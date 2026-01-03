@@ -1,0 +1,525 @@
+"""Tests for reference emitters (Json, Plain, Rich)."""
+
+import json
+from io import StringIO
+
+from ev import Event, Result
+from ev.emitter import Emitter
+from ev.emitters import JsonEmitter, PlainEmitter
+from ev.emitters.rich import RichEmitter
+
+
+class TestJsonEmitter:
+    """Tests for JsonEmitter."""
+
+    def test_satisfies_emitter_protocol(self):
+        """JsonEmitter satisfies the Emitter protocol."""
+        emitter: Emitter = JsonEmitter()
+        emitter.emit(Event(kind="log", message="test"))
+        emitter.finish(Result(status="ok"))
+
+    def test_default_outputs_events_and_result(self):
+        """Default mode outputs {"events": [...], "result": {...}}."""
+        stdout = StringIO()
+        stderr = StringIO()
+        emitter = JsonEmitter(stdout=stdout, stderr=stderr)
+
+        emitter.emit(Event(kind="log", message="first"))
+        emitter.emit(Event(kind="log", message="second"))
+        emitter.finish(Result(status="ok", summary="done"))
+
+        output = json.loads(stdout.getvalue())
+        assert "events" in output
+        assert "result" in output
+        assert len(output["events"]) == 2
+        assert output["events"][0]["message"] == "first"
+        assert output["events"][1]["message"] == "second"
+        assert output["result"]["status"] == "ok"
+        assert output["result"]["summary"] == "done"
+        assert stderr.getvalue() == ""
+
+    def test_include_events_false_outputs_only_result(self):
+        """With include_events=False, only result is output."""
+        stdout = StringIO()
+        emitter = JsonEmitter(stdout=stdout, include_events=False)
+
+        emitter.emit(Event(kind="log", message="ignored"))
+        emitter.finish(Result(status="ok", summary="done"))
+
+        output = json.loads(stdout.getvalue())
+        assert "events" not in output
+        assert output["status"] == "ok"
+        assert output["summary"] == "done"
+
+    def test_stream_events_writes_jsonl_to_stderr(self):
+        """With stream_events=True, events stream to stderr as JSONL."""
+        stdout = StringIO()
+        stderr = StringIO()
+        emitter = JsonEmitter(stdout=stdout, stderr=stderr, stream_events=True)
+
+        emitter.emit(Event(kind="log", message="first"))
+        emitter.emit(Event(kind="log", message="second"))
+        emitter.finish(Result(status="ok"))
+
+        # stderr should have JSONL
+        lines = stderr.getvalue().strip().split("\n")
+        assert len(lines) == 2
+        assert json.loads(lines[0])["message"] == "first"
+        assert json.loads(lines[1])["message"] == "second"
+
+        # stdout should still have full output
+        output = json.loads(stdout.getvalue())
+        assert len(output["events"]) == 2
+
+    def test_empty_events_list(self):
+        """Empty events list is handled correctly."""
+        stdout = StringIO()
+        emitter = JsonEmitter(stdout=stdout)
+
+        emitter.finish(Result(status="ok"))
+
+        output = json.loads(stdout.getvalue())
+        assert output["events"] == []
+        assert output["result"]["status"] == "ok"
+
+    def test_output_is_valid_json(self):
+        """Output is valid, parseable JSON."""
+        stdout = StringIO()
+        emitter = JsonEmitter(stdout=stdout)
+
+        emitter.emit(Event(kind="metric", data={"name": "duration", "value": 1.5}))
+        emitter.finish(Result(status="ok", data={"items": [1, 2, 3]}))
+
+        # Should not raise
+        output = json.loads(stdout.getvalue())
+        assert output["result"]["data"]["items"] == [1, 2, 3]
+
+    def test_output_ends_with_newline(self):
+        """Output ends with a newline for shell friendliness."""
+        stdout = StringIO()
+        emitter = JsonEmitter(stdout=stdout)
+        emitter.finish(Result(status="ok"))
+
+        assert stdout.getvalue().endswith("\n")
+
+
+class TestPlainEmitter:
+    """Tests for PlainEmitter."""
+
+    def test_satisfies_emitter_protocol(self):
+        """PlainEmitter satisfies the Emitter protocol."""
+        emitter: Emitter = PlainEmitter()
+        emitter.emit(Event(kind="log", message="test"))
+        emitter.finish(Result(status="ok"))
+
+    def test_log_event_prints_message(self):
+        """Log events print their message."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="log", message="Hello world"))
+        emitter.finish(Result(status="ok"))
+
+        assert "Hello world" in out.getvalue()
+
+    def test_progress_event_formats_step(self):
+        """Progress events show step/total when available."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", data={"step": 3, "of": 10}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "3" in output and "10" in output
+
+    def test_progress_event_formats_percent(self):
+        """Progress events show percentage when available."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", data={"percent": 50}))
+        emitter.finish(Result(status="ok"))
+
+        assert "50" in out.getvalue()
+
+    def test_artifact_event_shows_path(self):
+        """Artifact events show the path or URL."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="artifact", data={"path": "/tmp/output.json"}))
+        emitter.finish(Result(status="ok"))
+
+        assert "/tmp/output.json" in out.getvalue()
+
+    def test_metric_event_shows_name_value(self):
+        """Metric events show name and value."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="metric", data={"name": "duration", "value": 2.5}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "duration" in output
+        assert "2.5" in output
+
+    def test_input_event_shows_question_response(self):
+        """Input events show the question and response."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="input", message="Continue?", data={"response": "yes"}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "Continue?" in output
+        assert "yes" in output
+
+    def test_result_shows_status_summary(self):
+        """Result prints status and summary."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.finish(Result(status="ok", summary="All done"))
+
+        output = out.getvalue()
+        assert "OK" in output or "ok" in output.lower()
+        assert "All done" in output
+
+    def test_error_result_shows_error_status(self):
+        """Error results show error status."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.finish(Result(status="error", summary="Something failed"))
+
+        output = out.getvalue()
+        assert "ERROR" in output or "error" in output.lower()
+        assert "Something failed" in output
+
+    def test_level_prefix_when_enabled(self):
+        """Level prefix shown when enabled."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=True)
+
+        emitter.emit(Event(kind="log", level="warn", message="Watch out"))
+        emitter.finish(Result(status="ok"))
+
+        assert "WARN" in out.getvalue() or "warn" in out.getvalue().lower()
+
+    def test_no_level_prefix_when_disabled(self):
+        """No level prefix when disabled."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=False)
+
+        emitter.emit(Event(kind="log", level="warn", message="Watch out"))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        # Should have message but not bracketed level
+        assert "Watch out" in output
+        assert "[WARN]" not in output
+
+    def test_timestamp_prefix_when_enabled(self):
+        """Timestamp prefix shown when enabled."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_timestamp=True)
+
+        emitter.emit(Event(kind="log", message="test", ts=1704200000.123))
+        emitter.finish(Result(status="ok"))
+
+        assert "1704200000.123" in out.getvalue()
+
+    def test_progress_without_data_uses_message(self):
+        """Progress with only message renders the message."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", message="Working..."))
+        emitter.finish(Result(status="ok"))
+
+        assert "Working..." in out.getvalue()
+
+    def test_progress_step_without_message(self):
+        """Progress with step/of but no message."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", data={"step": 2, "of": 5}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "2" in output and "5" in output
+
+    def test_artifact_with_url(self):
+        """Artifact with URL instead of path."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="artifact", data={"href": "https://example.com/file"}))
+        emitter.finish(Result(status="ok"))
+
+        assert "https://example.com/file" in out.getvalue()
+
+    def test_metric_with_unit(self):
+        """Metric with unit included."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="metric", data={"name": "size", "value": 1024, "unit": "bytes"}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "size" in output
+        assert "1024" in output
+        assert "bytes" in output
+
+    def test_result_without_summary(self):
+        """Result without summary just shows status."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.finish(Result(status="ok"))
+
+        assert "OK" in out.getvalue()
+
+    def test_progress_empty_renders_nothing(self):
+        """Progress with no data and no message produces no output."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress"))  # No message, no data
+        emitter.finish(Result(status="ok"))
+
+        # Should only have the result line
+        lines = out.getvalue().strip().split("\n")
+        assert len(lines) == 1
+        assert "OK" in lines[0]
+
+    def test_artifact_with_id(self):
+        """Artifact with just an ID."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="artifact", message="Resource", data={"id": "res-123"}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "Resource" in output
+        assert "res-123" in output
+
+    def test_metric_without_unit(self):
+        """Metric without unit."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="metric", data={"name": "count", "value": 5}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "count" in output
+        assert "5" in output
+
+    def test_progress_step_with_message(self):
+        """Progress with step and message shows both."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", message="Installing", data={"step": 2, "of": 3}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "2" in output and "3" in output
+        assert "Installing" in output
+
+    def test_progress_percent_with_message(self):
+        """Progress with percent and message shows both."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out)
+
+        emitter.emit(Event(kind="progress", message="Downloading", data={"percent": 50}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "50" in output
+        assert "Downloading" in output
+
+
+class TestRichEmitter:
+    """Tests for RichEmitter."""
+
+    def _make_emitter(self) -> tuple["RichEmitter", StringIO]:
+        """Create a RichEmitter with a StringIO console for testing."""
+        from rich.console import Console
+
+        out = StringIO()
+        console = Console(file=out, force_terminal=True, width=80)
+        return RichEmitter(console=console), out
+
+    def test_satisfies_emitter_protocol(self):
+        """RichEmitter satisfies the Emitter protocol."""
+        from rich.console import Console
+
+        console = Console(file=StringIO(), force_terminal=True)
+        emitter: Emitter = RichEmitter(console=console)
+        emitter.emit(Event(kind="log", message="test"))
+        emitter.finish(Result(status="ok"))
+
+    def test_log_event_renders(self):
+        """Log events render to console."""
+        from rich.console import Console
+
+        out = StringIO()
+        console = Console(file=out, force_terminal=True, width=80)
+        emitter = RichEmitter(console=console)
+
+        emitter.emit(Event(kind="log", message="Hello Rich"))
+        emitter.finish(Result(status="ok"))
+
+        assert "Hello Rich" in out.getvalue()
+
+    def test_ok_result_shows_success(self):
+        """OK result shows success indicator."""
+        from rich.console import Console
+
+        out = StringIO()
+        console = Console(file=out, force_terminal=True, width=80)
+        emitter = RichEmitter(console=console)
+
+        emitter.finish(Result(status="ok", summary="All good"))
+
+        output = out.getvalue()
+        assert "All good" in output
+        # Should have some success indicator (checkmark or green or "ok")
+        assert "✓" in output or "ok" in output.lower()
+
+    def test_error_result_shows_failure(self):
+        """Error result shows failure indicator."""
+        from rich.console import Console
+
+        out = StringIO()
+        console = Console(file=out, force_terminal=True, width=80)
+        emitter = RichEmitter(console=console)
+
+        emitter.finish(Result(status="error", summary="Failed"))
+
+        output = out.getvalue()
+        assert "Failed" in output
+        # Should have some failure indicator (X or red or "error")
+        assert "✗" in output or "error" in output.lower() or "×" in output
+
+    def test_console_defaults_to_stderr(self):
+        """Console defaults to stderr."""
+        emitter = RichEmitter()
+        # Just verify it initializes without error
+        assert emitter._console is not None
+
+    def test_all_event_kinds_render(self):
+        """All event kinds render without error."""
+        from rich.console import Console
+
+        out = StringIO()
+        console = Console(file=out, force_terminal=True, width=80)
+        emitter = RichEmitter(console=console)
+
+        emitter.emit(Event(kind="log", message="log message"))
+        emitter.emit(Event(kind="progress", data={"step": 1, "of": 5}))
+        emitter.emit(Event(kind="artifact", data={"path": "/tmp/file.txt"}))
+        emitter.emit(Event(kind="metric", data={"name": "count", "value": 42}))
+        emitter.emit(Event(kind="input", message="Continue?", data={"response": "yes"}))
+        emitter.finish(Result(status="ok"))
+
+        # Should have rendered something for each
+        output = out.getvalue()
+        assert "log message" in output
+        assert "/tmp/file.txt" in output or "file.txt" in output
+
+    def test_log_levels_render_differently(self):
+        """Different log levels have different styling."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="log", level="debug", message="debug msg"))
+        emitter.emit(Event(kind="log", level="info", message="info msg"))
+        emitter.emit(Event(kind="log", level="warn", message="warn msg"))
+        emitter.emit(Event(kind="log", level="error", message="error msg"))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "debug msg" in output
+        assert "info msg" in output
+        assert "warn msg" in output
+        assert "error msg" in output
+
+    def test_progress_with_percent(self):
+        """Progress with percent renders."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="progress", data={"percent": 75}))
+        emitter.finish(Result(status="ok"))
+
+        assert "75" in out.getvalue()
+
+    def test_progress_with_percent_and_message(self):
+        """Progress with percent and message renders both."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="progress", message="Downloading", data={"percent": 50}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "50" in output
+        assert "Downloading" in output
+
+    def test_progress_with_only_message(self):
+        """Progress with only message renders."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="progress", message="Working hard"))
+        emitter.finish(Result(status="ok"))
+
+        assert "Working hard" in out.getvalue()
+
+    def test_progress_step_with_message(self):
+        """Progress with step and message renders both."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="progress", message="Installing", data={"step": 2, "of": 3}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "2" in output and "3" in output
+        assert "Installing" in output
+
+    def test_metric_with_unit(self):
+        """Metric with unit renders all parts."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="metric", data={"name": "size", "value": 1024, "unit": "KB"}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "size" in output
+        assert "1024" in output
+        assert "KB" in output
+
+    def test_input_renders(self):
+        """Input event renders question and response."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event(kind="input", message="Proceed?", data={"response": "no"}))
+        emitter.finish(Result(status="ok"))
+
+        output = out.getvalue()
+        assert "Proceed?" in output
+        assert "no" in output
+
+    def test_result_without_summary(self):
+        """Result without summary shows status."""
+        emitter, out = self._make_emitter()
+
+        emitter.finish(Result(status="error"))
+
+        output = out.getvalue()
+        assert "ERROR" in output or "✗" in output

@@ -1,0 +1,50 @@
+[project]
+name = "ev"
+version = "0.1.0"
+description = "Renderer-agnostic semantic contract for CLI output"
+readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+rich = ["rich>=13.0"]
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "rich>=13.0",
+    "ruff>=0.8",
+    "ty>=0.0.1a11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=ev --cov-report=term-missing --cov-fail-under=100"
+
+[tool.coverage.run]
+source = ["src/ev"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "\\.\\.\\.",  # Protocol method stubs
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.13"

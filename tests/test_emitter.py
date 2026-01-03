@@ -79,10 +79,10 @@ class TestListEmitter:
     def test_raises_on_double_finish(self):
         """Cannot call finish() twice."""
         emitter = ListEmitter()
-        emitter.finish(Result(status="ok"))
+        emitter.finish(Result.ok())
 
         with pytest.raises(RuntimeError, match="finish.*already called"):
-            emitter.finish(Result(status="error"))
+            emitter.finish(Result.error())
 
     def test_empty_run(self):
         """A run with no events is valid."""
@@ -113,9 +113,9 @@ class TestNullEmitter:
     def test_no_state_tracking(self):
         """NullEmitter is truly no-op, no invariant enforcement."""
         emitter = NullEmitter()
-        emitter.finish(Result(status="ok"))
+        emitter.finish(Result.ok())
         # Can emit after finish (no enforcement)
         emitter.emit(Event(kind="log"))
         # Can finish again (no enforcement)
-        emitter.finish(Result(status="error"))
+        emitter.finish(Result.error())
         # No errors raised

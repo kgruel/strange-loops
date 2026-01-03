@@ -193,7 +193,7 @@ class TestPlainEmitter:
         out = StringIO()
         emitter = PlainEmitter(file=out)
 
-        emitter.finish(Result(status="error", summary="Something failed"))
+        emitter.finish(Result.error("Something failed"))
 
         output = out.getvalue()
         assert "ERROR" in output or "error" in output.lower()
@@ -403,7 +403,7 @@ class TestRichEmitter:
         console = Console(file=out, force_terminal=True, width=80)
         emitter = RichEmitter(console=console)
 
-        emitter.finish(Result(status="error", summary="Failed"))
+        emitter.finish(Result.error("Failed"))
 
         output = out.getvalue()
         assert "Failed" in output
@@ -519,7 +519,7 @@ class TestRichEmitter:
         """Result without summary shows status."""
         emitter, out = self._make_emitter()
 
-        emitter.finish(Result(status="error"))
+        emitter.finish(Result.error())
 
         output = out.getvalue()
         assert "ERROR" in output or "✗" in output

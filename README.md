@@ -149,6 +149,24 @@ Plain and Rich emitters write presentation to stderr; the structured result rema
 
 ---
 
+## Quick Example
+
+```python
+from ev import Event, Result, Emitter
+
+def check_health(emitter: Emitter) -> Result:
+    emitter.emit(Event.log("Checking services..."))
+
+    for service in ["web", "db", "cache"]:
+        emitter.emit(Event.progress(f"Checking {service}", service=service))
+        # ... do actual check ...
+        emitter.emit(Event.artifact(type="health", service=service, healthy=True))
+
+    emitter.emit(Event.metric("duration", 1.2, unit="s"))
+
+    return Result.ok("All services healthy", data={"checked": 3})
+```
+
 ## Intended Usage
 
 * Works with Typer / Click / Cappa

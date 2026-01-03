@@ -29,20 +29,15 @@ class Event:
         ts: Optional timestamp (epoch seconds)
 
     Examples:
-        # Simple log
-        Event(kind="log", message="Connecting to server...")
+        # Preferred: use factory methods
+        Event.log("Connecting to server...")
+        Event.progress("Syncing", percent=50)
+        Event.metric("duration", 2.3, unit="s")
+        Event.artifact("Config", type="file", path="/tmp/out.txt")
+        Event.input("Continue?", response="yes")
 
-        # Progress with data
-        Event(kind="progress", data={"phase": "sync", "percent": 50})
-
-        # Metric
-        Event(kind="metric", data={"name": "duration", "value": 2.3, "unit": "s"})
-
-        # Artifact produced
-        Event(kind="artifact", data={"type": "file", "path": "/tmp/out.txt"})
-
-        # Input interaction
-        Event(kind="input", message="Continue?", data={"response": "yes"})
+        # Raw constructor (escape hatch)
+        Event(kind="log", message="Hello")
     """
 
     kind: EventKind
@@ -54,6 +49,124 @@ class Event:
     def __post_init__(self) -> None:
         """Wrap data in MappingProxyType for effective immutability."""
         object.__setattr__(self, "data", MappingProxyType(dict(self.data)))
+
+    def is_kind(self, *kinds: EventKind) -> bool:
+        """Check if event matches any of the given kinds.
+
+        Args:
+            *kinds: One or more event kinds to match against
+
+        Returns:
+            True if this event's kind matches any of the provided kinds
+        """
+        return self.kind in kinds
+
+    @classmethod
+    def log(
+        cls,
+        message: str,
+        *,
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create a log event.
+
+        Args:
+            message: Human-readable log message
+            level: Severity level (debug, info, warn, error)
+            ts: Optional timestamp
+            **data: Additional structured data
+        """
+        return cls(kind="log", level=level, message=message, data=data, ts=ts)
+
+    @classmethod
+    def progress(
+        cls,
+        message: str = "",
+        *,
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create a progress event.
+
+        Args:
+            message: Optional progress message
+            level: Severity level
+            ts: Optional timestamp
+            **data: Progress data (step, of, percent, phase, etc.)
+        """
+        return cls(kind="progress", level=level, message=message, data=data, ts=ts)
+
+    @classmethod
+    def artifact(
+        cls,
+        message: str = "",
+        *,
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create an artifact event.
+
+        Args:
+            message: Description of the artifact
+            level: Severity level
+            ts: Optional timestamp
+            **data: Artifact data (type, path, href, id, etc.)
+        """
+        return cls(kind="artifact", level=level, message=message, data=data, ts=ts)
+
+    @classmethod
+    def metric(
+        cls,
+        name: str,
+        value: Any,
+        *,
+        unit: str | None = None,
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create a metric event.
+
+        Args:
+            name: Metric name
+            value: Metric value
+            unit: Optional unit (s, ms, bytes, etc.)
+            level: Severity level
+            ts: Optional timestamp
+            **data: Additional metric data
+        """
+        metric_data: dict[str, Any] = {"name": name, "value": value, **data}
+        if unit is not None:
+            metric_data["unit"] = unit
+        return cls(kind="metric", level=level, data=metric_data, ts=ts)
+
+    @classmethod
+    def input(
+        cls,
+        message: str,
+        *,
+        response: Any = None,
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create an input event.
+
+        Args:
+            message: The prompt or question
+            response: The user's response (if captured)
+            level: Severity level
+            ts: Optional timestamp
+            **data: Additional input data (options, default, etc.)
+        """
+        input_data: dict[str, Any] = {**data}
+        if response is not None:
+            input_data["response"] = response
+        return cls(kind="input", level=level, message=message, data=input_data, ts=ts)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
@@ -85,18 +198,23 @@ class Result:
 
     Attributes:
         status: Overall outcome (ok, error)
-        code: Exit code (0 for success)
+        code: Exit code (0 for success, non-zero for error)
         summary: Short human sentence describing outcome
         data: Structured payload with command-specific results
         meta: Metadata (durations, counts, timing)
 
-    Examples:
-        # Success
-        Result(status="ok", summary="Deployed 3 stacks", data={"stacks": [...]})
+    Invariants:
+        - status="ok" requires code=0
+        - status="error" requires code != 0
 
-        # Error
-        Result(status="error", code=1, summary="Failed to connect",
-               data={"host": "media", "error": "timeout"})
+    Examples:
+        # Preferred: use factory methods
+        Result.ok("Deployed 3 stacks", data={"stacks": [...]})
+        Result.error("Failed to connect", data={"host": "media"})
+
+        # Raw constructor (escape hatch)
+        Result(status="ok", summary="Done")
+        Result(status="error", code=1, summary="Failed")
     """
 
     status: ResultStatus
@@ -106,9 +224,79 @@ class Result:
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Wrap data and meta in MappingProxyType for effective immutability."""
+        """Wrap data/meta and enforce status/code invariants."""
         object.__setattr__(self, "data", MappingProxyType(dict(self.data)))
         object.__setattr__(self, "meta", MappingProxyType(dict(self.meta)))
+
+        # Enforce invariants
+        if self.status == "ok" and self.code != 0:
+            raise ValueError("Result with status='ok' must have code=0")
+        if self.status == "error" and self.code == 0:
+            raise ValueError("Result with status='error' must have non-zero code")
+
+    @property
+    def is_ok(self) -> bool:
+        """True if status is 'ok'."""
+        return self.status == "ok"
+
+    @property
+    def is_error(self) -> bool:
+        """True if status is 'error'."""
+        return self.status == "error"
+
+    @classmethod
+    def ok(
+        cls,
+        summary: str = "",
+        *,
+        data: Mapping[str, Any] | None = None,
+        meta: Mapping[str, Any] | None = None,
+    ) -> Self:
+        """Create a successful result.
+
+        Args:
+            summary: Human-readable summary of success
+            data: Structured result data
+            meta: Metadata (timing, counts, etc.)
+
+        Returns:
+            Result with status="ok" and code=0
+        """
+        return cls(
+            status="ok",
+            code=0,
+            summary=summary,
+            data=data or {},
+            meta=meta or {},
+        )
+
+    @classmethod
+    def error(
+        cls,
+        summary: str = "",
+        *,
+        code: int = 1,
+        data: Mapping[str, Any] | None = None,
+        meta: Mapping[str, Any] | None = None,
+    ) -> Self:
+        """Create an error result.
+
+        Args:
+            summary: Human-readable summary of error
+            code: Exit code (must be non-zero, default 1)
+            data: Structured error data
+            meta: Metadata (timing, counts, etc.)
+
+        Returns:
+            Result with status="error" and specified code
+        """
+        return cls(
+            status="error",
+            code=code,
+            summary=summary,
+            data=data or {},
+            meta=meta or {},
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""

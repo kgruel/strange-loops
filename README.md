@@ -160,7 +160,7 @@ def check_health(emitter: Emitter) -> Result:
     for service in ["web", "db", "cache"]:
         emitter.emit(Event.progress(f"Checking {service}", service=service))
         # ... do actual check ...
-        emitter.emit(Event.artifact(type="health", service=service, healthy=True))
+        emitter.emit(Event.artifact("health", service=service, healthy=True))
 
     emitter.emit(Event.metric("duration", 1.2, unit="s"))
 

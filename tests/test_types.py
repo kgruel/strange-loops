@@ -17,7 +17,7 @@ class TestEvent:
         assert event.level == "info"
         assert event.message == ""
         assert event.data == {}
-        assert event.ts is None
+        assert isinstance(event.ts, float)  # Auto-populated
 
     # Immutability tests
 
@@ -77,7 +77,7 @@ class TestEvent:
         assert event.level == "info"
         assert event.message == ""
         assert event.data == {}
-        assert event.ts is None
+        assert event.ts == 0.0  # Sentinel for unknown original time
 
     def test_create_full(self):
         """Event can be created with all fields."""
@@ -102,8 +102,9 @@ class TestEvent:
 
     def test_equality(self):
         """Events with same fields are equal."""
-        e1 = Event(kind="log", message="test")
-        e2 = Event(kind="log", message="test")
+        # Explicit ts needed for equality (auto-ts would differ)
+        e1 = Event(kind="log", message="test", ts=1704200000.0)
+        e2 = Event(kind="log", message="test", ts=1704200000.0)
         assert e1 == e2
 
     # is_kind helper
@@ -163,22 +164,30 @@ class TestEvent:
         assert event.data == {"percent": 75}
 
     def test_artifact_factory_minimal(self):
-        """Event.artifact creates an artifact event."""
-        event = Event.artifact()
+        """Event.artifact creates an artifact event with type."""
+        event = Event.artifact("file")
         assert event.kind == "artifact"
         assert event.level == "info"
+        assert event.data == {"type": "file"}
 
-    def test_artifact_factory_file(self):
-        """Event.artifact with type and path."""
-        event = Event.artifact("Config saved", type="file", path="/tmp/config.json")
+    def test_artifact_factory_with_message(self):
+        """Event.artifact with type and message."""
+        event = Event.artifact("file", "Config saved", path="/tmp/config.json")
         assert event.kind == "artifact"
         assert event.message == "Config saved"
         assert event.data == {"type": "file", "path": "/tmp/config.json"}
 
-    def test_artifact_factory_url(self):
-        """Event.artifact with type and href."""
-        event = Event.artifact("Report", type="url", href="https://example.com/report")
+    def test_artifact_factory_type_only_with_data(self):
+        """Event.artifact with type and data, no message."""
+        event = Event.artifact("url", href="https://example.com/report")
+        assert event.message == ""
         assert event.data == {"type": "url", "href": "https://example.com/report"}
+
+    def test_artifact_factory_with_level(self):
+        """Event.artifact accepts level parameter."""
+        event = Event.artifact("deployment", "Deployed v1.2", level="warn")
+        assert event.level == "warn"
+        assert event.data["type"] == "deployment"
 
     def test_metric_factory(self):
         """Event.metric creates a metric event with name and value."""
@@ -224,6 +233,74 @@ class TestEvent:
         for level in ["debug", "info", "warn", "error"]:
             event = Event(kind="log", level=level)  # type: ignore[arg-type]
             assert event.level == level
+
+    # Timestamp auto-population
+
+    def test_ts_auto_populated(self):
+        """Event.ts is auto-populated with current time."""
+        import time
+
+        before = time.time()
+        event = Event(kind="log")
+        after = time.time()
+
+        assert isinstance(event.ts, float)
+        assert before <= event.ts <= after
+
+    def test_ts_auto_populated_factory(self):
+        """Factory methods also get auto-populated ts."""
+        import time
+
+        before = time.time()
+        event = Event.log("test")
+        after = time.time()
+
+        assert before <= event.ts <= after
+
+    def test_ts_explicit_override(self):
+        """User can still set explicit ts."""
+        event = Event(kind="log", ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+    def test_ts_explicit_override_factory(self):
+        """All factory methods respect explicit ts."""
+        # log
+        event = Event.log("test", ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+        # progress
+        event = Event.progress("test", ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+        # artifact
+        event = Event.artifact("file", ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+        # metric
+        event = Event.metric("count", 5, ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+        # input
+        event = Event.input("Continue?", ts=1704200000.0)
+        assert event.ts == 1704200000.0
+
+    def test_from_dict_missing_ts_uses_zero(self):
+        """from_dict uses 0.0 for missing ts (sentinel for unknown)."""
+        d = {"kind": "log"}
+        event = Event.from_dict(d)
+        assert event.ts == 0.0
+
+    def test_from_dict_null_ts_uses_zero(self):
+        """from_dict uses 0.0 for null ts."""
+        d = {"kind": "log", "ts": None}
+        event = Event.from_dict(d)
+        assert event.ts == 0.0
+
+    def test_from_dict_preserves_ts(self):
+        """from_dict preserves existing ts."""
+        d = {"kind": "log", "ts": 1704200000.0}
+        event = Event.from_dict(d)
+        assert event.ts == 1704200000.0
 
 
 class TestResult:

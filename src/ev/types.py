@@ -4,6 +4,7 @@ These are the fundamental building blocks of the ev contract.
 Both are frozen dataclasses, immutable and serializable.
 """
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -26,14 +27,14 @@ class Event:
         level: Severity (debug, info, warn, error)
         message: Short human-readable text or key
         data: Structured payload (must be JSON-serializable)
-        ts: Optional timestamp (epoch seconds)
+        ts: Timestamp (epoch seconds, auto-populated at creation)
 
     Examples:
         # Preferred: use factory methods
         Event.log("Connecting to server...")
         Event.progress("Syncing", percent=50)
         Event.metric("duration", 2.3, unit="s")
-        Event.artifact("Config", type="file", path="/tmp/out.txt")
+        Event.artifact("file", "Config saved", path="/tmp/out.txt")
         Event.input("Continue?", response="yes")
 
         # Raw constructor (escape hatch)
@@ -44,7 +45,7 @@ class Event:
     level: EventLevel = "info"
     message: str = ""
     data: Mapping[str, Any] = field(default_factory=dict)
-    ts: float | None = None
+    ts: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
         """Wrap data in MappingProxyType for effective immutability."""
@@ -75,10 +76,12 @@ class Event:
         Args:
             message: Human-readable log message
             level: Severity level (debug, info, warn, error)
-            ts: Optional timestamp
+            ts: Timestamp override (auto-populated if not provided)
             **data: Additional structured data
         """
-        return cls(kind="log", level=level, message=message, data=data, ts=ts)
+        if ts is not None:
+            return cls(kind="log", level=level, message=message, data=data, ts=ts)
+        return cls(kind="log", level=level, message=message, data=data)
 
     @classmethod
     def progress(
@@ -94,14 +97,17 @@ class Event:
         Args:
             message: Optional progress message
             level: Severity level
-            ts: Optional timestamp
+            ts: Timestamp override (auto-populated if not provided)
             **data: Progress data (step, of, percent, phase, etc.)
         """
-        return cls(kind="progress", level=level, message=message, data=data, ts=ts)
+        if ts is not None:
+            return cls(kind="progress", level=level, message=message, data=data, ts=ts)
+        return cls(kind="progress", level=level, message=message, data=data)
 
     @classmethod
     def artifact(
         cls,
+        type: str,
         message: str = "",
         *,
         level: EventLevel = "info",
@@ -110,13 +116,35 @@ class Event:
     ) -> Self:
         """Create an artifact event.
 
+        Artifacts represent things produced or discovered during execution.
+        The type parameter identifies what kind of artifact this is.
+
         Args:
-            message: Description of the artifact
+            type: Artifact type identifier (e.g., "file", "stack_status", "deployment").
+                Used by consumers to understand what data shape to expect.
+            message: Human-readable description of the artifact
             level: Severity level
             ts: Optional timestamp
-            **data: Artifact data (type, path, href, id, etc.)
+            **data: Additional artifact data (path, href, id, etc.)
+
+        Examples:
+            Event.artifact("file", path="/tmp/report.pdf")
+            Event.artifact("stack_status", "Stack healthy", stack="media", healthy_count=21)
         """
-        return cls(kind="artifact", level=level, message=message, data=data, ts=ts)
+        if ts is not None:
+            return cls(
+                kind="artifact",
+                level=level,
+                message=message,
+                data={**data, "type": type},
+                ts=ts,
+            )
+        return cls(
+            kind="artifact",
+            level=level,
+            message=message,
+            data={**data, "type": type},
+        )
 
     @classmethod
     def metric(
@@ -136,13 +164,15 @@ class Event:
             value: Metric value
             unit: Optional unit (s, ms, bytes, etc.)
             level: Severity level
-            ts: Optional timestamp
+            ts: Timestamp override (auto-populated if not provided)
             **data: Additional metric data
         """
         metric_data: dict[str, Any] = {"name": name, "value": value, **data}
         if unit is not None:
             metric_data["unit"] = unit
-        return cls(kind="metric", level=level, data=metric_data, ts=ts)
+        if ts is not None:
+            return cls(kind="metric", level=level, data=metric_data, ts=ts)
+        return cls(kind="metric", level=level, data=metric_data)
 
     @classmethod
     def input(
@@ -160,13 +190,15 @@ class Event:
             message: The prompt or question
             response: The user's response (if captured)
             level: Severity level
-            ts: Optional timestamp
+            ts: Timestamp override (auto-populated if not provided)
             **data: Additional input data (options, default, etc.)
         """
         input_data: dict[str, Any] = {**data}
         if response is not None:
             input_data["response"] = response
-        return cls(kind="input", level=level, message=message, data=input_data, ts=ts)
+        if ts is not None:
+            return cls(kind="input", level=level, message=message, data=input_data, ts=ts)
+        return cls(kind="input", level=level, message=message, data=input_data)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
@@ -180,13 +212,18 @@ class Event:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Self:
-        """Reconstruct an Event from a dict."""
+        """Reconstruct an Event from a dict.
+
+        Note: If ts is missing or null, uses 0.0 as a sentinel indicating
+        unknown original timestamp (distinguishable from "created now").
+        """
+        ts = d.get("ts")
         return cls(
             kind=d["kind"],
             level=d.get("level", "info"),
             message=d.get("message", ""),
             data=d.get("data", {}),
-            ts=d.get("ts"),
+            ts=ts if ts is not None else 0.0,
         )
 
 

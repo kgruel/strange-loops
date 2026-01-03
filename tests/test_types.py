@@ -222,6 +222,91 @@ class TestEvent:
         event = Event.input("Select option", response="A", options=["A", "B", "C"])
         assert event.data == {"response": "A", "options": ["A", "B", "C"]}
 
+    # log_signal factory
+
+    def test_log_signal_factory_minimal(self):
+        """Event.log_signal creates a log event with signal in data."""
+        event = Event.log_signal("stack_status")
+        assert event.kind == "log"
+        assert event.level == "info"
+        assert event.message == ""
+        assert event.data == {"signal": "stack_status"}
+
+    def test_log_signal_factory_with_data(self):
+        """Event.log_signal includes attributes in data."""
+        event = Event.log_signal("stack_status", stack="media", healthy=True)
+        assert event.kind == "log"
+        assert event.data == {"signal": "stack_status", "stack": "media", "healthy": True}
+
+    def test_log_signal_factory_with_message(self):
+        """Event.log_signal accepts optional message."""
+        event = Event.log_signal("stack_status", message="Stack is healthy", stack="media")
+        assert event.message == "Stack is healthy"
+        assert event.data == {"signal": "stack_status", "stack": "media"}
+
+    def test_log_signal_factory_with_level(self):
+        """Event.log_signal accepts level parameter."""
+        event = Event.log_signal("connection_failed", level="error", host="db.local")
+        assert event.level == "error"
+        assert event.data == {"signal": "connection_failed", "host": "db.local"}
+
+    def test_log_signal_factory_with_ts(self):
+        """Event.log_signal accepts explicit timestamp."""
+        event = Event.log_signal("cache_hit", ts=1704200000.0, key="user:123")
+        assert event.ts == 1704200000.0
+        assert event.data == {"signal": "cache_hit", "key": "user:123"}
+
+    def test_log_signal_rejects_empty_name(self):
+        """Event.log_signal raises ValueError for empty name."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            Event.log_signal("")
+
+    def test_log_signal_rejects_signal_key_in_data(self):
+        """Event.log_signal raises ValueError if 'signal' is in data kwargs."""
+        with pytest.raises(ValueError, match="reserved key"):
+            Event.log_signal("test", signal="conflict")
+
+    # is_signal property
+
+    def test_is_signal_true_for_log_signal(self):
+        """is_signal returns True for events created with log_signal."""
+        event = Event.log_signal("stack_status", stack="media")
+        assert event.is_signal is True
+
+    def test_is_signal_false_for_regular_log(self):
+        """is_signal returns False for regular log events."""
+        event = Event.log("Just a message")
+        assert event.is_signal is False
+
+    def test_is_signal_false_for_other_kinds(self):
+        """is_signal returns False for non-log events."""
+        assert Event.progress("test").is_signal is False
+        assert Event.artifact("file").is_signal is False
+        assert Event.metric("count", 5).is_signal is False
+        assert Event.input("Continue?").is_signal is False
+
+    def test_is_signal_true_for_manual_signal_in_data(self):
+        """is_signal returns True if 'signal' key is manually added to log."""
+        event = Event(kind="log", data={"signal": "manual_signal"})
+        assert event.is_signal is True
+
+    # signal_name property
+
+    def test_signal_name_returns_name_for_signal(self):
+        """signal_name returns the signal name for signal events."""
+        event = Event.log_signal("stack_status", stack="media")
+        assert event.signal_name == "stack_status"
+
+    def test_signal_name_returns_none_for_regular_log(self):
+        """signal_name returns None for regular log events."""
+        event = Event.log("Just a message")
+        assert event.signal_name is None
+
+    def test_signal_name_returns_none_for_other_kinds(self):
+        """signal_name returns None for non-log events."""
+        assert Event.progress("test").signal_name is None
+        assert Event.artifact("file").signal_name is None
+
     def test_all_kinds(self):
         """All event kinds can be used."""
         for kind in ["log", "progress", "artifact", "metric", "input"]:

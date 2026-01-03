@@ -1,6 +1,24 @@
 # Signals (Structured Observations)
 
-Signals are structured, machine-readable observations within the log event kind.
+Signals are structured observations within the log event kind, intended for UX, monitoring, and inspection — not for automation decisions.
+
+## Signals Are Telemetry, Not Truth
+
+> **Automation must be able to ignore all Events entirely and still make correct decisions based on Result alone.**
+
+Signals are valuable for:
+- Live terminal displays
+- Dashboards and monitoring
+- Audit trails and replay
+- Human inspection of CI logs
+
+Signals are **not** for:
+- Pipeline branching
+- Retry decisions
+- Automated alerting thresholds
+- Any control flow logic
+
+If automation needs information to make decisions, that information belongs in `Result`, not in signals. See [authority.md](authority.md) for the full authority model.
 
 ## Two Lanes Within Log
 
@@ -24,7 +42,7 @@ Event.log("Skipping optional checks")
 
 ### Lane 2: Signals (Structured Observations)
 
-Machine-meaningful, stable identifiers with structured attributes.
+Structured observations with stable identifiers, suitable for monitoring and UX.
 
 ```python
 Event.log_signal("stack_status", stack="media", healthy=True)
@@ -127,8 +145,9 @@ Signals are for **state facts** — observations about what's happening that don
 
 ### JSON Emitter
 
-- Signals are structured facts for downstream consumers
-- Can choose to output only signals in JSONL mode for tooling
+- Signals are structured observations for dashboards and monitoring tools
+- Can choose to output only signals in JSONL mode for log aggregation
+- Remember: automation should depend on `Result`, not on parsing signals
 
 ### Live Displays
 

@@ -92,13 +92,25 @@ These are frozen. New kinds require proving a renderer cannot work without them.
 
 ### Signals (structured observations)
 
-For machine-readable observations that don't fit other primitives, use `log_signal`:
+For structured observations intended for UX, monitoring, and inspection:
 
 ```python
 Event.log_signal("stack_status", stack="media", healthy=True)
 ```
 
-Signals are a convention within the `log` kind, not a new primitive. See [signal.md](signal.md).
+Signals are a convention within the `log` kind, not a new primitive. They are telemetry for humans and dashboards — not for automation decisions. See [signal.md](signal.md).
+
+### Authority Model
+
+> **Automation must be able to ignore all Events entirely and still make correct decisions based on Result alone.**
+
+| Tier | Source | Audience |
+|------|--------|----------|
+| Truth | `Result` | Automation, control flow |
+| Telemetry | Events | Humans, monitoring, UX |
+| Narrative | `log` (prose) | Explanation, debugging |
+
+See [authority.md](authority.md) for the full model.
 
 ### Result (final verdict)
 

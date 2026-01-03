@@ -4,7 +4,7 @@ All notable changes to ev are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/). Pre-1.0 releases may have breaking changes in minor versions.
 
-## [0.2.0] - 2026-01-03
+## [0.3.0] - 2026-01-03
 
 ### Added
 

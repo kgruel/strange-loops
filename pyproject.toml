@@ -1,6 +1,6 @@
 [project]
 name = "ev"
-version = "0.2.0"
+version = "0.3.0"
 description = "Renderer-agnostic semantic contract for CLI output"
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]

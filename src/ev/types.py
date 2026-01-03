@@ -32,6 +32,7 @@ class Event:
     Examples:
         # Preferred: use factory methods
         Event.log("Connecting to server...")
+        Event.log_signal("stack_status", stack="media", healthy=True)
         Event.progress("Syncing", percent=50)
         Event.metric("duration", 2.3, unit="s")
         Event.artifact("file", "Config saved", path="/tmp/out.txt")
@@ -61,6 +62,21 @@ class Event:
             True if this event's kind matches any of the provided kinds
         """
         return self.kind in kinds
+
+    @property
+    def is_signal(self) -> bool:
+        """True if this is a signal event (structured log).
+
+        Signals are logs with a "signal" key in data, created via log_signal().
+        """
+        return self.kind == "log" and "signal" in self.data
+
+    @property
+    def signal_name(self) -> str | None:
+        """Return the signal name if this is a signal event, else None."""
+        if self.is_signal:
+            return str(self.data["signal"])
+        return None
 
     @classmethod
     def log(
@@ -199,6 +215,49 @@ class Event:
         if ts is not None:
             return cls(kind="input", level=level, message=message, data=input_data, ts=ts)
         return cls(kind="input", level=level, message=message, data=input_data)
+
+    @classmethod
+    def log_signal(
+        cls,
+        name: str,
+        *,
+        message: str = "",
+        level: EventLevel = "info",
+        ts: float | None = None,
+        **data: Any,
+    ) -> Self:
+        """Create a structured signal event (a machine-readable log).
+
+        Signals are structured observations for renderers to interpret,
+        as opposed to narrative logs which are prose for humans.
+
+        The signal name is stored in data["signal"]. Renderers can detect
+        signals by checking: "signal" in event.data
+
+        Args:
+            name: Signal identifier (lowercase snake_case, e.g., "stack_status")
+            message: Optional display-only text (non-authoritative)
+            level: Severity level
+            ts: Timestamp override (auto-populated if not provided)
+            **data: Structured signal attributes
+
+        Raises:
+            ValueError: If name is empty or "signal" is passed as a data key
+
+        Examples:
+            Event.log_signal("stack_status", stack="media", healthy=True)
+            Event.log_signal("connection_established", host="db.local", port=5432)
+            Event.log_signal("cache_invalidated", key="user:123")
+        """
+        if not name:
+            raise ValueError("Signal name cannot be empty")
+        if "signal" in data:
+            raise ValueError("'signal' is a reserved key and cannot be used in data")
+
+        signal_data: dict[str, Any] = {"signal": name, **data}
+        if ts is not None:
+            return cls(kind="log", level=level, message=message, data=signal_data, ts=ts)
+        return cls(kind="log", level=level, message=message, data=signal_data)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""

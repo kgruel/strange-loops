@@ -4,7 +4,7 @@
 
 ## The Expectation
 
-ev provides reference emitters (`PlainEmitter`, `RichEmitter`, `JsonEmitter`) as **working examples of the protocol**, not as reusable building blocks for all use cases.
+ev provides reference emitters (`PlainEmitter`, `JsonEmitter`) as **working examples of the protocol**, not as reusable building blocks for all use cases. For Rich terminal output and composition utilities, see ev-toolkit.
 
 For production CLIs, you'll typically write **domain-specific emitters** that understand your event shapes and rendering needs.
 

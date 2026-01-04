@@ -27,7 +27,6 @@ addopts = "--cov=ev --cov-report=term-missing --cov-fail-under=100"
 [tool.coverage.run]
 source = ["src/ev"]
 branch = true
-omit = ["ev/*"]
 
 [tool.coverage.report]
 exclude_lines = [

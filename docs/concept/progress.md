@@ -17,15 +17,16 @@ Event(
 )
 ```
 
-Or:
+Or a step-based variant:
 
 ```python
 Event(
     kind="progress",
-    message="Applying step",
+    message="Running migrations",
     data={
-        "step": 3,
-        "of": 10
+        "current": 3,
+        "total": 10,
+        "unit": "migrations"
     }
 )
 ```
@@ -142,8 +143,6 @@ Progress events use `Event.data` for structured information. These fields are co
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | str | Unique identifier for this progress stream |
-| `parent_id` | str | Parent progress id (for nesting) |
 | `current` | int/float | Current value |
 | `total` | int/float | Total value (for percentage calculation) |
 | `unit` | str | What's being counted ("files", "bytes", etc.) |
@@ -152,63 +151,23 @@ Progress events use `Event.data` for structured information. These fields are co
 
 ### Examples
 
-**Simple percentage:**
+**Percentage progress:**
 ```python
 Event.progress("Downloading", current=37, total=100, unit="files")
 ```
 
-**Nested operations:**
-```python
-# Top-level operation
-Event.progress("Deploying", id="deploy", status="running")
-
-# Nested phase
-Event.progress("Decrypting secrets", id="decrypt", parent_id="deploy", current=2, total=5)
-```
-
 **Phase transitions:**
 ```python
-Event.progress("Build complete", phase="build", status="ok", next="test")
+Event.progress("Build complete", phase="build", status="ok")
 ```
 
-These are conventions in `Event.data`, not enforced by ev. Renderers may use them for richer displays (nested progress bars, phase timelines, etc.).
-
-## Examples
-
-**Percentage progress:**
+**Indeterminate (spinner-worthy):**
 ```python
-Event(
-    kind="progress",
-    message="Downloading images",
-    data={"current": 37, "total": 100}
-)
+Event.progress("Scanning repository", phase="scan", status="running")
 ```
 
-**Step-based progress:**
-```python
-Event(
-    kind="progress",
-    message="Running migrations",
-    data={"step": 3, "of": 10, "name": "add_user_table"}
-)
-```
+These are conventions in `Event.data`, not enforced by ev.
 
-**Phase transition:**
-```python
-Event(
-    kind="progress",
-    message="Build phase complete",
-    data={"phase": "build", "status": "complete", "next": "test"}
-)
-```
+### Hierarchical Progress
 
-**Indeterminate progress (work is happening, amount unknown):**
-```python
-Event(
-    kind="progress",
-    message="Scanning repository",
-    data={"phase": "scan"}
-)
-```
-
-No percentage, no step count — just a fact that work is ongoing. Renderer can show a spinner if it wants.
+For nested task trees (GitHub Actions-style workflows), see the `ProgressTree` pattern in ev-toolkit. This keeps ev's core minimal while providing a blessed pattern for complex workflows.

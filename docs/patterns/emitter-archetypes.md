@@ -39,7 +39,8 @@ class StreamingEmitter:
 
 **ev's reference emitters:**
 - `PlainEmitter` — streaming to stderr
-- `RichEmitter` — streaming to stderr
+
+For Rich terminal output, see `RichEmitter` in ev-toolkit.
 
 ### Output Stream Convention
 

@@ -1,5 +1,5 @@
 ---
-status: not-started
+status: completed
 updated: 2026-01-04
 ---
 

@@ -4,6 +4,27 @@ All notable changes to ev are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/). Pre-1.0 releases may have breaking changes in minor versions.
 
+## [0.6.0] - 2026-01-04
+
+### Removed
+
+- **TeeEmitter, FileEmitter, RichEmitter** — Moved to ev-toolkit
+  - ev core now ships only `PlainEmitter`, `JsonEmitter`, `ListEmitter`, `NullEmitter`
+  - For composition utilities and Rich output, use ev-toolkit
+- **`rich` optional dependency** — No longer needed in ev core
+
+### Changed
+
+- **Progress event conventions simplified** — Removed `id`/`parent_id` from recommended fields
+  - For hierarchical progress (GitHub Actions-style), see ProgressTree pattern in ev-toolkit
+  - Core progress fields: `current`, `total`, `unit`, `phase`, `status`
+
+### Not Added
+
+- **Schema versioning rejected** — `_schema` field was prototyped but removed
+  - Versioning belongs at emitter layer, not in core `to_dict()`
+  - See trifecta-alignment plan for rationale
+
 ## [0.3.0] - 2026-01-03
 
 ### Added
@@ -52,6 +73,6 @@ Initial release.
 - Event kinds: `log`, `progress`, `artifact`, `metric`, `input`
 - `Emitter` protocol with `emit()` and `finish()`
 - Reference emitters: `ListEmitter`, `NullEmitter`
-- Rendering emitters: `JsonEmitter`, `PlainEmitter`, `RichEmitter`
+- Rendering emitters: `JsonEmitter`, `PlainEmitter`
 - Immutability via frozen dataclasses and `MappingProxyType`
 - Serialization: `to_dict()` / `from_dict()` on Event and Result

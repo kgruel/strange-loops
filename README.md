@@ -107,9 +107,10 @@ An *Emitter* is any sink that receives `Event`s during execution and a final `Re
 
 Included reference emitters:
 
-* **JSONEmitter** (canonical): writes `Result` and optionally streams `Event`s as JSON / JSONL for automation and CI
+* **JsonEmitter** (canonical): writes `Result` and optionally streams `Event`s as JSON / JSONL for automation and CI
 * **PlainEmitter**: minimal, line-oriented output for pipes and dumb terminals
-* **RichEmitter** (optional dependency): beautiful, interactive terminal output using Rich
+
+For Rich terminal output, composition utilities (`TeeEmitter`, `FileEmitter`), and more, see **ev-toolkit**.
 
 Emitters live outside the core types so the contract stays clean, but they all consume the **same contract** and implement the same `Emitter` protocol.
 

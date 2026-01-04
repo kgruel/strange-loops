@@ -136,6 +136,43 @@ Just: "here's how far along we are right now."
 
 Everything else is derived by renderers.
 
+## Recommended Data Fields
+
+Progress events use `Event.data` for structured information. These fields are conventions, not requirements:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | str | Unique identifier for this progress stream |
+| `parent_id` | str | Parent progress id (for nesting) |
+| `current` | int/float | Current value |
+| `total` | int/float | Total value (for percentage calculation) |
+| `unit` | str | What's being counted ("files", "bytes", etc.) |
+| `phase` | str | Named phase identifier |
+| `status` | str | "running" / "ok" / "error" |
+
+### Examples
+
+**Simple percentage:**
+```python
+Event.progress("Downloading", current=37, total=100, unit="files")
+```
+
+**Nested operations:**
+```python
+# Top-level operation
+Event.progress("Deploying", id="deploy", status="running")
+
+# Nested phase
+Event.progress("Decrypting secrets", id="decrypt", parent_id="deploy", current=2, total=5)
+```
+
+**Phase transitions:**
+```python
+Event.progress("Build complete", phase="build", status="ok", next="test")
+```
+
+These are conventions in `Event.data`, not enforced by ev. Renderers may use them for richer displays (nested progress bars, phase timelines, etc.).
+
 ## Examples
 
 **Percentage progress:**

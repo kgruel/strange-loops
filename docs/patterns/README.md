@@ -12,9 +12,13 @@ Patterns for building production emitters with ev.
 
 **[Aggregating Emitter](aggregating-emitter.md)** — Wrap an emitter to count or accumulate while delegating rendering.
 
-**[Live Emitter](live-emitter.md)** — Integrate Rich Live displays with ev.
+**[Live Emitter](live-emitter.md)** — Integrate Rich Live displays with ev. Includes view functions pattern.
 
 **[Command Context](command-context.md)** — Single injection point for CLI commands, bundling config, emitters, and output.
+
+**[Signal Lifecycle](signal-lifecycle.md)** — Structured signaling for multi-stage operations (started/completed/failed).
+
+**[Topic Registry](topic-registry.md)** — Central registry of known signals for routing and validation.
 
 ## Quick Reference
 
@@ -25,7 +29,10 @@ Patterns for building production emitters with ev.
 | Batch archetype | Need composed output (tables, trees) |
 | Aggregating wrapper | Counting across events while delegating |
 | Live wrapper | Rich Live integration |
+| View functions | Testable state→renderable transforms |
 | Command context | CLI commands with multiple shared concerns |
+| Signal lifecycle | Multi-stage operations with progress |
+| Topic registry | 5+ signal types, need routing/validation |
 
 ## Related Docs
 

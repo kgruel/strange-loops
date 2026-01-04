@@ -153,6 +153,134 @@ class SpinnerEmitter:
         self._live.update(Text(f"{icon} {result.summary}"))
 ```
 
+## View Functions Pattern
+
+The most testable approach: **pure functions that transform state into renderables**.
+
+### The Pattern
+
+Instead of mixing state and rendering in the emitter, separate into:
+
+1. **Emitter** — accumulates state from events
+2. **View function** — pure function: `state → renderable`
+
+```python
+# views.py - Pure functions, no side effects
+from rich.tree import Tree
+from rich.text import Text
+
+def build_deploy_tree(
+    stages: dict[str, dict],
+    connecting: bool,
+    elapsed_fn: Callable[[], float],
+    theme: Theme
+) -> Tree:
+    """Build Rich Tree from current deploy state.
+
+    Args:
+        stages: Dict of stage_name → {signal, duration_ms, error}
+        connecting: Whether still connecting
+        elapsed_fn: Function returning elapsed seconds
+        theme: Visual theme for icons/colors
+
+    Returns:
+        Rich Tree renderable
+    """
+    tree = Tree(f"Deploy ({elapsed_fn():.1f}s)")
+
+    if connecting:
+        tree.add(Text("⏳ Connecting...", style="yellow"))
+        return tree
+
+    for name, data in stages.items():
+        signal = data.get("signal", "")
+        if signal == "deploy.stage_completed":
+            icon = theme.success_icon
+            label = f"{icon} {name} ({data['duration_ms']:.0f}ms)"
+        elif signal == "deploy.stage_failed":
+            icon = theme.error_icon
+            label = f"{icon} {name}: {data['error']}"
+        else:  # started
+            icon = theme.spinner
+            label = f"{icon} {name}..."
+        tree.add(Text(label))
+
+    return tree
+```
+
+### Emitter Uses View Functions
+
+The emitter accumulates state and calls view functions to render:
+
+```python
+# emitter.py
+class DeployLiveEmitter:
+    def __init__(self):
+        self._stages: dict[str, dict] = {}
+        self._connecting = True
+        self._start_time = time.monotonic()
+        self._live = Live(Tree("Deploy"))
+
+    def emit(self, event: Event) -> None:
+        # Update state
+        if event.topic == "signal:deploy.connected":
+            self._connecting = False
+        elif event.topic.startswith("signal:deploy.stage_"):
+            stage = event.data["stage"]
+            self._stages[stage] = {
+                "signal": event.signal_name,
+                **event.data
+            }
+
+        # Rebuild tree from state
+        self._update_display()
+
+    def _update_display(self) -> None:
+        tree = build_deploy_tree(
+            stages=self._stages,
+            connecting=self._connecting,
+            elapsed_fn=lambda: time.monotonic() - self._start_time,
+            theme=self._theme
+        )
+        self._live.update(tree)
+```
+
+### Why This Works
+
+1. **Testable** — View functions are pure, test without terminal:
+   ```python
+   def test_build_deploy_tree_shows_completed_stages():
+       tree = build_deploy_tree(
+           stages={"rsync": {"signal": "deploy.stage_completed", "duration_ms": 2340}},
+           connecting=False,
+           elapsed_fn=lambda: 5.0,
+           theme=default_theme
+       )
+       assert "rsync (2340ms)" in str(tree)
+   ```
+
+2. **Reusable** — Same view function works for batch rendering:
+   ```python
+   # In a batch emitter's finish()
+   tree = build_deploy_tree(self._stages, False, lambda: total_time, theme)
+   console.print(tree)
+   ```
+
+3. **Deterministic** — Same state always produces same output
+
+4. **Debuggable** — Can print state dict to see what view function receives
+
+### Separating Concerns
+
+| Component | Responsibility |
+|-----------|----------------|
+| Emitter | State accumulation, lifecycle |
+| View function | State → Renderable (pure) |
+| Theme | Visual constants (icons, colors) |
+| Live context | Terminal updates |
+
+This is the same separation hlab uses in `emitters/views.py`.
+
 ## Separating Display Logic
 
 Keep your Live display logic separate from the emitter wrapper:

@@ -49,12 +49,20 @@ class TestEvent:
         assert isinstance(d, dict)
         assert isinstance(d["data"], dict)
         assert d == {
+            "_schema": "ev:event@0.1",
             "kind": "progress",
             "level": "warn",
             "message": "test",
             "data": {"nested": {"deep": 1}},
             "ts": 1704200000.0,
         }
+
+    def test_to_dict_includes_schema(self):
+        """to_dict() includes _schema field with correct value."""
+        event = Event(kind="log", message="test")
+        d = event.to_dict()
+        assert "_schema" in d
+        assert d["_schema"] == "ev:event@0.1"
 
     def test_from_dict_round_trips(self):
         """from_dict() reconstructs an equivalent Event."""
@@ -481,12 +489,20 @@ class TestResult:
         assert isinstance(d["data"], dict)
         assert isinstance(d["meta"], dict)
         assert d == {
+            "_schema": "ev:result@0.1",
             "status": "error",
             "code": 1,
             "summary": "Failed",
             "data": {"error": {"code": "E001"}},
             "meta": {"duration": 2.3},
         }
+
+    def test_to_dict_includes_schema(self):
+        """to_dict() includes _schema field with correct value."""
+        result = Result.ok("test")
+        d = result.to_dict()
+        assert "_schema" in d
+        assert d["_schema"] == "ev:result@0.1"
 
     def test_from_dict_round_trips(self):
         """from_dict() reconstructs an equivalent Result."""

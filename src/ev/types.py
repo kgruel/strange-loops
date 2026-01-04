@@ -280,7 +280,6 @@ class Event:
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
         return {
-            "_schema": "ev:event@0.1",
             "kind": self.kind,
             "level": self.level,
             "message": self.message,
@@ -416,7 +415,6 @@ class Result:
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
         return {
-            "_schema": "ev:result@0.1",
             "status": self.status,
             "code": self.code,
             "summary": self.summary,

@@ -105,13 +105,8 @@ toml = [
 
 [[package]]
 name = "ev"
-version = "0.3.0"
+version = "0.6.0"
 source = { editable = "." }
-
-[package.optional-dependencies]
-rich = [
-    { name = "rich" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -123,8 +118,6 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "rich", marker = "extra == 'rich'", specifier = ">=13.0" }]
-provides-extras = ["rich"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -17,15 +17,16 @@ Event(
 )
 ```
 
-Or:
+Or a step-based variant:
 
 ```python
 Event(
     kind="progress",
-    message="Applying step",
+    message="Running migrations",
     data={
-        "step": 3,
-        "of": 10
+        "current": 3,
+        "total": 10,
+        "unit": "migrations"
     }
 )
 ```
@@ -136,42 +137,37 @@ Just: "here's how far along we are right now."
 
 Everything else is derived by renderers.
 
-## Examples
+## Recommended Data Fields
+
+Progress events use `Event.data` for structured information. These fields are conventions, not requirements:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `current` | int/float | Current value |
+| `total` | int/float | Total value (for percentage calculation) |
+| `unit` | str | What's being counted ("files", "bytes", etc.) |
+| `phase` | str | Named phase identifier |
+| `status` | str | "running" / "ok" / "error" |
+
+### Examples
 
 **Percentage progress:**
 ```python
-Event(
-    kind="progress",
-    message="Downloading images",
-    data={"current": 37, "total": 100}
-)
+Event.progress("Downloading", current=37, total=100, unit="files")
 ```
 
-**Step-based progress:**
+**Phase transitions:**
 ```python
-Event(
-    kind="progress",
-    message="Running migrations",
-    data={"step": 3, "of": 10, "name": "add_user_table"}
-)
+Event.progress("Build complete", phase="build", status="ok")
 ```
 
-**Phase transition:**
+**Indeterminate (spinner-worthy):**
 ```python
-Event(
-    kind="progress",
-    message="Build phase complete",
-    data={"phase": "build", "status": "complete", "next": "test"}
-)
+Event.progress("Scanning repository", phase="scan", status="running")
 ```
 
-**Indeterminate progress (work is happening, amount unknown):**
-```python
-Event(
-    kind="progress",
-    message="Scanning repository",
-    data={"phase": "scan"}
-)
-```
+These are conventions in `Event.data`, not enforced by ev.
 
-No percentage, no step count — just a fact that work is ongoing. Renderer can show a spinner if it wants.
+### Hierarchical Progress
+
+For nested task trees (GitHub Actions-style workflows), see the `ProgressTree` pattern in ev-toolkit. This keeps ev's core minimal while providing a blessed pattern for complex workflows.

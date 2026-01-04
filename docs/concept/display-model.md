@@ -2,137 +2,261 @@
 
 *The missing layer between contract and presentation.*
 
-## The Gap
-
-ev defines the contract layer: Event describes what happened, Result describes the outcome. But between receiving an Event and producing styled terminal output, there's a conceptual gap.
-
-```
-Domain Logic
-    ↓
-ev Contract (Event, Result)
-    ↓
-??? ← What goes here?
-    ↓
-Styled Terminal Output (Rich Text)
-```
-
-For trivial cases, emitters bridge this directly. For complex cases, an intermediate layer emerges.
-
-## The Display Model Layer
-
-A **display model** is the canonical form for a category of content, ready for rendering but not yet styled.
-
-```
-ev Event (log kind) ────┐
-                        ├──► LogLine ──► render() ──► Text
-external logs ──────────┘
-
-ev Event (progress) ────────► ProgressState ──► render() ──► Text
-
-ev Event (artifact) ────────► ArtifactRef ──► render() ──► Text
-```
-
-Display models are:
-- **Source-agnostic** — ev events and external sources converge
-- **Renderer-aware** — shaped for rendering needs
-- **Frozen** — immutable data, no behavior
-
-## Why Not Render Events Directly?
-
-Three reasons display models exist:
-
-### 1. Source Convergence
-
-Log-like content comes from multiple sources:
-- ev log events (your CLI's output)
-- Docker compose logs (external process)
-- Systemd journal (system logs)
-- JSON log files (structured logs)
-
-All should render consistently. A display model provides the convergence point.
-
-### 2. Rendering Needs Differ from Contract Needs
-
-ev Events are optimized for **emission** — what the domain wants to say.
-Display models are optimized for **rendering** — what the presenter needs to show.
-
-| ev Event | Display Model (LogLine) |
-|----------|------------------------|
-| `ts: float` (epoch) | `timestamp: datetime` (parsed) |
-| `data: Mapping` (arbitrary) | `source: str` (extracted) |
-| `level: str` | `level: str` (same) |
-| `message: str` | `message: str` (same) |
-| `signal_name` (derived) | `source` (first-class) |
-
-The shapes overlap but aren't identical. Display models reshape for rendering convenience.
-
-### 3. Accumulated Context
-
-Rendering often needs context beyond the single item:
-- Consistent colors for the same source across lines
-- Column widths based on seen content
-- Counts, aggregations, groupings
-
-This context accumulates across items. Display models are the natural attachment point.
-
-## The Rendering Stack
-
-Four layers, each with distinct responsibility:
+## The Stack
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ 1. CONTRACT LAYER (ev)                              │
-│    Event, Result — what happened                    │
-│    Frozen, minimal, serializable                    │
-│    Lives in: ev core                                │
+│ CONTRACT (ev)                                       │
+│ Event, Result — what happened                       │
+│ Frozen, minimal, serializable                       │
 ├─────────────────────────────────────────────────────┤
-│ 2. DISPLAY MODEL LAYER                              │
-│    LogLine, ProgressState, etc. — ready to render   │
-│    Source-agnostic, renderer-aware, frozen          │
-│    Lives in: ev-toolkit or application              │
+│ NORMALIZATION                                       │
+│ Normalizers — source → display model                │
+│ from_event(), from_docker(), from_systemd()         │
 ├─────────────────────────────────────────────────────┤
-│ 3. RENDERING LAYER                                  │
-│    render_log_line(), etc. — styling logic          │
-│    Pure functions: (model, context) → styled output │
-│    Lives in: application                            │
+│ DISPLAY MODELS                                      │
+│ LogLine, ProgressState, ArtifactRef                 │
+│ Layout-aware, style-agnostic, frozen                │
 ├─────────────────────────────────────────────────────┤
-│ 4. PRESENTATION LAYER (Rich, terminal)              │
-│    Text, Tree, Live — actual output                 │
-│    Library code, not ours                           │
-│    Lives in: rich, blessed, etc.                    │
+│ RENDERING                                           │
+│ render(model, theme, config, state) → Line          │
+│ Semantic IR: Line[Segment] with roles               │
+├─────────────────────────────────────────────────────┤
+│ BACKENDS                                            │
+│ rich.render(Line, theme) → Text                     │
+│ json.render(Line) → dict                            │
+│ plain.render(Line) → str                            │
+├─────────────────────────────────────────────────────┤
+│ PRESENTATION                                        │
+│ Terminal, file, stream                              │
 └─────────────────────────────────────────────────────┘
 ```
 
-## Rendering Context
+Each layer has one job. Data flows down, styling decisions flow up.
 
-Rendering requires more than the display model. The full context:
+## The Gap ev Doesn't Fill
 
-| Component | What It Provides | Lifecycle | Mutability |
-|-----------|------------------|-----------|------------|
-| **Theme** | Visual tokens (colors, icons) | Global | Frozen |
-| **Config** | Structural options (widths, separators) | Per-component | Frozen |
-| **State** | Accumulated context (color assignments) | Per-session | Mutable |
-| **Data** | The display model (LogLine) | Per-item | Frozen |
+ev defines the contract: Event describes what happened, Result describes the outcome. But between receiving an Event and producing terminal output, there's a conceptual gap.
 
-### Theme (Global)
+For trivial cases, emitters bridge this directly. For serious CLIs, intermediate layers emerge. This document defines those layers.
 
-Visual vocabulary shared across all rendering:
+## Layer 1: Contract (ev)
+
+What happened. Facts from domain logic.
+
+```python
+Event(kind="log", level="error", message="Connection failed", data={...})
+```
+
+ev stays here. Frozen, minimal, serializable.
+
+## Layer 2a: Normalization
+
+Sources converge to canonical display models.
+
+```python
+class Normalizer(Protocol):
+    def accepts(self, item: object) -> bool: ...
+    def normalize(self, item: object) -> DisplayModel: ...
+```
+
+Multiple sources produce similar content:
+
+```python
+# ev Events
+class EventNormalizer:
+    def normalize(self, event: Event) -> LogLine:
+        return LogLine(
+            message=event.message,
+            source=event.signal_name,
+            level=event.level,
+            timestamp=datetime.fromtimestamp(event.ts),
+        )
+
+# Docker compose logs
+class DockerComposeNormalizer:
+    def normalize(self, line: str) -> LogLine:
+        service, message = line.split(" | ", 1)
+        return LogLine(message=message, source=service, level=detect_level(message))
+
+# Systemd journal
+class SystemdNormalizer:
+    def normalize(self, entry: dict) -> LogLine:
+        return LogLine(
+            message=entry["MESSAGE"],
+            source=entry.get("SYSLOG_IDENTIFIER"),
+            level=priority_to_level(entry.get("PRIORITY")),
+            timestamp=entry.get("__REALTIME_TIMESTAMP"),
+        )
+```
+
+Normalizers are source-specific. They know format details. Display models don't.
+
+## Layer 2b: Display Models
+
+Canonical forms ready for rendering. The key properties:
+
+**Layout-aware** — contains the fields renderers need (message, source, level, timestamp).
+
+**Style-agnostic** — contains no styling decisions. If a display model contains `"red"` or `"✓"`, you've smuggled Theme into Data.
+
+```python
+# Good - semantic tokens
+level = "error"
+
+# Bad - styling decisions
+color = "red"
+icon = "✗"
+```
+
+**Frozen** — immutable data, no behavior.
+
+```python
+@dataclass(frozen=True)
+class LogLine:
+    """Display model for log-like content."""
+    message: str
+    source: str | None = None
+    level: str | None = None           # semantic: "error", "warn", "info", "debug"
+    timestamp: datetime | None = None
+    data: Mapping[str, Any] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class ProgressState:
+    """Display model for progress indication."""
+    message: str
+    step: int | None = None
+    total: int | None = None
+    percent: float | None = None
+    phase: str | None = None
+
+@dataclass(frozen=True)
+class ArtifactRef:
+    """Display model for produced artifacts."""
+    type: str
+    message: str
+    path: str | None = None
+    href: str | None = None
+    data: Mapping[str, Any] = field(default_factory=dict)
+```
+
+## Layer 3: Rendering → Semantic IR
+
+Renderers transform display models into a **semantic intermediate representation** — structured output that's backend-neutral.
+
+```python
+@dataclass(frozen=True)
+class Segment:
+    """A piece of output with a semantic role."""
+    role: str   # "timestamp", "source", "level:error", "message", "separator"
+    text: str
+
+@dataclass(frozen=True)
+class Line:
+    """A complete line of semantic output."""
+    segments: tuple[Segment, ...]
+```
+
+The role identifies what kind of content this is. Theme maps roles to styles. The renderer doesn't know about colors — it knows about meaning.
+
+```python
+def render_log_line(
+    model: LogLine,
+    config: LogLineConfig,
+    state: RenderState,
+) -> Line:
+    """Transform LogLine to semantic Line."""
+    segments = []
+
+    if config.show_source and model.source:
+        color = state.get_source_color(model.source)
+        segments.append(Segment(role=f"source:{color}", text=model.source.ljust(config.source_width)))
+        segments.append(Segment(role="separator", text=config.separator))
+
+    if model.level:
+        segments.append(Segment(role=f"level:{model.level}", text=model.message))
+    else:
+        segments.append(Segment(role="message", text=model.message))
+
+    return Line(segments=tuple(segments))
+```
+
+**Why semantic IR?**
+
+1. **Backend-neutral** — same Line renders to Rich, JSON, or plain text
+2. **Testable** — assert on roles and text, not terminal escape codes
+3. **Inspectable** — can examine structure before rendering
+4. **Transformable** — can filter, modify, aggregate Lines
+
+## Layer 4: Backends
+
+Backends convert semantic IR to specific output formats.
+
+```python
+# rich_backend.py
+def render(line: Line, theme: Theme) -> Text:
+    """Convert semantic Line to Rich Text."""
+    result = Text()
+    for segment in line.segments:
+        style = theme.style_for_role(segment.role)
+        result.append(segment.text, style=style)
+    return result
+
+# json_backend.py
+def render(line: Line) -> dict:
+    """Convert semantic Line to JSON-serializable dict."""
+    return {
+        "segments": [{"role": s.role, "text": s.text} for s in line.segments]
+    }
+
+# plain_backend.py
+def render(line: Line) -> str:
+    """Convert semantic Line to plain string."""
+    return "".join(s.text for s in line.segments)
+```
+
+Theme lives in the backend layer. It maps roles to styles:
 
 ```python
 @dataclass(frozen=True)
 class Theme:
-    error_color: str = "red"
-    warn_color: str = "yellow"
-    success_icon: str = "✓"
-    error_icon: str = "✗"
-    # ...
+    styles: Mapping[str, str] = field(default_factory=dict)
+
+    def style_for_role(self, role: str) -> str:
+        # Exact match
+        if role in self.styles:
+            return self.styles[role]
+        # Prefix match: "level:error" → "level"
+        prefix = role.split(":")[0]
+        return self.styles.get(prefix, "")
+
+# Example theme
+default_theme = Theme(styles={
+    "level:error": "bold red",
+    "level:warn": "yellow",
+    "level:debug": "dim",
+    "source": "cyan",
+    "separator": "dim",
+    "timestamp": "dim",
+})
 ```
 
-Loaded once, used everywhere. May come from config file or environment.
+## Rendering Context
+
+Rendering requires more than the display model:
+
+| Component | What It Provides | Lifecycle | Mutability |
+|-----------|------------------|-----------|------------|
+| **Config** | Structural options | Per-component | Frozen |
+| **State** | Accumulated context | Per-session | Mutable* |
+| **Theme** | Role → style mapping | Global | Frozen |
+| **Data** | Display model | Per-item | Frozen |
+
+*State mutation can be explicit (reducer pattern) or implicit (mutable object).
 
 ### Config (Per-Component, Frozen)
 
-Structural decisions for a specific renderer:
+Structural decisions. Layout, not style.
 
 ```python
 @dataclass(frozen=True)
@@ -141,174 +265,137 @@ class LogLineConfig:
     source_width: int = 15
     separator: str = " │ "
     show_timestamp: bool = False
-    truncate_at: int | None = None
 ```
 
-Created when component initializes, immutable thereafter. Describes "how to format" without visual details.
+### State (Per-Session)
 
-### State (Per-Session, Mutable)
-
-Context accumulated during rendering:
+Accumulated context for consistency across items.
 
 ```python
 @dataclass
 class RenderState:
     source_colors: dict[str, str] = field(default_factory=dict)
-    line_count: int = 0
-    seen_levels: set[str] = field(default_factory=set)
+
+    def get_source_color(self, source: str) -> str:
+        if source not in self.source_colors:
+            # Assign consistent color based on hash
+            colors = ["blue", "green", "magenta", "cyan", "yellow"]
+            self.source_colors[source] = colors[hash(source) % len(colors)]
+        return self.source_colors[source]
 ```
 
-Mutated by render functions. Enables consistency across items (same source → same color).
-
-### Data (Per-Item, Frozen)
-
-The display model itself:
+**State mutation patterns:**
 
 ```python
-@dataclass(frozen=True)
-class LogLine:
-    raw: str
-    message: str
-    source: str | None = None
-    level: str | None = None
-    timestamp: datetime | None = None
+# Mutable (simpler)
+line = render(model, config, state)  # state.source_colors mutated
+
+# Reducer (more functional, better for testing)
+line, new_state = render(model, config, state)  # state unchanged
 ```
 
-One per item being rendered. Immutable.
+### Theme (Global, Frozen)
 
-## The Render Function Pattern
-
-Render functions are pure (modulo state mutation) transformations:
+Visual vocabulary. Loaded once, used everywhere.
 
 ```python
-def render_log_line(
-    line: LogLine,          # Data (per-item)
-    theme: Theme,           # Visual tokens (global)
-    config: LogLineConfig,  # Structural options (per-component)
-    state: RenderState,     # Accumulated context (per-session)
-) -> Text:
-    """Transform LogLine to styled Rich Text."""
+theme = Theme(styles={
+    "level:error": "bold red",
+    "source:blue": "blue",
     ...
+})
 ```
 
-The signature makes dependencies explicit:
-- What are we rendering? (`line`)
-- What colors/icons? (`theme`)
-- What structure? (`config`)
-- What context? (`state`)
+## Testing
 
-## State Lifecycle
-
-State must be managed by the caller:
+Semantic IR makes testing trivial:
 
 ```python
-# Caller creates state
-state = RenderState()
+def test_error_level_has_correct_role():
+    model = LogLine(message="Connection failed", level="error")
+    line = render_log_line(model, config, state)
 
-# Same state passed to all render calls
-for line in log_lines:
-    text = render_log_line(line, theme, config, state)
-    console.print(text)
+    # Assert on semantic structure
+    roles = [s.role for s in line.segments]
+    assert "level:error" in roles
 
-# State accumulated (source_colors populated, line_count incremented)
+def test_source_included_when_configured():
+    model = LogLine(message="OK", source="nginx")
+    config = LogLineConfig(show_source=True)
+    line = render_log_line(model, config, state)
+
+    assert any(s.role.startswith("source:") for s in line.segments)
+    assert any(s.text.strip() == "nginx" for s in line.segments)
+
+def test_source_color_consistency():
+    state = RenderState()
+
+    line1 = render_log_line(LogLine(message="a", source="nginx"), config, state)
+    line2 = render_log_line(LogLine(message="b", source="nginx"), config, state)
+
+    # Same source gets same color role
+    color1 = [s.role for s in line1.segments if s.role.startswith("source:")][0]
+    color2 = [s.role for s in line2.segments if s.role.startswith("source:")][0]
+    assert color1 == color2
 ```
 
-**Why caller-managed?**
-- Explicit lifecycle (no hidden singletons)
-- Testable (inject state, verify mutations)
-- Flexible (reset state, share across components, serialize)
+No mocking Rich. No capturing terminal output. Just data in, data out.
 
-## MVVM Analogy
+## Library Boundaries
 
-The pattern mirrors Model-View-ViewModel:
+If this becomes a library (ev-display, ev-view, ev-present):
 
-| MVVM | ev Rendering Stack |
-|------|-------------------|
-| Model | ev Event (facts from domain) |
-| ViewModel | LogLine (display-ready form) |
-| View | Rich Text (styled output) |
+**In scope:**
+- Frozen display models (LogLine, ProgressState, ArtifactRef)
+- Normalizer protocol
+- Semantic IR (Segment, Line)
+- Renderers → Line (backend-neutral)
+- Config/State patterns
 
-ev Events are the Model — raw facts.
-Display models are the ViewModel — shaped for presentation.
-Render output is the View — final styled form.
+**Out of scope:**
+- Rich/blessed/textual integration (backends live in apps)
+- Live UI, async, streaming (app layer)
+- Domain logic (above contract layer)
 
-## When to Create Display Models
+This keeps the library backend-neutral and focused.
 
-Create a display model when:
-- Multiple sources produce similar content (convergence)
-- Rendering needs differ from emission needs (reshaping)
-- Context accumulates across items (state attachment)
+## Validation Test
 
-Skip display models when:
-- Single source, simple rendering
-- Direct Event → output is clear
-- No accumulated context needed
+The concept earns its existence if this pipeline is clean and testable:
 
-## Example: LogLine
+**Inputs:**
+- ev log events
+- Docker compose raw lines
+- (Future: systemd journal, JSON logs)
 
-```python
-# Display model
-@dataclass(frozen=True)
-class LogLine:
-    raw: str
-    message: str
-    source: str | None = None
-    level: Literal["debug", "info", "warn", "error"] | None = None
-    timestamp: datetime | None = None
-    data: Mapping[str, Any] = field(default_factory=dict)
+**Process:**
+1. Normalizers → unified LogLine stream
+2. Renderer → Line stream with consistent source coloring
+3. Backend → terminal output
 
-# Converters (source-specific)
-def from_event(event: Event) -> LogLine:
-    """ev log Event → LogLine"""
-    return LogLine(
-        raw=event.message,
-        message=event.message,
-        source=event.signal_name,
-        level=event.level,
-        timestamp=datetime.fromtimestamp(event.ts),
-        data=dict(event.data),
-    )
+**Outputs:**
+- Same source always gets same color
+- Same layout regardless of input source
+- Testable without terminal
 
-def from_docker_compose(line: str) -> LogLine:
-    """Docker compose log line → LogLine"""
-    # Parse "service | message" format
-    ...
-
-# Renderer (source-agnostic)
-def render_log_line(
-    line: LogLine,
-    theme: Theme,
-    config: LogLineConfig,
-    state: RenderState,
-) -> Text:
-    """LogLine → Rich Text"""
-    ...
-```
-
-## Relationship to ev
-
-ev stays at the contract layer. Display models are explicitly **not part of ev core**.
-
-| Layer | Package | Stability |
-|-------|---------|-----------|
-| Contract | ev | Frozen |
-| Display Model | ev-toolkit or app | Evolving |
-| Rendering | Application | Application-specific |
-
-This separation means:
-- ev remains minimal and stable
-- Display models can evolve with rendering needs
-- Applications own their presentation logic
+If that feels clean, the abstraction is real.
 
 ## Summary
 
-Display models fill the gap between contract and presentation:
+```
+ev Event ──────────────┐
+                       │
+docker logs ───────────┼──► Normalizers ──► Display Models ──► Renderers ──► Line ──► Backends ──► Output
+                       │         ↑                                  ↑              ↑
+systemd journal ───────┘    source-specific              (config, state)      (theme)
+                            format knowledge              layout decisions    style decisions
+```
 
-1. **Contract layer** (ev) — what happened
-2. **Display model layer** — ready to render, source-agnostic
-3. **Rendering layer** — pure functions with theme/config/state
-4. **Presentation layer** — actual terminal output
+- **Contract** (ev): what happened
+- **Normalization**: source → canonical model
+- **Display Models**: layout-aware, style-agnostic, frozen
+- **Rendering**: (model, config, state) → semantic IR
+- **Backends**: semantic IR → styled output
+- **Theme**: role → style mapping
 
-The rendering context pattern (Theme + Config + State + Data) makes dependencies explicit and enables accumulated context across items.
-
-Display models are not part of ev. They're the bridge each application builds between ev's facts and their presentation needs.
+The semantic IR (Segment/Line) is the key insight. It's the backend-neutral representation that makes everything testable and portable.

@@ -380,3 +380,111 @@ All wrappers:
 | Essential only | Opinionated helpers |
 
 This split keeps ev core stable while toolkit can evolve with new patterns.
+
+---
+
+## Retrospective: Logs Command Implementation
+
+Insights from implementing `hlab logs` - a streaming command that revealed edge cases.
+
+### Key Insight: Not Everything Is An Event
+
+The logs command revealed a gap: **high-volume content that's already formatted shouldn't be events**.
+
+```
+Lifecycle signals (logs.started, logs.stopped) → emitter (structured)
+Content (actual log lines)                     → direct to console (streaming)
+```
+
+This avoids wrapping every log line in an Event and enables efficient streaming.
+
+### Hybrid Emitter Pattern
+
+```python
+# Emitter handles lifecycle
+emitter.emit(Event.log_signal("logs.started", stack="media", follow=True))
+
+# Content bypasses emitter entirely
+async for line in stream:
+    output_fn(line)  # Direct to console
+
+emitter.emit(Event.log_signal("logs.stopped", reason="completed", line_count=n))
+```
+
+**Why this works:**
+- Emitter stays focused on structured observations
+- No Event overhead for thousands of log lines
+- Content already formatted for humans
+
+### NullEmitter for Bypass
+
+When operations expect an emitter but command doesn't need Live display:
+
+```python
+class _NullEmitter(Emitter):
+    def emit(self, event: Event) -> None: pass
+    def finish(self, result: Result) -> None: pass
+```
+
+Cleaner than `emitter: Emitter | None` everywhere. Consider adding to ev-toolkit if common.
+
+### Streaming vs Batch SSH
+
+| Mode | SSH Method | Use Case |
+|------|------------|----------|
+| Batch | `conn.run()` | Commands that complete (status, restart, deploy) |
+| Streaming | `conn.create_process()` | Commands that don't exit (logs -f) |
+
+### Signal Lifecycle for Long-Running Ops
+
+Every streaming operation should have started/stopped signals:
+
+```python
+# Started - captures intent
+Event.log_signal("logs.started", stack="media", service="nginx", follow=True)
+
+# Stopped - captures outcome (one of three reasons)
+Event.log_signal("logs.stopped", reason="completed", line_count=150)
+Event.log_signal("logs.stopped", reason="interrupted", line_count=42)  # Ctrl+C
+Event.log_signal("logs.stopped", reason="error", error="Connection lost")
+```
+
+### Frozen Header + Streaming Body
+
+Pattern for "follow" mode with Rich:
+
+```python
+if follow and ctx.mode == OutputMode.RICH:
+    ctx.output(Panel(header, expand=False, border_style="dim"))
+    # Stream lines below the frozen header...
+    async for line in stream:
+        ctx.output(line)
+```
+
+Could generalize to:
+```python
+with ctx.streaming_output(header="Logs: media/nginx") as stream:
+    async for line in lines:
+        stream.write(line)
+```
+
+### Questions Raised
+
+1. **Should "raw" content be an ev concept?** Options:
+   - `Event.raw(line)` — emitter passes through without wrapping
+   - Output callback in emitter — `emitter = create_emitter(mode, passthrough=fn)`
+   - Keep command-specific (current) — commands wire their own output_fn
+
+   Current approach is probably right: keeps ev focused on structured events.
+
+2. **Is NullEmitter common enough for ev-toolkit?** Watch if other commands need it.
+
+3. **Generic streaming helper?** `stream_command_output(conn, cmd, output_fn)` if pattern repeats.
+
+### Summary
+
+The logs command validated the architecture while revealing an important boundary:
+- **Emitter**: structure and lifecycle
+- **Direct output**: high-volume content
+
+Not everything is an event. That's the design working correctly.

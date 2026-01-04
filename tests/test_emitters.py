@@ -347,6 +347,98 @@ class TestPlainEmitter:
         assert "Downloading" in output
 
 
+class TestPlainEmitterContext:
+    """Tests for PlainEmitter context protocol."""
+
+    def test_context_manager(self):
+        """PlainEmitter can be used as context manager."""
+        out = StringIO()
+        with PlainEmitter(file=out) as emitter:
+            emitter.emit(Event.log("test"))
+
+        assert "test" in out.getvalue()
+
+    def test_enter_returns_self(self):
+        """__enter__ returns the emitter itself."""
+        emitter = PlainEmitter()
+        assert emitter.__enter__() is emitter
+
+
+class TestPlainEmitterSignalFallback:
+    """Tests for signal fallback rendering in PlainEmitter."""
+
+    def test_renders_signal_with_data(self):
+        """Signals render with name and key=value pairs."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=False)
+
+        emitter.emit(Event.log_signal("stack_status", stack="media", healthy=True))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "stack_status" in output
+        assert "stack=media" in output
+        assert "healthy=True" in output
+
+    def test_renders_signal_name_only_when_no_extra_data(self):
+        """Signal with only the signal marker shows just the name."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=False)
+
+        emitter.emit(Event.log_signal("heartbeat"))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "heartbeat" in output
+
+    def test_signal_key_excluded_from_output(self):
+        """The 'signal' key itself is not rendered as a value."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=False)
+
+        emitter.emit(Event.log_signal("foo", bar=1))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        # Should NOT contain "signal=foo"
+        assert "signal=" not in output
+        # Should contain the signal name and the data
+        assert "foo" in output
+        assert "bar=1" in output
+
+    def test_signal_with_message_includes_message(self):
+        """Signal with a message includes both message and data."""
+        out = StringIO()
+        emitter = PlainEmitter(file=out, show_level=False)
+
+        emitter.emit(Event.log_signal("deploy.stage", message="Deploying", stage="rsync"))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "deploy.stage" in output
+        assert "Deploying" in output
+        assert "stage=rsync" in output
+
+
+class TestJsonEmitterContext:
+    """Tests for JsonEmitter context protocol."""
+
+    def test_context_manager(self):
+        """JsonEmitter can be used as context manager."""
+        stdout = StringIO()
+        with JsonEmitter(stdout=stdout) as emitter:
+            emitter.emit(Event.log("test"))
+            emitter.finish(Result.ok())
+
+        output = json.loads(stdout.getvalue())
+        assert len(output["events"]) == 1
+
+    def test_enter_returns_self(self):
+        """__enter__ returns the emitter itself."""
+        emitter = JsonEmitter()
+        assert emitter.__enter__() is emitter
+
+
 class TestRichEmitter:
     """Tests for RichEmitter."""
 
@@ -523,3 +615,63 @@ class TestRichEmitter:
 
         output = out.getvalue()
         assert "ERROR" in output or "✗" in output
+
+    def test_context_manager(self):
+        """RichEmitter can be used as context manager."""
+        emitter, out = self._make_emitter()
+
+        with emitter:
+            emitter.emit(Event.log("test"))
+
+        assert "test" in out.getvalue()
+
+    def test_enter_returns_self(self):
+        """__enter__ returns the emitter itself."""
+        emitter, _ = self._make_emitter()
+        assert emitter.__enter__() is emitter
+
+    def test_signal_renders_with_data(self):
+        """Signals render with name and key=value pairs."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event.log_signal("stack_status", stack="media", healthy=True))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "stack_status" in output
+        assert "stack" in output
+        assert "media" in output
+
+    def test_signal_name_only_when_no_extra_data(self):
+        """Signal with only the signal marker shows just the name."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event.log_signal("heartbeat"))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "heartbeat" in output
+
+    def test_signal_key_excluded_from_output(self):
+        """The 'signal' key itself is not rendered as a value."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event.log_signal("foo", bar=1))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        # Should contain signal name and data, but not "signal="
+        assert "foo" in output
+        assert "bar" in output
+
+    def test_signal_with_message_includes_message(self):
+        """Signal with a message includes both message and data."""
+        emitter, out = self._make_emitter()
+
+        emitter.emit(Event.log_signal("deploy.stage", message="Deploying", stage="rsync"))
+        emitter.finish(Result.ok())
+
+        output = out.getvalue()
+        assert "deploy.stage" in output
+        assert "Deploying" in output
+        assert "stage" in output

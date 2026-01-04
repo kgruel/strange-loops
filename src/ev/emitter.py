@@ -18,6 +18,10 @@ class Emitter(Protocol):
     - emit() must not be called after finish()
 
     Implementations may enforce these invariants or ignore them.
+
+    All emitters support context manager protocol for uniform usage:
+        with emitter:
+            emitter.emit(...)
     """
 
     def emit(self, event: Event) -> None:
@@ -26,6 +30,14 @@ class Emitter(Protocol):
 
     def finish(self, result: Result) -> None:
         """Finalize the run with a result."""
+        ...
+
+    def __enter__(self) -> "Emitter":
+        """Enter context manager. Returns self."""
+        ...
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
         ...
 
 
@@ -57,6 +69,14 @@ class ListEmitter:
         self._finished = True
         self.result = result
 
+    def __enter__(self) -> "ListEmitter":
+        """Enter context manager. Returns self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
+        pass
+
 
 class NullEmitter:
     """No-op emitter for when you don't care about events.
@@ -70,4 +90,12 @@ class NullEmitter:
 
     def finish(self, result: Result) -> None:
         """Accept and discard result."""
+        pass
+
+    def __enter__(self) -> "NullEmitter":
+        """Enter context manager. Returns self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
         pass

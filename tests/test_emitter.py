@@ -119,3 +119,53 @@ class TestNullEmitter:
         # Can finish again (no enforcement)
         emitter.finish(Result.error())
         # No errors raised
+
+
+class TestContextProtocol:
+    """Tests for context manager protocol on emitters."""
+
+    def test_list_emitter_context_manager(self):
+        """ListEmitter can be used as context manager."""
+        with ListEmitter() as emitter:
+            emitter.emit(Event.log("test"))
+
+        assert len(emitter.events) == 1
+        assert emitter.events[0].message == "test"
+
+    def test_null_emitter_context_manager(self):
+        """NullEmitter can be used as context manager."""
+        with NullEmitter() as emitter:
+            emitter.emit(Event.log("test"))
+        # No error raised
+
+    def test_list_emitter_enter_returns_self(self):
+        """__enter__ returns the emitter itself."""
+        emitter = ListEmitter()
+        result = emitter.__enter__()
+        assert result is emitter
+
+    def test_null_emitter_enter_returns_self(self):
+        """__enter__ returns the emitter itself."""
+        emitter = NullEmitter()
+        result = emitter.__enter__()
+        assert result is emitter
+
+    def test_context_does_not_suppress_exceptions(self):
+        """__exit__ does not suppress exceptions."""
+        with pytest.raises(ValueError, match="test error"), ListEmitter() as emitter:
+            emitter.emit(Event.log("before error"))
+            raise ValueError("test error")
+
+    def test_context_exit_safe_after_exception(self):
+        """Emitter state is consistent after exception in context."""
+        emitter = ListEmitter()
+        try:
+            with emitter:
+                emitter.emit(Event.log("before"))
+                raise ValueError("boom")
+        except ValueError:
+            pass
+
+        # Emitter should still be usable (not in broken state)
+        assert len(emitter.events) == 1
+        assert emitter.events[0].message == "before"

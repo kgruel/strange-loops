@@ -64,10 +64,26 @@ class PlainEmitter:
 
     def _format_log(self, event: Event, prefix: str) -> str:
         """Format a log event."""
+        # Check if this is a signal - render with fallback format
+        if event.is_signal:
+            return self._format_signal(event, prefix)
+
         if self._show_level:
             level = event.level.upper()
             return f"{prefix}[{level}] {event.message}"
         return f"{prefix}{event.message}"
+
+    def _format_signal(self, event: Event, prefix: str) -> str:
+        """Format a signal event with name key=value pairs."""
+        signal_name = event.signal_name or "signal"
+        # Build key=value pairs, excluding the 'signal' marker key
+        pairs = [f"{k}={v}" for k, v in event.data.items() if k != "signal"]
+        parts = [signal_name]
+        if event.message:
+            parts.append(event.message)
+        if pairs:
+            parts.append(" ".join(pairs))
+        return f"{prefix}{' '.join(parts)}"
 
     def _format_progress(self, event: Event, prefix: str) -> str:
         """Format a progress event."""
@@ -113,3 +129,11 @@ class PlainEmitter:
         question = event.message or "Input"
         response = event.data.get("response", "")
         return f"{prefix}{question} → {response}"
+
+    def __enter__(self) -> "PlainEmitter":
+        """Enter context manager. Returns self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
+        pass

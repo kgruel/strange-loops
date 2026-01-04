@@ -57,6 +57,11 @@ class RichEmitter:
 
     def _render_log(self, event: Event) -> None:
         """Render a log event."""
+        # Check if this is a signal - render with fallback format
+        if event.is_signal:
+            self._render_signal(event)
+            return
+
         style = LEVEL_STYLES.get(event.level, "")
         message = event.message or ""
 
@@ -67,6 +72,18 @@ class RichEmitter:
             self._console.print(f"[{style}]{message}[/{style}]")
         else:
             self._console.print(message)
+
+    def _render_signal(self, event: Event) -> None:
+        """Render a signal event with name and key=value pairs."""
+        signal_name = event.signal_name or "signal"
+        # Build key=value pairs, excluding the 'signal' marker key
+        pairs = [f"[dim]{k}=[/dim]{v}" for k, v in event.data.items() if k != "signal"]
+        parts = [f"[cyan]{signal_name}[/cyan]"]
+        if event.message:
+            parts.append(event.message)
+        if pairs:
+            parts.append(" ".join(pairs))
+        self._console.print(" ".join(parts))
 
     def _render_progress(self, event: Event) -> None:
         """Render a progress event."""
@@ -112,3 +129,11 @@ class RichEmitter:
         question = event.message or "Input"
         response = event.data.get("response", "")
         self._console.print(f"[yellow]?[/yellow] {question} → [bold]{response}[/bold]")
+
+    def __enter__(self) -> "RichEmitter":
+        """Enter context manager. Returns self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
+        pass

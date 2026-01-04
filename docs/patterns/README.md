@@ -14,6 +14,8 @@ Patterns for building production emitters with ev.
 
 **[Live Emitter](live-emitter.md)** — Integrate Rich Live displays with ev.
 
+**[Command Context](command-context.md)** — Single injection point for CLI commands, bundling config, emitters, and output.
+
 ## Quick Reference
 
 | Pattern | Use When |
@@ -23,6 +25,7 @@ Patterns for building production emitters with ev.
 | Batch archetype | Need composed output (tables, trees) |
 | Aggregating wrapper | Counting across events while delegating |
 | Live wrapper | Rich Live integration |
+| Command context | CLI commands with multiple shared concerns |
 
 ## Related Docs
 

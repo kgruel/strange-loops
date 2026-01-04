@@ -58,3 +58,11 @@ class JsonEmitter:
 
         self._stdout.write(json.dumps(output) + "\n")
         self._stdout.flush()
+
+    def __enter__(self) -> "JsonEmitter":
+        """Enter context manager. Returns self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager. Does not suppress exceptions."""
+        pass

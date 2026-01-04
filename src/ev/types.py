@@ -78,6 +78,24 @@ class Event:
             return str(self.data["signal"])
         return None
 
+    @property
+    def topic(self) -> str:
+        """Canonical namespaced identifier for tooling and filtering.
+
+        Returns a stable string that uniquely identifies the event type:
+        - artifact:<type> for artifact events (e.g., "artifact:deployment_record")
+        - signal:<name> for signal events (e.g., "signal:stack_status")
+        - <kind> for other events (e.g., "log", "progress", "metric", "input")
+
+        This unifies the asymmetry between artifacts (which have types in data)
+        and signals (which have names in data) into one queryable surface.
+        """
+        if self.kind == "artifact":
+            return f"artifact:{self.data.get('type', 'unknown')}"
+        if self.is_signal:
+            return f"signal:{self.signal_name}"
+        return self.kind
+
     @classmethod
     def log(
         cls,

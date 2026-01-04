@@ -166,6 +166,32 @@ class StackLiveEmitter:
 
 Signals become the "timeline of domain events" — a structured record of what happened, suitable for replay or analysis.
 
+## Event.topic: Unified Filtering
+
+The `topic` property provides a canonical identifier for tooling and filtering:
+
+```python
+event = Event.log_signal("stack_status", stack="media")
+print(event.topic)  # "signal:stack_status"
+
+event = Event.artifact("deployment_record", id="123")
+print(event.topic)  # "artifact:deployment_record"
+
+event = Event.log("Just a message")
+print(event.topic)  # "log"
+```
+
+| Event | Topic |
+|-------|-------|
+| `Event.log_signal("stack_status", ...)` | `signal:stack_status` |
+| `Event.artifact("deployment_record", ...)` | `artifact:deployment_record` |
+| `Event.log("message")` | `log` |
+| `Event.progress(...)` | `progress` |
+| `Event.metric(...)` | `metric` |
+| `Event.input(...)` | `input` |
+
+This unifies the asymmetry between artifacts (identified by `data["type"]`) and signals (identified by `data["signal"]`) into one queryable surface. Use `topic` when filtering events or building tooling.
+
 ## Why Not a Separate Primitive?
 
 We considered adding `signal` as a 6th EventKind. We chose to keep it within `log` because:

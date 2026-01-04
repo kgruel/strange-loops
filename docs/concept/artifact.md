@@ -115,7 +115,7 @@ Event.artifact("file", path="/tmp/report.pdf")           # type only, no message
 Event.artifact("stack_status", "All healthy", count=3)   # type + message + data
 ```
 
-The type ends up in `event.data["type"]`, enabling emitters to handle different artifacts appropriately:
+The type ends up in `event.data["type"]`, enabling emitters to handle different artifacts appropriately. Use `event.topic` for filtering: an artifact with type `"file"` has topic `"artifact:file"`.
 
 ```python
 def emit(self, event: Event) -> None:
@@ -123,6 +123,7 @@ def emit(self, event: Event) -> None:
         return
 
     artifact_type = event.data.get("type")
+    # or use event.topic == "artifact:file"
 
     if artifact_type == "file":
         self._render_file(event.data.get("path"))

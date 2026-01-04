@@ -307,6 +307,43 @@ class TestEvent:
         assert Event.progress("test").signal_name is None
         assert Event.artifact("file").signal_name is None
 
+    # topic property
+
+    def test_topic_for_log(self):
+        """topic returns 'log' for regular log events."""
+        event = Event.log("Just a message")
+        assert event.topic == "log"
+
+    def test_topic_for_signal(self):
+        """topic returns 'signal:<name>' for signal events."""
+        event = Event.log_signal("stack_status", stack="media")
+        assert event.topic == "signal:stack_status"
+
+    def test_topic_for_artifact(self):
+        """topic returns 'artifact:<type>' for artifact events."""
+        event = Event.artifact("deployment_record", id="123")
+        assert event.topic == "artifact:deployment_record"
+
+    def test_topic_for_artifact_without_type(self):
+        """topic returns 'artifact:unknown' when type is missing."""
+        event = Event(kind="artifact", data={})
+        assert event.topic == "artifact:unknown"
+
+    def test_topic_for_progress(self):
+        """topic returns 'progress' for progress events."""
+        event = Event.progress("working", percent=50)
+        assert event.topic == "progress"
+
+    def test_topic_for_metric(self):
+        """topic returns 'metric' for metric events."""
+        event = Event.metric("duration", 2.5)
+        assert event.topic == "metric"
+
+    def test_topic_for_input(self):
+        """topic returns 'input' for input events."""
+        event = Event.input("Continue?", response="yes")
+        assert event.topic == "input"
+
     def test_all_kinds(self):
         """All event kinds can be used."""
         for kind in ["log", "progress", "artifact", "metric", "input"]:

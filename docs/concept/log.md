@@ -234,10 +234,12 @@ Signals are stored as logs with a `"signal"` key in data. Renderers detect them 
 
 ```python
 if event.is_signal:
-    # structured observation
+    # structured observation (topic: "signal:stack_status")
 else:
-    # narrative prose
+    # narrative prose (topic: "log")
 ```
+
+Use `event.topic` for filtering: signals have topic `signal:<name>`, narrative logs have topic `log`.
 
 This creates **two lanes** within log:
 1. **Narrative** — human-first prose, suppressible, non-authoritative

@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "f6dbff9d13c4fbe7",
+    "type": "split",
+    "children": [
+      {
+        "id": "ee396cf9327ae337",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "70284527636bd0fd",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/interactive-cli-framework.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "interactive-cli-framework"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "c8b6f058c3a987cc",
+    "type": "split",
+    "children": [
+      {
+        "id": "8eb7a8d308700274",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "043a79993a6df176",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "2e5701468ebe6aa7",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "d53dc695d34e3441",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 234.5
+  },
+  "right": {
+    "id": "22ae6c114e360cac",
+    "type": "split",
+    "children": [
+      {
+        "id": "8cb34e0f67a73524",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "23c92711244131c1",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "docs/interactive-cli-framework.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for interactive-cli-framework"
+            }
+          },
+          {
+            "id": "dc6372f1dc6f040a",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "docs/interactive-cli-framework.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from interactive-cli-framework"
+            }
+          },
+          {
+            "id": "addc7f22ed760898",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "d3f3c7557fc2157d",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "ff39449cbc611a94",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "docs/interactive-cli-framework.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of interactive-cli-framework"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "043a79993a6df176",
+  "lastOpenFiles": [
+    "examples/http_logger.py",
+    "examples/archive/status_reactive.py",
+    "examples/archive/logs_three_ways.py",
+    "examples/archive/logs_reactive.py",
+    "examples/archive/logs_events_primary.py",
+    "examples/archive/interactive_extended.py",
+    "examples/archive/interactive_events.py",
+    "examples/archive/events_primary_prototype.py",
+    "examples/archive",
+    "synthesis-reactive-cli-framework.md",
+    "docs/interactive-cli-framework.md",
+    "docs/archive/synthesis-reactive-cli-framework.md",
+    "docs/archive/status_comparison.md",
+    "docs/archive/reaktiv-concepts-analysis.md",
+    "docs/archive/reaktiv-code-analysis.md",
+    "docs/archive/library-shape.md",
+    "docs/archive/interactive-cli-dataflow.md",
+    "docs/archive/gruel-journey-analysis.md",
+    "docs/archive/ev-toolkit-concepts-analysis.md",
+    "docs/archive/ev-toolkit-code-analysis.md",
+    "docs/archive/ev-concepts-analysis.md",
+    "docs/archive/ev-code-analysis.md",
+    "docs/archive/dataflow.md",
+    "docs/archive",
+    "examples/dashboard.py",
+    "docs/library-shape.md",
+    "docs/interactive-cli-dataflow.md",
+    "docs/dataflow.md",
+    "HANDOFF.md",
+    "docs/synthesis-reactive-cli-framework.md",
+    "docs/status_comparison.md",
+    "docs/reaktiv-concepts-analysis.md",
+    "docs/reaktiv-code-analysis.md",
+    "docs/gruel-journey-analysis.md",
+    "docs/ev-toolkit-concepts-analysis.md",
+    "docs/ev-toolkit-code-analysis.md"
+  ]
+}

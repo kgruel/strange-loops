@@ -124,17 +124,110 @@ uv run examples/http_logger_v2.py
 # Keys: ?=help  l=histogram  b=breakdown  w=window  (plus all v1 keys)
 ```
 
-## Next Steps
+## Extraction (Complete)
 
-1. **Extract reusable components** - EventStore, KeyboardInput, base Filter could be a shared module
-2. **Third example** - Build watcher (hierarchical state) or queue monitor (gauges/thresholds)
-3. **Pattern documentation** - update `docs/interactive-cli-framework.md` with findings
+Reusable components extracted to `cli_framework/` (214 lines total):
+
+| Module | Component | Lines |
+|--------|-----------|-------|
+| `store.py` | `EventStore[T]` | 33 |
+| `keyboard.py` | `KeyboardInput` | 47 |
+| `filter.py` | `FilterHistory` | 30 |
+| `app.py` | `Mode`, `BaseApp` | 104 |
+
+Key design decisions:
+- `BaseApp._render_dependencies()` hook lets subclasses declare reactive deps without managing Effect directly
+- Effect creation deferred to `set_live()` to avoid init-ordering issues
+- Filter *matching logic* stays domain-specific (only history management extracted)
+- Verdict: **shared module, not framework**. The pattern knowledge matters more than code savings.
+
+## Next Example: Process Manager
+
+### Why this example?
+
+Both dashboard and http_logger are **observe-only**—user watches events flow and filters views. Process Manager introduces **user-initiated actions** that mutate state.
+
+| Aspect | Dashboard | HTTP Logger | Process Manager |
+|--------|-----------|-------------|-----------------|
+| Events | Independent | Correlated pairs | State transitions |
+| User role | Observer + filter | Observer + select | **Actor** (start/stop/restart) |
+| Data model | Flat events | Request→Response | Entity state machines |
+| Key metric | Counts | Latency | Uptime, restart count |
+| Time | Event timestamps | Derived latency | Duration in state |
+
+### What it tests
+
+1. **State machines** - Processes transition through states (stopped → starting → running → stopping → stopped/crashed)
+2. **User actions** - Keypresses that cause side effects, not just filter views
+3. **Per-entity log streams** - Each process has its own log tail
+4. **Entity lifecycle** - Create, destroy, not just observe
+5. **Action confirmation** - "Are you sure?" for destructive ops (new mode?)
+
+### Questions to answer
+
+1. **Actions vs. view-only:** How do user-triggered mutations interact with the reactive layer? Does the action just `signal.set()` and let Effect re-render, or is there more?
+2. **Per-entity state:** Each process has its own state machine. Signal per process? Or single Signal containing all process states?
+3. **Log streams:** Each process produces logs. One EventStore per process, or one shared store with process_id field?
+4. **Confirmation patterns:** Stop/kill are destructive. How does confirmation mode interact with the existing Mode enum?
+
+### Sketch
+
+```python
+class ProcessState(Enum):
+    STOPPED = auto()
+    STARTING = auto()
+    RUNNING = auto()
+    STOPPING = auto()
+    CRASHED = auto()
+
+@dataclass
+class Process:
+    pid: str
+    name: str
+    command: str
+    state: ProcessState
+    started_at: float | None
+    restart_count: int
+
+@dataclass(frozen=True)
+class ProcessEvent:
+    pid: str
+    kind: Literal["state_change", "log", "metric"]
+    payload: dict
+    ts: float
+
+# Computed from events:
+process_states = Computed(lambda: ...)      # {pid: Process}
+process_logs = Computed(lambda: ...)        # {pid: [log_lines]}
+uptime = Computed(lambda: ...)              # {pid: duration} (live, like pending age)
+
+# User actions (these ADD events, not just filter):
+def start_process(pid): store.add(ProcessEvent(pid, "state_change", {"to": "starting"}))
+def stop_process(pid): store.add(ProcessEvent(pid, "state_change", {"to": "stopping"}))
+```
+
+### Panes
+
+| Pane | Type | Content |
+|------|------|---------|
+| **Process list** | List + live state | All processes with state, uptime, restart count |
+| **Logs** | List (filtered) | Log output for selected/all processes |
+| **Detail** | Detail | Selected process full info |
+| **Actions** | New type | Available actions for selected process |
+
+### Open design questions
+
+- Should process definitions be static (config) or dynamic (user can add/remove)?
+- How to render state transitions visually (color pulse? status column?)
+- Log pane: tail -f style or scrollable history?
 
 ## Key Files
 
 ```
-examples/dashboard.py              # Reference implementation (~780 lines)
-examples/http_logger.py            # Correlation validation (~990 lines)
-examples/http_logger_v2.py         # Enhanced version (~1400 lines)
+cli_framework/                     # Shared module (214 lines)
+examples/dashboard.py              # Example 1: independent events (~780 lines)
+examples/http_logger.py            # Example 2: correlated events (~990 lines)
+examples/http_logger_v2.py         # Example 2 enhanced (~1400 lines)
+examples/extract_demo.py           # Minimal cli_framework usage (~207 lines)
 docs/interactive-cli-framework.md  # Pattern documentation
 ```

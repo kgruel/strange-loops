@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import time
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
-from reaktiv import Signal, Effect
+from reaktiv import Signal, Effect, batch
 from rich.console import Console
 from rich.live import Live
 
@@ -42,6 +42,7 @@ class BaseApp:
         self._mode = Signal(Mode.VIEW)
         self._input_buffer = Signal("")
         self._focused_pane = Signal("")
+        self._filter_history: Signal[list[str]] = Signal([])
 
         self._render_effect: Effect | None = None
         self._render_dirty = False
@@ -71,6 +72,7 @@ class BaseApp:
         self._mode()
         self._input_buffer()
         self._focused_pane()
+        self._filter_history()
 
         # Subclass dependencies
         self._render_dependencies()
@@ -83,6 +85,58 @@ class BaseApp:
         self._live.update(self.render())
         if not self._render_effect:
             self._render_effect = Effect(lambda: self._do_render())
+
+    def _handle_filter_key(
+        self,
+        key: str,
+        parse_fn: Callable[[str], Any],
+        filter_signal: Signal,
+        view_mode: Any = None,
+    ) -> bool:
+        """Default filter-mode key handler.
+
+        Handles Enter (apply), Escape (cancel), Backspace, Up (history cycle),
+        and printable chars. Subclasses call this from handle_key() when in
+        filter mode.
+
+        Args:
+            key: The key event string.
+            parse_fn: Converts raw input string into domain filter object.
+            filter_signal: The Signal to set with the parsed filter.
+            view_mode: The mode to return to (defaults to Mode.VIEW).
+        """
+        if view_mode is None:
+            view_mode = Mode.VIEW
+
+        if key == "\r" or key == "\n":
+            raw = self._input_buffer()
+            if raw.strip():
+                self._filter_history.update(
+                    lambda h: ([raw] + [x for x in h if x != raw])[:5]
+                )
+            with batch():
+                filter_signal.set(parse_fn(raw))
+                self._mode.set(view_mode)
+                self._input_buffer.set("")
+        elif key == "\x1b":  # Escape
+            with batch():
+                self._mode.set(view_mode)
+                self._input_buffer.set("")
+        elif key == "\x7f":  # Backspace
+            self._input_buffer.update(lambda s: s[:-1])
+        elif key == "\x1b[A":  # Up arrow — cycle history
+            history = self._filter_history()
+            if history:
+                current = self._input_buffer()
+                try:
+                    idx = history.index(current)
+                    next_idx = (idx + 1) % len(history)
+                except ValueError:
+                    next_idx = 0
+                self._input_buffer.set(history[next_idx])
+        elif key.isprintable():
+            self._input_buffer.update(lambda s: s + key)
+        return True
 
     def _available_rows(self) -> int:
         """Usable rows for content, accounting for chrome (status + help + borders)."""

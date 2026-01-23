@@ -42,6 +42,7 @@ from rich.text import Text
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from framework import EventStore, BaseApp
+from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts, ColumnSpec
 
 
 # =============================================================================
@@ -221,7 +222,6 @@ class Dashboard(BaseApp):
 
         # Domain-specific signals
         self._log_filter = Signal(FilterQuery())
-        self._filter_history: Signal[list[str]] = Signal([])  # Recent filter strings
         self._tee_path: Signal[Path | None] = Signal(None)  # Tee output file
         self._tee_count = Signal(0)  # Count of tee'd events
         self._tee_events: Signal[list[Event]] = Signal([])  # Recent tee'd events for display
@@ -250,7 +250,6 @@ class Dashboard(BaseApp):
         """Read Signals that should trigger re-render. No Computeds here."""
         self.store.version()
         self._log_filter()
-        self._filter_history()
         self._tee_path()
         self._tee_count()
         self._tee_events()
@@ -382,73 +381,39 @@ class Dashboard(BaseApp):
         return True
 
     def _handle_filter_key(self, key: str) -> bool:
-        if key == "\r" or key == "\n":
-            raw = self._input_buffer()
-            if raw.strip():
-                # Save to history (dedupe, keep last 5)
-                self._filter_history.update(lambda h:
-                    ([raw] + [x for x in h if x != raw])[:5]
-                )
-            with batch():
-                self._log_filter.set(FilterQuery.parse(raw))
-                self._mode.set(DashboardMode.VIEW)
-                self._input_buffer.set("")
-        elif key == "\x1b":  # Escape
-            with batch():
-                self._mode.set(DashboardMode.VIEW)
-                self._input_buffer.set("")
-        elif key == "\x7f":  # Backspace
-            self._input_buffer.update(lambda s: s[:-1])
-        elif key == "\x1b[A" or key == "":  # Up arrow (partial - see note)
-            # Cycle through history
-            history = self._filter_history()
-            if history:
-                current = self._input_buffer()
-                try:
-                    idx = history.index(current)
-                    next_idx = (idx + 1) % len(history)
-                except ValueError:
-                    next_idx = 0
-                self._input_buffer.set(history[next_idx])
-        elif key.isprintable():
-            self._input_buffer.update(lambda s: s + key)
-        return True
+        return super()._handle_filter_key(
+            key,
+            parse_fn=FilterQuery.parse,
+            filter_signal=self._log_filter,
+            view_mode=DashboardMode.VIEW,
+        )
 
     # =========================================================================
     # RENDER
     # =========================================================================
 
     def render(self) -> Layout:
-        layout = Layout()
-
-        # Main content: two panes side by side
-        layout.split_column(
-            Layout(name="main", ratio=1),
-            Layout(self._render_status(), name="status", size=1),
-            Layout(self._render_help(), name="help", size=1),
-        )
-
         if self._mode() == DashboardMode.SOURCES:
-            # Show sources panel instead of normal panes
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_sources_pane(), name="sources"),
                 Layout(self._render_metrics_pane(), name="metrics"),
             )
         elif self._tee_path():
-            # Three panes: logs, tee output, metrics
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_logs_pane(), name="logs", ratio=3),
                 Layout(self._render_tee_pane(), name="tee", ratio=2),
                 Layout(self._render_metrics_pane(), name="metrics", minimum_size=30),
             )
         else:
-            # Two panes: logs gets more space
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_logs_pane(), name="logs", ratio=2),
                 Layout(self._render_metrics_pane(), name="metrics", minimum_size=30),
             )
 
-        return layout
+        return app_layout(main, self._render_status(), self._render_help())
 
     def _render_tee_pane(self) -> Panel:
         """Tee output pane - shows recent tee'd events."""
@@ -511,81 +476,76 @@ class Dashboard(BaseApp):
 
     def _render_logs_pane(self) -> Panel:
         """Left pane: log viewer with filtering."""
-        table = Table(
-            show_header=True,
-            header_style="bold",
-            expand=True,
-            box=None,
-            padding=(0, 1),
-        )
-        # Flexible columns: time is fixed-ish, others expand
-        table.add_column("Time", no_wrap=True, style="dim")
-        table.add_column("Source", no_wrap=True)
-        table.add_column("Event", ratio=1)  # Takes remaining space
-        table.add_column("Lvl", no_wrap=True)
-
-        # Filter and show events (dynamic row count)
         log_filter = self._log_filter()
         filtered = [e for e in self.store.events if log_filter.matches(e)]
-        max_rows = self._available_rows()
-        for event in filtered[-max_rows:]:
-            time_str = time.strftime("%H:%M:%S", time.localtime(event.ts))
+
+        columns = [
+            ColumnSpec("Time", style="dim"),
+            ColumnSpec("Source"),
+            ColumnSpec("Event", ratio=1),
+            ColumnSpec("Lvl"),
+        ]
+
+        rows = []
+        for event in filtered:
             source_style = SOURCE_COLORS.get(event.source, "white")
             level_style = LEVEL_STYLES.get(event.level, "white")
-
-            table.add_row(
-                time_str,
+            rows.append([
+                Text(time.strftime("%H:%M:%S", time.localtime(event.ts)), style="dim"),
                 Text(event.source, style=source_style),
                 Text(event.event_type, style=level_style),
                 Text(event.level, style=level_style),
-            )
+            ])
 
-        border_style = "green" if self._focused_pane() == "logs" else "dim"
+        table, scroll = event_table(rows, columns, self._available_rows())
         filter_desc = log_filter.description()
-        title = f"[bold]Logs[/bold] [dim]({filter_desc})[/dim]"
-        return Panel(table, title=title, border_style=border_style)
+        return focus_panel(
+            table,
+            title=f"[bold]Logs[/bold] [dim]({filter_desc})[/dim]",
+            focused=self._focused_pane() == "logs",
+            subtitle=scroll.subtitle,
+        )
 
     def _render_metrics_pane(self) -> Panel:
         """Right pane: reaktiv-computed metrics (total + filtered when filter active)."""
         log_filter = self._log_filter()
         has_filter = bool(log_filter.conditions)
 
-        # Total metrics
         total = self.total_count()
         errors = self.error_count()
         warnings = self.warn_count()
         by_source = self.by_source()
 
-        lines = ["[bold underline]All Events[/bold underline]"]
-        lines.append(f"  Total: {total}  [red]err:{errors}[/red]  [yellow]warn:{warnings}[/yellow]")
+        sections = [
+            ("All Events", [
+                ("Total", f"{total}  [red]err:{errors}[/red]  [yellow]warn:{warnings}[/yellow]"),
+            ]),
+        ]
 
         if has_filter:
-            # Filtered metrics
             f_total = self.filtered_count()
             f_errors = self.filtered_errors()
             f_warnings = self.filtered_warns()
             f_by_source = self.filtered_by_source()
 
-            lines.append("")
-            lines.append(f"[bold underline]Filtered ({log_filter.raw})[/bold underline]")
-            lines.append(f"  Total: {f_total}  [red]err:{f_errors}[/red]  [yellow]warn:{f_warnings}[/yellow]")
-            lines.append("")
-            lines.append("  [dim]By Source:[/dim]")
+            filtered_entries: list[tuple[str, str] | tuple[str, str, str]] = [
+                ("Total", f"{f_total}  [red]err:{f_errors}[/red]  [yellow]warn:{f_warnings}[/yellow]"),
+            ]
             for source, count in sorted(f_by_source.items(), key=lambda x: -x[1]):
                 color = SOURCE_COLORS.get(source, "white")
-                lines.append(f"    [{color}]{source}[/{color}]: {count}")
+                filtered_entries.append((source, str(count), color))
+            sections.append((f"Filtered ({log_filter.raw})", filtered_entries))
         else:
-            lines.append("")
-            lines.append("[dim]By Source:[/dim]")
+            source_entries: list[tuple[str, str] | tuple[str, str, str]] = []
             for source, count in sorted(by_source.items(), key=lambda x: -x[1]):
                 color = SOURCE_COLORS.get(source, "white")
-                lines.append(f"  [{color}]{source}[/{color}]: {count}")
+                source_entries.append((source, str(count), color))
+            sections.append(("By Source", source_entries))
 
-        border_style = "green" if self._focused_pane() == "metrics" else "dim"
-        return Panel(
-            Text.from_markup("\n".join(lines)),
+        return focus_panel(
+            metrics_panel(sections),
             title="[bold]Metrics[/bold]",
-            border_style=border_style,
+            focused=self._focused_pane() == "metrics",
         )
 
     def _render_status(self) -> Text:
@@ -595,43 +555,45 @@ class Dashboard(BaseApp):
             return Text.from_markup(f"[bold]Filter:[/bold] /{self._input_buffer()}█{hist_str}")
 
         history = self._filter_history()
-        hist_part = f"  [dim]h={history[0]}[/dim]" if history else ""
+        hist_part = f"[dim]h={history[0]}[/dim]" if history else None
 
         tee_path = self._tee_path()
-        tee_part = f"  [green]tee:{self._tee_count()} → {tee_path.name}[/green]" if tee_path else ""
+        tee_part = f"[green]tee:{self._tee_count()} → {tee_path.name}[/green]" if tee_path else None
 
-        return Text.from_markup(
-            f"[bold]Focus:[/bold] {self._focused_pane()}  |  "
-            f"[bold]Events:[/bold] {self.store.total}{hist_part}{tee_part}"
+        return status_parts(
+            f"[bold]Focus:[/bold] {self._focused_pane()}",
+            "|",
+            f"[bold]Events:[/bold] {self.store.total}",
+            hist_part,
+            tee_part,
         )
 
     def _render_help(self) -> Text:
         if self._mode() == DashboardMode.FILTER:
-            # Show available fields and example syntax
-            return Text.from_markup(
-                "[dim]Enter[/dim]=apply  [dim]Esc[/dim]=cancel  |  "
-                "Fields: [cyan]level[/cyan]=(error,warn,info)  [cyan]source[/cyan]=(orders,payments,...)  [cyan]event_type[/cyan]=*pattern"
-            )
+            return help_bar([
+                ("Enter", "apply"), ("Esc", "cancel"), ("|", ""),
+                ("", "Fields: [cyan]level[/cyan]=(error,warn,info)  [cyan]source[/cyan]=(orders,...)  [cyan]event_type[/cyan]=*pattern"),
+            ])
 
         if self._mode() == DashboardMode.SOURCES:
-            return Text.from_markup(
-                "[dim]1-5[/dim]=toggle source  [dim]s/Esc[/dim]=done"
-            )
+            return help_bar([("1-5", "toggle source"), ("s/Esc", "done")])
 
         if self._focused_pane() == "logs":
             history = self._filter_history()
-            h_key = "  [dim]h[/dim]=last" if history else ""
-            tee_key = "[dim]t[/dim]=tee-off" if self._tee_path() else "[dim]t[/dim]=tee"
-            return Text.from_markup(
-                "[dim]1[/dim]=logs  [dim]2[/dim]=metrics  |  "
-                f"[dim]/[/dim]=filter  [dim]e[/dim]=errors  [dim]c[/dim]=clear  [dim]s[/dim]=sources{h_key}  {tee_key}  |  "
-                "[dim]q[/dim]=quit"
-            )
+            tee_action = "tee-off" if self._tee_path() else "tee"
+            bindings: list[tuple[str, str]] = [
+                ("1", "logs"), ("2", "metrics"), ("|", ""),
+                ("/", "filter"), ("e", "errors"), ("c", "clear"), ("s", "sources"),
+            ]
+            if history:
+                bindings.append(("h", "last"))
+            bindings.extend([("t", tee_action), ("|", ""), ("q", "quit")])
+            return help_bar(bindings)
         else:
-            return Text.from_markup(
-                "[dim]1[/dim]=logs  [dim]2[/dim]=metrics  |  "
-                "[dim]s[/dim]=sources  [dim]q[/dim]=quit"
-            )
+            return help_bar([
+                ("1", "logs"), ("2", "metrics"), ("|", ""),
+                ("s", "sources"), ("q", "quit"),
+            ])
 
 
 # =============================================================================

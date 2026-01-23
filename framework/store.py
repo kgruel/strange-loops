@@ -33,6 +33,7 @@ class EventStore(Generic[T]):
         deserialize: Callable[[dict], T] | None = None,
     ):
         self._events: list[T] = []
+        self._offset: int = 0  # logical index of _events[0] after eviction
         self._path = path
         self._serialize = serialize
         self._deserialize = deserialize
@@ -83,4 +84,31 @@ class EventStore(Generic[T]):
 
     @property
     def total(self) -> int:
-        return len(self._events)
+        return self._offset + len(self._events)
+
+    def since(self, cursor: int) -> list[T]:
+        """Return events from logical index `cursor` onward.
+
+        Raises IndexError if cursor is below the eviction watermark.
+        """
+        if cursor < self._offset:
+            raise IndexError(
+                f"Cursor {cursor} is below eviction watermark {self._offset}. "
+                f"Events before index {self._offset} have been evicted."
+            )
+        physical = cursor - self._offset
+        return self._events[physical:]
+
+    def evict_below(self, n: int) -> None:
+        """Evict events below logical index n.
+
+        After eviction, since() still works with cursors >= n.
+        Cursors < n will raise IndexError.
+        """
+        if n <= self._offset:
+            return  # nothing to evict
+        physical = n - self._offset
+        if physical >= len(self._events):
+            physical = len(self._events)
+        self._events = self._events[physical:]
+        self._offset = n

@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import time
 from enum import Enum, auto
+from typing import TYPE_CHECKING
 
 from reaktiv import Signal, Effect
 from rich.console import Console
 from rich.live import Live
 
 from .instrument import metrics
+
+if TYPE_CHECKING:
+    from .projection import Projection
+    from .store import EventStore
 
 
 class Mode(Enum):
@@ -40,6 +45,11 @@ class BaseApp:
 
         self._render_effect: Effect | None = None
         self._render_dirty = False
+
+        # Projection support
+        self._projections: list[Projection] = []
+        self._projection_store: EventStore | None = None
+        self._retention_enabled: bool = False
 
     def _render_dependencies(self) -> None:
         """Override to read Signals that should trigger re-render.
@@ -83,6 +93,38 @@ class BaseApp:
     def running(self) -> bool:
         return self._running()
 
+    def register_projection(self, projection: Projection, store: EventStore | None = None) -> None:
+        """Register a projection to be advanced each frame tick.
+
+        Args:
+            projection: The Projection instance to register.
+            store: EventStore to advance against. If None, uses self._projection_store
+                   (which must be set before the first frame tick).
+        """
+        self._projections.append(projection)
+        if store is not None:
+            self._projection_store = store
+
+    def enable_retention(self, store: EventStore | None = None) -> None:
+        """Enable retention: evict events below the min projection cursor each frame."""
+        self._retention_enabled = True
+        if store is not None:
+            self._projection_store = store
+
+    def _advance_projections(self) -> None:
+        """Advance all registered projections, then apply retention if enabled."""
+        store = self._projection_store
+        if not store or not self._projections:
+            return
+
+        for proj in self._projections:
+            proj.advance(store)
+
+        if self._retention_enabled:
+            watermark = min(p.cursor for p in self._projections)
+            if watermark > 0:
+                store.evict_below(watermark)
+
     def render(self):
         """Override in subclass. Return a Rich renderable."""
         raise NotImplementedError
@@ -108,6 +150,9 @@ class BaseApp:
                     key = keyboard.get_key()
                     if key:
                         self.handle_key(key)
+
+                    # Advance projections before render
+                    self._advance_projections()
 
                     if self._render_dirty:
                         self._render_dirty = False

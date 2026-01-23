@@ -41,7 +41,7 @@ from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from framework import EventStore, FilterHistory, BaseApp, DebugPane, BaseSimulator, SimState
+from framework import EventStore, FilterHistory, BaseApp, Projection, DebugPane, BaseSimulator, SimState
 
 
 # =============================================================================
@@ -345,6 +345,27 @@ class ProcessInfo:
 
 
 # =============================================================================
+# PROJECTIONS
+# =============================================================================
+
+class ProcessLogsProjection(Projection[dict[str, list[ProcessEvent]], ProcessEvent]):
+    """Incrementally accumulates last 50 log events per process."""
+
+    def __init__(self):
+        super().__init__({})
+
+    def apply(self, state: dict[str, list[ProcessEvent]], event: ProcessEvent) -> dict[str, list[ProcessEvent]]:
+        if event.kind != "log":
+            return state
+        logs = state.get(event.pid, [])[:]
+        logs.append(event)
+        if len(logs) > 50:
+            logs = logs[-50:]
+        state[event.pid] = logs
+        return state
+
+
+# =============================================================================
 # PROCESS MONITOR APP
 # =============================================================================
 
@@ -377,10 +398,13 @@ class ProcessMonitorApp(BaseApp):
         self._tick = Signal(0)
         self._tick_task: asyncio.Task | None = None
 
+        # Projection: incremental log accumulation
+        self._process_logs_projection = ProcessLogsProjection()
+        self.register_projection(self._process_logs_projection, store)
+
         # Computed values
         self.process_list = Computed(lambda: self._compute_process_list())
         self.process_states = Computed(lambda: self._compute_process_states())
-        self.process_logs = Computed(lambda: self._compute_process_logs())
         self.filtered_processes = Computed(lambda: self._compute_filtered_processes())
         self.selected_process = Computed(lambda: self._compute_selected_process())
 
@@ -459,25 +483,13 @@ class ProcessMonitorApp(BaseApp):
 
         return list(processes.values())
 
+    def process_logs(self) -> dict[str, list[ProcessEvent]]:
+        """Read accumulated logs from the projection."""
+        return self._process_logs_projection.state()
+
     def _compute_process_states(self) -> dict[str, ProcessState]:
         """Map pid → current state."""
         return {p.pid: p.state for p in self.process_list()}
-
-    def _compute_process_logs(self) -> dict[str, list[ProcessEvent]]:
-        """Collect last 50 log events per process."""
-        self.store.version()
-
-        logs: dict[str, list[ProcessEvent]] = {}
-        for event in self.store.events:
-            if event.kind == "log":
-                if event.pid not in logs:
-                    logs[event.pid] = []
-                logs[event.pid].append(event)
-                # Keep last 50
-                if len(logs[event.pid]) > 50:
-                    logs[event.pid] = logs[event.pid][-50:]
-
-        return logs
 
     def _compute_filtered_processes(self) -> list[ProcessInfo]:
         """Apply filter to process list."""

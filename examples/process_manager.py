@@ -38,7 +38,7 @@ from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from framework import EventStore, BaseApp, Projection, DebugPane, BaseSimulator, SimState
+from framework import EventStore, BaseApp, Projection, DebugPane, BaseSimulator, SimState, SelectionTracker
 from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts, ColumnSpec
 
 
@@ -380,7 +380,7 @@ class ProcessMonitorApp(BaseApp):
         self._focused_pane = Signal("list")  # "list", "logs", "detail"
 
         # Selection
-        self._selected_index: Signal[int | None] = Signal(None)
+        self._selection = SelectionTracker()
 
         # Filter
         self._filter = Signal(ProcessFilter())
@@ -427,7 +427,7 @@ class ProcessMonitorApp(BaseApp):
         """
         self.store.version()
         self._filter()
-        self._selected_index()
+        self._selection.index()
         self._confirm_action()
         self._tick()
         if self.debug:
@@ -496,7 +496,7 @@ class ProcessMonitorApp(BaseApp):
 
     def _compute_selected_process(self) -> ProcessInfo | None:
         """Get currently selected process."""
-        idx = self._selected_index()
+        idx = self._selection.value
         if idx is None:
             return None
         filtered = self.filtered_processes()
@@ -558,14 +558,14 @@ class ProcessMonitorApp(BaseApp):
             self._input_buffer.set("")
         elif key == "c":
             self._filter.set(ProcessFilter())
-            self._selected_index.set(None)
+            self._selection.reset()
         elif key == "a":
             self._mode.set(Mode.ADD)
             self._input_buffer.set("")
         elif key == "j" or key == "J":
-            self._move_selection(1)
+            self._selection.move(1, len(self.filtered_processes()))
         elif key == "k" or key == "K":
-            self._move_selection(-1)
+            self._selection.move(-1, len(self.filtered_processes()))
         elif key == "s":
             self._start_selected()
         elif key == "x":
@@ -580,7 +580,7 @@ class ProcessMonitorApp(BaseApp):
             history = self._filter_history()
             if history:
                 self._filter.set(ProcessFilter.parse(history[0]))
-                self._selected_index.set(None)
+                self._selection.reset()
         return True
 
     def _bulk_spawn(self) -> None:
@@ -622,7 +622,7 @@ class ProcessMonitorApp(BaseApp):
         )
         # Reset selection when filter is applied (Enter key)
         if (key == "\r" or key == "\n") and self._mode() == Mode.VIEW:
-            self._selected_index.set(None)
+            self._selection.reset()
         return result
 
     def _handle_add_key(self, key: str) -> bool:
@@ -665,17 +665,6 @@ class ProcessMonitorApp(BaseApp):
     # =========================================================================
     # SELECTION AND ACTIONS
     # =========================================================================
-
-    def _move_selection(self, delta: int) -> None:
-        filtered = self.filtered_processes()
-        if not filtered:
-            return
-        current = self._selected_index()
-        if current is None:
-            new_idx = 0 if delta > 0 else len(filtered) - 1
-        else:
-            new_idx = max(0, min(len(filtered) - 1, current + delta))
-        self._selected_index.set(new_idx)
 
     def _start_selected(self) -> None:
         proc = self.selected_process()
@@ -750,7 +739,7 @@ class ProcessMonitorApp(BaseApp):
         ]
 
         filtered = self.filtered_processes()
-        selected_idx = self._selected_index()
+        selected_idx = self._selection.value
         now = time.time()
 
         rows = []
@@ -919,7 +908,7 @@ class ProcessMonitorApp(BaseApp):
         running_count = sum(1 for p in processes if p.state == ProcessState.RUNNING)
         crashed_count = sum(1 for p in processes if p.state == ProcessState.CRASHED)
 
-        selected_idx = self._selected_index()
+        selected_idx = self._selection.value
         filtered = self.filtered_processes()
         sel_part = f"[cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]" if selected_idx is not None and filtered else None
         crashed_part = f"[red]Crashed: {crashed_count}[/red]" if crashed_count > 0 else None

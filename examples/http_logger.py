@@ -31,13 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from reaktiv import Signal, Computed, LinkedSignal, batch
+from reaktiv import Signal, Computed, batch
 from rich.console import Console
 from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from framework import EventStore, BaseApp, Mode
+from framework import EventStore, BaseApp, Mode, SelectionTracker
 from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts, ColumnSpec
 
 
@@ -326,10 +326,8 @@ class HttpLogger(BaseApp):
         self._show_pending = Signal(True)  # Toggle pending pane visibility
         self._pending_threshold = Signal(500.0)  # ms - highlight "stuck" requests
 
-        # LinkedSignal: selection resets to None whenever filter changes
-        self._selected_index: LinkedSignal[int | None] = LinkedSignal(
-            lambda: None, source=self._filter
-        )
+        # Selection
+        self._selection = SelectionTracker()
 
         # Computed: correlation (request → response pairs)
         self.completed_requests = Computed(lambda: self._compute_completed())
@@ -359,7 +357,7 @@ class HttpLogger(BaseApp):
         self._filter_history()
         self._show_pending()
         self._pending_threshold()
-        self._selected_index()
+        self._selection.index()
 
     def _compute_completed(self) -> list[CompletedRequest]:
         """Match requests to responses, compute latency."""
@@ -433,7 +431,7 @@ class HttpLogger(BaseApp):
         return [r for r in completed if filt.matches_completed(r)]
 
     def _compute_selected_request(self) -> CompletedRequest | None:
-        idx = self._selected_index()
+        idx = self._selection.value
         if idx is None:
             return None
         filtered = self.filtered_completed()
@@ -459,7 +457,7 @@ class HttpLogger(BaseApp):
         elif key == "1":
             self._focused_pane.set("requests")
         elif key == "2":
-            if self._selected_index() is not None:
+            if self._selection.value is not None:
                 self._focused_pane.set("detail")
             else:
                 self._focused_pane.set("pending")
@@ -472,55 +470,45 @@ class HttpLogger(BaseApp):
                 self._mode.set(Mode.FILTER)
                 self._input_buffer.set("")
         elif key == "c":
-            # LinkedSignal auto-resets _selected_index when filter changes
             self._filter.set(HttpFilter())
+            self._selection.reset()
         elif key == "e":  # Errors shortcut
             self._filter.set(HttpFilter.parse("status=4xx,5xx"))
+            self._selection.reset()
         elif key == "s":  # Slow requests shortcut
             self._filter.set(HttpFilter.parse("latency>500"))
+            self._selection.reset()
         elif key == "p":  # Toggle pending pane
             with batch():
-                self._selected_index.set(None)
+                self._selection.reset()
                 self._show_pending.update(lambda v: not v)
         elif key == "h":
             history = self._filter_history()
             if history:
                 self._filter.set(HttpFilter.parse(history[0]))
+                self._selection.reset()
         elif key == "\x1b":  # Escape - clear selection
-            self._selected_index.set(None)
+            self._selection.reset()
         elif key == "j" or key == "J":  # Down / select next
-            self._move_selection(1)
+            self._selection.move(1, len(self.filtered_completed()))
         elif key == "k" or key == "K":  # Up / select previous
-            self._move_selection(-1)
+            self._selection.move(-1, len(self.filtered_completed()))
         elif key == "\r" or key == "\n":  # Enter - focus detail pane
-            if self._selected_index() is not None:
+            if self._selection.value is not None:
                 self._focused_pane.set("detail")
         return True
 
-    def _move_selection(self, delta: int) -> None:
-        """Move selection up or down in the filtered list."""
-        filtered = self.filtered_completed()
-        if not filtered:
-            return
-
-        current = self._selected_index()
-        if current is None:
-            # Start at end (most recent) for down, start for up
-            new_idx = len(filtered) - 1 if delta > 0 else 0
-        else:
-            new_idx = current + delta
-            # Clamp to valid range
-            new_idx = max(0, min(len(filtered) - 1, new_idx))
-
-        self._selected_index.set(new_idx)
-
     def _handle_filter_key(self, key: str) -> bool:
-        return super()._handle_filter_key(
+        result = super()._handle_filter_key(
             key,
             parse_fn=HttpFilter.parse,
             filter_signal=self._filter,
             view_mode=Mode.VIEW,
         )
+        # Reset selection when filter is applied (Enter key)
+        if (key == "\r" or key == "\n") and self._mode() == Mode.VIEW:
+            self._selection.reset()
+        return result
 
     # =========================================================================
     # RENDER
@@ -565,7 +553,7 @@ class HttpLogger(BaseApp):
         ]
 
         filtered = self.filtered_completed()
-        selected_idx = self._selected_index()
+        selected_idx = self._selection.value
 
         rows = []
         for req in filtered:
@@ -767,7 +755,7 @@ class HttpLogger(BaseApp):
         pending = self.pending_count()
         pending_part = f"[yellow]Pending: {pending}[/yellow]" if pending > 0 else None
 
-        selected_idx = self._selected_index()
+        selected_idx = self._selection.value
         filtered = self.filtered_completed()
         selected_part = f"[cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]" if selected_idx is not None and filtered else None
 
@@ -788,7 +776,7 @@ class HttpLogger(BaseApp):
                  "[cyan]method[/cyan]=GET  [cyan]latency[/cyan]>500"),
             ])
 
-        selected = self._selected_index() is not None
+        selected = self._selection.value is not None
         pane2 = "detail" if selected else "pending"
 
         if self._focused_pane() == "requests":

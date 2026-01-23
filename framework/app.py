@@ -10,6 +10,8 @@ from reaktiv import Signal, Effect
 from rich.console import Console
 from rich.live import Live
 
+from .instrument import metrics
+
 
 class Mode(Enum):
     """Base mode enum. Subclass to add domain-specific modes."""
@@ -59,6 +61,7 @@ class BaseApp:
         self._render_dependencies()
 
         self._render_dirty = True
+        metrics.count("effect_fires")
 
     def set_live(self, live: Live) -> None:
         self._live = live
@@ -103,6 +106,8 @@ class BaseApp:
 
                     if self._render_dirty:
                         self._render_dirty = False
-                        live.update(self.render())
+                        with metrics.time("render"):
+                            live.update(self.render())
+                        metrics.count("frames_rendered")
 
                     await asyncio.sleep(0.05)

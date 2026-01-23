@@ -12,6 +12,7 @@ from .filter import FilterHistory
 from .app import BaseApp, Mode
 from .debug import DebugPane
 from .sim import BaseSimulator, SimState
+from .instrument import metrics
 
 __all__ = [
     "EventStore",
@@ -22,4 +23,5 @@ __all__ = [
     "DebugPane",
     "BaseSimulator",
     "SimState",
+    "metrics",
 ]

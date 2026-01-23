@@ -8,6 +8,8 @@ from typing import Callable, Generic, TypeVar
 
 from reaktiv import Signal
 
+from .instrument import metrics
+
 T = TypeVar("T")
 
 
@@ -57,8 +59,11 @@ class EventStore(Generic[T]):
     def add(self, event: T) -> None:
         self._events.append(event)
         if self._file is not None:
-            self._file.write(json.dumps(self._serialize(event)) + "\n")
-            self._file.flush()
+            with metrics.time("store_write"):
+                self._file.write(json.dumps(self._serialize(event)) + "\n")
+                self._file.flush()
+        metrics.count("events_added")
+        metrics.gauge("store_size", len(self._events))
         self.version.update(lambda v: v + 1)
 
     def close(self) -> None:

@@ -6,6 +6,9 @@ from .writer import Writer, ColorDepth
 from .block import StyledBlock, Wrap
 from .compose import Align, join_horizontal, join_vertical, pad, border, truncate
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
+from .region import Region
+from .focus import FocusRing
+from .app import RenderApp
 from .components import (
     SpinnerState, SpinnerFrames, DOTS, LINE, BRAILLE, spinner,
     ProgressState, progress_bar,
@@ -37,6 +40,9 @@ __all__ = [
     "DOUBLE",
     "LIGHT",
     "ASCII",
+    "Region",
+    "FocusRing",
+    "RenderApp",
     "SpinnerState",
     "SpinnerFrames",
     "DOTS",

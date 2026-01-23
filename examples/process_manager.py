@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import asyncio
 import random
+import resource
 import sys
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from reaktiv import Signal, Computed, Effect
 from rich.console import Console
@@ -170,12 +171,13 @@ class ProcessSimulator:
     """Per-process async task that simulates execution lifecycle."""
 
     def __init__(self, pid: str, name: str, crash_prob: float, log_freq: float,
-                 store: EventStore):
+                 store: EventStore, rate_multiplier: Callable[[], float] = lambda: 1.0):
         self.pid = pid
         self.name = name
         self.crash_prob = crash_prob
         self.log_freq = log_freq
         self._store = store
+        self._rate_multiplier = rate_multiplier
         self._task: asyncio.Task | None = None
         self._stop_requested = False
 
@@ -222,9 +224,10 @@ class ProcessSimulator:
                     self._emit_state_change(ProcessState.RUNNING, ProcessState.CRASHED)
                     return
 
-                # Wait before next log
-                delay = 1.0 / self.log_freq + random.uniform(-0.2, 0.5)
-                await asyncio.sleep(max(0.1, delay))
+                # Wait before next log (scaled by rate multiplier)
+                base_delay = 1.0 / self.log_freq
+                delay = base_delay / self._rate_multiplier() + random.uniform(-0.2, 0.5)
+                await asyncio.sleep(max(0.01, delay))
 
         except asyncio.CancelledError:
             pass
@@ -257,8 +260,9 @@ class ProcessSimulator:
 class ProcessManager:
     """Manages process lifecycle and simulators."""
 
-    def __init__(self, store: EventStore):
+    def __init__(self, store: EventStore, rate_multiplier: Callable[[], float] = lambda: 1.0):
         self._store = store
+        self._rate_multiplier = rate_multiplier
         self._simulators: dict[str, ProcessSimulator] = {}
         self._counter = 0
         self._rebuild_from_events()
@@ -279,7 +283,7 @@ class ProcessManager:
                 self._counter = num
             sim = ProcessSimulator(
                 pid, payload["name"], payload["crash_prob"],
-                payload["log_freq"], self._store,
+                payload["log_freq"], self._store, self._rate_multiplier,
             )
             self._simulators[pid] = sim
 
@@ -300,7 +304,7 @@ class ProcessManager:
             payload={"name": name, "crash_prob": crash_prob, "log_freq": log_freq},
         ))
 
-        sim = ProcessSimulator(pid, name, crash_prob, log_freq, self._store)
+        sim = ProcessSimulator(pid, name, crash_prob, log_freq, self._store, self._rate_multiplier)
         self._simulators[pid] = sim
         return pid
 
@@ -428,6 +432,14 @@ class ProcessMonitorApp(BaseApp):
         # Confirm action
         self._confirm_action: Signal[tuple[str, str] | None] = Signal(None)  # (action, pid)
 
+        # Debug pane
+        self._debug_visible = Signal(False)
+        self._rate_multiplier: Signal[float] = Signal(1.0)
+        self._render_time_ms: float = 0.0
+        self._last_event_count = 0
+        self._last_event_time = time.time()
+        self._events_per_sec = 0.0
+
         # Tick signal for live durations (bumped every second)
         self._tick = Signal(0)
         self._tick_task: asyncio.Task | None = None
@@ -446,6 +458,8 @@ class ProcessMonitorApp(BaseApp):
         self._selected_index()
         self._confirm_action()
         self._tick()
+        self._debug_visible()
+        self._rate_multiplier()
         self.process_list()
         self.process_states()
         self.filtered_processes()
@@ -603,12 +617,39 @@ class ProcessMonitorApp(BaseApp):
             self._request_restart()
         elif key == "d":
             self._request_remove()
+        elif key == "D":
+            self._debug_visible.update(lambda v: not v)
+        elif key == "+" and self._debug_visible():
+            self._cycle_rate_multiplier(up=True)
+        elif key == "-" and self._debug_visible():
+            self._cycle_rate_multiplier(up=False)
+        elif key == "B" and self._debug_visible():
+            self._bulk_spawn()
         elif key == "h":
             latest = self._filter_history.latest
             if latest:
                 self._filter.set(ProcessFilter.parse(latest))
                 self._selected_index.set(None)
         return True
+
+    _RATE_STEPS = [1.0, 2.0, 5.0, 10.0, 50.0, 100.0]
+
+    def _cycle_rate_multiplier(self, up: bool) -> None:
+        current = self._rate_multiplier()
+        try:
+            idx = self._RATE_STEPS.index(current)
+        except ValueError:
+            idx = 0
+        if up:
+            idx = min(idx + 1, len(self._RATE_STEPS) - 1)
+        else:
+            idx = max(idx - 1, 0)
+        self._rate_multiplier.set(self._RATE_STEPS[idx])
+
+    def _bulk_spawn(self) -> None:
+        names = ["web-server", "worker", "scheduler", "api-gateway", "cache", "db-proxy"]
+        for _ in range(10):
+            self.manager.create(random.choice(names))
 
     def _handle_filter_key(self, key: str) -> bool:
         if key == "\r" or key == "\n":
@@ -708,6 +749,17 @@ class ProcessMonitorApp(BaseApp):
     # =========================================================================
 
     def render(self) -> Layout:
+        t0 = time.perf_counter()
+
+        # Compute events/sec
+        now = time.time()
+        current_total = self.store.total
+        dt = now - self._last_event_time
+        if dt > 0:
+            self._events_per_sec = (current_total - self._last_event_count) / dt
+        self._last_event_count = current_total
+        self._last_event_time = now
+
         layout = Layout()
 
         layout.split_column(
@@ -718,23 +770,28 @@ class ProcessMonitorApp(BaseApp):
 
         pane = self._focused_pane()
         selected = self.selected_process()
+        debug_visible = self._debug_visible()
+
+        # Build content panes
+        content_panes: list[Layout] = []
 
         if pane == "detail" and selected:
-            layout["main"].split_row(
-                Layout(self._render_list_pane(), name="list", ratio=1),
-                Layout(self._render_detail_pane(selected), name="detail", ratio=1),
-            )
+            content_panes.append(Layout(self._render_list_pane(), name="list", ratio=1))
+            content_panes.append(Layout(self._render_detail_pane(selected), name="detail", ratio=1))
         elif pane == "logs":
-            layout["main"].split_row(
-                Layout(self._render_list_pane(), name="list", ratio=1),
-                Layout(self._render_logs_pane(), name="logs", ratio=2),
-            )
+            content_panes.append(Layout(self._render_list_pane(), name="list", ratio=1))
+            content_panes.append(Layout(self._render_logs_pane(), name="logs", ratio=2))
         else:
-            # Default: list + logs side by side
-            layout["main"].split_row(
-                Layout(self._render_list_pane(), name="list", ratio=1),
-                Layout(self._render_logs_pane(), name="logs", ratio=1),
-            )
+            content_panes.append(Layout(self._render_list_pane(), name="list", ratio=1))
+            content_panes.append(Layout(self._render_logs_pane(), name="logs", ratio=1))
+
+        if debug_visible:
+            content_panes.append(Layout(self._render_debug_pane(), name="debug", size=32))
+
+        layout["main"].split_row(*content_panes)
+
+        # Record render time
+        self._render_time_ms = (time.perf_counter() - t0) * 1000
 
         return layout
 
@@ -921,6 +978,40 @@ class ProcessMonitorApp(BaseApp):
             border_style=border_style,
         )
 
+    def _render_debug_pane(self) -> Panel:
+        """Debug pane with system metrics and sim controls."""
+        lines = []
+
+        # Metrics
+        lines.append("[bold underline]Metrics[/bold underline]")
+        lines.append(f"  Events/sec:     {self._events_per_sec:>8.1f}")
+        lines.append(f"  Total events:   {self.store.total:>8d}")
+        lines.append(f"  Render time:    {self._render_time_ms:>7.2f} ms")
+
+        # Memory RSS (macOS: ru_maxrss is bytes)
+        rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        rss_mb = rss_bytes / 1048576
+        lines.append(f"  Memory (RSS):   {rss_mb:>7.1f} MB")
+
+        lines.append(f"  Active sims:    {len(self.manager._simulators):>8d}")
+        lines.append("")
+
+        # Controls
+        lines.append("[bold underline]Controls[/bold underline]")
+        rate = self._rate_multiplier()
+        rate_str = f"{rate:.0f}x" if rate == int(rate) else f"{rate}x"
+        lines.append(f"  Rate multiplier: [bold cyan]{rate_str:>5}[/bold cyan]")
+        lines.append("    [dim]+/-[/dim] to adjust")
+        lines.append("")
+        lines.append("  [dim]B[/dim] = bulk spawn (10)")
+        lines.append("  [dim]D[/dim] = hide debug pane")
+
+        return Panel(
+            Text.from_markup("\n".join(lines)),
+            title="[bold]Debug[/bold]",
+            border_style="magenta",
+        )
+
     def _render_status(self) -> Text:
         mode = self._mode()
 
@@ -988,7 +1079,7 @@ class ProcessMonitorApp(BaseApp):
             "[dim]j/k[/dim]=nav  [dim]s[/dim]=start  [dim]x[/dim]=stop  "
             "[dim]r[/dim]=restart  [dim]d[/dim]=remove  |  "
             f"[dim]/[/dim]=filter  [dim]a[/dim]=add  [dim]c[/dim]=clear{h_key}  |  "
-            "[dim]q[/dim]=quit"
+            "[dim]D[/dim]=debug  [dim]q[/dim]=quit"
         )
 
     def _format_duration(self, seconds: float) -> str:
@@ -1024,15 +1115,17 @@ async def run_manager(duration: float | None = None):
         serialize=serialize_event,
         deserialize=deserialize_event,
     )
-    manager = ProcessManager(store)
+
+    # Create app first so manager can reference the rate_multiplier signal
+    app = ProcessMonitorApp(store, None, console)  # type: ignore[arg-type]
+    manager = ProcessManager(store, rate_multiplier=app._rate_multiplier)
+    app.manager = manager
 
     # Pre-seed processes only on first run (no existing events)
     if store.total == 0:
         manager.create("web-server", crash_prob=0.02, log_freq=1.5)
         manager.create("worker", crash_prob=0.08, log_freq=1.0)
         manager.create("scheduler", crash_prob=0.15, log_freq=0.7)
-
-    app = ProcessMonitorApp(store, manager, console)
     await app.start_tick()
 
     try:

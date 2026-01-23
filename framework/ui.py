@@ -225,3 +225,54 @@ def status_parts(*parts: str | None) -> Text:
     """
     valid = [p for p in parts if p is not None]
     return Text.from_markup("  ".join(valid))
+
+
+# =============================================================================
+# TEXT-BASED VISUALIZATIONS
+# =============================================================================
+
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values: list[float], width: int = 10,
+              max_value: float | None = None) -> str:
+    """Render a list of floats as a sparkline string.
+
+    Args:
+        values: Data points to visualize.
+        width: Number of characters in the output.
+        max_value: Optional ceiling for normalization (auto-scaled if None).
+
+    Returns:
+        String of sparkline characters, left-padded to `width`.
+    """
+    if not values:
+        return " " * width
+    recent = values[-width:]
+    lo = min(recent)
+    hi = max_value if max_value is not None else max(recent)
+    span = hi - lo if hi > lo else 1.0
+    chars = []
+    for v in recent:
+        clamped = min(v, hi)
+        idx = int((clamped - lo) / span * (len(_SPARK_CHARS) - 1))
+        chars.append(_SPARK_CHARS[idx])
+    return "".join(chars).ljust(width)
+
+
+def compact_bar(value: float, max_value: float, width: int = 10) -> str:
+    """Render a value as a compact horizontal bar.
+
+    Args:
+        value: Current value.
+        max_value: Value that fills the full bar.
+        width: Character width of the bar.
+
+    Returns:
+        String like "████░░░░░░" representing the proportion.
+    """
+    if max_value <= 0:
+        return "░" * width
+    fraction = min(value / max_value, 1.0)
+    filled = int(fraction * width)
+    return "█" * filled + "░" * (width - filled)

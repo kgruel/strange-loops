@@ -106,8 +106,9 @@ def pad(block: StyledBlock, *, left: int = 0, right: int = 0,
 
 
 def border(block: StyledBlock, chars: BorderChars = ROUNDED,
-           style: Style = Style()) -> StyledBlock:
-    """Wrap a block with a 1-cell border."""
+           style: Style = Style(), title: str | None = None,
+           title_style: Style | None = None) -> StyledBlock:
+    """Wrap a block with a 1-cell border, optionally with a title in the top row."""
     new_width = block.width + 2
     rows: list[list[Cell]] = []
 
@@ -115,6 +116,20 @@ def border(block: StyledBlock, chars: BorderChars = ROUNDED,
     top_row = ([Cell(chars.top_left, style)]
                + [Cell(chars.horizontal, style)] * block.width
                + [Cell(chars.top_right, style)])
+
+    # Paint title into top row if provided
+    if title and block.width >= len(title) + 2:
+        ts = title_style if title_style is not None else style
+        pos = 2  # start after top_left + 1 padding cell
+        # Space before title
+        top_row[pos] = Cell(" ", ts)
+        pos += 1
+        for ch in title:
+            top_row[pos] = Cell(ch, ts)
+            pos += 1
+        # Space after title
+        top_row[pos] = Cell(" ", ts)
+
     rows.append(top_row)
 
     # Content rows with vertical borders

@@ -6,11 +6,22 @@ import resource
 from typing import Callable
 
 from reaktiv import Signal
-from rich.panel import Panel
-from rich.text import Text
+
+from render import StyledBlock, Style, join_horizontal, join_vertical, border
 
 from .instrument import metrics
 from .store import EventStore
+from .ui import sparkline
+
+
+def _budget_color(pct: float) -> str:
+    """Return color name based on frame budget percentage."""
+    if pct < 50:
+        return "green"
+    elif pct < 80:
+        return "yellow"
+    else:
+        return "red"
 
 
 _RATE_STEPS = [1.0, 2.0, 5.0, 10.0, 50.0, 100.0]
@@ -90,7 +101,7 @@ class DebugPane:
         """Legacy hook — render timing now comes from metrics.time('render')."""
         pass
 
-    def render(self) -> Panel:
+    def render(self) -> StyledBlock:
         """Render the debug pane. Call this from your app's render() method."""
         # Record RSS as a gauge so it shows up alongside instrument data
         rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -98,56 +109,140 @@ class DebugPane:
         metrics.gauge("rss_mb", rss_mb)
 
         snap = metrics.snapshot()
+        elapsed = snap["elapsed_sec"]
+        timings = snap["timings"]
+        counters = snap["counters"]
+        gauges = snap["gauges"]
 
-        lines = []
+        header = Style(bold=True, underline=True)
+        dim = Style(dim=True)
+        plain = Style()
+        bold = Style(bold=True)
 
-        # --- Counters ---
-        if snap["counters"]:
-            lines.append("[bold underline]Counters[/bold underline]")
-            elapsed = snap["elapsed_sec"]
-            for name, val in sorted(snap["counters"].items()):
-                rate = val / elapsed if elapsed > 0 else 0.0
-                lines.append(f"  {name:<20} {val:>7,}  ({rate:>6.1f}/s)")
-            lines.append("")
+        rows: list[StyledBlock] = []
 
-        # --- Timings ---
-        if snap["timings"]:
-            lines.append("[bold underline]Timings[/bold underline]")
-            for name, t in sorted(snap["timings"].items()):
-                lines.append(
-                    f"  {name:<20} last={t['last_ms']:>6.2f}  "
-                    f"avg={t['avg_ms']:>6.2f}  p95={t['p95_ms']:>6.2f} ms"
-                )
-            lines.append("")
+        # --- Frame budget ---
+        render_t = timings.get("render")
+        if render_t:
+            samples = metrics.timing_samples("render")
+            spark = sparkline(samples, width=10, max_value=16.67)
+            # Budget: 16.67ms = 60fps target
+            budget_pct = (render_t["avg_ms"] / 16.67) * 100
+            color = _budget_color(budget_pct)
+            rows.append(join_horizontal(
+                StyledBlock.text("Frame ", bold),
+                StyledBlock.text(spark + " ", plain),
+                StyledBlock.text(f"{budget_pct:>3.0f}%", Style(fg=color, bold=True)),
+                StyledBlock.text(f"  avg={render_t['avg_ms']:.1f}", dim),
+                StyledBlock.text(f" p95={render_t['p95_ms']:.1f}ms", dim),
+            ))
+            # Projection vs render breakdown
+            proj_advance = [n for n in timings if n.endswith(".advance")]
+            if proj_advance:
+                proj_sum = sum(timings[n]["avg_ms"] for n in proj_advance)
+                rows.append(join_horizontal(
+                    StyledBlock.text("       ", plain),
+                    StyledBlock.text(f"proj={proj_sum:.1f}", dim),
+                    StyledBlock.text(f" render={render_t['avg_ms'] - proj_sum:.1f}ms", dim),
+                ))
+            rows.append(StyledBlock.text("", plain))
 
-        # --- Gauges ---
-        if snap["gauges"]:
-            lines.append("[bold underline]Gauges[/bold underline]")
-            for name, val in sorted(snap["gauges"].items()):
-                lines.append(f"  {name:<20} {val:>10.1f}")
-            lines.append("")
+        # --- Per-projection metrics ---
+        # Extract unique projection names from dot-separated keys: proj.{name}.*
+        proj_names: set[str] = set()
+        for key in list(timings) + list(counters) + list(gauges):
+            if key.startswith("proj."):
+                parts = key.split(".")
+                if len(parts) >= 3:
+                    proj_names.add(parts[1])
+        if proj_names:
+            rows.append(StyledBlock.text("Projections", header))
+            for name in sorted(proj_names):
+                advance_t = timings.get(f"proj.{name}.advance")
+                avg_ms = advance_t["avg_ms"] if advance_t else 0.0
+                fold_rate = metrics.rate(f"proj.{name}.events_folded")
+                lag = gauges.get(f"proj.{name}.lag", 0.0)
+                # Color lag: green <2ms, yellow <5ms, red >=5ms
+                lag_color = "green" if lag < 2 else ("yellow" if lag < 5 else "red")
+                rows.append(join_horizontal(
+                    StyledBlock.text(f"  {name:<14}", plain),
+                    StyledBlock.text(f"avg={avg_ms:>5.1f}", dim),
+                    StyledBlock.text(f" {fold_rate:>5.0f}/s", dim),
+                    StyledBlock.text(f" lag=", dim),
+                    StyledBlock.text(f"{lag:>4.1f}", Style(fg=lag_color)),
+                ))
+            rows.append(StyledBlock.text("", plain))
 
-        # Extra metrics from caller (app-specific)
+        # --- Store breakdown ---
+        rows.append(StyledBlock.text("Store", header))
+        in_mem = len(self.store.events)
+        ev_rate = metrics.rate("events_added")
+        store_parts: list[StyledBlock] = [StyledBlock.text("  ", plain)]
+        store_parts.append(StyledBlock.text(f"mem={in_mem}", plain))
+        store_parts.append(StyledBlock.text(f"  {ev_rate:.0f}ev/s", dim))
+        store_parts.append(StyledBlock.text(f"  rss={rss_mb:.0f}MB", dim))
+        if self.store._offset > 0:
+            store_parts.append(StyledBlock.text(
+                f"  evicted={self.store._offset}/{self.store.total}", dim
+            ))
+        if self.store._file is not None and self.store._path is not None:
+            disk_mb = self.store._path.stat().st_size / 1048576
+            store_parts.append(StyledBlock.text(f"  disk={disk_mb:.1f}MB", dim))
+        rows.append(join_horizontal(*store_parts))
+        rows.append(StyledBlock.text("", plain))
+
+        # --- Debounce ratio ---
+        frames = counters.get("frames_rendered", 0)
+        effects = counters.get("effect_fires", 0)
+        if frames > 0 and effects > 0:
+            ratio = effects / frames
+            rows.append(join_horizontal(
+                StyledBlock.text("Debounce ", bold),
+                StyledBlock.text(f"{effects}:{frames}", plain),
+                StyledBlock.text(f" ({ratio:.1f}x)", dim),
+            ))
+            rows.append(StyledBlock.text("", plain))
+
+        # --- Other timings (non-render, non-projection) ---
+        other_timings = {n: t for n, t in timings.items()
+                         if n != "render"
+                         and not n.startswith("proj.")}
+        if other_timings:
+            rows.append(StyledBlock.text("Timings", header))
+            for name, t in sorted(other_timings.items()):
+                rows.append(join_horizontal(
+                    StyledBlock.text(f"  {name:<14}", plain),
+                    StyledBlock.text(f"avg={t['avg_ms']:>5.2f}", dim),
+                    StyledBlock.text(f" p95={t['p95_ms']:>5.2f}ms", dim),
+                ))
+            rows.append(StyledBlock.text("", plain))
+
+        # --- Extra metrics (app-specific) ---
         if self._extra_metrics:
-            for label, value in self._extra_metrics():
-                lines.append(f"  {label:<16}{value:>8}")
-            lines.append("")
+            extras = self._extra_metrics()
+            if extras:
+                for label, value in extras:
+                    rows.append(join_horizontal(
+                        StyledBlock.text(f"  {label:<14}", plain),
+                        StyledBlock.text(value, dim),
+                    ))
+                rows.append(StyledBlock.text("", plain))
 
-        # Rate control
-        lines.append("[bold underline]Controls[/bold underline]")
+        # --- Controls (compact one-line) ---
         rate = self.rate_multiplier()
         rate_str = f"{rate:.0f}x" if rate == int(rate) else f"{rate}x"
-        lines.append(f"  Rate multiplier: [bold cyan]{rate_str:>5}[/bold cyan]")
-        lines.append("    [dim]+/-[/dim] to adjust")
-        lines.append("")
-
-        # Actions
+        ctrl_parts = [f"+/-={rate_str}"]
         for key, (label, _) in sorted(self._actions.items()):
-            lines.append(f"  [dim]{key}[/dim] = {label}")
-        lines.append("  [dim]D[/dim] = hide debug pane")
+            ctrl_parts.append(f"{key}={label}")
+        ctrl_parts.append("D=hide")
+        rows.append(join_horizontal(
+            StyledBlock.text(" ".join(ctrl_parts), dim),
+        ))
 
-        return Panel(
-            Text.from_markup("\n".join(lines)),
-            title="[bold]Debug[/bold]",
-            border_style="magenta",
+        content = join_vertical(*rows)
+        return border(
+            content,
+            title="Debug",
+            style=Style(fg="magenta"),
+            title_style=Style(fg="magenta", bold=True),
         )

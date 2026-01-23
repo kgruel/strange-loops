@@ -12,6 +12,7 @@ from .keyboard import KeyboardInput
 from .filter import FilterHistory
 from .app import BaseApp, Mode
 from .projection import Projection
+from .selection import SelectionTracker
 from .debug import DebugPane
 from .sim import BaseSimulator, SimState
 from .instrument import metrics
@@ -33,6 +34,7 @@ __all__ = [
     "BaseApp",
     "Mode",
     "Projection",
+    "SelectionTracker",
     "DebugPane",
     "BaseSimulator",
     "SimState",

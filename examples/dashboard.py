@@ -28,21 +28,20 @@ import json
 import random
 import re
 import sys
-import termios
 import time
-import tty
 from dataclasses import dataclass, field, asdict
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
-
-from reaktiv import Signal, Computed, Effect
+from reaktiv import Signal, Computed, Effect, batch
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+# Framework imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from framework import EventStore, BaseApp
 
 
 # =============================================================================
@@ -56,32 +55,6 @@ class Event:
     payload: dict
     level: str
     ts: float = field(default_factory=time.time)
-
-
-# =============================================================================
-# EVENT STORE
-# =============================================================================
-
-class EventStore:
-    """Append-only event store with version signal for reaktiv integration."""
-
-    def __init__(self):
-        self._events: list[Event] = []
-        # Version signal - bumped on each add
-        # Computed/Effect can depend on this without O(n) list copying
-        self.version = Signal(0)
-
-    def add(self, event: Event) -> None:
-        self._events.append(event)
-        self.version.update(lambda v: v + 1)
-
-    @property
-    def events(self) -> list[Event]:
-        return self._events
-
-    @property
-    def total(self) -> int:
-        return len(self._events)
 
 
 # =============================================================================
@@ -139,49 +112,13 @@ class FilterQuery:
 
 
 # =============================================================================
-# MODE
+# DASHBOARD MODE (extends framework Mode with SOURCES)
 # =============================================================================
 
-class Mode(Enum):
+class DashboardMode(Enum):
     VIEW = auto()
     FILTER = auto()
     SOURCES = auto()
-
-
-# =============================================================================
-# KEYBOARD INPUT
-# =============================================================================
-
-class KeyboardInput:
-    def __init__(self):
-        self._old_settings = None
-        self._available = True
-
-    def __enter__(self):
-        try:
-            self._old_settings = termios.tcgetattr(sys.stdin)
-            tty.setcbreak(sys.stdin.fileno())
-        except (termios.error, OSError):
-            self._available = False
-        return self
-
-    def __exit__(self, *args):
-        if self._old_settings:
-            try:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
-            except (termios.error, OSError):
-                pass
-
-    def get_key(self) -> str | None:
-        if not self._available:
-            return None
-        import select
-        try:
-            if select.select([sys.stdin], [], [], 0)[0]:
-                return sys.stdin.read(1)
-        except (OSError, ValueError):
-            self._available = False
-        return None
 
 
 # =============================================================================
@@ -272,19 +209,18 @@ SOURCE_COLORS = {
 }
 
 
-class Dashboard:
+class Dashboard(BaseApp):
     def __init__(self, store: EventStore, sources: SourceManager, console: Console):
+        super().__init__(console)
         self.store = store
         self.sources = sources
-        self._console = console
-        self._live: Live | None = None
 
-        # UI state as Signals - changes trigger Effect
-        self._running = Signal(True)
+        # Override mode signal to support DashboardMode.SOURCES
+        self._mode = Signal(DashboardMode.VIEW)
         self._focused_pane = Signal("logs")  # "logs" or "metrics"
-        self._mode = Signal(Mode.VIEW)
+
+        # Domain-specific signals
         self._log_filter = Signal(FilterQuery())
-        self._input_buffer = Signal("")
         self._filter_history: Signal[list[str]] = Signal([])  # Recent filter strings
         self._tee_path: Signal[Path | None] = Signal(None)  # Tee output file
         self._tee_count = Signal(0)  # Count of tee'd events
@@ -307,12 +243,18 @@ class Dashboard:
         self.filtered_warns = Computed(lambda: self._compute_filtered_warns())
         self.filtered_by_source = Computed(lambda: self._compute_filtered_by_source())
 
-        # Effect: re-render when any dependency changes
-        # This replaces manual subscribers and _refresh() calls
-        self._render_effect = Effect(lambda: self._do_render())
-
         # Effect: tee filtered events to file when tee is active
         self._tee_effect = Effect(lambda: self._do_tee())
+
+    def _render_dependencies(self) -> None:
+        """Read Signals that should trigger re-render. No Computeds here."""
+        self.store.version()
+        self._log_filter()
+        self._filter_history()
+        self._tee_path()
+        self._tee_count()
+        self._tee_events()
+        self.sources.active()
 
     def _compute_by_source(self) -> dict[str, int]:
         """Compute event counts by source. Depends on store.version."""
@@ -343,24 +285,6 @@ class Dashboard:
             result[e.source] = result.get(e.source, 0) + 1
         return result
 
-    def _do_render(self) -> None:
-        """Effect body: read all dependencies, then update Live."""
-        # Read all signals to establish dependencies
-        self.store.version()
-        self._focused_pane()
-        self._mode()
-        self._log_filter()
-        self._input_buffer()
-        self._filter_history()
-        self._tee_path()
-        self._tee_count()
-        self._tee_events()
-        self.sources.active()
-
-        # Side effect: update display
-        if self._live:
-            self._live.update(self.render())
-
     def _do_tee(self) -> None:
         """Effect body: write new filtered events to tee file."""
         version = self.store.version()
@@ -388,27 +312,17 @@ class Dashboard:
             # Keep last 50 for display (will be trimmed by _available_rows)
             self._tee_events.update(lambda evts: (evts + matching)[-50:])
 
-    def set_live(self, live: Live) -> None:
-        self._live = live
-        self._live.update(self.render())
-
-    def _available_rows(self) -> int:
-        """Calculate available rows for event display based on terminal height."""
-        height = self._console.size.height
-        # Subtract: status(1) + help(1) + panel borders(2) + table header(2) + padding(2)
-        return max(5, height - 8)
-
-    @property
-    def running(self) -> bool:
-        return self._running()
+    # =========================================================================
+    # KEY HANDLING
+    # =========================================================================
 
     def handle_key(self, key: str) -> bool:
         """Handle keystroke. Returns False if should quit."""
-        if self._mode() == Mode.VIEW:
+        if self._mode() == DashboardMode.VIEW:
             return self._handle_view_key(key)
-        elif self._mode() == Mode.FILTER:
+        elif self._mode() == DashboardMode.FILTER:
             return self._handle_filter_key(key)
-        elif self._mode() == Mode.SOURCES:
+        elif self._mode() == DashboardMode.SOURCES:
             return self._handle_sources_key(key)
         return True
 
@@ -421,8 +335,9 @@ class Dashboard:
         elif key == "2":
             self._focused_pane.set("metrics")
         elif key == "/" and self._focused_pane() == "logs":
-            self._mode.set(Mode.FILTER)
-            self._input_buffer.set("")
+            with batch():
+                self._mode.set(DashboardMode.FILTER)
+                self._input_buffer.set("")
         elif key == "c" and self._focused_pane() == "logs":
             self._log_filter.set(FilterQuery())
         elif key == "e" and self._focused_pane() == "logs":
@@ -439,24 +354,25 @@ class Dashboard:
         elif key == "t" and self._focused_pane() == "logs":
             # Toggle tee
             if self._tee_path():
-                self._tee_path.set(None)
-                self._tee_count.set(0)
-                self._tee_events.set([])
+                with batch():
+                    self._tee_path.set(None)
+                    self._tee_count.set(0)
+                    self._tee_events.set([])
             else:
                 tee_file = Path(f"/tmp/tee_{int(time.time())}.jsonl")
-                self._tee_path.set(tee_file)
-                self._tee_count.set(0)
-                self._tee_events.set([])
+                with batch():
+                    self._tee_path.set(tee_file)
+                    self._tee_count.set(0)
+                    self._tee_events.set([])
                 self._last_tee_version = self.store.version()  # Start from now
         elif key == "s":
-            self._mode.set(Mode.SOURCES)
-        # No manual refresh needed - Effect handles it
+            self._mode.set(DashboardMode.SOURCES)
         return True
 
     def _handle_sources_key(self, key: str) -> bool:
         """Handle keys in sources mode."""
         if key == "\x1b" or key == "s":
-            self._mode.set(Mode.VIEW)
+            self._mode.set(DashboardMode.VIEW)
         elif key in "12345":
             idx = int(key) - 1
             if idx < len(AVAILABLE_SOURCES):
@@ -473,12 +389,14 @@ class Dashboard:
                 self._filter_history.update(lambda h:
                     ([raw] + [x for x in h if x != raw])[:5]
                 )
-            self._log_filter.set(FilterQuery.parse(raw))
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
+            with batch():
+                self._log_filter.set(FilterQuery.parse(raw))
+                self._mode.set(DashboardMode.VIEW)
+                self._input_buffer.set("")
         elif key == "\x1b":  # Escape
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
+            with batch():
+                self._mode.set(DashboardMode.VIEW)
+                self._input_buffer.set("")
         elif key == "\x7f":  # Backspace
             self._input_buffer.update(lambda s: s[:-1])
         elif key == "\x1b[A" or key == "":  # Up arrow (partial - see note)
@@ -494,8 +412,11 @@ class Dashboard:
                 self._input_buffer.set(history[next_idx])
         elif key.isprintable():
             self._input_buffer.update(lambda s: s + key)
-        # No manual refresh needed - Effect handles it
         return True
+
+    # =========================================================================
+    # RENDER
+    # =========================================================================
 
     def render(self) -> Layout:
         layout = Layout()
@@ -507,7 +428,7 @@ class Dashboard:
             Layout(self._render_help(), name="help", size=1),
         )
 
-        if self._mode() == Mode.SOURCES:
+        if self._mode() == DashboardMode.SOURCES:
             # Show sources panel instead of normal panes
             layout["main"].split_row(
                 Layout(self._render_sources_pane(), name="sources"),
@@ -668,7 +589,7 @@ class Dashboard:
         )
 
     def _render_status(self) -> Text:
-        if self._mode() == Mode.FILTER:
+        if self._mode() == DashboardMode.FILTER:
             history = self._filter_history()
             hist_str = f"  [dim]history: {', '.join(history[:3])}[/dim]" if history else ""
             return Text.from_markup(f"[bold]Filter:[/bold] /{self._input_buffer()}█{hist_str}")
@@ -685,14 +606,14 @@ class Dashboard:
         )
 
     def _render_help(self) -> Text:
-        if self._mode() == Mode.FILTER:
+        if self._mode() == DashboardMode.FILTER:
             # Show available fields and example syntax
             return Text.from_markup(
                 "[dim]Enter[/dim]=apply  [dim]Esc[/dim]=cancel  |  "
                 "Fields: [cyan]level[/cyan]=(error,warn,info)  [cyan]source[/cyan]=(orders,payments,...)  [cyan]event_type[/cyan]=*pattern"
             )
 
-        if self._mode() == Mode.SOURCES:
+        if self._mode() == DashboardMode.SOURCES:
             return Text.from_markup(
                 "[dim]1-5[/dim]=toggle source  [dim]s/Esc[/dim]=done"
             )
@@ -713,8 +634,6 @@ class Dashboard:
             )
 
 
-
-
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -730,31 +649,16 @@ async def run_dashboard(duration: float | None = None):
     console.print()
     await asyncio.sleep(0.5)
 
-    store = EventStore()
+    store: EventStore[Event] = EventStore()
     sources = SourceManager(store)
-    dashboard = Dashboard(store, sources, console)
+    app = Dashboard(store, sources, console)
 
     # Start with some sources active
     await sources.toggle("orders")
     await sources.toggle("payments")
 
-    start_time = time.time()
-
     try:
-        with KeyboardInput() as keyboard:
-            with Live(console=console, refresh_per_second=10) as live:
-                dashboard.set_live(live)
-
-                while dashboard.running:
-                    if duration and (time.time() - start_time) > duration:
-                        break
-
-                    key = keyboard.get_key()
-                    if key:
-                        dashboard.handle_key(key)
-
-                    await asyncio.sleep(0.05)
-
+        await app.run(duration=duration)
     finally:
         await sources.stop_all()
 

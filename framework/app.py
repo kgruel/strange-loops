@@ -46,6 +46,7 @@ class BaseApp:
 
         self._render_effect: Effect | None = None
         self._render_dirty = False
+        self._dirty_event: asyncio.Event = asyncio.Event()
 
         # Projection support
         self._projections: list[Projection] = []
@@ -78,6 +79,7 @@ class BaseApp:
         self._render_dependencies()
 
         self._render_dirty = True
+        self._dirty_event.set()
         metrics.count("effect_fires")
 
     def set_live(self, live: Live) -> None:
@@ -210,8 +212,13 @@ class BaseApp:
 
                     if self._render_dirty:
                         self._render_dirty = False
+                        self._dirty_event.clear()
                         with metrics.time("render"):
                             live.update(self.render())
                         metrics.count("frames_rendered")
 
-                    await asyncio.sleep(0.05)
+                    # Wait for dirty signal or timeout (keeps keyboard polling alive)
+                    try:
+                        await asyncio.wait_for(self._dirty_event.wait(), timeout=0.05)
+                    except asyncio.TimeoutError:
+                        pass

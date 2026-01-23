@@ -34,14 +34,12 @@ from typing import Callable, Literal
 
 from reaktiv import Signal, Computed
 from rich.console import Console
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from framework import EventStore, FilterHistory, BaseApp, Projection, DebugPane, BaseSimulator, SimState
+from framework import EventStore, BaseApp, Projection, DebugPane, BaseSimulator, SimState
+from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts, ColumnSpec
 
 
 # =============================================================================
@@ -386,7 +384,6 @@ class ProcessMonitorApp(BaseApp):
 
         # Filter
         self._filter = Signal(ProcessFilter())
-        self._filter_history = FilterHistory()
 
         # Confirm action
         self._confirm_action: Signal[tuple[str, str] | None] = Signal(None)  # (action, pid)
@@ -580,9 +577,9 @@ class ProcessMonitorApp(BaseApp):
         elif self.debug and self.debug.handle_key(key):
             pass  # consumed by debug pane
         elif key == "h":
-            latest = self._filter_history.latest
-            if latest:
-                self._filter.set(ProcessFilter.parse(latest))
+            history = self._filter_history()
+            if history:
+                self._filter.set(ProcessFilter.parse(history[0]))
                 self._selected_index.set(None)
         return True
 
@@ -617,22 +614,16 @@ class ProcessMonitorApp(BaseApp):
         asyncio.get_event_loop().create_task(_do_mass_close())
 
     def _handle_filter_key(self, key: str) -> bool:
-        if key == "\r" or key == "\n":
-            raw = self._input_buffer()
-            if raw.strip():
-                self._filter_history.push(raw)
-            self._filter.set(ProcessFilter.parse(raw))
+        result = super()._handle_filter_key(
+            key,
+            parse_fn=ProcessFilter.parse,
+            filter_signal=self._filter,
+            view_mode=Mode.VIEW,
+        )
+        # Reset selection when filter is applied (Enter key)
+        if (key == "\r" or key == "\n") and self._mode() == Mode.VIEW:
             self._selected_index.set(None)
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
-        elif key == "\x1b":  # Escape
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
-        elif key == "\x7f":  # Backspace
-            self._input_buffer.update(lambda s: s[:-1])
-        elif key.isprintable():
-            self._input_buffer.update(lambda s: s + key)
-        return True
+        return result
 
     def _handle_add_key(self, key: str) -> bool:
         if key == "\r" or key == "\n":
@@ -713,15 +704,10 @@ class ProcessMonitorApp(BaseApp):
     # RENDER
     # =========================================================================
 
-    def render(self) -> Layout:
-        t0 = time.perf_counter()
-        layout = Layout()
+    def render(self):
+        from rich.layout import Layout
 
-        layout.split_column(
-            Layout(name="main", ratio=1),
-            Layout(self._render_status(), name="status", size=1),
-            Layout(self._render_help(), name="help", size=1),
-        )
+        t0 = time.perf_counter()
 
         pane = self._focused_pane()
         selected = self.selected_process()
@@ -742,45 +728,33 @@ class ProcessMonitorApp(BaseApp):
         if self.debug and self.debug.visible():
             content_panes.append(Layout(self.debug.render(), name="debug", size=32))
 
-        layout["main"].split_row(*content_panes)
+        main = Layout()
+        main.split_row(*content_panes)
+
+        result = app_layout(main, self._render_status(), self._render_help())
 
         # Record render time
         render_ms = (time.perf_counter() - t0) * 1000
         if self.debug:
             self.debug.record_render_time(render_ms)
 
-        return layout
+        return result
 
-    def _render_list_pane(self) -> Panel:
+    def _render_list_pane(self):
         """Process list with state, uptime, restarts."""
-        table = Table(
-            show_header=True,
-            header_style="bold",
-            expand=True,
-            box=None,
-            padding=(0, 1),
-        )
-        table.add_column("", no_wrap=True, width=1)  # Selection indicator
-        table.add_column("Name", ratio=1)
-        table.add_column("State", no_wrap=True)
-        table.add_column("Uptime", no_wrap=True, justify="right")
-        table.add_column("Restarts", no_wrap=True, justify="right")
+        columns = [
+            ColumnSpec("Name", ratio=1),
+            ColumnSpec("State"),
+            ColumnSpec("Uptime", justify="right"),
+            ColumnSpec("Restarts", justify="right"),
+        ]
 
         filtered = self.filtered_processes()
         selected_idx = self._selected_index()
-        max_rows = self._available_rows()
         now = time.time()
 
-        start_idx = 0
-        if selected_idx is not None and selected_idx >= max_rows:
-            start_idx = selected_idx - max_rows + 1
-        end_idx = min(len(filtered), start_idx + max_rows)
-
-        for i in range(start_idx, end_idx):
-            proc = filtered[i]
-            is_selected = (i == selected_idx)
-
-            indicator = "▶" if is_selected else ""
+        rows = []
+        for proc in filtered:
             state_style = STATE_STYLES.get(proc.state, "white")
 
             # Compute uptime for running processes
@@ -793,41 +767,34 @@ class ProcessMonitorApp(BaseApp):
             restart_count = max(0, proc.start_count - 1)
             restart_str = str(restart_count) if restart_count > 0 else ""
 
-            row_style = "reverse" if is_selected else None
-            table.add_row(
-                Text(indicator, style="cyan bold"),
-                Text(proc.name, style="" if not is_selected else "reverse"),
-                Text(proc.state.value, style=state_style if not is_selected else f"{state_style} reverse"),
-                Text(uptime_str, style="dim" if not is_selected else "dim reverse"),
-                Text(restart_str, style="dim" if not is_selected else "dim reverse"),
-                style=row_style,
-            )
+            rows.append([
+                Text(proc.name),
+                Text(proc.state.value, style=state_style),
+                Text(uptime_str, style="dim"),
+                Text(restart_str, style="dim"),
+            ])
 
-        if not filtered:
-            table.add_row("", Text("No processes", style="dim"), "", "", "")
+        table, scroll = event_table(rows, columns, self._available_rows(), selected_idx=selected_idx)
 
-        border_style = "green" if self._focused_pane() == "list" else "dim"
         filt = self._filter()
         title_extra = f" [dim]({filt.description()})[/dim]" if filt.raw else ""
-        return Panel(table, title=f"[bold]Processes[/bold]{title_extra}",
-                     border_style=border_style)
-
-    def _render_logs_pane(self) -> Panel:
-        """Log output for selected process (or all if none selected)."""
-        table = Table(
-            show_header=True,
-            header_style="bold",
-            expand=True,
-            box=None,
-            padding=(0, 1),
+        return focus_panel(
+            table,
+            title=f"[bold]Processes[/bold]{title_extra}",
+            focused=self._focused_pane() == "list",
+            subtitle=scroll.subtitle,
         )
-        table.add_column("Time", no_wrap=True, style="dim")
-        table.add_column("Process", no_wrap=True)
-        table.add_column("Message", ratio=1)
+
+    def _render_logs_pane(self):
+        """Log output for selected process (or all if none selected)."""
+        columns = [
+            ColumnSpec("Time", style="dim"),
+            ColumnSpec("Process"),
+            ColumnSpec("Message", ratio=1),
+        ]
 
         all_logs = self.process_logs()
         selected = self.selected_process()
-        max_rows = self._available_rows()
 
         # Collect relevant logs
         if selected:
@@ -841,105 +808,97 @@ class ProcessMonitorApp(BaseApp):
             entries.sort(key=lambda e: e.ts)
             title_proc = "all"
 
-        # Show last N
-        visible = entries[-max_rows:]
-
         # Get process names for display
         proc_names = {p.pid: p.name for p in self.process_list()}
 
-        for event in visible:
+        rows = []
+        for event in entries:
             time_str = time.strftime("%H:%M:%S", time.localtime(event.ts))
             level = event.payload.get("level", "info")
             level_style = LOG_LEVEL_STYLES.get(level, "white")
             proc_name = proc_names.get(event.pid, event.pid)
             message = event.payload.get("message", "")
 
-            table.add_row(
-                time_str,
+            rows.append([
+                Text(time_str, style="dim"),
                 Text(proc_name, style="cyan"),
-                Text(f"[{level_style}]{message}[/{level_style}]"),
-            )
+                Text(message, style=level_style),
+            ])
 
-        if not visible:
-            table.add_row("", "", Text("No logs yet", style="dim"))
+        table, scroll = event_table(rows, columns, self._available_rows())
 
-        border_style = "green" if self._focused_pane() == "logs" else "dim"
-        return Panel(table, title=f"[bold]Logs[/bold] [dim]({title_proc})[/dim]",
-                     border_style=border_style)
+        return focus_panel(
+            table,
+            title=f"[bold]Logs[/bold] [dim]({title_proc})[/dim]",
+            focused=self._focused_pane() == "logs",
+            subtitle=scroll.subtitle,
+        )
 
-    def _render_detail_pane(self, proc: ProcessInfo) -> Panel:
+    def _render_detail_pane(self, proc: ProcessInfo):
         """Full detail view for selected process."""
-        lines = []
         now = time.time()
-
-        lines.append(f"[bold]{proc.name}[/bold]  [dim]{proc.pid}[/dim]")
-        lines.append("")
-
-        # State
         state_style = STATE_STYLES.get(proc.state, "white")
-        lines.append(f"[bold]State:[/bold]  [{state_style}]{proc.state.value}[/{state_style}]")
-        lines.append("")
 
         # Uptime
         if proc.state == ProcessState.RUNNING and proc.last_started_at:
-            elapsed = now - proc.last_started_at
-            lines.append(f"[bold]Uptime:[/bold] {self._format_duration(elapsed)}")
+            uptime_str = self._format_duration(now - proc.last_started_at)
         else:
-            lines.append("[bold]Uptime:[/bold] -")
-        lines.append("")
+            uptime_str = "-"
 
-        # Config
-        lines.append("[bold underline]Configuration[/bold underline]")
-        lines.append(f"  Crash probability: {proc.crash_prob:.1%}")
-        lines.append(f"  Log frequency:     {proc.log_freq:.1f} msg/sec")
-        lines.append("")
-
-        # Stats
-        lines.append("[bold underline]Statistics[/bold underline]")
-        lines.append(f"  Start count:  {proc.start_count}")
         restart_count = max(0, proc.start_count - 1)
-        lines.append(f"  Restarts:     {restart_count}")
         created_str = time.strftime("%H:%M:%S", time.localtime(proc.created_at))
-        lines.append(f"  Created:      {created_str}")
-        lines.append("")
+
+        sections: list[tuple[str, list[tuple[str, str] | tuple[str, str, str]]]] = [
+            (f"{proc.name}  [dim]{proc.pid}[/dim]", [
+                ("State", proc.state.value, state_style),
+                ("Uptime", uptime_str),
+            ]),
+            ("Configuration", [
+                ("Crash probability", f"{proc.crash_prob:.1%}"),
+                ("Log frequency", f"{proc.log_freq:.1f} msg/sec"),
+            ]),
+            ("Statistics", [
+                ("Start count", str(proc.start_count)),
+                ("Restarts", str(restart_count)),
+                ("Created", created_str),
+            ]),
+        ]
 
         # Recent logs
         all_logs = self.process_logs()
         proc_logs = all_logs.get(proc.pid, [])
         if proc_logs:
-            lines.append("[bold underline]Recent Logs[/bold underline]")
+            log_entries: list[tuple[str, str] | tuple[str, str, str]] = []
             for event in proc_logs[-5:]:
                 level = event.payload.get("level", "info")
-                level_style = LOG_LEVEL_STYLES.get(level, "white")
+                level_style_log = LOG_LEVEL_STYLES.get(level, "white")
                 msg = event.payload.get("message", "")
-                lines.append(f"  [{level_style}]{msg}[/{level_style}]")
-        else:
-            lines.append("[dim]No logs yet[/dim]")
+                log_entries.append(("", msg, level_style_log))
+            sections.append(("Recent Logs", log_entries))
 
         # Available actions
-        lines.append("")
-        lines.append("[bold underline]Actions[/bold underline]")
+        action_entries: list[tuple[str, str] | tuple[str, str, str]] = []
         if proc.state in (ProcessState.STOPPED, ProcessState.CRASHED):
-            lines.append("  [green]s[/green] = start")
+            action_entries.append(("s", "start", "green"))
             if proc.state == ProcessState.STOPPED:
-                lines.append("  [red]d[/red] = remove")
+                action_entries.append(("d", "remove", "red"))
         elif proc.state == ProcessState.RUNNING:
-            lines.append("  [yellow]x[/yellow] = stop")
-            lines.append("  [yellow]r[/yellow] = restart")
+            action_entries.append(("x", "stop", "yellow"))
+            action_entries.append(("r", "restart", "yellow"))
+        sections.append(("Actions", action_entries))
 
-        border_style = "green" if self._focused_pane() == "detail" else "dim"
-        return Panel(
-            Text.from_markup("\n".join(lines)),
+        return focus_panel(
+            metrics_panel(sections),
             title="[bold]Detail[/bold]",
-            border_style=border_style,
+            focused=self._focused_pane() == "detail",
         )
 
     def _render_status(self) -> Text:
         mode = self._mode()
 
         if mode == Mode.FILTER:
-            entries = self._filter_history.entries()
-            hist_str = f"  [dim]history: {', '.join(entries[:3])}[/dim]" if entries else ""
+            history = self._filter_history()
+            hist_str = f"  [dim]history: {', '.join(history[:3])}[/dim]" if history else ""
             return Text.from_markup(f"[bold]Filter:[/bold] /{self._input_buffer()}█{hist_str}")
 
         if mode == Mode.ADD:
@@ -962,47 +921,44 @@ class ProcessMonitorApp(BaseApp):
 
         selected_idx = self._selected_index()
         filtered = self.filtered_processes()
-        sel_part = ""
-        if selected_idx is not None and filtered:
-            sel_part = f"  [cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]"
+        sel_part = f"[cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]" if selected_idx is not None and filtered else None
+        crashed_part = f"[red]Crashed: {crashed_count}[/red]" if crashed_count > 0 else None
 
-        crashed_part = f"  [red]Crashed: {crashed_count}[/red]" if crashed_count > 0 else ""
-
-        return Text.from_markup(
-            f"[bold]Focus:[/bold] {self._focused_pane()}  |  "
-            f"[bold]Total:[/bold] {len(processes)}  "
-            f"[green]Running: {running_count}[/green]{crashed_part}{sel_part}"
+        return status_parts(
+            f"[bold]Focus:[/bold] {self._focused_pane()}",
+            "|",
+            f"[bold]Total:[/bold] {len(processes)}  [green]Running: {running_count}[/green]",
+            crashed_part,
+            sel_part,
         )
 
     def _render_help(self) -> Text:
         mode = self._mode()
 
         if mode == Mode.FILTER:
-            return Text.from_markup(
-                "[dim]Enter[/dim]=apply  [dim]Esc[/dim]=cancel  |  "
-                "Syntax: [cyan]name[/cyan]  [cyan]state=[/cyan]running|stopped|crashed"
-            )
+            return help_bar([
+                ("Enter", "apply"), ("Esc", "cancel"), ("|", ""),
+                ("", "Syntax: [cyan]name[/cyan]  [cyan]state=[/cyan]running|stopped|crashed"),
+            ])
 
         if mode == Mode.ADD:
-            return Text.from_markup(
-                "[dim]Enter[/dim]=create  [dim]Esc[/dim]=cancel"
-            )
+            return help_bar([("Enter", "create"), ("Esc", "cancel")])
 
         if mode == Mode.CONFIRM:
-            return Text.from_markup(
-                "[dim]y[/dim]=confirm  [dim]n/Esc[/dim]=cancel"
-            )
+            return help_bar([("y", "confirm"), ("n/Esc", "cancel")])
 
         # VIEW mode
-        history = self._filter_history.entries()
-        h_key = "  [dim]h[/dim]=last" if history else ""
-        return Text.from_markup(
-            "[dim]1[/dim]=list  [dim]2[/dim]=logs  [dim]3[/dim]=detail  |  "
-            "[dim]j/k[/dim]=nav  [dim]s[/dim]=start  [dim]x[/dim]=stop  "
-            "[dim]r[/dim]=restart  [dim]d[/dim]=remove  |  "
-            f"[dim]/[/dim]=filter  [dim]a[/dim]=add  [dim]c[/dim]=clear{h_key}  |  "
-            "[dim]D[/dim]=debug  [dim]q[/dim]=quit"
-        )
+        history = self._filter_history()
+        bindings: list[tuple[str, str]] = [
+            ("1", "list"), ("2", "logs"), ("3", "detail"), ("|", ""),
+            ("j/k", "nav"), ("s", "start"), ("x", "stop"),
+            ("r", "restart"), ("d", "remove"), ("|", ""),
+            ("/", "filter"), ("a", "add"), ("c", "clear"),
+        ]
+        if history:
+            bindings.append(("h", "last"))
+        bindings.extend([("|", ""), ("D", "debug"), ("q", "quit")])
+        return help_bar(bindings)
 
     def _format_duration(self, seconds: float) -> str:
         """Format seconds into human-readable duration."""

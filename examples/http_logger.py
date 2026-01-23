@@ -33,14 +33,12 @@ from typing import Literal
 
 from reaktiv import Signal, Computed, LinkedSignal, batch
 from rich.console import Console
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from framework import EventStore, BaseApp, Mode
+from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts, ColumnSpec
 
 
 # =============================================================================
@@ -517,93 +515,60 @@ class HttpLogger(BaseApp):
         self._selected_index.set(new_idx)
 
     def _handle_filter_key(self, key: str) -> bool:
-        if key == "\r" or key == "\n":
-            raw = self._input_buffer()
-            if raw.strip():
-                self._filter_history.update(lambda h:
-                    ([raw] + [x for x in h if x != raw])[:5]
-                )
-            with batch():
-                self._filter.set(HttpFilter.parse(raw))
-                self._mode.set(Mode.VIEW)
-                self._input_buffer.set("")
-        elif key == "\x1b":  # Escape
-            with batch():
-                self._mode.set(Mode.VIEW)
-                self._input_buffer.set("")
-        elif key == "\x7f":  # Backspace
-            self._input_buffer.update(lambda s: s[:-1])
-        elif key.isprintable():
-            self._input_buffer.update(lambda s: s + key)
-        return True
+        return super()._handle_filter_key(
+            key,
+            parse_fn=HttpFilter.parse,
+            filter_signal=self._filter,
+            view_mode=Mode.VIEW,
+        )
 
     # =========================================================================
     # RENDER
     # =========================================================================
 
-    def render(self) -> Layout:
-        layout = Layout()
-
-        layout.split_column(
-            Layout(name="main", ratio=1),
-            Layout(self._render_status(), name="status", size=1),
-            Layout(self._render_help(), name="help", size=1),
-        )
+    def render(self):
+        from rich.layout import Layout
 
         selected = self.selected_request()
 
         if selected is not None:
-            # Show detail pane when request is selected
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_requests_pane(), name="requests", ratio=2),
                 Layout(self._render_detail_pane(selected), name="detail", ratio=1),
                 Layout(self._render_metrics_pane(), name="metrics", minimum_size=35),
             )
         elif self._show_pending():
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_requests_pane(), name="requests", ratio=2),
                 Layout(self._render_pending_pane(), name="pending", ratio=1),
                 Layout(self._render_metrics_pane(), name="metrics", minimum_size=35),
             )
         else:
-            layout["main"].split_row(
+            main = Layout()
+            main.split_row(
                 Layout(self._render_requests_pane(), name="requests", ratio=2),
                 Layout(self._render_metrics_pane(), name="metrics", minimum_size=35),
             )
 
-        return layout
+        return app_layout(main, self._render_status(), self._render_help())
 
-    def _render_requests_pane(self) -> Panel:
+    def _render_requests_pane(self):
         """Completed requests with latency."""
-        table = Table(
-            show_header=True,
-            header_style="bold",
-            expand=True,
-            box=None,
-            padding=(0, 1),
-        )
-        table.add_column("", no_wrap=True, width=1)  # Selection indicator
-        table.add_column("Time", no_wrap=True, style="dim")
-        table.add_column("Method", no_wrap=True)
-        table.add_column("Path", ratio=1)
-        table.add_column("Status", no_wrap=True)
-        table.add_column("Latency", no_wrap=True, justify="right")
+        columns = [
+            ColumnSpec("Time", style="dim"),
+            ColumnSpec("Method"),
+            ColumnSpec("Path", ratio=1),
+            ColumnSpec("Status"),
+            ColumnSpec("Latency", justify="right"),
+        ]
 
         filtered = self.filtered_completed()
-        max_rows = self._available_rows()
         selected_idx = self._selected_index()
 
-        # Calculate which slice of requests to show
-        # If selected, try to keep selection visible
-        start_idx = max(0, len(filtered) - max_rows)
-        if selected_idx is not None and selected_idx < start_idx:
-            start_idx = selected_idx
-        end_idx = min(len(filtered), start_idx + max_rows)
-
-        for i in range(start_idx, end_idx):
-            req = filtered[i]
-            is_selected = (i == selected_idx)
-
+        rows = []
+        for req in filtered:
             time_str = time.strftime("%H:%M:%S", time.localtime(req.request_ts))
             method_style = METHOD_STYLES.get(req.method, "white")
             status_style = STATUS_STYLES.get(req.status // 100, "white")
@@ -615,47 +580,42 @@ class HttpLogger(BaseApp):
             if req.latency_ms > 1000:
                 latency_style = "red"
 
-            # Selection indicator and row styling
-            indicator = "▶" if is_selected else ""
-            row_style = "reverse" if is_selected else None
+            rows.append([
+                Text(time_str, style="dim"),
+                Text(req.method, style=method_style),
+                Text(req.path),
+                Text(str(req.status), style=status_style),
+                Text(f"{req.latency_ms:.0f}ms", style=latency_style),
+            ])
 
-            table.add_row(
-                Text(indicator, style="cyan bold"),
-                Text(time_str, style="dim" if not is_selected else "dim reverse"),
-                Text(req.method, style=method_style if not is_selected else f"{method_style} reverse"),
-                Text(req.path, style="" if not is_selected else "reverse"),
-                Text(str(req.status), style=status_style if not is_selected else f"{status_style} reverse"),
-                Text(f"{req.latency_ms:.0f}ms", style=latency_style if not is_selected else f"{latency_style} reverse"),
-            )
+        table, scroll = event_table(rows, columns, self._available_rows(), selected_idx=selected_idx)
 
-        border_style = "green" if self._focused_pane() == "requests" else "dim"
         filt = self._filter()
-        title = f"[bold]Requests[/bold] [dim]({filt.description()})[/dim]"
-        return Panel(table, title=title, border_style=border_style)
-
-    def _render_pending_pane(self) -> Panel:
-        """Pending requests with live age tracking."""
-        table = Table(
-            show_header=True,
-            header_style="bold",
-            expand=True,
-            box=None,
-            padding=(0, 1),
+        return focus_panel(
+            table,
+            title=f"[bold]Requests[/bold] [dim]({filt.description()})[/dim]",
+            focused=self._focused_pane() == "requests",
+            subtitle=scroll.subtitle,
         )
-        table.add_column("Age", no_wrap=True, justify="right")
-        table.add_column("Method", no_wrap=True)
-        table.add_column("Path", ratio=1)
-        table.add_column("ID", no_wrap=True, style="dim")
+
+    def _render_pending_pane(self):
+        """Pending requests with live age tracking."""
+        columns = [
+            ColumnSpec("Age", justify="right"),
+            ColumnSpec("Method"),
+            ColumnSpec("Path", ratio=1),
+            ColumnSpec("ID", style="dim"),
+        ]
 
         pending = self.pending_requests()
         threshold = self._pending_threshold()
         now = time.time()
-        max_rows = self._available_rows()
 
         # Sort by age (oldest first)
         sorted_pending = sorted(pending, key=lambda e: e.ts)
 
-        for event in sorted_pending[:max_rows]:
+        rows = []
+        for event in sorted_pending:
             age_ms = (now - event.ts) * 1000
             method_style = METHOD_STYLES.get(event.method, "white")
 
@@ -676,66 +636,61 @@ class HttpLogger(BaseApp):
             else:
                 age_str = f"{age_ms/1000:.1f}s"
 
-            table.add_row(
+            rows.append([
                 Text(f"{age_indicator}{age_str}", style=age_style),
                 Text(event.method, style=method_style),
-                event.path,
-                event.request_id[-4:],  # Last 4 chars of ID
-            )
+                Text(event.path),
+                Text(event.request_id[-4:], style="dim"),
+            ])
 
-        if not pending:
-            table.add_row("", "", Text("No pending requests", style="dim"), "")
+        table, scroll = event_table(rows, columns, self._available_rows())
 
-        border_style = "green" if self._focused_pane() == "pending" else "dim"
         stuck_count = sum(1 for e in pending if (now - e.ts) * 1000 >= threshold)
         stuck_str = f" [red]{stuck_count} stuck[/red]" if stuck_count > 0 else ""
-        title = f"[bold]Pending[/bold] [dim]({len(pending)})[/dim]{stuck_str}"
-        return Panel(table, title=title, border_style=border_style)
+        return focus_panel(
+            table,
+            title=f"[bold]Pending[/bold] [dim]({len(pending)})[/dim]{stuck_str}",
+            focused=self._focused_pane() == "pending",
+            subtitle=scroll.subtitle,
+        )
 
-    def _render_detail_pane(self, req: CompletedRequest) -> Panel:
+    def _render_detail_pane(self, req: CompletedRequest):
         """Detail view for selected request."""
-        lines = []
-
-        # Request info
         method_style = METHOD_STYLES.get(req.method, "white")
         status_style = STATUS_STYLES.get(req.status // 100, "white")
 
-        lines.append(f"[bold]{req.request_id}[/bold]")
-        lines.append("")
-        lines.append(f"[{method_style}]{req.method}[/{method_style}] {req.path}")
-        lines.append("")
-
-        # Status with description
         status_desc = {
             200: "OK", 201: "Created", 204: "No Content",
             301: "Moved", 304: "Not Modified",
             400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
             500: "Internal Error", 502: "Bad Gateway", 503: "Unavailable",
         }.get(req.status, "")
-        lines.append(f"[bold]Status:[/bold] [{status_style}]{req.status} {status_desc}[/{status_style}]")
-        lines.append("")
 
-        # Timing
-        lines.append("[bold underline]Timing[/bold underline]")
         request_time = time.strftime("%H:%M:%S", time.localtime(req.request_ts))
         response_time = time.strftime("%H:%M:%S", time.localtime(req.response_ts))
-        lines.append(f"  Request:  {request_time}")
-        lines.append(f"  Response: {response_time}")
 
-        # Latency with styling
         latency_style = "green"
         if req.latency_ms > 500:
             latency_style = "yellow"
         if req.latency_ms > 1000:
             latency_style = "red"
-        lines.append(f"  Latency:  [{latency_style}]{req.latency_ms:.1f}ms[/{latency_style}]")
-        lines.append("")
 
-        # Size
-        lines.append("[bold underline]Size[/bold underline]")
-        lines.append(f"  Request:  {req.request_size:,} bytes")
-        lines.append(f"  Response: {req.response_size:,} bytes")
-        lines.append("")
+        sections: list[tuple[str, list[tuple[str, str] | tuple[str, str, str]]]] = [
+            (req.request_id, [
+                ("Method", req.method, method_style),
+                ("Path", req.path),
+                ("Status", f"{req.status} {status_desc}", status_style),
+            ]),
+            ("Timing", [
+                ("Request", request_time),
+                ("Response", response_time),
+                ("Latency", f"{req.latency_ms:.1f}ms", latency_style),
+            ]),
+            ("Size", [
+                ("Request", f"{req.request_size:,} bytes"),
+                ("Response", f"{req.response_size:,} bytes"),
+            ]),
+        ]
 
         # Percentile context
         completed = self.completed_requests()
@@ -743,16 +698,17 @@ class HttpLogger(BaseApp):
             latencies = sorted(r.latency_ms for r in completed)
             rank = sum(1 for l in latencies if l <= req.latency_ms)
             percentile = (rank / len(latencies)) * 100
-            lines.append(f"[dim]Faster than {100 - percentile:.0f}% of requests[/dim]")
+            sections.append(("Percentile", [
+                ("Faster than", f"{100 - percentile:.0f}% of requests"),
+            ]))
 
-        border_style = "green" if self._focused_pane() == "detail" else "dim"
-        return Panel(
-            Text.from_markup("\n".join(lines)),
+        return focus_panel(
+            metrics_panel(sections),
             title="[bold]Detail[/bold]",
-            border_style=border_style,
+            focused=self._focused_pane() == "detail",
         )
 
-    def _render_metrics_pane(self) -> Panel:
+    def _render_metrics_pane(self):
         """Latency stats and status distribution."""
         filt = self._filter()
         has_filter = bool(filt.conditions)
@@ -765,34 +721,38 @@ class HttpLogger(BaseApp):
         error_rate = self.error_rate()
         status_counts = self.status_counts()
 
-        lines = ["[bold underline]Overview[/bold underline]"]
-        lines.append(f"  Completed: {total}  Pending: {pending}")
-        lines.append("")
-        lines.append("[bold underline]Latency[/bold underline]")
-        lines.append(f"  Avg: {avg_lat:.0f}ms  P95: {p95_lat:.0f}ms")
-        lines.append("")
-        lines.append("[bold underline]Status Codes[/bold underline]")
+        error_style = "red" if error_rate > 5 else "yellow" if error_rate > 1 else "green"
 
+        # Status code entries
+        status_entries: list[tuple[str, str] | tuple[str, str, str]] = []
         for status in sorted(status_counts.keys()):
             count = status_counts[status]
             style = STATUS_STYLES.get(status // 100, "white")
-            lines.append(f"  [{style}]{status}[/{style}]: {count}")
+            status_entries.append((str(status), str(count), style))
+        status_entries.append(("Error rate", f"{error_rate:.1f}%", error_style))
 
-        lines.append("")
-        error_style = "red" if error_rate > 5 else "yellow" if error_rate > 1 else "green"
-        lines.append(f"  Error rate: [{error_style}]{error_rate:.1f}%[/{error_style}]")
+        sections: list[tuple[str, list[tuple[str, str] | tuple[str, str, str]]]] = [
+            ("Overview", [
+                ("Completed", str(total)),
+                ("Pending", str(pending)),
+            ]),
+            ("Latency", [
+                ("Avg", f"{avg_lat:.0f}ms"),
+                ("P95", f"{p95_lat:.0f}ms"),
+            ]),
+            ("Status Codes", status_entries),
+        ]
 
         if has_filter:
             filtered = self.filtered_completed()
-            lines.append("")
-            lines.append(f"[bold underline]Filtered ({filt.raw})[/bold underline]")
-            lines.append(f"  Showing: {len(filtered)} requests")
+            sections.append((f"Filtered ({filt.raw})", [
+                ("Showing", f"{len(filtered)} requests"),
+            ]))
 
-        border_style = "green" if self._focused_pane() == "metrics" else "dim"
-        return Panel(
-            Text.from_markup("\n".join(lines)),
+        return focus_panel(
+            metrics_panel(sections),
             title="[bold]Metrics[/bold]",
-            border_style=border_style,
+            focused=self._focused_pane() == "metrics",
         )
 
     def _render_status(self) -> Text:
@@ -802,52 +762,61 @@ class HttpLogger(BaseApp):
             return Text.from_markup(f"[bold]Filter:[/bold] /{self._input_buffer()}█{hist_str}")
 
         history = self._filter_history()
-        hist_part = f"  [dim]h={history[0]}[/dim]" if history else ""
+        hist_part = f"[dim]h={history[0]}[/dim]" if history else None
 
         pending = self.pending_count()
-        pending_part = f"  [yellow]Pending: {pending}[/yellow]" if pending > 0 else ""
+        pending_part = f"[yellow]Pending: {pending}[/yellow]" if pending > 0 else None
 
         selected_idx = self._selected_index()
         filtered = self.filtered_completed()
-        if selected_idx is not None and filtered:
-            selected_part = f"  [cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]"
-        else:
-            selected_part = ""
+        selected_part = f"[cyan]Selected: {selected_idx + 1}/{len(filtered)}[/cyan]" if selected_idx is not None and filtered else None
 
-        return Text.from_markup(
-            f"[bold]Focus:[/bold] {self._focused_pane()}  |  "
-            f"[bold]Completed:[/bold] {self.total_requests()}{pending_part}{selected_part}{hist_part}"
+        return status_parts(
+            f"[bold]Focus:[/bold] {self._focused_pane()}",
+            "|",
+            f"[bold]Completed:[/bold] {self.total_requests()}",
+            pending_part,
+            selected_part,
+            hist_part,
         )
 
     def _render_help(self) -> Text:
         if self._mode() == Mode.FILTER:
-            return Text.from_markup(
-                "[dim]Enter[/dim]=apply  [dim]Esc[/dim]=cancel  |  "
-                "Fields: [cyan]status[/cyan]=200,4xx  [cyan]path[/cyan]=/api/*  "
-                "[cyan]method[/cyan]=GET  [cyan]latency[/cyan]>500"
-            )
+            return help_bar([
+                ("Enter", "apply"), ("Esc", "cancel"), ("|", ""),
+                ("", "Fields: [cyan]status[/cyan]=200,4xx  [cyan]path[/cyan]=/api/*  "
+                 "[cyan]method[/cyan]=GET  [cyan]latency[/cyan]>500"),
+            ])
 
         selected = self._selected_index() is not None
         pane2 = "detail" if selected else "pending"
-        pane_keys = f"[dim]1[/dim]=requests  [dim]2[/dim]={pane2}  [dim]3[/dim]=metrics"
 
         if self._focused_pane() == "requests":
             history = self._filter_history()
-            h_key = "  [dim]h[/dim]=last" if history else ""
-            nav_keys = "[dim]j/k[/dim]=select  " if not selected else "[dim]j/k[/dim]=nav  [dim]Esc[/dim]=deselect  "
-            return Text.from_markup(
-                f"{pane_keys}  |  {nav_keys}"
-                f"[dim]/[/dim]=filter  [dim]e[/dim]=errors  [dim]s[/dim]=slow{h_key}  |  "
-                "[dim]q[/dim]=quit"
-            )
+            nav_action = "nav" if selected else "select"
+            bindings: list[tuple[str, str]] = [
+                ("1", "requests"), ("2", pane2), ("3", "metrics"), ("|", ""),
+                ("j/k", nav_action),
+            ]
+            if selected:
+                bindings.append(("Esc", "deselect"))
+            bindings.extend([
+                ("/", "filter"), ("e", "errors"), ("s", "slow"),
+            ])
+            if history:
+                bindings.append(("h", "last"))
+            bindings.extend([("|", ""), ("q", "quit")])
+            return help_bar(bindings)
         elif self._focused_pane() == "detail":
-            return Text.from_markup(
-                f"{pane_keys}  |  [dim]j/k[/dim]=nav  [dim]Esc[/dim]=back  |  [dim]q[/dim]=quit"
-            )
+            return help_bar([
+                ("1", "requests"), ("2", pane2), ("3", "metrics"), ("|", ""),
+                ("j/k", "nav"), ("Esc", "back"), ("|", ""), ("q", "quit"),
+            ])
         else:
-            return Text.from_markup(
-                f"{pane_keys}  |  [dim]q[/dim]=quit"
-            )
+            return help_bar([
+                ("1", "requests"), ("2", pane2), ("3", "metrics"), ("|", ""),
+                ("q", "quit"),
+            ])
 
 
 # =============================================================================

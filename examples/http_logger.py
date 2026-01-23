@@ -26,20 +26,21 @@ import fnmatch
 import random
 import re
 import sys
-import termios
 import time
-import tty
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from pathlib import Path
 from typing import Literal
 
-from reaktiv import Signal, Computed, Effect
+from reaktiv import Signal, Computed, LinkedSignal, batch
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+# Framework imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from framework import EventStore, BaseApp, Mode
 
 
 # =============================================================================
@@ -71,30 +72,6 @@ class CompletedRequest:
     latency_ms: float
     request_size: int
     response_size: int
-
-
-# =============================================================================
-# EVENT STORE (same pattern as dashboard)
-# =============================================================================
-
-class EventStore:
-    """Append-only event store with version signal."""
-
-    def __init__(self):
-        self._events: list[HttpEvent] = []
-        self.version = Signal(0)
-
-    def add(self, event: HttpEvent) -> None:
-        self._events.append(event)
-        self.version.update(lambda v: v + 1)
-
-    @property
-    def events(self) -> list[HttpEvent]:
-        return self._events
-
-    @property
-    def total(self) -> int:
-        return len(self._events)
 
 
 # =============================================================================
@@ -209,51 +186,6 @@ class HttpFilter:
 
     def description(self) -> str:
         return self.raw if self.conditions else "all"
-
-
-# =============================================================================
-# MODE
-# =============================================================================
-
-class Mode(Enum):
-    VIEW = auto()
-    FILTER = auto()
-
-
-# =============================================================================
-# KEYBOARD INPUT (same as dashboard)
-# =============================================================================
-
-class KeyboardInput:
-    def __init__(self):
-        self._old_settings = None
-        self._available = True
-
-    def __enter__(self):
-        try:
-            self._old_settings = termios.tcgetattr(sys.stdin)
-            tty.setcbreak(sys.stdin.fileno())
-        except (termios.error, OSError):
-            self._available = False
-        return self
-
-    def __exit__(self, *args):
-        if self._old_settings:
-            try:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
-            except (termios.error, OSError):
-                pass
-
-    def get_key(self) -> str | None:
-        if not self._available:
-            return None
-        import select
-        try:
-            if select.select([sys.stdin], [], [], 0)[0]:
-                return sys.stdin.read(1)
-        except (OSError, ValueError):
-            self._available = False
-        return None
 
 
 # =============================================================================
@@ -384,24 +316,22 @@ METHOD_STYLES = {
 }
 
 
-class HttpLogger:
+class HttpLogger(BaseApp):
     def __init__(self, store: EventStore, console: Console):
+        super().__init__(console)
         self.store = store
-        self._console = console
-        self._live: Live | None = None
 
-        # UI state as Signals
-        self._running = Signal(True)
+        # Domain-specific signals
         self._focused_pane = Signal("requests")  # "requests", "pending", "detail", or "metrics"
-        self._mode = Signal(Mode.VIEW)
         self._filter = Signal(HttpFilter())
-        self._input_buffer = Signal("")
         self._filter_history: Signal[list[str]] = Signal([])
         self._show_pending = Signal(True)  # Toggle pending pane visibility
         self._pending_threshold = Signal(500.0)  # ms - highlight "stuck" requests
 
-        # Selection state for request detail view
-        self._selected_index: Signal[int | None] = Signal(None)  # Index into filtered_completed
+        # LinkedSignal: selection resets to None whenever filter changes
+        self._selected_index: LinkedSignal[int | None] = LinkedSignal(
+            lambda: None, source=self._filter
+        )
 
         # Computed: correlation (request → response pairs)
         self.completed_requests = Computed(lambda: self._compute_completed())
@@ -421,8 +351,17 @@ class HttpLogger:
         # Computed: selected request (depends on selection index and filtered list)
         self.selected_request = Computed(lambda: self._compute_selected_request())
 
-        # Effect: render
-        self._render_effect = Effect(lambda: self._do_render())
+    def _render_dependencies(self) -> None:
+        """Read signals that should trigger re-render.
+
+        Only Signals here — Computeds evaluate lazily in render().
+        """
+        self.store.version()
+        self._filter()
+        self._filter_history()
+        self._show_pending()
+        self._pending_threshold()
+        self._selected_index()
 
     def _compute_completed(self) -> list[CompletedRequest]:
         """Match requests to responses, compute latency."""
@@ -504,36 +443,9 @@ class HttpLogger:
             return filtered[idx]
         return None
 
-    def _do_render(self) -> None:
-        """Effect: read dependencies, update Live."""
-        # Establish dependencies
-        self.store.version()
-        self._focused_pane()
-        self._mode()
-        self._filter()
-        self._input_buffer()
-        self._filter_history()
-        self._show_pending()
-        self._pending_threshold()
-        self._selected_index()
-        self.completed_requests()
-        self.pending_requests()
-        self.selected_request()
-
-        if self._live:
-            self._live.update(self.render())
-
-    def set_live(self, live: Live) -> None:
-        self._live = live
-        self._live.update(self.render())
-
-    def _available_rows(self) -> int:
-        height = self._console.size.height
-        return max(5, height - 8)
-
-    @property
-    def running(self) -> bool:
-        return self._running()
+    # =========================================================================
+    # KEY HANDLING
+    # =========================================================================
 
     def handle_key(self, key: str) -> bool:
         if self._mode() == Mode.VIEW:
@@ -558,25 +470,24 @@ class HttpLogger:
         elif key == "3":
             self._focused_pane.set("metrics")
         elif key == "/" and self._focused_pane() == "requests":
-            self._mode.set(Mode.FILTER)
-            self._input_buffer.set("")
+            with batch():
+                self._mode.set(Mode.FILTER)
+                self._input_buffer.set("")
         elif key == "c":
+            # LinkedSignal auto-resets _selected_index when filter changes
             self._filter.set(HttpFilter())
-            self._selected_index.set(None)  # Clear selection on filter clear
         elif key == "e":  # Errors shortcut
             self._filter.set(HttpFilter.parse("status=4xx,5xx"))
-            self._selected_index.set(None)
         elif key == "s":  # Slow requests shortcut
             self._filter.set(HttpFilter.parse("latency>500"))
-            self._selected_index.set(None)
-        elif key == "p":  # Toggle pending pane (clears selection)
-            self._selected_index.set(None)
-            self._show_pending.update(lambda v: not v)
+        elif key == "p":  # Toggle pending pane
+            with batch():
+                self._selected_index.set(None)
+                self._show_pending.update(lambda v: not v)
         elif key == "h":
             history = self._filter_history()
             if history:
                 self._filter.set(HttpFilter.parse(history[0]))
-                self._selected_index.set(None)
         elif key == "\x1b":  # Escape - clear selection
             self._selected_index.set(None)
         elif key == "j" or key == "J":  # Down / select next
@@ -612,17 +523,23 @@ class HttpLogger:
                 self._filter_history.update(lambda h:
                     ([raw] + [x for x in h if x != raw])[:5]
                 )
-            self._filter.set(HttpFilter.parse(raw))
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
+            with batch():
+                self._filter.set(HttpFilter.parse(raw))
+                self._mode.set(Mode.VIEW)
+                self._input_buffer.set("")
         elif key == "\x1b":  # Escape
-            self._mode.set(Mode.VIEW)
-            self._input_buffer.set("")
+            with batch():
+                self._mode.set(Mode.VIEW)
+                self._input_buffer.set("")
         elif key == "\x7f":  # Backspace
             self._input_buffer.update(lambda s: s[:-1])
         elif key.isprintable():
             self._input_buffer.update(lambda s: s + key)
         return True
+
+    # =========================================================================
+    # RENDER
+    # =========================================================================
 
     def render(self) -> Layout:
         layout = Layout()
@@ -947,32 +864,18 @@ async def run_logger(duration: float | None = None):
     console.print()
     await asyncio.sleep(0.5)
 
-    store = EventStore()
+    store: EventStore[HttpEvent] = EventStore()
     simulator = TrafficSimulator(store)
-    logger = HttpLogger(store, console)
+    app = HttpLogger(store, console)
 
     await simulator.start()
-    start_time = time.time()
 
     try:
-        with KeyboardInput() as keyboard:
-            with Live(console=console, refresh_per_second=10) as live:
-                logger.set_live(live)
-
-                while logger.running:
-                    if duration and (time.time() - start_time) > duration:
-                        break
-
-                    key = keyboard.get_key()
-                    if key:
-                        logger.handle_key(key)
-
-                    await asyncio.sleep(0.05)
-
+        await app.run(duration=duration)
     finally:
         await simulator.stop()
 
-    console.print(f"\n[bold]Done![/bold] {logger.total_requests()} completed requests")
+    console.print(f"\n[bold]Done![/bold] {app.total_requests()} completed requests")
 
 
 def main():

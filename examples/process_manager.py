@@ -398,7 +398,12 @@ class ProcessMonitorApp(BaseApp):
         )
 
     def _render_dependencies(self) -> None:
-        """Read signals that should trigger re-render."""
+        """Read signals that should trigger re-render.
+
+        Only read Signals here, not Computeds. Computeds evaluate lazily
+        when render() reads them — avoids per-event recomputation when
+        the Effect fires at event rate but renders at frame rate.
+        """
         self.store.version()
         self._filter()
         self._selected_index()
@@ -407,10 +412,6 @@ class ProcessMonitorApp(BaseApp):
         if self.debug:
             self.debug.visible()
             self.debug.rate_multiplier()
-        self.process_list()
-        self.process_states()
-        self.filtered_processes()
-        self.selected_process()
 
     # =========================================================================
     # COMPUTED VALUES

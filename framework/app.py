@@ -42,10 +42,15 @@ class BaseApp:
         self._render_dirty = False
 
     def _render_dependencies(self) -> None:
-        """Override to read additional signals that should trigger re-render.
+        """Override to read Signals that should trigger re-render.
 
-        Called inside the render Effect body. Read any signals here to establish
+        Called inside the render Effect body. Read Signals here to establish
         them as dependencies (e.g., self.store.version()).
+
+        IMPORTANT: Only read Signals here, not Computeds. Computeds should
+        evaluate lazily when render() reads them. Reading Computeds here
+        forces re-evaluation on every Signal change (per-event), defeating
+        the debounced render.
         """
         pass
 

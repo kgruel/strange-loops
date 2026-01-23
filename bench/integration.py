@@ -62,10 +62,8 @@ class MinimalReactiveApp:
         self._effect = Effect(lambda: self._on_signal_change())
 
     def _on_signal_change(self):
+        # Only read Signals — Computeds evaluate lazily in render
         self.store.version()
-        self.process_list()
-        self.process_logs()
-        self.process_states()
         self._render_dirty = True
         metrics.count("effect_fires")
 

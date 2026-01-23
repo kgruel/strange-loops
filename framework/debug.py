@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import resource
-import time
 from typing import Callable
 
 from reaktiv import Signal
 from rich.panel import Panel
 from rich.text import Text
 
+from .instrument import metrics
 from .store import EventStore
 
 
@@ -19,11 +19,12 @@ _RATE_STEPS = [1.0, 2.0, 5.0, 10.0, 50.0, 100.0]
 class DebugPane:
     """Reusable debug pane providing metrics display and simulation rate control.
 
+    Reads live instrumentation data from the ``metrics`` singleton
+    (framework.instrument) when visible. Metrics collection is enabled
+    automatically on show and disabled on hide (zero-cost when hidden).
+
     Usage:
         debug = DebugPane(store=my_store, actions={"B": ("bulk spawn (10)", spawn_fn)})
-
-    The pane tracks events/sec, render time, memory, and exposes a rate_multiplier
-    Signal that simulators can read.
 
     Actions dict maps key -> (label, callable). The callable is invoked with no args
     when the key is pressed while the debug pane is visible.
@@ -44,14 +45,15 @@ class DebugPane:
         self.visible = Signal(False)
         self.rate_multiplier: Signal[float] = Signal(1.0)
 
-        # Metrics state
-        self._render_time_ms: float = 0.0
-        self._last_event_count = 0
-        self._last_event_time = time.time()
-        self._events_per_sec = 0.0
-
     def toggle(self) -> None:
-        self.visible.update(lambda v: not v)
+        currently_visible = self.visible()
+        self.visible.set(not currently_visible)
+        if not currently_visible:
+            # Becoming visible — enable metrics collection
+            metrics.enable()
+        else:
+            # Becoming hidden — disable (zero-cost)
+            metrics.disable()
 
     def cycle_rate(self, up: bool) -> None:
         current = self.rate_multiplier()
@@ -85,38 +87,51 @@ class DebugPane:
         return False
 
     def record_render_time(self, ms: float) -> None:
-        self._render_time_ms = ms
+        """Legacy hook — render timing now comes from metrics.time('render')."""
+        pass
 
     def render(self) -> Panel:
         """Render the debug pane. Call this from your app's render() method."""
-        # Update events/sec
-        now = time.time()
-        current_total = self.store.total
-        dt = now - self._last_event_time
-        if dt > 0:
-            self._events_per_sec = (current_total - self._last_event_count) / dt
-        self._last_event_count = current_total
-        self._last_event_time = now
+        # Record RSS as a gauge so it shows up alongside instrument data
+        rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        rss_mb = rss_bytes / 1048576
+        metrics.gauge("rss_mb", rss_mb)
+
+        snap = metrics.snapshot()
 
         lines = []
 
-        # Metrics
-        lines.append("[bold underline]Metrics[/bold underline]")
-        lines.append(f"  Events/sec:     {self._events_per_sec:>8.1f}")
-        lines.append(f"  Total events:   {self.store.total:>8d}")
-        lines.append(f"  Render time:    {self._render_time_ms:>7.2f} ms")
+        # --- Counters ---
+        if snap["counters"]:
+            lines.append("[bold underline]Counters[/bold underline]")
+            elapsed = snap["elapsed_sec"]
+            for name, val in sorted(snap["counters"].items()):
+                rate = val / elapsed if elapsed > 0 else 0.0
+                lines.append(f"  {name:<20} {val:>7,}  ({rate:>6.1f}/s)")
+            lines.append("")
 
-        # Memory RSS (macOS: ru_maxrss is bytes)
-        rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        rss_mb = rss_bytes / 1048576
-        lines.append(f"  Memory (RSS):   {rss_mb:>7.1f} MB")
+        # --- Timings ---
+        if snap["timings"]:
+            lines.append("[bold underline]Timings[/bold underline]")
+            for name, t in sorted(snap["timings"].items()):
+                lines.append(
+                    f"  {name:<20} last={t['last_ms']:>6.2f}  "
+                    f"avg={t['avg_ms']:>6.2f}  p95={t['p95_ms']:>6.2f} ms"
+                )
+            lines.append("")
 
-        # Extra metrics from caller
+        # --- Gauges ---
+        if snap["gauges"]:
+            lines.append("[bold underline]Gauges[/bold underline]")
+            for name, val in sorted(snap["gauges"].items()):
+                lines.append(f"  {name:<20} {val:>10.1f}")
+            lines.append("")
+
+        # Extra metrics from caller (app-specific)
         if self._extra_metrics:
             for label, value in self._extra_metrics():
                 lines.append(f"  {label:<16}{value:>8}")
-
-        lines.append("")
+            lines.append("")
 
         # Rate control
         lines.append("[bold underline]Controls[/bold underline]")

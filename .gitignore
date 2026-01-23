@@ -1,2 +1,4 @@
 /.subtask/
 __pycache__/
+.obsidian/
+.venv

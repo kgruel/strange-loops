@@ -201,36 +201,55 @@ class ProcessSimulator:
                 pass
 
     async def _run(self) -> None:
-        """Process lifecycle: starting → running (with logs/crashes) → stopped."""
-        # STARTING phase
-        self._emit_state_change(ProcessState.STOPPED, ProcessState.STARTING)
-        start_delay = random.uniform(0.5, 2.0)
-        await asyncio.sleep(start_delay)
+        """Process lifecycle: starting → running (with logs/crashes) → stopped.
 
-        # Transition to RUNNING
-        self._emit_state_change(ProcessState.STARTING, ProcessState.RUNNING)
+        On crash, auto-restarts after a short delay to sustain event throughput.
+        """
+        prev_state = ProcessState.STOPPED
 
-        # RUNNING phase - emit logs, may crash
-        messages = LOG_MESSAGES.get(self.name, LOG_MESSAGES["_default"])
-        try:
-            while not self._stop_requested:
-                # Emit a log message
-                level, message = random.choice(messages)
-                self._emit_log(message, level)
+        while not self._stop_requested:
+            # STARTING phase
+            self._emit_state_change(prev_state, ProcessState.STARTING)
+            start_delay = random.uniform(0.5, 2.0)
+            await asyncio.sleep(start_delay / self._rate_multiplier())
 
-                # Check for crash
-                if random.random() < self.crash_prob:
-                    self._emit_log("Fatal error: process terminated unexpectedly", "error")
-                    self._emit_state_change(ProcessState.RUNNING, ProcessState.CRASHED)
-                    return
+            # Transition to RUNNING
+            self._emit_state_change(ProcessState.STARTING, ProcessState.RUNNING)
 
-                # Wait before next log (scaled by rate multiplier)
-                base_delay = 1.0 / self.log_freq
-                delay = base_delay / self._rate_multiplier() + random.uniform(-0.2, 0.5)
-                await asyncio.sleep(max(0.01, delay))
+            # RUNNING phase - emit logs, may crash
+            messages = LOG_MESSAGES.get(self.name, LOG_MESSAGES["_default"])
+            crashed = False
+            try:
+                while not self._stop_requested:
+                    # Emit a log message
+                    level, message = random.choice(messages)
+                    self._emit_log(message, level)
 
-        except asyncio.CancelledError:
-            pass
+                    # Check for crash (scale probability by rate so per-second crash rate is constant)
+                    effective_crash_prob = self.crash_prob / self._rate_multiplier()
+                    if random.random() < effective_crash_prob:
+                        self._emit_log("Fatal error: process terminated unexpectedly", "error")
+                        self._emit_state_change(ProcessState.RUNNING, ProcessState.CRASHED)
+                        crashed = True
+                        break
+
+                    # Wait before next log (scaled by rate multiplier)
+                    base_delay = 1.0 / self.log_freq
+                    delay = base_delay / self._rate_multiplier() + random.uniform(-0.2, 0.5)
+                    await asyncio.sleep(max(0.01, delay))
+
+            except asyncio.CancelledError:
+                break
+
+            if crashed:
+                # Auto-restart after a short delay
+                restart_delay = random.uniform(2.0, 3.0) / self._rate_multiplier()
+                await asyncio.sleep(restart_delay)
+                prev_state = ProcessState.CRASHED
+                continue
+
+            # If we exit the inner loop without crash or cancel, it's a stop request
+            break
 
         # STOPPING phase (graceful shutdown)
         if self._stop_requested:

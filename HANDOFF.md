@@ -1,125 +1,160 @@
-# Handoff: Context Observability Primitive
+# Handoff: Event-Sourced Reactive CLI Framework
 
 ## Summary
 
-Event-sourced reactive TUI pattern using Rich + reaktiv. Framework (`framework/`, ~500 lines) with persistence, debug tooling, simulator base, and debounced rendering. Profiling infrastructure validates performance characteristics. Pattern proven across domains; now focused on profiling/debug as the development workbench.
+Event-sourced reactive TUI framework using Rich + reaktiv. Framework (`framework/`) with persistence, debug tooling, simulator base, debounced rendering, incremental projections, and reusable render helpers. Baseline profiling snapshot captured. Currently iterating on M3 (UI primitives).
+
+## Milestone Status
+
+| Milestone | Status | Notes |
+|-----------|--------|-------|
+| M0: Consolidate pattern | **Done** | All examples on BaseApp, impure Computeds fixed, batch everywhere |
+| M2: Projections | **Done** | `Projection` base class, `store.since()`, retention via watermark |
+| M3: UI primitives | **Active** | Render helpers extracted, filter handler in BaseApp, iterating |
+| M4: Real tool adapters | Not started | Subprocess, file tailer, HTTP capture |
+| M5: Docs + releases | Partial | Reactive contracts + projections docs done, roadmap exists |
+| M6: Package MVP | Not started | pyproject.toml, src/ layout, tests, CI (deferred) |
+
+See `ROADMAP.md` for full milestone details.
 
 ## Current State
 
-| Component | Lines | Purpose |
-|-----------|-------|---------|
-| `framework/store.py` | ~80 | EventStore with JSONL persistence, persistent file handle |
-| `framework/app.py` | ~115 | BaseApp, debounced render Effect, main loop |
-| `framework/debug.py` | ~140 | DebugPane (metrics, rate control, pluggable actions) |
-| `framework/sim.py` | ~140 | BaseSimulator (lifecycle, auto-restart, rate-aware crash) |
-| `framework/instrument.py` | ~150 | Metrics collector (counters, timings, gauges) |
-| `framework/keyboard.py` | ~47 | KeyboardInput |
-| `framework/filter.py` | ~30 | FilterHistory |
-
-| Example | Domain |
-|---------|--------|
-| `examples/dashboard.py` | Independent event aggregation |
-| `examples/http_logger.py` | Correlated request/response pairs |
-| `examples/http_logger_v2.py` | Same, enhanced |
-| `examples/process_manager.py` | State machines + user actions + debug pane |
+| Component | Purpose |
+|-----------|---------|
+| `framework/store.py` | EventStore with JSONL persistence, `since(n)`, `evict_below(n)` |
+| `framework/app.py` | BaseApp: render loop, projection registry, filter handler |
+| `framework/projection.py` | Projection base class (incremental fold over events) |
+| `framework/ui.py` | Render helpers: `app_layout`, `focus_panel`, `event_table`, `metrics_panel`, `help_bar`, `status_parts` |
+| `framework/debug.py` | DebugPane (metrics, rate control, pluggable actions) |
+| `framework/sim.py` | BaseSimulator (lifecycle, auto-restart, rate-aware crash) |
+| `framework/instrument.py` | Metrics collector (counters, timings, gauges) |
+| `framework/keyboard.py` | KeyboardInput |
+| `framework/filter.py` | FilterHistory |
 
 ## The Pattern
 
 ```
 EventStore (append-only log, optional JSONL persistence)
-└── version: Signal ─────────────────────────┐
-                                             │
-App                                          │
-├── ui_state: Signal (mode, filter, etc) ───┤
-├── tick: Signal (periodic, for live state) ─┼──► Effect (marks dirty)
-│                                            │         │
-│                                            │    main loop (20fps)
-│                                            │         │
-└── derived: Computed ◄──────────────────────┘    render() ──► Live.update()
-    (evaluates lazily at frame rate,                  ▲
-     NOT at event rate)                               │
-                                              Computeds evaluate here
+├── version: Signal ─────────────────────────┐
+│                                             │
+│   store.since(cursor) → new events          │
+│         │                                   │
+│         ▼                                   │
+│   Projection.advance()                      │
+│     apply(state, e1), apply(state, e2)...   │
+│     state.set(accumulated)                  │
+│         │                                   │
+App       │                                   │
+├── ui_state: Signal (mode, filter, etc) ────┤
+├── projections: [registered] ───────────────┤
+│         │                                   │
+│    frame tick (20fps):                      │
+│      1. advance projections                 │
+│      2. render() reads .state + Computeds   │
+│      3. live.update(layout)                 │
+│                                            │
+└── Effect (reads Signals → marks dirty) ────┘
+
+Render helpers (framework/ui.py):
+  app_layout(main, status, help) → Layout
+  focus_panel(content, title, focused) → Panel
+  event_table(rows, columns, max_rows) → (Table, ScrollInfo)
+  metrics_panel(sections) → Text
+  help_bar(bindings) → Text
+  status_parts(*parts) → Text
 ```
 
-Critical insight: `_render_dependencies()` reads only Signals, never Computeds. Computeds evaluate lazily in `render()`. This means Computeds run at frame rate (~20fps) regardless of event rate (tested to 80k events/sec).
+## Key Contracts
 
-## Performance Profile
+See `docs/reactive-contracts.md` for full rationale.
 
-Benchmarks in `bench/`:
+1. Effects establish dependencies, not workload (just set dirty flag)
+2. Computeds evaluate at frame rate, not event rate
+3. `_render_dependencies()` reads only Signals, never Computeds
+4. Computeds are pure (no mutation, no I/O)
+5. Batch multi-Signal mutations with `batch()`
+6. Projections advance at frame rate (O(new) not O(all))
+7. Retention: `min(cursor)` watermark, `store.evict_below(n)`
 
-| Metric | Value | Source |
-|--------|-------|--------|
-| Computed scaling | O(n), budget-breaking at ~500k events | `computed_scaling.py` |
-| Max throughput (lazy Computeds) | ~80k events/sec | `integration.py` |
-| Effect fires per frame | 500-4000x at high load (all just set dirty flag) | `integration.py` |
-| Rich rendering | 7ms at 1000 rows (not a bottleneck) | `system_profile.py` |
-| Memory | ~0.4 KB/event, never freed | `system_profile.py` |
-| Persistence I/O (persistent handle) | ~820k writes/sec | `system_profile.py` |
+## Baseline Performance
 
-Framework self-instruments via `framework/instrument.py` (zero-cost when disabled).
+Snapshot: `bench/results/snapshots/baseline.md` (git SHA `9823e35`)
 
-## What Was Proven
+| Metric | Value |
+|--------|-------|
+| Pipeline throughput | ~210k events/sec |
+| Render (1000 rows) | 7ms |
+| Computed scaling (500k) | 107ms (O(n), breaks frame budget) |
+| Memory | 0.41 KB/event |
+| Persistence I/O | ~830k writes/sec (batched) |
 
-1. **Actions are just events.** User-triggered mutations add to the same EventStore.
-2. **Per-entity state machines fall out naturally.** Shared store, Computed scans and groups.
-3. **Composability via addition.** New features = new Computed + new pane. No refactoring.
-4. **Framework generality.** Four examples, zero framework changes needed.
-5. **Debounced lazy evaluation.** Effect fires per-event but Computeds evaluate per-frame. 26x throughput improvement over naive approach.
-6. **Persistence/replay works.** Quit → restart → state reconstructed from event log.
+Compare against baseline: `uv run bench/snapshot.py --name current --seed 0 --compare baseline`
 
-## Deferred Roadmap
+## M3 Status: UI Primitives
 
-| Priority | Item | Depends on | Notes |
-|----------|------|-----------|-------|
-| 1 | **Widget primitives** | — | Sparkline, Temperature, Metric. First consumer: debug pane |
-| 2 | **Incremental Computed** | Widgets (for observability) | Fold pattern: Computed carries state, processes only new events |
-| 3 | **Windowed retention** | Incremental Computed | Evict old events, cap memory. Can't evict if Computed needs full history |
-| — | **Real data sources** | Any of above | Actual subprocess/log/queue. Lateral move, same pattern |
-| — | **Pane DSL** | Widgets | Declarative pane composition. Debug pane = first customer |
+**Done:**
+- `framework/ui.py` — 6 render helpers + `ColumnSpec`/`ScrollInfo` types
+- `BaseApp._handle_filter_key()` — shared filter keyboard handler
+- `examples/dashboard.py` — migrated to use all helpers (proof of concept)
 
-## Development Workbench
+**What's left (domain-specific, per-app):**
+- Column definitions + row styling logic
+- Filter parser (domain-specific field names/syntax)
+- Pane visibility conditions
+- Metrics section categories
+- Mode enums beyond VIEW/FILTER
 
-The debug pane is both product and forge:
-- **Profiling infrastructure** (`bench/`, `framework/instrument.py`) — offline characterization
-- **Debug pane** — live observability, runtime controls, rate adjustment
-- **Simulator** (`framework/sim.py`) — configurable data source for iteration
-- Development loop: add primitive → use in debug pane → profile → validate
+**Framing:** After extraction, an app is a BaseApp subclass that provides schema (columns, filter, modes) + projections. The framework handles rendering mechanics, keyboard plumbing, and projection lifecycle.
 
 ## Run
 
 ```bash
 uv run examples/process_manager.py    # Press D for debug pane, +/- for rate
+uv run examples/dashboard.py          # Multi-source event aggregation
 
 # Benchmarks
-uv run bench/computed_scaling.py
-uv run bench/system_profile.py
-uv run bench/integration.py
+uv run bench/snapshot.py --name current --seed 0 --compare baseline
+uv run bench/harness.py --scenario narrow --profile narrow_high_rate
 ```
 
 ## Key Files
 
 ```
-framework/                         # Framework (~500 lines)
-├── store.py                       # EventStore + persistence
-├── app.py                         # BaseApp + debounced render
+framework/
+├── store.py                       # EventStore + persistence + since() + evict_below()
+├── app.py                         # BaseApp + render loop + projection registry + filter handler
+├── projection.py                  # Projection base class (incremental fold)
+├── ui.py                          # Render helpers (pure functions → Rich renderables)
 ├── debug.py                       # DebugPane (dev tool)
 ├── sim.py                         # BaseSimulator
 ├── instrument.py                  # Metrics collector
 ├── keyboard.py                    # KeyboardInput
 └── filter.py                      # FilterHistory
 
-bench/                             # Profiling infrastructure
+bench/
+├── snapshot.py                    # Unified bench suite runner
+├── harness.py                     # Parameterized reactive pipeline bench
+├── profiles.py                    # Scenario profiles
+├── scenarios.py                   # Event shape scenarios
 ├── computed_scaling.py            # Computed O(n) characterization
 ├── system_profile.py              # Fan-out, Rich, memory, I/O
-└── integration.py                 # Full pipeline under load
+└── results/snapshots/             # Saved baselines
 
-examples/                          # Domain examples
-├── dashboard.py                   # Independent events
+examples/                          # Domain examples (all on BaseApp)
+├── dashboard.py                   # Independent events (uses render helpers)
 ├── http_logger.py                 # Correlated events
 ├── http_logger_v2.py              # Enhanced
-└── process_manager.py             # State machines + debug pane
+├── extract_demo.py                # EventStore + KeyboardInput demo
+└── process_manager.py             # State machines + projections + debug pane
+
+docs/
+├── reactive-contracts.md          # Reactive contracts (what goes where and why)
+└── projections.md                 # Projection primitive (M2)
 ```
 
 ## See Also
 
-`RETROSPECTIVE.md` contains the intellectual history, void analysis, and context systems architecture.
+- `ROADMAP.md` — full milestone plan with deliverables and work items
+- `RETROSPECTIVE.md` — intellectual history, void analysis, context systems architecture
+- `docs/reactive-contracts.md` — Signal vs Computed vs Effect vs Projection
+- `bench/results/snapshots/baseline.md` — baseline performance numbers

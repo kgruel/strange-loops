@@ -52,25 +52,6 @@ Work items:
 
 ---
 
-## Milestone (deferred to m5): Package MVP (installable, testable)
-# DEFER
-**Goal:** turn `framework/` into a reusable package you can depend on from real tools.
-
-Deliverables:
-- Root `pyproject.toml` for this package (name TBD) and a `src/` layout.
-- Examples runnable via `python -m ...` / console scripts without `sys.path.insert(...)`.
-- Basic test suite (pytest) that locks down the critical contracts.
-
-Work items:
-- Choose package name and public API surface (`EventStore`, `BaseApp`, `KeyboardInput`, `FilterHistory`, `DebugPane`, `metrics`).
-- Add tests for:
-  - `EventStore` persistence/replay ordering
-  - debounced rendering contract (Effect may fire at event-rate, render runs at frame-rate)
-  - “no Computed side effects” (convention + a couple targeted regression tests)
-- Add CI (lint + typecheck + tests) once the package exists.
-
----
-
 ## Milestone 2: Projections (incremental Computed / folds)
 
 **Goal:** scale derived state without re-scanning the full event list.
@@ -143,5 +124,25 @@ Work items:
   - “add a pane”
   - “persistence + replay”
   - “batch UI updates”
-- Add a “pitfalls” section (Computed purity, Effect dependency hygiene, retention gotchas).
+- Add a "pitfalls" section (Computed purity, Effect dependency hygiene, retention gotchas).
+
+---
+
+## Milestone 6: Package MVP (installable, testable)
+
+**Goal:** turn `framework/` into a reusable package you can depend on from real tools.
+
+Deliverables:
+- Root `pyproject.toml` for this package (name TBD) and a `src/` layout.
+- Examples runnable via `python -m ...` / console scripts without `sys.path.insert(...)`.
+- Basic test suite (pytest) that locks down the critical contracts.
+
+Work items:
+- Choose package name and public API surface (`EventStore`, `BaseApp`, `KeyboardInput`, `FilterHistory`, `DebugPane`, `Projection`, `metrics`).
+- Add tests for:
+  - `EventStore` persistence/replay ordering
+  - Projection advance + cursor + retention
+  - debounced rendering contract (Effect may fire at event-rate, render runs at frame-rate)
+  - "no Computed side effects" (convention + a couple targeted regression tests)
+- Add CI (lint + typecheck + tests) once the package exists.
 

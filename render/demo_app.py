@@ -39,14 +39,14 @@ class DemoApp(RenderApp):
     def layout(self, width: int, height: int) -> None:
         self._region_main = Region(0, 0, width, height)
 
-    def render(self) -> None:
-        # Tick spinner ~10 fps
+    def update(self) -> None:
         now = time.monotonic()
         if now - self._last_tick >= 0.1:
             self._spinner_state = self._spinner_state.tick()
             self._last_tick = now
             self.mark_dirty()
 
+    def render(self) -> None:
         # Build list block
         items = [
             StyledBlock.text(item, Style()) for item in LIST_ITEMS

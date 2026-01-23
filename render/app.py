@@ -51,6 +51,9 @@ class RenderApp:
                         self.on_key(key)
                         self._dirty = True
 
+                    # Advance state (animations, timers)
+                    self.update()
+
                     # Render if dirty
                     if self._dirty:
                         self._dirty = False
@@ -65,6 +68,12 @@ class RenderApp:
 
     def layout(self, width: int, height: int) -> None:
         """Called on resize. Override to recalculate regions."""
+
+    def update(self) -> None:
+        """Called every iteration. Override to advance animations/timers.
+
+        Call mark_dirty() if state changed and a re-render is needed.
+        """
 
     def render(self) -> None:
         """Called each frame when dirty. Override to paint into self._buf."""
@@ -92,7 +101,7 @@ class RenderApp:
         """Diff current vs previous buffer and write changes to terminal."""
         if self._buf is None or self._prev is None:
             return
-        writes = self._prev.diff(self._buf)
+        writes = self._buf.diff(self._prev)
         if writes:
             self._writer.write_frame(writes)
         # Swap: current becomes previous for next frame

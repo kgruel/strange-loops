@@ -45,11 +45,15 @@ class RenderApp:
         try:
             with self._keyboard:
                 while self._running:
-                    # Poll keyboard
-                    key = self._keyboard.get_key()
-                    if key is not None:
+                    # Drain all available keypresses before rendering
+                    had_key = False
+                    while True:
+                        key = self._keyboard.get_key()
+                        if key is None:
+                            break
                         self.on_key(key)
                         self._dirty = True
+                        had_key = True
 
                     # Advance state (animations, timers)
                     self.update()
@@ -60,7 +64,11 @@ class RenderApp:
                         self.render()
                         self._flush()
 
-                    await asyncio.sleep(1.0 / self._fps_cap)
+                    # Adaptive sleep: short yield when active, full frame sleep when idle
+                    if had_key or self._dirty:
+                        await asyncio.sleep(0.001)
+                    else:
+                        await asyncio.sleep(1.0 / self._fps_cap)
         finally:
             loop.remove_signal_handler(signal.SIGWINCH)
             self._writer.show_cursor()

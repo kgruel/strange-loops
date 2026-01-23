@@ -19,7 +19,8 @@ class EventStore(Generic[T]):
 
     Optional persistence: pass path, serialize, and deserialize to enable
     JSON Lines append-only file storage. Events are loaded on init and
-    appended on each add().
+    appended on each add(). The file handle is kept open for the lifetime
+    of the store — call close() when done, or use as a context manager.
     """
 
     def __init__(
@@ -33,11 +34,13 @@ class EventStore(Generic[T]):
         self._path = path
         self._serialize = serialize
         self._deserialize = deserialize
+        self._file = None
 
         if path is not None:
             if serialize is None or deserialize is None:
                 raise ValueError("path requires both serialize and deserialize")
             self._load()
+            self._file = path.open("a")
 
         self.version = Signal(len(self._events))
 
@@ -53,10 +56,21 @@ class EventStore(Generic[T]):
 
     def add(self, event: T) -> None:
         self._events.append(event)
-        if self._path is not None:
-            with self._path.open("a") as f:
-                f.write(json.dumps(self._serialize(event)) + "\n")
+        if self._file is not None:
+            self._file.write(json.dumps(self._serialize(event)) + "\n")
+            self._file.flush()
         self.version.update(lambda v: v + 1)
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self) -> "EventStore[T]":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
 
     @property
     def events(self) -> list[T]:

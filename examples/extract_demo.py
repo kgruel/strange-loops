@@ -36,7 +36,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cli_framework import EventStore, BaseApp, Mode, FilterHistory
+from framework import EventStore, BaseApp, Mode, FilterHistory
 
 
 # =============================================================================

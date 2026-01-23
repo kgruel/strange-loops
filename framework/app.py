@@ -37,6 +37,7 @@ class BaseApp:
         self._focused_pane = Signal("")
 
         self._render_effect: Effect | None = None
+        self._render_dirty = False
 
     def _render_dependencies(self) -> None:
         """Override to read additional signals that should trigger re-render.
@@ -47,7 +48,7 @@ class BaseApp:
         pass
 
     def _do_render(self) -> None:
-        """Effect body: read all dependencies, then update Live."""
+        """Effect body: read all dependencies, mark dirty for next loop tick."""
         # Base signal dependencies
         self._running()
         self._mode()
@@ -57,8 +58,7 @@ class BaseApp:
         # Subclass dependencies
         self._render_dependencies()
 
-        if self._live:
-            self._live.update(self.render())
+        self._render_dirty = True
 
     def set_live(self, live: Live) -> None:
         self._live = live
@@ -100,5 +100,9 @@ class BaseApp:
                     key = keyboard.get_key()
                     if key:
                         self.handle_key(key)
+
+                    if self._render_dirty:
+                        self._render_dirty = False
+                        live.update(self.render())
 
                     await asyncio.sleep(0.05)

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import resource
 import sys
 import time
 from dataclasses import dataclass, field
@@ -33,7 +32,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Callable, Literal
 
-from reaktiv import Signal, Computed, Effect
+from reaktiv import Signal, Computed
 from rich.console import Console
 from rich.layout import Layout
 from rich.panel import Panel
@@ -42,19 +41,15 @@ from rich.text import Text
 
 # Framework imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from cli_framework import EventStore, KeyboardInput, FilterHistory, BaseApp
+from framework import EventStore, FilterHistory, BaseApp, DebugPane, BaseSimulator, SimState
 
 
 # =============================================================================
 # DATA MODEL
 # =============================================================================
 
-class ProcessState(Enum):
-    STOPPED = "stopped"
-    STARTING = "starting"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    CRASHED = "crashed"
+# Reuse SimState from framework, aliased for domain clarity
+ProcessState = SimState
 
 
 @dataclass(frozen=True)
@@ -167,109 +162,33 @@ LOG_MESSAGES = {
 # PROCESS SIMULATOR
 # =============================================================================
 
-class ProcessSimulator:
-    """Per-process async task that simulates execution lifecycle."""
+class ProcessSimulator(BaseSimulator):
+    """Process-specific simulator that emits ProcessEvents."""
 
     def __init__(self, pid: str, name: str, crash_prob: float, log_freq: float,
                  store: EventStore, rate_multiplier: Callable[[], float] = lambda: 1.0):
-        self.pid = pid
+        super().__init__(pid, rate_multiplier=rate_multiplier,
+                         crash_prob=crash_prob, event_freq=log_freq)
         self.name = name
-        self.crash_prob = crash_prob
-        self.log_freq = log_freq
         self._store = store
-        self._rate_multiplier = rate_multiplier
-        self._task: asyncio.Task | None = None
-        self._stop_requested = False
 
-    @property
-    def is_running(self) -> bool:
-        return self._task is not None and not self._task.done()
-
-    async def start(self) -> None:
-        """Start the process simulation."""
-        self._stop_requested = False
-        self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        """Request graceful stop."""
-        self._stop_requested = True
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-
-    async def _run(self) -> None:
-        """Process lifecycle: starting → running (with logs/crashes) → stopped.
-
-        On crash, auto-restarts after a short delay to sustain event throughput.
-        """
-        prev_state = ProcessState.STOPPED
-
-        while not self._stop_requested:
-            # STARTING phase
-            self._emit_state_change(prev_state, ProcessState.STARTING)
-            start_delay = random.uniform(0.5, 2.0)
-            await asyncio.sleep(start_delay / self._rate_multiplier())
-
-            # Transition to RUNNING
-            self._emit_state_change(ProcessState.STARTING, ProcessState.RUNNING)
-
-            # RUNNING phase - emit logs, may crash
-            messages = LOG_MESSAGES.get(self.name, LOG_MESSAGES["_default"])
-            crashed = False
-            try:
-                while not self._stop_requested:
-                    # Emit a log message
-                    level, message = random.choice(messages)
-                    self._emit_log(message, level)
-
-                    # Check for crash (scale probability by rate so per-second crash rate is constant)
-                    effective_crash_prob = self.crash_prob / self._rate_multiplier()
-                    if random.random() < effective_crash_prob:
-                        self._emit_log("Fatal error: process terminated unexpectedly", "error")
-                        self._emit_state_change(ProcessState.RUNNING, ProcessState.CRASHED)
-                        crashed = True
-                        break
-
-                    # Wait before next log (scaled by rate multiplier)
-                    base_delay = 1.0 / self.log_freq
-                    delay = base_delay / self._rate_multiplier() + random.uniform(-0.2, 0.5)
-                    await asyncio.sleep(max(0.01, delay))
-
-            except asyncio.CancelledError:
-                break
-
-            if crashed:
-                # Auto-restart after a short delay
-                restart_delay = random.uniform(2.0, 3.0) / self._rate_multiplier()
-                await asyncio.sleep(restart_delay)
-                prev_state = ProcessState.CRASHED
-                continue
-
-            # If we exit the inner loop without crash or cancel, it's a stop request
-            break
-
-        # STOPPING phase (graceful shutdown)
-        if self._stop_requested:
-            self._emit_state_change(ProcessState.RUNNING, ProcessState.STOPPING)
-            await asyncio.sleep(random.uniform(0.3, 1.0))
-            self._emit_state_change(ProcessState.STOPPING, ProcessState.STOPPED)
-
-    def _emit_state_change(self, from_state: ProcessState, to_state: ProcessState) -> None:
+    def emit_event(self, message: str, level: str = "info") -> None:
         self._store.add(ProcessEvent(
-            pid=self.pid,
+            pid=self.entity_id,
+            kind="log",
+            payload={"message": message, "level": level},
+        ))
+
+    def on_state_change(self, from_state: SimState, to_state: SimState) -> None:
+        self._store.add(ProcessEvent(
+            pid=self.entity_id,
             kind="state_change",
             payload={"from": from_state.value, "to": to_state.value},
         ))
 
-    def _emit_log(self, message: str, level: str) -> None:
-        self._store.add(ProcessEvent(
-            pid=self.pid,
-            kind="log",
-            payload={"message": message, "level": level},
-        ))
+    def generate_message(self) -> tuple[str, str]:
+        messages = LOG_MESSAGES.get(self.name, LOG_MESSAGES["_default"])
+        return random.choice(messages)
 
 
 # =============================================================================
@@ -451,13 +370,8 @@ class ProcessMonitorApp(BaseApp):
         # Confirm action
         self._confirm_action: Signal[tuple[str, str] | None] = Signal(None)  # (action, pid)
 
-        # Debug pane
-        self._debug_visible = Signal(False)
-        self._rate_multiplier: Signal[float] = Signal(1.0)
-        self._render_time_ms: float = 0.0
-        self._last_event_count = 0
-        self._last_event_time = time.time()
-        self._events_per_sec = 0.0
+        # Debug pane (initialized after manager is set via _init_debug)
+        self.debug: DebugPane | None = None
 
         # Tick signal for live durations (bumped every second)
         self._tick = Signal(0)
@@ -470,6 +384,19 @@ class ProcessMonitorApp(BaseApp):
         self.filtered_processes = Computed(lambda: self._compute_filtered_processes())
         self.selected_process = Computed(lambda: self._compute_selected_process())
 
+    def init_debug(self) -> None:
+        """Initialize debug pane after manager is attached."""
+        self.debug = DebugPane(
+            self.store,
+            actions={
+                "B": ("bulk spawn (10)", self._bulk_spawn),
+                "S": ("mass stop", self._mass_stop),
+                "R": ("mass restart", self._mass_restart),
+                "X": ("mass close", self._mass_close),
+            },
+            extra_metrics=lambda: [("Active sims:", f"{len(self.manager._simulators):>5d}")],
+        )
+
     def _render_dependencies(self) -> None:
         """Read signals that should trigger re-render."""
         self.store.version()
@@ -477,8 +404,9 @@ class ProcessMonitorApp(BaseApp):
         self._selected_index()
         self._confirm_action()
         self._tick()
-        self._debug_visible()
-        self._rate_multiplier()
+        if self.debug:
+            self.debug.visible()
+            self.debug.rate_multiplier()
         self.process_list()
         self.process_states()
         self.filtered_processes()
@@ -636,40 +564,14 @@ class ProcessMonitorApp(BaseApp):
             self._request_restart()
         elif key == "d":
             self._request_remove()
-        elif key == "D":
-            self._debug_visible.update(lambda v: not v)
-        elif key == "+" and self._debug_visible():
-            self._cycle_rate_multiplier(up=True)
-        elif key == "-" and self._debug_visible():
-            self._cycle_rate_multiplier(up=False)
-        elif key == "B" and self._debug_visible():
-            self._bulk_spawn()
-        elif key == "S" and self._debug_visible():
-            self._mass_stop()
-        elif key == "R" and self._debug_visible():
-            self._mass_restart()
-        elif key == "X" and self._debug_visible():
-            self._mass_close()
+        elif self.debug and self.debug.handle_key(key):
+            pass  # consumed by debug pane
         elif key == "h":
             latest = self._filter_history.latest
             if latest:
                 self._filter.set(ProcessFilter.parse(latest))
                 self._selected_index.set(None)
         return True
-
-    _RATE_STEPS = [1.0, 2.0, 5.0, 10.0, 50.0, 100.0]
-
-    def _cycle_rate_multiplier(self, up: bool) -> None:
-        current = self._rate_multiplier()
-        try:
-            idx = self._RATE_STEPS.index(current)
-        except ValueError:
-            idx = 0
-        if up:
-            idx = min(idx + 1, len(self._RATE_STEPS) - 1)
-        else:
-            idx = max(idx - 1, 0)
-        self._rate_multiplier.set(self._RATE_STEPS[idx])
 
     def _bulk_spawn(self) -> None:
         names = ["web-server", "worker", "scheduler", "api-gateway", "cache", "db-proxy"]
@@ -800,16 +702,6 @@ class ProcessMonitorApp(BaseApp):
 
     def render(self) -> Layout:
         t0 = time.perf_counter()
-
-        # Compute events/sec
-        now = time.time()
-        current_total = self.store.total
-        dt = now - self._last_event_time
-        if dt > 0:
-            self._events_per_sec = (current_total - self._last_event_count) / dt
-        self._last_event_count = current_total
-        self._last_event_time = now
-
         layout = Layout()
 
         layout.split_column(
@@ -820,7 +712,6 @@ class ProcessMonitorApp(BaseApp):
 
         pane = self._focused_pane()
         selected = self.selected_process()
-        debug_visible = self._debug_visible()
 
         # Build content panes
         content_panes: list[Layout] = []
@@ -835,13 +726,15 @@ class ProcessMonitorApp(BaseApp):
             content_panes.append(Layout(self._render_list_pane(), name="list", ratio=1))
             content_panes.append(Layout(self._render_logs_pane(), name="logs", ratio=1))
 
-        if debug_visible:
-            content_panes.append(Layout(self._render_debug_pane(), name="debug", size=32))
+        if self.debug and self.debug.visible():
+            content_panes.append(Layout(self.debug.render(), name="debug", size=32))
 
         layout["main"].split_row(*content_panes)
 
         # Record render time
-        self._render_time_ms = (time.perf_counter() - t0) * 1000
+        render_ms = (time.perf_counter() - t0) * 1000
+        if self.debug:
+            self.debug.record_render_time(render_ms)
 
         return layout
 
@@ -1028,43 +921,6 @@ class ProcessMonitorApp(BaseApp):
             border_style=border_style,
         )
 
-    def _render_debug_pane(self) -> Panel:
-        """Debug pane with system metrics and sim controls."""
-        lines = []
-
-        # Metrics
-        lines.append("[bold underline]Metrics[/bold underline]")
-        lines.append(f"  Events/sec:     {self._events_per_sec:>8.1f}")
-        lines.append(f"  Total events:   {self.store.total:>8d}")
-        lines.append(f"  Render time:    {self._render_time_ms:>7.2f} ms")
-
-        # Memory RSS (macOS: ru_maxrss is bytes)
-        rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        rss_mb = rss_bytes / 1048576
-        lines.append(f"  Memory (RSS):   {rss_mb:>7.1f} MB")
-
-        lines.append(f"  Active sims:    {len(self.manager._simulators):>8d}")
-        lines.append("")
-
-        # Controls
-        lines.append("[bold underline]Controls[/bold underline]")
-        rate = self._rate_multiplier()
-        rate_str = f"{rate:.0f}x" if rate == int(rate) else f"{rate}x"
-        lines.append(f"  Rate multiplier: [bold cyan]{rate_str:>5}[/bold cyan]")
-        lines.append("    [dim]+/-[/dim] to adjust")
-        lines.append("")
-        lines.append("  [dim]B[/dim] = bulk spawn (10)")
-        lines.append("  [dim]S[/dim] = mass stop")
-        lines.append("  [dim]R[/dim] = mass restart")
-        lines.append("  [dim]X[/dim] = mass close")
-        lines.append("  [dim]D[/dim] = hide debug pane")
-
-        return Panel(
-            Text.from_markup("\n".join(lines)),
-            title="[bold]Debug[/bold]",
-            border_style="magenta",
-        )
-
     def _render_status(self) -> Text:
         mode = self._mode()
 
@@ -1169,9 +1025,9 @@ async def run_manager(duration: float | None = None):
         deserialize=deserialize_event,
     )
 
-    # Create app first so manager can reference the rate_multiplier signal
     app = ProcessMonitorApp(store, None, console)  # type: ignore[arg-type]
-    manager = ProcessManager(store, rate_multiplier=app._rate_multiplier)
+    app.init_debug()
+    manager = ProcessManager(store, rate_multiplier=app.debug.rate_multiplier)
     app.manager = manager
 
     # Pre-seed processes only on first run (no existing events)
@@ -1186,6 +1042,7 @@ async def run_manager(duration: float | None = None):
     finally:
         await app.stop_tick()
         await manager.stop_all()
+        store.close()
 
     processes = app.process_list()
     console.print(f"\n[bold]Done![/bold] {len(processes)} processes managed")

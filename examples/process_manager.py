@@ -70,6 +70,21 @@ class ProcessEvent:
 
 
 # =============================================================================
+# PERSISTENCE HELPERS
+# =============================================================================
+
+EVENTS_PATH = Path(__file__).parent / "process_events.jsonl"
+
+
+def serialize_event(e: ProcessEvent) -> dict:
+    return {"pid": e.pid, "kind": e.kind, "ts": e.ts, "payload": e.payload}
+
+
+def deserialize_event(d: dict) -> ProcessEvent:
+    return ProcessEvent(pid=d["pid"], kind=d["kind"], ts=d["ts"], payload=d["payload"])
+
+
+# =============================================================================
 # MODE
 # =============================================================================
 
@@ -246,6 +261,27 @@ class ProcessManager:
         self._store = store
         self._simulators: dict[str, ProcessSimulator] = {}
         self._counter = 0
+        self._rebuild_from_events()
+
+    def _rebuild_from_events(self) -> None:
+        """Rebuild simulators and counter from replayed events."""
+        alive: dict[str, dict] = {}  # pid -> created payload
+
+        for event in self._store.events:
+            if event.kind == "created":
+                alive[event.pid] = event.payload
+            elif event.kind == "removed":
+                alive.pop(event.pid, None)
+
+        for pid, payload in alive.items():
+            num = int(pid.split("-")[1])
+            if num > self._counter:
+                self._counter = num
+            sim = ProcessSimulator(
+                pid, payload["name"], payload["crash_prob"],
+                payload["log_freq"], self._store,
+            )
+            self._simulators[pid] = sim
 
     def create(self, name: str, crash_prob: float | None = None,
                log_freq: float | None = None) -> str:
@@ -983,13 +1019,18 @@ async def run_manager(duration: float | None = None):
     console.print()
     await asyncio.sleep(0.5)
 
-    store = EventStore()
+    store: EventStore[ProcessEvent] = EventStore(
+        path=EVENTS_PATH,
+        serialize=serialize_event,
+        deserialize=deserialize_event,
+    )
     manager = ProcessManager(store)
 
-    # Pre-seed processes
-    manager.create("web-server", crash_prob=0.02, log_freq=1.5)
-    manager.create("worker", crash_prob=0.08, log_freq=1.0)
-    manager.create("scheduler", crash_prob=0.15, log_freq=0.7)
+    # Pre-seed processes only on first run (no existing events)
+    if store.total == 0:
+        manager.create("web-server", crash_prob=0.02, log_freq=1.5)
+        manager.create("worker", crash_prob=0.08, log_freq=1.0)
+        manager.create("scheduler", crash_prob=0.15, log_freq=0.7)
 
     app = ProcessMonitorApp(store, manager, console)
     await app.start_tick()

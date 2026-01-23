@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+import json
+from pathlib import Path
+from typing import Callable, Generic, TypeVar
 
 from reaktiv import Signal
 
@@ -14,14 +16,46 @@ class EventStore(Generic[T]):
 
     The version Signal bumps on each add, so Computed/Effect can depend on it
     without O(n) list copying.
+
+    Optional persistence: pass path, serialize, and deserialize to enable
+    JSON Lines append-only file storage. Events are loaded on init and
+    appended on each add().
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        path: Path | None = None,
+        serialize: Callable[[T], dict] | None = None,
+        deserialize: Callable[[dict], T] | None = None,
+    ):
         self._events: list[T] = []
-        self.version = Signal(0)
+        self._path = path
+        self._serialize = serialize
+        self._deserialize = deserialize
+
+        if path is not None:
+            if serialize is None or deserialize is None:
+                raise ValueError("path requires both serialize and deserialize")
+            self._load()
+
+        self.version = Signal(len(self._events))
+
+    def _load(self) -> None:
+        """Load events from file on init."""
+        if self._path is None or not self._path.exists():
+            return
+        with self._path.open("r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    self._events.append(self._deserialize(json.loads(line)))
 
     def add(self, event: T) -> None:
         self._events.append(event)
+        if self._path is not None:
+            with self._path.open("a") as f:
+                f.write(json.dumps(self._serialize(event)) + "\n")
         self.version.update(lambda v: v + 1)
 
     @property

@@ -644,6 +644,12 @@ class ProcessMonitorApp(BaseApp):
             self._cycle_rate_multiplier(up=False)
         elif key == "B" and self._debug_visible():
             self._bulk_spawn()
+        elif key == "S" and self._debug_visible():
+            self._mass_stop()
+        elif key == "R" and self._debug_visible():
+            self._mass_restart()
+        elif key == "X" and self._debug_visible():
+            self._mass_close()
         elif key == "h":
             latest = self._filter_history.latest
             if latest:
@@ -669,6 +675,31 @@ class ProcessMonitorApp(BaseApp):
         names = ["web-server", "worker", "scheduler", "api-gateway", "cache", "db-proxy"]
         for _ in range(10):
             self.manager.create(random.choice(names))
+
+    def _mass_stop(self) -> None:
+        """Stop all RUNNING processes."""
+        for pid, sim in list(self.manager._simulators.items()):
+            if sim.is_running:
+                asyncio.get_event_loop().create_task(self.manager.stop(pid))
+
+    def _mass_restart(self) -> None:
+        """Restart all STOPPED/CRASHED processes."""
+        states = self.process_states()
+        for pid in list(self.manager._simulators.keys()):
+            if states.get(pid) in (ProcessState.STOPPED, ProcessState.CRASHED):
+                asyncio.get_event_loop().create_task(self.manager.start(pid))
+
+    def _mass_close(self) -> None:
+        """Remove all processes (stop running ones first)."""
+        async def _do_mass_close():
+            # Stop all running first
+            for pid, sim in list(self.manager._simulators.items()):
+                if sim.is_running:
+                    await self.manager.stop(pid)
+            # Remove all
+            for pid in list(self.manager._simulators.keys()):
+                self.manager.remove(pid)
+        asyncio.get_event_loop().create_task(_do_mass_close())
 
     def _handle_filter_key(self, key: str) -> bool:
         if key == "\r" or key == "\n":
@@ -1023,6 +1054,9 @@ class ProcessMonitorApp(BaseApp):
         lines.append("    [dim]+/-[/dim] to adjust")
         lines.append("")
         lines.append("  [dim]B[/dim] = bulk spawn (10)")
+        lines.append("  [dim]S[/dim] = mass stop")
+        lines.append("  [dim]R[/dim] = mass restart")
+        lines.append("  [dim]X[/dim] = mass close")
         lines.append("  [dim]D[/dim] = hide debug pane")
 
         return Panel(

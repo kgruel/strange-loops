@@ -13,6 +13,7 @@ Usage: uv run bench/computed_scaling.py
 # dependencies = []
 # ///
 
+import argparse
 import random
 import time
 from dataclasses import dataclass, field
@@ -30,35 +31,55 @@ class ProcessEvent:
 def generate_events(n: int, num_processes: int = 20) -> list[ProcessEvent]:
     """Generate a realistic mix of events."""
     events = []
+    ts = 0.0
     # Create processes first
     for i in range(num_processes):
-        events.append(ProcessEvent(
-            pid=f"proc-{i}",
-            kind="created",
-            ts=time.time(),
-            payload={"name": f"worker-{i}", "crash_prob": 0.05, "log_freq": 1.0},
-        ))
-        events.append(ProcessEvent(
-            pid=f"proc-{i}",
-            kind="state_change",
-            ts=time.time(),
-            payload={"from": "stopped", "to": "running"},
-        ))
+        if len(events) >= n:
+            break
+        events.append(
+            ProcessEvent(
+                pid=f"proc-{i}",
+                kind="created",
+                ts=ts,
+                payload={"name": f"worker-{i}", "crash_prob": 0.05, "log_freq": 1.0},
+            )
+        )
+        ts += 1.0
+        if len(events) >= n:
+            break
+        events.append(
+            ProcessEvent(
+                pid=f"proc-{i}",
+                kind="state_change",
+                ts=ts,
+                payload={"from": "stopped", "to": "running"},
+            )
+        )
+        ts += 1.0
 
     # Fill remaining with ~90% log events, ~10% state changes
     remaining = n - len(events)
     for _ in range(remaining):
         pid = f"proc-{random.randint(0, num_processes - 1)}"
         if random.random() < 0.9:
-            events.append(ProcessEvent(
-                pid=pid, kind="log", ts=time.time(),
-                payload={"message": "Processing request", "level": "info"},
-            ))
+            events.append(
+                ProcessEvent(
+                    pid=pid,
+                    kind="log",
+                    ts=ts,
+                    payload={"message": "Processing request", "level": "info"},
+                )
+            )
         else:
-            events.append(ProcessEvent(
-                pid=pid, kind="state_change", ts=time.time(),
-                payload={"from": "running", "to": "running"},
-            ))
+            events.append(
+                ProcessEvent(
+                    pid=pid,
+                    kind="state_change",
+                    ts=ts,
+                    payload={"from": "running", "to": "running"},
+                )
+            )
+        ts += 1.0
     return events
 
 
@@ -111,16 +132,32 @@ def bench_one(events: list[ProcessEvent], func, warmup: int = 3, runs: int = 10)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Benchmark full-scan projection cost vs event count")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed for event generation (default: 0). Use -1 to disable seeding.",
+    )
+    parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per measurement")
+    parser.add_argument("--runs", type=int, default=10, help="Measured runs per measurement")
+    args = parser.parse_args()
+
+    if args.seed >= 0:
+        random.seed(args.seed)
+
     print("Computed Scaling Benchmark")
     print("=" * 60)
+    if args.seed >= 0:
+        print(f"seed={args.seed} warmup={args.warmup} runs={args.runs}")
     print(f"{'N events':>10} {'process_list':>14} {'process_logs':>14} {'combined':>14}")
     print(f"{'':>10} {'(ms)':>14} {'(ms)':>14} {'(ms)':>14}")
     print("-" * 60)
 
     for n in [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000]:
         events = generate_events(n, num_processes=min(n // 5, 200))
-        t_list = bench_one(events, compute_process_list)
-        t_logs = bench_one(events, compute_process_logs)
+        t_list = bench_one(events, compute_process_list, warmup=args.warmup, runs=args.runs)
+        t_logs = bench_one(events, compute_process_logs, warmup=args.warmup, runs=args.runs)
         combined = t_list + t_logs
         print(f"{n:>10,} {t_list:>12.2f}ms {t_logs:>12.2f}ms {combined:>12.2f}ms")
 
@@ -131,8 +168,9 @@ def main():
     print()
     print("Notes:")
     print("- Both Computed functions do full O(n) scans of the event list")
-    print("- At 10fps, each render tick has ~100ms budget")
-    print("- These two Computeds run on every version bump (every new event)")
+    print("- Whether this breaks you depends on evaluation frequency:")
+    print("  - debounced render loop: evaluated at frame rate")
+    print("  - naive loop: evaluated per event/version bump")
 
 
 if __name__ == "__main__":

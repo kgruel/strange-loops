@@ -10,6 +10,7 @@ Usage:
     uv run bench/harness.py --scenario wide --profile wide_medium_rate --save baseline
     uv run bench/harness.py --scenario wide --profile wide_medium_rate --compare baseline
     uv run bench/harness.py --scenario narrow --sweep num_entities 10,50,100,500
+    uv run bench/harness.py --scenario wide --profile wide_medium_rate --seed 0 --save baseline
 """
 
 # /// script
@@ -23,7 +24,10 @@ Usage:
 # ///
 
 import argparse
+import hashlib
 import json
+import os
+import platform
 import random
 import statistics
 import sys
@@ -31,6 +35,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from subprocess import DEVNULL, CalledProcessError, check_output
 
 from reaktiv import Signal, Computed, Effect
 
@@ -39,6 +44,59 @@ from framework import EventStore, metrics
 
 from scenarios import NarrowEvent, WideEvent, NestedEvent, SCENARIOS
 from profiles import EventProfile, PRESETS
+
+
+# =============================================================================
+# REPRODUCIBILITY + ENVIRONMENT
+# =============================================================================
+
+
+def _git_head_sha(repo_root: Path) -> str | None:
+    try:
+        out = check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            stderr=DEVNULL,
+            text=True,
+        ).strip()
+        return out or None
+    except (FileNotFoundError, CalledProcessError):
+        return None
+
+
+def collect_environment(repo_root: Path) -> dict[str, Any]:
+    """Collect lightweight environment metadata for result comparability."""
+    return {
+        "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_sha": _git_head_sha(repo_root),
+        "python_executable": sys.executable,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "cpu_count": os.cpu_count(),
+    }
+
+
+def derive_run_seed(
+    base_seed: int | None,
+    *,
+    scenario: str,
+    profile_name: str,
+    profile: EventProfile,
+) -> int | None:
+    """Derive a stable per-run seed so sweeps are deterministic regardless of order."""
+    if base_seed is None or base_seed < 0:
+        return None
+    salt = json.dumps(
+        {"scenario": scenario, "profile_name": profile_name, "profile": asdict(profile)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(salt.encode("utf-8")).digest()
+    salt_int = int.from_bytes(digest[:4], "big")
+    return (int(base_seed) + salt_int) % (2**32)
 
 
 # =============================================================================
@@ -189,13 +247,13 @@ def generate_events(scenario: str, profile: EventProfile) -> list:
 
         if scenario == "narrow":
             source = f"svc-{entity_idx}"
-            event = factory_cls.build(source=source)
+            event = factory_cls.build(source=source, ts=float(i))
         elif scenario == "wide":
             resource_id = f"res-{entity_idx:04d}"
             # Respect payload_fields for tag/config width
             tags = {f"tag-{j}": f"v-{random.randint(0,100)}" for j in range(min(profile.payload_fields, 30))}
             config = {f"cfg-{j}": random.randint(0, 1000) for j in range(profile.payload_fields)}
-            event = factory_cls.build(resource_id=resource_id, tags=tags, config=config)
+            event = factory_cls.build(resource_id=resource_id, tags=tags, config=config, ts=float(i))
         elif scenario == "nested":
             stack = f"stack-{entity_idx}"
             # Respect child_entities for service count
@@ -209,9 +267,9 @@ def generate_events(scenario: str, profile: EventProfile) -> list:
                 }
                 for j in range(profile.child_entities)
             )
-            event = factory_cls.build(stack=stack, services=services)
+            event = factory_cls.build(stack=stack, services=services, ts=float(i))
         else:
-            event = factory_cls.build()
+            event = factory_cls.build(ts=float(i))
 
         events.append(event)
 
@@ -271,6 +329,9 @@ class RunResult:
     scenario: str
     profile_name: str
     profile: dict
+    base_seed: int | None
+    seed: int | None
+    environment: dict
     iteration_times_ms: list[float]
     median_ms: float
     p95_ms: float
@@ -291,7 +352,7 @@ def run_iteration(pipeline: BenchPipeline, events: list) -> float:
     metrics.enable()
 
     # Reset pipeline state
-    pipeline.store._events.clear()
+    pipeline.store.events.clear()
     pipeline.store.version.set(0)
     pipeline.render_count = 0
     pipeline._render_dirty = False
@@ -317,8 +378,19 @@ def run_iteration(pipeline: BenchPipeline, events: list) -> float:
     return elapsed_ms
 
 
-def run_harness(scenario: str, profile: EventProfile, profile_name: str) -> RunResult:
+def run_harness(
+    scenario: str,
+    profile: EventProfile,
+    profile_name: str,
+    *,
+    base_seed: int | None,
+    environment: dict[str, Any],
+) -> RunResult:
     """Run warmup + measurement iterations, collect stats."""
+    run_seed = derive_run_seed(base_seed, scenario=scenario, profile_name=profile_name, profile=profile)
+    if run_seed is not None:
+        random.seed(run_seed)
+
     # Pre-generate events (excluded from timing)
     print(f"  Generating {profile.event_count:,} events...", end=" ", flush=True)
     gen_start = time.perf_counter()
@@ -358,6 +430,9 @@ def run_harness(scenario: str, profile: EventProfile, profile_name: str) -> RunR
         scenario=scenario,
         profile_name=profile_name,
         profile=asdict(profile) if hasattr(profile, "__dataclass_fields__") else {},
+        base_seed=base_seed,
+        seed=run_seed,
+        environment=environment,
         iteration_times_ms=times,
         median_ms=round(median, 2),
         p95_ms=round(p95, 2),
@@ -386,6 +461,9 @@ def save_result(result: RunResult, name: str) -> Path:
         "scenario": result.scenario,
         "profile_name": result.profile_name,
         "profile": result.profile,
+        "base_seed": result.base_seed,
+        "seed": result.seed,
+        "environment": result.environment,
         "iteration_times_ms": result.iteration_times_ms,
         "median_ms": result.median_ms,
         "p95_ms": result.p95_ms,
@@ -456,6 +534,11 @@ def compare_results(current: RunResult, baseline: dict) -> None:
 def print_result(result: RunResult) -> None:
     """Print formatted result summary."""
     print(f"\n  Results:")
+    if result.seed is not None:
+        print(f"    Seed:            {result.seed} (base={result.base_seed})")
+    git_sha = result.environment.get("git_sha") if isinstance(result.environment, dict) else None
+    if git_sha:
+        print(f"    Git SHA:         {git_sha}")
     print(f"    Median:          {result.median_ms:>10.2f} ms")
     print(f"    P95:             {result.p95_ms:>10.2f} ms")
     print(f"    Max:             {result.max_ms:>10.2f} ms")
@@ -480,7 +563,7 @@ def print_result(result: RunResult) -> None:
 
 
 def run_sweep(scenario: str, profile: EventProfile, profile_name: str,
-              param: str, values: list[int]) -> None:
+              param: str, values: list[int], *, base_seed: int | None, environment: dict[str, Any]) -> None:
     """Sweep a single parameter across values."""
     print(f"\n  Sweep: {param} = {values}")
     print(f"  {'Value':>8} {'Median ms':>12} {'P95 ms':>10} {'Events/sec':>12}")
@@ -488,7 +571,13 @@ def run_sweep(scenario: str, profile: EventProfile, profile_name: str,
 
     for val in values:
         swept_profile = EventProfile(**{**asdict(profile), param: val})
-        result = run_harness(scenario, swept_profile, f"{profile_name}_{param}_{val}")
+        result = run_harness(
+            scenario,
+            swept_profile,
+            f"{profile_name}_{param}_{val}",
+            base_seed=base_seed,
+            environment=environment,
+        )
         print(f"  {val:>8} {result.median_ms:>12.2f} {result.p95_ms:>10.2f} "
               f"{result.events_per_sec:>12,.0f}")
 
@@ -513,8 +602,16 @@ def main():
                         help="Override warmup iterations")
     parser.add_argument("--iterations", type=int, default=None,
                         help="Override measurement iterations")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Base RNG seed (default: 0). Each run derives a stable per-scenario seed; use -1 to disable seeding.",
+    )
 
     args = parser.parse_args()
+    repo_root = Path(__file__).parent.parent
+    environment = collect_environment(repo_root)
 
     # Resolve profile
     if args.profile and args.profile in PRESETS:
@@ -535,7 +632,7 @@ def main():
     if args.iterations is not None:
         profile = EventProfile(**{**asdict(profile), "measure_iterations": args.iterations})
 
-    print(f"Bench Harness: scenario={args.scenario}, profile={profile_name}")
+    print(f"Bench Harness: scenario={args.scenario}, profile={profile_name}, base_seed={args.seed}")
     print(f"  {profile}")
     print()
 
@@ -547,11 +644,25 @@ def main():
                          f"Available: {list(EventProfile.__dataclass_fields__.keys())}")
             return
         values = [int(v) for v in values_str.split(",")]
-        run_sweep(args.scenario, profile, profile_name, param, values)
+        run_sweep(
+            args.scenario,
+            profile,
+            profile_name,
+            param,
+            values,
+            base_seed=args.seed,
+            environment=environment,
+        )
         return
 
     # Normal run
-    result = run_harness(args.scenario, profile, profile_name)
+    result = run_harness(
+        args.scenario,
+        profile,
+        profile_name,
+        base_seed=args.seed,
+        environment=environment,
+    )
     print_result(result)
 
     # Save

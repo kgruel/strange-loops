@@ -1,0 +1,19 @@
+projection "vm-logs" {
+    about "Streaming log lines per VM"
+
+    event "log.line" {
+        source "str"
+        message "str"
+        level "str"
+    }
+
+    state {
+        lines "list"
+        sources "set"
+    }
+
+    fold {
+        collect "lines" max=5000
+        upsert "sources" key="source"
+    }
+}

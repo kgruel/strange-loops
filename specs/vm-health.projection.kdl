@@ -1,0 +1,21 @@
+projection "vm-health" {
+    about "Container health state per VM"
+
+    event "container.status" {
+        container "str"
+        service "str"
+        state "str"
+        health "str?"
+        healthy "bool"
+    }
+
+    state {
+        containers "dict"
+        last_update "datetime?"
+    }
+
+    fold {
+        upsert "containers" key="container"
+        latest "last_update"
+    }
+}

@@ -1,0 +1,11 @@
+app "homelab" {
+    about "Homelab VM dashboard"
+    watch true
+
+    inventory "~/Code/gruel.network/ansible/inventory.yml"
+
+    per-connection {
+        use "vm-health"
+        use "vm-logs"
+    }
+}

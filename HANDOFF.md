@@ -1,199 +1,237 @@
-# Handoff: Render Layer CLI Framework
+# Handoff: Render + Topology
 
 ## Summary
 
-Cell-buffer terminal rendering engine (`render/`) — Python equivalent of Ratatui (buffer+diff) + Lip Gloss (styled composition) + Bubbles (interactive components). First real app (streaming log viewer) running against live infrastructure. Performance: 7.3ms avg frame at 2800+ items.
+Two independent layers for building interactive terminal tools:
 
-**Three-level composition vocabulary:**
-- **Span** — styled text run (atom)
-- **Line** — sequence of spans (inline composition, the workhorse)
-- **Block** — 2D cell grid (spatial composition: borders, padding, joins)
+1. **`render/`** — Cell-buffer terminal rendering engine. Python equivalent of Ratatui (buffer+diff) + Lip Gloss (styled composition) + Bubbles (interactive components). Performance: 7.3ms avg frame at 2800+ items.
 
-The paint boundary (Line.paint / Block.paint → BufferView) is where Cells get created — exactly once, in their final location. Apps compose descriptions above this boundary, never below.
+2. **`framework/`** — Typed event multiplexer. In-process stream processing with fan-in/fan-out. Sources emit events into Streams, Consumers receive them. The async equivalent of Unix `tee` + `grep` for typed events.
 
-The framework layer (`framework/`) provides event-sourcing, projections, and reactive signals for complex dashboards. Layers are decoupled: `render/` has zero framework imports. Framework optionally reaches into render for its debug pane and BaseApp's keyboard input.
-
-## Milestone Status
-
-| Milestone | Status | Notes |
-|-----------|--------|-------|
-| R1: Buffer + Diff + Writer | **Done** | Cell, Style, Buffer, BufferView, diff, Writer, Mode 2026 |
-| R2: Styling + Composition | **Done** | Block (2D grid), join, pad, border, truncate, Wrap modes |
-| R2.5: Description Layer | **Done** | Span + Line (frozen dataclasses) — inline text, paint boundary |
-| R3: Components | **Done** | Frozen state + transitions + render: Spinner, Progress, List, TextInput, Table |
-| R4: App integration | **Done** | RenderApp, FocusRing, Region, update/render/on_key lifecycle |
-| R4.5: Real app | **Done** | Logs viewer (apps/logs.py) — SSH streaming, filtering, level toggles |
-| R4.6: Performance | **Done** | Profiling infra (FrameTimer), visible-window rendering, drain-all-keys |
-| R4.7: Logs → Span/Line | **Done** | All rendering via Line/Span, no Block in the render path |
-| R5: Theming + API | **Done** | render/theme.py, Line.plain(), components accept Line items |
-| R6: Demo + Cleanup | **Done** | Project cleanup (archives removed), progressive demo walkthrough |
-| R7: Decoupling | **Done** | keyboard→render, render imports zero from framework, demos/ split |
-| M0-M3: Framework | **Done** | EventStore, Projections, BaseApp, debug panel, idle-gated rendering |
+Layers are fully decoupled: `render/` has zero framework imports. `framework/` has zero render imports (except legacy debug pane).
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Apps (apps/)                                            │
-│  Real tools: SSH streaming, filtering, keyboard nav      │
-│  extend RenderApp, own their state + async I/O           │
+│  extend RenderApp, read Projection.state, paint          │
 ├─────────────────────────────────────────────────────────┤
-│  Theme (render/theme.py)                                 │
-│  Named style constants. Apps import, never inline Style. │
+│  Render (render/)                                        │
+│  Buffer, Cell, Style, Block, Line, Span                  │
+│  Components: list_view, table, text_input, spinner        │
+│  RenderApp: update/render/on_key at fps_cap              │
 ├─────────────────────────────────────────────────────────┤
-│  Description Layer — Span/Line (render/span.py)          │
-│  Lightweight: (str, Style) pairs. Line.plain() for text. │
-│  Line.paint() is the cell-creation boundary.             │
-├─────────────────────────────────────────────────────────┤
-│  Block Layer — Block (render/block.py)                   │
-│  Retained 2D cell grid: borders, padding, multi-line.    │
-│  Escape hatch for spatial composition (joins, chrome).   │
-├─────────────────────────────────────────────────────────┤
-│  Buffer Layer (render/buffer.py, writer.py)              │
-│  Cell grid, diff, ANSI output. The frame buffer.         │
-├─────────────────────────────────────────────────────────┤
-│  Framework (framework/) — optional                       │
-│  EventStore, Projections, Signals — for complex dashboards│
+│  Framework (framework/)                                  │
+│  Stream[T]: typed async multiplexer (fan-in/fan-out)     │
+│  Consumer[T]: protocol (async consume(event))            │
+│  Projection[S,T]: fold events → state + version counter  │
+│  EventStore[T]: persist + replay                         │
+│  FileWriter[T]: JSONL recording                          │
+│  Forward[T,U]: bridge between typed streams              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Actual dependency structure:**
-- `apps/` → `render/` only (logs.py, demo.py)
-- `demos/` → `framework/` only (Rich-based, separate product line)
-- `render/` → nothing (zero framework imports, self-contained)
-- `framework/app.py` → `render.keyboard` (BaseApp needs terminal I/O)
-- `framework/debug.py` → `render` (Block, Style, compose — optional debug pane)
-- `render/keyboard.py` has zero internal dependencies (pure stdlib)
+**Dependency structure:**
+- `apps/` → `render/` only
+- `render/` → nothing (zero imports, self-contained)
+- `framework/` topology → nothing (Stream, Consumer, Projection, EventStore, FileWriter, Forward)
+- `demos/` → `framework/` legacy (BaseApp, Rich-based — still uses reaktiv)
 
-**When to use what:**
-- **Line** (90% of cases): log rows, status bars, table cells, list items. Left-to-right styled text. No Cells until paint.
-- **Block** (escape hatch): bordered panels, side-by-side panes, multi-line widgets that need spatial composition.
+## Framework: Stream Topology
 
-## Performance
+The core insight: EventStore is just one consumer, not the center. The Stream is the center.
 
-**After Span/Line refactor (2800+ items):**
+```python
+from framework import Stream, Consumer, Projection, EventStore, FileWriter, Forward
 
-| Metric | StyledBlock path | Line path |
-|--------|-----------------|-----------|
-| Avg frame time | 12.7ms | 7.3ms |
-| Avg build+paint | ~5ms (build+list+paint) | 2.9ms (m.build) |
+# Define your event type
+@dataclass(frozen=True)
+class HealthCheck:
+    source: str
+    stacks: dict[str, str]
 
-Elimination of intermediate allocations: no Block per row, no join_horizontal, no list_view wrapper. Lines paint directly into BufferView.
+# Create stream and attach consumers
+stream: Stream[HealthCheck] = Stream()
+stream.tap(store)                                       # persist
+stream.tap(projection)                                  # fold → state
+stream.tap(FileWriter(Path("log.jsonl"), serialize=asdict))  # record
+stream.tap(webhook, filter=lambda e: "unhealthy" in e.stacks.values())
 
-**Profiling infrastructure** (`render/timer.py`):
-- `FrameTimer` — per-phase `perf_counter` timing with context manager API
-- Live debug overlay — toggle with `d` key, shows last/avg/max per phase
-- `--profile PATH` — dumps all frames as JSONL for post-hoc analysis
+# Sources are just async functions that call emit
+async def poll_health(stream: Stream[HealthCheck]):
+    while True:
+        result = await check_infrastructure()
+        await stream.emit(HealthCheck(source="infra", stacks=result))
+        await asyncio.sleep(30)
 
-## Component APIs
+# Render reads projection state
+class Dashboard(RenderApp):
+    def update(self):
+        if self._proj.version != self._last_version:
+            self._last_version = self._proj.version
+            self.mark_dirty()
+    def render(self):
+        state = self._proj.state  # plain value, no Signal
+        # paint with render layer
+```
+
+### Core Primitives (3 types)
+
+| Type | API | Role |
+|------|-----|------|
+| `Stream[T]` | `emit(event)`, `tap(consumer, filter?, transform?)`, `detach(tap)` | Fan-in/fan-out multiplexer |
+| `Consumer[T]` | `async consume(event: T)` | Protocol — anything that eats events |
+| `Tap[T]` | dataclass: consumer + filter + transform | Handle for detach |
+
+### Battery Consumers
+
+| Consumer | Role |
+|----------|------|
+| `Projection[S, T]` | Fold events → `.state` (value) + `.version` (counter). Also supports `advance(store)` for pull mode. |
+| `EventStore[T]` | Append-only log. `.since(cursor)`, `.events`, `.version`. Optional JSONL persistence. |
+| `FileWriter[T]` | Serialize to JSONL file. Takes path + serialize function. |
+| `Forward[T, U]` | Transform and emit to another Stream. Bridges typed streams. |
+
+### Design Constraints
+
+- **No operator chains** — not Rx. No `stream.map().filter().merge()`.
+- **No backpressure** — async/await naturally bounds.
+- **No main loop ownership** — you own asyncio.
+- **Sources are NOT a type** — just async functions that call `stream.emit()`.
+- **No reaktiv dependency** — version counters, not Signals. Push topology handles invalidation.
+
+## Render Layer
+
+### Three-level composition vocabulary
+
+- **Span** — styled text run (atom): `Span("text", Style(fg="cyan"))`
+- **Line** — sequence of spans (workhorse, ~90%): `Line.plain("hello")`
+- **Block** — 2D cell grid (escape hatch): borders, padding, joins
+
+The paint boundary (Line.paint / Block.paint → BufferView) is where Cells get created — exactly once, in their final location.
+
+### Components
 
 Components accept `Line` for item content:
 
 ```python
-# list_view — items are Lines
 items = [Line.plain(name) for name in names]
 block = list_view(state, items, height, selected_style=Style(bg=237))
 
-# table — cells and headers are Lines
 columns = [Column(header=Line.plain("Name"), width=12)]
 rows = [[Line.plain("Alice")], [Line.plain("Bob")]]
 block = table(state, columns, rows, height)
-
-# Styled items
-line = Line((Span(source, Style(fg="cyan")), Span(msg, Style(dim=True))))
 ```
 
-Selection highlighting: Line's base `style` merges onto each Span at paint time. `Line(item.spans, style=highlight)` highlights without rebuilding spans.
+### RenderApp Lifecycle
 
-## Known Contracts
+```python
+class MyApp(RenderApp):
+    def layout(self, width, height): ...   # regions
+    def update(self): ...                   # async state, mark_dirty()
+    def render(self): ...                   # paint into self._buf
+    def on_key(self, key): ...              # input handling
+```
 
-### Subprocess stdin isolation
-Any RenderApp that spawns subprocesses MUST use `stdin=asyncio.subprocess.DEVNULL`. The app owns the terminal in alt-screen/cbreak mode.
-
-### Keyboard API (`render/keyboard.py`)
-`KeyboardInput.get_key()` returns named strings or single characters. Escape sequences are parsed atomically (5ms timeout) and fully drained — unrecognized sequences are consumed without leaving garbage in the input buffer. Multi-byte UTF-8 characters are assembled from continuation bytes.
-
-Named keys: `"up"`, `"down"`, `"left"`, `"right"`, `"home"`, `"end"`, `"escape"`, `"enter"`, `"backspace"`, `"tab"`, `"shift_tab"`, `"delete"`, `"insert"`, `"page_up"`, `"page_down"`, `"f1"`-`"f4"`.
-
-Handles: CSI sequences (ESC [), SS3 sequences (ESC O), parameterized sequences (ESC [3~, etc.).
-
-### RenderApp main loop
 - Drains ALL available keys per frame
 - Adaptive sleep: 1ms when keys/dirty, 33ms (1/fps) when idle
-- update() for async state, render() for painting, on_key() for input
 
-### Two rendering modes
+### Performance
 
-The demo surfaces a pattern worth naming:
+7.3ms avg frame at 2800+ items (Line path). Profiling via `FrameTimer`, debug overlay with `d` key, `--profile PATH` for JSONL dump.
 
-- **Compose mode** (stages 1-5): Build Blocks with `join_*`, `pad`, `border`, return a Block. Static layout, declarative. The framework paints it.
-- **Canvas mode** (finale): Create a `Buffer(w, h)`, paint elements at computed `(x, y)` positions, convert to Block. Absolute positioning, animation-friendly. `update()` drives time-varying state, `render()` computes positions/styles from that state.
+## Broader Context
 
-Both modes return a Block from the render function — the app lifecycle doesn't change. Canvas mode is the escape hatch when compose's left-to-right/top-to-bottom isn't enough (animation, overlapping elements, physics).
+This project exists within a larger ecosystem:
 
-### Paint boundary
-`Line.paint(view, x, y)` and `Block.paint(view, x, y)` are where Cells get created. Style merge: `Line.style.merge(span.style)` — span fields override base when non-None/non-False.
+| Package | Role | Status |
+|---------|------|--------|
+| **ev** | Event vocabulary (Event, Result, Emitter) | Stable, frozen |
+| **ev-toolkit** | CLI script harness (run, signal, detect_mode) | Stable |
+| **framework/** (here) | Stream topology (fan-in/fan-out) | New — topology primitives done |
+| **render/** (here) | Terminal display (buffer, composition, components) | Done |
 
-### Theme
-`render/theme.py` — module-level `Style` constants. Apps import named styles, never construct `Style(...)` inline (except `Style()` for null/default and dynamic per-source colors).
+**The conceptual model:**
+- ev defines *what things are* (Event, Result, Emitter)
+- framework routes *where things go* (Stream, Consumer, Tap)
+- render determines *how things look* (Buffer, Line, Block)
+- ev-toolkit is the *script harness* for fire-once CLI operations
+
+**Positioned as:** a typed event multiplexer — the in-process equivalent of pub-sub with typed channels. Simpler than Rx (no operator zoo), more structured than Unix pipes (typed events, not bytes).
 
 ## Current State
 
 | Component | Purpose |
 |-----------|---------|
-| `apps/demo.py` | **Progressive demo** — 7-stage walkthrough, animated finale, touches all layers |
-| `apps/logs.py` | **First real app** — streaming SSH log viewer, Line-based rendering |
-| `render/span.py` | **Span + Line**: description layer, `Line.plain()`, paint boundary |
-| `render/theme.py` | **Theme**: named style constants for the render layer |
-| `render/app.py` | RenderApp: adaptive sleep, drain-all-keys, update/render/on_key |
-| `render/timer.py` | FrameTimer: per-phase profiling, debug overlay, JSONL dump |
+| `framework/stream.py` | **Stream, Consumer, Tap**: core topology primitives |
+| `framework/projection.py` | **Projection**: fold events → state + version counter |
+| `framework/store.py` | **EventStore**: append-only log, persistence, Consumer |
+| `framework/file_writer.py` | **FileWriter**: JSONL recording Consumer |
+| `framework/forward.py` | **Forward**: bridge between typed streams |
+| `apps/demo.py` | Progressive demo — 7-stage walkthrough, animated finale |
+| `apps/logs.py` | First real app — streaming SSH log viewer |
+| `render/span.py` | Span + Line: description layer, paint boundary |
+| `render/app.py` | RenderApp: adaptive sleep, drain-all-keys, lifecycle |
 | `render/cell.py` | Cell, Style, EMPTY_CELL |
 | `render/buffer.py` | Buffer, BufferView, diff |
 | `render/writer.py` | ANSI output, Mode 2026, alt screen |
-| `render/block.py` | Block (was StyledBlock), Wrap modes |
-| `render/compose.py` | join_horizontal, join_vertical, pad, border, truncate, Align |
-| `render/borders.py` | BorderChars presets (ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII) |
-| `render/components/` | Line-based: list_view, table. Block-based: spinner, progress, text_input |
-| `render/keyboard.py` | KeyboardInput: cbreak mode, CSI/SS3 drain, UTF-8 assembly |
-| `render/focus.py` | FocusRing |
-| `render/region.py` | Region → BufferView |
-| `framework/` | EventStore, Projections, BaseApp, debug panel |
+| `render/block.py` | Block, Wrap modes |
+| `render/compose.py` | join_horizontal, join_vertical, pad, border, truncate |
+| `render/components/` | list_view, table, spinner, progress, text_input |
+| `render/keyboard.py` | KeyboardInput: cbreak, CSI/SS3, UTF-8 |
+| `render/timer.py` | FrameTimer: profiling, debug overlay, JSONL dump |
+| `render/theme.py` | Named style constants |
+| `demos/` | **Legacy** — Rich-based, uses BaseApp + reaktiv. Predates render layer. |
+
+## Known Contracts
+
+### Subprocess stdin isolation
+Any RenderApp that spawns subprocesses MUST use `stdin=asyncio.subprocess.DEVNULL`.
+
+### Keyboard API
+`KeyboardInput.get_key()` returns named strings (`"up"`, `"down"`, `"enter"`, etc.) or single characters. Escape sequences parsed atomically (5ms timeout), fully drained.
+
+### Paint boundary
+`Line.paint(view, x, y)` and `Block.paint(view, x, y)` create Cells. Style merge: span fields override Line's base style when non-None/non-False.
+
+### Projection → Render bridge
+No reactive Signals. Render loop checks `proj.version` each frame. If changed since last seen, `mark_dirty()` and repaint. State is just `proj.state` (a plain value).
 
 ## Next Steps
 
-### Polish
+1. **First dashboard app** — Status pane using topology: Source (poll script) → Stream → Projection → RenderApp display.
 
-1. **Cache `filtered_lines()` per frame** — `apps/logs.py` calls `filtered_lines()` multiple times per render (header, main, debug). Cache the result per frame to avoid repeated scans.
+2. **ev integration** — Connect ev-toolkit's Emitter output to framework's Stream. Emitter.emit() feeds stream.emit().
 
-2. **Spinner/Progress → Line** — These still return Block. Evaluate whether they should return Line (spinner is 1 char, progress is a single row).
+3. **Network consumers** — WebhookConsumer, SSE consumer, remote-terminal-forwarding consumer. These are just more Consumer implementations.
 
-3. **Fully decouple `framework/debug.py`** — Still imports Block/Style/compose from render. Extract the render method to app code so framework becomes fully renderer-agnostic.
+4. **Strip legacy** — demos/ and framework BaseApp/selection/filter/debug still use reaktiv. These are superseded by Stream topology + render layer.
 
 ## Run
 
 ```bash
 # Demo walkthrough (start here)
-uv run python -m apps.demo              # ←/→ pages, interactive stages, animated finale
+uv run python -m apps.demo
 
 # Real apps
 uv run python -m apps.logs infra --host 192.168.1.30 -i ~/.ssh/homelab_deploy
-uv run python -m apps.logs infra --host 192.168.1.30 -s traefik --level error,warn
-uv run python -m apps.logs infra --host 192.168.1.30 --profile /tmp/frames.jsonl  # d=overlay
 
-# Render layer demos (developer verification, predate the walkthrough)
-uv run -m render.demo_app             # Interactive: list + input + spinner
-uv run -m render.demo_components      # Component assertions + composed layout
-uv run -m render.demo_compose         # Composition operations
+# Topology tests
+uv run pytest tests/test_stream.py -v
 
-# Framework demos (Rich-based, predates render layer)
-uv run demos/process_manager.py       # Press D for debug pane
-uv run demos/dashboard.py             # Multi-source event aggregation
+# Render layer demos
+uv run -m render.demo_app
+uv run -m render.demo_components
+
+# Legacy framework demos (Rich-based, may need reaktiv)
+uv run demos/process_manager.py
+uv run demos/dashboard.py
 ```
 
 ## See Also
 
-- `IDEAS.md` — CLI harness concept, ev dissolution reasoning
 - `CLAUDE.md` — project conventions and branching workflow
-- `docs/composition-journey.md` — full research journey: profiling → Layer 3 design decisions
-- `docs/composition-research.md` — Ratatui, Lip Gloss, Rich/Textual comparison
 - `docs/render-layer.md` — render layer reference (primitives, data flow, contracts)
+- `docs/composition-journey.md` — profiling → Layer 3 design decisions
+- `docs/composition-research.md` — Ratatui, Lip Gloss, Rich/Textual comparison

@@ -166,7 +166,7 @@ async def test_projection_as_consumer():
     await stream.emit(20)
     await stream.emit(5)
 
-    assert proj.state() == 35
+    assert proj.state == 35
     assert proj.cursor == 3
 
 
@@ -181,7 +181,7 @@ async def test_projection_advance_still_works():
     store.add(3)
     proj.advance(store)
 
-    assert proj.state() == 6
+    assert proj.state == 6
     assert proj.cursor == 3
 
 
@@ -201,7 +201,7 @@ async def test_store_as_consumer():
 
     assert store.events == [Tick(1), Tick(2), Tick(3)]
     assert store.since(1) == [Tick(2), Tick(3)]
-    assert store.version() == 3
+    assert store.version == 3
 
 
 @pytest.mark.asyncio
@@ -211,7 +211,7 @@ async def test_store_add_still_works():
     store.add(10)
     store.add(20)
     assert store.events == [10, 20]
-    assert store.version() == 2
+    assert store.version == 2
 
 
 # --- Forward ---
@@ -311,7 +311,7 @@ async def test_full_pipeline(tmp_path):
     writer.close()
 
     assert store.events == [1, 2, 3, 4, 5]
-    assert proj.state() == 15
+    assert proj.state == 15
     lines = path.read_text().strip().split("\n")
     assert len(lines) == 5
 

@@ -11,7 +11,7 @@ Cell-buffer terminal rendering engine (`render/`) — Python equivalent of Ratat
 
 The paint boundary (Line.paint / Block.paint → BufferView) is where Cells get created — exactly once, in their final location. Apps compose descriptions above this boundary, never below.
 
-The framework layer (`framework/`) provides event-sourcing, projections, and reactive signals for complex dashboards. Conceptually independent, but currently two cross-imports exist (see P1 below).
+The framework layer (`framework/`) provides event-sourcing, projections, and reactive signals for complex dashboards. Layers are decoupled: `render/` has zero framework imports. Framework optionally reaches into render for its debug pane and BaseApp's keyboard input.
 
 ## Milestone Status
 
@@ -27,6 +27,7 @@ The framework layer (`framework/`) provides event-sourcing, projections, and rea
 | R4.7: Logs → Span/Line | **Done** | All rendering via Line/Span, no Block in the render path |
 | R5: Theming + API | **Done** | render/theme.py, Line.plain(), components accept Line items |
 | R6: Demo + Cleanup | **Done** | Project cleanup (archives removed), progressive demo walkthrough |
+| R7: Decoupling | **Done** | keyboard→render, render imports zero from framework, demos/ split |
 | M0-M3: Framework | **Done** | EventStore, Projections, BaseApp, debug panel, idle-gated rendering |
 
 ## Architecture
@@ -58,10 +59,11 @@ The framework layer (`framework/`) provides event-sourcing, projections, and rea
 
 **Actual dependency structure:**
 - `apps/` → `render/` only (logs.py, demo.py)
-- `examples/` → `framework/` only (Rich-based, separate product line)
-- `render/app.py` → `framework.keyboard` (single import, the coupling point)
-- `framework/debug.py` → `render` (Block, Style, compose functions)
-- `framework/keyboard.py` has zero internal dependencies (pure stdlib)
+- `demos/` → `framework/` only (Rich-based, separate product line)
+- `render/` → nothing (zero framework imports, self-contained)
+- `framework/app.py` → `render.keyboard` (BaseApp needs terminal I/O)
+- `framework/debug.py` → `render` (Block, Style, compose — optional debug pane)
+- `render/keyboard.py` has zero internal dependencies (pure stdlib)
 
 **When to use what:**
 - **Line** (90% of cases): log rows, status bars, table cells, list items. Left-to-right styled text. No Cells until paint.
@@ -108,7 +110,7 @@ Selection highlighting: Line's base `style` merges onto each Span at paint time.
 ### Subprocess stdin isolation
 Any RenderApp that spawns subprocesses MUST use `stdin=asyncio.subprocess.DEVNULL`. The app owns the terminal in alt-screen/cbreak mode.
 
-### Keyboard API
+### Keyboard API (`render/keyboard.py`)
 `KeyboardInput.get_key()` returns named strings or single characters. Escape sequences are parsed atomically (5ms timeout) and fully drained — unrecognized sequences are consumed without leaving garbage in the input buffer. Multi-byte UTF-8 characters are assembled from continuation bytes.
 
 Named keys: `"up"`, `"down"`, `"left"`, `"right"`, `"home"`, `"end"`, `"escape"`, `"enter"`, `"backspace"`, `"tab"`, `"shift_tab"`, `"delete"`, `"insert"`, `"page_up"`, `"page_down"`, `"f1"`-`"f4"`.
@@ -152,24 +154,20 @@ Both modes return a Block from the render function — the app lifecycle doesn't
 | `render/compose.py` | join_horizontal, join_vertical, pad, border, truncate, Align |
 | `render/borders.py` | BorderChars presets (ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII) |
 | `render/components/` | Line-based: list_view, table. Block-based: spinner, progress, text_input |
+| `render/keyboard.py` | KeyboardInput: cbreak mode, CSI/SS3 drain, UTF-8 assembly |
 | `render/focus.py` | FocusRing |
 | `render/region.py` | Region → BufferView |
-| `framework/keyboard.py` | KeyboardInput: cbreak mode, CSI/SS3 drain, UTF-8 assembly |
-| `framework/` | EventStore, Projections, BaseApp, debug panel, simulators |
+| `framework/` | EventStore, Projections, BaseApp, debug panel |
 
 ## Next Steps
 
-### P1 — Architecture
+### Polish
 
-1. **Break render↔framework coupling** — `render/app.py:10` imports `framework.keyboard.KeyboardInput`. `framework/debug.py:10` imports render primitives. `KeyboardInput` is pure terminal I/O (stdlib only) — it belongs in `render/` or a shared `terminal/` leaf module. This makes render self-contained and framework independently packageable.
+1. **Cache `filtered_lines()` per frame** — `apps/logs.py` calls `filtered_lines()` multiple times per render (header, main, debug). Cache the result per frame to avoid repeated scans.
 
-2. **Decide framework rendering strategy** — `framework/ui.py` returns Rich renderables. `framework/debug.py` returns `render.Block`. `examples/` use Rich. Either: keep framework Rich-based and add a Block→Rich adapter, or fully port framework to the render layer. Currently the migration state is ambiguous.
+2. **Spinner/Progress → Line** — These still return Block. Evaluate whether they should return Line (spinner is 1 char, progress is a single row).
 
-### P2 — Polish
-
-3. **Cache `filtered_lines()` per frame** — `apps/logs.py` calls `filtered_lines()` multiple times per render (header, main, debug). Cache the result per frame to avoid repeated scans.
-
-4. **Spinner/Progress → Line** — These still return Block. Evaluate whether they should return Line (spinner is 1 char, progress is a single row).
+3. **Fully decouple `framework/debug.py`** — Still imports Block/Style/compose from render. Extract the render method to app code so framework becomes fully renderer-agnostic.
 
 ## Run
 
@@ -187,9 +185,9 @@ uv run -m render.demo_app             # Interactive: list + input + spinner
 uv run -m render.demo_components      # Component assertions + composed layout
 uv run -m render.demo_compose         # Composition operations
 
-# Framework examples (Rich-based, predates render layer)
-uv run examples/process_manager.py    # Press D for debug pane
-uv run examples/dashboard.py          # Multi-source event aggregation
+# Framework demos (Rich-based, predates render layer)
+uv run demos/process_manager.py       # Press D for debug pane
+uv run demos/dashboard.py             # Multi-source event aggregation
 ```
 
 ## See Also

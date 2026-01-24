@@ -7,7 +7,7 @@ import signal
 
 from .buffer import Buffer
 from .writer import Writer
-from framework.keyboard import KeyboardInput
+from .keyboard import KeyboardInput
 
 
 class RenderApp:

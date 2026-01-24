@@ -9,6 +9,7 @@ from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 from .region import Region
 from .focus import FocusRing
 from .span import Span, Line
+from .keyboard import KeyboardInput
 from .app import RenderApp
 from .components import (
     SpinnerState, SpinnerFrames, DOTS, LINE, BRAILLE, spinner,
@@ -45,6 +46,7 @@ __all__ = [
     "FocusRing",
     "Span",
     "Line",
+    "KeyboardInput",
     "RenderApp",
     "SpinnerState",
     "SpinnerFrames",

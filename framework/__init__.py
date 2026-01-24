@@ -3,12 +3,11 @@
 Usage from examples/:
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from framework import EventStore, KeyboardInput, FilterHistory, BaseApp, Mode
+    from framework import EventStore, FilterHistory, BaseApp, Mode
     from framework.ui import app_layout, focus_panel, event_table, metrics_panel, help_bar, status_parts
 """
 
 from .store import EventStore
-from .keyboard import KeyboardInput
 from .filter import FilterHistory
 from .app import BaseApp, Mode
 from .projection import Projection
@@ -29,7 +28,6 @@ from .ui import (
 
 __all__ = [
     "EventStore",
-    "KeyboardInput",
     "FilterHistory",
     "BaseApp",
     "Mode",

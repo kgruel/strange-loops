@@ -191,7 +191,7 @@ class BaseApp:
 
     async def run(self, duration: float | None = None) -> None:
         """Main loop: keyboard → handle_key → sleep. Runs until quit or duration."""
-        from .keyboard import KeyboardInput
+        from render.keyboard import KeyboardInput
 
         start_time = time.time()
 

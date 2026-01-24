@@ -34,6 +34,11 @@ class Line:
     spans: tuple[Span, ...] = ()
     style: Style = Style()
 
+    @classmethod
+    def plain(cls, text: str, style: Style = Style()) -> Line:
+        """Create a Line from a single unstyled (or uniformly styled) string."""
+        return cls((Span(text, style),))
+
     @property
     def width(self) -> int:
         """Total display width across all spans."""

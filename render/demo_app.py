@@ -19,6 +19,7 @@ from .components import (
 )
 from .focus import FocusRing
 from .region import Region
+from .span import Line
 
 
 LIST_ITEMS = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"]
@@ -48,9 +49,7 @@ class DemoApp(RenderApp):
 
     def render(self) -> None:
         # Build list block
-        items = [
-            StyledBlock.text(item, Style()) for item in LIST_ITEMS
-        ]
+        items = [Line.plain(item) for item in LIST_ITEMS]
         list_height = min(len(LIST_ITEMS), self._region_main.height - 6)
         self._list_state = self._list_state.scroll_into_view(list_height)
         list_block = list_view(self._list_state, items, list_height)

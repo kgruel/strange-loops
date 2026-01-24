@@ -13,30 +13,14 @@ from render.cell import Style, Cell
 from render.compose import join_horizontal
 from render.components import ListState, SpinnerState, TextInputState, list_view, spinner, text_input
 from render.region import Region
-
-
-# -- Styles --
-
-HEADER_BG = "#1a2035"
-FOOTER_BG = "#1a1a2a"
-FILTER_INPUT_BG = "#2a2040"
-
-STYLE_HEADER = Style(bg=HEADER_BG)
-STYLE_FOOTER = Style(dim=True, bg=FOOTER_BG)
-STYLE_FOOTER_KEY = Style(bold=True, bg=FOOTER_BG)
-STYLE_FILTER_PROMPT = Style(bold=True, fg="cyan", bg=FILTER_INPUT_BG)
-STYLE_FILTER_INPUT = Style(bg=FILTER_INPUT_BG)
-
-LEVEL_STYLES = {
-    "error": Style(fg="red", bold=True),
-    "warn": Style(fg="yellow"),
-    "info": Style(fg="green"),
-    "debug": Style(fg="cyan"),
-    "trace": Style(fg="magenta", dim=True),
-}
-
-LEVEL_LABELS = ["err", "wrn", "inf", "dbg", "trc"]
-LEVEL_NAMES = ["error", "warn", "info", "debug", "trace"]
+from render.theme import (
+    HEADER_BG, FOOTER_BG, FILTER_INPUT_BG,
+    HEADER_BASE, HEADER_DIM, HEADER_TARGET, HEADER_CONNECTED, HEADER_ERROR, HEADER_SPINNER,
+    FOOTER_BASE, FOOTER_KEY, FOOTER_SEPARATOR, FOOTER_ACTIVE_FILTER,
+    FILTER_PROMPT, FILTER_INPUT, FILTER_CURSOR,
+    LEVEL_STYLES, LEVEL_LABELS, LEVEL_NAMES,
+    SELECTION_CURSOR, SELECTION_HIGHLIGHT, SOURCE_DIM, SCROLL_PAUSED, ERROR_TEXT,
+)
 
 LEVEL_PATTERN = re.compile(
     r"\b(ERROR|ERRO|ERR|WARN|WRN|INFO|INF|DEBUG|DBG|TRACE|TRC)\b", re.IGNORECASE
@@ -258,37 +242,36 @@ class LogsApp(RenderApp):
     def _render_header(self, width: int) -> StyledBlock:
         """Build header: spinner/status + line count + level indicators + scroll pos."""
         parts: list[Cell] = []
-        bg = STYLE_HEADER
 
         # Connection indicator
         if self._state.connected:
-            parts.append(Cell("●", Style(fg="green", bg=HEADER_BG)))
+            parts.append(Cell("●", HEADER_CONNECTED))
         elif self._state.error:
-            parts.append(Cell("●", Style(fg="red", bg=HEADER_BG)))
+            parts.append(Cell("●", HEADER_ERROR))
         else:
             # Show spinner frame while connecting
             frame = self._state.spinner_state.frames.frames[
                 self._state.spinner_state.frame % len(self._state.spinner_state.frames.frames)
             ]
-            parts.append(Cell(frame, Style(fg="cyan", bg=HEADER_BG)))
+            parts.append(Cell(frame, HEADER_SPINNER))
 
-        parts.append(Cell(" ", bg))
+        parts.append(Cell(" ", HEADER_BASE))
 
         # Target name
         target_display = self._target[:20]
         for ch in target_display:
-            parts.append(Cell(ch, Style(fg="white", bold=True, bg=HEADER_BG)))
+            parts.append(Cell(ch, HEADER_TARGET))
 
-        parts.append(Cell(" ", bg))
-        parts.append(Cell(" ", bg))
+        parts.append(Cell(" ", HEADER_BASE))
+        parts.append(Cell(" ", HEADER_BASE))
 
         # Line count
         count_str = f"[{self._state.line_count} lines]"
         for ch in count_str:
-            parts.append(Cell(ch, Style(dim=True, bg=HEADER_BG)))
+            parts.append(Cell(ch, HEADER_DIM))
 
-        parts.append(Cell(" ", bg))
-        parts.append(Cell(" ", bg))
+        parts.append(Cell(" ", HEADER_BASE))
+        parts.append(Cell(" ", HEADER_BASE))
 
         # Level indicators: 1:err 2:wrn 3:inf 4:dbg 5:trc
         for idx, (label, name) in enumerate(zip(LEVEL_LABELS, LEVEL_NAMES)):
@@ -298,13 +281,13 @@ class LogsApp(RenderApp):
             if active:
                 style = Style(fg=LEVEL_STYLES[name].fg, bold=LEVEL_STYLES[name].bold, bg=HEADER_BG)
             else:
-                style = Style(dim=True, bg=HEADER_BG)
+                style = HEADER_DIM
 
-            parts.append(Cell(key_ch, Style(dim=True, bg=HEADER_BG)))
-            parts.append(Cell(":", Style(dim=True, bg=HEADER_BG)))
+            parts.append(Cell(key_ch, HEADER_DIM))
+            parts.append(Cell(":", HEADER_DIM))
             for ch in label:
                 parts.append(Cell(ch, style))
-            parts.append(Cell(" ", bg))
+            parts.append(Cell(" ", HEADER_BASE))
 
         # Scroll position (right-aligned)
         scroll_info = self._scroll_info()
@@ -313,13 +296,13 @@ class LogsApp(RenderApp):
         remaining = width - used - len(scroll_info)
         # Fill gap
         for _ in range(max(0, remaining)):
-            parts.append(Cell(" ", bg))
+            parts.append(Cell(" ", HEADER_BASE))
         for ch in scroll_info:
-            parts.append(Cell(ch, Style(dim=True, bg=HEADER_BG)))
+            parts.append(Cell(ch, HEADER_DIM))
 
         # Pad/truncate to width
         while len(parts) < width:
-            parts.append(Cell(" ", bg))
+            parts.append(Cell(" ", HEADER_BASE))
         parts = parts[:width]
 
         return StyledBlock([parts], width)
@@ -351,11 +334,11 @@ class LogsApp(RenderApp):
             # Show empty state
             if self._state.error:
                 msg = f"Error: {self._state.error}"
-                view.put_text(1, 0, msg, Style(fg="red"))
+                view.put_text(1, 0, msg, ERROR_TEXT)
             elif not self._state.connected:
-                view.put_text(1, 0, "Connecting...", Style(dim=True))
+                view.put_text(1, 0, "Connecting...", SOURCE_DIM)
             else:
-                view.put_text(1, 0, "No matching lines", Style(dim=True))
+                view.put_text(1, 0, "No matching lines", SOURCE_DIM)
             return
 
         # Determine visible window based on list_state
@@ -396,21 +379,20 @@ class LogsApp(RenderApp):
 
             # Selection indicator
             if is_selected:
-                view.put(0, row_idx, "▸", Style(fg="cyan", bold=True))
+                view.put(0, row_idx, "▸", SELECTION_CURSOR)
 
             col = 2  # start after cursor + space
 
             # Source column
             if has_sources:
                 src_display = line.source[:source_col_width]
-                src_style = Style(dim=True)
-                view.put_text(col, row_idx, src_display, src_style)
+                view.put_text(col, row_idx, src_display, SOURCE_DIM)
                 col = 2 + source_col_width
 
                 # Separator
-                view.put(col, row_idx, " ", Style(dim=True))
-                view.put(col + 1, row_idx, "│", Style(dim=True))
-                view.put(col + 2, row_idx, " ", Style(dim=True))
+                view.put(col, row_idx, " ", SOURCE_DIM)
+                view.put(col + 1, row_idx, "│", SOURCE_DIM)
+                view.put(col + 2, row_idx, " ", SOURCE_DIM)
                 col += 3
 
             # Message with level coloring
@@ -425,7 +407,6 @@ class LogsApp(RenderApp):
 
             # Selection highlight (full row background)
             if is_selected:
-                sel_bg = Style(bg="#1a2a3a")
                 for c in range(main_width):
                     cell = self._buf.get(
                         self._region_main.x + c,
@@ -433,7 +414,7 @@ class LogsApp(RenderApp):
                     )
                     merged_style = Style(
                         fg=cell.style.fg,
-                        bg=sel_bg.bg,
+                        bg=SELECTION_HIGHLIGHT.bg,
                         bold=cell.style.bold,
                         dim=cell.style.dim,
                         italic=cell.style.italic,
@@ -450,7 +431,7 @@ class LogsApp(RenderApp):
             indicator = " ↓ auto-scroll paused "
             x_pos = main_width - len(indicator) - 1
             if x_pos > 0:
-                view.put_text(x_pos, visible_height - 1, indicator, Style(dim=True, italic=True))
+                view.put_text(x_pos, visible_height - 1, indicator, SCROLL_PAUSED)
 
     def _render_footer(self, width: int) -> StyledBlock:
         """Build footer: keybinds or filter input."""
@@ -460,7 +441,7 @@ class LogsApp(RenderApp):
             # Filter mode: show prompt and input
             prompt = " / "
             for ch in prompt:
-                parts.append(Cell(ch, STYLE_FILTER_PROMPT))
+                parts.append(Cell(ch, FILTER_PROMPT))
 
             # Render text input inline
             input_width = width - len(prompt)
@@ -469,17 +450,17 @@ class LogsApp(RenderApp):
 
             for i, ch in enumerate(text[:input_width]):
                 if i == cursor_pos:
-                    parts.append(Cell(ch, Style(reverse=True, bg=FILTER_INPUT_BG)))
+                    parts.append(Cell(ch, FILTER_CURSOR))
                 else:
-                    parts.append(Cell(ch, STYLE_FILTER_INPUT))
+                    parts.append(Cell(ch, FILTER_INPUT))
 
             # Cursor at end
             if cursor_pos >= len(text):
-                parts.append(Cell(" ", Style(reverse=True, bg=FILTER_INPUT_BG)))
+                parts.append(Cell(" ", FILTER_CURSOR))
 
             # Fill rest
             while len(parts) < width:
-                parts.append(Cell(" ", STYLE_FILTER_INPUT))
+                parts.append(Cell(" ", FILTER_INPUT))
 
         else:
             # Normal mode: keybind hints
@@ -495,23 +476,23 @@ class LogsApp(RenderApp):
             if self._state.active_filter:
                 filter_display = f" filter: {self._state.active_filter} "
                 for ch in filter_display:
-                    parts.append(Cell(ch, Style(fg="cyan", bg=FOOTER_BG)))
-                parts.append(Cell("│", Style(dim=True, bg=FOOTER_BG)))
+                    parts.append(Cell(ch, FOOTER_ACTIVE_FILTER))
+                parts.append(Cell("│", FOOTER_SEPARATOR))
 
-            parts.append(Cell(" ", STYLE_FOOTER))
+            parts.append(Cell(" ", FOOTER_BASE))
             for i, (key, desc) in enumerate(hints):
                 for ch in key:
-                    parts.append(Cell(ch, STYLE_FOOTER_KEY))
-                parts.append(Cell(":", STYLE_FOOTER))
+                    parts.append(Cell(ch, FOOTER_KEY))
+                parts.append(Cell(":", FOOTER_BASE))
                 for ch in desc:
-                    parts.append(Cell(ch, STYLE_FOOTER))
+                    parts.append(Cell(ch, FOOTER_BASE))
                 if i < len(hints) - 1:
-                    parts.append(Cell(" ", STYLE_FOOTER))
-                    parts.append(Cell(" ", STYLE_FOOTER))
+                    parts.append(Cell(" ", FOOTER_BASE))
+                    parts.append(Cell(" ", FOOTER_BASE))
 
             # Fill rest with footer bg
             while len(parts) < width:
-                parts.append(Cell(" ", STYLE_FOOTER))
+                parts.append(Cell(" ", FOOTER_BASE))
 
         parts = parts[:width]
         return StyledBlock([parts], width)

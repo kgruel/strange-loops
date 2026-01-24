@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ..cell import Style, Cell
+from ..buffer import Buffer
+from ..cell import Style
 from ..block import StyledBlock
-from ..compose import join_vertical
+from ..span import Line, Span
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class ListState:
 
 def list_view(
     state: ListState,
-    items: list[StyledBlock],
+    items: list[Line],
     visible_height: int,
     *,
     selected_style: Style = Style(reverse=True),
@@ -59,31 +60,40 @@ def list_view(
     # Find max width across visible items (+ 2 for cursor prefix)
     max_width = max((items[i].width for i in range(start, end)), default=0) + 2
 
-    rows: list[list[Cell]] = []
-    for i in range(start, end):
+    # Paint into a temporary buffer
+    buf = Buffer(max_width, visible_height)
+
+    for row_idx, i in enumerate(range(start, end)):
         is_selected = i == state.selected
         prefix_char = cursor_char if is_selected else " "
-        style = selected_style if is_selected else Style()
 
-        # Build row: prefix + space content from block
-        row: list[Cell] = [Cell(prefix_char, style), Cell(" ", style)]
+        # Build a Line: cursor prefix + item spans
+        prefix_span = Span(prefix_char + " ", selected_style if is_selected else Style())
+        if is_selected:
+            # Merge selected_style as base onto item spans
+            row_line = Line(
+                spans=(prefix_span,) + items[i].spans,
+                style=selected_style,
+            )
+        else:
+            row_line = Line(
+                spans=(prefix_span,) + items[i].spans,
+            )
 
-        # Copy item cells, applying selected_style if selected
-        item_row = items[i].row(0) if items[i].height > 0 else []
-        for cell in item_row:
-            if is_selected:
-                row.append(Cell(cell.char, cell.style.merge(selected_style)))
-            else:
-                row.append(cell)
+        row_line = row_line.truncate(max_width)
+        view = buf.region(0, row_idx, max_width, 1)
+        row_line.paint(view, 0, 0)
 
-        # Pad to max_width
-        while len(row) < max_width:
-            row.append(Cell(" ", style))
+        # Fill remainder with selected_style if selected
+        filled = row_line.width
+        if filled < max_width:
+            fill_style = selected_style if is_selected else Style()
+            buf.fill(filled, row_idx, max_width - filled, 1, " ", fill_style)
 
+    # Extract rows from buffer into StyledBlock
+    rows = []
+    for y in range(visible_height):
+        row = [buf.get(x, y) for x in range(max_width)]
         rows.append(row)
-
-    # Pad remaining visible rows if fewer items than visible_height
-    while len(rows) < visible_height:
-        rows.append([Cell(" ", Style())] * max_width)
 
     return StyledBlock(rows, max_width)

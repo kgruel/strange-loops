@@ -16,6 +16,7 @@ from .components import (
     TextInputState, text_input,
     Column, TableState, table,
 )
+from .span import Line
 
 
 def demo_spinner() -> None:
@@ -110,9 +111,7 @@ def demo_progress() -> None:
 def demo_list_view() -> None:
     print("=== List View ===\n")
 
-    items = [
-        StyledBlock.text(f"Item {i}", Style()) for i in range(8)
-    ]
+    items = [Line.plain(f"Item {i}") for i in range(8)]
 
     # Basic rendering
     state = ListState(selected=0, scroll_offset=0, item_count=8)
@@ -241,17 +240,17 @@ def demo_table() -> None:
     print("=== Table ===\n")
 
     columns = [
-        Column(header="Name", width=12),
-        Column(header="Status", width=8, align=Align.CENTER),
-        Column(header="Count", width=6, align=Align.END),
+        Column(header=Line.plain("Name"), width=12),
+        Column(header=Line.plain("Status"), width=8, align=Align.CENTER),
+        Column(header=Line.plain("Count"), width=6, align=Align.END),
     ]
 
     rows = [
-        ["Alice", "Active", "42"],
-        ["Bob", "Idle", "7"],
-        ["Charlie", "Active", "123"],
-        ["Diana", "Offline", "0"],
-        ["Eve", "Active", "99"],
+        [Line.plain("Alice"), Line.plain("Active"), Line.plain("42")],
+        [Line.plain("Bob"), Line.plain("Idle"), Line.plain("7")],
+        [Line.plain("Charlie"), Line.plain("Active"), Line.plain("123")],
+        [Line.plain("Diana"), Line.plain("Offline"), Line.plain("0")],
+        [Line.plain("Eve"), Line.plain("Active"), Line.plain("99")],
     ]
 
     state = TableState(selected_row=0, scroll_offset=0, row_count=5)
@@ -313,7 +312,7 @@ def demo_composition() -> None:
     print("=== Composed Layout ===\n")
 
     # Build a composed UI: bordered list next to a progress bar stack
-    items = [StyledBlock.text(name, Style()) for name in ["Build", "Test", "Deploy"]]
+    items = [Line.plain(name) for name in ["Build", "Test", "Deploy"]]
     ls = ListState(selected=1, scroll_offset=0, item_count=3)
     ls_block = list_view(ls, items, visible_height=3)
     ls_bordered = border(pad(ls_block, left=1, right=1), ROUNDED, Style(fg="cyan"))

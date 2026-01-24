@@ -105,7 +105,7 @@ Rich Live is adequate. Upgrade path if needed: own the output, use Rich only for
 
 ### What Our Framework Does Better Than Textual
 
-1. **Fine-grained reactivity** — reaktiv signals with dependency tracking vs Textual's "invalidate all computes"
+1. **Version-counter invalidation** — explicit change detection vs Textual's "invalidate all computes"
 2. **Event sourcing** — append-only log, replay, incremental projections (Textual has nothing comparable)
 3. **Lightweight** — no per-widget asyncio tasks, no CSS engine, no DOM
 

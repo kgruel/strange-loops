@@ -23,9 +23,9 @@ The render layer fills this gap: cell-buffer rendering with composable styling a
 
 ### App Framework Contracts
 1. **Event log is truth.** Everything derives from the append-only store; user actions are events too.
-2. **Computeds are pure.** No mutation, no I/O, no side effects inside Computed bodies.
-3. **Effects establish dependencies, not workload.** Read Signals, mark dirty. Computeds evaluate in render().
-4. **Batch UI mutations.** Multi-Signal updates use `reaktiv.batch()`.
+2. **Projections are pure folds.** No mutation, no I/O, no side effects inside apply().
+3. **Version counters drive invalidation.** Render loop checks version, repaints when changed.
+4. **Push topology.** Stream.emit() pushes to consumers — no polling, no batch signals.
 5. **Bounded memory story.** Retention/windowing/projections for long-running tools.
 
 ### Render Layer Contracts

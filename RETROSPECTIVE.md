@@ -120,11 +120,11 @@ Ratatui chose immediate mode without a reactive state layer.
 
 | Thread | Our form |
 |--------|----------|
-| Reactivity | Signals (reaktiv) — fine-grained, synchronous |
-| Unidirectional flow | Events → Computed → Effect → render |
-| Event sourcing | Append-only EventStore, derived state via Computed |
-| Rendering | Immediate mode (Rich Live, full frame each render) |
-| Terminal UI | Rich as the rendering target |
+| Reactivity | Version counters — poll-based, zero dependencies |
+| Unidirectional flow | Stream → Projection → render loop |
+| Event sourcing | Append-only EventStore, derived state via Projection |
+| Rendering | Retained mode (Buffer diff, incremental updates) |
+| Terminal UI | Custom render layer (cells, blocks, styled spans) |
 
 What makes this distinctive: **the event log is both the persistence model AND the reactivity source.** The `version` Signal on EventStore bridges the two worlds. Event sourcing gives "what happened"; Signals give "when to recompute"; Computed gives pure derivation; Effect gives side-effect boundary.
 

@@ -36,7 +36,7 @@ Layers are fully decoupled: `render/` has zero framework imports. `framework/` h
 - `apps/` → `render/` only
 - `render/` → nothing (zero imports, self-contained)
 - `framework/` topology → nothing (Stream, Consumer, Projection, EventStore, FileWriter, Forward)
-- `demos/` → `framework/` legacy (BaseApp, Rich-based — still uses reaktiv)
+- `apps/` → `render/` + `framework/` topology
 
 ## Framework: Stream Topology
 
@@ -99,7 +99,7 @@ class Dashboard(RenderApp):
 - **No backpressure** — async/await naturally bounds.
 - **No main loop ownership** — you own asyncio.
 - **Sources are NOT a type** — just async functions that call `stream.emit()`.
-- **No reaktiv dependency** — version counters, not Signals. Push topology handles invalidation.
+- **No external reactivity library** — version counters, not Signals. Push topology handles invalidation.
 
 ## Render Layer
 
@@ -182,7 +182,7 @@ This project exists within a larger ecosystem:
 | `render/keyboard.py` | KeyboardInput: cbreak, CSI/SS3, UTF-8 |
 | `render/timer.py` | FrameTimer: profiling, debug overlay, JSONL dump |
 | `render/theme.py` | Named style constants |
-| `demos/` | **Legacy** — Rich-based, uses BaseApp + reaktiv. Predates render layer. |
+| `apps/` | Live apps using render layer + framework topology. |
 
 ## Known Contracts
 
@@ -206,7 +206,7 @@ No reactive Signals. Render loop checks `proj.version` each frame. If changed si
 
 3. **Network consumers** — WebhookConsumer, SSE consumer, remote-terminal-forwarding consumer. These are just more Consumer implementations.
 
-4. **Strip legacy** — demos/ and framework BaseApp/selection/filter/debug still use reaktiv. These are superseded by Stream topology + render layer.
+4. **Network consumers** — WebhookConsumer, SSE consumer, remote-terminal-forwarding consumer.
 
 ## Run
 
@@ -224,9 +224,8 @@ uv run pytest tests/test_stream.py -v
 uv run -m render.demo_app
 uv run -m render.demo_components
 
-# Legacy framework demos (Rich-based, may need reaktiv)
-uv run demos/process_manager.py
-uv run demos/dashboard.py
+# App demos
+uv run apps/demo.py
 ```
 
 ## See Also

@@ -1,76 +1,78 @@
-# framework — Event Sourcing + Reactive Projections
+# framework — Streaming Topology
 
-Lightweight event sourcing with incremental projections for async Python apps. Multiple event streams in, coherent derived state out. ~350 lines of core.
+Lightweight streaming topology for async Python apps. Event streams in, coherent derived state out via incremental projections. No external reactivity library — uses version counters for change detection.
 
 ## What it is
 
-A context loom: you feed it raw events from multiple async sources, it weaves them into derived state through incremental folds. Projections advance O(new events) per frame — not O(all events). State is exposed as reaktiv Signals for reactive propagation.
+A streaming pipeline: you feed it events from async sources, route them through typed streams, fold them into derived state with projections. Projections advance O(new events) per frame.
 
 ```
-Raw events (many sources)
+Stream[T] (typed async broadcast)
     │
-    ▼
-EventStore (append-only log, optional JSONL persistence)
+    ├─► EventStore (append-only log, optional JSONL persistence)
+    │       │
+    │       ▼
+    │   Projection (incremental fold: apply(state, event) → state)
     │
-    ▼
-Projection (incremental fold: apply(state, event) → state)
+    ├─► FileWriter (JSONL persistence)
     │
-    ▼
-Signal[S] (reactive derived state, triggers downstream)
+    └─► Forward (bridge to another Stream)
 ```
-
-## Where it sits
-
-| Library | Model | Weight |
-|---------|-------|--------|
-| eventsourcing (Python) | Full ES/CQRS, database-backed | Heavy |
-| RxPY | Observable streams, operators | Complex |
-| reaktiv | Signal/Computed/Effect primitives | Minimal |
-| **this** | EventStore + Projection on reaktiv | Minimal+incremental |
-
-You reach for this when:
-- Multiple async event streams need combining into coherent state
-- Derived state should update incrementally (not full recomputation)
-- You want persistence/replay for debugging (JSONL)
-- You need observable state without full Rx complexity
 
 ## Core primitives
 
+### Stream[T]
+
+Typed async broadcast. Emits to all tapped consumers.
+
+```python
+stream: Stream[MyEvent] = Stream()
+stream.tap(consumer)                    # attach
+stream.tap(consumer, filter=is_error)   # filtered
+stream.tap(consumer, transform=enrich)  # transformed
+await stream.emit(event)                # broadcast
+```
+
 ### EventStore[T]
 
-Append-only event log. Generic over event type.
+Append-only event log with version counter.
 
 ```python
 store = EventStore[MyEvent](
-    path=Path("events.jsonl"),       # optional persistence
+    path=Path("events.jsonl"),
     serialize=lambda e: e.to_dict(),
     deserialize=MyEvent.from_dict,
 )
 
-store.add(ProcessStarted(pid=123))   # version Signal bumps
-store.add(ProcessCrashed(pid=123))
-
+store.add(ProcessStarted(pid=123))   # version increments
 recent = store.since(cursor=50)      # incremental reads
 store.evict_below(100)               # memory management
 ```
 
 ### Projection[S, T]
 
-Incremental fold over an EventStore. Subclass and define `apply()`.
+Incremental fold over events. Works as both a store consumer (advance) and a stream consumer (direct tap).
 
 ```python
 class StatusProjection(Projection[dict[int, str], ProcessEvent]):
     def apply(self, state, event):
         if isinstance(event, ProcessStarted):
             return {**state, event.pid: "running"}
-        if isinstance(event, ProcessCrashed):
-            return {**state, event.pid: "crashed"}
         return state
 
-status = StatusProjection(initial={})
-status.advance(store)                # processes only new events
-current = status.state()             # dict[int, str]
+proj = StatusProjection(initial={})
+stream.tap(proj)           # direct from stream
+# or
+proj.advance(store)        # pull from store
 ```
+
+### FileWriter
+
+JSONL persistence consumer.
+
+### Forward
+
+Bridge between typed streams with optional transform.
 
 ### Instrument (metrics)
 
@@ -83,22 +85,8 @@ metrics.enable()
 metrics.count("events_added")
 with metrics.time("projection.advance"):
     projection.advance(store)
-metrics.gauge("store_size", len(store.events))
-
-rate = metrics.rate("events_added", window_sec=5.0)  # windowed rate
-snap = metrics.snapshot()                             # all metrics
 ```
 
 ## Dependencies
 
-- `reaktiv` (Signal/Computed/Effect)
-- stdlib only for everything else
-
-## Renderer-agnostic
-
-Framework exposes Signals. Any renderer can consume them:
-- **render engine** — RenderApp reads `projection.state()` in its render loop
-- **Rich** — Effect triggers `Live.update()` when state changes
-- **Plain text** — print state on each change
-
-The examples/ directory demonstrates both Rich-based and render-based consumption.
+- stdlib only

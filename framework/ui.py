@@ -49,6 +49,78 @@ class ScrollInfo:
 
 
 # =============================================================================
+# PRIMITIVES
+# =============================================================================
+
+
+def sparkline(
+    values: list[float] | tuple[float, ...],
+    width: int = 10,
+    max_value: float | None = None,
+) -> str:
+    """Render values as a Unicode sparkline.
+
+    Args:
+        values: Sequence of numeric values.
+        width: Number of characters to render (uses last `width` values).
+        max_value: Scale ceiling. If None, uses max of values.
+
+    Returns:
+        String of Unicode block characters (▁▂▃▄▅▆▇█).
+    """
+    if not values:
+        return "\u2581" * width
+
+    # Take last `width` values
+    tail = list(values)[-width:]
+    ceil = max_value if max_value is not None else max(tail)
+    if ceil <= 0:
+        return "\u2581" * len(tail)
+
+    blocks = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+    chars = []
+    for v in tail:
+        idx = int(min(v / ceil, 1.0) * 7)
+        chars.append(blocks[idx])
+
+    # Pad left if fewer values than width
+    pad = width - len(chars)
+    return "\u2581" * pad + "".join(chars)
+
+
+def compact_bar(
+    value: float,
+    max_value: float,
+    width: int = 20,
+    thresholds: tuple[float, float] = (0.5, 0.8),
+) -> str:
+    """Horizontal fill bar with auto-coloring by fill level.
+
+    Args:
+        value: Current value.
+        max_value: Value representing 100% fill.
+        width: Bar width in characters.
+        thresholds: (yellow_pct, red_pct) — fractions of max_value.
+
+    Returns:
+        Rich markup string: ``[color]████░░░░[/color]``
+    """
+    pct = min(value / max_value, 1.0) if max_value > 0 else 0.0
+    filled = int(pct * width)
+    empty = width - filled
+
+    if pct > thresholds[1]:
+        color = "red"
+    elif pct > thresholds[0]:
+        color = "yellow"
+    else:
+        color = "green"
+
+    bar = "\u2588" * filled + "\u2591" * empty
+    return f"[{color}]{bar}[/{color}]"
+
+
+# =============================================================================
 # RENDER HELPERS
 # =============================================================================
 

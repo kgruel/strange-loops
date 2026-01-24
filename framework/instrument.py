@@ -77,6 +77,7 @@ class Metrics:
         self._counters: dict[str, int] = {}
         self._timings: dict[str, TimingSamples] = {}
         self._gauges: dict[str, float] = {}
+        self._counter_history: dict[str, deque] = {}
         self._start_time: float = 0.0
 
     def enable(self) -> None:
@@ -95,6 +96,9 @@ class Metrics:
         if not self._enabled:
             return
         self._counters[name] = self._counters.get(name, 0) + n
+        if name not in self._counter_history:
+            self._counter_history[name] = deque(maxlen=_MAX_SAMPLES)
+        self._counter_history[name].append((time.perf_counter(), n))
 
     @contextmanager
     def time(self, name: str):
@@ -114,6 +118,21 @@ class Metrics:
         if not self._enabled:
             return
         self._gauges[name] = value
+
+    def rate(self, name: str, window_sec: float = 5.0) -> float:
+        """Compute windowed rate (increments/sec) for a counter over recent window."""
+        history = self._counter_history.get(name)
+        if not history:
+            return 0.0
+        now = time.perf_counter()
+        cutoff = now - window_sec
+        total = sum(n for t, n in history if t >= cutoff)
+        return total / window_sec
+
+    def timing_samples(self, name: str) -> list[float]:
+        """Return raw timing samples (ms) for a named metric."""
+        ts = self._timings.get(name)
+        return list(ts.samples) if ts else []
 
     def snapshot(self) -> dict:
         """Return current state of all metrics."""
@@ -159,6 +178,7 @@ class Metrics:
         self._counters.clear()
         self._timings.clear()
         self._gauges.clear()
+        self._counter_history.clear()
         self._start_time = time.time()
 
     def report(self) -> str:

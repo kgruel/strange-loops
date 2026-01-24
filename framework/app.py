@@ -173,8 +173,10 @@ class BaseApp:
         if not store or not self._projections:
             return
 
-        for proj in self._projections:
-            proj.advance(store)
+        with metrics.time("projections"):
+            for proj in self._projections:
+                proj.advance(store)
+                metrics.gauge(f"proj.{proj.name}.lag", store.version() - proj.cursor)
 
         if self._retention_enabled:
             watermark = min(p.cursor for p in self._projections)

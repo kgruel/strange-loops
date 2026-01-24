@@ -14,6 +14,7 @@ from typing import Generic, TypeVar
 
 from reaktiv import Signal
 
+from .instrument import metrics
 from .store import EventStore
 
 S = TypeVar("S")  # State type
@@ -33,6 +34,10 @@ class Projection(Generic[S, T]):
         self.state: Signal[S] = Signal(initial)
         self.cursor: int = 0
 
+    @property
+    def name(self) -> str:
+        return type(self).__name__
+
     def apply(self, state: S, event: T) -> S:
         """Process one event, return new state.
 
@@ -45,8 +50,10 @@ class Projection(Generic[S, T]):
         new_events = store.since(self.cursor)
         if not new_events:
             return
-        current = self.state()
-        for event in new_events:
-            current = self.apply(current, event)
-            self.cursor += 1
-        self.state.set(current)
+        with metrics.time(f"proj.{self.name}.advance"):
+            current = self.state()
+            for event in new_events:
+                current = self.apply(current, event)
+                self.cursor += 1
+            self.state.set(current)
+        metrics.count(f"proj.{self.name}.events_folded", len(new_events))

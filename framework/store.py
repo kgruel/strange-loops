@@ -1,4 +1,8 @@
-"""Append-only event store with reaktiv Signal integration."""
+"""Append-only event store with reaktiv Signal integration.
+
+Implements the Consumer protocol so it can be tapped onto a Stream.
+consume() = append to store (same as add(), but async).
+"""
 
 from __future__ import annotations
 
@@ -56,6 +60,10 @@ class EventStore(Generic[T]):
                 line = line.strip()
                 if line:
                     self._events.append(self._deserialize(json.loads(line)))
+
+    async def consume(self, event: T) -> None:
+        """Consumer protocol: append event to store."""
+        self.add(event)
 
     def add(self, event: T) -> None:
         self._events.append(event)

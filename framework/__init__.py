@@ -8,9 +8,12 @@ Usage from examples/:
 """
 
 from .store import EventStore
+from .stream import Stream, Tap, Consumer
 from .filter import FilterHistory
 from .app import BaseApp, Mode
 from .projection import Projection
+from .file_writer import FileWriter
+from .forward import Forward
 from .selection import SelectionTracker
 from .debug import DebugPane
 from .sim import BaseSimulator, SimState
@@ -27,11 +30,16 @@ from .ui import (
 )
 
 __all__ = [
+    "Stream",
+    "Tap",
+    "Consumer",
     "EventStore",
     "FilterHistory",
     "BaseApp",
     "Mode",
     "Projection",
+    "FileWriter",
+    "Forward",
     "SelectionTracker",
     "DebugPane",
     "BaseSimulator",

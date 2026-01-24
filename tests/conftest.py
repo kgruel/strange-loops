@@ -14,4 +14,7 @@ if "render" not in sys.modules:
     pkg = ModuleType("render")
     pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "render")]
     pkg.__package__ = "render"
+    # Stub out names that framework.debug imports
+    for _name in ("Block", "Style", "join_horizontal", "join_vertical", "border"):
+        setattr(pkg, _name, None)
     sys.modules["render"] = pkg

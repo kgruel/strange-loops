@@ -1,9 +1,12 @@
-"""Projection: incremental fold over an EventStore.
+"""Projection: incremental fold over events.
 
 A Projection maintains a `.state` Signal that is advanced incrementally
-by processing new events since its last cursor position. Unlike Computed
-(which re-derives from scratch), Projection accumulates state — O(new events)
-per frame tick rather than O(all events).
+by processing new events. Unlike Computed (which re-derives from scratch),
+Projection accumulates state — O(new events) per update rather than O(all).
+
+Works in two modes:
+  1. Stream consumer: tap a Projection onto a Stream, events arrive via consume()
+  2. Store-driven: call advance(store) to pull new events since last cursor
 
 Subclass and override `apply()` to define how each event updates state.
 """
@@ -22,10 +25,10 @@ T = TypeVar("T")  # Event type
 
 
 class Projection(Generic[S, T]):
-    """Incremental fold over an EventStore.
+    """Incremental fold over events.
 
-    Maintains a `.state` Signal advanced by the app frame loop.
-    NOT a Computed — it's honest about being mutable state.
+    Maintains a `.state` Signal updated on each event.
+    Implements the Consumer protocol so it can be tapped onto a Stream.
 
     Subclass and override `apply(state, event)` to define the fold.
     """
@@ -41,9 +44,17 @@ class Projection(Generic[S, T]):
     def apply(self, state: S, event: T) -> S:
         """Process one event, return new state.
 
-        Override in subclass. Called once per event during advance().
+        Override in subclass. Called once per event during advance()/consume().
         """
         raise NotImplementedError
+
+    async def consume(self, event: T) -> None:
+        """Consumer protocol: fold a single event into state."""
+        current = self.state()
+        new_state = self.apply(current, event)
+        self.state.set(new_state)
+        self.cursor += 1
+        metrics.count(f"proj.{self.name}.events_folded")
 
     def advance(self, store: EventStore[T]) -> None:
         """Process all new events since last cursor, update .state once."""

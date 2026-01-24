@@ -3,7 +3,7 @@
 from .cell import Style, Cell, EMPTY_CELL
 from .buffer import Buffer, BufferView, CellWrite
 from .writer import Writer, ColorDepth
-from .block import StyledBlock, Wrap
+from .block import Block, Wrap
 from .compose import Align, join_horizontal, join_vertical, pad, border, truncate
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 from .region import Region
@@ -26,7 +26,7 @@ __all__ = [
     "CellWrite",
     "Writer",
     "ColorDepth",
-    "StyledBlock",
+    "Block",
     "Wrap",
     "Align",
     "join_horizontal",

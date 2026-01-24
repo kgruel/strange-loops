@@ -5,7 +5,7 @@ Run with: python -m render.demo_components
 
 from .cell import Style
 from .buffer import Buffer
-from .block import StyledBlock
+from .block import Block
 from .compose import Align, join_horizontal, join_vertical, pad, border
 from .borders import ROUNDED
 from .writer import Writer
@@ -320,7 +320,7 @@ def demo_composition() -> None:
     # Stack of progress bars with labels
     bars = []
     for label, value in [("Build", 1.0), ("Test", 0.6), ("Deploy", 0.0)]:
-        lbl = StyledBlock.text(f"{label:>6} ", Style(dim=True))
+        lbl = Block.text(f"{label:>6} ", Style(dim=True))
         bar = progress_bar(ProgressState(value=value), 15)
         bars.append(join_horizontal(lbl, bar))
 
@@ -354,7 +354,7 @@ def demo_composition() -> None:
         width=20,
         focused=True,
     )
-    input_row = join_horizontal(sp, StyledBlock.text(" ", Style()), ti, gap=0)
+    input_row = join_horizontal(sp, Block.text(" ", Style()), ti, gap=0)
     input_bordered = border(input_row, ROUNDED, Style(fg="magenta"))
 
     input_bordered.paint(buf, x=2, y=composed.height + 1)

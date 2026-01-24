@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from ..cell import Style, Cell
-from ..block import StyledBlock
+from ..block import Block
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,7 @@ def text_input(
     style: Style = Style(),
     cursor_style: Style = Style(reverse=True),
     placeholder: str = "",
-) -> StyledBlock:
+) -> Block:
     """Render a single-line text input field."""
     # Ensure cursor is visible
     state = state._ensure_visible(width)
@@ -91,7 +91,7 @@ def text_input(
         cells = [Cell(ch, placeholder_style) for ch in display]
         while len(cells) < width:
             cells.append(Cell(" ", style))
-        return StyledBlock([cells], width)
+        return Block([cells], width)
 
     # Extract visible portion of text
     visible_text = state.text[state.scroll_offset:state.scroll_offset + width]
@@ -113,4 +113,4 @@ def text_input(
     while len(cells) < width:
         cells.append(Cell(" ", style))
 
-    return StyledBlock([cells[:width]], width)
+    return Block([cells[:width]], width)

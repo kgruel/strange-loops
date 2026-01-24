@@ -1,4 +1,4 @@
-"""StyledBlock: immutable rectangle of styled cells with known dimensions."""
+"""Block: immutable rectangle of styled cells with known dimensions."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class Wrap(Enum):
     ELLIPSIS = "ellipsis"  # truncate with "…"
 
 
-class StyledBlock:
+class Block:
     """Immutable rectangle of styled cells with known dimensions."""
 
     __slots__ = ("width", "height", "_rows")
@@ -27,19 +27,19 @@ class StyledBlock:
 
     @staticmethod
     def text(content: str, style: Style, *, width: int | None = None,
-             wrap: Wrap = Wrap.NONE) -> StyledBlock:
+             wrap: Wrap = Wrap.NONE) -> Block:
         """Create a block from text content with optional wrapping."""
         if width is None:
             # No width constraint: single line, width = len(content)
             cells = [Cell(ch, style) for ch in content]
-            return StyledBlock([cells], len(content))
+            return Block([cells], len(content))
 
         if wrap == Wrap.NONE:
             # Truncate at width, single line
             line = content[:width]
             cells = [Cell(ch, style) for ch in line]
             cells = _pad_row(cells, width, style)
-            return StyledBlock([cells], width)
+            return Block([cells], width)
 
         if wrap == Wrap.ELLIPSIS:
             # Truncate with ellipsis if needed
@@ -49,7 +49,7 @@ class StyledBlock:
                 line = content
             cells = [Cell(ch, style) for ch in line]
             cells = _pad_row(cells, width, style)
-            return StyledBlock([cells], width)
+            return Block([cells], width)
 
         if wrap == Wrap.CHAR:
             # Break at any character boundary
@@ -60,23 +60,23 @@ class StyledBlock:
                 lines = [""]
             rows = [_pad_row([Cell(ch, style) for ch in line], width, style)
                     for line in lines]
-            return StyledBlock(rows, width)
+            return Block(rows, width)
 
         if wrap == Wrap.WORD:
             # Break at word boundaries
             lines = _word_wrap(content, width)
             rows = [_pad_row([Cell(ch, style) for ch in line], width, style)
                     for line in lines]
-            return StyledBlock(rows, width)
+            return Block(rows, width)
 
         raise ValueError(f"Unknown wrap mode: {wrap}")
 
     @staticmethod
-    def empty(width: int, height: int, style: Style = Style()) -> StyledBlock:
+    def empty(width: int, height: int, style: Style = Style()) -> Block:
         """Create a block filled with space cells."""
         space = Cell(" ", style)
         rows = [[space] * width for _ in range(height)]
-        return StyledBlock(rows, width)
+        return Block(rows, width)
 
     def paint(self, buffer: Buffer | BufferView, x: int = 0, y: int = 0) -> None:
         """Transfer cells into a buffer region. Clips to buffer bounds."""

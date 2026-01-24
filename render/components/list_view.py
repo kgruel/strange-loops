@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from ..buffer import Buffer
 from ..cell import Style
-from ..block import StyledBlock
+from ..block import Block
 from ..span import Line, Span
 
 
@@ -48,10 +48,10 @@ def list_view(
     *,
     selected_style: Style = Style(reverse=True),
     cursor_char: str = "▸",
-) -> StyledBlock:
+) -> Block:
     """Render a scrollable list with selection highlight."""
     if not items:
-        return StyledBlock.empty(1, visible_height)
+        return Block.empty(1, visible_height)
 
     # Determine visible window
     start = state.scroll_offset
@@ -90,10 +90,10 @@ def list_view(
             fill_style = selected_style if is_selected else Style()
             buf.fill(filled, row_idx, max_width - filled, 1, " ", fill_style)
 
-    # Extract rows from buffer into StyledBlock
+    # Extract rows from buffer into Block
     rows = []
     for y in range(visible_height):
         row = [buf.get(x, y) for x in range(max_width)]
         rows.append(row)
 
-    return StyledBlock(rows, max_width)
+    return Block(rows, max_width)

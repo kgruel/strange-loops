@@ -6,7 +6,7 @@ import asyncio
 import time
 
 from .app import RenderApp
-from .block import StyledBlock
+from .block import Block
 from .cell import Style
 from .compose import border, join_horizontal, join_vertical, pad
 from .components import (
@@ -72,7 +72,7 @@ class DemoApp(RenderApp):
         # Build spinner + status
         spin_block = spinner(self._spinner_state, style=Style(fg="cyan"))
         status_text = f" Focus: {self._focus.focused} | q=quit Tab=switch"
-        status_block = StyledBlock.text(status_text, Style(dim=True))
+        status_block = Block.text(status_text, Style(dim=True))
         header = join_horizontal(spin_block, status_block, gap=1)
 
         # Compose layout vertically

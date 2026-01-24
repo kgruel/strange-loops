@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from ..buffer import Buffer
 from ..cell import Style
-from ..block import StyledBlock
+from ..block import Block
 from ..compose import Align
 from ..span import Line, Span
 
@@ -81,10 +81,10 @@ def table(
     header_style: Style = Style(bold=True),
     selected_style: Style = Style(reverse=True),
     separator: str = "│",
-) -> StyledBlock:
+) -> Block:
     """Render a table with headers, scrolling, and row selection."""
     if not columns:
-        return StyledBlock.empty(1, visible_height + 2)
+        return Block.empty(1, visible_height + 2)
 
     # Calculate total width: sum of column widths + separators
     sep_width = len(separator)
@@ -137,11 +137,11 @@ def table(
                 buf.put_text(col_x, buf_y, separator, row_style)
                 col_x += sep_width
 
-    # Extract rows from buffer into StyledBlock
+    # Extract rows from buffer into Block
     block_rows = []
     actual_height = 2 + (end - start) + max(0, visible_height - (end - start))
     for y in range(actual_height):
         row = [buf.get(x, y) for x in range(total_width)]
         block_rows.append(row)
 
-    return StyledBlock(block_rows, total_width)
+    return Block(block_rows, total_width)

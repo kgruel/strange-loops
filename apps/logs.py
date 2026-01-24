@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, replace, field
 
 from render.app import RenderApp
-from render.block import StyledBlock
+from render.block import Block
 from render.cell import Style, Cell
 from render.compose import join_horizontal
 from render.components import ListState, SpinnerState, TextInputState, list_view, spinner, text_input
@@ -239,7 +239,7 @@ class LogsApp(RenderApp):
         footer_view = self._region_footer.view(self._buf)
         footer_block.paint(footer_view, x=0, y=0)
 
-    def _render_header(self, width: int) -> StyledBlock:
+    def _render_header(self, width: int) -> Block:
         """Build header: spinner/status + line count + level indicators + scroll pos."""
         parts: list[Cell] = []
 
@@ -305,7 +305,7 @@ class LogsApp(RenderApp):
             parts.append(Cell(" ", HEADER_BASE))
         parts = parts[:width]
 
-        return StyledBlock([parts], width)
+        return Block([parts], width)
 
     def _scroll_info(self) -> str:
         """Build scroll position string."""
@@ -433,7 +433,7 @@ class LogsApp(RenderApp):
             if x_pos > 0:
                 view.put_text(x_pos, visible_height - 1, indicator, SCROLL_PAUSED)
 
-    def _render_footer(self, width: int) -> StyledBlock:
+    def _render_footer(self, width: int) -> Block:
         """Build footer: keybinds or filter input."""
         parts: list[Cell] = []
 
@@ -495,7 +495,7 @@ class LogsApp(RenderApp):
                 parts.append(Cell(" ", FOOTER_BASE))
 
         parts = parts[:width]
-        return StyledBlock([parts], width)
+        return Block([parts], width)
 
     def on_key(self, key: str) -> None:
         if self._state.filter_mode:

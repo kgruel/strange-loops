@@ -7,7 +7,7 @@ from typing import Callable
 
 from reaktiv import Signal
 
-from render import StyledBlock, Style, join_horizontal, join_vertical, border
+from render import Block, Style, join_horizontal, join_vertical, border
 
 from .instrument import metrics
 from .store import EventStore
@@ -101,7 +101,7 @@ class DebugPane:
         """Legacy hook — render timing now comes from metrics.time('render')."""
         pass
 
-    def render(self) -> StyledBlock:
+    def render(self) -> Block:
         """Render the debug pane. Call this from your app's render() method."""
         # Record RSS as a gauge so it shows up alongside instrument data
         rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -119,7 +119,7 @@ class DebugPane:
         plain = Style()
         bold = Style(bold=True)
 
-        rows: list[StyledBlock] = []
+        rows: list[Block] = []
 
         # --- Frame budget ---
         render_t = timings.get("render")
@@ -130,22 +130,22 @@ class DebugPane:
             budget_pct = (render_t["avg_ms"] / 16.67) * 100
             color = _budget_color(budget_pct)
             rows.append(join_horizontal(
-                StyledBlock.text("Frame ", bold),
-                StyledBlock.text(spark + " ", plain),
-                StyledBlock.text(f"{budget_pct:>3.0f}%", Style(fg=color, bold=True)),
-                StyledBlock.text(f"  avg={render_t['avg_ms']:.1f}", dim),
-                StyledBlock.text(f" p95={render_t['p95_ms']:.1f}ms", dim),
+                Block.text("Frame ", bold),
+                Block.text(spark + " ", plain),
+                Block.text(f"{budget_pct:>3.0f}%", Style(fg=color, bold=True)),
+                Block.text(f"  avg={render_t['avg_ms']:.1f}", dim),
+                Block.text(f" p95={render_t['p95_ms']:.1f}ms", dim),
             ))
             # Projection vs render breakdown
             proj_advance = [n for n in timings if n.endswith(".advance")]
             if proj_advance:
                 proj_sum = sum(timings[n]["avg_ms"] for n in proj_advance)
                 rows.append(join_horizontal(
-                    StyledBlock.text("       ", plain),
-                    StyledBlock.text(f"proj={proj_sum:.1f}", dim),
-                    StyledBlock.text(f" render={render_t['avg_ms'] - proj_sum:.1f}ms", dim),
+                    Block.text("       ", plain),
+                    Block.text(f"proj={proj_sum:.1f}", dim),
+                    Block.text(f" render={render_t['avg_ms'] - proj_sum:.1f}ms", dim),
                 ))
-            rows.append(StyledBlock.text("", plain))
+            rows.append(Block.text("", plain))
 
         # --- Per-projection metrics ---
         # Extract unique projection names from dot-separated keys: proj.{name}.*
@@ -156,7 +156,7 @@ class DebugPane:
                 if len(parts) >= 3:
                     proj_names.add(parts[1])
         if proj_names:
-            rows.append(StyledBlock.text("Projections", header))
+            rows.append(Block.text("Projections", header))
             for name in sorted(proj_names):
                 advance_t = timings.get(f"proj.{name}.advance")
                 avg_ms = advance_t["avg_ms"] if advance_t else 0.0
@@ -165,31 +165,31 @@ class DebugPane:
                 # Color lag: green <2ms, yellow <5ms, red >=5ms
                 lag_color = "green" if lag < 2 else ("yellow" if lag < 5 else "red")
                 rows.append(join_horizontal(
-                    StyledBlock.text(f"  {name:<14}", plain),
-                    StyledBlock.text(f"avg={avg_ms:>5.1f}", dim),
-                    StyledBlock.text(f" {fold_rate:>5.0f}/s", dim),
-                    StyledBlock.text(f" lag=", dim),
-                    StyledBlock.text(f"{lag:>4.1f}", Style(fg=lag_color)),
+                    Block.text(f"  {name:<14}", plain),
+                    Block.text(f"avg={avg_ms:>5.1f}", dim),
+                    Block.text(f" {fold_rate:>5.0f}/s", dim),
+                    Block.text(f" lag=", dim),
+                    Block.text(f"{lag:>4.1f}", Style(fg=lag_color)),
                 ))
-            rows.append(StyledBlock.text("", plain))
+            rows.append(Block.text("", plain))
 
         # --- Store breakdown ---
-        rows.append(StyledBlock.text("Store", header))
+        rows.append(Block.text("Store", header))
         in_mem = len(self.store.events)
         ev_rate = metrics.rate("events_added")
-        store_parts: list[StyledBlock] = [StyledBlock.text("  ", plain)]
-        store_parts.append(StyledBlock.text(f"mem={in_mem}", plain))
-        store_parts.append(StyledBlock.text(f"  {ev_rate:.0f}ev/s", dim))
-        store_parts.append(StyledBlock.text(f"  rss={rss_mb:.0f}MB", dim))
+        store_parts: list[Block] = [Block.text("  ", plain)]
+        store_parts.append(Block.text(f"mem={in_mem}", plain))
+        store_parts.append(Block.text(f"  {ev_rate:.0f}ev/s", dim))
+        store_parts.append(Block.text(f"  rss={rss_mb:.0f}MB", dim))
         if self.store._offset > 0:
-            store_parts.append(StyledBlock.text(
+            store_parts.append(Block.text(
                 f"  evicted={self.store._offset}/{self.store.total}", dim
             ))
         if self.store._file is not None and self.store._path is not None:
             disk_mb = self.store._path.stat().st_size / 1048576
-            store_parts.append(StyledBlock.text(f"  disk={disk_mb:.1f}MB", dim))
+            store_parts.append(Block.text(f"  disk={disk_mb:.1f}MB", dim))
         rows.append(join_horizontal(*store_parts))
-        rows.append(StyledBlock.text("", plain))
+        rows.append(Block.text("", plain))
 
         # --- Debounce ratio ---
         frames = counters.get("frames_rendered", 0)
@@ -197,25 +197,25 @@ class DebugPane:
         if frames > 0 and effects > 0:
             ratio = effects / frames
             rows.append(join_horizontal(
-                StyledBlock.text("Debounce ", bold),
-                StyledBlock.text(f"{effects}:{frames}", plain),
-                StyledBlock.text(f" ({ratio:.1f}x)", dim),
+                Block.text("Debounce ", bold),
+                Block.text(f"{effects}:{frames}", plain),
+                Block.text(f" ({ratio:.1f}x)", dim),
             ))
-            rows.append(StyledBlock.text("", plain))
+            rows.append(Block.text("", plain))
 
         # --- Other timings (non-render, non-projection) ---
         other_timings = {n: t for n, t in timings.items()
                          if n != "render"
                          and not n.startswith("proj.")}
         if other_timings:
-            rows.append(StyledBlock.text("Timings", header))
+            rows.append(Block.text("Timings", header))
             for name, t in sorted(other_timings.items()):
                 rows.append(join_horizontal(
-                    StyledBlock.text(f"  {name:<14}", plain),
-                    StyledBlock.text(f"avg={t['avg_ms']:>5.2f}", dim),
-                    StyledBlock.text(f" p95={t['p95_ms']:>5.2f}ms", dim),
+                    Block.text(f"  {name:<14}", plain),
+                    Block.text(f"avg={t['avg_ms']:>5.2f}", dim),
+                    Block.text(f" p95={t['p95_ms']:>5.2f}ms", dim),
                 ))
-            rows.append(StyledBlock.text("", plain))
+            rows.append(Block.text("", plain))
 
         # --- Extra metrics (app-specific) ---
         if self._extra_metrics:
@@ -223,10 +223,10 @@ class DebugPane:
             if extras:
                 for label, value in extras:
                     rows.append(join_horizontal(
-                        StyledBlock.text(f"  {label:<14}", plain),
-                        StyledBlock.text(value, dim),
+                        Block.text(f"  {label:<14}", plain),
+                        Block.text(value, dim),
                     ))
-                rows.append(StyledBlock.text("", plain))
+                rows.append(Block.text("", plain))
 
         # --- Controls (compact one-line) ---
         rate = self.rate_multiplier()
@@ -236,7 +236,7 @@ class DebugPane:
             ctrl_parts.append(f"{key}={label}")
         ctrl_parts.append("D=hide")
         rows.append(join_horizontal(
-            StyledBlock.text(" ".join(ctrl_parts), dim),
+            Block.text(" ".join(ctrl_parts), dim),
         ))
 
         content = join_vertical(*rows)

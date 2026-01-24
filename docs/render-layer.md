@@ -10,7 +10,7 @@ Timer    → update()  → state transition → mark_dirty()
 
                     ┌──────────────────────────────────┐
   mark_dirty() ───►│ render()                          │
-                    │   state → StyledBlock → paint()   │
+                    │   state → Block → paint()   │
                     └──────────────┬───────────────────┘
                                    ▼
                     ┌──────────────────────────────────┐
@@ -28,7 +28,7 @@ State is frozen. Rendering is a pure function of state. Side effects happen only
 | Layer | Files | Primitive | Produces |
 |-------|-------|-----------|----------|
 | R1: Buffer | `cell.py`, `buffer.py`, `writer.py` | `Cell`, `Buffer` | Minimal terminal writes via diff |
-| R2: Composition | `block.py`, `compose.py`, `borders.py` | `StyledBlock` | Composed rectangles of cells |
+| R2: Composition | `block.py`, `compose.py`, `borders.py` | `Block` | Composed rectangles of cells |
 | R3: Components | `components/*.py` | Frozen state dataclasses | State machines + render functions |
 | R4: App | `app.py`, `focus.py`, `region.py` | `RenderApp` | Lifecycle, keyboard, frame loop |
 
@@ -103,21 +103,21 @@ writer.write_frame(writes)    # Mode 2026 brackets + ANSI sequences
 writer.exit_alt_screen()
 ```
 
-## R2: Styled Blocks and Composition
+## R2: Blocks and Composition
 
-### StyledBlock
+### Block
 
 Immutable rectangle of cells with known dimensions. The composition currency.
 
 ```python
 # From text (width inferred)
-block = StyledBlock.text("hello", Style(fg="green"))         # width=5, height=1
+block = Block.text("hello", Style(fg="green"))         # width=5, height=1
 
 # From text with width constraint
-block = StyledBlock.text("hello world", style, width=8, wrap=Wrap.WORD)  # width=8, height=2
+block = Block.text("hello world", style, width=8, wrap=Wrap.WORD)  # width=8, height=2
 
 # Empty (spacer)
-block = StyledBlock.empty(10, 3, Style())                    # 10x3 of spaces
+block = Block.empty(10, 3, Style())                    # 10x3 of spaces
 ```
 
 #### Wrap modes
@@ -139,7 +139,7 @@ block.paint(buffer_or_view, x=0, y=0)   # clips to buffer bounds
 
 ### Composition Functions
 
-All produce new StyledBlocks. No mutation.
+All produce new Blocks. No mutation.
 
 ```python
 # Horizontal: side by side
@@ -189,7 +189,7 @@ Every component follows the same pattern:
 
 1. **Frozen state dataclass** — holds UI-domain state
 2. **Transition methods** — return new instances (pure, no mutation)
-3. **Render function** — `(state, width/height, ...) -> StyledBlock`
+3. **Render function** — `(state, width/height, ...) -> Block`
 
 ### Spinner
 
@@ -222,7 +222,7 @@ state = state.move_up()                   # selected: 1 → 0
 state = state.move_to(50)                 # jump to index
 state = state.scroll_into_view(visible_height=10)  # adjust scroll_offset
 
-items = [StyledBlock.text(name, Style()) for name in names]
+items = [Block.text(name, Style()) for name in names]
 block = list_view(state, items, visible_height=10,
                   selected_style=Style(reverse=True),
                   cursor_char="▸")
@@ -282,7 +282,7 @@ class MyApp(RenderApp):
         Advance animations, check timers. Call mark_dirty() if state changed."""
 
     def render(self) -> None:
-        """Called only when dirty. Paint StyledBlocks into self._buf."""
+        """Called only when dirty. Paint Blocks into self._buf."""
         self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
         block = list_view(self._state, items, height=10)
         block.paint(self._buf, x=0, y=0)
@@ -355,7 +355,7 @@ User presses Down Arrow with list focused:
 7. Main loop sets _dirty = True
 8. render() fires:
    a. buf.fill() clears the buffer
-   b. list_view(state, items, height) → StyledBlock
+   b. list_view(state, items, height) → Block
    c. block.paint(buf, x, y) → cells written to buffer
 9. _flush():
    a. buf.diff(prev) → list of changed CellWrites

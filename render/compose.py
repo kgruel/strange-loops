@@ -1,10 +1,10 @@
-"""Composition functions for StyledBlock: join, pad, border, truncate."""
+"""Composition functions for Block: join, pad, border, truncate."""
 
 from __future__ import annotations
 
 from enum import Enum
 
-from .block import StyledBlock
+from .block import Block
 from .cell import Style, Cell
 from .borders import BorderChars, ROUNDED
 
@@ -15,11 +15,11 @@ class Align(Enum):
     END = "end"        # bottom or right
 
 
-def join_horizontal(*blocks: StyledBlock, gap: int = 0,
-                    align: Align = Align.START) -> StyledBlock:
+def join_horizontal(*blocks: Block, gap: int = 0,
+                    align: Align = Align.START) -> Block:
     """Join blocks left-to-right with optional gap and vertical alignment."""
     if not blocks:
-        return StyledBlock.empty(0, 0)
+        return Block.empty(0, 0)
 
     max_height = max(b.height for b in blocks)
     total_width = sum(b.width for b in blocks) + gap * (len(blocks) - 1)
@@ -42,14 +42,14 @@ def join_horizontal(*blocks: StyledBlock, gap: int = 0,
             if i < len(blocks) - 1 and gap > 0:
                 rows[row_idx].extend([gap_cell] * gap)
 
-    return StyledBlock(rows, total_width)
+    return Block(rows, total_width)
 
 
-def join_vertical(*blocks: StyledBlock,
-                  align: Align = Align.START) -> StyledBlock:
+def join_vertical(*blocks: Block,
+                  align: Align = Align.START) -> Block:
     """Join blocks top-to-bottom with horizontal alignment."""
     if not blocks:
-        return StyledBlock.empty(0, 0)
+        return Block.empty(0, 0)
 
     max_width = max(b.width for b in blocks)
     pad_cell = Cell(" ", Style())
@@ -72,11 +72,11 @@ def join_vertical(*blocks: StyledBlock,
                 row.extend([pad_cell] * right_pad)
             rows.append(row)
 
-    return StyledBlock(rows, max_width)
+    return Block(rows, max_width)
 
 
-def pad(block: StyledBlock, *, left: int = 0, right: int = 0,
-        top: int = 0, bottom: int = 0, style: Style = Style()) -> StyledBlock:
+def pad(block: Block, *, left: int = 0, right: int = 0,
+        top: int = 0, bottom: int = 0, style: Style = Style()) -> Block:
     """Add empty cell padding around a block."""
     new_width = block.width + left + right
     new_height = block.height + top + bottom
@@ -102,12 +102,12 @@ def pad(block: StyledBlock, *, left: int = 0, right: int = 0,
     for _ in range(bottom):
         rows.append([space] * new_width)
 
-    return StyledBlock(rows, new_width)
+    return Block(rows, new_width)
 
 
-def border(block: StyledBlock, chars: BorderChars = ROUNDED,
+def border(block: Block, chars: BorderChars = ROUNDED,
            style: Style = Style(), title: str | None = None,
-           title_style: Style | None = None) -> StyledBlock:
+           title_style: Style | None = None) -> Block:
     """Wrap a block with a 1-cell border, optionally with a title in the top row."""
     new_width = block.width + 2
     rows: list[list[Cell]] = []
@@ -145,10 +145,10 @@ def border(block: StyledBlock, chars: BorderChars = ROUNDED,
                   + [Cell(chars.bottom_right, style)])
     rows.append(bottom_row)
 
-    return StyledBlock(rows, new_width)
+    return Block(rows, new_width)
 
 
-def truncate(block: StyledBlock, width: int, ellipsis: str = "…") -> StyledBlock:
+def truncate(block: Block, width: int, ellipsis: str = "…") -> Block:
     """Truncate a block to width, appending ellipsis if truncated."""
     if block.width <= width:
         return block
@@ -166,7 +166,7 @@ def truncate(block: StyledBlock, width: int, ellipsis: str = "…") -> StyledBlo
             new_row.append(Cell(ellipsis, src_row[width - 1].style))
             rows.append(new_row)
 
-    return StyledBlock(rows, width)
+    return Block(rows, width)
 
 
 def _valign_offset(block_height: int, container_height: int, align: Align) -> int:

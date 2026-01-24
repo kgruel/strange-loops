@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from ..cell import Style, Cell
-from ..block import StyledBlock
+from ..block import Block
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ def progress_bar(
     empty_style: Style = Style(dim=True),
     filled_char: str = "█",
     empty_char: str = "░",
-) -> StyledBlock:
+) -> Block:
     """Render a horizontal progress bar."""
     filled_count = round(state.value * width)
     empty_count = width - filled_count
@@ -36,4 +36,4 @@ def progress_bar(
         [Cell(filled_char, filled_style)] * filled_count
         + [Cell(empty_char, empty_style)] * empty_count
     )
-    return StyledBlock([cells], width)
+    return Block([cells], width)

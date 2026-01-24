@@ -1,620 +1,683 @@
-"""Logs viewer app: SSH log streaming with visual polish."""
+#!/usr/bin/env python3
+"""Streaming log viewer — SSH to homelab hosts and tail docker compose logs.
+
+Rendered entirely with the render layer (no Rich).
+
+Usage:
+    python -m apps.logs infra --host 10.0.0.1
+    python -m apps.logs infra --host 10.0.0.1 --service traefik --level error,warn
+    python -m apps.logs infra --host 10.0.0.1 --user deploy --tail 200
+"""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import re
+import shlex
 import time
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, replace
+
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from render.app import RenderApp
-from render.block import Block
-from render.cell import Style, Cell
-from render.compose import join_horizontal
-from render.components import ListState, SpinnerState, TextInputState, list_view, spinner, text_input
+from render.cell import Style
+from render.components import ListState, SpinnerState, TextInputState
 from render.region import Region
+from render.span import Span, Line
 from render.theme import (
-    HEADER_BG, FOOTER_BG, FILTER_INPUT_BG,
-    HEADER_BASE, HEADER_DIM, HEADER_TARGET, HEADER_CONNECTED, HEADER_ERROR, HEADER_SPINNER,
-    FOOTER_BASE, FOOTER_KEY, FOOTER_SEPARATOR, FOOTER_ACTIVE_FILTER,
-    FILTER_PROMPT, FILTER_INPUT, FILTER_CURSOR,
-    LEVEL_STYLES, LEVEL_LABELS, LEVEL_NAMES,
-    SELECTION_CURSOR, SELECTION_HIGHLIGHT, SOURCE_DIM, SCROLL_PAUSED, ERROR_TEXT,
+    HEADER_BASE, HEADER_BOLD, HEADER_DIM, HEADER_CONNECTED, HEADER_ERROR,
+    HEADER_SPINNER, HEADER_LEVEL_FILTER,
+    FOOTER_KEY, FOOTER_DIM, FOOTER_ACTIVE_FILTER,
+    FILTER_PROMPT, FILTER_CURSOR,
+    LEVEL_STYLES, SELECTION_CURSOR, SELECTION_HIGHLIGHT, SOURCE_DIM,
+    DEBUG_OVERLAY,
 )
-
-LEVEL_PATTERN = re.compile(
-    r"\b(ERROR|ERRO|ERR|WARN|WRN|INFO|INF|DEBUG|DBG|TRACE|TRC)\b", re.IGNORECASE
-)
+from render.timer import FrameTimer
 
 
-# -- State --
+# =============================================================================
+# Log parsing (lifted from logs-v2.py)
+# =============================================================================
+
+_LEVEL_PATTERNS = [
+    (re.compile(r"\[ERROR\]", re.IGNORECASE), "error"),
+    (re.compile(r"\[WARN(?:ING)?\]", re.IGNORECASE), "warn"),
+    (re.compile(r"\[INFO\]", re.IGNORECASE), "info"),
+    (re.compile(r"\[DEBUG\]", re.IGNORECASE), "debug"),
+    (re.compile(r"\[TRACE\]", re.IGNORECASE), "trace"),
+    (re.compile(r'\blevel[=:]\s*"?error"?', re.IGNORECASE), "error"),
+    (re.compile(r'\blevel[=:]\s*"?warn(?:ing)?"?', re.IGNORECASE), "warn"),
+    (re.compile(r'\blevel[=:]\s*"?info"?', re.IGNORECASE), "info"),
+    (re.compile(r'\blevel[=:]\s*"?debug"?', re.IGNORECASE), "debug"),
+    (re.compile(r'"level"\s*:\s*"error"', re.IGNORECASE), "error"),
+    (re.compile(r'"level"\s*:\s*"warn(?:ing)?"', re.IGNORECASE), "warn"),
+    (re.compile(r'"level"\s*:\s*"info"', re.IGNORECASE), "info"),
+    (re.compile(r'"level"\s*:\s*"debug"', re.IGNORECASE), "debug"),
+    (re.compile(r"\bERROR\b"), "error"),
+    (re.compile(r"\bWARNING\b"), "warn"),
+    (re.compile(r"\bFATAL\b", re.IGNORECASE), "error"),
+    (re.compile(r"\bCRITICAL\b", re.IGNORECASE), "error"),
+]
+
+_SOURCE_COLORS = [
+    "cyan", "green", "yellow", "blue", "magenta",
+    "red", "#5fafff", "#5fd787", "#d7af5f", "#af87d7",
+]
+
+LEVELS = ["error", "warn", "info", "debug", "trace"]
+
+
+
+def _detect_level(message: str) -> str | None:
+    for pattern, level in _LEVEL_PATTERNS:
+        if pattern.search(message):
+            return level
+    return None
+
 
 @dataclass(frozen=True)
 class LogLine:
-    """A parsed log line."""
-    raw: str
-    source: str
-    level: str  # one of LEVEL_NAMES or ""
     message: str
+    raw: str | None = None
+    source: str | None = None
+    level: str | None = None
 
+
+def _parse_log_line(line: str) -> LogLine:
+    if " | " in line:
+        source, message = line.split(" | ", 1)
+        return LogLine(raw=line, source=source.strip(), message=message,
+                       level=_detect_level(message))
+    return LogLine(raw=line, source=None, message=line, level=_detect_level(line))
+
+
+# =============================================================================
+# Source color assignment
+# =============================================================================
+
+class SourceColorMap:
+    """Assigns stable colors to sources by first-seen order."""
+
+    def __init__(self):
+        self._map: dict[str, str] = {}
+
+    def get(self, source: str) -> str:
+        if source not in self._map:
+            self._map[source] = _SOURCE_COLORS[len(self._map) % len(_SOURCE_COLORS)]
+        return self._map[source]
+
+
+# =============================================================================
+# App state
+# =============================================================================
 
 @dataclass(frozen=True)
 class LogsState:
-    """Immutable application state."""
-    lines: tuple[LogLine, ...] = ()
-    list_state: ListState = field(default_factory=ListState)
-    spinner_state: SpinnerState = field(default_factory=SpinnerState)
-    input_state: TextInputState = field(default_factory=TextInputState)
-    active_filter: str = ""
-    level_filters: tuple[bool, ...] = (True, True, True, True, True)  # error, warn, info, debug, trace
-    filter_mode: bool = False
+    stack: str = ""
+    host: str = ""
+    user: str = "deploy"
+    service: str | None = None
+    tail: int = 100
+    follow: bool = True
+    identity: str | None = None
+
     connected: bool = False
-    error: str = ""
-    auto_scroll: bool = True
+    connecting: bool = True
+    error: str | None = None
+
+    lines: tuple[LogLine, ...] = ()
     line_count: int = 0
-    max_source_width: int = 0
+
+    filter_text: str = ""
+    level_filter: frozenset[str] = frozenset()  # empty = show all
+
+    auto_scroll: bool = True
+    filter_focused: bool = False
+
+    def add_line(self, line: LogLine) -> LogsState:
+        new_lines = self.lines + (line,)
+        if len(new_lines) > 5000:
+            new_lines = new_lines[-5000:]
+        return replace(self, lines=new_lines, line_count=self.line_count + 1)
+
+    def filtered_lines(self) -> list[LogLine]:
+        result = []
+        for line in self.lines:
+            if self.level_filter:
+                line_level = line.level or "info"
+                if line_level not in self.level_filter:
+                    continue
+            if self.filter_text:
+                text = self.filter_text.lower()
+                haystack = (line.message + " " + (line.source or "")).lower()
+                if text not in haystack:
+                    continue
+            result.append(line)
+        return result
+
+    def toggle_level(self, level: str) -> LogsState:
+        if level in self.level_filter:
+            return replace(self, level_filter=self.level_filter - {level})
+        else:
+            return replace(self, level_filter=self.level_filter | {level})
 
 
-# -- Helpers --
-
-def _detect_level(text: str) -> str:
-    """Detect log level from text content."""
-    m = LEVEL_PATTERN.search(text)
-    if not m:
-        return ""
-    token = m.group(1).upper()
-    if token in ("ERROR", "ERRO", "ERR"):
-        return "error"
-    if token in ("WARN", "WRN"):
-        return "warn"
-    if token in ("INFO", "INF"):
-        return "info"
-    if token in ("DEBUG", "DBG"):
-        return "debug"
-    if token in ("TRACE", "TRC"):
-        return "trace"
-    return ""
-
-
-def _parse_line(raw: str) -> LogLine:
-    """Parse a raw log line into source, level, message."""
-    # Try "source | message" format
-    if " | " in raw:
-        parts = raw.split(" | ", 1)
-        source = parts[0].strip()
-        message = parts[1] if len(parts) > 1 else ""
-    else:
-        source = ""
-        message = raw
-
-    level = _detect_level(raw)
-    return LogLine(raw=raw, source=source, level=level, message=message)
-
-
-def _filter_lines(state: LogsState) -> list[int]:
-    """Return indices of lines matching current filters."""
-    result = []
-    for i, line in enumerate(state.lines):
-        # Level filter
-        if line.level:
-            level_idx = LEVEL_NAMES.index(line.level)
-            if not state.level_filters[level_idx]:
-                continue
-
-        # Text filter
-        if state.active_filter:
-            if state.active_filter.lower() not in line.raw.lower():
-                continue
-
-        result.append(i)
-    return result
-
-
-# -- App --
+# =============================================================================
+# LogsApp
+# =============================================================================
 
 class LogsApp(RenderApp):
-    """SSH log streaming viewer with visual polish."""
+    """Streaming log viewer on the cell-buffer render layer."""
 
-    def __init__(self, target: str, *, ssh_command: str | None = None):
+    def __init__(self, args: argparse.Namespace):
         super().__init__(fps_cap=30)
-        self._target = target
-        self._ssh_command = ssh_command
-        self._state = LogsState()
+        self._state = LogsState(
+            stack=args.stack,
+            host=args.host,
+            user=args.user,
+            service=args.service,
+            tail=args.tail,
+            follow=args.follow,
+            identity=args.identity,
+        )
+        self._list_state = ListState()
+        self._input_state = TextInputState()
+        self._spinner_state = SpinnerState()
+        self._source_colors = SourceColorMap()
         self._last_tick = time.monotonic()
-        self._process: asyncio.subprocess.Process | None = None
+        self._profile_path = getattr(args, 'profile', None)
+        self._timer = FrameTimer(profile=bool(self._profile_path))
+        self._show_debug = False
+        self._frame_trigger: set[str] = set()
+
+        self._region_header = Region(0, 0, 80, 1)
+        self._region_main = Region(0, 1, 80, 20)
+        self._region_footer = Region(0, 21, 80, 2)
+
+        self._proc: asyncio.subprocess.Process | None = None
         self._stream_task: asyncio.Task | None = None
 
-        # Regions
-        self._region_header = Region(0, 0, 80, 1)
-        self._region_main = Region(0, 1, 80, 22)
-        self._region_footer = Region(0, 23, 80, 1)
-
-        # Filtered line indices (cached, rebuilt on filter change)
-        self._filtered: list[int] = []
-        self._filter_dirty = True
+    # -- Lifecycle -------------------------------------------------------------
 
     def layout(self, width: int, height: int) -> None:
-        self._region_header = Region(0, 0, width, 1)
-        self._region_main = Region(0, 1, width, height - 2)
-        self._region_footer = Region(0, height - 1, width, 1)
+        header_h = 1
+        footer_h = 2
+        main_h = max(1, height - header_h - footer_h)
 
-    async def run(self) -> None:
-        """Start SSH streaming then run the UI loop."""
-        self._stream_task = asyncio.ensure_future(self._stream_logs())
-        try:
-            await super().run()
-        finally:
-            if self._stream_task:
-                self._stream_task.cancel()
-                try:
-                    await self._stream_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            if self._process:
-                try:
-                    self._process.terminate()
-                except ProcessLookupError:
-                    pass
+        self._region_header = Region(0, 0, width, header_h)
+        self._region_main = Region(0, header_h, width, main_h)
+        self._region_footer = Region(0, header_h + main_h, width, footer_h)
 
-    async def _stream_logs(self) -> None:
-        """Connect via SSH and stream log lines."""
-        try:
-            cmd = self._ssh_command or f"ssh {self._target}"
-            self._process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            self._state = replace(self._state, connected=True)
-            self.mark_dirty()
-
-            assert self._process.stdout is not None
-            async for raw_line in self._process.stdout:
-                text = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
-                if not text:
-                    continue
-                parsed = _parse_line(text)
-                new_lines = self._state.lines + (parsed,)
-
-                # Track max source width (capped at 20)
-                src_w = min(len(parsed.source), 20)
-                max_src = max(self._state.max_source_width, src_w)
-
-                new_count = len(new_lines)
-                new_list = self._state.list_state
-                if self._state.auto_scroll:
-                    new_list = replace(new_list, item_count=new_count, selected=new_count - 1)
-                else:
-                    new_list = replace(new_list, item_count=new_count)
-
-                self._state = replace(
-                    self._state,
-                    lines=new_lines,
-                    list_state=new_list,
-                    line_count=new_count,
-                    max_source_width=max_src,
-                )
-                self._filter_dirty = True
-                self.mark_dirty()
-
-        except Exception as e:
-            self._state = replace(self._state, error=str(e), connected=False)
-            self.mark_dirty()
+        # Re-sync list scroll
+        filtered = self._state.filtered_lines()
+        self._list_state = replace(
+            self._list_state,
+            item_count=len(filtered),
+        )
+        if self._state.auto_scroll and filtered:
+            self._list_state = replace(
+                self._list_state,
+                selected=len(filtered) - 1,
+            ).scroll_into_view(main_h)
 
     def update(self) -> None:
         now = time.monotonic()
-        if now - self._last_tick >= 0.1:
-            self._state = replace(
-                self._state,
-                spinner_state=self._state.spinner_state.tick(),
-            )
+        if self._state.connecting and now - self._last_tick >= 0.08:
+            self._spinner_state = self._spinner_state.tick()
             self._last_tick = now
+            self._frame_trigger.add("spinner")
             self.mark_dirty()
+        if self._show_debug:
+            self._frame_trigger.add("debug")
+            self.mark_dirty()
+
+    async def run(self) -> None:
+        """Override to start SSH streaming alongside the render loop."""
+        self._running = True
+        self._writer.enter_alt_screen()
+        self._writer.hide_cursor()
+
+        width, height = self._writer.size()
+        from render.buffer import Buffer
+        self._buf = Buffer(width, height)
+        self._prev = Buffer(width, height)
+        self.layout(width, height)
+
+        import signal as sig
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(sig.SIGWINCH, self._on_resize)
+
+        self._stream_task = asyncio.create_task(self._stream_logs())
+
+        try:
+            with self._keyboard:
+                while self._running:
+                    self._timer.begin_frame()
+
+                    with self._timer.phase("keys"):
+                        while True:
+                            key = self._keyboard.get_key()
+                            if key is None:
+                                break
+                            self.on_key(key)
+                            self._dirty = True
+                            self._frame_trigger.add("key")
+
+                    with self._timer.phase("update"):
+                        self.update()
+
+                    rendered = False
+                    if self._dirty:
+                        self._dirty = False
+                        rendered = True
+                        with self._timer.phase("render"):
+                            self.render()
+                        with self._timer.phase("flush"):
+                            self._flush()
+
+                    if self._frame_trigger:
+                        self._timer.set_meta("trigger", sorted(self._frame_trigger))
+                    self._timer.set_meta("items", len(self._state.lines))
+                    self._timer.set_meta("rendered", rendered)
+                    self._frame_trigger = set()
+                    self._timer.end_frame()
+                    await asyncio.sleep(1.0 / self._fps_cap)
+        finally:
+            loop.remove_signal_handler(sig.SIGWINCH)
+            if self._stream_task and not self._stream_task.done():
+                self._stream_task.cancel()
+                try:
+                    await self._stream_task
+                except asyncio.CancelledError:
+                    pass
+            if self._proc and self._proc.returncode is None:
+                self._proc.terminate()
+                try:
+                    await self._proc.wait()
+                except Exception:
+                    pass
+            self._writer.show_cursor()
+            self._writer.exit_alt_screen()
+            if self._profile_path:
+                from pathlib import Path
+                n = self._timer.dump_jsonl(Path(self._profile_path))
+                print(f"profile: {n} frames → {self._profile_path}")
+
+    # -- SSH streaming ---------------------------------------------------------
+
+    async def _stream_logs(self) -> None:
+        ssh_args = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=5",
+            "-o", "LogLevel=ERROR",
+        ]
+        if self._state.identity:
+            ssh_args.extend(["-i", self._state.identity])
+
+        cmd = ["docker", "compose", "logs", "--no-color",
+               "--tail", str(self._state.tail)]
+        if self._state.follow:
+            cmd.append("-f")
+        if self._state.service:
+            cmd.append(self._state.service)
+
+        remote_cmd = (
+            f"cd /opt/{shlex.quote(self._state.stack)} && {shlex.join(cmd)}"
+        )
+
+        try:
+            self._proc = await asyncio.create_subprocess_exec(
+                *ssh_args,
+                f"{self._state.user}@{self._state.host}",
+                remote_cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            self._state = replace(self._state, connected=True, connecting=False)
+            self.mark_dirty()
+
+            assert self._proc.stdout is not None
+            while True:
+                raw = await self._proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode(errors="replace").rstrip("\n")
+                if not line:
+                    continue
+
+                parsed = _parse_log_line(line)
+                self._state = self._state.add_line(parsed)
+
+                # Sync list state
+                filtered = self._state.filtered_lines()
+                self._list_state = replace(
+                    self._list_state, item_count=len(filtered)
+                )
+                if self._state.auto_scroll and filtered:
+                    self._list_state = replace(
+                        self._list_state, selected=len(filtered) - 1
+                    ).scroll_into_view(self._region_main.height)
+
+                self._frame_trigger.add("data")
+                self.mark_dirty()
+
+            rc = await self._proc.wait()
+            if rc != 0:
+                self._state = replace(self._state,
+                                      error=f"exit {rc}", connecting=False)
+            else:
+                self._state = replace(self._state, connecting=False)
+            self.mark_dirty()
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._state = replace(self._state, error=str(e),
+                                  connecting=False, connected=False)
+            self.mark_dirty()
+
+    # -- Rendering -------------------------------------------------------------
 
     def render(self) -> None:
         if self._buf is None:
             return
+        with self._timer.phase("r.clear"):
+            self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
+        with self._timer.phase("r.header"):
+            self._render_header()
+        with self._timer.phase("r.main"):
+            self._render_main()
+        with self._timer.phase("r.footer"):
+            self._render_footer()
+        if self._show_debug:
+            self._render_debug()
 
-        # Rebuild filter cache if needed
-        if self._filter_dirty:
-            self._filtered = _filter_lines(self._state)
-            self._filter_dirty = False
-
+    def _render_header(self) -> None:
+        view = self._region_header.view(self._buf)
         width = self._region_header.width
+        view.fill(0, 0, width, 1, " ", HEADER_BASE)
 
-        # Clear buffer
-        self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
+        spans: list[Span] = []
+        spans.append(Span(f" {self._state.stack}", HEADER_BOLD))
 
-        # Render header
-        header_block = self._render_header(width)
-        header_view = self._region_header.view(self._buf)
-        header_block.paint(header_view, x=0, y=0)
-
-        # Render main log area
-        self._render_main()
-
-        # Render footer
-        footer_block = self._render_footer(width)
-        footer_view = self._region_footer.view(self._buf)
-        footer_block.paint(footer_view, x=0, y=0)
-
-    def _render_header(self, width: int) -> Block:
-        """Build header: spinner/status + line count + level indicators + scroll pos."""
-        parts: list[Cell] = []
-
-        # Connection indicator
-        if self._state.connected:
-            parts.append(Cell("●", HEADER_CONNECTED))
-        elif self._state.error:
-            parts.append(Cell("●", HEADER_ERROR))
-        else:
-            # Show spinner frame while connecting
-            frame = self._state.spinner_state.frames.frames[
-                self._state.spinner_state.frame % len(self._state.spinner_state.frames.frames)
+        if self._state.connecting:
+            frame = self._spinner_state.frames.frames[
+                self._spinner_state.frame % len(self._spinner_state.frames.frames)
             ]
-            parts.append(Cell(frame, HEADER_SPINNER))
+            spans.append(Span(f" {frame} ", HEADER_SPINNER))
+            spans.append(Span("connecting", HEADER_DIM))
+        elif self._state.error:
+            spans.append(Span(f" ✗ {self._state.error}", HEADER_ERROR))
+        elif self._state.connected:
+            spans.append(Span(" ●", HEADER_CONNECTED))
 
-        parts.append(Cell(" ", HEADER_BASE))
+        filtered = self._state.filtered_lines()
+        spans.append(Span(f" {len(filtered)}/{self._state.line_count}", HEADER_DIM))
 
-        # Target name
-        target_display = self._target[:20]
-        for ch in target_display:
-            parts.append(Cell(ch, HEADER_TARGET))
+        if self._state.level_filter:
+            lvl_str = " [" + ",".join(sorted(self._state.level_filter)) + "]"
+            spans.append(Span(lvl_str, HEADER_LEVEL_FILTER))
 
-        parts.append(Cell(" ", HEADER_BASE))
-        parts.append(Cell(" ", HEADER_BASE))
-
-        # Line count
-        count_str = f"[{self._state.line_count} lines]"
-        for ch in count_str:
-            parts.append(Cell(ch, HEADER_DIM))
-
-        parts.append(Cell(" ", HEADER_BASE))
-        parts.append(Cell(" ", HEADER_BASE))
-
-        # Level indicators: 1:err 2:wrn 3:inf 4:dbg 5:trc
-        for idx, (label, name) in enumerate(zip(LEVEL_LABELS, LEVEL_NAMES)):
-            active = self._state.level_filters[idx]
-            # Key hint
-            key_ch = str(idx + 1)
-            if active:
-                style = Style(fg=LEVEL_STYLES[name].fg, bold=LEVEL_STYLES[name].bold, bg=HEADER_BG)
-            else:
-                style = HEADER_DIM
-
-            parts.append(Cell(key_ch, HEADER_DIM))
-            parts.append(Cell(":", HEADER_DIM))
-            for ch in label:
-                parts.append(Cell(ch, style))
-            parts.append(Cell(" ", HEADER_BASE))
-
-        # Scroll position (right-aligned)
-        scroll_info = self._scroll_info()
-        # Calculate remaining space
-        used = len(parts)
-        remaining = width - used - len(scroll_info)
-        # Fill gap
-        for _ in range(max(0, remaining)):
-            parts.append(Cell(" ", HEADER_BASE))
-        for ch in scroll_info:
-            parts.append(Cell(ch, HEADER_DIM))
-
-        # Pad/truncate to width
-        while len(parts) < width:
-            parts.append(Cell(" ", HEADER_BASE))
-        parts = parts[:width]
-
-        return Block([parts], width)
-
-    def _scroll_info(self) -> str:
-        """Build scroll position string."""
-        filtered_count = len(self._filtered)
-        if filtered_count == 0:
-            return ""
-
-        if self._state.auto_scroll:
-            return "[end]"
-
-        selected = self._state.list_state.selected
-        # Find position in filtered list
-        if filtered_count > 0:
-            pct = int((selected / max(1, filtered_count - 1)) * 100)
-            return f"[{pct}%]"
-        return ""
+        Line(tuple(spans), style=HEADER_BASE).truncate(width).paint(view, x=0, y=0)
 
     def _render_main(self) -> None:
-        """Render log lines into the main region."""
         view = self._region_main.view(self._buf)
-        visible_height = self._region_main.height
-        main_width = self._region_main.width
+        width = self._region_main.width
+        height = self._region_main.height
 
-        filtered = self._filtered
+        with self._timer.phase("m.filter"):
+            filtered = self._state.filtered_lines()
         if not filtered:
-            # Show empty state
-            if self._state.error:
-                msg = f"Error: {self._state.error}"
-                view.put_text(1, 0, msg, ERROR_TEXT)
-            elif not self._state.connected:
-                view.put_text(1, 0, "Connecting...", SOURCE_DIM)
-            else:
-                view.put_text(1, 0, "No matching lines", SOURCE_DIM)
             return
 
-        # Determine visible window based on list_state
-        total = len(filtered)
-        state = self._state.list_state
+        start = self._list_state.scroll_offset
+        end = min(start + height, len(filtered))
+        content_width = width - 2  # room for cursor prefix
 
-        # Calculate scroll offset
-        scroll_offset = state.scroll_offset
-        if state.selected < scroll_offset:
-            scroll_offset = state.selected
-        elif state.selected >= scroll_offset + visible_height:
-            scroll_offset = state.selected - visible_height + 1
-        scroll_offset = max(0, min(scroll_offset, total - visible_height))
-
-        # Determine if we show source column
-        has_sources = self._state.max_source_width > 0
-        # Check if all sources are the same (single-service mode)
-        if has_sources and len(self._state.lines) > 1:
-            first_src = self._state.lines[0].source
-            single_service = all(
-                line.source == first_src for line in self._state.lines[:50]
-            )
-            if single_service:
-                has_sources = False
-
-        source_col_width = min(self._state.max_source_width, 20) if has_sources else 0
-        separator_width = 3 if has_sources else 0  # " │ "
-        message_start = source_col_width + separator_width
-
-        for row_idx in range(visible_height):
-            line_idx = scroll_offset + row_idx
-            if line_idx >= total:
-                break
-
-            actual_idx = filtered[line_idx]
-            line = self._state.lines[actual_idx]
-            is_selected = line_idx == state.selected
-
-            # Selection indicator
-            if is_selected:
-                view.put(0, row_idx, "▸", SELECTION_CURSOR)
-
-            col = 2  # start after cursor + space
-
-            # Source column
-            if has_sources:
-                src_display = line.source[:source_col_width]
-                view.put_text(col, row_idx, src_display, SOURCE_DIM)
-                col = 2 + source_col_width
-
-                # Separator
-                view.put(col, row_idx, " ", SOURCE_DIM)
-                view.put(col + 1, row_idx, "│", SOURCE_DIM)
-                view.put(col + 2, row_idx, " ", SOURCE_DIM)
-                col += 3
-
-            # Message with level coloring
-            level_style = LEVEL_STYLES.get(line.level, Style())
-            msg = line.message if has_sources else line.raw
-            # Truncate to fit
-            max_msg = main_width - col
-            if len(msg) > max_msg:
-                msg = msg[:max(0, max_msg - 1)] + "…"
-
-            view.put_text(col, row_idx, msg, level_style)
-
-            # Selection highlight (full row background)
-            if is_selected:
-                for c in range(main_width):
-                    cell = self._buf.get(
-                        self._region_main.x + c,
-                        self._region_main.y + row_idx,
-                    )
-                    merged_style = Style(
-                        fg=cell.style.fg,
-                        bg=SELECTION_HIGHLIGHT.bg,
-                        bold=cell.style.bold,
-                        dim=cell.style.dim,
-                        italic=cell.style.italic,
-                    )
-                    self._buf.put(
-                        self._region_main.x + c,
-                        self._region_main.y + row_idx,
-                        cell.char,
-                        merged_style,
-                    )
-
-        # Auto-scroll paused indicator
-        if not self._state.auto_scroll and total > visible_height:
-            indicator = " ↓ auto-scroll paused "
-            x_pos = main_width - len(indicator) - 1
-            if x_pos > 0:
-                view.put_text(x_pos, visible_height - 1, indicator, SCROLL_PAUSED)
-
-    def _render_footer(self, width: int) -> Block:
-        """Build footer: keybinds or filter input."""
-        parts: list[Cell] = []
-
-        if self._state.filter_mode:
-            # Filter mode: show prompt and input
-            prompt = " / "
-            for ch in prompt:
-                parts.append(Cell(ch, FILTER_PROMPT))
-
-            # Render text input inline
-            input_width = width - len(prompt)
-            text = self._state.input_state.text
-            cursor_pos = self._state.input_state.cursor
-
-            for i, ch in enumerate(text[:input_width]):
-                if i == cursor_pos:
-                    parts.append(Cell(ch, FILTER_CURSOR))
+        with self._timer.phase("m.build"):
+            for row_idx, line in enumerate(filtered[start:end]):
+                is_selected = (start + row_idx) == self._list_state.selected
+                row_line = self._render_log_line(line, content_width)
+                if is_selected:
+                    sel = Line(
+                        (Span("▸ ", SELECTION_CURSOR),) + row_line.spans,
+                        style=SELECTION_HIGHLIGHT,
+                    ).truncate(width)
+                    sel.paint(view, x=0, y=row_idx)
                 else:
-                    parts.append(Cell(ch, FILTER_INPUT))
+                    prefixed = Line((Span("  "),) + row_line.spans).truncate(width)
+                    prefixed.paint(view, x=0, y=row_idx)
 
-            # Cursor at end
-            if cursor_pos >= len(text):
-                parts.append(Cell(" ", FILTER_CURSOR))
+    def _render_log_line(self, line: LogLine, width: int) -> Line:
+        """Build a Line for a single log entry."""
+        spans: list[Span] = []
 
-            # Fill rest
-            while len(parts) < width:
-                parts.append(Cell(" ", FILTER_INPUT))
+        if line.source:
+            color = self._source_colors.get(line.source)
+            spans.append(Span(f"{line.source:>12} ", Style(fg=color)))
+            spans.append(Span("│ ", SOURCE_DIM))
 
-        else:
-            # Normal mode: keybind hints
-            hints = [
-                ("q", "quit"),
-                ("/", "filter"),
-                ("j/k", "scroll"),
-                ("g/G", "top/btm"),
-                ("1-5", "levels"),
-            ]
+        msg_style = LEVEL_STYLES.get(line.level, Style())
+        spans.append(Span(line.message, msg_style))
 
-            # Show active filter if any
-            if self._state.active_filter:
-                filter_display = f" filter: {self._state.active_filter} "
-                for ch in filter_display:
-                    parts.append(Cell(ch, FOOTER_ACTIVE_FILTER))
-                parts.append(Cell("│", FOOTER_SEPARATOR))
+        return Line(tuple(spans)).truncate(width)
 
-            parts.append(Cell(" ", FOOTER_BASE))
-            for i, (key, desc) in enumerate(hints):
-                for ch in key:
-                    parts.append(Cell(ch, FOOTER_KEY))
-                parts.append(Cell(":", FOOTER_BASE))
-                for ch in desc:
-                    parts.append(Cell(ch, FOOTER_BASE))
-                if i < len(hints) - 1:
-                    parts.append(Cell(" ", FOOTER_BASE))
-                    parts.append(Cell(" ", FOOTER_BASE))
+    def _render_footer(self) -> None:
+        view = self._region_footer.view(self._buf)
+        width = self._region_footer.width
 
-            # Fill rest with footer bg
-            while len(parts) < width:
-                parts.append(Cell(" ", FOOTER_BASE))
+        # Row 0: filter
+        if self._state.filter_focused:
+            spans: list[Span] = [Span("/", FILTER_PROMPT)]
+            text = self._input_state.text
+            cursor = self._input_state.cursor
+            if text[:cursor]:
+                spans.append(Span(text[:cursor]))
+            cursor_ch = text[cursor] if cursor < len(text) else " "
+            spans.append(Span(cursor_ch, FILTER_CURSOR))
+            if cursor < len(text) - 1:
+                spans.append(Span(text[cursor + 1:]))
+            Line(tuple(spans)).truncate(width).paint(view, x=0, y=0)
+        elif self._state.filter_text:
+            Line((Span(f" filter: {self._state.filter_text}", FOOTER_ACTIVE_FILTER),)).truncate(width).paint(view, x=0, y=0)
 
-        parts = parts[:width]
-        return Block([parts], width)
+        # Row 1: keyboard hints
+        hints = [("q", "quit"), ("/", "filter"), ("j/k", "scroll"),
+                 ("1-5", "levels"), ("G", "bottom"), ("d", "perf")]
+        hint_spans: list[Span] = []
+        for key, desc in hints:
+            hint_spans.append(Span(f" {key}", FOOTER_KEY))
+            hint_spans.append(Span(f"={desc}", FOOTER_DIM))
+
+        Line(tuple(hint_spans)).truncate(width).paint(view, x=0, y=1)
+
+    def _render_debug(self) -> None:
+        """Overlay frame timing stats in top-right corner."""
+        last = self._timer.last()
+        if last is None:
+            return
+
+        # Build lines: phase name + last ms + avg ms
+        lines: list[str] = []
+        lines.append(f"{'phase':<10} {'last':>6} {'avg':>6} {'max':>6}")
+        lines.append(f"{'─' * 10} {'─' * 6} {'─' * 6} {'─' * 6}")
+        for name in self._timer.phase_names():
+            val = last.phases.get(name, 0.0)
+            avg = self._timer.avg(name)
+            mx = self._timer.max(name)
+            lines.append(f"{name:<10} {val:>5.1f}m {avg:>5.1f}m {mx:>5.1f}m")
+        lines.append(f"{'─' * 10} {'─' * 6} {'─' * 6} {'─' * 6}")
+        lines.append(f"{'TOTAL':<10} {last.total:>5.1f}m {self._timer.avg_total():>5.1f}m")
+
+        # Also show item counts for context
+        filtered = self._state.filtered_lines()
+        lines.append(f"items: {len(filtered)}/{len(self._state.lines)}")
+
+        # Paint directly into buffer at top-right
+        panel_w = max(len(l) for l in lines) + 2
+        panel_h = len(lines) + 1
+        x_start = max(0, self._buf.width - panel_w - 1)
+        y_start = 1
+
+        bg = DEBUG_OVERLAY
+        for dy, line in enumerate(lines):
+            y = y_start + dy
+            if y >= self._buf.height:
+                break
+            # Background fill for this row
+            for dx in range(panel_w):
+                self._buf.put(x_start + dx, y, " ", bg)
+            # Write text
+            self._buf.put_text(x_start + 1, y, line[:panel_w - 2], bg)
+
+    def _flush(self) -> None:
+        if self._buf is None or self._prev is None:
+            return
+        with self._timer.phase("f.diff"):
+            writes = self._buf.diff(self._prev)
+        if writes:
+            with self._timer.phase("f.write"):
+                self._writer.write_frame(writes)
+        with self._timer.phase("f.clone"):
+            self._prev = self._buf.clone()
+
+    # -- Keyboard --------------------------------------------------------------
 
     def on_key(self, key: str) -> None:
-        if self._state.filter_mode:
+        if self._state.filter_focused:
             self._handle_filter_key(key)
-        else:
-            self._handle_normal_key(key)
+            return
 
-    def _handle_normal_key(self, key: str) -> None:
         if key == "q":
             self.quit()
-            return
-
-        if key == "/":
-            self._state = replace(
-                self._state,
-                filter_mode=True,
-                input_state=TextInputState(text=self._state.active_filter,
-                                           cursor=len(self._state.active_filter)),
-            )
-            return
-
-        if key in ("j", "down"):
+        elif key == "/":
+            self._state = replace(self._state, filter_focused=True)
+        elif key in ("j", "down"):
             self._scroll_down()
-            return
-
-        if key in ("k", "up"):
+        elif key in ("k", "up"):
             self._scroll_up()
-            return
-
-        if key == "g":
-            self._scroll_top()
-            return
-
-        if key == "G":
-            self._scroll_bottom()
-            return
-
-        if key in "12345":
-            idx = int(key) - 1
-            filters = list(self._state.level_filters)
-            filters[idx] = not filters[idx]
-            self._state = replace(self._state, level_filters=tuple(filters))
-            self._filter_dirty = True
-            return
+        elif key == "G":
+            self._jump_to_bottom()
+        elif key == "g":
+            self._jump_to_top()
+        elif key == "escape":
+            if self._state.filter_text:
+                self._state = replace(self._state, filter_text="")
+                self._input_state = TextInputState()
+                self._sync_list_after_filter()
+        elif key == "d":
+            self._show_debug = not self._show_debug
+        elif key in "12345":
+            level_idx = int(key) - 1
+            if level_idx < len(LEVELS):
+                self._state = self._state.toggle_level(LEVELS[level_idx])
+                self._sync_list_after_filter()
 
     def _handle_filter_key(self, key: str) -> None:
         if key == "escape":
-            self._state = replace(self._state, filter_mode=False)
-            return
-
-        if key == "enter":
+            self._state = replace(self._state, filter_focused=False, filter_text="")
+            self._input_state = TextInputState()
+            self._sync_list_after_filter()
+        elif key == "enter":
             self._state = replace(
-                self._state,
-                filter_mode=False,
-                active_filter=self._state.input_state.text,
+                self._state, filter_focused=False,
+                filter_text=self._input_state.text,
             )
-            self._filter_dirty = True
-            return
+            self._sync_list_after_filter()
+        elif key == "backspace":
+            self._input_state = self._input_state.delete_back()
+            self._state = replace(self._state, filter_text=self._input_state.text)
+            self._sync_list_after_filter()
+        elif key.isprintable() and len(key) == 1:
+            self._input_state = self._input_state.insert(key)
+            self._state = replace(self._state, filter_text=self._input_state.text)
+            self._sync_list_after_filter()
 
-        if key == "backspace":
-            self._state = replace(
-                self._state,
-                input_state=self._state.input_state.delete_back(),
-            )
-            return
-
-        if key.isprintable() and len(key) == 1:
-            self._state = replace(
-                self._state,
-                input_state=self._state.input_state.insert(key),
-            )
-            return
-
-    def _scroll_down(self) -> None:
-        filtered_count = len(self._filtered)
-        if filtered_count == 0:
-            return
-        new_selected = min(self._state.list_state.selected + 1, filtered_count - 1)
-        at_bottom = new_selected >= filtered_count - 1
-        self._state = replace(
-            self._state,
-            list_state=replace(self._state.list_state, selected=new_selected),
-            auto_scroll=at_bottom,
-        )
+    def _sync_list_after_filter(self) -> None:
+        filtered = self._state.filtered_lines()
+        self._list_state = replace(self._list_state, item_count=len(filtered))
+        if self._state.auto_scroll and filtered:
+            self._list_state = replace(
+                self._list_state, selected=len(filtered) - 1
+            ).scroll_into_view(self._region_main.height)
 
     def _scroll_up(self) -> None:
-        if len(self._filtered) == 0:
-            return
-        new_selected = max(self._state.list_state.selected - 1, 0)
-        self._state = replace(
-            self._state,
-            list_state=replace(self._state.list_state, selected=new_selected),
-            auto_scroll=False,
+        self._state = replace(self._state, auto_scroll=False)
+        self._list_state = self._list_state.move_up().scroll_into_view(
+            self._region_main.height
         )
 
-    def _scroll_top(self) -> None:
-        self._state = replace(
-            self._state,
-            list_state=replace(self._state.list_state, selected=0, scroll_offset=0),
-            auto_scroll=False,
+    def _scroll_down(self) -> None:
+        self._list_state = self._list_state.move_down().scroll_into_view(
+            self._region_main.height
+        )
+        filtered = self._state.filtered_lines()
+        if filtered and self._list_state.selected >= len(filtered) - 1:
+            self._state = replace(self._state, auto_scroll=True)
+
+    def _jump_to_bottom(self) -> None:
+        self._state = replace(self._state, auto_scroll=True)
+        filtered = self._state.filtered_lines()
+        if filtered:
+            self._list_state = replace(
+                self._list_state, selected=len(filtered) - 1
+            ).scroll_into_view(self._region_main.height)
+
+    def _jump_to_top(self) -> None:
+        self._state = replace(self._state, auto_scroll=False)
+        self._list_state = replace(
+            self._list_state, selected=0, scroll_offset=0
         )
 
-    def _scroll_bottom(self) -> None:
-        filtered_count = len(self._filtered)
-        if filtered_count == 0:
-            return
-        self._state = replace(
-            self._state,
-            list_state=replace(self._state.list_state, selected=filtered_count - 1),
-            auto_scroll=True,
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Streaming log viewer for homelab docker compose stacks",
+        prog="logs",
+    )
+    parser.add_argument("stack", help="Stack name (matches /opt/<stack> on remote)")
+    parser.add_argument("--host", required=True, help="SSH host (IP or hostname)")
+    parser.add_argument("--user", default="deploy", help="SSH user (default: deploy)")
+    parser.add_argument("-s", "--service", default=None,
+                        help="Filter to a specific service")
+    parser.add_argument("--tail", type=int, default=100,
+                        help="Number of initial lines (default: 100)")
+    parser.add_argument("-i", "--identity", default=None,
+                        help="SSH identity file path")
+    parser.add_argument("--level", default=None,
+                        help="Initial level filter (comma-separated)")
+    parser.add_argument("--no-follow", dest="follow", action="store_false",
+                        help="Don't follow (just tail)")
+    parser.add_argument("--profile", default=None, metavar="PATH",
+                        help="Dump per-frame timing JSONL to this path on exit")
+    parser.set_defaults(follow=True)
+    return parser.parse_args()
+
+
+async def main():
+    args = parse_args()
+    app = LogsApp(args)
+
+    if args.level:
+        levels = frozenset(
+            ("warn" if v.strip().lower() == "warning" else v.strip().lower())
+            for v in args.level.split(",") if v.strip()
         )
+        app._state = replace(app._state, level_filter=levels)
 
-
-async def main(target: str = "localhost", *, ssh_command: str | None = None):
-    app = LogsApp(target, ssh_command=ssh_command)
     await app.run()
 
 
 if __name__ == "__main__":
-    import sys
-    target = sys.argv[1] if len(sys.argv) > 1 else "localhost"
-    asyncio.run(main(target))
+    asyncio.run(main())

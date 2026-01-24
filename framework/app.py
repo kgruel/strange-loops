@@ -110,7 +110,7 @@ class BaseApp:
         if view_mode is None:
             view_mode = Mode.VIEW
 
-        if key == "\r" or key == "\n":
+        if key == "enter":
             raw = self._input_buffer()
             if raw.strip():
                 self._filter_history.update(
@@ -120,13 +120,13 @@ class BaseApp:
                 filter_signal.set(parse_fn(raw))
                 self._mode.set(view_mode)
                 self._input_buffer.set("")
-        elif key == "\x1b":  # Escape
+        elif key == "escape":
             with batch():
                 self._mode.set(view_mode)
                 self._input_buffer.set("")
-        elif key == "\x7f":  # Backspace
+        elif key == "backspace":
             self._input_buffer.update(lambda s: s[:-1])
-        elif key == "\x1b[A":  # Up arrow — cycle history
+        elif key == "up":
             history = self._filter_history()
             if history:
                 current = self._input_buffer()
@@ -136,7 +136,7 @@ class BaseApp:
                 except ValueError:
                     next_idx = 0
                 self._input_buffer.set(history[next_idx])
-        elif key.isprintable():
+        elif key.isprintable() and len(key) == 1:
             self._input_buffer.update(lambda s: s + key)
         return True
 

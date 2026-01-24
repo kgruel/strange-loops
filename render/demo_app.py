@@ -94,7 +94,7 @@ class DemoApp(RenderApp):
             self.quit()
             return
 
-        if key == "\t":
+        if key == "tab":
             self._focus.next()
             return
 
@@ -106,27 +106,17 @@ class DemoApp(RenderApp):
             self._handle_input_key(key)
 
     def _handle_list_key(self, key: str) -> None:
-        # Arrow keys come as escape sequences
-        if key == "\x1b":
-            # Read the rest of the escape sequence
-            k2 = self._keyboard.get_key()
-            if k2 == "[":
-                k3 = self._keyboard.get_key()
-                if k3 == "A":  # Up
-                    self._list_state = self._list_state.move_up()
-                elif k3 == "B":  # Down
-                    self._list_state = self._list_state.move_down()
+        if key == "up":
+            self._list_state = self._list_state.move_up()
+        elif key == "down":
+            self._list_state = self._list_state.move_down()
 
     def _handle_input_key(self, key: str) -> None:
-        if key == "\x1b":
-            k2 = self._keyboard.get_key()
-            if k2 == "[":
-                k3 = self._keyboard.get_key()
-                if k3 == "D":  # Left
-                    self._input_state = self._input_state.move_left()
-                elif k3 == "C":  # Right
-                    self._input_state = self._input_state.move_right()
-        elif key == "\x7f":  # Backspace
+        if key == "left":
+            self._input_state = self._input_state.move_left()
+        elif key == "right":
+            self._input_state = self._input_state.move_right()
+        elif key == "backspace":
             self._input_state = self._input_state.delete_back()
         elif key.isprintable() and len(key) == 1:
             self._input_state = self._input_state.insert(key)

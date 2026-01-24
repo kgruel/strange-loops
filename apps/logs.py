@@ -607,6 +607,13 @@ class LogsApp(RenderApp):
             self._list_state = replace(
                 self._list_state, selected=len(filtered) - 1
             ).scroll_into_view(self._region_main.height)
+        elif not self._state.auto_scroll:
+            max_sel = max(0, len(filtered) - 1)
+            if self._list_state.selected > max_sel:
+                self._list_state = replace(self._list_state, selected=max_sel)
+                self._list_state = self._list_state.scroll_into_view(
+                    self._region_main.height
+                )
 
     def _scroll_up(self) -> None:
         self._state = replace(self._state, auto_scroll=False)

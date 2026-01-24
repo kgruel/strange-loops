@@ -11,7 +11,7 @@ Cell-buffer terminal rendering engine (`render/`) — Python equivalent of Ratat
 
 The paint boundary (Line.paint / Block.paint → BufferView) is where Cells get created — exactly once, in their final location. Apps compose descriptions above this boundary, never below.
 
-The framework layer (`framework/`) provides event-sourcing, projections, and reactive signals for complex dashboards. The render layer operates independently — simple apps don't need it.
+The framework layer (`framework/`) provides event-sourcing, projections, and reactive signals for complex dashboards. Conceptually independent, but currently two cross-imports exist (see P1 below).
 
 ## Milestone Status
 
@@ -55,6 +55,13 @@ The framework layer (`framework/`) provides event-sourcing, projections, and rea
 │  EventStore, Projections, Signals — for complex dashboards│
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Actual dependency structure:**
+- `apps/` → `render/` only (logs.py, demo.py)
+- `examples/` → `framework/` only (Rich-based, separate product line)
+- `render/app.py` → `framework.keyboard` (single import, the coupling point)
+- `framework/debug.py` → `render` (Block, Style, compose functions)
+- `framework/keyboard.py` has zero internal dependencies (pure stdlib)
 
 **When to use what:**
 - **Line** (90% of cases): log rows, status bars, table cells, list items. Left-to-right styled text. No Cells until paint.
@@ -102,7 +109,11 @@ Selection highlighting: Line's base `style` merges onto each Span at paint time.
 Any RenderApp that spawns subprocesses MUST use `stdin=asyncio.subprocess.DEVNULL`. The app owns the terminal in alt-screen/cbreak mode.
 
 ### Keyboard API
-`KeyboardInput.get_key()` returns named strings: `"up"`, `"down"`, `"escape"`, `"enter"`, `"backspace"`, printable chars. Escape sequences are atomic (5ms timeout).
+`KeyboardInput.get_key()` returns named strings or single characters. Escape sequences are parsed atomically (5ms timeout) and fully drained — unrecognized sequences are consumed without leaving garbage in the input buffer. Multi-byte UTF-8 characters are assembled from continuation bytes.
+
+Named keys: `"up"`, `"down"`, `"left"`, `"right"`, `"home"`, `"end"`, `"escape"`, `"enter"`, `"backspace"`, `"tab"`, `"shift_tab"`, `"delete"`, `"insert"`, `"page_up"`, `"page_down"`, `"f1"`-`"f4"`.
+
+Handles: CSI sequences (ESC [), SS3 sequences (ESC O), parameterized sequences (ESC [3~, etc.).
 
 ### RenderApp main loop
 - Drains ALL available keys per frame
@@ -143,19 +154,22 @@ Both modes return a Block from the render function — the app lifecycle doesn't
 | `render/components/` | Line-based: list_view, table. Block-based: spinner, progress, text_input |
 | `render/focus.py` | FocusRing |
 | `render/region.py` | Region → BufferView |
+| `framework/keyboard.py` | KeyboardInput: cbreak mode, CSI/SS3 drain, UTF-8 assembly |
 | `framework/` | EventStore, Projections, BaseApp, debug panel, simulators |
 
 ## Next Steps
 
-1. **Review & feedback** — Next session focus. Walk through the codebase with fresh eyes, assess API ergonomics, identify rough edges.
+### P1 — Architecture
 
-2. **Demo evolution** — The demo (`apps/demo.py`) serves as both showcase and regression test. It will grow as we add features. Worth thinking about structure for multi-stage animated apps: when to use Buffer-as-canvas (absolute positioning, animation) vs compose functions (static layout). Currently the finale uses Buffer directly while other stages use join/pad/border — that pattern may want a name.
+1. **Break render↔framework coupling** — `render/app.py:10` imports `framework.keyboard.KeyboardInput`. `framework/debug.py:10` imports render primitives. `KeyboardInput` is pure terminal I/O (stdlib only) — it belongs in `render/` or a shared `terminal/` leaf module. This makes render self-contained and framework independently packageable.
 
-3. **Thin CLI harness** — Mode detection (TTY → RenderApp, `--json` → stdout) in ~30 lines. Pattern is clear from apps/logs.py. Not urgent.
+2. **Decide framework rendering strategy** — `framework/ui.py` returns Rich renderables. `framework/debug.py` returns `render.Block`. `examples/` use Rich. Either: keep framework Rich-based and add a Block→Rich adapter, or fully port framework to the render layer. Currently the migration state is ambiguous.
 
-4. **Layout constraints** — If complex dashboards emerge, Ratatui-style `Layout` that splits Rects via constraints (Min, Max, Percentage, Fixed). Produces Regions, not Blocks. Only add when patterns demand it.
+### P2 — Polish
 
-5. **Spinner/Progress → Line** — These still return Block. Evaluate whether they should return Line (spinner is 1 char, progress is a single row). Low priority since they're typically composed into bordered panels.
+3. **Cache `filtered_lines()` per frame** — `apps/logs.py` calls `filtered_lines()` multiple times per render (header, main, debug). Cache the result per frame to avoid repeated scans.
+
+4. **Spinner/Progress → Line** — These still return Block. Evaluate whether they should return Line (spinner is 1 char, progress is a single row).
 
 ## Run
 

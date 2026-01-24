@@ -156,23 +156,6 @@ class Metrics:
             },
         }
 
-    def timing_samples(self, name: str) -> list[float]:
-        """Return the recent timing samples for a named metric (public API)."""
-        t = self._timings.get(name)
-        return list(t.samples) if t else []
-
-    def rate(self, name: str, window: float = 5.0) -> float:
-        """Windowed rate for a counter: increments in the last `window` seconds."""
-        # Simple approximation: total count / elapsed, clamped to window
-        elapsed = time.time() - self._start_time if self._start_time else 0
-        if elapsed <= 0:
-            return 0.0
-        count = self._counters.get(name, 0)
-        if elapsed <= window:
-            return count / elapsed
-        # For longer runs, approximate recent rate from total
-        return count / elapsed
-
     def reset(self) -> None:
         """Clear all metrics."""
         self._counters.clear()

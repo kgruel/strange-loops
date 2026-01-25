@@ -51,14 +51,16 @@ BenchState(current_slide, demo_focused, show_help, ...component_states...)
 
 ```
 intro → cell → style → span → line → buffer → block → compose → app → components
-           ↓        ↓                    ↓                              ↓
-       cell/detail  style/detail    buffer/view               components/progress
-                                                                        ↓
-                                                              components/list
-                                                                        ↓
-                                                              components/text
-                                                                        ↓
-                                                                       fin
+           ↓        ↓      ↓      ↓       ↓        ↓                       ↓
+       cell/detail  |  span/  line/  buffer/  block/           components/progress
+                    |  detail detail  view    detail                       ↓
+              style/detail                                       components/list
+                                                                           ↓
+                                                                 components/text
+                                                                           ↓
+                                                                 components/table
+                                                                           ↓
+                                                                          fin
 ```
 
 Horizontal (←→) = peer concepts. Vertical (↑↓) = depth on same concept.
@@ -149,8 +151,8 @@ def styled(*parts: str | tuple[str, Style]) -> Line:
 
 ### Quick Wins
 
-- [ ] Add `table` demo slide (component exists, not demoed)
-- [ ] Add depth slides for Span, Line, Block (currently only Cell, Style, Buffer have depth)
+- [x] Add `table` demo slide (component exists, not demoed)
+- [x] Add depth slides for Span, Line, Block (currently only Cell, Style, Buffer have depth)
 
 ### Framework Improvements
 

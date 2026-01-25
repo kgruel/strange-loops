@@ -20,11 +20,14 @@ from cells import (
     RenderApp, Block, Style, Span, Line,
     join_horizontal, join_vertical, pad, border,
     ROUNDED,
+    # Focus management
+    Focus, ring_next, ring_prev, linear_next, linear_prev,
     # Components for interactive demos
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
     ListState, list_view,
     TextInputState, text_input,
+    Column, TableState, table,
 )
 
 
@@ -99,7 +102,7 @@ class Slide:
 class BenchState:
     """Application state for the teaching bench."""
     current_slide: str = "intro"
-    demo_focused: bool = False  # True = keys go to demo widget, False = keys navigate
+    focus: Focus = field(default_factory=lambda: Focus(id="demo"))  # .captured = keys go to widget
     show_help: bool = False  # True = show help overlay
 
     # Component states for interactive demos
@@ -109,6 +112,11 @@ class BenchState:
     progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
     list_state: ListState = field(default_factory=lambda: ListState(item_count=5))
     text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
+    table_state: TableState = field(default_factory=lambda: TableState(row_count=4))
+
+    # Focus demo state
+    focus_demo_item: str = "a"
+    focus_demo_mode: str = "ring"  # "ring" or "linear"
 
 
 # -- Styles --
@@ -327,11 +335,25 @@ DEMO_LIST_ITEMS = [
     Line.plain("Elderberries", Style(fg="blue")),
 ]
 
+# Demo data for table
+DEMO_TABLE_COLUMNS = [
+    Column(header=Line.plain("Name", Style(fg="cyan")), width=12),
+    Column(header=Line.plain("Type", Style(fg="cyan")), width=10),
+    Column(header=Line.plain("Size", Style(fg="cyan")), width=8),
+]
+
+DEMO_TABLE_ROWS = [
+    [Line.plain("Cell"), Line.plain("Primitive"), Line.plain("tiny")],
+    [Line.plain("Span"), Line.plain("Text"), Line.plain("varies")],
+    [Line.plain("Block"), Line.plain("Layout"), Line.plain("varies")],
+    [Line.plain("Buffer"), Line.plain("Canvas"), Line.plain("WxH")],
+]
+
 
 def render_demo(section: Demo, width: int, state: BenchState) -> Block:
     """Render an interactive demo widget."""
     demo_id = section.demo_id
-    focused = state.demo_focused
+    focused = state.focus.captured
 
     # Border style changes based on focus
     def demo_border_style(base_color: str) -> Style:
@@ -405,6 +427,51 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
             hint = Block.text("  tab: focus", HINT_STYLE)
         content = join_vertical(inp, hint)
         content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("yellow"))
+
+    elif demo_id == "table":
+        # Scroll into view before rendering
+        table_state = state.table_state.scroll_into_view(visible_height=3)
+        tbl = table(
+            table_state,
+            columns=DEMO_TABLE_COLUMNS,
+            rows=DEMO_TABLE_ROWS,
+            visible_height=3,
+            header_style=Style(fg="cyan", bold=True),
+            selected_style=Style(fg="black", bg="cyan", bold=True),
+        )
+        if focused:
+            hint = Block.text("  ↑/↓ navigate  esc: done", Style(fg="cyan"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+        content = join_vertical(tbl, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("cyan"))
+
+    elif demo_id == "focus_nav":
+        # Demo showing navigation patterns
+        items = ("a", "b", "c")
+        current = state.focus_demo_item
+        mode = state.focus_demo_mode
+
+        # Render items with highlight on current
+        item_blocks = []
+        for item in items:
+            if item == current:
+                item_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="green", bold=True)))
+            else:
+                item_blocks.append(Block.text(f" {item} ", Style(dim=True)))
+        items_row = join_horizontal(*item_blocks, gap=1)
+
+        # Mode indicator
+        mode_text = f"mode: {mode}"
+        mode_block = Block.text(mode_text, Style(fg="cyan"))
+
+        if focused:
+            hint = Block.text("  ←/→ nav  m: mode  esc: done", Style(fg="green"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+
+        content = join_vertical(items_row, mode_block, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("green"))
 
     else:
         content = Block.text(f"[unknown demo: {demo_id}]", Style(fg="red"))
@@ -599,9 +666,46 @@ class Style:
                     title="span.py",
                 ),
                 Spacer(1),
-                Text("Span handles wide characters (CJK) correctly", HINT_STYLE, center=True),
+                Text("↓ for more detail", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="style", right="line"),
+            nav=Navigation(left="style", right="line", down="span/detail"),
+        ),
+
+        "span/detail": Slide(
+            id="span/detail",
+            title="Span (detail)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        ("Span", KEYWORD), " handles wide characters via ",
+                        ("wcwidth", EMPH),
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Span:
+    text: str
+    style: Style = Style()
+
+    @property
+    def width(self) -> int:
+        # accounts for CJK double-width chars
+        return span_width(self.text)''',
+                    title="definition",
+                ),
+                Spacer(1),
+                Text(
+                    styled(
+                        ("span.width", KEYWORD), " is display width, not ",
+                        ("len(text)", KEYWORD),
+                    ),
+                    center=True,
+                ),
+            ),
+            nav=Navigation(up="span"),
         ),
 
         # Line
@@ -621,9 +725,48 @@ class Style:
                     title="line.py",
                 ),
                 Spacer(1),
-                Text("Line.paint(view, x, y) renders to a BufferView", HINT_STYLE, center=True),
+                Text("↓ for more detail", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="span", right="buffer"),
+            nav=Navigation(left="span", right="buffer", down="line/detail"),
+        ),
+
+        "line/detail": Slide(
+            id="line/detail",
+            title="Line (detail)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        ("Line", KEYWORD), " is a sequence of ", ("Spans", KEYWORD),
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Line:
+    spans: tuple[Span, ...] = ()
+    style: Style | None = None  # fallback style
+
+    @property
+    def width(self) -> int:
+        return sum(s.width for s in self.spans)
+
+    def paint(self, view: BufferView, x: int, y: int):
+        for span in self.spans:
+            # paint each span, advancing x''',
+                    title="definition",
+                ),
+                Spacer(1),
+                Text(
+                    styled(
+                        ("Line.plain(text, style)", KEYWORD),
+                        " — convenience constructor"
+                    ),
+                    center=True,
+                ),
+            ),
+            nav=Navigation(up="line"),
         ),
 
         # Buffer
@@ -681,9 +824,49 @@ block.paint(buf, x=10, y=5)  # copy into buffer''',
                     title="block.py",
                 ),
                 Spacer(1),
-                Text("→ for composition functions", HINT_STYLE, center=True),
+                Text("↓ for more detail", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="buffer", right="compose"),
+            nav=Navigation(left="buffer", right="compose", down="block/detail"),
+        ),
+
+        "block/detail": Slide(
+            id="block/detail",
+            title="Block (detail)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        ("Block", KEYWORD), " stores rows of ", ("Cells", KEYWORD),
+                        " — ", ("immutable", EMPH),
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Block:
+    rows: list[list[Cell]]
+    width: int
+
+    @classmethod
+    def text(cls, text: str, style: Style) -> Block:
+        # create block from string
+
+    @classmethod
+    def empty(cls, width: int, height: int) -> Block:
+        # create blank block''',
+                    title="definition",
+                ),
+                Spacer(1),
+                Text(
+                    styled(
+                        "compose via ", ("join", KEYWORD), ", ",
+                        ("pad", KEYWORD), ", ", ("border", KEYWORD),
+                    ),
+                    center=True,
+                ),
+            ),
+            nav=Navigation(up="block"),
         ),
 
         # Compose
@@ -738,7 +921,72 @@ truncate(block, width=20)     # cut to size''',
                     center=True,
                 ),
             ),
-            nav=Navigation(left="compose", right="components"),
+            nav=Navigation(left="compose", right="focus"),
+        ),
+
+        # Focus - two-tier keyboard handling
+        "focus": Slide(
+            id="focus",
+            title="Focus",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        "immutable state: ", ("id", KEYWORD), " + ",
+                        ("captured", KEYWORD), " flag",
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''focus = Focus(id="sidebar")
+focus = focus.capture()   # widget handles keys
+focus = focus.release()   # nav handles keys''',
+                    title="focus.py",
+                ),
+                Spacer(1),
+                Text(
+                    styled(
+                        "navigation patterns: ",
+                        ("ring_next", KEYWORD), ", ",
+                        ("linear_prev", KEYWORD), ", ..."
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Text("↓ for navigation demo", HINT_STYLE, center=True),
+            ),
+            nav=Navigation(left="app", right="components", down="focus/nav"),
+        ),
+
+        "focus/nav": Slide(
+            id="focus/nav",
+            title="Navigation Patterns",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        "pure functions: ", ("items", KEYWORD), " + ",
+                        ("current", KEYWORD), " → ", ("next", KEYWORD),
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''items = ("a", "b", "c")
+current = "b"
+
+ring_next(items, current)    # "c"
+ring_next(items, "c")        # "a" (wraps)
+
+linear_next(items, current)  # "c"
+linear_next(items, "c")      # "c" (stops)''',
+                    title="focus.py",
+                ),
+                Spacer(1),
+                Demo(demo_id="focus_nav"),
+            ),
+            nav=Navigation(up="focus"),
         ),
 
         # Components - interactive demos
@@ -769,7 +1017,7 @@ truncate(block, width=20)     # cut to size''',
                 Spacer(1),
                 Text("↓ for interactive examples", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="app", down="components/progress"),
+            nav=Navigation(left="focus", down="components/progress"),
         ),
 
         "components/progress": Slide(
@@ -839,7 +1087,31 @@ inp = text_input(state, width=20, focused=True)''',
                     title="usage",
                 ),
             ),
-            nav=Navigation(up="components/list", down="fin"),
+            nav=Navigation(up="components/list", down="components/table"),
+        ),
+
+        "components/table": Slide(
+            id="components/table",
+            title="Table",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(("TableState", KEYWORD), " + ", ("table()", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Demo(demo_id="table"),
+                Spacer(1),
+                Code(
+                    source='''columns = [Column(header=Line.plain("Name"), width=12)]
+rows = [[Line.plain("Cell")], [Line.plain("Block")]]
+state = TableState(row_count=len(rows))
+
+tbl = table(state, columns, rows, visible_height=3)''',
+                    title="usage",
+                ),
+            ),
+            nav=Navigation(up="components/text", down="fin"),
         ),
 
         # Finale
@@ -886,7 +1158,7 @@ inp = text_input(state, width=20, focused=True)''',
                     center=True,
                 ),
             ),
-            nav=Navigation(up="components/text"),
+            nav=Navigation(up="components/table"),
         ),
     }
 
@@ -959,13 +1231,13 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
     parts: list[Block] = []
 
     # Focus indicator
-    if state.demo_focused:
+    if state.focus.captured:
         parts.append(Block.text(" FOCUS ", Style(fg="black", bg="cyan", bold=True)))
         parts.append(Block.text(" ", Style()))
 
     # Navigation hints (dimmed when focused)
-    nav_style = Style(dim=True) if state.demo_focused else NAV_DIM_STYLE
-    key_style = Style(fg="cyan", dim=True) if state.demo_focused else NAV_KEY_STYLE
+    nav_style = Style(dim=True) if state.focus.captured else NAV_DIM_STYLE
+    key_style = Style(fg="cyan", dim=True) if state.focus.captured else NAV_KEY_STYLE
 
     nav_hints = []
     if nav.left:
@@ -981,7 +1253,7 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
         parts.append(Block.text(key, key_style))
         parts.append(Block.text(f" {label}  ", nav_style))
 
-    if not nav_hints and not state.demo_focused:
+    if not nav_hints and not state.focus.captured:
         parts.append(Block.text("q to quit", NAV_DIM_STYLE))
 
     nav_row = join_horizontal(*parts) if parts else Block.empty(1, 1)
@@ -1112,19 +1384,19 @@ class BenchApp(RenderApp):
             return
 
         demo_id = self._get_demo_id(slide)
-        focused = self._state.demo_focused
+        focused = self._state.focus.captured
 
-        # Escape: unfocus demo or quit
+        # Escape: release focus or quit
         if key == "escape":
             if focused:
-                self._state = replace(self._state, demo_focused=False)
+                self._state = replace(self._state, focus=self._state.focus.release())
             else:
                 self.quit()
             return
 
-        # Tab: toggle demo focus (only if slide has interactive demo)
+        # Tab: toggle focus capture (only if slide has interactive demo)
         if key == "tab" and demo_id:
-            self._state = replace(self._state, demo_focused=not focused)
+            self._state = replace(self._state, focus=self._state.focus.toggle_capture())
             return
 
         # When focused, keys go to demo widget
@@ -1183,6 +1455,44 @@ class BenchApp(RenderApp):
                     )
                     handled = True
 
+            elif demo_id == "table":
+                if key == "up":
+                    self._state = replace(
+                        self._state,
+                        table_state=self._state.table_state.move_up()
+                    )
+                    handled = True
+                elif key == "down":
+                    self._state = replace(
+                        self._state,
+                        table_state=self._state.table_state.move_down()
+                    )
+                    handled = True
+
+            elif demo_id == "focus_nav":
+                items = ("a", "b", "c")
+                current = self._state.focus_demo_item
+                mode = self._state.focus_demo_mode
+
+                if key == "right":
+                    if mode == "ring":
+                        new_item = ring_next(items, current)
+                    else:
+                        new_item = linear_next(items, current)
+                    self._state = replace(self._state, focus_demo_item=new_item)
+                    handled = True
+                elif key == "left":
+                    if mode == "ring":
+                        new_item = ring_prev(items, current)
+                    else:
+                        new_item = linear_prev(items, current)
+                    self._state = replace(self._state, focus_demo_item=new_item)
+                    handled = True
+                elif key == "m":
+                    new_mode = "linear" if mode == "ring" else "ring"
+                    self._state = replace(self._state, focus_demo_mode=new_mode)
+                    handled = True
+
             if handled:
                 return
 
@@ -1202,7 +1512,7 @@ class BenchApp(RenderApp):
 
             if new_slide and new_slide in self._slides:
                 # Reset focus when changing slides
-                self._state = replace(self._state, current_slide=new_slide, demo_focused=False)
+                self._state = replace(self._state, current_slide=new_slide, focus=self._state.focus.release())
                 return
 
         # Delegate to slide-specific handler

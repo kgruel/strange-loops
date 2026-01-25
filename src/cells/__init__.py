@@ -7,7 +7,7 @@ from .block import Block, Wrap
 from .compose import Align, join_horizontal, join_vertical, pad, border, truncate
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 from .region import Region
-from .focus import FocusRing
+from .focus import Focus, FocusRing, ring_next, ring_prev, linear_next, linear_prev
 from .span import Span, Line
 from .keyboard import KeyboardInput
 from .app import RenderApp
@@ -43,7 +43,12 @@ __all__ = [
     "LIGHT",
     "ASCII",
     "Region",
+    "Focus",
     "FocusRing",
+    "ring_next",
+    "ring_prev",
+    "linear_next",
+    "linear_prev",
     "Span",
     "Line",
     "KeyboardInput",

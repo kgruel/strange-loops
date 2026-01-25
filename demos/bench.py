@@ -6,11 +6,19 @@ A 2D navigable space where:
 - up/down moves between depths (same concept, more/less detail)
 
 Run: uv run python demos/bench.py
+
+Verbosity modes:
+- -q, --quiet: Print slides inline and exit (no TUI)
+- -v, --verbose: Detail slides become primary navigation
+- -vv: Add source view showing code that builds each slide
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import inspect
+import textwrap
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
@@ -33,6 +41,8 @@ from cells import (
     ListState, list_view,
     TextInputState, text_input,
     Column, TableState, table,
+    # Output
+    print_block,
 )
 
 
@@ -1869,8 +1879,317 @@ class BenchApp(RenderApp):
             self.quit()
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Teaching Bench: Interactive educational platform for cells",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+            Verbosity modes express "navigation verbosity":
+              default   : Normal interactive slideshow
+              -q        : Quiet - print all slides inline and exit
+              -v        : Verbose - detail slides become primary navigation
+              -vv       : Very verbose - add source view toggle (s key)
+        """),
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Print slides inline and exit (no TUI)",
+    )
+    group.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity (-v for details, -vv for source view)",
+    )
+    return parser.parse_args()
+
+
+def get_navigation_order(slides: dict[str, Slide]) -> list[str]:
+    """Walk the slide graph in navigation order (right/down).
+
+    Traverses: right first, then down, depth-first.
+    Returns list of slide IDs in navigation order.
+    """
+    visited: set[str] = set()
+    order: list[str] = []
+
+    def visit(slide_id: str) -> None:
+        if slide_id in visited or slide_id not in slides:
+            return
+        visited.add(slide_id)
+        order.append(slide_id)
+
+        slide = slides[slide_id]
+        # Visit detail (down) before moving right
+        if slide.nav.down:
+            visit(slide.nav.down)
+        if slide.nav.right:
+            visit(slide.nav.right)
+
+    # Start from intro
+    visit("intro")
+
+    # Add any remaining slides not reachable from intro
+    for slide_id in slides:
+        if slide_id not in visited:
+            visit(slide_id)
+
+    return order
+
+
+def run_quiet_mode(slides: dict[str, Slide]) -> None:
+    """Print all slides inline and exit (quiet mode)."""
+    import sys
+
+    order = get_navigation_order(slides)
+    state = BenchState()  # Need state for demo rendering
+
+    for slide_id in order:
+        slide = slides[slide_id]
+
+        # Build slide content as a Block
+        content_blocks: list[Block] = []
+
+        # Title
+        title_block = Block.text(f"=== {slide.title} ===", TITLE_STYLE)
+        content_blocks.append(title_block)
+        content_blocks.append(Block.empty(1, 1))
+
+        # Sections (skip interactive demos in quiet mode)
+        for section in slide.sections:
+            if isinstance(section, Demo):
+                # Show placeholder for demos
+                demo_block = Block.text(f"[interactive demo: {section.demo_id}]", Style(dim=True))
+                content_blocks.append(demo_block)
+            else:
+                block = render_section(section, 78, state)
+                content_blocks.append(block)
+
+        content_blocks.append(Block.empty(1, 1))
+
+        # Combine and print
+        if content_blocks:
+            content = join_vertical(*content_blocks)
+            print_block(content, sys.stdout)
+
+
+def invert_navigation_graph(slides: dict[str, Slide]) -> dict[str, Slide]:
+    """Invert the navigation graph: detail slides become primary.
+
+    In verbose mode, detail slides (X/detail) become part of the main
+    left/right flow, with parents accessible via 'up'.
+
+    Convention: parent X has down=X/detail, child has up=X.
+    """
+    # Build a mapping of parent -> detail relationships
+    parent_to_detail: dict[str, str] = {}
+    detail_to_parent: dict[str, str] = {}
+
+    for slide_id, slide in slides.items():
+        if slide.nav.down and slide.nav.down in slides and "/" in slide.nav.down:
+            parent_to_detail[slide_id] = slide.nav.down
+            detail_to_parent[slide.nav.down] = slide_id
+
+    # Create new slides with inverted navigation
+    new_slides: dict[str, Slide] = {}
+
+    for slide_id, slide in slides.items():
+        nav = slide.nav
+
+        # Check if this is a parent with a detail slide
+        if slide_id in parent_to_detail:
+            detail_id = parent_to_detail[slide_id]
+            detail_slide = slides.get(detail_id)
+
+            if detail_slide:
+                # Parent's right now points to detail
+                # Detail's right points to parent's original right
+                new_nav = Navigation(
+                    up=nav.up,
+                    down=None,  # No more down, it's now right
+                    left=nav.left,
+                    right=detail_id,  # Right goes to detail
+                )
+                new_slides[slide_id] = replace(slide, nav=new_nav)
+
+                # Update detail slide navigation
+                detail_nav = Navigation(
+                    up=slide_id,  # Up goes back to parent
+                    down=detail_slide.nav.down,  # Preserve any further detail
+                    left=slide_id,  # Left goes back to parent
+                    right=nav.right,  # Right continues the main flow
+                )
+                new_slides[detail_id] = replace(detail_slide, nav=detail_nav)
+            else:
+                new_slides[slide_id] = slide
+        elif slide_id in detail_to_parent:
+            # Already handled above when processing parent
+            if slide_id not in new_slides:
+                new_slides[slide_id] = slide
+        else:
+            new_slides[slide_id] = slide
+
+    return new_slides
+
+
+# Store source code for slides (populated at module load)
+SLIDE_SOURCE: dict[str, str] = {}
+
+
+def capture_slide_source() -> None:
+    """Capture source code for build_slides function.
+
+    This enables -vv mode to show the code that builds each slide.
+    """
+    global SLIDE_SOURCE
+    try:
+        source = inspect.getsource(build_slides)
+        lines = source.split("\n")
+
+        # Find slide definitions by looking for patterns like '"intro": Slide('
+        current_slide = None
+        current_lines: list[str] = []
+        brace_depth = 0
+
+        for line in lines:
+            # Check for new slide definition
+            for slide_id in ["intro", "cell", "cell/detail", "style", "style/detail",
+                           "span", "span/detail", "line", "line/detail",
+                           "buffer", "buffer/view", "block", "block/detail",
+                           "compose", "app", "focus", "focus/nav",
+                           "search", "search/demo", "components",
+                           "components/progress", "components/list",
+                           "components/text", "components/table", "fin"]:
+                if f'"{slide_id}": Slide(' in line or f"'{slide_id}': Slide(" in line:
+                    # Save previous slide
+                    if current_slide:
+                        SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
+                    current_slide = slide_id
+                    current_lines = [line]
+                    brace_depth = line.count("(") - line.count(")")
+                    break
+            else:
+                if current_slide:
+                    current_lines.append(line)
+                    brace_depth += line.count("(") - line.count(")")
+                    # Check if slide definition is complete
+                    if brace_depth <= 0 and line.strip().endswith("),"):
+                        SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
+                        current_slide = None
+                        current_lines = []
+                        brace_depth = 0
+
+        # Save last slide
+        if current_slide:
+            SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
+
+    except (OSError, TypeError):
+        # Can't get source (e.g., running from compiled code)
+        pass
+
+
+# Capture source at module load
+capture_slide_source()
+
+
+class VerboseBenchApp(BenchApp):
+    """BenchApp with verbosity support (-v, -vv modes)."""
+
+    def __init__(self, slides: dict[str, Slide] | None = None, verbosity: int = 0):
+        self._verbosity = verbosity
+        self._show_source = False  # Toggle for -vv mode
+
+        # In verbose mode, invert the navigation graph
+        if slides is None:
+            slides = build_slides()
+        if verbosity >= 1:
+            slides = invert_navigation_graph(slides)
+
+        super().__init__(slides)
+
+    def render(self) -> None:
+        if self._buf is None:
+            return
+
+        # Clear
+        self._buf.fill(0, 0, self._width, self._height, " ", Style())
+
+        # Render all layers bottom-to-top
+        render_layers(self._state, self._buf, get_layers)
+
+        # In -vv mode with source visible, show source panel
+        if self._verbosity >= 2 and self._show_source:
+            self._render_source_panel()
+
+    def _render_source_panel(self) -> None:
+        """Render source code panel in -vv mode."""
+        slide_id = self._state.current_slide
+        source = SLIDE_SOURCE.get(slide_id, "# Source not available")
+
+        # Calculate panel dimensions
+        panel_width = min(60, self._width // 2)
+        panel_height = min(20, self._height - 4)
+        panel_x = self._width - panel_width - 1
+        panel_y = 2
+
+        # Build source content
+        source_lines = source.split("\n")[:panel_height - 4]
+        content_blocks: list[Block] = []
+
+        # Title
+        title = Block.text(" Source ", Style(fg="yellow", bold=True))
+        content_blocks.append(title)
+        content_blocks.append(Block.empty(1, 1))
+
+        # Source lines with syntax highlighting
+        for line in source_lines:
+            # Truncate long lines
+            display_line = line[:panel_width - 4] if len(line) > panel_width - 4 else line
+            highlighted = highlight_line(display_line)
+            content_blocks.append(highlighted.to_block(panel_width - 4))
+
+        content = join_vertical(*content_blocks)
+        content = pad(content, left=1, right=1, top=1, bottom=1)
+        boxed = border(content, ROUNDED, Style(fg="yellow", dim=True))
+
+        # Paint to buffer
+        if self._buf:
+            boxed.paint(self._buf, panel_x, panel_y)
+
+    def on_key(self, key: str) -> None:
+        # In -vv mode, 's' toggles source panel
+        if self._verbosity >= 2 and key == "s":
+            self._show_source = not self._show_source
+            self.mark_dirty()
+            return
+
+        # Process key through layer stack
+        self._state, should_quit, _result = process_key(key, self._state, get_layers, set_layers)
+
+        # Check for quit signal
+        if should_quit:
+            self.quit()
+
+
 async def main():
-    app = BenchApp()
+    args = parse_args()
+
+    if args.quiet:
+        # Quiet mode: print slides inline and exit
+        slides = build_slides()
+        run_quiet_mode(slides)
+        return
+
+    if args.verbose >= 1:
+        # Verbose mode(s): use VerboseBenchApp
+        app = VerboseBenchApp(verbosity=args.verbose)
+    else:
+        # Default: normal interactive mode
+        app = BenchApp()
+
     await app.run()
 
 

@@ -188,9 +188,35 @@ Not integrated yet. Could:
 
 ### Stretch
 
-- [ ] Self-documenting slides (show source rendering current slide)
+- [x] Self-documenting slides (show source rendering current slide) - via `-vv` mode
 - [ ] Slide table of contents view
 - [ ] Layer slide in teaching bench
+
+## Verbosity Pattern
+
+Added CLI verbosity flags to bench.py following standard conventions:
+
+```bash
+# Default: interactive slideshow
+uv run python -m demos.bench
+
+# Quiet: print all slides inline and exit
+uv run python -m demos.bench -q
+
+# Verbose: detail slides become primary navigation
+uv run python -m demos.bench -v
+
+# Very verbose: add source view (s to toggle panel)
+uv run python -m demos.bench -vv
+```
+
+Implementation adds:
+- `print_block()` in `src/cells/writer.py` - renders Block to stream with ANSI styling
+- `invert_navigation_graph()` - transforms detail slides into main flow
+- `capture_slide_source()` - extracts source code for -vv mode
+- `VerboseBenchApp` - extends BenchApp with verbosity support
+
+See `demos/VERBOSITY.md` for full documentation of the pattern.
 
 ## Testing
 

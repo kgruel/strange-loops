@@ -6,10 +6,13 @@ import os
 import shutil
 import sys
 from enum import Enum
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from .buffer import CellWrite
 from .cell import Cell, Style, NAMED_COLORS
+
+if TYPE_CHECKING:
+    from .block import Block
 
 
 class ColorDepth(Enum):
@@ -161,3 +164,38 @@ class Writer:
     def show_cursor(self) -> None:
         self._stream.write("\x1b[?25h")
         self._stream.flush()
+
+
+def print_block(block: "Block", stream: TextIO = sys.stdout) -> None:
+    """Print a Block to a stream with ANSI styling, without TUI.
+
+    Renders the block line-by-line with ANSI escape codes for styling.
+    Each row is followed by a style reset and newline.
+
+    Args:
+        block: The Block to print.
+        stream: Output stream (defaults to stdout).
+    """
+    writer = Writer(stream)
+
+    for row_idx in range(block.height):
+        parts: list[str] = []
+        last_style: Style | None = None
+
+        for cell in block.row(row_idx):
+            if cell.style != last_style:
+                # Reset and apply new style
+                parts.append(writer.reset_style())
+                sgr = writer.apply_style(cell.style)
+                if sgr:
+                    parts.append(sgr)
+                last_style = cell.style
+            parts.append(cell.char)
+
+        # Reset at end of line and add newline
+        parts.append(writer.reset_style())
+        parts.append("\n")
+
+        stream.write("".join(parts))
+
+    stream.flush()

@@ -143,3 +143,65 @@ class TestStyleInheritance:
         cell = buf.get(0, 0)
         assert cell.style.fg == "green"
         assert cell.style.bold is True
+
+
+class TestLineToBlock:
+    def test_basic_conversion(self):
+        line = Line(spans=(Span("hi"),))
+        block = line.to_block(5)
+        assert block.width == 5
+        assert block.height == 1
+        assert block.row(0)[0].char == "h"
+        assert block.row(0)[1].char == "i"
+
+    def test_pads_to_width(self):
+        line = Line(spans=(Span("ab"),))
+        block = line.to_block(5)
+        assert block.width == 5
+        # Cells beyond line content are empty
+        assert block.row(0)[2].char == " "
+        assert block.row(0)[3].char == " "
+        assert block.row(0)[4].char == " "
+
+    def test_truncates_to_width(self):
+        line = Line(spans=(Span("hello world"),))
+        block = line.to_block(5)
+        assert block.width == 5
+        assert block.row(0)[4].char == "o"  # "hello"
+
+    def test_preserves_span_style(self):
+        style = Style(fg="red", bold=True)
+        line = Line(spans=(Span("x", style),))
+        block = line.to_block(3)
+        cell = block.row(0)[0]
+        assert cell.style.fg == "red"
+        assert cell.style.bold is True
+
+    def test_merges_line_style(self):
+        line_style = Style(fg="blue")
+        span_style = Style(bold=True)
+        line = Line(spans=(Span("x", span_style),), style=line_style)
+        block = line.to_block(3)
+        cell = block.row(0)[0]
+        # Line style merged with span style
+        assert cell.style.fg == "blue"
+        assert cell.style.bold is True
+
+    def test_multiple_spans(self):
+        line = Line(spans=(
+            Span("ab", Style(fg="red")),
+            Span("cd", Style(fg="blue")),
+        ))
+        block = line.to_block(6)
+        assert block.row(0)[0].char == "a"
+        assert block.row(0)[0].style.fg == "red"
+        assert block.row(0)[2].char == "c"
+        assert block.row(0)[2].style.fg == "blue"
+
+    def test_empty_line(self):
+        line = Line()
+        block = line.to_block(3)
+        assert block.width == 3
+        assert block.height == 1
+        # All empty cells
+        assert block.row(0)[0].char == " "

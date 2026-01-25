@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from wcwidth import wcswidth
 
 from .buffer import BufferView
-from .cell import Style
+from .cell import Style, Cell, EMPTY_CELL
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,3 +77,28 @@ class Line:
                     kept.append(Span("".join(chars), span.style))
                 break
         return Line(spans=tuple(kept), style=self.style)
+
+    def to_block(self, width: int) -> "Block":
+        """Convert this Line to a Block of the given width.
+
+        Builds cells directly from spans, merging Line style onto each span.
+        Pads with empty cells if Line is shorter than width.
+        Truncates if Line is longer than width.
+        """
+        from .block import Block
+
+        cells: list[Cell] = []
+        for span in self.spans:
+            merged = self.style.merge(span.style)
+            for ch in span.text:
+                if len(cells) >= width:
+                    break
+                cells.append(Cell(ch, merged))
+            if len(cells) >= width:
+                break
+
+        # Pad to width
+        while len(cells) < width:
+            cells.append(EMPTY_CELL)
+
+        return Block([cells], width)

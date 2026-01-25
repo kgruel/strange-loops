@@ -258,26 +258,13 @@ def highlight_line(text: str) -> Line:
 
 # -- Section Renderers --
 
-def line_to_block(line: Line, width: int) -> Block:
-    """Convert a Line to a Block by painting into a buffer."""
-    from cells import Buffer
-    buf = Buffer(width, 1)
-    view = buf.region(0, 0, width, 1)
-    line.paint(view, 0, 0)
-    cells = [buf.get(x, 0) for x in range(line.width)]
-    # Pad to full width with empty cells
-    from cells import EMPTY_CELL
-    while len(cells) < width:
-        cells.append(EMPTY_CELL)
-    return Block([cells[:width]], width)
-
 
 def render_text(section: Text, width: int) -> Block:
     """Render a text section."""
     if isinstance(section.content, Line):
         # Pre-styled Line
         line = section.content
-        block = line_to_block(line, line.width)
+        block = line.to_block(line.width)
     else:
         # Plain string
         block = Block.text(section.content, section.style)
@@ -301,7 +288,7 @@ def render_code(section: Code, width: int) -> Block:
     # Convert to blocks and pad
     code_blocks = []
     for line in highlighted:
-        block = line_to_block(line, max_width)
+        block = line.to_block(max_width)
         code_blocks.append(block)
 
     content = join_vertical(*code_blocks) if code_blocks else Block.empty(1, 1)

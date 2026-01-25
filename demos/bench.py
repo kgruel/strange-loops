@@ -22,6 +22,8 @@ from cells import (
     ROUNDED,
     # Focus management
     Focus, ring_next, ring_prev, linear_next, linear_prev,
+    # Search
+    Search, filter_contains, filter_prefix, filter_fuzzy,
     # Components for interactive demos
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
@@ -117,6 +119,10 @@ class BenchState:
     # Focus demo state
     focus_demo_item: str = "a"
     focus_demo_mode: str = "ring"  # "ring" or "linear"
+
+    # Search demo state
+    search_state: Search = field(default_factory=Search)
+    search_mode: str = "contains"  # "contains", "prefix", "fuzzy"
 
 
 # -- Styles --
@@ -459,6 +465,49 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
 
         content = join_vertical(items_row, mode_block, hint)
         content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("green"))
+
+    elif demo_id == "search":
+        # Demo showing search/filter patterns
+        all_items = ("Cell", "Style", "Span", "Line", "Block", "Buffer", "Focus", "Search")
+        search = state.search_state
+        mode = state.search_mode
+
+        # Filter based on mode
+        if mode == "contains":
+            matches = filter_contains(all_items, search.query)
+        elif mode == "prefix":
+            matches = filter_prefix(all_items, search.query)
+        else:
+            matches = filter_fuzzy(all_items, search.query)
+
+        # Query display
+        query_display = search.query if search.query else "(type to filter)"
+        query_style = Style(fg="cyan") if search.query else Style(dim=True)
+        query_block = Block.text(f"query: {query_display}", query_style)
+
+        # Render matches with selection highlight
+        match_blocks = []
+        for i, item in enumerate(matches[:5]):  # Show max 5
+            if i == search.selected:
+                match_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True)))
+            else:
+                match_blocks.append(Block.text(f" {item} ", Style(dim=True)))
+
+        if match_blocks:
+            matches_row = join_horizontal(*match_blocks, gap=0)
+        else:
+            matches_row = Block.text("  (no matches)", Style(dim=True))
+
+        # Mode indicator
+        mode_block = Block.text(f"mode: {mode}", Style(fg="cyan"))
+
+        if focused:
+            hint = Block.text("  type/bksp  ↑/↓ select  m: mode  esc: done", Style(fg="magenta"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+
+        content = join_vertical(query_block, matches_row, mode_block, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("magenta"))
 
     else:
         content = Block.text(f"[unknown demo: {demo_id}]", Style(fg="red"))
@@ -943,7 +992,7 @@ focus = focus.release()   # nav handles keys''',
                 Spacer(1),
                 Text("↓ for navigation demo", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="app", right="components", down="focus/nav"),
+            nav=Navigation(left="app", right="search", down="focus/nav"),
         ),
 
         "focus/nav": Slide(
@@ -976,6 +1025,61 @@ linear_next(items, "c")      # "c" (stops)''',
             nav=Navigation(up="focus"),
         ),
 
+        # Search - filtered selection primitive
+        "search": Slide(
+            id="search",
+            title="Search",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        "filtered selection: ", ("query", KEYWORD), " + ",
+                        ("selected", KEYWORD), " index",
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''search = Search()
+search = search.type("f")     # query="f"
+search = search.type("o")     # query="fo"
+search = search.backspace()   # query="f"''',
+                    title="search.py",
+                ),
+                Spacer(1),
+                Text(
+                    styled(
+                        "filter patterns: ",
+                        ("contains", KEYWORD), ", ",
+                        ("prefix", KEYWORD), ", ",
+                        ("fuzzy", KEYWORD),
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Text("↓ for interactive demo", HINT_STYLE, center=True),
+            ),
+            nav=Navigation(left="focus", right="components", down="search/demo"),
+        ),
+
+        "search/demo": Slide(
+            id="search/demo",
+            title="Search Demo",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled(
+                        "type to filter, ", ("↑/↓", KEYWORD), " to select, ",
+                        ("m", KEYWORD), " to change mode",
+                    ),
+                    center=True,
+                ),
+                Spacer(1),
+                Demo(demo_id="search"),
+            ),
+            nav=Navigation(up="search"),
+        ),
+
         # Components - interactive demos
         "components": Slide(
             id="components",
@@ -1004,7 +1108,7 @@ linear_next(items, "c")      # "c" (stops)''',
                 Spacer(1),
                 Text("↓ for interactive examples", HINT_STYLE, center=True),
             ),
-            nav=Navigation(left="focus", down="components/progress"),
+            nav=Navigation(left="search", down="components/progress"),
         ),
 
         "components/progress": Slide(
@@ -1478,6 +1582,38 @@ class BenchApp(RenderApp):
                 elif key == "m":
                     new_mode = "linear" if mode == "ring" else "ring"
                     self._state = replace(self._state, focus_demo_mode=new_mode)
+                    handled = True
+
+            elif demo_id == "search":
+                all_items = ("Cell", "Style", "Span", "Line", "Block", "Buffer", "Focus", "Search")
+                search = self._state.search_state
+                mode = self._state.search_mode
+
+                # Get current matches for navigation
+                if mode == "contains":
+                    matches = filter_contains(all_items, search.query)
+                elif mode == "prefix":
+                    matches = filter_prefix(all_items, search.query)
+                else:
+                    matches = filter_fuzzy(all_items, search.query)
+
+                if key == "backspace":
+                    self._state = replace(self._state, search_state=search.backspace())
+                    handled = True
+                elif key == "up":
+                    self._state = replace(self._state, search_state=search.select_prev(len(matches)))
+                    handled = True
+                elif key == "down":
+                    self._state = replace(self._state, search_state=search.select_next(len(matches)))
+                    handled = True
+                elif key == "m":
+                    modes = ["contains", "prefix", "fuzzy"]
+                    idx = modes.index(mode)
+                    new_mode = modes[(idx + 1) % len(modes)]
+                    self._state = replace(self._state, search_mode=new_mode)
+                    handled = True
+                elif len(key) == 1 and key.isprintable():
+                    self._state = replace(self._state, search_state=search.type(key))
                     handled = True
 
             if handled:

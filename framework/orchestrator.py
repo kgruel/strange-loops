@@ -125,6 +125,7 @@ async def run_poll_collector(
         try:
             events = await collector_fn(ssh)
             for event in events:
+                event["type"] = ds.event_type
                 await stream.emit(event)
         except Exception as e:
             print(f"Collector {ds.collector} error: {e}")
@@ -149,6 +150,7 @@ async def run_stream_collector(
         async for event in collector_fn(ssh):
             if shutdown.is_set():
                 break
+            event["type"] = ds.event_type
             await stream.emit(event)
     except asyncio.CancelledError:
         pass

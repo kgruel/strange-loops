@@ -33,10 +33,11 @@ class DataSourceSpec:
     """A data source: collector -> projection mapping.
 
     Parsed from:
-        collect "docker:containers" into="vm-health" interval=5
-        stream "docker:events" into="vm-events"
+        collect "docker:containers" as="container.status" into="vm-health" interval=5
+        stream "docker:events" as="docker.event" into="vm-events"
     """
     collector: str        # "docker:containers"
+    event_type: str       # "container.status" - maps collector output to event type
     projection: str       # "vm-health"
     mode: str            # "collect" or "stream"
     interval: int | None  # poll interval in seconds (collect only)
@@ -133,8 +134,10 @@ def _parse_data_source(node: Any) -> DataSourceSpec | None:
     """Parse a collect or stream node into a DataSourceSpec.
 
     Syntax:
-        collect "docker:containers" into="vm-health" interval=5
-        stream "docker:events" into="vm-events"
+        collect "docker:containers" as="container.status" into="vm-health" interval=5
+        stream "docker:events" as="docker.event" into="vm-events"
+
+    Returns None if required fields (as, into) are missing.
     """
     if not node.args:
         return None
@@ -142,16 +145,19 @@ def _parse_data_source(node: Any) -> DataSourceSpec | None:
     collector = str(node.args[0])
     mode = node.name  # "collect" or "stream"
 
-    # Get properties
-    props = {p.name: p.value for p in (node.properties or [])}
+    # Get properties (node.props is an OrderedDict)
+    props = node.props or {}
+    event_type = str(props.get("as", ""))
     projection = str(props.get("into", ""))
     interval = int(props["interval"]) if "interval" in props else None
 
-    if not projection:
+    # Both 'as' and 'into' are required
+    if not event_type or not projection:
         return None
 
     return DataSourceSpec(
         collector=collector,
+        event_type=event_type,
         projection=projection,
         mode=mode,
         interval=interval,

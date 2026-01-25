@@ -1,5 +1,6 @@
 """Tests for spec-driven projections."""
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from framework.spec import (
     ValidationError,
     parse_projection_spec,
 )
-from framework.app_spec import parse_app_spec, VMInfo
+from framework.app_spec import parse_app_spec, DataSourceSpec, VMInfo
 
 
 SPECS_DIR = Path(__file__).parent.parent / "specs"
@@ -243,3 +244,108 @@ class TestValidation:
         }))
         assert proj.state["resources"]["nginx"]["pids"] == 10
         assert proj.state["resources"]["nginx"]["cpu_pct"] == 45.5
+
+
+class TestDataSourceSpec:
+    """Tests for data source parsing with 'as' field."""
+
+    def test_parse_collect_with_as(self):
+        """collect node with as= field parses correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            # Create minimal inventory
+            (tmp / "inventory.yml").write_text("all: {}")
+            # Create app spec with collect using 'as'
+            (tmp / "test.app.kdl").write_text('''
+                app "test" {
+                    inventory "inventory.yml"
+                    per-connection {
+                        collect "docker:containers" as="container.status" into="vm-health" interval=5
+                    }
+                }
+            ''')
+            app = parse_app_spec(tmp / "test.app.kdl")
+            assert len(app.data_sources) == 1
+            ds = app.data_sources[0]
+            assert ds.collector == "docker:containers"
+            assert ds.event_type == "container.status"
+            assert ds.projection == "vm-health"
+            assert ds.mode == "collect"
+            assert ds.interval == 5
+
+    def test_parse_stream_with_as(self):
+        """stream node with as= field parses correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            (tmp / "inventory.yml").write_text("all: {}")
+            (tmp / "test.app.kdl").write_text('''
+                app "test" {
+                    inventory "inventory.yml"
+                    per-connection {
+                        stream "docker:events" as="docker.event" into="vm-events"
+                    }
+                }
+            ''')
+            app = parse_app_spec(tmp / "test.app.kdl")
+            assert len(app.data_sources) == 1
+            ds = app.data_sources[0]
+            assert ds.collector == "docker:events"
+            assert ds.event_type == "docker.event"
+            assert ds.projection == "vm-events"
+            assert ds.mode == "stream"
+            assert ds.interval is None
+
+    def test_missing_as_skips_data_source(self):
+        """collect/stream without as= is skipped (returns None)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            (tmp / "inventory.yml").write_text("all: {}")
+            (tmp / "test.app.kdl").write_text('''
+                app "test" {
+                    inventory "inventory.yml"
+                    per-connection {
+                        collect "docker:containers" into="vm-health" interval=5
+                    }
+                }
+            ''')
+            app = parse_app_spec(tmp / "test.app.kdl")
+            # Data source should be skipped due to missing 'as'
+            assert len(app.data_sources) == 0
+
+    def test_missing_into_skips_data_source(self):
+        """collect/stream without into= is skipped."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            (tmp / "inventory.yml").write_text("all: {}")
+            (tmp / "test.app.kdl").write_text('''
+                app "test" {
+                    inventory "inventory.yml"
+                    per-connection {
+                        collect "docker:containers" as="container.status" interval=5
+                    }
+                }
+            ''')
+            app = parse_app_spec(tmp / "test.app.kdl")
+            # Data source should be skipped due to missing 'into'
+            assert len(app.data_sources) == 0
+
+    def test_multiple_data_sources(self):
+        """Multiple collect/stream nodes with as= all parse."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            (tmp / "inventory.yml").write_text("all: {}")
+            (tmp / "test.app.kdl").write_text('''
+                app "test" {
+                    inventory "inventory.yml"
+                    per-connection {
+                        collect "docker:containers" as="container.status" into="vm-health" interval=5
+                        stream "docker:events" as="container.lifecycle" into="vm-events"
+                        collect "docker:stats" as="container.stats" into="vm-resources" interval=10
+                    }
+                }
+            ''')
+            app = parse_app_spec(tmp / "test.app.kdl")
+            assert len(app.data_sources) == 3
+            assert app.data_sources[0].event_type == "container.status"
+            assert app.data_sources[1].event_type == "container.lifecycle"
+            assert app.data_sources[2].event_type == "container.stats"

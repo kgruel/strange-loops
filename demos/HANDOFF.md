@@ -5,7 +5,7 @@
 Two demo systems exist:
 
 1. **Progressive demos (01-08)**: Educational, print-based output for primitives, interactive for app/components
-2. **Teaching bench (bench.py)**: Interactive slideshow using cells to teach cells
+2. **Teaching bench (bench.py)**: Interactive slideshow using cells to teach cells (~1800 lines)
 
 Both are functional and can be run independently.
 
@@ -31,150 +31,149 @@ uv run python demos/bench.py
 |------|---------|
 | `demo_01_cell.py` - `demo_08_components.py` | Progressive API introduction |
 | `demo_utils.py` | Shared `render_buffer()` helper |
-| `bench.py` | Interactive teaching bench (~800 lines) |
-| `DEMO_ROADMAP.md` | Phased implementation plan for bench |
+| `bench.py` | Interactive teaching bench |
+| `slide_loader.py` | Markdown slide loader (prototype, not integrated) |
+| `slides/` | Sample markdown slides (prototype) |
 | `RETRO.md` | API friction and patterns discovered |
+
+## Framework Primitives Added
+
+This session added several framework primitives based on patterns discovered in bench development:
+
+### Focus (`src/cells/focus.py`)
+```python
+Focus(id="sidebar", captured=False)  # immutable state
+focus.capture() / focus.release() / focus.toggle_capture()
+
+# Navigation as pure functions
+ring_next(items, current)   # wraps at end
+ring_prev(items, current)   # wraps at start
+linear_next(items, current) # stops at end
+linear_prev(items, current) # stops at start
+```
+
+### Search (`src/cells/search.py`)
+```python
+Search(query="", selected=0)  # immutable state
+search.type(char) / search.backspace() / search.clear()
+search.select_next(match_count) / search.select_prev(match_count)
+
+# Filtering as pure functions
+filter_contains(items, query)  # substring match
+filter_prefix(items, query)    # prefix match
+filter_fuzzy(items, query)     # chars in order (e.g., "fb" matches "FooBar")
+```
+
+### Line.to_block (`src/cells/span.py`)
+```python
+line = Line(spans=(Span("hello", style), ...))
+block = line.to_block(width)  # direct conversion, no Buffer round-trip
+```
 
 ## Teaching Bench Architecture
 
-### Data Model
+### Navigation Graph (25 slides)
+
+```
+intro → cell → style → span → line → buffer → block → compose → app → focus → search → components
+           ↓       ↓      ↓      ↓       ↓       ↓                       ↓        ↓           ↓
+       cell/   style/  span/  line/  buffer/ block/               focus/nav  search/   components/
+       detail  detail  detail detail  view   detail                          demo      progress
+                                                                                           ↓
+                                                                                    components/list
+                                                                                           ↓
+                                                                                    components/text
+                                                                                           ↓
+                                                                                    components/table
+                                                                                           ↓
+                                                                                          fin
+```
+
+### Key Features
+- Arrow key navigation between slides
+- `/` for fuzzy search/jump to any slide
+- `?` for help overlay
+- Tab to focus interactive demos
+- Component demos: spinner, progress, list, text input, table
+- Focus demo: ring vs linear navigation
+- Search demo: contains/prefix/fuzzy filtering
+
+### Current Pain Points (Why Mode Extraction)
+
+The bench has grown to ~1800 lines with repeated patterns:
+
+**Each "mode" (help, search, demo focus) has:**
+- State fields scattered in `BenchState`
+- Entry/exit logic somewhere in `on_key()`
+- Key handling in another block of `on_key()`
+- Render logic in `render()` + helper function
+
+These should be bundled as a `Mode` abstraction.
+
+## Next Steps
+
+### Priority: Mode Extraction
+
+Extract the repeated pattern into a `Mode` protocol:
 
 ```python
-Slide(id, title, sections, nav, on_key)
-Navigation(up, down, left, right)  # graph links
-Section = Text | Code | Spacer | Demo
-
-BenchState(current_slide, demo_focused, show_help, ...component_states...)
+@dataclass
+class Mode:
+    name: str
+    state: Any
+    handles_key: Callable[[str, AppState], tuple[bool, AppState]]
+    render_overlay: Callable[[AppState, int, int], Block | None]
 ```
 
-### Navigation Graph
+Then refactor:
+1. Extract `HelpMode` (simplest, just shows/hides overlay)
+2. Extract `SearchMode` (query input, filtering, selection)
+3. Extract `DemoFocusMode` (captures keys for widget interaction)
+4. Refactor `on_key` to: iterate modes, first handler wins
+5. Refactor `render` to: paint base, then paint mode overlays
 
-```
-intro → cell → style → span → line → buffer → block → compose → app → components
-           ↓        ↓      ↓      ↓       ↓        ↓                       ↓
-       cell/detail  |  span/  line/  buffer/  block/           components/progress
-                    |  detail detail  view    detail                       ↓
-              style/detail                                       components/list
-                                                                           ↓
-                                                                 components/text
-                                                                           ↓
-                                                                 components/table
-                                                                           ↓
-                                                                          fin
-```
+### Deferred: Content Separation
 
-Horizontal (←→) = peer concepts. Vertical (↑↓) = depth on same concept.
+Prototype exists in `slide_loader.py` for markdown-based slides:
 
-### Key Patterns Used
+```markdown
+---
+id: cell
+nav:
+  left: intro
+  right: style
+---
 
-**1. Section Dispatch**
-```python
-def render_section(section: Section, width: int, state: BenchState) -> Block:
-    if isinstance(section, Text): return render_text(...)
-    elif isinstance(section, Code): return render_code(...)
-    # ...
-```
+# Cell
 
-**2. Focus Mode**
-```python
-# State
-demo_focused: bool = False
-
-# Toggle
-if key == "tab": state = replace(state, demo_focused=not focused)
-
-# Visual feedback
-if state.demo_focused:
-    parts.append(Block.text(" FOCUS ", Style(fg="black", bg="cyan", bold=True)))
-```
-
-**3. Overlay Pattern**
-```python
-def render(self):
-    # ... render slide content ...
-    if self._state.show_help:
-        help_overlay = render_help(width, height)
-        help_overlay.paint(self._buf, 0, 0)  # on top
-```
-
-**4. styled() Helper**
-```python
-def styled(*parts: str | tuple[str, Style]) -> Line:
-    # styled("a ", ("Cell", KEYWORD), " is one character")
-```
-
-## Known Issues / Gaps
-
-### Framework Level
-
-1. **FocusRing is mutable** — inconsistent with other state types
-2. **No Line → Block conversion** — `line_to_block()` helper in bench.py fills this gap
-3. **Focus mode not in framework** — nav-vs-widget two-tier focus is app-level code
-
-### Bench Specific
-
-1. **No self-documenting slides** — would be nice to show "this slide is rendered by this code"
-2. **State is global** — all component states persist across slides (intentional for demo, might not be desired)
-
-## Extending the Bench
-
-### Adding a Slide
+the atomic unit: one `character` + one `style`
 
 ```python
-"new-topic": Slide(
-    id="new-topic",
-    title="New Topic",
-    sections=(
-        Text("explanation", SUBTITLE_STYLE, center=True),
-        Code(source="code_here()", title="example"),
-        Demo(demo_id="spinner"),  # if interactive
-    ),
-    nav=Navigation(left="previous", right="next", down="new-topic/detail"),
-),
+cell = Cell("A", Style(fg="red", bold=True))
 ```
 
-### Adding a Section Type
+[demo:spinner]
+```
 
-1. Add dataclass in Data Model section
-2. Add to `Section` union type
-3. Add `render_X()` function
-4. Add case to `render_section()` dispatch
-
-### Adding a Demo Widget
-
-1. Add state field to `BenchState`
-2. Add case to `render_demo()`
-3. Add key handling in `on_key()` under `if focused and demo_id == "X":`
-4. If animated, add tick in `update()`
-
-## Next Steps (Suggested)
-
-### Quick Wins
-
-- [x] Add `table` demo slide (component exists, not demoed)
-- [x] Add depth slides for Span, Line, Block (currently only Cell, Style, Buffer have depth)
-
-### Framework Improvements
-
-- [ ] `Line.to_block()` method
-- [ ] Immutable `FocusRing`
-- [ ] Two-tier focus manager
+Not integrated yet. After Mode extraction, could:
+1. Wire loader into bench (hybrid: markdown + Python fallback)
+2. Migrate slides incrementally
 
 ### Stretch
 
-- [ ] Self-documenting slides (show source that renders current slide)
-- [ ] External slide definitions (YAML/TOML instead of Python)
-- [ ] Slide search/jump (/ to search by title)
+- [ ] Self-documenting slides (show source rendering current slide)
+- [ ] Slide table of contents view
 
 ## Testing
 
-No automated tests for demos — they're manual verification of the library.
-
 ```bash
-# Verify imports work
+# Run all tests (71 total)
+uv run pytest
+
+# Verify bench imports
 uv run python -c "from demos.bench import BenchApp; print('OK')"
 
-# Verify slide graph is valid
+# Verify slide graph
 uv run python -c "
 from demos.bench import build_slides
 slides = build_slides()

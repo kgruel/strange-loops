@@ -29,6 +29,20 @@ class VMInfo:
 
 
 @dataclass(frozen=True)
+class DataSourceSpec:
+    """A data source: collector -> projection mapping.
+
+    Parsed from:
+        collect "docker:containers" into="vm-health" interval=5
+        stream "docker:events" into="vm-events"
+    """
+    collector: str        # "docker:containers"
+    projection: str       # "vm-health"
+    mode: str            # "collect" or "stream"
+    interval: int | None  # poll interval in seconds (collect only)
+
+
+@dataclass(frozen=True)
 class AppSpec:
     """Parsed app specification."""
     name: str
@@ -37,6 +51,7 @@ class AppSpec:
     inventory_path: Path
     vms: tuple[VMInfo, ...]
     projections: tuple[ProjectionSpec, ...]  # per-connection specs
+    data_sources: tuple[DataSourceSpec, ...]  # collector -> projection mappings
 
 
 def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
@@ -57,6 +72,7 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
     watch = False
     inventory_path = ""
     uses: list[str] = []
+    data_sources: list[DataSourceSpec] = []
 
     for node in doc.nodes:
         if node.name == "app":
@@ -74,6 +90,10 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
                             spec_name = str(use_node.args[0]) if use_node.args else ""
                             if spec_name:
                                 uses.append(spec_name)
+                        elif use_node.name in ("collect", "stream"):
+                            ds = _parse_data_source(use_node)
+                            if ds:
+                                data_sources.append(ds)
 
     if not name:
         raise ValueError(f"Missing app name in {path}")
@@ -99,6 +119,36 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
         inventory_path=inv_path,
         vms=tuple(vms),
         projections=tuple(projections),
+        data_sources=tuple(data_sources),
+    )
+
+
+def _parse_data_source(node: Any) -> DataSourceSpec | None:
+    """Parse a collect or stream node into a DataSourceSpec.
+
+    Syntax:
+        collect "docker:containers" into="vm-health" interval=5
+        stream "docker:events" into="vm-events"
+    """
+    if not node.args:
+        return None
+
+    collector = str(node.args[0])
+    mode = node.name  # "collect" or "stream"
+
+    # Get properties
+    props = {p.name: p.value for p in (node.properties or [])}
+    projection = str(props.get("into", ""))
+    interval = int(props["interval"]) if "interval" in props else None
+
+    if not projection:
+        return None
+
+    return DataSourceSpec(
+        collector=collector,
+        projection=projection,
+        mode=mode,
+        interval=interval,
     )
 
 

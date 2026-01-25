@@ -107,6 +107,10 @@ class BenchState:
     focus: Focus = field(default_factory=lambda: Focus(id="demo"))  # .captured = keys go to widget
     show_help: bool = False  # True = show help overlay
 
+    # Slide search state
+    search_active: bool = False  # True = show search overlay
+    slide_search: Search = field(default_factory=Search)
+
     # Component states for interactive demos
     spinner_state: SpinnerState = field(default_factory=SpinnerState)
     spinner_braille: SpinnerState = field(default_factory=lambda: SpinnerState(frames=BRAILLE))
@@ -1259,6 +1263,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
 HELP_CONTENT = [
     ("Navigation", [
         ("← → ↑ ↓", "move between slides"),
+        ("/", "search/jump to slide"),
         ("q / esc", "quit"),
         ("?", "toggle this help"),
     ]),
@@ -1299,6 +1304,69 @@ def render_help(width: int, height: int) -> Block:
     content = join_vertical(*rows)
     content = pad(content, left=2, right=2, top=1, bottom=1)
     boxed = border(content, ROUNDED, Style(fg="cyan"))
+
+    # Center in the available space
+    pad_left = max(0, (width - boxed.width) // 2)
+    pad_top = max(0, (height - boxed.height) // 2)
+
+    return pad(boxed, left=pad_left, top=pad_top)
+
+
+def render_search_overlay(
+    width: int,
+    height: int,
+    search: Search,
+    slide_titles: list[tuple[str, str]],
+) -> Block:
+    """Render the slide search overlay.
+
+    Args:
+        width: Terminal width
+        height: Terminal height
+        search: Current search state
+        slide_titles: List of (slide_id, title) tuples
+    """
+    rows: list[Block] = []
+
+    # Title
+    title = Block.text(" Jump to Slide ", Style(fg="magenta", bold=True))
+    rows.append(title)
+    rows.append(Block.empty(1, 1))
+
+    # Query input
+    query_display = search.query if search.query else ""
+    query_block = Block.text(f" > {query_display}_", Style(fg="cyan"))
+    rows.append(query_block)
+    rows.append(Block.empty(1, 1))
+
+    # Filter slide titles
+    titles_only = [title for _, title in slide_titles]
+    matches = filter_fuzzy(titles_only, search.query)
+
+    # Build a mapping from title back to slide_id
+    title_to_id = {title: sid for sid, title in slide_titles}
+
+    # Show matches (max 10)
+    visible_matches = matches[:10]
+    if visible_matches:
+        for i, match_title in enumerate(visible_matches):
+            if i == search.selected:
+                # Selected item
+                row = Block.text(f" > {match_title}", Style(fg="black", bg="magenta", bold=True))
+            else:
+                row = Block.text(f"   {match_title}", Style(dim=True))
+            rows.append(row)
+    else:
+        rows.append(Block.text("   (no matches)", Style(dim=True)))
+
+    rows.append(Block.empty(1, 1))
+
+    # Footer hints
+    rows.append(Block.text(" enter: jump  esc: cancel  ↑↓: select ", HINT_STYLE))
+
+    content = join_vertical(*rows)
+    content = pad(content, left=2, right=2, top=1, bottom=1)
+    boxed = border(content, ROUNDED, Style(fg="magenta"))
 
     # Center in the available space
     pad_left = max(0, (width - boxed.width) // 2)
@@ -1440,6 +1508,17 @@ class BenchApp(RenderApp):
             help_overlay = render_help(self._width, self._height)
             help_overlay.paint(self._buf, 0, 0)
 
+        # Search overlay (on top of everything)
+        if self._state.search_active:
+            slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
+            search_overlay = render_search_overlay(
+                self._width,
+                self._height,
+                self._state.slide_search,
+                slide_titles,
+            )
+            search_overlay.paint(self._buf, 0, 0)
+
     def _has_demo(self, slide: Slide, demo_id: str | None = None) -> bool:
         """Check if a slide contains a demo (optionally of a specific type)."""
         for section in slide.sections:
@@ -1468,6 +1547,93 @@ class BenchApp(RenderApp):
         # When help is showing, any key closes it
         if self._state.show_help:
             self._state = replace(self._state, show_help=False)
+            return
+
+        # When search is active, handle search-mode keys
+        if self._state.search_active:
+            search = self._state.slide_search
+
+            if key == "escape":
+                # Close search without jumping
+                self._state = replace(
+                    self._state,
+                    search_active=False,
+                    slide_search=Search(),  # Reset for next time
+                )
+                return
+
+            if key == "enter":
+                # Jump to selected slide and close search
+                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
+                titles_only = [title for _, title in slide_titles]
+                matches = filter_fuzzy(titles_only, search.query)
+                title_to_id = {title: sid for sid, title in slide_titles}
+
+                if matches and search.selected < len(matches):
+                    selected_title = matches[search.selected]
+                    target_slide = title_to_id.get(selected_title)
+                    if target_slide:
+                        self._state = replace(
+                            self._state,
+                            current_slide=target_slide,
+                            search_active=False,
+                            slide_search=Search(),
+                            focus=self._state.focus.release(),
+                        )
+                else:
+                    # No matches, just close
+                    self._state = replace(
+                        self._state,
+                        search_active=False,
+                        slide_search=Search(),
+                    )
+                return
+
+            if key == "up":
+                # Get match count for navigation
+                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
+                titles_only = [title for _, title in slide_titles]
+                matches = filter_fuzzy(titles_only, search.query)
+                self._state = replace(
+                    self._state,
+                    slide_search=search.select_prev(len(matches)),
+                )
+                return
+
+            if key == "down":
+                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
+                titles_only = [title for _, title in slide_titles]
+                matches = filter_fuzzy(titles_only, search.query)
+                self._state = replace(
+                    self._state,
+                    slide_search=search.select_next(len(matches)),
+                )
+                return
+
+            if key == "backspace":
+                self._state = replace(
+                    self._state,
+                    slide_search=search.backspace(),
+                )
+                return
+
+            if len(key) == 1 and key.isprintable():
+                self._state = replace(
+                    self._state,
+                    slide_search=search.type(key),
+                )
+                return
+
+            # Ignore other keys when in search mode
+            return
+
+        # "/" activates search mode (only when not focused on demo)
+        if key == "/" and not self._state.focus.captured:
+            self._state = replace(
+                self._state,
+                search_active=True,
+                slide_search=Search(),  # Fresh search
+            )
             return
 
         slide = self._slides.get(self._state.current_slide)

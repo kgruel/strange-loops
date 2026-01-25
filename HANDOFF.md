@@ -1,47 +1,47 @@
 # Handoff: Homelab Event Infrastructure
 
-## The Concept
-
-This repo experiments with **personal-scale event infrastructure** — Kafka concepts at homelab scale. The core primitives now live in [rill](../rill), a separate package.
+## Lineage
 
 ```
-Typed fact → Append-only log → Derived views (projections)
+hlab (exploration) → experiments (proving ground) → extracted packages
 ```
+
+- **rill** (`../rill`) — streaming primitives, stdlib only
+- **cells** (`../cells`) — cell-buffer TUI, composition-first rendering
+- **experiments** — spec layer + orchestrator, the integration testbed
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  rill (separate package)                                │
-│  Stream, Projection, EventStore, FileWriter, Tailer    │
-│  The "personal kafka" primitives. Stdlib only.         │
-├─────────────────────────────────────────────────────────┤
-│  framework/ (this repo)                                 │
-│  Spec layer: KDL parsing, projection specs, app specs  │
-│  SSH layer: SSHSession, collectors, orchestration      │
-│  Uses rill primitives to build homelab monitoring      │
-├─────────────────────────────────────────────────────────┤
-│  Display (separate package)                             │
-│  ~/Code/cells — cell-buffer TUI engine                 │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  rill (stdlib only)                                         │
+│  Stream, Projection, EventStore, FileWriter, Tailer         │
+│  "Personal Kafka" — the file IS the broker                  │
+├─────────────────────────────────────────────────────────────┤
+│  experiments/framework                                       │
+│  Spec layer: KDL → projection contracts                     │
+│  Orchestrator: SSH → collectors → streams → JSONL           │
+│  "Homelab as code" — declare what to collect, how to fold   │
+├─────────────────────────────────────────────────────────────┤
+│  cells                                                       │
+│  Buffer → Diff → Writer, Styled blocks, Components          │
+│  "Python's missing middle" — between Rich and Textual       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## rill Primitives
+## What's Where
 
-| Primitive | Role |
-|-----------|------|
-| `Stream[T]` | Typed async fan-out |
-| `EventStore[T]` | Append-only log with optional JSONL persistence |
-| `Projection[S,T]` | Incremental fold (materialized view) |
-| `FileWriter[T]` | JSONL persistence (consumer) |
-| `Tailer[T]` | JSONL reader with byte-offset tracking |
-| `Forward[T,U]` | Stream-to-stream bridge with transform |
+| Thing | Location | Status |
+|-------|----------|--------|
+| Stream, Projection, EventStore, FileWriter, Tailer, Forward | `../rill` | Extracted, stdlib only |
+| Cell buffer, diff, styling, components | `../cells` | Extracted |
+| KDL spec parsing (ProjectionSpec, AppSpec) | `framework/spec.py`, `app_spec.py` | Here |
+| SSH + collectors + orchestrator | `framework/orchestrator.py`, `ssh_session.py`, `collectors/` | Here |
+| Homelab dashboard app | `apps/` | Here, uses all three |
 
-## This Repo: Spec + Orchestration
+## The Spec Layer
 
-### Spec Layer
-
-KDL specs as projection contracts:
+The interesting middle piece — not just config, but a **contract language**:
 
 ```kdl
 projection "vm-health" {
@@ -61,30 +61,18 @@ projection "vm-health" {
 }
 ```
 
-**Fold ops:** `latest`, `collect`, `count`, `upsert`
+- **Event shapes** — input schema, validated on ingest
+- **State shapes** — derived schema, initialized from types
+- **Fold ops** — transformation rules (latest, collect, count, upsert)
+- **App composition** — which projections, what data sources, inventory
 
-### App Composition
+This makes projections declarative. You define the contract, the runtime instantiates typed Projections from rill.
 
-```kdl
-app "homelab" {
-    inventory "~/Code/gruel.network/ansible/inventory.yml"
-    per-connection {
-        collect "docker:containers" into="vm-health" interval=5
-        stream "docker:events" into="vm-events"
-    }
-}
-```
+## The Thesis
 
-### Orchestration
+**rill** = primitives (what), **cells** = display (how to show), **spec layer** = contracts (what shape, how to fold)
 
-```
-SSHSession.run(cmd) → collector parses → stream.emit(event) → FileWriter persists
-```
-
-**Collectors:**
-- `docker:containers` — poll `docker ps`, emit container status
-- `docker:events` — stream `docker events`, emit lifecycle events
-- `docker:stats` — poll `docker stats`, emit resource usage
+The homelab is the real testbed that proves all three compose into something useful.
 
 ## Files
 
@@ -92,11 +80,9 @@ SSHSession.run(cmd) → collector parses → stream.emit(event) → FileWriter p
 |------|------|
 | `spec.py` | ProjectionSpec, SpecProjection — KDL parser + fold ops |
 | `app_spec.py` | AppSpec — composition + inventory + DataSourceSpec |
-| `spec_render.py` | Convention-based state→component mapping |
-| `ssh_session.py` | SSHSession — async run() + stream() over SSH |
 | `orchestrator.py` | Multi-host collection via Stream/FileWriter |
+| `ssh_session.py` | SSHSession — async run() + stream() over SSH |
 | `collectors/` | Collector registry + docker collectors |
-| `watcher.py` | Mtime-polling file watcher with debounce |
 
 ## Run
 
@@ -104,18 +90,20 @@ SSHSession.run(cmd) → collector parses → stream.emit(event) → FileWriter p
 # Orchestrator (collection)
 uv run python -m framework.orchestrator --spec specs/homelab.app.kdl --output /tmp
 
-# Simulated producer
-uv run python -m apps.simulate_homelab
-
-# Homelab dashboard (requires cells package)
-uv run python -m apps.homelab --source /tmp/homelab
-
 # Tests
 uv run pytest tests/ -v
 ```
 
+## Next
+
+Focus areas to consider:
+1. **Spec layer** — event validation, type generation, richer fold ops
+2. **Orchestrator** — real collection from homelab VMs
+3. **Integration** — spec-driven dashboard with cells rendering projection state
+
 ## See Also
 
-- `~/Code/rill` — core streaming primitives
-- `~/Code/cells` — cell-buffer TUI package
+- `../rill` — core streaming primitives
+- `../cells` — cell-buffer TUI package
+- `ROADMAP.md` — detailed phased plan
 - `CLAUDE.md` — project conventions

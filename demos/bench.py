@@ -7,17 +7,24 @@ A 2D navigable space where:
 
 Run: uv run python demos/bench.py
 
-Verbosity modes:
-- -q, --quiet: Print slides inline and exit (no TUI)
-- -v, --verbose: Detail slides become primary navigation
-- -vv: Add source view showing code that builds each slide
+Three depth levels:
+- Level 0 (main):   intro -> cell -> style -> span -> ...
+- Level 1 (detail): cell/detail -> style/detail -> ...
+- Level 2 (source): cell/source -> style/source -> ...
+
+Verbosity = starting zoom level (navigation structure unchanged):
+- -q, --quiet: Print slides inline with rendered demos, then exit
+- default:     Start at level 0 (main slides)
+- -v:          Start at level 1 (detail slides)
+- -vv:         Start at level 2 (source slides)
+
+User can always navigate up/down between levels with arrow keys.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 import textwrap
 from dataclasses import dataclass, field, replace
 from typing import Callable
@@ -658,7 +665,7 @@ EMPTY_CELL = Cell(" ", Style())''',
                     center=True,
                 ),
             ),
-            nav=Navigation(up="cell"),
+            nav=Navigation(up="cell", right="style/detail", down="cell/source"),
         ),
 
         # Style
@@ -715,7 +722,7 @@ class Style:
                     center=True,
                 ),
             ),
-            nav=Navigation(up="style"),
+            nav=Navigation(up="style", left="cell/detail", right="span/detail", down="style/source"),
         ),
 
         # Span
@@ -772,7 +779,7 @@ class Span:
                     center=True,
                 ),
             ),
-            nav=Navigation(up="span"),
+            nav=Navigation(up="span", left="style/detail", right="line/detail", down="span/source"),
         ),
 
         # Line
@@ -833,7 +840,7 @@ class Line:
                     center=True,
                 ),
             ),
-            nav=Navigation(up="line"),
+            nav=Navigation(up="line", left="span/detail", right="buffer/view", down="line/source"),
         ),
 
         # Buffer
@@ -872,7 +879,7 @@ buf.fill(10, 10, 5, 3, "X", Style(fg="blue"))''',
                 Spacer(1),
                 Text("paint into views without bounds checking", HINT_STYLE, center=True),
             ),
-            nav=Navigation(up="buffer"),
+            nav=Navigation(up="buffer", left="line/detail", right="block/detail", down="buffer/source"),
         ),
 
         # Block
@@ -933,7 +940,7 @@ class Block:
                     center=True,
                 ),
             ),
-            nav=Navigation(up="block"),
+            nav=Navigation(up="block", left="buffer/view", right="focus/nav", down="block/source"),
         ),
 
         # Compose
@@ -953,7 +960,7 @@ truncate(block, width=20)     # cut to size''',
                     title="compose.py",
                 ),
             ),
-            nav=Navigation(left="block", right="app"),
+            nav=Navigation(left="block", right="app", down="compose/source"),
         ),
 
         # App
@@ -988,7 +995,7 @@ truncate(block, width=20)     # cut to size''',
                     center=True,
                 ),
             ),
-            nav=Navigation(left="compose", right="focus"),
+            nav=Navigation(left="compose", right="focus", down="app/source"),
         ),
 
         # Focus - two-tier keyboard handling
@@ -1053,7 +1060,7 @@ linear_next(items, "c")      # "c" (stops)''',
                 Spacer(1),
                 Demo(demo_id="focus_nav"),
             ),
-            nav=Navigation(up="focus"),
+            nav=Navigation(up="focus", left="block/detail", right="search/demo", down="focus/source"),
         ),
 
         # Search - filtered selection primitive
@@ -1108,7 +1115,7 @@ search = search.backspace()   # query="f"''',
                 Spacer(1),
                 Demo(demo_id="search"),
             ),
-            nav=Navigation(up="search"),
+            nav=Navigation(up="search", left="focus/nav", right="components/progress", down="search/source"),
         ),
 
         # Components - interactive demos
@@ -1162,7 +1169,7 @@ bar = progress_bar(state, width=30)''',
                     title="usage",
                 ),
             ),
-            nav=Navigation(up="components", down="components/list"),
+            nav=Navigation(up="components", left="search/demo", right="components/list", down="components/list"),
         ),
 
         "components/list": Slide(
@@ -1186,7 +1193,7 @@ lst = list_view(state, items, visible_height=5)''',
                     title="usage",
                 ),
             ),
-            nav=Navigation(up="components/progress", down="components/text"),
+            nav=Navigation(up="components/progress", left="components/progress", right="components/text", down="components/text"),
         ),
 
         "components/text": Slide(
@@ -1209,7 +1216,7 @@ inp = text_input(state, width=20, focused=True)''',
                     title="usage",
                 ),
             ),
-            nav=Navigation(up="components/list", down="components/table"),
+            nav=Navigation(up="components/list", left="components/list", right="components/table", down="components/table"),
         ),
 
         "components/table": Slide(
@@ -1233,7 +1240,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
                     title="usage",
                 ),
             ),
-            nav=Navigation(up="components/text", down="fin"),
+            nav=Navigation(up="components/text", left="components/text", down="fin"),
         ),
 
         # Finale
@@ -1281,6 +1288,383 @@ tbl = table(state, columns, rows, visible_height=3)''',
                 ),
             ),
             nav=Navigation(up="components/table"),
+        ),
+
+        # -- Source slides (level 2) --
+        # These show the actual implementation code from the cells library
+
+        "cell/source": Slide(
+            id="cell/source",
+            title="Cell (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/cell.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Cell:
+    """A single cell in the buffer: one character + one style."""
+    char: str = " "
+    style: Style = field(default_factory=Style)
+
+    def __post_init__(self):
+        # Enforce single character (but allow multi-byte)
+        if len(self.char) != 1:
+            object.__setattr__(self, "char", self.char[0] if self.char else " ")
+
+EMPTY_CELL = Cell(" ", Style())''',
+                    title="cell.py",
+                ),
+            ),
+            nav=Navigation(up="cell/detail", right="style/source"),
+        ),
+
+        "style/source": Slide(
+            id="style/source",
+            title="Style (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/cell.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Style:
+    """Visual attributes for a cell."""
+    fg: str | int | None = None
+    bg: str | int | None = None
+    bold: bool = False
+    dim: bool = False
+    italic: bool = False
+    underline: bool = False
+    reverse: bool = False
+
+    def merge(self, other: "Style") -> "Style":
+        """Merge with another style; other wins on conflict."""
+        return Style(
+            fg=other.fg if other.fg is not None else self.fg,
+            bg=other.bg if other.bg is not None else self.bg,
+            bold=other.bold or self.bold,
+            # ... etc
+        )''',
+                    title="cell.py",
+                ),
+            ),
+            nav=Navigation(up="style/detail", left="cell/source", right="span/source"),
+        ),
+
+        "span/source": Slide(
+            id="span/source",
+            title="Span (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/span.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''def span_width(text: str) -> int:
+    """Calculate display width accounting for wide chars."""
+    total = 0
+    for ch in text:
+        w = wcwidth(ch)
+        if w < 0:
+            w = 0  # control chars
+        total += w
+    return total
+
+@dataclass(frozen=True)
+class Span:
+    """A run of text with one style."""
+    text: str
+    style: Style = field(default_factory=Style)
+
+    @property
+    def width(self) -> int:
+        return span_width(self.text)''',
+                    title="span.py",
+                ),
+            ),
+            nav=Navigation(up="span/detail", left="style/source", right="line/source"),
+        ),
+
+        "line/source": Slide(
+            id="line/source",
+            title="Line (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/span.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Line:
+    """A sequence of Spans - styled inline text."""
+    spans: tuple[Span, ...] = ()
+    style: Style | None = None
+
+    @property
+    def width(self) -> int:
+        return sum(s.width for s in self.spans)
+
+    def paint(self, view: BufferView, x: int, y: int) -> int:
+        """Paint spans left to right, return ending x."""
+        for span in self.spans:
+            view.put_text(x, y, span.text, span.style)
+            x += span.width
+        return x''',
+                    title="span.py",
+                ),
+            ),
+            nav=Navigation(up="line/detail", left="span/source", right="buffer/source"),
+        ),
+
+        "buffer/source": Slide(
+            id="buffer/source",
+            title="Buffer (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/buffer.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''class Buffer:
+    """2D grid of Cells - the rendering canvas."""
+
+    def __init__(self, width: int, height: int):
+        self._width = width
+        self._height = height
+        self._cells = [[EMPTY_CELL] * width for _ in range(height)]
+
+    def put(self, x: int, y: int, char: str, style: Style):
+        """Set a single cell."""
+        if 0 <= x < self._width and 0 <= y < self._height:
+            self._cells[y][x] = Cell(char, style)
+
+    def region(self, x: int, y: int, w: int, h: int) -> BufferView:
+        """Get a clipped, translated view of this buffer."""
+        return BufferView(self, x, y, w, h)''',
+                    title="buffer.py",
+                ),
+            ),
+            nav=Navigation(up="buffer/view", left="line/source", right="block/source"),
+        ),
+
+        "block/source": Slide(
+            id="block/source",
+            title="Block (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/block.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Block:
+    """Immutable rectangle of Cells."""
+    rows: list[list[Cell]]
+    width: int
+
+    @property
+    def height(self) -> int:
+        return len(self.rows)
+
+    @classmethod
+    def text(cls, text: str, style: Style) -> "Block":
+        """Create a Block from a string."""
+        cells = [Cell(ch, style) for ch in text]
+        return cls(rows=[cells], width=len(cells))
+
+    def paint(self, view: BufferView, x: int, y: int):
+        """Copy this block into the view."""
+        for row_idx, row in enumerate(self.rows):
+            for col_idx, cell in enumerate(row):
+                view.put(x + col_idx, y + row_idx, cell.char, cell.style)''',
+                    title="block.py",
+                ),
+            ),
+            nav=Navigation(up="block/detail", left="buffer/source", right="compose/source"),
+        ),
+
+        "compose/source": Slide(
+            id="compose/source",
+            title="Compose (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/compose.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''def join_horizontal(*blocks: Block, gap: int = 0) -> Block:
+    """Place blocks side by side."""
+    if not blocks:
+        return Block.empty(0, 0)
+    max_h = max(b.height for b in blocks)
+    rows = []
+    for y in range(max_h):
+        row = []
+        for i, block in enumerate(blocks):
+            if i > 0 and gap > 0:
+                row.extend([EMPTY_CELL] * gap)
+            if y < block.height:
+                row.extend(block.rows[y])
+            else:
+                row.extend([EMPTY_CELL] * block.width)
+        rows.append(row)
+    return Block(rows=rows, width=sum(len(r) for r in [rows[0]]))''',
+                    title="compose.py",
+                ),
+            ),
+            nav=Navigation(up="compose", left="block/source", right="app/source"),
+        ),
+
+        "app/source": Slide(
+            id="app/source",
+            title="RenderApp (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/app.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''class RenderApp:
+    """Async main loop with diff-based rendering."""
+
+    async def run(self):
+        self._writer.enter_alt_screen()
+        try:
+            while not self._quit:
+                # Handle input
+                for key in self._keyboard.read():
+                    self.on_key(key)
+                # Update state
+                self.update()
+                # Render if dirty
+                if self._dirty:
+                    self.render()
+                    self._flush()
+                await asyncio.sleep(1 / self._fps_cap)
+        finally:
+            self._writer.exit_alt_screen()''',
+                    title="app.py",
+                ),
+            ),
+            nav=Navigation(up="app", left="compose/source", right="focus/source"),
+        ),
+
+        "focus/source": Slide(
+            id="focus/source",
+            title="Focus (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/focus.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Focus:
+    """Immutable focus state: id + captured flag."""
+    id: str = ""
+    captured: bool = False
+
+    def capture(self) -> "Focus":
+        return replace(self, captured=True)
+
+    def release(self) -> "Focus":
+        return replace(self, captured=False)
+
+def ring_next(items: Sequence[T], current: T) -> T:
+    """Next item, wrapping at end."""
+    idx = items.index(current)
+    return items[(idx + 1) % len(items)]''',
+                    title="focus.py",
+                ),
+            ),
+            nav=Navigation(up="focus/nav", left="app/source", right="search/source"),
+        ),
+
+        "search/source": Slide(
+            id="search/source",
+            title="Search (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("from ", ("cells/search.py", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''@dataclass(frozen=True)
+class Search:
+    """Immutable search state: query + selected index."""
+    query: str = ""
+    selected: int = 0
+
+    def type(self, char: str) -> "Search":
+        return replace(self, query=self.query + char, selected=0)
+
+    def backspace(self) -> "Search":
+        return replace(self, query=self.query[:-1], selected=0)
+
+def filter_fuzzy(items: Sequence[str], query: str) -> list[str]:
+    """Filter items by fuzzy match (chars in order)."""
+    if not query:
+        return list(items)
+    return [item for item in items if _fuzzy_match(item, query)]''',
+                    title="search.py",
+                ),
+            ),
+            nav=Navigation(up="search/demo", left="focus/source", right="components/source"),
+        ),
+
+        "components/source": Slide(
+            id="components/source",
+            title="Components (source)",
+            sections=(
+                Spacer(1),
+                Text(
+                    styled("the component pattern: ", ("State", KEYWORD), " + ", ("render()", KEYWORD)),
+                    center=True,
+                ),
+                Spacer(1),
+                Code(
+                    source='''# Each component follows the same pattern:
+# 1. Immutable state dataclass
+# 2. Pure render function: state -> Block
+
+@dataclass(frozen=True)
+class SpinnerState:
+    frame: int = 0
+    frames: tuple[str, ...] = DOTS
+
+    def tick(self) -> "SpinnerState":
+        return replace(self, frame=(self.frame + 1) % len(self.frames))
+
+def spinner(state: SpinnerState, style: Style = Style()) -> Block:
+    char = state.frames[state.frame]
+    return Block.text(char, style)''',
+                    title="components/spinner.py",
+                ),
+            ),
+            nav=Navigation(up="components/progress", left="search/source"),
         ),
     }
 
@@ -1831,11 +2215,14 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 class BenchApp(RenderApp):
     """Interactive teaching bench application."""
 
-    def __init__(self, slides: dict[str, Slide] | None = None):
+    def __init__(self, slides: dict[str, Slide] | None = None, start_slide: str = "intro"):
         super().__init__(fps_cap=30)
         self._slides = slides or build_slides()
         # Initialize state with base navigation layer (slides passed via layer state)
-        self._state = BenchState(layers=(make_nav_layer(self._slides),))
+        self._state = BenchState(
+            current_slide=start_slide,
+            layers=(make_nav_layer(self._slides),),
+        )
         self._width = 80
         self._height = 24
         self._last_tick = time.monotonic()
@@ -1885,11 +2272,13 @@ def parse_args() -> argparse.Namespace:
         description="Teaching Bench: Interactive educational platform for cells",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
-            Verbosity modes express "navigation verbosity":
-              default   : Normal interactive slideshow
+            Verbosity = starting zoom level (navigation structure unchanged):
+              default   : Start at main slides (intro -> cell -> style -> ...)
               -q        : Quiet - print all slides inline and exit
-              -v        : Verbose - detail slides become primary navigation
-              -vv       : Very verbose - add source view toggle (s key)
+              -v        : Start at detail level (cell/detail -> style/detail -> ...)
+              -vv       : Start at source level (cell/source -> style/source -> ...)
+
+            User can always navigate up/down between levels with arrow keys.
         """),
     )
     group = parser.add_mutually_exclusive_group()
@@ -1902,7 +2291,7 @@ def parse_args() -> argparse.Namespace:
         "-v", "--verbose",
         action="count",
         default=0,
-        help="Increase verbosity (-v for details, -vv for source view)",
+        help="Start deeper (-v: detail level, -vv: source level)",
     )
     return parser.parse_args()
 
@@ -1941,11 +2330,14 @@ def get_navigation_order(slides: dict[str, Slide]) -> list[str]:
 
 
 def run_quiet_mode(slides: dict[str, Slide]) -> None:
-    """Print all slides inline and exit (quiet mode)."""
+    """Print all slides inline and exit (quiet mode).
+
+    Demos are rendered in their default/initial state (not interactive).
+    """
     import sys
 
     order = get_navigation_order(slides)
-    state = BenchState()  # Need state for demo rendering
+    state = BenchState()  # Demo components rendered in default state
 
     for slide_id in order:
         slide = slides[slide_id]
@@ -1958,15 +2350,10 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
         content_blocks.append(title_block)
         content_blocks.append(Block.empty(1, 1))
 
-        # Sections (skip interactive demos in quiet mode)
+        # Render all sections including demos
         for section in slide.sections:
-            if isinstance(section, Demo):
-                # Show placeholder for demos
-                demo_block = Block.text(f"[interactive demo: {section.demo_id}]", Style(dim=True))
-                content_blocks.append(demo_block)
-            else:
-                block = render_section(section, 78, state)
-                content_blocks.append(block)
+            block = render_section(section, 78, state)
+            content_blocks.append(block)
 
         content_blocks.append(Block.empty(1, 1))
 
@@ -1976,219 +2363,33 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
             print_block(content, sys.stdout)
 
 
-def invert_navigation_graph(slides: dict[str, Slide]) -> dict[str, Slide]:
-    """Invert the navigation graph: detail slides become primary.
+def get_start_slide(verbosity: int) -> str:
+    """Get the starting slide based on verbosity level.
 
-    In verbose mode, detail slides (X/detail) become part of the main
-    left/right flow, with parents accessible via 'up'.
-
-    Convention: parent X has down=X/detail, child has up=X.
+    - default (0): Start at main slides (intro)
+    - -v (1): Start at detail level (cell/detail)
+    - -vv (2): Start at source level (cell/source)
     """
-    # Build a mapping of parent -> detail relationships
-    parent_to_detail: dict[str, str] = {}
-    detail_to_parent: dict[str, str] = {}
-
-    for slide_id, slide in slides.items():
-        if slide.nav.down and slide.nav.down in slides and "/" in slide.nav.down:
-            parent_to_detail[slide_id] = slide.nav.down
-            detail_to_parent[slide.nav.down] = slide_id
-
-    # Create new slides with inverted navigation
-    new_slides: dict[str, Slide] = {}
-
-    for slide_id, slide in slides.items():
-        nav = slide.nav
-
-        # Check if this is a parent with a detail slide
-        if slide_id in parent_to_detail:
-            detail_id = parent_to_detail[slide_id]
-            detail_slide = slides.get(detail_id)
-
-            if detail_slide:
-                # Parent's right now points to detail
-                # Detail's right points to parent's original right
-                new_nav = Navigation(
-                    up=nav.up,
-                    down=None,  # No more down, it's now right
-                    left=nav.left,
-                    right=detail_id,  # Right goes to detail
-                )
-                new_slides[slide_id] = replace(slide, nav=new_nav)
-
-                # Update detail slide navigation
-                detail_nav = Navigation(
-                    up=slide_id,  # Up goes back to parent
-                    down=detail_slide.nav.down,  # Preserve any further detail
-                    left=slide_id,  # Left goes back to parent
-                    right=nav.right,  # Right continues the main flow
-                )
-                new_slides[detail_id] = replace(detail_slide, nav=detail_nav)
-            else:
-                new_slides[slide_id] = slide
-        elif slide_id in detail_to_parent:
-            # Already handled above when processing parent
-            if slide_id not in new_slides:
-                new_slides[slide_id] = slide
-        else:
-            new_slides[slide_id] = slide
-
-    return new_slides
-
-
-# Store source code for slides (populated at module load)
-SLIDE_SOURCE: dict[str, str] = {}
-
-
-def capture_slide_source() -> None:
-    """Capture source code for build_slides function.
-
-    This enables -vv mode to show the code that builds each slide.
-    """
-    global SLIDE_SOURCE
-    try:
-        source = inspect.getsource(build_slides)
-        lines = source.split("\n")
-
-        # Find slide definitions by looking for patterns like '"intro": Slide('
-        current_slide = None
-        current_lines: list[str] = []
-        brace_depth = 0
-
-        for line in lines:
-            # Check for new slide definition
-            for slide_id in ["intro", "cell", "cell/detail", "style", "style/detail",
-                           "span", "span/detail", "line", "line/detail",
-                           "buffer", "buffer/view", "block", "block/detail",
-                           "compose", "app", "focus", "focus/nav",
-                           "search", "search/demo", "components",
-                           "components/progress", "components/list",
-                           "components/text", "components/table", "fin"]:
-                if f'"{slide_id}": Slide(' in line or f"'{slide_id}': Slide(" in line:
-                    # Save previous slide
-                    if current_slide:
-                        SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
-                    current_slide = slide_id
-                    current_lines = [line]
-                    brace_depth = line.count("(") - line.count(")")
-                    break
-            else:
-                if current_slide:
-                    current_lines.append(line)
-                    brace_depth += line.count("(") - line.count(")")
-                    # Check if slide definition is complete
-                    if brace_depth <= 0 and line.strip().endswith("),"):
-                        SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
-                        current_slide = None
-                        current_lines = []
-                        brace_depth = 0
-
-        # Save last slide
-        if current_slide:
-            SLIDE_SOURCE[current_slide] = "\n".join(current_lines)
-
-    except (OSError, TypeError):
-        # Can't get source (e.g., running from compiled code)
-        pass
-
-
-# Capture source at module load
-capture_slide_source()
-
-
-class VerboseBenchApp(BenchApp):
-    """BenchApp with verbosity support (-v, -vv modes)."""
-
-    def __init__(self, slides: dict[str, Slide] | None = None, verbosity: int = 0):
-        self._verbosity = verbosity
-        self._show_source = False  # Toggle for -vv mode
-
-        # In verbose mode, invert the navigation graph
-        if slides is None:
-            slides = build_slides()
-        if verbosity >= 1:
-            slides = invert_navigation_graph(slides)
-
-        super().__init__(slides)
-
-    def render(self) -> None:
-        if self._buf is None:
-            return
-
-        # Clear
-        self._buf.fill(0, 0, self._width, self._height, " ", Style())
-
-        # Render all layers bottom-to-top
-        render_layers(self._state, self._buf, get_layers)
-
-        # In -vv mode with source visible, show source panel
-        if self._verbosity >= 2 and self._show_source:
-            self._render_source_panel()
-
-    def _render_source_panel(self) -> None:
-        """Render source code panel in -vv mode."""
-        slide_id = self._state.current_slide
-        source = SLIDE_SOURCE.get(slide_id, "# Source not available")
-
-        # Calculate panel dimensions
-        panel_width = min(60, self._width // 2)
-        panel_height = min(20, self._height - 4)
-        panel_x = self._width - panel_width - 1
-        panel_y = 2
-
-        # Build source content
-        source_lines = source.split("\n")[:panel_height - 4]
-        content_blocks: list[Block] = []
-
-        # Title
-        title = Block.text(" Source ", Style(fg="yellow", bold=True))
-        content_blocks.append(title)
-        content_blocks.append(Block.empty(1, 1))
-
-        # Source lines with syntax highlighting
-        for line in source_lines:
-            # Truncate long lines
-            display_line = line[:panel_width - 4] if len(line) > panel_width - 4 else line
-            highlighted = highlight_line(display_line)
-            content_blocks.append(highlighted.to_block(panel_width - 4))
-
-        content = join_vertical(*content_blocks)
-        content = pad(content, left=1, right=1, top=1, bottom=1)
-        boxed = border(content, ROUNDED, Style(fg="yellow", dim=True))
-
-        # Paint to buffer
-        if self._buf:
-            boxed.paint(self._buf, panel_x, panel_y)
-
-    def on_key(self, key: str) -> None:
-        # In -vv mode, 's' toggles source panel
-        if self._verbosity >= 2 and key == "s":
-            self._show_source = not self._show_source
-            self.mark_dirty()
-            return
-
-        # Process key through layer stack
-        self._state, should_quit, _result = process_key(key, self._state, get_layers, set_layers)
-
-        # Check for quit signal
-        if should_quit:
-            self.quit()
+    if verbosity >= 2:
+        return "cell/source"
+    elif verbosity >= 1:
+        return "cell/detail"
+    else:
+        return "intro"
 
 
 async def main():
     args = parse_args()
+    slides = build_slides()
 
     if args.quiet:
         # Quiet mode: print slides inline and exit
-        slides = build_slides()
         run_quiet_mode(slides)
         return
 
-    if args.verbose >= 1:
-        # Verbose mode(s): use VerboseBenchApp
-        app = VerboseBenchApp(verbosity=args.verbose)
-    else:
-        # Default: normal interactive mode
-        app = BenchApp()
+    # Verbosity determines starting slide, not navigation structure
+    start_slide = get_start_slide(args.verbose)
+    app = BenchApp(slides=slides, start_slide=start_slide)
 
     await app.run()
 

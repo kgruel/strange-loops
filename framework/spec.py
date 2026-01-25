@@ -44,11 +44,37 @@ class FoldOp:
     props: dict[str, Any] = field(default_factory=dict)  # key=, max=, etc.
 
 
+class ValidationError(Exception):
+    """Raised when event validation fails."""
+    pass
+
+
 @dataclass(frozen=True)
 class EventSpec:
     """Declares the shape of incoming events."""
     name: str
     fields: tuple[FieldSpec, ...]
+
+    def validate(self, event: dict) -> None:
+        """Validate event dict against spec. Raises ValidationError on mismatch.
+
+        Permissive: unknown fields are ignored, only declared fields are checked.
+        """
+        for field in self.fields:
+            # Required field missing?
+            if not field.optional and field.name not in event:
+                raise ValidationError(
+                    f"missing required field '{field.name}' in event '{self.name}'"
+                )
+
+            # Type check if field present and not None
+            if field.name in event:
+                value = event[field.name]
+                if value is not None and not _type_matches(value, field.type):
+                    raise ValidationError(
+                        f"field '{field.name}' expected {field.type}, "
+                        f"got {type(value).__name__} in event '{self.name}'"
+                    )
 
 
 @dataclass(frozen=True)
@@ -66,6 +92,36 @@ class ProjectionSpec:
         for f in self.state_fields:
             state[f.name] = _initial_value(f.type)
         return state
+
+    def event(self, name: str) -> EventSpec:
+        """Look up an event spec by name. Raises KeyError if not found."""
+        for e in self.events:
+            if e.name == name:
+                return e
+        raise KeyError(f"no event '{name}' in projection '{self.name}'")
+
+
+def _type_matches(value: Any, type_str: str) -> bool:
+    """Check if value matches declared type. Shallow check for containers."""
+    match type_str:
+        case "str":
+            return isinstance(value, str)
+        case "int":
+            return isinstance(value, int) and not isinstance(value, bool)
+        case "float":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        case "bool":
+            return isinstance(value, bool)
+        case "dict":
+            return isinstance(value, dict)
+        case "list":
+            return isinstance(value, list)
+        case "set":
+            return isinstance(value, (set, list))  # allow list as set input
+        case "datetime":
+            return isinstance(value, (str, datetime))  # ISO string or datetime
+        case _:
+            return True  # unknown type, permissive
 
 
 def _initial_value(type_str: str) -> Any:

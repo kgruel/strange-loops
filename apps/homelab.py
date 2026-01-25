@@ -19,12 +19,12 @@ import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from render.app import RenderApp
-from render.block import Block
-from render.cell import Style
-from render.compose import join_horizontal, join_vertical, border
-from render.span import Line, Span
-from render.components.list_view import ListState, list_view
+from cells import (
+    RenderApp, Block, Style,
+    join_horizontal, join_vertical, border,
+    Line, Span,
+    ListState, list_view,
+)
 
 from framework.spec import SpecProjection, parse_projection_spec
 from framework.spec_render import render_projection

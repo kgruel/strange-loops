@@ -3,6 +3,21 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
+name = "cells"
+version = "0.1.0"
+source = { editable = "../cells" }
+dependencies = [
+    { name = "wcwidth" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
+    { name = "wcwidth", specifier = ">=0.2" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -16,6 +31,7 @@ name = "experiments"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cells" },
     { name = "kdl-py" },
     { name = "pyyaml" },
     { name = "wcwidth" },
@@ -28,6 +44,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cells", editable = "../cells" },
     { name = "kdl-py", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "wcwidth", specifier = ">=0.2" },

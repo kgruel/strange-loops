@@ -6,7 +6,12 @@ dependencies = [
     "wcwidth>=0.2",
     "kdl-py>=1.2.0",
     "pyyaml>=6.0",
+    "asyncssh>=2.14",
+    "cells",
 ]
+
+[tool.uv.sources]
+cells = { path = "../cells", editable = true }
 
 [dependency-groups]
 dev = ["pytest>=7.0"]

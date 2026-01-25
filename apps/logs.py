@@ -23,12 +23,13 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from render.app import RenderApp
-from render.cell import Style
-from render.components import ListState, SpinnerState, TextInputState
-from render.region import Region
-from render.span import Span, Line
-from render.theme import (
+from cells import (
+    RenderApp, Style,
+    ListState, SpinnerState, TextInputState,
+    Region,
+    Span, Line,
+)
+from cells.theme import (
     HEADER_BASE, HEADER_BOLD, HEADER_DIM, HEADER_CONNECTED, HEADER_ERROR,
     HEADER_SPINNER, HEADER_LEVEL_FILTER,
     FOOTER_KEY, FOOTER_DIM, FOOTER_ACTIVE_FILTER,
@@ -36,7 +37,7 @@ from render.theme import (
     LEVEL_STYLES, SELECTION_CURSOR, SELECTION_HIGHLIGHT, SOURCE_DIM,
     DEBUG_OVERLAY,
 )
-from render.timer import FrameTimer
+from cells.timer import FrameTimer
 
 
 # =============================================================================
@@ -242,7 +243,7 @@ class LogsApp(RenderApp):
         self._writer.hide_cursor()
 
         width, height = self._writer.size()
-        from render.buffer import Buffer
+        from cells import Buffer
         self._buf = Buffer(width, height)
         self._prev = Buffer(width, height)
         self.layout(width, height)

@@ -1,8 +1,6 @@
-"""Tests for render.span: Span and Line primitives."""
+"""Tests for cells.span: Span and Line primitives."""
 
-from render.buffer import Buffer
-from render.cell import Style
-from render.span import Line, Span
+from cells import Buffer, Style, Line, Span
 
 
 class TestSpanWidth:

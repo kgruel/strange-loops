@@ -12,20 +12,18 @@ from dataclasses import dataclass, replace, field
 
 from wcwidth import wcwidth as _wcw
 
-from render.app import RenderApp
-from render.block import Block
-from render.cell import Style, Cell
-from render.compose import join_horizontal, join_vertical, pad, border, Align
-from render.borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
-from render.components import (
+from cells import (
+    RenderApp, Block, Style, Cell,
+    join_horizontal, join_vertical, pad, border, Align,
+    BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII,
     ListState, SpinnerState,
     DOTS, BRAILLE, LINE,
     Column, TableState,
     list_view, spinner, table,
     TextInputState, text_input,
+    Span, Line,
 )
-from render.span import Span, Line
-from render.theme import (
+from cells.theme import (
     HEADER_BG,
     HEADER_BASE, HEADER_DIM, HEADER_CONNECTED, HEADER_SPINNER,
     FOOTER_KEY, FOOTER_DIM,
@@ -858,7 +856,7 @@ def _hue_to_rgb(h: float) -> str:
 
 
 def _render_finale(state: DemoState, width: int, height: int) -> Block:
-    from render.buffer import Buffer
+    from cells import Buffer
 
     buf = Buffer(width, height)
     elapsed = time.monotonic() - state.finale_start if state.finale_start > 0 else 99.0
@@ -1094,7 +1092,7 @@ def _centered_text(text: str, width: int, style: Style) -> Block:
 
 
 def _line_to_block(line: Line, width: int, indent: int = 0) -> Block:
-    from render.buffer import Buffer
+    from cells import Buffer
     buf = Buffer(width, 1)
     view = buf.region(0, 0, width, 1)
     line.paint(view, indent, 0)

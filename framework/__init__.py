@@ -1,21 +1,15 @@
-"""Stream topology primitives.
+"""Homelab event infrastructure.
 
-The framework layer provides typed event routing:
-  Stream → Consumer fan-out
-  Projection → incremental fold (materialized view)
-  EventStore → append-only log with version counter
-  FileWriter → JSONL persistence (producer)
-  Tailer → JSONL reader with offset tracking (consumer)
-  Forward → typed stream-to-stream bridge
-  SpecProjection → declarative projection from KDL specs
+Core primitives (Stream, Projection, EventStore, etc.) live in rill package.
+This layer adds:
+  - KDL spec parsing (ProjectionSpec, AppSpec)
+  - SSH collection (SSHSession, SSHConnectionManager)
+  - Docker collectors
+  - Orchestration
 """
 
-from .store import EventStore
-from .stream import Stream, Tap, Consumer
-from .projection import Projection
-from .file_writer import FileWriter
-from .tailer import Tailer
-from .forward import Forward
+# Re-export rill primitives for convenience
+from rill import Stream, Tap, Consumer, EventStore, Projection, FileWriter, Tailer, Forward
 from .sim import BaseSimulator, SimState
 from .instrument import metrics
 from .spec import ProjectionSpec, SpecProjection, parse_projection_spec

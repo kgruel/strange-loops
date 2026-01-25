@@ -1,8 +1,8 @@
-# Handoff: Personal Event Infrastructure
+# Handoff: Homelab Event Infrastructure
 
 ## The Concept
 
-**Personal-scale event infrastructure** — Kafka concepts (append-only logs, offset-tracking consumers, materialized views) at individual/homelab scale, using files instead of brokers.
+This repo experiments with **personal-scale event infrastructure** — Kafka concepts at homelab scale. The core primitives now live in [rill](../rill), a separate package.
 
 ```
 Typed fact → Append-only log → Derived views (projections)
@@ -12,69 +12,34 @@ Typed fact → Append-only log → Derived views (projections)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Producers                                               │
-│  Collectors (via SSH), scripts, hooks — emit facts       │
-│  Write via: stream.emit() → FileWriter                   │
+│  rill (separate package)                                │
+│  Stream, Projection, EventStore, FileWriter, Tailer    │
+│  The "personal kafka" primitives. Stdlib only.         │
 ├─────────────────────────────────────────────────────────┤
-│  The Log                                                 │
-│  JSONL files. One file = one topic. Append-only.         │
-│  The filesystem IS the broker.                           │
+│  framework/ (this repo)                                 │
+│  Spec layer: KDL parsing, projection specs, app specs  │
+│  SSH layer: SSHSession, collectors, orchestration      │
+│  Uses rill primitives to build homelab monitoring      │
 ├─────────────────────────────────────────────────────────┤
-│  Consumers                                               │
-│  Tailer (offset-tracking reader) → Projection (fold)     │
-│  In-process: Stream → direct fan-out (fast path)         │
-│  Cross-process: file → Tailer → Projection (general)     │
-├─────────────────────────────────────────────────────────┤
-│  Spec Layer                                              │
-│  .projection.kdl — declares events, state, fold ops      │
-│  .app.kdl — composes projections, binds collectors       │
+│  Display (separate package)                             │
+│  ~/Code/cells — cell-buffer TUI engine                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Two paths, same Projection interface:**
+## rill Primitives
 
-- **In-process** — Stream[T] fans out to consumers in the same event loop
-- **Persistent** — FileWriter writes JSONL, Tailer reads with offset tracking
+| Primitive | Role |
+|-----------|------|
+| `Stream[T]` | Typed async fan-out |
+| `EventStore[T]` | Append-only log with optional JSONL persistence |
+| `Projection[S,T]` | Incremental fold (materialized view) |
+| `FileWriter[T]` | JSONL persistence (consumer) |
+| `Tailer[T]` | JSONL reader with byte-offset tracking |
+| `Forward[T,U]` | Stream-to-stream bridge with transform |
 
-## Current State
+## This Repo: Spec + Orchestration
 
-### Framework (`framework/`)
-
-| File | Role |
-|------|------|
-| `stream.py` | Stream[T] — typed async fan-out |
-| `projection.py` | Projection[S,T] — fold events → state + version |
-| `store.py` | EventStore[T] — in-memory append-only log |
-| `file_writer.py` | FileWriter[T] — JSONL persistence (with optional validation) |
-| `tailer.py` | Tailer[T] — JSONL reader with offset tracking |
-| `forward.py` | Forward[T,U] — bridge between typed streams |
-| `spec.py` | SpecProjection — KDL parser + declarative fold ops + validation |
-| `app_spec.py` | AppSpec — composition parser + inventory + DataSourceSpec |
-| `spec_render.py` | Convention-based state→component mapping |
-| `ssh_session.py` | SSHSession — async run() + stream() over SSH |
-| `collectors/` | Collector registry + docker collectors |
-| `orchestrator.py` | Multi-host collection via Stream/FileWriter |
-| `watcher.py` | Mtime-polling file watcher with debounce |
-
-### Orchestration Layer (New)
-
-The orchestrator composes framework primitives:
-
-```
-SSHSession.run(cmd) → collector parses → stream.emit(event) → FileWriter persists
-```
-
-**Key abstractions:**
-- `DataSourceSpec` — collector → projection binding (`collect "docker:containers" into="vm-health" interval=5`)
-- `HostStream` — bundles Stream + FileWriter + Tap for a host+projection pair
-- `Orchestrator` — manages streams per host, handles graceful shutdown
-
-**Collectors:**
-- `docker:containers` — poll `docker ps`, emit container status
-- `docker:events` — stream `docker events`, emit lifecycle events
-- `docker:stats` — poll `docker stats`, emit resource usage
-
-### Spec-Driven Projections
+### Spec Layer
 
 KDL specs as projection contracts:
 
@@ -98,7 +63,7 @@ projection "vm-health" {
 
 **Fold ops:** `latest`, `collect`, `count`, `upsert`
 
-**App composition:**
+### App Composition
 
 ```kdl
 app "homelab" {
@@ -110,29 +75,28 @@ app "homelab" {
 }
 ```
 
-### Display (separate package)
+### Orchestration
 
-The render layer lives in `~/Code/cells` — cell-buffer TUI engine. This repo depends on it via path dependency.
+```
+SSHSession.run(cmd) → collector parses → stream.emit(event) → FileWriter persists
+```
 
-## What Was Learned
+**Collectors:**
+- `docker:containers` — poll `docker ps`, emit container status
+- `docker:events` — stream `docker events`, emit lifecycle events
+- `docker:stats` — poll `docker stats`, emit resource usage
 
-1. **Events are primary, state is derived** — append-only log is truth. State = fold(events).
+## Files
 
-2. **The file IS the broker** — JSONL + byte offset = Kafka partition at personal scale.
-
-3. **Collectors emit to streams, persistence is a tap concern** — separation means collectors don't know about files.
-
-4. **KDL specs as contracts work** — declare events, state, fold ops → get working projections.
-
-5. **Convention-based rendering** — dict→table, list→list_view, set→tags, scalar→label.
-
-## Next: Framework Cleanup
-
-Focus areas:
-- Clean up module boundaries
-- Remove dead code paths
-- Ensure consistent patterns across primitives
-- Tests for orchestration layer
+| File | Role |
+|------|------|
+| `spec.py` | ProjectionSpec, SpecProjection — KDL parser + fold ops |
+| `app_spec.py` | AppSpec — composition + inventory + DataSourceSpec |
+| `spec_render.py` | Convention-based state→component mapping |
+| `ssh_session.py` | SSHSession — async run() + stream() over SSH |
+| `orchestrator.py` | Multi-host collection via Stream/FileWriter |
+| `collectors/` | Collector registry + docker collectors |
+| `watcher.py` | Mtime-polling file watcher with debounce |
 
 ## Run
 
@@ -152,6 +116,6 @@ uv run pytest tests/ -v
 
 ## See Also
 
-- `CLAUDE.md` — project conventions
-- `framework/README.md` — streaming topology reference
+- `~/Code/rill` — core streaming primitives
 - `~/Code/cells` — cell-buffer TUI package
+- `CLAUDE.md` — project conventions

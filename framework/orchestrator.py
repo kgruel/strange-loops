@@ -19,11 +19,11 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rill import Stream, Tap, FileWriter
+
 from .app_spec import AppSpec, DataSourceSpec, VMInfo, parse_app_spec
 from .collectors import get_collector
-from .file_writer import FileWriter
 from .ssh_session import SSHSession
-from .stream import Stream, Tap
 
 
 @dataclass

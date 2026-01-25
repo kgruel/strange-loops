@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import kdl
-
-from .projection import Projection
+from rill import Projection
 
 
 @dataclass(frozen=True)

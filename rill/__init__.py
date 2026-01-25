@@ -18,6 +18,7 @@ from .projection import Projection
 from .file_writer import FileWriter
 from .tailer import Tailer
 from .forward import Forward
+from .source import Source, ClosableSource
 
 __all__ = [
     "Stream",
@@ -28,4 +29,6 @@ __all__ = [
     "FileWriter",
     "Tailer",
     "Forward",
+    "Source",
+    "ClosableSource",
 ]

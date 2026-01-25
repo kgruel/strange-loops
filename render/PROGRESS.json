@@ -1,8 +1,0 @@
-[
-    {"step": "Create render/cell.py — Style, Cell, EMPTY_CELL primitives", "done": true},
-    {"step": "Create render/buffer.py — Buffer and BufferView with diff/clone", "done": true},
-    {"step": "Create render/writer.py — ANSI Writer with Mode 2026 sync", "done": true},
-    {"step": "Create render/__init__.py — public exports", "done": true},
-    {"step": "Create render/demo.py — verification script", "done": true},
-    {"step": "Add wcwidth dependency (render/requirements.txt)", "done": true}
-]

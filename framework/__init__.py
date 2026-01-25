@@ -20,6 +20,8 @@ from .sim import BaseSimulator, SimState
 from .instrument import metrics
 from .spec import ProjectionSpec, SpecProjection, parse_projection_spec
 from .app_spec import AppSpec, VMInfo, parse_app_spec
+from .ssh import SSHConnectionManager
+from .watcher import SpecWatcher
 
 __all__ = [
     "Stream",
@@ -39,4 +41,6 @@ __all__ = [
     "AppSpec",
     "VMInfo",
     "parse_app_spec",
+    "SSHConnectionManager",
+    "SpecWatcher",
 ]

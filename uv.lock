@@ -16,6 +16,21 @@ wheels = [
 ]
 
 [[package]]
+name = "cells"
+version = "0.1.0"
+source = { editable = "../cells" }
+dependencies = [
+    { name = "wcwidth" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
+    { name = "wcwidth", specifier = ">=0.2" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -162,6 +177,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "asyncssh" },
+    { name = "cells" },
     { name = "kdl-py" },
     { name = "pyyaml" },
     { name = "wcwidth" },
@@ -175,6 +191,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncssh", specifier = ">=2.14" },
+    { name = "cells", editable = "../cells" },
     { name = "kdl-py", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "wcwidth", specifier = ">=0.2" },

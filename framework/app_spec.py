@@ -53,6 +53,12 @@ class AppSpec:
     projections: tuple[ProjectionSpec, ...]  # per-connection specs
     data_sources: tuple[DataSourceSpec, ...]  # collector -> projection mappings
 
+    def diff_uses(self, other: AppSpec) -> tuple[list[str], list[str]]:
+        """Compare projection uses with another spec. Returns (added, removed)."""
+        old_names = {p.name for p in self.projections}
+        new_names = {p.name for p in other.projections}
+        return sorted(new_names - old_names), sorted(old_names - new_names)
+
 
 def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
     """Parse a .app.kdl file, resolve inventory and projection specs.

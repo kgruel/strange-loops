@@ -1,0 +1,22 @@
+projection "vm-resources" {
+    about "Container CPU and memory usage per VM"
+
+    event "container.stats" {
+        container "str"
+        cpu_pct "float"
+        mem_pct "float"
+        mem_usage "str"
+        net_io "str"
+        pids "int"
+    }
+
+    state {
+        resources "dict"
+        last_update "datetime?"
+    }
+
+    fold {
+        upsert "resources" key="container"
+        latest "last_update"
+    }
+}

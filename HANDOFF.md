@@ -144,8 +144,10 @@ Override with explicit view hints only when convention breaks down.
 | `tailer.py` | Tailer[T] | JSONL reader with offset tracking (consumer side) |
 | `forward.py` | Forward[T,U] | Bridge between typed streams |
 | `spec.py` | SpecProjection | KDL parser + declarative fold ops runtime |
-| `app_spec.py` | AppSpec | App composition parser + inventory loader |
+| `app_spec.py` | AppSpec | App composition parser + inventory loader + diff_uses() |
 | `spec_render.py` | render_projection() | Convention-based state→component mapping |
+| `ssh.py` | SSHConnectionManager | Async SSH subprocesses (health poll + log stream) |
+| `watcher.py` | SpecWatcher | Mtime-polling file watcher with debounce |
 
 ### Render (cell-buffer TUI engine)
 
@@ -161,7 +163,8 @@ Novel for Python. No curses dependency, pure ANSI. Performance: 7.3ms avg frame 
 | File | Role |
 |------|------|
 | `specs/vm-health.projection.kdl` | Container health fold (upsert + latest) |
-| `specs/vm-logs.projection.kdl` | Log line collection (collect + upsert set) |
+| `specs/vm-events.projection.kdl` | Container lifecycle events (collect + upsert set) |
+| `specs/vm-resources.projection.kdl` | Container CPU/memory stats (upsert + latest) |
 | `specs/homelab.app.kdl` | App composition (inventory + per-connection uses) |
 
 ### Apps
@@ -172,9 +175,10 @@ Novel for Python. No curses dependency, pure ANSI. Performance: 7.3ms avg frame 
 | `apps/logs.py` | Streaming SSH log viewer |
 | `apps/producer.py` | Simulates container events → writes JSONL |
 | `apps/tail_dashboard.py` | Tails JSONL → Projection → live dashboard |
-| `apps/homelab.py` | **Spec-driven VM dashboard** (simulated events, real inventory) |
+| `apps/homelab.py` | **Spec-driven VM dashboard** (SSH, persistence, hot-reload) |
+| `apps/simulate_homelab.py` | Fake event producer for all projections (writes same JSONL paths) |
 
-**apps/homelab.py** is the spec-driven proof-of-concept: parses KDL specs, loads real inventory from terraform-generated YAML, instantiates projections per connected VM, renders via convention. Currently uses simulated events; real SSH is the next step.
+**apps/homelab.py** is the integrated dashboard: parses KDL specs, loads real inventory, connects to VMs via SSH (`docker compose ps` + `logs` + `stats`), folds events into in-memory projections, and hot-reloads projection specs on file change. Stateless — no persistence. Use `--source DIR` to tail JSONL from an external producer instead of SSH.
 
 ## Broader Ecosystem
 
@@ -204,31 +208,72 @@ Novel for Python. No curses dependency, pure ANSI. Performance: 7.3ms avg frame 
 
 7. **Fold ops cover the mechanical cases** — `upsert`, `collect`, `count`, `latest` handle status dashboards and log viewers without custom Python. Custom folds stay in Python; patterns promote to ops if they repeat.
 
-## Next: Pick Up Here
+## Session Retrospective (2026-01-24)
 
-The spec-driven pipeline is proven end-to-end with simulated events. The next iteration:
+**What happened:** Added vm-resources projection (✓), then refactored based on real usage:
 
-1. **Real SSH connections** — Replace `_simulate_events()` in `apps/homelab.py` with persistent SSH subprocesses running `docker compose ps --format json` and `docker compose logs -f`, parsing output into the event shapes declared in the specs.
+1. **Separated simulation from viewing** — `simulate_homelab.py` is a standalone producer. The homelab app is stateless (no FileWriter, no replay).
 
-2. **File watcher for hot-reload** — The `watch true` in the app spec is declared but not implemented. On spec file change: re-parse, diff projections, add/remove panels live.
+2. **Discovered compose assumption was wrong** — `docker compose ps` and `docker compose logs` require a compose project in cwd. Real VMs don't have that. Switched to daemon-level queries: `docker ps`, `docker events`, `docker stats`.
 
-3. **New projection spec** — Add e.g. `vm-resources.projection.kdl` (CPU/memory from `docker stats`), add `use "vm-resources"` to app spec, see it appear in the dashboard.
+3. **vm-logs is now vm-events** — Streams container lifecycle (start/stop/die/health_status) not log lines. Name is stale.
 
-4. **FileWriter integration** — Connected VMs should write events to JSONL via FileWriter (one file per VM per projection). Enables: replay on reconnect, cross-process consumption, offline analysis.
+**What the pushback revealed:**
 
-## Open Questions
+The homelab app was conflating: viewing events (its job), producing events (simulation's job), persisting events (storage's job). Each refactor removed responsibility. It got simpler.
 
-1. **Checkpoint persistence** — Tailer tracks offset in memory. For restart-resilient consumers, offset should persist somewhere (sidecar `.offset` file most likely).
+**What held up:**
 
-2. **Per-VM vs per-stack granularity** — Current model is per-VM connections. Real gruel.network has multiple docker-compose stacks per VM. Should the app spec model `per-stack` instead?
+- Spec layer — event shapes didn't change when we swapped SSH commands
+- Fold ops — `upsert`, `collect`, `latest` don't care about transport
+- Convention renderer — dict→table, list→list, set→tags still works
 
-3. **Custom fold escape hatch** — How does a projection spec reference a Python fold function? `fold { custom "my_module.my_fold" }`? Or is the pattern always: if you need custom, subclass SpecProjection?
+The layering paid off: changed transport without touching projection or render logic.
+
+## Next: Rebuild Iteratively
+
+**The proof is in:** Spec a projection, get a UI. The pattern works. But the current homelab app has conceptual muddles worth addressing by starting fresh:
+
+### What's muddled now
+
+1. **"VM" vs "SSH connection" vs "Docker queries"** — The app says "VMs" but it's really "SSH connections to hosts where we query the Docker daemon." These are three different concepts collapsed into one.
+
+2. **No panel interactivity** — Can't switch focus between projections, drill down into a container, filter, etc. The UI is display-only.
+
+3. **Inventory as implicit source** — Loads from ansible inventory, but that's just one way to get connection targets. Could be CLI args, a config file, or discovered.
+
+4. **vm-logs should be vm-events** — Name doesn't match content anymore.
+
+### Next session focus
+
+**Rebuild from ground up, iteratively.** The goal isn't to fix the current app — it's to discover the right abstractions by building up piece by piece:
+
+1. Start with the render layer (proven, keep it)
+2. Add one projection, one event source
+3. See what interactivity wants to exist
+4. Let the app structure emerge from usage
+
+Questions to explore:
+- What's the minimal "connection" concept? (host + transport + queries)
+- How do projections compose spatially? (tabs, splits, drill-down)
+- Where does configuration live? (CLI, spec files, discovered)
+
+### Deferred (still valid, not urgent)
+
+- `custom "module.callable"` fold op
+- Checkpoint persistence (`.offset` sidecar)
+- Real container logs (per-container `docker logs -f`, or aggregator)
 
 ## Run
 
 ```bash
-# Spec-driven homelab dashboard
-uv run python -m apps.homelab               # ↑/↓ select, Enter connect/disconnect
+# Homelab dashboard
+uv run python -m apps.homelab               # live SSH (↑/↓ select, Enter connect, q quit)
+uv run python -m apps.homelab --source /tmp/homelab  # tail JSONL from directory
+
+# Simulated producer (pair with --source)
+uv run python -m apps.simulate_homelab      # all VMs from app spec
+uv run python -m apps.simulate_homelab --vms media infra  # specific VMs only
 
 # Producer/consumer demo (two terminals)
 uv run python -m apps.producer              # writes /tmp/events.jsonl
@@ -236,12 +281,14 @@ uv run python -m apps.tail_dashboard        # tails and renders
 
 # Tests
 uv run pytest tests/test_spec.py -v         # 13 spec tests, 0.05s
-uv run pytest tests/ -v                     # full suite (some async tests need pytest-asyncio)
+uv run pytest tests/ -v                     # full suite
 
 # Render demos
 uv run python -m apps.demo
 uv run python -m render.demo_app
 ```
+
+**Simulated event data:** `simulate_homelab` writes to `/tmp/homelab/{vm_name}/{projection_name}.jsonl` by default (configurable via `--output`).
 
 ## See Also
 

@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from render.block import Block
-from render.cell import Style
-from render.span import Line, Span
-from render.components.table import Column, TableState, table
-from render.components.list_view import ListState, list_view
-from render.compose import join_vertical
+from cells import (
+    Block, Style,
+    Line, Span,
+    Column, TableState, table,
+    ListState, list_view,
+    join_vertical,
+)
 
 from .spec import ProjectionSpec, FieldSpec
 

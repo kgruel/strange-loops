@@ -6,6 +6,7 @@ app "homelab" {
 
     per-connection {
         use "vm-health"
-        use "vm-logs"
+        use "vm-events"
+        use "vm-resources"
     }
 }

@@ -12,20 +12,18 @@ from dataclasses import dataclass, replace, field
 
 from wcwidth import wcwidth as _wcw
 
-from render.app import RenderApp
-from render.block import Block
-from render.cell import Style, Cell
-from render.compose import join_horizontal, join_vertical, pad, border, Align
-from render.borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
-from render.components import (
+from cells import (
+    RenderApp, Block, Style, Cell,
+    join_horizontal, join_vertical, pad, border, Align,
+    BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII,
     ListState, SpinnerState,
     DOTS, BRAILLE, LINE,
     Column, TableState,
     list_view, spinner, table,
     TextInputState, text_input,
+    Span, Line,
 )
-from render.span import Span, Line
-from render.theme import (
+from cells.theme import (
     HEADER_BG,
     HEADER_BASE, HEADER_DIM, HEADER_CONNECTED, HEADER_SPINNER,
     FOOTER_KEY, FOOTER_DIM,
@@ -85,6 +83,54 @@ DOT_ACTIVE = Style(fg="cyan", bold=True)
 DOT_INACTIVE = Style(dim=True)
 
 
+# -- Theme Palettes --
+
+# Each palette maps token names to colors/styles
+# This demonstrates the concept: same tokens, different values
+THEME_PALETTES = [
+    {
+        "name": "default",
+        "error": "#ff5555",
+        "warn": "#ffff55",
+        "info": "#ffffff",
+        "debug": "#888888",
+        "connected": "#55ff55",
+        "accent": "#55ffff",
+        "bg": 236,
+    },
+    {
+        "name": "ocean",
+        "error": "#ff6b6b",
+        "warn": "#ffd93d",
+        "info": "#a8d8ea",
+        "debug": "#6b8e9f",
+        "connected": "#6bffb8",
+        "accent": "#6bb5ff",
+        "bg": 17,
+    },
+    {
+        "name": "forest",
+        "error": "#e57373",
+        "warn": "#dce775",
+        "info": "#c8e6c9",
+        "debug": "#81976c",
+        "connected": "#aed581",
+        "accent": "#81c784",
+        "bg": 22,
+    },
+    {
+        "name": "high-contrast",
+        "error": "#ff0000",
+        "warn": "#ffff00",
+        "info": "#ffffff",
+        "debug": "#aaaaaa",
+        "connected": "#00ff00",
+        "accent": "#00ffff",
+        "bg": 16,
+    },
+]
+
+
 # -- State --
 
 # Named colors for the spans color picker
@@ -113,6 +159,8 @@ class DemoState:
     span_underline: bool = False
     span_reverse: bool = False
     span_color_index: int = 0
+    # Theme: palette selection
+    theme_index: int = 0
     # Blocks: border cycling
     border_index: int = 0
     # Components: list + spinners
@@ -357,52 +405,85 @@ def _render_lines(width: int, height: int) -> Block:
     return join_vertical(*rows, align=Align.START)
 
 
-def _render_theme(width: int, height: int) -> Block:
+def _render_theme(state: DemoState, width: int, height: int) -> Block:
     rows: list[Block] = []
     rows.append(Block.empty(width, 1))
-    rows.append(_centered_text("theme: naming things", width, TITLE_STYLE))
+    rows.append(_centered_text("theme: swap the palette, keep the names", width, TITLE_STYLE))
     rows.append(Block.empty(width, 1))
-    rows.append(_centered_text("why memorize hex codes when you can name them?", width, CAPTION))
+    rows.append(_centered_text("same tokens, different colors. the UI updates instantly.", width, CAPTION))
     rows.append(Block.empty(width, 2))
 
-    categories = [
-        ("header", [
-            ("BASE", HEADER_BASE),
-            ("DIM", HEADER_DIM),
-            ("CONNECTED", HEADER_CONNECTED),
-            ("SPINNER", HEADER_SPINNER),
-        ]),
-        ("footer", [
-            ("BASE", FOOTER_BASE),
-            ("KEY", FOOTER_KEY),
-            ("DIM", FOOTER_DIM),
-        ]),
-        ("levels", [
-            ("error", LEVEL_STYLES["error"]),
-            ("warn", LEVEL_STYLES["warn"]),
-            ("info", LEVEL_STYLES["info"]),
-            ("debug", LEVEL_STYLES["debug"]),
-            ("trace", LEVEL_STYLES["trace"]),
-        ]),
-        ("selection", [
-            ("CURSOR", SELECTION_CURSOR),
-            ("HIGHLIGHT", SELECTION_HIGHLIGHT),
-            ("SOURCE_DIM", SOURCE_DIM),
-        ]),
+    palette = THEME_PALETTES[state.theme_index]
+
+    # -- Left side: theme picker --
+    picker_lines: list[Block] = []
+    for i, p in enumerate(THEME_PALETTES):
+        cursor = "▸ " if i == state.theme_index else "  "
+        name = p["name"]
+        if i == state.theme_index:
+            line_style = Style(fg="cyan", bold=True)
+        else:
+            line_style = Style(dim=True)
+        picker_lines.append(Block.text(f"{cursor}{name:<14}", line_style))
+    picker_content = join_vertical(*picker_lines)
+    picker_box = border(picker_content, ROUNDED, Style(fg="cyan", dim=True),
+                        title="theme", title_style=Style(fg="cyan", bold=True))
+
+    # -- Right side: live preview --
+    preview_lines: list[Block] = []
+
+    # Log entries using palette colors
+    log_entries = [
+        ("14:23:07", "ERROR", "disk full", "error"),
+        ("14:23:08", "WARN", "quota 89%", "warn"),
+        ("14:23:09", "INFO", "backup done", "info"),
+        ("14:23:10", "DEBUG", "cache hit", "debug"),
     ]
+    for ts, level, msg, level_key in log_entries:
+        ts_block = Block.text(f"{ts} ", Style(dim=True))
+        level_color = palette[level_key]
+        level_block = Block.text(f"{level:<5} ", Style(fg=level_color, bold=(level_key == "error")))
+        msg_block = Block.text(msg, Style(fg=palette["info"]))
+        entry = join_horizontal(ts_block, level_block, msg_block, gap=0)
+        preview_lines.append(entry)
 
-    for cat_name, styles in categories:
-        label = Block.text(f"  {cat_name:>10}  ", Style(bold=True))
-        swatches = [label]
-        for name, style in styles:
-            swatches.append(Block.text(f" {name} ", style))
-        row = join_horizontal(*swatches, gap=1)
-        rows.append(row)
-        rows.append(Block.empty(width, 1))
+    # Status line
+    preview_lines.append(Block.empty(1, 1))
+    dot = Block.text("● ", Style(fg=palette["connected"]))
+    status = Block.text("connected", Style(fg=palette["info"], bold=True))
+    sep = Block.text("  ", Style())
+    latency_label = Block.text("latency: ", Style(dim=True))
+    latency_val = Block.text("2ms", Style(fg=palette["accent"]))
+    status_line = join_horizontal(dot, status, sep, latency_label, latency_val, gap=0)
+    preview_lines.append(status_line)
 
+    preview_content = join_vertical(*preview_lines)
+    preview_box = border(preview_content, ROUNDED, Style(fg=palette["accent"], dim=True),
+                         title="preview", title_style=Style(fg=palette["accent"], bold=True))
+
+    # Combine picker and preview side by side
+    main_row = join_horizontal(picker_box, preview_box, gap=3)
+    rows.append(pad(main_row, left=4))
     rows.append(Block.empty(width, 1))
-    rows.append(_centered_text("import LEVEL_STYLES from theme. never Style(fg='red') inline.", width, CAPTION))
-    rows.append(_centered_text("(ok, maybe sometimes. but name things when you can.)", width, DIM))
+
+    # -- Token mappings --
+    tokens = [
+        ("error", palette["error"]),
+        ("warn", palette["warn"]),
+        ("connected", palette["connected"]),
+        ("accent", palette["accent"]),
+    ]
+    token_parts: list[Block] = []
+    for name, color in tokens:
+        token_parts.append(Block.text(f"{name}", Style(dim=True)))
+        token_parts.append(Block.text("→", Style(dim=True)))
+        token_parts.append(Block.text(f"{color}", Style(fg=color, bold=True)))
+        token_parts.append(Block.text("  ", Style()))
+    token_row = join_horizontal(*token_parts, gap=1)
+    rows.append(pad(token_row, left=4))
+
+    rows.append(Block.empty(width, 2))
+    rows.append(_centered_text("↑/↓ switch themes    same code, different palette", width, HINT))
 
     return join_vertical(*rows, align=Align.START)
 
@@ -775,7 +856,7 @@ def _hue_to_rgb(h: float) -> str:
 
 
 def _render_finale(state: DemoState, width: int, height: int) -> Block:
-    from render.buffer import Buffer
+    from cells import Buffer
 
     buf = Buffer(width, height)
     elapsed = time.monotonic() - state.finale_start if state.finale_start > 0 else 99.0
@@ -1011,7 +1092,7 @@ def _centered_text(text: str, width: int, style: Style) -> Block:
 
 
 def _line_to_block(line: Line, width: int, indent: int = 0) -> Block:
-    from render.buffer import Buffer
+    from cells import Buffer
     buf = Buffer(width, 1)
     view = buf.region(0, 0, width, 1)
     line.paint(view, indent, 0)
@@ -1087,7 +1168,7 @@ class DemoApp(RenderApp):
         elif s == 2:
             return _render_lines(width, height)
         elif s == 3:
-            return _render_theme(width, height)
+            return _render_theme(self._state, width, height)
         elif s == 4:
             return _render_blocks(self._state, width, height)
         elif s == 5:
@@ -1180,6 +1261,16 @@ class DemoApp(RenderApp):
                 self._state = replace(self._state, input_state=self._state.input_state.delete_back())
             elif len(key) == 1 and key.isprintable() and key not in "bdiurc":
                 self._state = replace(self._state, input_state=self._state.input_state.insert(key))
+            return
+
+        # Theme: palette selection
+        if stage == 3:
+            if key in ("up", "k"):
+                new_idx = (self._state.theme_index - 1) % len(THEME_PALETTES)
+                self._state = replace(self._state, theme_index=new_idx)
+            elif key in ("down", "j"):
+                new_idx = (self._state.theme_index + 1) % len(THEME_PALETTES)
+                self._state = replace(self._state, theme_index=new_idx)
             return
 
         # Blocks: cycle borders

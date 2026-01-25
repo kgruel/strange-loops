@@ -19,11 +19,11 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
-from render.app import RenderApp
-from render.block import Block
-from render.cell import Style
-from render.compose import join_horizontal, join_vertical, pad, border
-from render.region import Region
+from cells import (
+    RenderApp, Block, Style,
+    join_horizontal, join_vertical, pad, border,
+    Region,
+)
 
 from framework.tailer import Tailer
 from framework.projection import Projection

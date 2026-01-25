@@ -4,7 +4,7 @@
 
 Two demo systems exist:
 
-1. **Progressive demos (01-08)**: Educational, print-based output for primitives, interactive for app/components
+1. **Progressive demos (01-09)**: Educational, print-based output for primitives, interactive for app/components/layer
 2. **Teaching bench (bench.py)**: Interactive slideshow using cells to teach cells (~1800 lines)
 
 Both are functional and can be run independently.
@@ -20,6 +20,7 @@ uv run python demos/demo_02_buffer.py
 # Progressive demos (interactive)
 uv run python demos/demo_07_app.py
 uv run python demos/demo_08_components.py
+uv run python demos/demo_09_layer.py
 
 # Teaching bench (interactive)
 uv run python demos/bench.py
@@ -30,6 +31,7 @@ uv run python demos/bench.py
 | File | Purpose |
 |------|---------|
 | `demo_01_cell.py` - `demo_08_components.py` | Progressive API introduction |
+| `demo_09_layer.py` | Layer primitive demo (modal stacking) |
 | `demo_utils.py` | Shared `render_buffer()` helper |
 | `bench.py` | Interactive teaching bench |
 | `slide_loader.py` | Markdown slide loader (prototype, not integrated) |
@@ -38,7 +40,36 @@ uv run python demos/bench.py
 
 ## Framework Primitives Added
 
-This session added several framework primitives based on patterns discovered in bench development:
+### Layer (`src/cells/layer.py`)
+
+Modal stacking primitive for input handling and rendering. A layer is a **temporary input scope with visual presence**.
+
+```python
+# Layer bundles state + handler + renderer
+@dataclass(frozen=True)
+class Layer(Generic[S]):
+    name: str
+    state: S
+    handle: Callable[[str, S, AppState], tuple[S, AppState, Action]]
+    render: Callable[[S, AppState, BufferView], None]
+
+# Actions
+Stay()              # remain active
+Pop(result=value)   # remove from stack, optionally return result
+Push(layer)         # add new layer on top
+Quit()              # signal app exit
+
+# Processing
+new_state, should_quit, pop_result = process_key(key, state, get_layers, set_layers)
+render_layers(state, buffer, get_layers)
+```
+
+Key design decisions:
+- Layer state is bundled (created on push, gone on pop)
+- Follows the component pattern: frozen state + pure functions
+- No globals needed for layer-local state
+- `Quit()` action replaces magic values for exit signaling
+- `Pop(result=...)` enables clean result passing
 
 ### Focus (`src/cells/focus.py`)
 ```python
@@ -70,6 +101,13 @@ line = Line(spans=(Span("hello", style), ...))
 block = line.to_block(width)  # direct conversion, no Buffer round-trip
 ```
 
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/DATA_PATTERNS.md` | Data modeling patterns: frozen state + pure functions |
+| `docs/ARCHITECTURE.md` | Data-flow reference: rendering, input, layer stack |
+
 ## Teaching Bench Architecture
 
 ### Navigation Graph (25 slides)
@@ -98,39 +136,28 @@ intro → cell → style → span → line → buffer → block → compose → 
 - Focus demo: ring vs linear navigation
 - Search demo: contains/prefix/fuzzy filtering
 
-### Current Pain Points (Why Mode Extraction)
+### Layer Architecture
 
-The bench has grown to ~1800 lines with repeated patterns:
+The bench uses the Layer primitive for modal UI:
 
-**Each "mode" (help, search, demo focus) has:**
-- State fields scattered in `BenchState`
-- Entry/exit logic somewhere in `on_key()`
-- Key handling in another block of `on_key()`
-- Render logic in `render()` + helper function
-
-These should be bundled as a `Mode` abstraction.
-
-## Next Steps
-
-### Priority: Mode Extraction
-
-Extract the repeated pattern into a `Mode` protocol:
-
-```python
-@dataclass
-class Mode:
-    name: str
-    state: Any
-    handles_key: Callable[[str, AppState], tuple[bool, AppState]]
-    render_overlay: Callable[[AppState, int, int], Block | None]
+```
+┌─────────────────────┐
+│   Help Layer        │  ← any key pops
+├─────────────────────┤
+│   Search Layer      │  ← query input, Enter pops with result
+├─────────────────────┤
+│   Demo Layer        │  ← widget interaction, Escape pops
+├─────────────────────┤
+│   Nav Layer         │  ← base: arrow navigation, pushes overlays
+└─────────────────────┘
 ```
 
-Then refactor:
-1. Extract `HelpMode` (simplest, just shows/hides overlay)
-2. Extract `SearchMode` (query input, filtering, selection)
-3. Extract `DemoFocusMode` (captures keys for widget interaction)
-4. Refactor `on_key` to: iterate modes, first handler wins
-5. Refactor `render` to: paint base, then paint mode overlays
+Each layer has its own state dataclass:
+- `NavLayerState`: slides reference
+- `SearchLayerState`: Search primitive + slides reference
+- `DemoLayerState`: widget state + handler
+
+## Next Steps
 
 ### Deferred: Content Separation
 
@@ -155,7 +182,7 @@ cell = Cell("A", Style(fg="red", bold=True))
 [demo:spinner]
 ```
 
-Not integrated yet. After Mode extraction, could:
+Not integrated yet. Could:
 1. Wire loader into bench (hybrid: markdown + Python fallback)
 2. Migrate slides incrementally
 
@@ -163,15 +190,19 @@ Not integrated yet. After Mode extraction, could:
 
 - [ ] Self-documenting slides (show source rendering current slide)
 - [ ] Slide table of contents view
+- [ ] Layer slide in teaching bench
 
 ## Testing
 
 ```bash
-# Run all tests (71 total)
+# Run all tests (94 total)
 uv run pytest
 
 # Verify bench imports
 uv run python -c "from demos.bench import BenchApp; print('OK')"
+
+# Verify demo_09 imports
+uv run python -c "from demos.demo_09_layer import Demo09App; print('OK')"
 
 # Verify slide graph
 uv run python -c "

@@ -2,8 +2,8 @@
 """Teaching Bench: Interactive educational platform for cells.
 
 A 2D navigable space where:
-- ←/→ moves between topics (sibling concepts)
-- ↑/↓ moves between depths (same concept, more/less detail)
+- left/right moves between topics (sibling concepts)
+- up/down moves between depths (same concept, more/less detail)
 
 Run: uv run python demos/bench.py
 """
@@ -24,6 +24,9 @@ from cells import (
     Focus, ring_next, ring_prev, linear_next, linear_prev,
     # Search
     Search, filter_contains, filter_prefix, filter_fuzzy,
+    # Layer
+    Layer, Stay, Pop, Push, Quit, process_key, render_layers,
+    BufferView,
     # Components for interactive demos
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
@@ -105,11 +108,9 @@ class BenchState:
     """Application state for the teaching bench."""
     current_slide: str = "intro"
     focus: Focus = field(default_factory=lambda: Focus(id="demo"))  # .captured = keys go to widget
-    show_help: bool = False  # True = show help overlay
 
-    # Slide search state
-    search_active: bool = False  # True = show search overlay
-    slide_search: Search = field(default_factory=Search)
+    # Layer stack (base layer + modal overlays)
+    layers: tuple[Layer, ...] = ()  # Initialized in BenchApp.__init__
 
     # Component states for interactive demos
     spinner_state: SpinnerState = field(default_factory=SpinnerState)
@@ -127,6 +128,10 @@ class BenchState:
     # Search demo state
     search_state: Search = field(default_factory=Search)
     search_mode: str = "contains"  # "contains", "prefix", "fuzzy"
+
+    # Terminal dimensions (for layers to access)
+    width: int = 80
+    height: int = 24
 
 
 # -- Styles --
@@ -180,6 +185,18 @@ PY_BUILTINS = {
     "set", "bool", "type", "isinstance", "hasattr", "getattr", "setattr",
     "property", "staticmethod", "classmethod", "super", "self", "max", "min",
 }
+
+
+# -- Layer Accessors --
+
+def get_layers(state: BenchState) -> tuple[Layer, ...]:
+    """Extract layers from state."""
+    return state.layers
+
+
+def set_layers(state: BenchState, layers: tuple[Layer, ...]) -> BenchState:
+    """Return state with new layers."""
+    return replace(state, layers=layers)
 
 
 # -- Code Highlighting --
@@ -388,7 +405,7 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         pct_label = Block.text(f" {pct}%", Style(fg="green" if pct > 50 else "yellow"))
         row = join_horizontal(bar, pct_label)
         if focused:
-            hint = Block.text("  ←/→ adjust  esc: done", Style(fg="green"))
+            hint = Block.text("  left/right adjust  esc: done", Style(fg="green"))
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
         content = join_vertical(row, hint)
@@ -400,10 +417,10 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
             items=DEMO_LIST_ITEMS,
             visible_height=5,
             selected_style=Style(fg="black", bg="cyan", bold=True),
-            cursor_char="▸",
+            cursor_char="*",
         )
         if focused:
-            hint = Block.text("  ↑/↓ navigate  esc: done", Style(fg="magenta"))
+            hint = Block.text("  up/down navigate  esc: done", Style(fg="magenta"))
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
         content = join_vertical(lst, hint)
@@ -437,7 +454,7 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
             selected_style=Style(fg="black", bg="cyan", bold=True),
         )
         if focused:
-            hint = Block.text("  ↑/↓ navigate  esc: done", Style(fg="cyan"))
+            hint = Block.text("  up/down navigate  esc: done", Style(fg="cyan"))
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
         content = join_vertical(tbl, hint)
@@ -463,7 +480,7 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         mode_block = Block.text(mode_text, Style(fg="cyan"))
 
         if focused:
-            hint = Block.text("  ←/→ nav  m: mode  esc: done", Style(fg="green"))
+            hint = Block.text("  left/right nav  m: mode  esc: done", Style(fg="green"))
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
 
@@ -506,7 +523,7 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         mode_block = Block.text(f"mode: {mode}", Style(fg="cyan"))
 
         if focused:
-            hint = Block.text("  type/bksp  ↑/↓ select  m: mode  esc: done", Style(fg="magenta"))
+            hint = Block.text("  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta"))
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
 
@@ -563,14 +580,14 @@ def build_slides() -> dict[str, Slide]:
                 ),
                 Text(
                     styled(
-                        ("←", KEYWORD), " ", ("→", KEYWORD), " for topics, ",
-                        ("↑", KEYWORD), " ", ("↓", KEYWORD), " for depth"
+                        ("left", KEYWORD), " ", ("right", KEYWORD), " for topics, ",
+                        ("up", KEYWORD), " ", ("down", KEYWORD), " for depth"
                     ),
                     center=True,
                 ),
                 Spacer(2),
                 Text(
-                    styled("press ", ("→", KEYWORD), " to begin"),
+                    styled("press ", ("right", KEYWORD), " to begin"),
                     center=True,
                 ),
             ),
@@ -596,7 +613,7 @@ def build_slides() -> dict[str, Slide]:
                     title="cell.py",
                 ),
                 Spacer(1),
-                Text("↓ for more detail", HINT_STYLE, center=True),
+                Text("down for more detail", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="intro", right="style", down="cell/detail"),
         ),
@@ -608,7 +625,7 @@ def build_slides() -> dict[str, Slide]:
                 Spacer(1),
                 Text(
                     styled(
-                        ("Cell", KEYWORD), " is a frozen dataclass — ",
+                        ("Cell", KEYWORD), " is a frozen dataclass - ",
                         ("immutable", EMPH), " by design"
                     ),
                     center=True,
@@ -683,7 +700,7 @@ class Style:
                 Text(
                     styled(
                         ("Style.merge(other)", KEYWORD),
-                        " combines styles — other wins on conflict"
+                        " combines styles - other wins on conflict"
                     ),
                     center=True,
                 ),
@@ -706,7 +723,7 @@ class Style:
                     title="span.py",
                 ),
                 Spacer(1),
-                Text("↓ for more detail", HINT_STYLE, center=True),
+                Text("down for more detail", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="style", right="line", down="span/detail"),
         ),
@@ -754,7 +771,7 @@ class Span:
             title="Line",
             sections=(
                 Spacer(1),
-                Text("a sequence of Spans — styled inline text", SUBTITLE_STYLE, center=True),
+                Text("a sequence of Spans - styled inline text", SUBTITLE_STYLE, center=True),
                 Spacer(2),
                 Code(
                     source='''line = Line(spans=(
@@ -765,7 +782,7 @@ class Span:
                     title="line.py",
                 ),
                 Spacer(1),
-                Text("↓ for more detail", HINT_STYLE, center=True),
+                Text("down for more detail", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="span", right="buffer", down="line/detail"),
         ),
@@ -801,7 +818,7 @@ class Line:
                 Text(
                     styled(
                         ("Line.plain(text, style)", KEYWORD),
-                        " — convenience constructor"
+                        " - convenience constructor"
                     ),
                     center=True,
                 ),
@@ -815,13 +832,13 @@ class Line:
             title="Buffer",
             sections=(
                 Spacer(1),
-                Text("the 2D canvas — a grid of Cells", SUBTITLE_STYLE, center=True),
+                Text("the 2D canvas - a grid of Cells", SUBTITLE_STYLE, center=True),
                 Spacer(2),
                 Code(
                     source='''buf = Buffer(80, 24)
 buf.put(0, 0, "A", Style(fg="red"))
 buf.put_text(0, 1, "hello", Style())
-buf.fill(10, 10, 5, 3, "█", Style(fg="blue"))''',
+buf.fill(10, 10, 5, 3, "X", Style(fg="blue"))''',
                     title="buffer.py",
                 ),
             ),
@@ -838,7 +855,7 @@ buf.fill(10, 10, 5, 3, "█", Style(fg="blue"))''',
                 Code(
                     source='''view = buf.region(10, 5, 20, 10)
 # view.width = 20, view.height = 10
-# writes at (0,0) in view → (10,5) in buffer
+# writes at (0,0) in view -> (10,5) in buffer
 # writes outside view bounds are clipped''',
                     title="bufferview",
                 ),
@@ -854,7 +871,7 @@ buf.fill(10, 10, 5, 3, "█", Style(fg="blue"))''',
             title="Block",
             sections=(
                 Spacer(1),
-                Text("immutable rectangle of Cells — the composition unit", SUBTITLE_STYLE, center=True),
+                Text("immutable rectangle of Cells - the composition unit", SUBTITLE_STYLE, center=True),
                 Spacer(2),
                 Code(
                     source='''block = Block.text("hello", Style(fg="cyan"))
@@ -864,7 +881,7 @@ block.paint(buf, x=10, y=5)  # copy into buffer''',
                     title="block.py",
                 ),
                 Spacer(1),
-                Text("↓ for more detail", HINT_STYLE, center=True),
+                Text("down for more detail", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="buffer", right="compose", down="block/detail"),
         ),
@@ -877,7 +894,7 @@ block.paint(buf, x=10, y=5)  # copy into buffer''',
                 Text(
                     styled(
                         ("Block", KEYWORD), " stores rows of ", ("Cells", KEYWORD),
-                        " — ", ("immutable", EMPH),
+                        " - ", ("immutable", EMPH),
                     ),
                     center=True,
                 ),
@@ -937,7 +954,7 @@ truncate(block, width=20)     # cut to size''',
                 Spacer(1),
                 Text(
                     styled(
-                        "the application loop — ",
+                        "the application loop - ",
                         ("keyboard", KEYWORD), ", ",
                         ("resize", KEYWORD), ", ",
                         ("diff rendering", KEYWORD),
@@ -957,7 +974,7 @@ truncate(block, width=20)     # cut to size''',
                 ),
                 Spacer(1),
                 Text(
-                    styled("→ for ", ("components", KEYWORD), " (interactive widgets)"),
+                    styled("right for ", ("components", KEYWORD), " (interactive widgets)"),
                     center=True,
                 ),
             ),
@@ -994,7 +1011,7 @@ focus = focus.release()   # nav handles keys''',
                     center=True,
                 ),
                 Spacer(1),
-                Text("↓ for navigation demo", HINT_STYLE, center=True),
+                Text("down for navigation demo", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="app", right="search", down="focus/nav"),
         ),
@@ -1007,7 +1024,7 @@ focus = focus.release()   # nav handles keys''',
                 Text(
                     styled(
                         "pure functions: ", ("items", KEYWORD), " + ",
-                        ("current", KEYWORD), " → ", ("next", KEYWORD),
+                        ("current", KEYWORD), " -> ", ("next", KEYWORD),
                     ),
                     center=True,
                 ),
@@ -1061,7 +1078,7 @@ search = search.backspace()   # query="f"''',
                     center=True,
                 ),
                 Spacer(1),
-                Text("↓ for interactive demo", HINT_STYLE, center=True),
+                Text("down for interactive demo", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="focus", right="components", down="search/demo"),
         ),
@@ -1073,7 +1090,7 @@ search = search.backspace()   # query="f"''',
                 Spacer(1),
                 Text(
                     styled(
-                        "type to filter, ", ("↑/↓", KEYWORD), " to select, ",
+                        "type to filter, ", ("up/down", KEYWORD), " to select, ",
                         ("m", KEYWORD), " to change mode",
                     ),
                     center=True,
@@ -1105,12 +1122,12 @@ search = search.backspace()   # query="f"''',
                 Spacer(1),
                 Text(
                     styled(
-                        "state is ", ("immutable", EMPH), " — methods return new instances"
+                        "state is ", ("immutable", EMPH), " - methods return new instances"
                     ),
                     center=True,
                 ),
                 Spacer(1),
-                Text("↓ for interactive examples", HINT_STYLE, center=True),
+                Text("down for interactive examples", HINT_STYLE, center=True),
             ),
             nav=Navigation(left="search", down="components/progress"),
         ),
@@ -1226,11 +1243,11 @@ tbl = table(state, columns, rows, visible_height=3)''',
                 Spacer(2),
                 Text(
                     styled(
-                        ("Cell", KEYWORD), " → ",
-                        ("Style", KEYWORD), " → ",
-                        ("Span", KEYWORD), " → ",
-                        ("Line", KEYWORD), " → ",
-                        ("Block", KEYWORD), " → ",
+                        ("Cell", KEYWORD), " -> ",
+                        ("Style", KEYWORD), " -> ",
+                        ("Span", KEYWORD), " -> ",
+                        ("Line", KEYWORD), " -> ",
+                        ("Block", KEYWORD), " -> ",
                         ("Buffer", KEYWORD),
                     ),
                     center=True,
@@ -1262,15 +1279,15 @@ tbl = table(state, columns, rows, visible_height=3)''',
 
 HELP_CONTENT = [
     ("Navigation", [
-        ("← → ↑ ↓", "move between slides"),
+        ("left right up down", "move between slides"),
         ("/", "search/jump to slide"),
         ("q / esc", "quit"),
         ("?", "toggle this help"),
     ]),
     ("Demo Widgets", [
         ("tab", "focus/unfocus demo"),
-        ("← →", "adjust progress (when focused)"),
-        ("↑ ↓", "navigate list (when focused)"),
+        ("left right", "adjust progress (when focused)"),
+        ("up down", "navigate list (when focused)"),
         ("type", "edit text input (when focused)"),
         ("esc", "unfocus demo"),
     ]),
@@ -1292,7 +1309,7 @@ def render_help(width: int, height: int) -> Block:
         rows.append(Block.empty(1, 1))
 
         for key, desc in bindings:
-            key_block = Block.text(f"  {key:12}", Style(fg="yellow"))
+            key_block = Block.text(f"  {key:20}", Style(fg="yellow"))
             desc_block = Block.text(desc, Style(dim=True))
             rows.append(join_horizontal(key_block, desc_block))
 
@@ -1362,7 +1379,7 @@ def render_search_overlay(
     rows.append(Block.empty(1, 1))
 
     # Footer hints
-    rows.append(Block.text(" enter: jump  esc: cancel  ↑↓: select ", HINT_STYLE))
+    rows.append(Block.text(" enter: jump  esc: cancel  up/down: select ", HINT_STYLE))
 
     content = join_vertical(*rows)
     content = pad(content, left=2, right=2, top=1, bottom=1)
@@ -1373,6 +1390,368 @@ def render_search_overlay(
     pad_top = max(0, (height - boxed.height) // 2)
 
     return pad(boxed, left=pad_left, top=pad_top)
+
+
+# -- Layer Handlers --
+
+# Help Layer - no state needed
+def _handle_help(key: str, layer_state: None, app_state: BenchState) -> tuple[None, BenchState, Stay | Pop | Push | Quit]:
+    """Help layer: any key dismisses."""
+    return None, app_state, Pop()
+
+
+def _render_help(layer_state: None, app_state: BenchState, view: BufferView) -> None:
+    """Render help overlay."""
+    block = render_help(app_state.width, app_state.height)
+    block.paint(view, 0, 0)
+
+
+def make_help_layer() -> Layer[None]:
+    """Create the help overlay layer."""
+    return Layer(name="help", state=None, handle=_handle_help, render=_render_help)
+
+
+# Search Layer - state is the Search primitive
+@dataclass(frozen=True)
+class SearchLayerState:
+    """State for the search layer."""
+    search: Search = field(default_factory=Search)
+    slides: dict[str, Slide] = field(default_factory=dict)
+
+
+def _handle_search(key: str, layer_state: SearchLayerState, app_state: BenchState) -> tuple[SearchLayerState, BenchState, Stay | Pop | Push | Quit]:
+    """Search layer: handles query input and selection."""
+    search = layer_state.search
+    slides = layer_state.slides
+
+    if key == "escape":
+        # Close search without jumping
+        return layer_state, app_state, Pop()
+
+    if key == "enter":
+        # Jump to selected slide and close search
+        slide_titles = [(sid, s.title) for sid, s in slides.items()]
+        titles_only = [title for _, title in slide_titles]
+        matches = filter_fuzzy(titles_only, search.query)
+        title_to_id = {title: sid for sid, title in slide_titles}
+
+        if matches and search.selected < len(matches):
+            selected_title = matches[search.selected]
+            target_slide = title_to_id.get(selected_title)
+            if target_slide:
+                new_app_state = replace(
+                    app_state,
+                    current_slide=target_slide,
+                    focus=app_state.focus.release(),
+                )
+                return layer_state, new_app_state, Pop(result=target_slide)
+        # No matches, just close
+        return layer_state, app_state, Pop()
+
+    if key == "up":
+        slide_titles = [(sid, s.title) for sid, s in slides.items()]
+        titles_only = [title for _, title in slide_titles]
+        matches = filter_fuzzy(titles_only, search.query)
+        new_layer_state = replace(layer_state, search=search.select_prev(len(matches)))
+        return new_layer_state, app_state, Stay()
+
+    if key == "down":
+        slide_titles = [(sid, s.title) for sid, s in slides.items()]
+        titles_only = [title for _, title in slide_titles]
+        matches = filter_fuzzy(titles_only, search.query)
+        new_layer_state = replace(layer_state, search=search.select_next(len(matches)))
+        return new_layer_state, app_state, Stay()
+
+    if key == "backspace":
+        new_layer_state = replace(layer_state, search=search.backspace())
+        return new_layer_state, app_state, Stay()
+
+    if len(key) == 1 and key.isprintable():
+        new_layer_state = replace(layer_state, search=search.type(key))
+        return new_layer_state, app_state, Stay()
+
+    # Ignore other keys
+    return layer_state, app_state, Stay()
+
+
+def _render_search(layer_state: SearchLayerState, app_state: BenchState, view: BufferView) -> None:
+    """Render search overlay."""
+    slide_titles = [(sid, s.title) for sid, s in layer_state.slides.items()]
+    block = render_search_overlay(app_state.width, app_state.height, layer_state.search, slide_titles)
+    block.paint(view, 0, 0)
+
+
+def make_search_layer(slides: dict[str, Slide]) -> Layer[SearchLayerState]:
+    """Create the search overlay layer."""
+    return Layer(
+        name="search",
+        state=SearchLayerState(search=Search(), slides=slides),
+        handle=_handle_search,
+        render=_render_search,
+    )
+
+
+# Demo Layer - state tracks which demo is focused
+@dataclass(frozen=True)
+class DemoLayerState:
+    """State for the demo focus layer."""
+    slides: dict[str, Slide] = field(default_factory=dict)
+
+
+def _get_demo_id(slide: Slide) -> str | None:
+    """Get the first interactive demo ID on a slide (not spinner)."""
+    for section in slide.sections:
+        if isinstance(section, Demo) and section.demo_id != "spinner":
+            return section.demo_id
+    return None
+
+
+def _handle_demo_input(key: str, state: BenchState, demo_id: str) -> tuple[BenchState, bool]:
+    """Handle key for demo widget. Returns (new_state, handled)."""
+    handled = False
+
+    if demo_id == "progress":
+        if key == "left":
+            state = replace(
+                state,
+                progress_state=state.progress_state.set(
+                    max(0.0, state.progress_state.value - 0.05)
+                )
+            )
+            handled = True
+        elif key == "right":
+            state = replace(
+                state,
+                progress_state=state.progress_state.set(
+                    min(1.0, state.progress_state.value + 0.05)
+                )
+            )
+            handled = True
+
+    elif demo_id == "list":
+        if key == "up":
+            state = replace(state, list_state=state.list_state.move_up())
+            handled = True
+        elif key == "down":
+            state = replace(state, list_state=state.list_state.move_down())
+            handled = True
+
+    elif demo_id == "text_input":
+        if key == "backspace":
+            state = replace(state, text_state=state.text_state.delete_back())
+            handled = True
+        elif key == "delete":
+            state = replace(state, text_state=state.text_state.delete_forward())
+            handled = True
+        elif len(key) == 1 and key.isprintable():
+            state = replace(state, text_state=state.text_state.insert(key))
+            handled = True
+
+    elif demo_id == "table":
+        if key == "up":
+            state = replace(state, table_state=state.table_state.move_up())
+            handled = True
+        elif key == "down":
+            state = replace(state, table_state=state.table_state.move_down())
+            handled = True
+
+    elif demo_id == "focus_nav":
+        items = ("a", "b", "c")
+        current = state.focus_demo_item
+        mode = state.focus_demo_mode
+
+        if key == "right":
+            if mode == "ring":
+                new_item = ring_next(items, current)
+            else:
+                new_item = linear_next(items, current)
+            state = replace(state, focus_demo_item=new_item)
+            handled = True
+        elif key == "left":
+            if mode == "ring":
+                new_item = ring_prev(items, current)
+            else:
+                new_item = linear_prev(items, current)
+            state = replace(state, focus_demo_item=new_item)
+            handled = True
+        elif key == "m":
+            new_mode = "linear" if mode == "ring" else "ring"
+            state = replace(state, focus_demo_mode=new_mode)
+            handled = True
+
+    elif demo_id == "search":
+        all_items = ("Cell", "Style", "Span", "Line", "Block", "Buffer", "Focus", "Search")
+        search = state.search_state
+        mode = state.search_mode
+
+        # Get current matches for navigation
+        if mode == "contains":
+            matches = filter_contains(all_items, search.query)
+        elif mode == "prefix":
+            matches = filter_prefix(all_items, search.query)
+        else:
+            matches = filter_fuzzy(all_items, search.query)
+
+        if key == "backspace":
+            state = replace(state, search_state=search.backspace())
+            handled = True
+        elif key == "up":
+            state = replace(state, search_state=search.select_prev(len(matches)))
+            handled = True
+        elif key == "down":
+            state = replace(state, search_state=search.select_next(len(matches)))
+            handled = True
+        elif key == "m":
+            modes = ["contains", "prefix", "fuzzy"]
+            idx = modes.index(mode)
+            new_mode = modes[(idx + 1) % len(modes)]
+            state = replace(state, search_mode=new_mode)
+            handled = True
+        elif len(key) == 1 and key.isprintable():
+            state = replace(state, search_state=search.type(key))
+            handled = True
+
+    return state, handled
+
+
+def _handle_demo(key: str, layer_state: DemoLayerState, app_state: BenchState) -> tuple[DemoLayerState, BenchState, Stay | Pop | Push | Quit]:
+    """Demo focus layer: captures input for widget interaction."""
+    if key == "escape":
+        # Release focus and pop demo layer
+        return layer_state, replace(app_state, focus=app_state.focus.release()), Pop()
+
+    slide = layer_state.slides.get(app_state.current_slide)
+    if not slide:
+        return layer_state, app_state, Stay()
+
+    demo_id = _get_demo_id(slide)
+    if demo_id:
+        new_app_state, handled = _handle_demo_input(key, app_state, demo_id)
+        if handled:
+            return layer_state, new_app_state, Stay()
+
+    return layer_state, app_state, Stay()
+
+
+def _render_demo(layer_state: DemoLayerState, app_state: BenchState, view: BufferView) -> None:
+    """Demo layer has no extra rendering - slide content shows focus state."""
+    pass
+
+
+def make_demo_layer(slides: dict[str, Slide]) -> Layer[DemoLayerState]:
+    """Create the demo focus layer."""
+    return Layer(
+        name="demo",
+        state=DemoLayerState(slides=slides),
+        handle=_handle_demo,
+        render=_render_demo,
+    )
+
+
+# Nav Layer - state holds slides reference
+@dataclass(frozen=True)
+class NavLayerState:
+    """State for the navigation layer."""
+    slides: dict[str, Slide] = field(default_factory=dict)
+
+
+def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> tuple[NavLayerState, BenchState, Stay | Pop | Push | Quit]:
+    """Base navigation layer: handles slide navigation and pushes overlays."""
+    slides = layer_state.slides
+
+    if key == "q":
+        return layer_state, app_state, Quit()
+
+    if key == "?":
+        return layer_state, app_state, Push(make_help_layer())
+
+    if key == "/" and not app_state.focus.captured:
+        return layer_state, app_state, Push(make_search_layer(slides))
+
+    slide = slides.get(app_state.current_slide)
+    if not slide:
+        return layer_state, app_state, Stay()
+
+    demo_id = _get_demo_id(slide)
+
+    # Escape when not focused = quit
+    if key == "escape":
+        return layer_state, app_state, Quit()
+
+    # Tab: toggle focus capture (only if slide has interactive demo)
+    if key == "tab" and demo_id:
+        new_focus = app_state.focus.toggle_capture()
+        if new_focus.captured:
+            # Push demo layer when capturing focus
+            return layer_state, replace(app_state, focus=new_focus), Push(make_demo_layer(slides))
+        return layer_state, replace(app_state, focus=new_focus), Stay()
+
+    # Navigation (only when not focused on demo)
+    nav = slide.nav
+    new_slide = None
+
+    if key == "left" and nav.left:
+        new_slide = nav.left
+    elif key == "right" and nav.right:
+        new_slide = nav.right
+    elif key == "up" and nav.up:
+        new_slide = nav.up
+    elif key == "down" and nav.down:
+        new_slide = nav.down
+
+    if new_slide and new_slide in slides:
+        # Reset focus when changing slides
+        return layer_state, replace(app_state, current_slide=new_slide, focus=app_state.focus.release()), Stay()
+
+    # Delegate to slide-specific handler
+    if slide.on_key:
+        new_app_state = slide.on_key(key, app_state)
+        return layer_state, new_app_state, Stay()
+
+    return layer_state, app_state, Stay()
+
+
+def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferView) -> None:
+    """Render the main slide content."""
+    slides = layer_state.slides
+    slide = slides.get(app_state.current_slide)
+    if not slide:
+        view.put_text(0, 0, f"Unknown slide: {app_state.current_slide}", Style(fg="red"))
+        return
+
+    width = app_state.width
+    height = app_state.height
+
+    # Header
+    header = render_header(slide, width)
+    header.paint(view, 0, 0)
+
+    # Content area
+    content_y = header.height
+
+    content_blocks = []
+    for section in slide.sections:
+        block = render_section(section, width - 4, app_state)
+        content_blocks.append(block)
+
+    if content_blocks:
+        content = join_vertical(*content_blocks)
+        content = pad(content, left=2)
+        content.paint(view, 0, content_y)
+
+    # Footer
+    footer = render_footer(slide, slide.nav, width, slides, app_state)
+    footer.paint(view, 0, height - 1)
+
+
+def make_nav_layer(slides: dict[str, Slide]) -> Layer[NavLayerState]:
+    """Create the base navigation layer."""
+    return Layer(
+        name="nav",
+        state=NavLayerState(slides=slides),
+        handle=_handle_nav,
+        render=_render_nav,
+    )
 
 
 # -- Header & Footer --
@@ -1400,13 +1779,13 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 
     nav_hints = []
     if nav.left:
-        nav_hints.append(("←", slides[nav.left].title if nav.left in slides else nav.left))
+        nav_hints.append(("left", slides[nav.left].title if nav.left in slides else nav.left))
     if nav.right:
-        nav_hints.append(("→", slides[nav.right].title if nav.right in slides else nav.right))
+        nav_hints.append(("right", slides[nav.right].title if nav.right in slides else nav.right))
     if nav.up:
-        nav_hints.append(("↑", "less"))
+        nav_hints.append(("up", "less"))
     if nav.down:
-        nav_hints.append(("↓", "more"))
+        nav_hints.append(("down", "more"))
 
     for key, label in nav_hints:
         parts.append(Block.text(key, key_style))
@@ -1445,7 +1824,8 @@ class BenchApp(RenderApp):
     def __init__(self, slides: dict[str, Slide] | None = None):
         super().__init__(fps_cap=30)
         self._slides = slides or build_slides()
-        self._state = BenchState()
+        # Initialize state with base navigation layer (slides passed via layer state)
+        self._state = BenchState(layers=(make_nav_layer(self._slides),))
         self._width = 80
         self._height = 24
         self._last_tick = time.monotonic()
@@ -1453,6 +1833,8 @@ class BenchApp(RenderApp):
     def layout(self, width: int, height: int) -> None:
         self._width = width
         self._height = height
+        # Update state dimensions for layers to access
+        self._state = replace(self._state, width=width, height=height)
 
     def update(self) -> None:
         """Advance animations (spinners)."""
@@ -1475,338 +1857,16 @@ class BenchApp(RenderApp):
         # Clear
         self._buf.fill(0, 0, self._width, self._height, " ", Style())
 
-        # Get current slide
-        slide = self._slides.get(self._state.current_slide)
-        if not slide:
-            self._buf.put_text(0, 0, f"Unknown slide: {self._state.current_slide}", Style(fg="red"))
-            return
-
-        # Header
-        header = render_header(slide, self._width)
-        header.paint(self._buf, 0, 0)
-
-        # Content area
-        content_y = header.height
-        content_height = self._height - header.height - 2  # leave room for footer
-
-        content_blocks = []
-        for section in slide.sections:
-            block = render_section(section, self._width - 4, self._state)  # pass state for demos
-            content_blocks.append(block)
-
-        if content_blocks:
-            content = join_vertical(*content_blocks)
-            content = pad(content, left=2)
-            content.paint(self._buf, 0, content_y)
-
-        # Footer
-        footer = render_footer(slide, slide.nav, self._width, self._slides, self._state)
-        footer.paint(self._buf, 0, self._height - 1)
-
-        # Help overlay (on top of everything)
-        if self._state.show_help:
-            help_overlay = render_help(self._width, self._height)
-            help_overlay.paint(self._buf, 0, 0)
-
-        # Search overlay (on top of everything)
-        if self._state.search_active:
-            slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
-            search_overlay = render_search_overlay(
-                self._width,
-                self._height,
-                self._state.slide_search,
-                slide_titles,
-            )
-            search_overlay.paint(self._buf, 0, 0)
-
-    def _has_demo(self, slide: Slide, demo_id: str | None = None) -> bool:
-        """Check if a slide contains a demo (optionally of a specific type)."""
-        for section in slide.sections:
-            if isinstance(section, Demo):
-                if demo_id is None or section.demo_id == demo_id:
-                    return True
-        return False
-
-    def _get_demo_id(self, slide: Slide) -> str | None:
-        """Get the first interactive demo ID on a slide (not spinner)."""
-        for section in slide.sections:
-            if isinstance(section, Demo) and section.demo_id != "spinner":
-                return section.demo_id
-        return None
+        # Render all layers bottom-to-top
+        render_layers(self._state, self._buf, get_layers)
 
     def on_key(self, key: str) -> None:
-        if key == "q":
+        # Process key through layer stack
+        self._state, should_quit, _result = process_key(key, self._state, get_layers, set_layers)
+
+        # Check for quit signal
+        if should_quit:
             self.quit()
-            return
-
-        # Help toggle
-        if key == "?":
-            self._state = replace(self._state, show_help=not self._state.show_help)
-            return
-
-        # When help is showing, any key closes it
-        if self._state.show_help:
-            self._state = replace(self._state, show_help=False)
-            return
-
-        # When search is active, handle search-mode keys
-        if self._state.search_active:
-            search = self._state.slide_search
-
-            if key == "escape":
-                # Close search without jumping
-                self._state = replace(
-                    self._state,
-                    search_active=False,
-                    slide_search=Search(),  # Reset for next time
-                )
-                return
-
-            if key == "enter":
-                # Jump to selected slide and close search
-                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
-                titles_only = [title for _, title in slide_titles]
-                matches = filter_fuzzy(titles_only, search.query)
-                title_to_id = {title: sid for sid, title in slide_titles}
-
-                if matches and search.selected < len(matches):
-                    selected_title = matches[search.selected]
-                    target_slide = title_to_id.get(selected_title)
-                    if target_slide:
-                        self._state = replace(
-                            self._state,
-                            current_slide=target_slide,
-                            search_active=False,
-                            slide_search=Search(),
-                            focus=self._state.focus.release(),
-                        )
-                else:
-                    # No matches, just close
-                    self._state = replace(
-                        self._state,
-                        search_active=False,
-                        slide_search=Search(),
-                    )
-                return
-
-            if key == "up":
-                # Get match count for navigation
-                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
-                titles_only = [title for _, title in slide_titles]
-                matches = filter_fuzzy(titles_only, search.query)
-                self._state = replace(
-                    self._state,
-                    slide_search=search.select_prev(len(matches)),
-                )
-                return
-
-            if key == "down":
-                slide_titles = [(sid, s.title) for sid, s in self._slides.items()]
-                titles_only = [title for _, title in slide_titles]
-                matches = filter_fuzzy(titles_only, search.query)
-                self._state = replace(
-                    self._state,
-                    slide_search=search.select_next(len(matches)),
-                )
-                return
-
-            if key == "backspace":
-                self._state = replace(
-                    self._state,
-                    slide_search=search.backspace(),
-                )
-                return
-
-            if len(key) == 1 and key.isprintable():
-                self._state = replace(
-                    self._state,
-                    slide_search=search.type(key),
-                )
-                return
-
-            # Ignore other keys when in search mode
-            return
-
-        # "/" activates search mode (only when not focused on demo)
-        if key == "/" and not self._state.focus.captured:
-            self._state = replace(
-                self._state,
-                search_active=True,
-                slide_search=Search(),  # Fresh search
-            )
-            return
-
-        slide = self._slides.get(self._state.current_slide)
-        if not slide:
-            return
-
-        demo_id = self._get_demo_id(slide)
-        focused = self._state.focus.captured
-
-        # Escape: release focus or quit
-        if key == "escape":
-            if focused:
-                self._state = replace(self._state, focus=self._state.focus.release())
-            else:
-                self.quit()
-            return
-
-        # Tab: toggle focus capture (only if slide has interactive demo)
-        if key == "tab" and demo_id:
-            self._state = replace(self._state, focus=self._state.focus.toggle_capture())
-            return
-
-        # When focused, keys go to demo widget
-        if focused and demo_id:
-            handled = False
-
-            if demo_id == "progress":
-                if key == "left":
-                    self._state = replace(
-                        self._state,
-                        progress_state=self._state.progress_state.set(
-                            max(0.0, self._state.progress_state.value - 0.05)
-                        )
-                    )
-                    handled = True
-                elif key == "right":
-                    self._state = replace(
-                        self._state,
-                        progress_state=self._state.progress_state.set(
-                            min(1.0, self._state.progress_state.value + 0.05)
-                        )
-                    )
-                    handled = True
-
-            elif demo_id == "list":
-                if key == "up":
-                    self._state = replace(
-                        self._state,
-                        list_state=self._state.list_state.move_up()
-                    )
-                    handled = True
-                elif key == "down":
-                    self._state = replace(
-                        self._state,
-                        list_state=self._state.list_state.move_down()
-                    )
-                    handled = True
-
-            elif demo_id == "text_input":
-                if key == "backspace":
-                    self._state = replace(
-                        self._state,
-                        text_state=self._state.text_state.delete_back()
-                    )
-                    handled = True
-                elif key == "delete":
-                    self._state = replace(
-                        self._state,
-                        text_state=self._state.text_state.delete_forward()
-                    )
-                    handled = True
-                elif len(key) == 1 and key.isprintable():
-                    self._state = replace(
-                        self._state,
-                        text_state=self._state.text_state.insert(key)
-                    )
-                    handled = True
-
-            elif demo_id == "table":
-                if key == "up":
-                    self._state = replace(
-                        self._state,
-                        table_state=self._state.table_state.move_up()
-                    )
-                    handled = True
-                elif key == "down":
-                    self._state = replace(
-                        self._state,
-                        table_state=self._state.table_state.move_down()
-                    )
-                    handled = True
-
-            elif demo_id == "focus_nav":
-                items = ("a", "b", "c")
-                current = self._state.focus_demo_item
-                mode = self._state.focus_demo_mode
-
-                if key == "right":
-                    if mode == "ring":
-                        new_item = ring_next(items, current)
-                    else:
-                        new_item = linear_next(items, current)
-                    self._state = replace(self._state, focus_demo_item=new_item)
-                    handled = True
-                elif key == "left":
-                    if mode == "ring":
-                        new_item = ring_prev(items, current)
-                    else:
-                        new_item = linear_prev(items, current)
-                    self._state = replace(self._state, focus_demo_item=new_item)
-                    handled = True
-                elif key == "m":
-                    new_mode = "linear" if mode == "ring" else "ring"
-                    self._state = replace(self._state, focus_demo_mode=new_mode)
-                    handled = True
-
-            elif demo_id == "search":
-                all_items = ("Cell", "Style", "Span", "Line", "Block", "Buffer", "Focus", "Search")
-                search = self._state.search_state
-                mode = self._state.search_mode
-
-                # Get current matches for navigation
-                if mode == "contains":
-                    matches = filter_contains(all_items, search.query)
-                elif mode == "prefix":
-                    matches = filter_prefix(all_items, search.query)
-                else:
-                    matches = filter_fuzzy(all_items, search.query)
-
-                if key == "backspace":
-                    self._state = replace(self._state, search_state=search.backspace())
-                    handled = True
-                elif key == "up":
-                    self._state = replace(self._state, search_state=search.select_prev(len(matches)))
-                    handled = True
-                elif key == "down":
-                    self._state = replace(self._state, search_state=search.select_next(len(matches)))
-                    handled = True
-                elif key == "m":
-                    modes = ["contains", "prefix", "fuzzy"]
-                    idx = modes.index(mode)
-                    new_mode = modes[(idx + 1) % len(modes)]
-                    self._state = replace(self._state, search_mode=new_mode)
-                    handled = True
-                elif len(key) == 1 and key.isprintable():
-                    self._state = replace(self._state, search_state=search.type(key))
-                    handled = True
-
-            if handled:
-                return
-
-        # Navigation (only when not focused on demo)
-        if not focused:
-            nav = slide.nav
-            new_slide = None
-
-            if key == "left" and nav.left:
-                new_slide = nav.left
-            elif key == "right" and nav.right:
-                new_slide = nav.right
-            elif key == "up" and nav.up:
-                new_slide = nav.up
-            elif key == "down" and nav.down:
-                new_slide = nav.down
-
-            if new_slide and new_slide in self._slides:
-                # Reset focus when changing slides
-                self._state = replace(self._state, current_slide=new_slide, focus=self._state.focus.release())
-                return
-
-        # Delegate to slide-specific handler
-        if slide.on_key:
-            self._state = slide.on_key(key, self._state)
 
 
 async def main():

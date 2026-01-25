@@ -76,6 +76,80 @@ Not necessarily wrong, but easy to get wrong without reading each source file.
 
 "Development through demo" surfaced API usability issues quickly. Multiple fix cycles on demo_08 revealed the friction points. If these demos existed before library development, the APIs might have been more consistent.
 
+---
+
+## Teaching Bench Session (bench.py)
+
+### What We Built
+
+Interactive teaching bench — a 2D navigable slideshow that uses cells to teach cells:
+
+| Phase | Deliverable |
+|-------|-------------|
+| 1 | Navigation infrastructure, slide graph (17 slides) |
+| 2 | Content rendering: syntax highlighting, `styled()` helper |
+| 3 | Interactive demos: spinner, progress, list, text input |
+| 4 | Polish: help overlay, focus indicator, visual hierarchy |
+
+~800 lines, self-contained in `bench.py`.
+
+### New API Friction Discovered
+
+#### 5. Focus Management is a Framework Gap
+
+The nav-vs-widget key conflict appeared again. On slides where ↑/↓ navigate *and* a list needs ↑/↓, there's no way to use the list without explicit focus mode.
+
+**Solution implemented**: `demo_focused: bool` state + Tab to toggle + visual feedback (FOCUS badge, dimmed nav).
+
+**Recommendation**: This pattern should be in the framework. `FocusRing` currently only tracks *which* component is focused, not *whether* focus is in "widget mode" vs "navigation mode". Consider:
+- `FocusRing.mode: Literal["nav", "widget"]`
+- Or a higher-level `FocusManager` that handles this two-tier focus
+
+#### 6. No Line → Block Conversion
+
+Had to write `line_to_block()` helper because there's no direct way to convert a `Line` to a `Block`. The layers are:
+```
+Buffer (mutable canvas)
+  ↑ paint
+Block (immutable rectangle)
+  ↑ paint
+Line/Span (text description)
+```
+
+But sometimes you need to go Line → Block for composition (e.g., centering styled text). Currently requires creating a temporary Buffer, painting, then extracting cells.
+
+**Recommendation**: Add `Line.to_block(width: int) -> Block` or `Block.from_line(line: Line)`.
+
+#### 7. Section Renderer Signature Evolution
+
+Started with `render_section(section, width)`, had to change to `render_section(section, width, state)` when adding Demo sections that need app state.
+
+**Pattern**: When building extensible renderers, pass a context object from the start:
+```python
+@dataclass
+class RenderContext:
+    width: int
+    state: AppState
+    # future: theme, focus_id, etc.
+```
+
+### Patterns Worth Extracting
+
+1. **Graph navigation**: `Navigation(up=, down=, left=, right=)` — reusable for wizards, multi-pane UIs
+2. **Section dispatch**: Union type + isinstance for heterogeneous content
+3. **Focus mode**: `focused: bool` + Tab toggle + Escape exit + visual feedback
+4. **Overlay pattern**: Render base, then `if show_overlay: overlay.paint(buf, 0, 0)`
+5. **styled() helper**: Inline rich text without verbose Span construction
+
+### Stats
+
+- 4 phases, 1 session
+- 17 slides covering full Cell → App stack
+- 4 interactive widget demos
+- 2 new API friction points identified (#5, #6)
+
+---
+
 ## Suggested Next Steps
 
 1. Decide on immutable vs mutable state pattern (recommend: all immutable)
@@ -83,3 +157,5 @@ Not necessarily wrong, but easy to get wrong without reading each source file.
 3. Add type stubs or better docstrings for discoverability
 4. Consider a `table` demo (demo_09)
 5. Consider documenting the keyboard key names prominently
+6. **Add `Line.to_block()` or `Block.from_line()`** — fills a real gap
+7. **Extend focus management** — two-tier focus (nav mode vs widget mode) is a recurring need

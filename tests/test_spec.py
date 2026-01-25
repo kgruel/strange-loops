@@ -27,11 +27,11 @@ class TestProjectionSpecParsing:
         assert len(spec.state_fields) == 2
         assert len(spec.fold_ops) == 2
 
-    def test_parse_vm_logs(self):
-        spec = parse_projection_spec(SPECS_DIR / "vm-logs.projection.kdl")
-        assert spec.name == "vm-logs"
+    def test_parse_vm_events(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-events.projection.kdl")
+        assert spec.name == "vm-events"
         assert len(spec.events) == 1
-        assert spec.events[0].name == "log.line"
+        assert spec.events[0].name == "container.lifecycle"
         assert len(spec.state_fields) == 2
         assert len(spec.fold_ops) == 2
 
@@ -41,9 +41,9 @@ class TestProjectionSpecParsing:
         assert state == {"containers": {}, "last_update": None}
 
     def test_initial_state_list_and_set(self):
-        spec = parse_projection_spec(SPECS_DIR / "vm-logs.projection.kdl")
+        spec = parse_projection_spec(SPECS_DIR / "vm-events.projection.kdl")
         state = spec.initial_state()
-        assert state == {"lines": [], "sources": set()}
+        assert state == {"events": [], "containers": set()}
 
 
 class TestFoldOps:
@@ -81,21 +81,21 @@ class TestFoldOps:
         assert s2["containers"]["nginx"]["state"] == "restarting"
 
     def test_upsert_set(self):
-        spec = parse_projection_spec(SPECS_DIR / "vm-logs.projection.kdl")
+        spec = parse_projection_spec(SPECS_DIR / "vm-events.projection.kdl")
         proj = SpecProjection(spec)
         s1 = proj.apply(proj.state, {"source": "nginx", "message": "hi", "level": "info"})
         s2 = proj.apply(s1, {"source": "redis", "message": "ok", "level": "info"})
         s3 = proj.apply(s2, {"source": "nginx", "message": "again", "level": "info"})
-        assert s3["sources"] == {"nginx", "redis"}
+        assert s3["containers"] == {"nginx", "redis"}
 
     def test_collect_bounded(self):
-        spec = parse_projection_spec(SPECS_DIR / "vm-logs.projection.kdl")
+        spec = parse_projection_spec(SPECS_DIR / "vm-events.projection.kdl")
         proj = SpecProjection(spec)
         state = proj.state
-        # Feed more than max (5000) events — verify truncation
+        # Feed more than max (500) events — verify truncation
         for i in range(10):
             state = proj.apply(state, {"source": "x", "message": f"msg {i}", "level": "info"})
-        assert len(state["lines"]) == 10  # well under max
+        assert len(state["events"]) == 10  # well under max
 
     def test_latest(self):
         spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
@@ -117,9 +117,10 @@ class TestAppSpec:
         app = parse_app_spec(SPECS_DIR / "homelab.app.kdl", specs_dir=SPECS_DIR)
         assert app.name == "homelab"
         assert app.watch is True
-        assert len(app.projections) == 2
+        assert len(app.projections) == 3
         assert app.projections[0].name == "vm-health"
-        assert app.projections[1].name == "vm-logs"
+        assert app.projections[1].name == "vm-events"
+        assert app.projections[2].name == "vm-resources"
 
     def test_inventory_loaded(self):
         app = parse_app_spec(SPECS_DIR / "homelab.app.kdl", specs_dir=SPECS_DIR)

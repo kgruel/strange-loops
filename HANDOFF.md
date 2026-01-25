@@ -61,7 +61,7 @@ projection "vm-health" {
 }
 ```
 
-- **Event shapes** — input schema, validated on ingest
+- **Event shapes** — input schema, validated + coerced on ingest
 - **State shapes** — derived schema, initialized from types
 - **Fold ops** — transformation rules (latest, collect, count, upsert)
 - **App composition** — which projections, what data sources, inventory
@@ -70,9 +70,15 @@ This makes projections declarative. You define the contract, the runtime instant
 
 ## The Thesis
 
-**rill** = primitives (what), **cells** = display (how to show), **spec layer** = contracts (what shape, how to fold)
+**Spec-driven data contracts**, not config-driven UI.
 
-The homelab is the real testbed that proves all three compose into something useful.
+- **rill** = primitives (Stream, Projection, Tailer, FileWriter)
+- **cells** = rendering (Block, Style, convention-based)
+- **spec layer** = contracts (event shapes, state shapes, fold ops)
+
+The spec declares *what data looks like* and *how it transforms*. Rendering is derived from state shapes via conventions (dict→table, list→scrolling). No custom render code per projection.
+
+See `docs/SPEC_DRIVEN.md` for the full conceptual foundation.
 
 ## Files
 
@@ -84,26 +90,52 @@ The homelab is the real testbed that proves all three compose into something use
 | `ssh_session.py` | SSHSession — async run() + stream() over SSH |
 | `collectors/` | Collector registry + docker collectors |
 
+## Current State
+
+**Implemented:**
+- KDL spec parsing (event, state, fold)
+- Event validation + type coercion (raises `ValidationError` on mismatch)
+- Fold ops: upsert, collect, latest, count
+- Hot-reload via SpecWatcher
+- Simulator + tail mode working
+- 41 tests passing
+
+**Known limitations:**
+- Single event type per projection (first iteration, will evolve)
+- SSHConnectionManager has hardcoded docker collectors (not using registry)
+- No state persistence (memory only)
+
+## Next
+
+**Open questions:**
+- Multi-event projections — when/how to support multiple event types
+- Collector registry wiring — how specs map to collector functions
+- State persistence — snapshot vs replay from event log
+
+**Deferred:**
+- Collector registry — wire data_source specs to collector functions
+- State snapshots / replay
+- SSH connection multiplexing
+
 ## Run
 
 ```bash
-# Orchestrator (collection)
-uv run python -m framework.orchestrator --spec specs/homelab.app.kdl --output /tmp
+# Dashboard (tail mode)
+uv run python apps/simulate_homelab.py    # generate test events
+uv run python apps/homelab.py --source /tmp/homelab
+
+# Dashboard (live SSH)
+uv run python apps/homelab.py
 
 # Tests
 uv run pytest tests/ -v
 ```
 
-## Next
-
-Focus areas to consider:
-1. **Spec layer** — event validation, type generation, richer fold ops
-2. **Orchestrator** — real collection from homelab VMs
-3. **Integration** — spec-driven dashboard with cells rendering projection state
-
 ## See Also
 
+- `docs/GROUNDING.md` — how to re-orient, tbd queries, checklist
+- `docs/SPEC_DRIVEN.md` — conceptual foundation (spec-driven data contracts)
+- `apps/README.md` — homelab app documentation
 - `../rill` — core streaming primitives
 - `../cells` — cell-buffer TUI package
-- `ROADMAP.md` — detailed phased plan
 - `CLAUDE.md` — project conventions

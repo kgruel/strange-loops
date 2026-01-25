@@ -1,6 +1,6 @@
 """Producer: simulates container health events, writes to JSONL.
 
-Run: uv run python -m apps.producer [--path /tmp/events.jsonl]
+Run: uv run python apps/producer.py [--path /tmp/events.jsonl]
 
 Writes a container health event every 0.5-2s. Simulates 3 stacks
 with occasional unhealthy/error states. Ctrl-C to stop.
@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from framework.file_writer import FileWriter
+from rill import FileWriter
 
 
 @dataclass(frozen=True)

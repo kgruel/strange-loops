@@ -54,10 +54,22 @@ class EventSpec:
     name: str
     fields: tuple[FieldSpec, ...]
 
+    def coerce(self, event: dict) -> dict:
+        """Coerce event fields to declared types. Returns new dict with coerced values.
+
+        Extra fields are passed through unchanged.
+        """
+        result = dict(event)
+        for field in self.fields:
+            if field.name in result:
+                result[field.name] = _coerce_value(result[field.name], field.type)
+        return result
+
     def validate(self, event: dict) -> None:
         """Validate event dict against spec. Raises ValidationError on mismatch.
 
-        Permissive: unknown fields are ignored, only declared fields are checked.
+        Permissive: extra fields are ignored, only declared fields are checked.
+        Call coerce() first for type coercion.
         """
         for field in self.fields:
             # Required field missing?
@@ -72,7 +84,7 @@ class EventSpec:
                 if value is not None and not _type_matches(value, field.type):
                     raise ValidationError(
                         f"field '{field.name}' expected {field.type}, "
-                        f"got {type(value).__name__} in event '{self.name}'"
+                        f"got {type(value).__name__}: {value!r} in event '{self.name}'"
                     )
 
 
@@ -98,6 +110,65 @@ class ProjectionSpec:
             if e.name == name:
                 return e
         raise KeyError(f"no event '{name}' in projection '{self.name}'")
+
+
+def _coerce_value(value: Any, type_str: str) -> Any:
+    """Coerce value to expected type. Returns coerced value or original if not coercible."""
+    if value is None:
+        return None
+
+    match type_str:
+        case "str":
+            return str(value) if not isinstance(value, str) else value
+        case "int":
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                try:
+                    return int(value)
+                except ValueError:
+                    return value  # leave as-is, validation will catch
+            if isinstance(value, float):
+                return int(value)
+            return value
+        case "float":
+            if isinstance(value, bool):
+                return float(value)
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value)
+                except ValueError:
+                    return value
+            return value
+        case "bool":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                if value.lower() in ("true", "1", "yes"):
+                    return True
+                if value.lower() in ("false", "0", "no"):
+                    return False
+            if isinstance(value, (int, float)):
+                return bool(value)
+            return value
+        case "set":
+            if isinstance(value, set):
+                return value
+            if isinstance(value, list):
+                return set(value)
+            return value
+        case "list":
+            if isinstance(value, list):
+                return value
+            if isinstance(value, set):
+                return list(value)
+            return value
+        case _:
+            return value  # dict, datetime, unknown — no coercion
 
 
 def _type_matches(value: Any, type_str: str) -> bool:
@@ -207,16 +278,33 @@ class SpecProjection(Projection[dict[str, Any], dict[str, Any]]):
     """A Projection instantiated from a ProjectionSpec.
 
     The fold function is built from the spec's fold ops.
+    Validates and coerces events before folding.
     """
 
     def __init__(self, spec: ProjectionSpec):
         super().__init__(spec.initial_state())
         self.spec = spec
         self._fold_fns = [_build_fold_fn(op, spec) for op in spec.fold_ops]
+        # Cache the first event spec for single-event projections
+        self._event_spec = spec.events[0] if spec.events else None
 
     @property
     def name(self) -> str:
         return self.spec.name
+
+    async def consume(self, event: dict[str, Any]) -> None:
+        """Consume an event: coerce types, validate, then fold.
+
+        Raises ValidationError if event doesn't match spec.
+        Extra fields are allowed and passed through to fold ops.
+        """
+        if self._event_spec:
+            # Coerce first, then validate
+            event = self._event_spec.coerce(event)
+            self._event_spec.validate(event)
+
+        # Delegate to base class for actual state mutation
+        await super().consume(event)
 
     def apply(self, state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
         """Apply all fold ops to produce new state."""

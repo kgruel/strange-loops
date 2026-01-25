@@ -1,6 +1,6 @@
 """Consumer dashboard: tails a JSONL file, renders live state.
 
-Run: uv run python -m apps.tail_dashboard [--path /tmp/events.jsonl]
+Run: uv run python apps/tail_dashboard.py [--path /tmp/events.jsonl]
 
 Tails the event file (created by apps.producer), projects into
 summary state, and renders a live terminal dashboard. Replays
@@ -25,8 +25,7 @@ from cells import (
     Region,
 )
 
-from framework.tailer import Tailer
-from framework.projection import Projection
+from rill import Tailer, Projection
 
 
 # --- Event type (matches producer) ---

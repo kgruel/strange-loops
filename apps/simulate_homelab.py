@@ -1,26 +1,32 @@
 """Simulated homelab producer: writes fake VM events to JSONL.
 
 Run:
-    uv run python -m apps.simulate_homelab                        # all VMs
-    uv run python -m apps.simulate_homelab --vms media infra      # specific VMs
-    uv run python -m apps.simulate_homelab --output /tmp/homelab  # custom output dir
+    uv run python apps/simulate_homelab.py                        # all VMs
+    uv run python apps/simulate_homelab.py --vms media infra      # specific VMs
+    uv run python apps/simulate_homelab.py --output /tmp/homelab  # custom output dir
 
 Generates container health, log, and resource events. Pair with:
-    uv run python -m apps.homelab --source <output-dir>
+    uv run python apps/homelab.py --source <output-dir>
 
 Ctrl-C to stop.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import asyncio
 import random
 from datetime import datetime, timezone
-from pathlib import Path
 
-from framework.app_spec import parse_app_spec
-from framework.file_writer import FileWriter
+from rill import FileWriter
+
+from framework import parse_app_spec
 
 SPECS_DIR = Path(__file__).parent.parent / "specs"
 APP_SPEC = SPECS_DIR / "homelab.app.kdl"

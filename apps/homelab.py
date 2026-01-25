@@ -1,8 +1,8 @@
 """Homelab dashboard: spec-driven projections over VM connections.
 
 Run:
-    uv run python -m apps.homelab                          # live SSH
-    uv run python -m apps.homelab --source ~/.local/share/homelab/events  # tail JSONL
+    uv run python apps/homelab.py                          # live SSH
+    uv run python apps/homelab.py --source /tmp/homelab    # tail JSONL
 
 Loads the app spec (specs/homelab.app.kdl), connects to VMs via SSH,
 folds events into projections in-memory, renders via convention-based
@@ -14,10 +14,16 @@ Expects {source}/{vm_name}/{projection_name}.jsonl layout.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Allow running as script: python apps/homelab.py
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from cells import (
     RenderApp, Block, Style,
@@ -26,12 +32,15 @@ from cells import (
     ListState, list_view,
 )
 
-from framework.spec import SpecProjection, parse_projection_spec
+from rill import Tailer
+
+from framework import (
+    SpecProjection, parse_projection_spec,
+    AppSpec, VMInfo, parse_app_spec,
+    SSHConnectionManager,
+    SpecWatcher,
+)
 from framework.spec_render import render_projection
-from framework.app_spec import parse_app_spec, AppSpec, VMInfo
-from framework.tailer import Tailer
-from framework.ssh import SSHConnectionManager
-from framework.watcher import SpecWatcher
 
 
 SPECS_DIR = Path(__file__).parent.parent / "specs"

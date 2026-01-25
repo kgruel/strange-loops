@@ -2,12 +2,15 @@
 
 from pathlib import Path
 
+import pytest
+
 from framework.spec import (
     ProjectionSpec,
     SpecProjection,
     FieldSpec,
     FoldOp,
     EventSpec,
+    ValidationError,
     parse_projection_spec,
 )
 from framework.app_spec import parse_app_spec, VMInfo
@@ -135,3 +138,108 @@ class TestAppSpec:
         assert media.host == "192.168.1.40"
         assert media.user == "deploy"
         assert media.service_type == "media"
+
+
+class TestValidation:
+    """Tests for event validation and type coercion."""
+
+    def test_missing_required_field_raises(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        with pytest.raises(ValidationError, match="missing required field 'container'"):
+            import asyncio
+            asyncio.run(proj.consume({"service": "x", "state": "r", "healthy": True}))
+
+    def test_wrong_type_raises(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        with pytest.raises(ValidationError, match="expected bool"):
+            import asyncio
+            # "maybe" can't coerce to bool
+            asyncio.run(proj.consume({
+                "container": "x",
+                "service": "x",
+                "state": "r",
+                "healthy": "maybe",  # wrong: can't coerce to bool
+            }))
+
+    def test_coerce_string_true_to_bool(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "service": "nginx",
+            "state": "running",
+            "healthy": "true",  # string, should coerce to True
+        }))
+        assert proj.state["containers"]["nginx"]["healthy"] is True
+
+    def test_coerce_string_false_to_bool(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "service": "nginx",
+            "state": "running",
+            "healthy": "false",
+        }))
+        assert proj.state["containers"]["nginx"]["healthy"] is False
+
+    def test_coerce_int_to_bool(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "service": "nginx",
+            "state": "running",
+            "healthy": 1,  # int, should coerce to True
+        }))
+        assert proj.state["containers"]["nginx"]["healthy"] is True
+
+    def test_optional_field_can_be_missing(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        # 'health' is optional (str?), should not raise
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "service": "nginx",
+            "state": "running",
+            "healthy": True,
+            # no 'health' field
+        }))
+        assert proj.state["containers"]["nginx"]["container"] == "nginx"
+
+    def test_extra_fields_allowed(self):
+        spec = parse_projection_spec(SPECS_DIR / "vm-health.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "service": "nginx",
+            "state": "running",
+            "healthy": True,
+            "extra_field": "ignored by schema but passed through",
+            "another": 123,
+        }))
+        # Extra fields should be in the stored event
+        assert proj.state["containers"]["nginx"]["extra_field"] == "ignored by schema but passed through"
+
+    def test_coerce_string_to_int(self):
+        """Test coercion for numeric types (using vm-resources which has int fields)."""
+        spec = parse_projection_spec(SPECS_DIR / "vm-resources.projection.kdl")
+        proj = SpecProjection(spec)
+        import asyncio
+        asyncio.run(proj.consume({
+            "container": "nginx",
+            "cpu_pct": "45.5",  # string, should coerce to float
+            "mem_pct": "30",
+            "mem_usage": "100MiB / 1GiB",
+            "net_io": "1kB / 2kB",
+            "pids": "10",  # string, should coerce to int
+        }))
+        assert proj.state["resources"]["nginx"]["pids"] == 10
+        assert proj.state["resources"]["nginx"]["cpu_pct"] == 45.5

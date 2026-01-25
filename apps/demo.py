@@ -87,13 +87,32 @@ DOT_INACTIVE = Style(dim=True)
 
 # -- State --
 
+# Named colors for the spans color picker
+SPAN_COLORS = [
+    ("red", "red"),
+    ("green", "green"),
+    ("blue", "blue"),
+    ("cyan", "cyan"),
+    ("magenta", "magenta"),
+    ("yellow", "yellow"),
+    ("#ff6b35", "#ff6b35"),
+    ("#7b68ee", "#7b68ee"),
+]
+
+
 @dataclass(frozen=True)
 class DemoState:
     stage: int = 0
     # Title: reveal animation
     reveal_chars: int = 0
-    # Spans: user typing
-    input_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello render"))
+    # Spans: user typing + style toggles
+    input_state: TextInputState = field(default_factory=lambda: TextInputState(text="the quick fox"))
+    span_bold: bool = False
+    span_dim: bool = False
+    span_italic: bool = False
+    span_underline: bool = False
+    span_reverse: bool = False
+    span_color_index: int = 0
     # Blocks: border cycling
     border_index: int = 0
     # Components: list + spinners
@@ -156,27 +175,127 @@ def _render_spans(state: DemoState, width: int, height: int) -> Block:
     rows.append(Block.empty(width, 1))
     rows.append(_centered_text("spans: the atoms", width, TITLE_STYLE))
     rows.append(Block.empty(width, 1))
-    rows.append(_centered_text("type something. i'll dress it up.", width, CAPTION))
+
+    # -- Top section: Attributes + Colors reference cards side by side --
+
+    # Attributes reference card
+    attr_rows: list[Block] = []
+    attr_samples = [
+        ("bold", Style(bold=True)),
+        ("dim", Style(dim=True)),
+        ("italic", Style(italic=True)),
+        ("underline", Style(underline=True)),
+        ("reverse", Style(reverse=True)),
+    ]
+    for name, style in attr_samples:
+        label = Block.text(f" {name:<10}", DIM)
+        sample = Block.text("the quick fox", style)
+        attr_rows.append(join_horizontal(label, sample, gap=1))
+    attr_content = join_vertical(*attr_rows)
+    attr_card = border(attr_content, ROUNDED, Style(fg="cyan", dim=True),
+                       title="attributes", title_style=Style(fg="cyan", bold=True))
+
+    # Colors reference card
+    color_rows: list[Block] = []
+
+    # Named colors row
+    named_colors = ["red", "green", "blue", "cyan", "magenta", "yellow"]
+    named_row: list[Block] = [Block.text(" named ", DIM)]
+    for color in named_colors:
+        named_row.append(Block.text(f" {color[:3]} ", Style(fg=color)))
+    color_rows.append(join_horizontal(*named_row, gap=0))
+
+    # 256-palette sample row
+    palette_row: list[Block] = [Block.text(" 256   ", DIM)]
+    palette_samples = [196, 208, 226, 46, 51, 21, 129, 201]  # rainbow selection
+    for code in palette_samples:
+        palette_row.append(Block.text(" ■ ", Style(fg=code)))
+    color_rows.append(join_horizontal(*palette_row, gap=0))
+
+    # Hex colors row
+    hex_row: list[Block] = [Block.text(" hex   ", DIM)]
+    hex_samples = ["#ff6b35", "#7b68ee", "#00d4aa", "#ff1493"]
+    for hex_color in hex_samples:
+        hex_row.append(Block.text(f" {hex_color[:4]} ", Style(fg=hex_color)))
+    color_rows.append(join_horizontal(*hex_row, gap=0))
+
+    color_content = join_vertical(*color_rows)
+    color_card = border(color_content, ROUNDED, Style(fg="magenta", dim=True),
+                        title="colors", title_style=Style(fg="magenta", bold=True))
+
+    # Join the two cards horizontally
+    top_section = join_horizontal(attr_card, color_card, gap=2)
+    rows.append(pad(top_section, left=max(0, (width - top_section.width) // 2)))
     rows.append(Block.empty(width, 1))
 
-    # Text input
-    input_width = min(40, width - 8)
+    # -- Bottom section: Interactive span builder --
+
+    builder_rows: list[Block] = []
+
+    # Toggle row showing current attribute states
+    toggle_parts: list[Block] = []
+    toggles = [
+        ("b", "bold", state.span_bold),
+        ("d", "dim", state.span_dim),
+        ("i", "italic", state.span_italic),
+        ("u", "underline", state.span_underline),
+        ("r", "reverse", state.span_reverse),
+    ]
+    for key, name, active in toggles:
+        if active:
+            toggle_parts.append(Block.text(f" [{key}] {name} ", Style(fg="cyan", bold=True, reverse=True)))
+        else:
+            toggle_parts.append(Block.text(f" [{key}] {name} ", DIM))
+    toggle_row = join_horizontal(*toggle_parts, gap=0)
+    builder_rows.append(toggle_row)
+    builder_rows.append(Block.empty(1, 1))
+
+    # Color selector row
+    color_parts: list[Block] = [Block.text(" color: ", DIM)]
+    for i, (name, color) in enumerate(SPAN_COLORS):
+        if i == state.span_color_index:
+            color_parts.append(Block.text(f" {name} ", Style(fg=color, bold=True, reverse=True)))
+        else:
+            color_parts.append(Block.text(f" {name} ", Style(fg=color, dim=True)))
+    color_parts.append(Block.text("  (c: cycle)", HINT))
+    color_row = join_horizontal(*color_parts, gap=0)
+    builder_rows.append(color_row)
+    builder_rows.append(Block.empty(1, 1))
+
+    # Build the composed style
+    _, current_color = SPAN_COLORS[state.span_color_index]
+    composed_style = Style(
+        fg=current_color,
+        bold=state.span_bold,
+        dim=state.span_dim,
+        italic=state.span_italic,
+        underline=state.span_underline,
+        reverse=state.span_reverse,
+    )
+
+    # Preview text with composed style
+    preview_text = state.input_state.text or "the quick fox"
+    preview_label = Block.text(" preview: ", DIM)
+    preview_sample = Block.text(preview_text[:30], composed_style)
+    preview_row = join_horizontal(preview_label, preview_sample, gap=0)
+    builder_rows.append(preview_row)
+    builder_rows.append(Block.empty(1, 1))
+
+    # Text input for customizing preview
+    input_label = Block.text(" text: ", DIM)
+    input_width = min(30, width - 20)
     inp = text_input(state.input_state, input_width, focused=True,
                      style=Style(fg="white"), placeholder="type here...")
-    inp_bordered = border(inp, ROUNDED, Style(fg="cyan", dim=True))
-    rows.append(pad(inp_bordered, left=(width - inp_bordered.width) // 2))
+    input_row = join_horizontal(input_label, inp, gap=0)
+    builder_rows.append(input_row)
+
+    builder_content = join_vertical(*builder_rows)
+    builder_card = border(builder_content, ROUNDED, Style(fg="yellow", dim=True),
+                          title="composer", title_style=Style(fg="yellow", bold=True))
+    rows.append(pad(builder_card, left=max(0, (width - builder_card.width) // 2)))
     rows.append(Block.empty(width, 1))
 
-    # Show the typed text in many styles
-    text = state.input_state.text or "hello render"
-    for label, style in TYPING_STYLES:
-        label_block = Block.text(f"  {label:>18}  ", DIM)
-        sample = Block.text(text[:width - 24], style)
-        row = join_horizontal(label_block, sample, gap=0)
-        rows.append(row)
-
-    rows.append(Block.empty(width, 1))
-    rows.append(_centered_text("one Span = one run of text + one Style. that's it.", width, CAPTION))
+    rows.append(_centered_text("one Span = one run of text + one Style. compose them freely.", width, CAPTION))
 
     return join_vertical(*rows, align=Align.START)
 
@@ -1040,11 +1159,26 @@ class DemoApp(RenderApp):
         # Stage-specific input
         stage = self._state.stage
 
-        # Spans: typing
+        # Spans: typing + style toggles
         if stage == 1:
-            if key == "backspace":
+            if key == "b":
+                self._state = replace(self._state, span_bold=not self._state.span_bold)
+            elif key == "d":
+                self._state = replace(self._state, span_dim=not self._state.span_dim)
+            elif key == "i":
+                self._state = replace(self._state, span_italic=not self._state.span_italic)
+            elif key == "u":
+                self._state = replace(self._state, span_underline=not self._state.span_underline)
+            elif key == "r":
+                self._state = replace(self._state, span_reverse=not self._state.span_reverse)
+            elif key == "c":
+                self._state = replace(
+                    self._state,
+                    span_color_index=(self._state.span_color_index + 1) % len(SPAN_COLORS),
+                )
+            elif key == "backspace":
                 self._state = replace(self._state, input_state=self._state.input_state.delete_back())
-            elif len(key) == 1 and key.isprintable():
+            elif len(key) == 1 and key.isprintable() and key not in "bdiurc":
                 self._state = replace(self._state, input_state=self._state.input_state.insert(key))
             return
 

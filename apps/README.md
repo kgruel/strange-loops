@@ -1,6 +1,6 @@
 # Homelab Dashboard
 
-Spec-driven VM monitoring dashboard. Connects to VMs via SSH, runs docker commands, folds output into projections, renders live.
+Spec-driven VM monitoring with embedded orchestration. The dashboard IS the orchestrator — live connection is the default, recording is opt-in.
 
 ## Run
 
@@ -8,7 +8,7 @@ Spec-driven VM monitoring dashboard. Connects to VMs via SSH, runs docker comman
 # Live SSH (connects to real VMs)
 uv run python apps/homelab.py
 
-# Tail mode (reads JSONL files, for testing)
+# Replay mode (reads recorded JSONL files)
 uv run python apps/simulate_homelab.py   # generate fake events
 uv run python apps/homelab.py --source /tmp/homelab
 ```
@@ -16,29 +16,66 @@ uv run python apps/homelab.py --source /tmp/homelab
 ## Conceptual Model
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  VM (via SSH)   │────▶│   Projection    │────▶│     Render      │
-│  docker ps/stats│     │   fold events   │     │   cells TUI     │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Source    │────▶│   Stream    │────▶│  Projection │────▶│   Render    │
+│ (SSH, file) │     │  (fan-out)  │     │   (fold)    │     │   (cells)   │
+└─────────────┘     └──────┬──────┘     └─────────────┘     └─────────────┘
+                          │
+                          ▼ (opt-in tap)
+                   ┌─────────────┐
+                   │ FileWriter  │
+                   │ (recording) │
+                   └─────────────┘
 ```
 
-**Core assumption:** A projection is a fold over an event stream. Events have a shape (declared in spec). State has a shape (declared in spec). Fold ops transform events into state updates.
+**The thesis:** The dashboard embeds orchestration. Persistence is a tap you attach when you want to record, not architecture you deploy separately.
+
+**Core primitives:**
+- **Source** — produces events (SSH collector, file tailer, simulator)
+- **Stream** — typed async fan-out to consumers
+- **Projection** — fold events into derived state
+- **FileWriter** — optional persistence tap
+
+## Operating Modes
+
+### Live Mode (default)
+
+Dashboard connects directly to sources, events flow in-process:
+
+```
+SSH Source ──▶ Stream ──▶ Projection ──▶ Render
+                  │
+                  └──▶ FileWriter (if recording enabled)
+```
+
+### Replay Mode (`--source`)
+
+Dashboard tails recorded files, same projection logic:
+
+```
+Tailer ──▶ Stream ──▶ Projection ──▶ Render
+```
+
+### Recording (future)
+
+User triggers from dashboard: "start recording" attaches FileWriter tap. Events persist AND feed projections. Stop recording detaches the tap.
 
 ## What Actually Runs
 
-When you connect to a VM, three SSH subprocesses spawn:
+When you connect to a VM, data sources from the spec execute:
 
-| Task | Command | Interval | Projection |
-|------|---------|----------|------------|
-| Health poller | `docker ps --format json` | 5s | vm-health |
-| Log streamer | `docker events --format json` | continuous | vm-events |
-| Resources poller | `docker stats --no-stream --format json` | 5s | vm-resources |
+| Data Source | Command | Mode | Event Type |
+|-------------|---------|------|------------|
+| `docker:containers` | `docker ps --format json` | poll (5s) | `container.status` |
+| `docker:events` | `docker events --format json` | stream | `docker.event` |
+| `docker:stats` | `docker stats --no-stream --format json` | poll (5s) | `container.stats` |
 
-Each subprocess:
-1. Runs the docker command over SSH
-2. Parses JSON output into event dicts
-3. Calls `proj.consume(event)` to fold into state
-4. Projection version bumps, triggering re-render
+Each source:
+1. Runs collector function (SSH command, parse output)
+2. Maps to declared event type (`as=` in spec)
+3. Emits to Stream
+4. Projection taps stream, folds event, bumps version
+5. Render loop detects version change, re-renders
 
 ## Specs
 
@@ -83,47 +120,60 @@ projection "vm-health" {
 
 **Reading this:** Events of type `container.status` with those fields fold into state via `upsert` (dict keyed by container name) and `latest` (timestamp tracking).
 
-## Architecture Assumptions
+## Architecture
 
-### 1. File is the broker (tail mode)
+### 1. Stream is the broker (live), File is the broker (replay)
 
-In `--source` mode, JSONL files are the transport:
+**Live mode:** Stream is the in-process broker. Events flow directly from source to projection.
+
+**Replay mode:** JSONL files are the broker. Tailer reads with byte-offset tracking.
+
 ```
 /tmp/homelab/
   media/
     vm-health.jsonl      # one event per line
     vm-events.jsonl
-    vm-resources.jsonl
   infra/
     ...
 ```
 
-`Tailer` reads with byte-offset tracking. No external broker needed.
+Same projection logic, different source. The broker choice is a runtime decision.
 
-### 2. Projection is the primitive
+### 2. Embedded orchestration
 
-From `rill`:
+The dashboard doesn't shell out to an orchestrator. It IS the orchestrator:
+
 ```python
-class Projection[S, T]:
-    def apply(self, state: S, event: T) -> S: ...
-    async def consume(self, event: T) -> None: ...
-
-    @property
-    def state(self) -> S: ...
-    @property
-    def version(self) -> int: ...  # bumps on state change
+# Conceptually (collapsed architecture)
+for source_spec in app_spec.data_sources:
+    source = make_source(source_spec, vm)     # SSHSource, TailerSource, etc.
+    stream = Stream()
+    projection = SpecProjection(source_spec.projection)
+    stream.tap(projection)
+    # optional: stream.tap(FileWriter(...)) for recording
+    asyncio.create_task(run_source(source, stream))
 ```
 
-`SpecProjection` extends this with declarative fold ops parsed from KDL.
+No separate process. No file-based coordination. Events flow in-memory.
 
-### 3. Specs declare contracts
+### 3. Persistence is a tap, not architecture
+
+Recording is opt-in:
+- Default: events flow source → stream → projection (memory only)
+- Recording: attach `FileWriter` tap, events persist AND feed projection
+- Stop recording: detach tap, back to memory only
+
+The user decides when to record, from the dashboard.
+
+### 4. Specs declare contracts
 
 Event shapes and fold semantics are declared, not coded:
-- **Event spec** → input schema (currently not validated at runtime)
+- **Event spec** → input schema, validated on ingest
 - **State spec** → derived schema, initialized from types
-- **Fold ops** → transformation rules
+- **Fold ops** → transformation rules (upsert, collect, latest, count)
+- **Data sources** → collector + event type mapping (`as=`)
 
-### 4. Render is convention-based
+### 5. Render is convention-based
 
 `spec_render.py` maps state shapes to UI:
 - `dict` field → table
@@ -132,45 +182,45 @@ Event shapes and fold semantics are declared, not coded:
 
 No custom rendering code per projection.
 
-## Current Limitations
+## Current State
 
-### Hardcoded collectors
+### Done
+- Spec-driven collection: `as=` field maps collector output to event types
+- Event validation with type coercion
+- Orchestrator uses DataSourceSpec from app spec
+- Fold ops: upsert, collect, latest, count
 
-`SSHConnectionManager` has docker commands baked in. The collector registry (`framework/collectors/`) exists but isn't used. To add a new data source, you'd currently edit `ssh.py`.
+### In Progress: Collapse SSHConnectionManager
 
-**Future:** Wire data_source specs to collector registry so new sources are declarative.
+Currently two SSH paths exist:
+- `SSHConnectionManager` — hardcoded collectors, callback-based (used by dashboard)
+- `Orchestrator` — spec-driven, Stream-based (standalone CLI)
 
-### No event validation
+**Target:** One path. Dashboard embeds orchestrator-style collection.
 
-Specs declare event shapes but `SpecProjection.consume()` doesn't validate. Malformed events silently produce bad state.
+### Future
 
-**Future:** Validate on ingest, reject or log violations.
+**Recording from dashboard** — UI to attach/detach FileWriter taps at runtime.
 
-### Memory-only projections
+**SSH multiplexing** — single connection per VM instead of subprocess per collector.
 
-State lives in-memory. Disconnect and it's gone. No snapshots, no replay from JSONL.
-
-**Future:** Snapshot/restore, or replay from FileWriter output.
-
-### SSH subprocess per command
-
-Each poller spawns a new SSH process. For 8 VMs × 3 collectors = 24 subprocesses.
-
-**Future:** Multiplex over single SSH connection per VM.
+**State snapshots** — persist projection state for fast restart.
 
 ## Code Map
 
 ```
 apps/
-  homelab.py          # main app, RenderApp subclass
+  homelab.py          # main app, embeds orchestration
   simulate_homelab.py # fake event generator for testing
 
 framework/
-  ssh.py              # SSHConnectionManager (hardcoded collectors)
+  orchestrator.py     # spec-driven collection, Stream-based
+  ssh_session.py      # SSHSession (asyncssh wrapper)
+  ssh.py              # SSHConnectionManager (to be replaced)
   spec.py             # ProjectionSpec, SpecProjection, fold ops
-  app_spec.py         # AppSpec, VMInfo, inventory loading
+  app_spec.py         # AppSpec, DataSourceSpec, inventory
   spec_render.py      # projection → Block conventions
-  collectors/         # collector registry (unused by homelab)
+  collectors/         # collector registry + implementations
 
 specs/
   homelab.app.kdl
@@ -179,8 +229,27 @@ specs/
   vm-resources.projection.kdl
 ```
 
-## Dependencies
+## Package Boundaries
 
-- **rill** — `Tailer`, `Projection`, `FileWriter` (stdlib only)
-- **cells** — `RenderApp`, `Block`, `Style`, composition
-- **framework** — spec parsing, SSH, orchestration
+```
+rill (stdlib only)
+├── Stream, Tap        — typed async fan-out
+├── Projection         — incremental fold
+├── FileWriter         — JSONL persistence
+├── Tailer             — byte-offset reader
+└── Forward            — stream bridging
+
+cells (stdlib + wcwidth)
+├── Buffer, Diff       — cell-level rendering
+├── Block, Style       — composable layout
+└── RenderApp          — event loop + render
+
+framework (rill + cells + IO)
+├── Spec parsing       — KDL → contracts
+├── SpecProjection     — declarative fold ops
+├── Sources            — SSH, collectors
+└── Orchestration      — wire sources to projections
+
+apps (everything)
+└── Dashboard          — orchestration + rendering
+```

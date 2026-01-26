@@ -86,7 +86,7 @@ Surface emits at three strata:
     Raw input      yes     "ui.key"      {key: "j"}
     UI structure   yes     "ui.action"   {action: "pop", layer: "confirm"}
                    yes     "ui.resize"   {width: 80, height: 24}
-    Domain         no      (any)      {item: "deploy-prod"}
+    Domain         no      (any)         {item: "deploy-prod"}
 
 `Emit = Callable[[str, dict], None]` — cells defines the callback type,
 the integration layer wires it to `Fact.of()` + `Stream.emit()`. No
@@ -139,3 +139,37 @@ Standalone demo scripts and teaching materials extracted from the cells library.
 - Shape is the contract at every boundary — describes what data looks like and how to fold it
 - Projection accepts a fold callable: `Projection(initial, fold=shape.apply)` — no bridge class needed
 - Facts go in, Ticks come out: Fact is the raw observation (input), Tick is the derived snapshot (output)
+
+## Conventions
+
+Composition conventions for wiring the atoms together. Not enforced by code —
+these are patterns that keep independently-authored integrations legible and
+compatible.
+
+### Kind namespacing
+
+Infrastructure facts auto-emitted by a lib are prefixed by origin:
+
+    ui.key, ui.action, ui.resize     ← cells (Surface)
+
+Domain facts (user/integration-defined) stay bare: `"container-health"`,
+`"deploy"`, whatever makes sense in context. The rule: if a lib emits it
+automatically, it gets a prefix. If you define it, you name it.
+
+### Kind → Shape naming
+
+Name your Shape after the primary Fact kind it folds. A Shape called
+`"container-health"` folds Facts with `kind="container-health"`. This is a
+legibility convention, not a dispatch mechanism — routing is still explicit
+in your wiring code.
+
+If boilerplate accumulates around this pattern (registering shapes, matching
+kinds, auto-routing), that's the signal to add a thin convenience. Not yet.
+
+### Fact → Shape bridge
+
+Every Projection folding Facts through a Shape needs a thin extraction
+function (~3 lines) at the composition point: pull the dict payload, add
+timestamp, call `shape.apply()`. This is intentionally not a library
+primitive — it lives in the integration layer because it touches both Fact
+and Shape, and the atoms don't import each other.

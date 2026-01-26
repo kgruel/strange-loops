@@ -1,32 +1,32 @@
 # shapes
 
-Declarative schema shapes: `Field + Fold + Form`.
+Data contracts for how events become state: `Facet + Fold + Shape`.
 
 ## What it is
 
 Shape contracts that define how events become state. Three primitives:
 
-- **Field** — a typed slot (`name + kind`), with optional marker (`"int?"`)
+- **Facet** — a named, typed face of a shape (`name + kind`), with optional marker (`"int?"`)
 - **Fold** — a transformation rule (`op + target`): latest, collect, count, upsert, sum
-- **Form** — a complete contract: input fields + state fields + fold rules
+- **Shape** — a complete contract: input facets + state facets + fold rules
 
 ## Usage
 
 ```python
-from shapes import Field, Fold, Form
+from shapes import Facet, Fold, Shape
 
 # Define what events look like
-input_fields = (
-    Field("host", "str"),
-    Field("cpu", "float"),
-    Field("status", "str"),
+input_facets = (
+    Facet("host", "str"),
+    Facet("cpu", "float"),
+    Facet("status", "str"),
 )
 
 # Define what state looks like
-state_fields = (
-    Field("hosts", "dict"),
-    Field("readings", "list"),
-    Field("count", "int"),
+state_facets = (
+    Facet("hosts", "dict"),
+    Facet("readings", "list"),
+    Facet("count", "int"),
 )
 
 # Define how events update state
@@ -36,15 +36,15 @@ folds = (
     Fold("count", "count"),
 )
 
-form = Form(
+shape = Shape(
     name="host_monitor",
     about="Track host CPU readings",
-    input_fields=input_fields,
-    state_fields=state_fields,
+    input_facets=input_facets,
+    state_facets=state_facets,
     folds=folds,
 )
 
-state = form.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
+state = shape.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
 ```
 
 ## Fold operations

@@ -1,6 +1,6 @@
 """Tests for the full wired pipeline experiment.
 
-Tests the FormProjection bridge and render_dashboard function,
+Tests the ShapeProjection bridge and render_dashboard function,
 verifying that all 5 libraries integrate correctly.
 """
 
@@ -10,11 +10,11 @@ import time
 
 import pytest
 from facts import Event
-from shapes import Field, Fold, Form
+from shapes import Facet, Fold, Shape
 
 from apps.pipeline import (
-    FormProjection,
-    PULSE_FORM,
+    ShapeProjection,
+    PULSE_SHAPE,
     render_dashboard,
     _make_latest,
     _make_count,
@@ -25,15 +25,15 @@ from apps.pipeline import (
 
 
 # ---------------------------------------------------------------------------
-# FormProjection tests
+# ShapeProjection tests
 # ---------------------------------------------------------------------------
 
 
-class TestFormProjection:
-    """Tests for FormProjection bridge."""
+class TestShapeProjection:
+    """Tests for ShapeProjection bridge."""
 
-    def test_initial_state_matches_form(self):
-        proj = FormProjection(PULSE_FORM)
+    def test_initial_state_matches_shape(self):
+        proj = ShapeProjection(PULSE_SHAPE)
         state = proj.state
         assert state["last_seen"] == ""
         assert state["event_count"] == 0
@@ -42,7 +42,7 @@ class TestFormProjection:
         assert state["total_requests"] == 0
 
     def test_apply_extracts_event_data(self):
-        proj = FormProjection(PULSE_FORM)
+        proj = ShapeProjection(PULSE_SHAPE)
         event = Event.log_signal(
             "heartbeat",
             service="api-gateway",
@@ -68,7 +68,7 @@ class TestFormProjection:
 
     @pytest.mark.asyncio
     async def test_consume_updates_version(self):
-        proj = FormProjection(PULSE_FORM)
+        proj = ShapeProjection(PULSE_SHAPE)
         assert proj.version == 0
         event = Event.log_signal(
             "heartbeat",
@@ -84,7 +84,7 @@ class TestFormProjection:
 
     @pytest.mark.asyncio
     async def test_multiple_events_accumulate(self):
-        proj = FormProjection(PULSE_FORM)
+        proj = ShapeProjection(PULSE_SHAPE)
         for i in range(5):
             event = Event.log_signal(
                 "heartbeat",
@@ -101,7 +101,7 @@ class TestFormProjection:
 
     def test_apply_returns_new_state(self):
         """apply() must return a new dict (not mutate the original)."""
-        proj = FormProjection(PULSE_FORM)
+        proj = ShapeProjection(PULSE_SHAPE)
         original = proj.state
         event = Event.log_signal(
             "heartbeat",
@@ -156,13 +156,13 @@ class TestRenderDashboard:
     """Tests for render_dashboard function."""
 
     def test_empty_state_renders(self):
-        state = PULSE_FORM.initial_state()
+        state = PULSE_SHAPE.initial_state()
         block = render_dashboard(state, 80, 24)
         assert block.height > 0
         assert block.width > 0
 
     def test_populated_state_renders(self):
-        state = PULSE_FORM.initial_state()
+        state = PULSE_SHAPE.initial_state()
         state["event_count"] = 42
         state["total_requests"] = 500
         state["services"] = {

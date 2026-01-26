@@ -1,4 +1,4 @@
-"""Type utilities for forms: coercion, validation, initial values."""
+"""Type utilities for shapes: coercion, validation, initial values."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 
 class ValidationError(Exception):
-    """Raised when value validation fails against a form contract."""
+    """Raised when value validation fails against a shape contract."""
 
     pass
 

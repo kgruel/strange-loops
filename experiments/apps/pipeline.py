@@ -18,7 +18,7 @@ from typing import Any
 
 from peers import Peer, Scope
 from facts import Event
-from shapes import Field, Fold, Form
+from shapes import Facet, Fold, Shape
 from ticks import Stream, Projection
 from cells import (
     RenderApp, Block, Style, Region,
@@ -29,25 +29,25 @@ from cells import (
 
 
 # ---------------------------------------------------------------------------
-# 1. Form declaration — service pulse monitor schema
+# 1. Shape declaration — service pulse monitor schema
 # ---------------------------------------------------------------------------
 
-PULSE_FORM = Form(
+PULSE_SHAPE = Shape(
     name="service_pulse",
     about="Monitor service heartbeat status, latency, and request counts",
-    input_fields=(
-        Field(name="service", kind="str"),
-        Field(name="status", kind="str"),
-        Field(name="latency_ms", kind="float"),
-        Field(name="requests", kind="int"),
-        Field(name="peer", kind="str"),
+    input_facets=(
+        Facet(name="service", kind="str"),
+        Facet(name="status", kind="str"),
+        Facet(name="latency_ms", kind="float"),
+        Facet(name="requests", kind="int"),
+        Facet(name="peer", kind="str"),
     ),
-    state_fields=(
-        Field(name="last_seen", kind="str"),
-        Field(name="event_count", kind="int"),
-        Field(name="services", kind="dict"),
-        Field(name="history", kind="list"),
-        Field(name="total_requests", kind="int"),
+    state_facets=(
+        Facet(name="last_seen", kind="str"),
+        Facet(name="event_count", kind="int"),
+        Facet(name="services", kind="dict"),
+        Facet(name="history", kind="list"),
+        Facet(name="total_requests", kind="int"),
     ),
     folds=(
         Fold(op="latest", target="last_seen"),
@@ -60,7 +60,7 @@ PULSE_FORM = Form(
 
 
 # ---------------------------------------------------------------------------
-# 2. FormProjection bridge — Projection[dict, Event] backed by Form folds
+# 2. ShapeProjection bridge — Projection[dict, Event] backed by Shape folds
 # ---------------------------------------------------------------------------
 
 def _make_latest(target: str):
@@ -104,7 +104,7 @@ def _make_sum(target: str, value_field: str):
     return fold
 
 
-def _build_fold_fn(fold: Fold, form: Form):
+def _build_fold_fn(fold: Fold, shape: Shape):
     """Build a callable (state, payload) -> None from a Fold."""
     target = fold.target
     match fold.op:
@@ -127,17 +127,17 @@ def _build_fold_fn(fold: Fold, form: Form):
             raise ValueError(f"Unknown fold op: {fold.op}")
 
 
-class FormProjection(Projection[dict[str, Any], Event]):
-    """Projection driven by a Form's fold rules.
+class ShapeProjection(Projection[dict[str, Any], Event]):
+    """Projection driven by a Shape's fold rules.
 
     Extracts dict(event.data) + _ts from event.ts as the payload,
-    then applies fold closures built from Form.folds.
+    then applies fold closures built from Shape.folds.
     """
 
-    def __init__(self, form: Form):
-        super().__init__(form.initial_state())
-        self.form = form
-        self._fold_fns = [_build_fold_fn(f, form) for f in form.folds]
+    def __init__(self, shape: Shape):
+        super().__init__(shape.initial_state())
+        self.shape = shape
+        self._fold_fns = [_build_fold_fn(f, shape) for f in shape.folds]
 
     def apply(self, state: dict[str, Any], event: Event) -> dict[str, Any]:
         payload = dict(event.data)
@@ -290,7 +290,7 @@ def render_dashboard(state: dict[str, Any], width: int, height: int) -> Block:
 
 
 # ---------------------------------------------------------------------------
-# 5. PipelineApp — RenderApp that wires Stream -> FormProjection
+# 5. PipelineApp — RenderApp that wires Stream -> ShapeProjection
 # ---------------------------------------------------------------------------
 
 class PipelineApp(RenderApp):
@@ -299,7 +299,7 @@ class PipelineApp(RenderApp):
     def __init__(self):
         super().__init__(fps_cap=15)
         self._stream: Stream[Event] = Stream()
-        self._projection = FormProjection(PULSE_FORM)
+        self._projection = ShapeProjection(PULSE_SHAPE)
         self._region = Region(0, 0, 80, 24)
         self._last_version = -1
         self._pump_task: asyncio.Task | None = None

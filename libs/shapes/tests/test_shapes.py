@@ -1,38 +1,38 @@
-"""Tests for forms core types: Field, Fold, Form."""
+"""Tests for shapes core types: Facet, Fold, Shape."""
 
 import pytest
 
-from shapes import Field, Fold, Form, ValidationError
+from shapes import Facet, Fold, Shape, ValidationError
 from shapes.types import coerce_value, initial_value, type_matches
 
 
-class TestField:
-    """Tests for Field dataclass."""
+class TestFacet:
+    """Tests for Facet dataclass."""
 
-    def test_basic_field(self):
-        f = Field(name="count", kind="int")
+    def test_basic_facet(self):
+        f = Facet(name="count", kind="int")
         assert f.name == "count"
         assert f.kind == "int"
         assert f.optional is False
 
-    def test_optional_field(self):
-        f = Field(name="label", kind="str", optional=True)
+    def test_optional_facet(self):
+        f = Facet(name="label", kind="str", optional=True)
         assert f.optional is True
 
     def test_from_type_str_required(self):
-        f = Field.from_type_str("age", "int")
+        f = Facet.from_type_str("age", "int")
         assert f.name == "age"
         assert f.kind == "int"
         assert f.optional is False
 
     def test_from_type_str_optional(self):
-        f = Field.from_type_str("nickname", "str?")
+        f = Facet.from_type_str("nickname", "str?")
         assert f.name == "nickname"
         assert f.kind == "str"
         assert f.optional is True
 
     def test_frozen(self):
-        f = Field(name="x", kind="int")
+        f = Facet(name="x", kind="int")
         with pytest.raises(AttributeError):
             f.name = "y"
 
@@ -60,39 +60,44 @@ class TestFold:
         with pytest.raises(AttributeError):
             f.op = "sum"
 
+    def test_props_immutable(self):
+        f = Fold(op="collect", target="events", props={"max": 100})
+        with pytest.raises(TypeError):
+            f.props["max"] = 200
 
-class TestForm:
-    """Tests for Form dataclass."""
 
-    def test_empty_form(self):
-        f = Form(name="empty")
+class TestShape:
+    """Tests for Shape dataclass."""
+
+    def test_empty_shape(self):
+        f = Shape(name="empty")
         assert f.name == "empty"
         assert f.about == ""
-        assert f.input_fields == ()
-        assert f.state_fields == ()
+        assert f.input_facets == ()
+        assert f.state_facets == ()
         assert f.folds == ()
 
-    def test_form_with_about(self):
-        f = Form(name="counter", about="Counts events")
+    def test_shape_with_about(self):
+        f = Shape(name="counter", about="Counts events")
         assert f.about == "Counts events"
 
-    def test_form_with_fields(self):
-        f = Form(
+    def test_shape_with_facets(self):
+        f = Shape(
             name="tracker",
-            input_fields=(
-                Field("user_id", "str"),
-                Field("action", "str"),
+            input_facets=(
+                Facet("user_id", "str"),
+                Facet("action", "str"),
             ),
-            state_fields=(
-                Field("count", "int"),
-                Field("users", "set"),
+            state_facets=(
+                Facet("count", "int"),
+                Facet("users", "set"),
             ),
         )
-        assert len(f.input_fields) == 2
-        assert len(f.state_fields) == 2
+        assert len(f.input_facets) == 2
+        assert len(f.state_facets) == 2
 
-    def test_form_with_folds(self):
-        f = Form(
+    def test_shape_with_folds(self):
+        f = Shape(
             name="accumulator",
             folds=(
                 Fold(op="count", target="total"),
@@ -102,69 +107,69 @@ class TestForm:
         assert len(f.folds) == 2
 
     def test_initial_state_dict(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("items", "dict"),),
+            state_facets=(Facet("items", "dict"),),
         )
         assert f.initial_state() == {"items": {}}
 
     def test_initial_state_list(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("events", "list"),),
+            state_facets=(Facet("events", "list"),),
         )
         assert f.initial_state() == {"events": []}
 
     def test_initial_state_set(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("seen", "set"),),
+            state_facets=(Facet("seen", "set"),),
         )
         assert f.initial_state() == {"seen": set()}
 
     def test_initial_state_int(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("count", "int"),),
+            state_facets=(Facet("count", "int"),),
         )
         assert f.initial_state() == {"count": 0}
 
     def test_initial_state_float(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("total", "float"),),
+            state_facets=(Facet("total", "float"),),
         )
         assert f.initial_state() == {"total": 0}
 
     def test_initial_state_bool(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("active", "bool"),),
+            state_facets=(Facet("active", "bool"),),
         )
         assert f.initial_state() == {"active": False}
 
     def test_initial_state_str(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("label", "str"),),
+            state_facets=(Facet("label", "str"),),
         )
         assert f.initial_state() == {"label": ""}
 
     def test_initial_state_datetime(self):
-        f = Form(
+        f = Shape(
             name="test",
-            state_fields=(Field("last_seen", "datetime"),),
+            state_facets=(Facet("last_seen", "datetime"),),
         )
         assert f.initial_state() == {"last_seen": None}
 
-    def test_initial_state_multiple_fields(self):
-        f = Form(
+    def test_initial_state_multiple_facets(self):
+        f = Shape(
             name="complex",
-            state_fields=(
-                Field("count", "int"),
-                Field("items", "dict"),
-                Field("events", "list"),
-                Field("seen", "set"),
+            state_facets=(
+                Facet("count", "int"),
+                Facet("items", "dict"),
+                Facet("events", "list"),
+                Facet("seen", "set"),
             ),
         )
         state = f.initial_state()
@@ -175,32 +180,32 @@ class TestForm:
             "seen": set(),
         }
 
-    def test_input_field_lookup(self):
-        f = Form(
+    def test_input_facet_lookup(self):
+        f = Shape(
             name="test",
-            input_fields=(
-                Field("user_id", "str"),
-                Field("amount", "int"),
+            input_facets=(
+                Facet("user_id", "str"),
+                Facet("amount", "int"),
             ),
         )
-        assert f.input_field("user_id") == Field("user_id", "str")
-        assert f.input_field("amount") == Field("amount", "int")
-        assert f.input_field("missing") is None
+        assert f.input_facet("user_id") == Facet("user_id", "str")
+        assert f.input_facet("amount") == Facet("amount", "int")
+        assert f.input_facet("missing") is None
 
-    def test_state_field_lookup(self):
-        f = Form(
+    def test_state_facet_lookup(self):
+        f = Shape(
             name="test",
-            state_fields=(
-                Field("total", "int"),
-                Field("items", "dict"),
+            state_facets=(
+                Facet("total", "int"),
+                Facet("items", "dict"),
             ),
         )
-        assert f.state_field("total") == Field("total", "int")
-        assert f.state_field("items") == Field("items", "dict")
-        assert f.state_field("missing") is None
+        assert f.state_facet("total") == Facet("total", "int")
+        assert f.state_facet("items") == Facet("items", "dict")
+        assert f.state_facet("missing") is None
 
     def test_frozen(self):
-        f = Form(name="test")
+        f = Shape(name="test")
         with pytest.raises(AttributeError):
             f.name = "other"
 
@@ -301,5 +306,5 @@ class TestValidationError:
             raise ValidationError("test error")
 
     def test_message(self):
-        err = ValidationError("field 'x' missing")
-        assert str(err) == "field 'x' missing"
+        err = ValidationError("facet 'x' missing")
+        assert str(err) == "facet 'x' missing"

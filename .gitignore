@@ -7,5 +7,6 @@ build/
 .uv-cache/
 uv.lock
 *.jsonl
+.coverage
 .subtask/
 .obsidian/

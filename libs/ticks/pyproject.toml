@@ -12,6 +12,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "ty>=0.0.1a11",
 ]
 
 [build-system]
@@ -37,3 +39,13 @@ exclude_lines = [
     "raise NotImplementedError",
     "\\.\\.\\.$",  # Protocol method stubs
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.11"

@@ -36,7 +36,13 @@ class Peer:
 # Scope operations (pure functions, following cells patterns)
 
 
-def grant(scope: Scope, *, see: set[str] | None = None, do: set[str] | None = None, ask: set[str] | None = None) -> Scope:
+def grant(
+    scope: Scope,
+    *,
+    see: set[str] | None = None,
+    do: set[str] | None = None,
+    ask: set[str] | None = None,
+) -> Scope:
     """Expand scope with additional permissions."""
     return replace(
         scope,
@@ -46,7 +52,13 @@ def grant(scope: Scope, *, see: set[str] | None = None, do: set[str] | None = No
     )
 
 
-def restrict(scope: Scope, *, see: set[str] | None = None, do: set[str] | None = None, ask: set[str] | None = None) -> Scope:
+def restrict(
+    scope: Scope,
+    *,
+    see: set[str] | None = None,
+    do: set[str] | None = None,
+    ask: set[str] | None = None,
+) -> Scope:
     """Narrow scope (intersection). Used for delegation."""
     return replace(
         scope,
@@ -56,7 +68,14 @@ def restrict(scope: Scope, *, see: set[str] | None = None, do: set[str] | None =
     )
 
 
-def delegate(peer: Peer, name: str, *, see: set[str] | None = None, do: set[str] | None = None, ask: set[str] | None = None) -> Peer:
+def delegate(
+    peer: Peer,
+    name: str,
+    *,
+    see: set[str] | None = None,
+    do: set[str] | None = None,
+    ask: set[str] | None = None,
+) -> Peer:
     """Create a child peer with restricted scope.
 
     Delegation can only narrow, never expand. If see/do/ask are None,

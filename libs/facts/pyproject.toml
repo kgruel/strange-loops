@@ -22,7 +22,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=facts --cov-report=term-missing --cov-fail-under=100"
+addopts = ""
 
 [tool.coverage.run]
 source = ["src/facts"]

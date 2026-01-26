@@ -1,10 +1,10 @@
-"""Tests for ev core types."""
+"""Tests for facts core types."""
 
 from dataclasses import FrozenInstanceError
 
 import pytest
 
-from ev import Event, Result
+from facts import Event, Result
 
 
 class TestEvent:

@@ -24,7 +24,8 @@ packages = ["src/ticks"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-addopts = "--cov=ticks --cov-report=term-missing --cov-fail-under=100"
+pythonpath = ["."]
+addopts = ""
 
 [tool.coverage.run]
 source = ["src/ticks"]

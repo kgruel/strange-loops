@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from typing import Any, Callable
+from typing import Any, Callable, Awaitable
 
 from .buffer import Buffer
 from .layer import Layer, process_key as _process_key
@@ -12,6 +12,7 @@ from .writer import Writer
 from .keyboard import KeyboardInput
 
 Emit = Callable[[str, dict[str, Any]], None]
+LifecycleHook = Callable[[], Awaitable[None]]
 
 
 class Surface:
@@ -21,7 +22,14 @@ class Surface:
     terminal UIs using the cell-buffer rendering system.
     """
 
-    def __init__(self, *, fps_cap: int = 60, on_emit: Emit | None = None):
+    def __init__(
+        self,
+        *,
+        fps_cap: int = 60,
+        on_emit: Emit | None = None,
+        on_start: LifecycleHook | None = None,
+        on_stop: LifecycleHook | None = None,
+    ):
         self._writer = Writer()
         self._fps_cap = fps_cap
         self._buf: Buffer | None = None
@@ -30,6 +38,8 @@ class Surface:
         self._running = False
         self._dirty = True
         self._on_emit = on_emit
+        self._on_start = on_start
+        self._on_stop = on_stop
 
     async def run(self) -> None:
         """Enter alt screen, run main loop, restore terminal on exit."""
@@ -49,6 +59,9 @@ class Surface:
 
         try:
             with self._keyboard:
+                if self._on_start is not None:
+                    await self._on_start()
+
                 while self._running:
                     # Drain all available keypresses before rendering
                     had_key = False
@@ -57,7 +70,7 @@ class Surface:
                         if key is None:
                             break
                         self.on_key(key)
-                        self.emit("key", key=key)
+                        self.emit("ui.key", key=key)
                         self._dirty = True
                         had_key = True
 
@@ -76,6 +89,8 @@ class Surface:
                     else:
                         await asyncio.sleep(1.0 / self._fps_cap)
         finally:
+            if self._on_stop is not None:
+                await self._on_stop()
             loop.remove_signal_handler(signal.SIGWINCH)
             self._writer.show_cursor()
             self._writer.exit_alt_screen()
@@ -111,19 +126,19 @@ class Surface:
 
         Returns the same (new_state, should_quit, pop_result) tuple as
         process_key().  After processing, emits one of:
-          - action="quit"   when should_quit is True
-          - action="pop"    when pop_result is not None
-          - action="stay"   otherwise
+          - ui.action action="quit"   when should_quit is True
+          - ui.action action="pop"    when pop_result is not None
+          - ui.action action="stay"   otherwise
         """
         new_state, should_quit, pop_result = _process_key(
             key, state, get_layers, set_layers,
         )
         if should_quit:
-            self.emit("action", action="quit")
+            self.emit("ui.action", action="quit")
         elif pop_result is not None:
-            self.emit("action", action="pop", result=str(pop_result))
+            self.emit("ui.action", action="pop", result=str(pop_result))
         else:
-            self.emit("action", action="stay")
+            self.emit("ui.action", action="stay")
         return new_state, should_quit, pop_result
 
     def mark_dirty(self) -> None:
@@ -141,7 +156,7 @@ class Surface:
         self._prev = Buffer(width, height)
         self.layout(width, height)
         self._dirty = True
-        self.emit("resize", width=width, height=height)
+        self.emit("ui.resize", width=width, height=height)
 
     def _flush(self) -> None:
         """Diff current vs previous buffer and write changes to terminal."""

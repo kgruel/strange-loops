@@ -12,9 +12,9 @@ class TestEmitWithCallback:
             captured.append((kind, data))
 
         surface = Surface(on_emit=on_emit)
-        surface.emit("key", key="j")
+        surface.emit("ui.key", key="j")
 
-        assert captured == [("key", {"key": "j"})]
+        assert captured == [("ui.key", {"key": "j"})]
 
     def test_emit_multiple(self):
         captured = []
@@ -23,12 +23,12 @@ class TestEmitWithCallback:
             captured.append((kind, data))
 
         surface = Surface(on_emit=on_emit)
-        surface.emit("key", key="j")
-        surface.emit("resize", width=80, height=24)
+        surface.emit("ui.key", key="j")
+        surface.emit("ui.resize", width=80, height=24)
 
         assert len(captured) == 2
-        assert captured[0] == ("key", {"key": "j"})
-        assert captured[1] == ("resize", {"width": 80, "height": 24})
+        assert captured[0] == ("ui.key", {"key": "j"})
+        assert captured[1] == ("ui.resize", {"width": 80, "height": 24})
 
     def test_emit_domain_action(self):
         captured = []
@@ -46,16 +46,16 @@ class TestEmitWithoutCallback:
     def test_emit_no_callback_is_noop(self):
         surface = Surface()
         # Should not raise
-        surface.emit("key", key="j")
+        surface.emit("ui.key", key="j")
 
     def test_emit_none_callback_is_noop(self):
         surface = Surface(on_emit=None)
-        surface.emit("resize", width=80, height=24)
+        surface.emit("ui.resize", width=80, height=24)
 
 
 class TestAutoEmitKinds:
     def test_key_auto_emit_kind(self):
-        """The run loop emits 'key' after on_key — verify emit sends correct kind."""
+        """The run loop emits 'ui.key' after on_key — verify emit sends correct kind."""
         captured = []
 
         def on_emit(kind: str, data: dict) -> None:
@@ -64,12 +64,12 @@ class TestAutoEmitKinds:
         surface = Surface(on_emit=on_emit)
         # Simulate what the run loop does: on_key then emit
         surface.on_key("j")
-        surface.emit("key", key="j")
+        surface.emit("ui.key", key="j")
 
-        assert captured == [("key", {"key": "j"})]
+        assert captured == [("ui.key", {"key": "j"})]
 
     def test_resize_auto_emit_kind(self):
-        """The _on_resize handler emits 'resize' — verify emit sends correct kind."""
+        """The _on_resize handler emits 'ui.resize' — verify emit sends correct kind."""
         captured = []
 
         def on_emit(kind: str, data: dict) -> None:
@@ -77,9 +77,9 @@ class TestAutoEmitKinds:
 
         surface = Surface(on_emit=on_emit)
         # Simulate what _on_resize does at the emit point
-        surface.emit("resize", width=120, height=40)
+        surface.emit("ui.resize", width=120, height=40)
 
-        assert captured == [("resize", {"width": 120, "height": 40})]
+        assert captured == [("ui.resize", {"width": 120, "height": 40})]
 
 
 # -- Helpers for action auto-emission tests ----------------------------------
@@ -115,7 +115,7 @@ class TestActionAutoEmission:
 
         assert not should_quit
         assert pop_result is None
-        assert captured == [("action", {"action": "stay"})]
+        assert captured == [("ui.action", {"action": "stay"})]
 
     def test_handle_key_emits_quit(self):
         captured = []
@@ -128,7 +128,7 @@ class TestActionAutoEmission:
         )
 
         assert should_quit
-        assert captured == [("action", {"action": "quit"})]
+        assert captured == [("ui.action", {"action": "quit"})]
 
     def test_handle_key_emits_pop_with_result(self):
         captured = []
@@ -144,7 +144,7 @@ class TestActionAutoEmission:
 
         assert not should_quit
         assert pop_result == "selected"
-        assert captured == [("action", {"action": "pop", "result": "selected"})]
+        assert captured == [("ui.action", {"action": "pop", "result": "selected"})]
 
     def test_handle_key_emits_pop_none_result_as_stay(self):
         """Pop with result=None means pop_result is None — emits stay."""
@@ -160,7 +160,7 @@ class TestActionAutoEmission:
 
         assert not should_quit
         assert pop_result is None
-        assert captured == [("action", {"action": "stay"})]
+        assert captured == [("ui.action", {"action": "stay"})]
 
     def test_handle_key_no_emit_callback_is_noop(self):
         """handle_key works without on_emit — no crash."""

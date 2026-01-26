@@ -103,8 +103,8 @@ Projection.state ──→ Lens.render() ──→ Block ──→ Surface ─�
 Surface.emit(kind, **data) ──→ Fact.of() ──→ Stream  (feedback loop)
 
 Three emission strata:
-  Raw input    (auto)  "key"     {key: "j"}
-  UI structure (auto)  "action"  {action: "pop", layer: "confirm"}
+  Raw input    (auto)  "ui.key"     {key: "j"}
+  UI structure (auto)  "ui.action"  {action: "pop", layer: "confirm"}
   Domain       (manual) (any)    {item: "deploy-prod"}
 ```
 

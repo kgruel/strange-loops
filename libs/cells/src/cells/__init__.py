@@ -13,7 +13,7 @@ from .layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_lay
 from .lens import Lens, shape_lens, SHAPE_LENS
 from .span import Span, Line
 from .keyboard import KeyboardInput
-from .app import Surface, Emit
+from .app import Surface, Emit, LifecycleHook
 from .components import (
     SpinnerState, SpinnerFrames, DOTS, LINE, BRAILLE, spinner,
     ProgressState, progress_bar,
@@ -73,6 +73,7 @@ __all__ = [
     "KeyboardInput",
     "Surface",
     "Emit",
+    "LifecycleHook",
     "SpinnerState",
     "SpinnerFrames",
     "DOTS",

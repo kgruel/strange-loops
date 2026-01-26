@@ -729,8 +729,8 @@ def _surface_down(w: int) -> list[Block]:
 # Surface emits observations that become Facts upstream
 #
 # Three strata:
-#   Raw input  (auto)   "key"    {key: "j"}
-#   UI action  (auto)   "action" {action: "pop", layer: "confirm"}
+#   Raw input  (auto)   "ui.key"    {key: "j"}
+#   UI action  (auto)   "ui.action" {action: "pop", layer: "confirm"}
 #   Domain     (manual)  (any)   {item: "deploy-prod"}''',
             w, title="emit protocol",
         ),

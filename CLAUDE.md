@@ -83,9 +83,9 @@ Surface emits at three strata:
 
     Stratum        Auto?   Kind       Example payload
     ────────────────────────────────────────────────────────
-    Raw input      yes     "key"      {key: "j"}
-    UI structure   yes     "action"   {action: "pop", layer: "confirm"}
-                   yes     "resize"   {width: 80, height: 24}
+    Raw input      yes     "ui.key"      {key: "j"}
+    UI structure   yes     "ui.action"   {action: "pop", layer: "confirm"}
+                   yes     "ui.resize"   {width: 80, height: 24}
     Domain         no      (any)      {item: "deploy-prod"}
 
 `Emit = Callable[[str, dict], None]` — cells defines the callback type,

@@ -1,14 +1,22 @@
 # cells
 
-A cell-buffer terminal UI framework for Python.
+A cell-buffer terminal UI framework
 
-## Install
+## Atom
 
-```bash
-uv add cells
+```
+Cell
+ ├─ char: str       # single character
+ └─ style: Style
+     ├─ fg: str     # foreground color
+     ├─ bg: str     # background color
+     ├─ bold: bool
+     ├─ dim: bool
+     ├─ italic: bool
+     └─ ...
 ```
 
-## Quick Start
+## Usage
 
 ```python
 import asyncio
@@ -23,14 +31,14 @@ class HelloApp(Surface):
 asyncio.run(HelloApp().run())
 ```
 
-## Overview
+## API
 
-- **Cell/Style** — atomic display unit (char + style)
-- **Buffer/BufferView** — 2D cell grid with region clipping
-- **Block** — immutable rectangle of cells for composition
-- **Span/Line** — styled text primitives
-- **compose** — `join_horizontal`, `join_vertical`, `pad`, `border`, `truncate`
-- **Surface** — async main loop with keyboard input and resize handling
-- **components** — spinner, progress bar, list view, text input, table
-
-Extracted from [experiments](https://github.com/kaygee/experiments).
+| Export | Purpose |
+|--------|---------|
+| `Cell` / `Style` | Atomic display unit (char + style) |
+| `Buffer` / `BufferView` | 2D cell grid with region clipping |
+| `Block` | Immutable rectangle of cells for composition |
+| `Span` / `Line` | Styled text primitives |
+| `join_horizontal`, `join_vertical`, `pad`, `border`, `truncate` | Composition functions |
+| `Surface` | Async main loop with keyboard input and resize handling |
+| `Layer` / `Lens` | Layered rendering and viewport |

@@ -3,6 +3,7 @@ name = "ticks"
 version = "0.1.0"
 description = "Personal-scale event infrastructure. Kafka concepts at file scale."
 readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = []
 
@@ -24,8 +25,6 @@ packages = ["src/ticks"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["."]
-addopts = ""
 
 [tool.coverage.run]
 source = ["src/ticks"]

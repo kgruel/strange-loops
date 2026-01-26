@@ -1,14 +1,26 @@
 # shapes
 
-Data contracts for how events become state: `Facet + Fold + Shape`.
+Declarative schema shapes: Field, Fold, Form
 
-## What it is
+## Atom
 
-Shape contracts that define how events become state. Three primitives:
+```
+Shape
+ ├─ name: str
+ ├─ about: str
+ ├─ input_facets: tuple[Facet, ...]    # what events look like
+ ├─ state_facets: tuple[Facet, ...]    # what state looks like
+ └─ folds: tuple[Fold, ...]           # how events update state
 
-- **Facet** — a named, typed face of a shape (`name + kind`), with optional marker (`"int?"`)
-- **Fold** — a transformation rule (`op + target`): latest, collect, count, upsert, sum
-- **Shape** — a complete contract: input facets + state facets + fold rules
+Facet
+ ├─ name: str       # field name
+ └─ kind: str       # type marker ("str", "int", "dict", "int?")
+
+Fold
+ ├─ op: str         # operation (latest, collect, count, upsert, sum)
+ ├─ target: str     # which state facet to update
+ └─ props: dict     # operation-specific config
+```
 
 ## Usage
 
@@ -47,7 +59,17 @@ shape = Shape(
 state = shape.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
 ```
 
-## Fold operations
+## API
+
+| Export | Purpose |
+|--------|---------|
+| `Facet` | Named, typed face of a shape (name + kind) |
+| `Fold` | Transformation rule (op + target + props) |
+| `Shape` | Complete contract: input facets + state facets + folds |
+| `Shape.apply()` | Execute folds: pure dict → dict |
+| `Shape.initial_state()` | Generate initial state from state facets |
+
+### Fold operations
 
 | Op | Behavior | Props |
 |----|----------|-------|
@@ -56,7 +78,3 @@ state = shape.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
 | `count` | Increment counter | — |
 | `upsert` | Update-or-insert into dict or set | `key=` field |
 | `sum` | Accumulate numeric value | — |
-
-## Dependencies
-
-None. Stdlib only.

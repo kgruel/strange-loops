@@ -3,10 +3,11 @@ name = "peers"
 version = "0.1.0"
 description = "Scoped identity primitives: Peer = name + scope"
 readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = []
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.0",
 ]

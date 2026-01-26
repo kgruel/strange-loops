@@ -2,6 +2,21 @@
 
 Fact: the observation atom — what happened, when.
 
+## Atom
+
+```
+Fact[T]
+ ├─ kind: str        # open routing key ("heartbeat", "deploy", etc.)
+ ├─ ts: datetime     # when observed (timezone-aware)
+ └─ payload: T       # the details — Shape knows the structure
+```
+
+Kind is an open string. No enum, no constrained set. Structure comes from Shape, not from kind.
+
+Dict payloads are wrapped in `MappingProxyType` for immutability (same pattern as Fold.props in shapes).
+
+## Usage
+
 ```python
 from facts import Fact
 
@@ -19,15 +34,12 @@ f2 = Fact.from_dict(d)
 f.is_kind("deploy", "rollback")  # True if kind matches any
 ```
 
-## The atom
+## API
 
-```
-Fact[T]
- ├─ kind: str        # open routing key ("heartbeat", "deploy", etc.)
- ├─ ts: datetime     # when observed (timezone-aware)
- └─ payload: T       # the details — Shape knows the structure
-```
-
-Kind is an open string. No enum, no constrained set. Structure comes from Shape, not from kind.
-
-Dict payloads are wrapped in `MappingProxyType` for immutability (same pattern as Fold.props in shapes).
+| Export | Purpose |
+|--------|---------|
+| `Fact` | kind + ts + payload (observation atom) |
+| `Fact.of()` | Factory with auto-timestamp and dict payload |
+| `Fact.to_dict()` | Serialize to dict |
+| `Fact.from_dict()` | Deserialize from dict |
+| `Fact.is_kind()` | Kind predicate |

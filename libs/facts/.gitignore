@@ -1,21 +1,7 @@
-# Python-generated files
 __pycache__/
-*.py[oc]
-build/
+*.py[cod]
+*.egg-info/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-
-# Coverage files
-.coverage
-htmlcov/
-
-# Pytest files
+build/
+.venv/
 .pytest_cache/
-coverage.xml 
-
-# CLAUDE files
-.claude/

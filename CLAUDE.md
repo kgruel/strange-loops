@@ -132,7 +132,7 @@ Standalone demo scripts and teaching materials extracted from the cells library.
 
 ## Key Patterns
 
-- All libs use `src/` layout with hatchling (except facts which uses uv_build)
+- All libs use `src/` layout with hatchling
 - Workspace dependencies use `{ workspace = true }` in `[tool.uv.sources]`
 - Each lib has its own pyproject.toml, tests/, and build config
 - Immutable by default: frozen dataclasses, pure functions, compose don't mutate

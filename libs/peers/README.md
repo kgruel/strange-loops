@@ -1,13 +1,16 @@
 # peers
 
-Scoped identity primitives: `Peer = name + scope`
+Scoped identity primitives: Peer = name + scope
 
-Part of a five-library ecosystem answering: *Who is acting? What can they see/do?*
+## Atom
 
-## Install
-
-```bash
-uv add peers
+```
+Peer
+ ├─ name: str        # identity label
+ └─ scope: Scope
+     ├─ see: frozenset[str]   # what you can observe
+     ├─ do: frozenset[str]    # what you can act on
+     └─ ask: frozenset[str]   # what you can query
 ```
 
 ## Usage
@@ -32,16 +35,12 @@ operator = delegate(admin, "operator", see={"logs", "metrics"}, do={"deploy"})
 expanded = grant(operator.scope, see={"alerts"})
 ```
 
-## Primitives
+## API
 
-| Primitive | Purpose |
-|-----------|---------|
+| Export | Purpose |
+|--------|---------|
 | `Peer` | name + scope (atomic identity) |
 | `Scope` | see + do + ask (boundaries) |
 | `grant` | expand scope |
 | `restrict` | narrow scope (intersection) |
 | `delegate` | create child peer with restricted scope |
-
-## Key Insight
-
-**Scope cascades through everything.** A Peer's scope defines what they can see/do/ask across all layers of the ecosystem.

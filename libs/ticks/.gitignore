@@ -1,22 +1,7 @@
-# Python
 __pycache__/
 *.py[cod]
-*.so
-.Python
 *.egg-info/
 dist/
 build/
-
-# Testing
-.coverage
-.pytest_cache/
-htmlcov/
-
-# Virtual environments
 .venv/
-venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
+.pytest_cache/

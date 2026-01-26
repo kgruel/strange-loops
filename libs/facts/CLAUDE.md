@@ -51,7 +51,3 @@ src/facts/__init__.py   # Re-exports Fact
 src/facts/fact.py       # Fact implementation
 tests/test_fact.py      # 10 test classes
 ```
-
-## Build Note
-
-Uses `uv_build` (not hatchling) as build backend.

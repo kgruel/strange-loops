@@ -14,19 +14,30 @@ if TYPE_CHECKING:
 
 
 async def containers(ssh: "SSHSession") -> list[dict]:
-    """Poll running containers. Returns one event per container."""
+    """Poll running containers. Returns one event per container.
+
+    Output matches vm-health projection's container.status event:
+      container, service, state, health, healthy
+    """
     output = await ssh.run("docker ps --format json")
     events = []
     for line in output.strip().split("\n"):
         if line:
             data = json.loads(line)
+            name = data.get("Names", "")
+            state = data.get("State", "")  # "running", "exited", etc.
+            status = data.get("Status", "")  # "Up 2 hours", "Exited (1) 3 days ago"
+
+            # Derive health from state
+            healthy = state == "running"
+            health = "healthy" if healthy else state
+
             events.append({
-                "type": "container",
-                "id": data.get("ID", ""),
-                "name": data.get("Names", ""),
-                "image": data.get("Image", ""),
-                "status": data.get("Status", ""),
-                "state": data.get("State", ""),
+                "container": name,
+                "service": name,  # use container name as service for now
+                "state": state,
+                "health": health,
+                "healthy": healthy,
             })
     return events
 

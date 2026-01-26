@@ -121,10 +121,8 @@ class TestAppSpec:
         app = parse_app_spec(SPECS_DIR / "homelab.app.kdl", specs_dir=SPECS_DIR)
         assert app.name == "homelab"
         assert app.watch is True
-        assert len(app.projections) == 3
+        assert len(app.projections) == 1
         assert app.projections[0].name == "vm-health"
-        assert app.projections[1].name == "vm-events"
-        assert app.projections[2].name == "vm-resources"
 
     def test_inventory_loaded(self):
         app = parse_app_spec(SPECS_DIR / "homelab.app.kdl", specs_dir=SPECS_DIR)

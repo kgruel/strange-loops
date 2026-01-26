@@ -132,6 +132,7 @@ Clean up or port as needed when those experiments are revisited.
 ## Commits this session
 
 ```
+2125bcb Replace old pipeline experiment with atomic pipeline tests
 61fbc73 Update CLAUDE.md, HANDOFF.md, and THREADS.md for session vocabulary changes
 49ea6a0 Replace Event with Fact atom, strip CLI framework from facts library
 9738280 Add Shape.apply() fold engine and Projection fold callable

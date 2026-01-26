@@ -14,10 +14,57 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import AsyncIterator
+import shlex
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator
 
 import asyncssh
+
+
+def _parse_common_args(args: str) -> dict[str, Any]:
+    """Parse SSH common args into asyncssh connect kwargs.
+
+    Supports:
+      -J jump_host        → tunnel="jump_host"
+      -o ProxyJump=host   → tunnel="host"
+      -p port             → port=int(port)
+      -o Port=port        → port=int(port)
+
+    Returns dict of asyncssh.connect() kwargs.
+    """
+    if not args:
+        return {}
+
+    result: dict[str, Any] = {}
+    tokens = shlex.split(args)
+    i = 0
+
+    while i < len(tokens):
+        token = tokens[i]
+
+        if token == "-J" and i + 1 < len(tokens):
+            # -J jump_host
+            result["tunnel"] = tokens[i + 1]
+            i += 2
+        elif token == "-p" and i + 1 < len(tokens):
+            # -p port
+            result["port"] = int(tokens[i + 1])
+            i += 2
+        elif token == "-o" and i + 1 < len(tokens):
+            # -o Option=value
+            opt = tokens[i + 1]
+            if "=" in opt:
+                key, val = opt.split("=", 1)
+                if key == "ProxyJump":
+                    result["tunnel"] = val
+                elif key == "Port":
+                    result["port"] = int(val)
+                # Other -o options can be added here
+            i += 2
+        else:
+            i += 1
+
+    return result
 
 
 @dataclass
@@ -27,14 +74,17 @@ class SSHSession:
     host: str
     user: str
     key_file: str
-    _conn: asyncssh.SSHClientConnection | None = None
+    common_args: str = ""
+    _conn: asyncssh.SSHClientConnection | None = field(default=None, repr=False)
 
     async def __aenter__(self) -> "SSHSession":
+        connect_kwargs = _parse_common_args(self.common_args)
         self._conn = await asyncssh.connect(
             self.host,
             username=self.user,
             client_keys=[self.key_file],
             known_hosts=None,  # TODO: proper host key verification
+            **connect_kwargs,
         )
         return self
 

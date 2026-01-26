@@ -45,9 +45,15 @@ class AppSpec:
     about: str
     watch: bool
     inventory_path: Path
-    vms: tuple[HostInfo, ...]
+    inventory_type: str  # "ansible" (default), future: other formats
+    hosts: tuple[HostInfo, ...]
     projections: tuple[ProjectionSpec, ...]  # per-connection specs
     data_sources: tuple[DataSourceSpec, ...]  # collector -> projection mappings
+
+    @property
+    def vms(self) -> tuple[HostInfo, ...]:
+        """Backward compat alias for hosts."""
+        return self.hosts
 
     def diff_uses(self, other: AppSpec) -> tuple[list[str], list[str]]:
         """Compare projection uses with another spec. Returns (added, removed)."""
@@ -73,6 +79,7 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
     about = ""
     watch = False
     inventory_path = ""
+    inventory_type = "ansible"  # default
     uses: list[str] = []
     data_sources: list[DataSourceSpec] = []
 
@@ -85,7 +92,12 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
                 elif child.name == "watch":
                     watch = bool(child.args[0]) if child.args else True
                 elif child.name == "inventory":
-                    inventory_path = str(child.args[0]) if child.args else ""
+                    # Parse inventory node: supports two syntaxes
+                    # 1. inventory "path" (backward compat, implies from="ansible")
+                    # 2. inventory from="ansible" path="..."
+                    inv_path, inv_type = _parse_inventory_node(child)
+                    inventory_path = inv_path
+                    inventory_type = inv_type
                 elif child.name == "per-connection":
                     for use_node in child.nodes or []:
                         if use_node.name == "use":
@@ -102,7 +114,7 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
 
     # Resolve inventory
     inv_path = _resolve_path(inventory_path, path.parent)
-    vms = _load_inventory(inv_path) if inv_path.exists() else ()
+    hosts = _load_inventory(inv_path, inventory_type) if inv_path.exists() else ()
 
     # Resolve projection specs
     projections: list[ProjectionSpec] = []
@@ -119,7 +131,8 @@ def parse_app_spec(path: Path, specs_dir: Path | None = None) -> AppSpec:
         about=about,
         watch=watch,
         inventory_path=inv_path,
-        vms=tuple(vms),
+        inventory_type=inventory_type,
+        hosts=tuple(hosts),
         projections=tuple(projections),
         data_sources=tuple(data_sources),
     )
@@ -167,6 +180,32 @@ def _resolve_path(path_str: str, base: Path) -> Path:
     return (base / p).resolve()
 
 
-def _load_inventory(path: Path) -> list[HostInfo]:
-    """Load hosts from an Ansible inventory YAML."""
-    return load_ansible_inventory(path)
+def _parse_inventory_node(node: Any) -> tuple[str, str]:
+    """Parse inventory node into (path, type).
+
+    Supports two syntaxes:
+        inventory "path"                   → path, "ansible"
+        inventory from="ansible" path="~"  → path, "ansible"
+
+    Returns (inventory_path, inventory_type).
+    """
+    props = node.props or {}
+
+    # Check for new syntax: from= and path= properties
+    if "path" in props:
+        inv_path = str(props["path"])
+        inv_type = str(props.get("from", "ansible"))
+        return inv_path, inv_type
+
+    # Backward compat: positional arg is path, type is ansible
+    if node.args:
+        return str(node.args[0]), "ansible"
+
+    return "", "ansible"
+
+
+def _load_inventory(path: Path, inventory_type: str) -> list[HostInfo]:
+    """Load hosts from inventory file based on type."""
+    if inventory_type == "ansible":
+        return load_ansible_inventory(path)
+    raise ValueError(f"Unknown inventory type: {inventory_type}")

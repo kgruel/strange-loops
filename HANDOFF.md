@@ -52,20 +52,43 @@ at a boundary). Same envelope pattern, different semantics. Fact has
 - All five THREADS.md files updated with resolved threads and
   vocabulary corrections (Event→Fact).
 
+**Pipeline experiment reset** — Deleted old `experiments/apps/pipeline.py`
+and `experiments/tests/test_pipeline.py` (used Event, ShapeProjection
+bridge class, old vocabulary). Built new `experiments/tests/test_atoms.py`
+— 14 tests validating the full pipeline atomically, stage by stage:
+
+1. Fact creation (direct, factory, is_kind)
+2. Stream[Fact] carries and fans out
+3. Shape defines contract with initial_state
+4. Shape.apply folds payloads into state (single, accumulate, immutability)
+5. Projection(fold=...) wires Stream → Shape.apply
+6. Tick snapshots state, Tick flows through downstream Stream[Tick]
+
+The bridge between Fact and Shape is a 3-line function:
+```python
+def _make_fold(shape):
+    def fold(state, fact):
+        return shape.apply(state, dict(fact.payload))
+    return fold
+```
+Projection receives Facts, Shape.apply receives dicts. The extraction
+happens at the composition point — no class, no import tangle.
+
 ## Next session
 
-Dump the old pipeline experiment and rebuild it iteratively, using
-the now-consistent atoms:
+Continue building up the pipeline experiment. The atoms validate —
+next layers to add:
 
-```
-Fact.of("heartbeat", service="api") → Stream[Fact]
-    → Projection(initial=shape.initial_state(), fold=shape.apply)
-    → live state → Lens → Cells
-    → Tick[state] at boundary → Stream[Tick] → downstream
-```
+- **Lens → Cells**: Render projected state through shape_lens into
+  terminal output. Validates the shapes→cells bridge.
+- **Persistence**: Stream[Fact] → FileWriter → Tailer → replay.
+  Validates the facts→ticks persistence path.
+- **Live app**: RenderApp wiring all five libs end-to-end.
+  The old pipeline.py rebuilt with the new atoms and no bridge classes.
 
-No bridge classes. Shape.apply() does the folding. Projection accepts
-the callable. Fact carries the observation. Tick carries the snapshot.
+The old experiments/ still has apps (homelab, demo, logs, etc.) and
+framework/ code that uses the old Event import — these will break.
+Clean up or port as needed when those experiments are revisited.
 
 ## Open threads
 
@@ -97,9 +120,19 @@ the callable. Fact carries the observation. Tick carries the snapshot.
 - **ShapeLens extensions**: Tree lens, chart lens. Future.
 - **Zoom propagation**: Global vs independent vs relative. Not decided.
 
+### Emerging patterns
+
+- **Fact→Shape bridge**: Every Projection that folds Facts through a
+  Shape needs a thin extraction function. This is 3 lines today. If
+  it keeps recurring, it may become a utility. Watch for this.
+- **"Personal semantic Kafka"**: The project framing that emerged —
+  same plumbing and concepts as Kafka (streams, projections, stores),
+  reimagined for personal context without enterprise cruft.
+
 ## Commits this session
 
 ```
+61fbc73 Update CLAUDE.md, HANDOFF.md, and THREADS.md for session vocabulary changes
 49ea6a0 Replace Event with Fact atom, strip CLI framework from facts library
 9738280 Add Shape.apply() fold engine and Projection fold callable
 b8d5879 Add Tick atom to ticks library: frozen dataclass ts + payload

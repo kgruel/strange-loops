@@ -25,57 +25,78 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 
 ### Atoms
 
-| Package | Atom | Structure | Question |
-|---------|------|-----------|----------|
-| **peers** | Peer | name + scope | *who* |
-| **facts** | Event | kind + data + ts | *what* |
-| **ticks** | Tick | timestamp + payload | *when* |
-| **shapes** | Shape | facets + folds | *how* |
-| **cells** | Cell | char + style | *where* |
+| Package | Atom | Structure | Question | Metaphor |
+|---------|------|-----------|----------|----------|
+| **peers** | Peer | name + scope | *who* | social |
+| **facts** | Event | kind + data + ts | *what* | narrative |
+| **ticks** | Tick | timestamp + payload | *when* | temporal |
+| **shapes** | Shape | facets + folds | *how* | geometric |
+| **cells** | Cell | char + style | *where* | spatial |
 
 ### Data Flow
 
-The pipeline is a loop. The human is a Peer in it.
+The pipeline is a loop. You are a Peer in it.
 
-    ┌──────────────────────────────────────────────────────────┐
-    │                                                          │
-    ▼                                                          │
-  Event                                            facts       │
-    │                                                          │
-    ▼                                                          │
-  Stream                                           ticks       │
-    │                                                          │
-    ▼                                                          │
-  Store ──→ FileWriter                             ticks       │
-    │                                                          │
-    ▼                                                          │
-  Projection                                       ticks       │
-    │  delegates to Shape                          shapes      │
-    │                                                          │
-    ▼                                                          │
-  state ─── shaped by Shape ───                                │
-    │                          │              │                │
-    ▼                          ▼              ▼                │
-  Lens → Block → You    Store → SQLite    OpenAPI spec         │
-  cells          peers   ticks             shapes              │
-    │                                                          │
-    └──────────────────────────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────┐
+    │  You (Peer) — your choices become new Events            │
+    │                                                         │
+    ▼                                                         │
+  Event                                            facts      │
+    │                                                         │
+    ▼                                                         │
+  Stream[Event] ─── tap ──→ any external consumer  ticks      │
+    │                                                         │
+    ├──→ Store ──→ FileWriter                      ticks      │
+    │                                                         │
+    ▼                                                         │
+  Projection ← Shape                          ticks + shapes  │
+    │                                                         │
+    ├── live state ──→ Lens → Block → You ────────────────────┘
+    │                              cells   peers
+    │
+    └── Tick[state] ──→ Stream[Tick] ─── tap ──→ any external consumer
+                              │                      ticks
+                              ▼
+                         downstream
+                   (project, persist, serve)
 
-State is a dict that conforms to a Shape. Any consumer that reads
-the Shape can use the state: render it, persist it, serve it,
-or feed it downstream.
+A Peer emits an Event. The Event flows through a Stream. A
+Projection applies a Shape to fold events into state. You see
+state through a Lens rendered as Cells. Your choices become new
+Events — the loop continues.
+
+At a temporal boundary, the folded state becomes a Tick — a frozen
+snapshot. Ticks flow downstream as a new Stream for further
+projection, persistence, or serving. Streams can be tapped at any
+point to split off to external consumers without interrupting
+the main pipeline.
 
 ### Core Libraries (libs/)
 
 | Package | Atom | Purpose |
 |---------|------|---------|
-| **peers** | Peer | Scoped identity: name + scope (see, do, ask) |
+| **peers** | Peer | Scoped identity: name + scope (see, do, ask). Delegation creates child peers with narrower scope — the hierarchy encodes participation level (direct, delegated, automated). |
 | **facts** | Event | Semantic contract: kind + data + ts. Result for completion. Emitter protocol. |
-| **ticks** | Tick | Event infrastructure: Stream, Store, Projection, FileWriter, Tailer |
-| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply) |
+| **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding events through a Shape over a period. |
+| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds). Defines how events become state. |
 | **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, RenderApp |
 
 All libraries are independent — no lib imports another. They compose in experiments.
+
+### Peer Participation
+
+A Peer's level of participation is encoded in the delegation hierarchy,
+not as a separate type. The root peer acts directly; children act on
+behalf of the root with restricted scope.
+
+    You (Peer: "kyle")                      → direct, full scope
+      ├─ delegate("kyle/deploy-agent")      → autonomous, narrower scope
+      ├─ delegate("kyle/backup-cron")       → automated, narrowest scope
+      └─ delegate("kyle/subtask-worker")    → delegated, task-scoped
+
+Stance (direct, guided, delegated, automated, observing) is an emergent
+property of the topology — which peer emitted the event tells you the
+participation level. No enum needed; the identity is the stance.
 
 ### experiments/
 

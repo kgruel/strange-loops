@@ -1,7 +1,7 @@
 [project]
 name = "facts"
-version = "0.6.0"
-description = "Renderer-agnostic semantic contract for CLI output"
+version = "1.0.0"
+description = "Fact: the observation atom — what happened, when"
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"

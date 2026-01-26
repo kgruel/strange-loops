@@ -1,28 +1,11 @@
 # THREADS — facts
 
-## Vocabulary rename: Event vs Fact
-Prior session (Jan 25) planned Event -> Fact, Result -> Verdict as part
-of the ecosystem vocabulary grounding. Code in prism still uses
-Event/Result. The pipeline reads naturally with "Event" and the name has
-earned its place. Decision needed: commit to the rename or keep Event?
+## [resolved] Vocabulary rename: Event → Fact
+Event renamed to Fact. Clean break — Event, Result, Emitter, and all CLI
+output framework removed. Fact is the observation atom: kind + ts + payload.
 
-If renaming:
-- Event -> Fact
-- Result -> Verdict
-- EventKind -> FactKind
-- EventLevel -> FactLevel
-- ResultStatus -> VerdictStatus
-- Emitter stays (still emits)
-
-## API refinement
-The original ecosystem discussion noted facts needs vocabulary and API
-work to refine. Specifics not yet scoped. The factory methods
-(Event.log, Event.progress, Event.artifact, Event.metric, Event.input,
-Event.log_signal) work but may need review against the grounded
-vocabulary.
-
-## Emitter protocol
-Emitter.emit() + Emitter.finish() with "finish exactly once" invariant.
-Solid design from the ev days. May need review for how it integrates
-with the Stream[Event] pattern in ticks — currently Emitter is
-synchronous, Stream is async.
+## Kind conventions
+Open thread: review kind conventions as usage patterns emerge. Kind is an
+open string by design — no enum, no constrained set. As the pipeline gets
+real usage, patterns will surface (e.g., common prefixes, naming conventions).
+Defer codifying until patterns are grounded.

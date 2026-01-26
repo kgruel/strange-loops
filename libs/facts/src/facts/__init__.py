@@ -1,31 +1,16 @@
-"""facts - Renderer-agnostic semantic contract for CLI output.
+"""facts — Fact: the observation atom.
 
-The missing ViewModel layer between domain logic and presentation.
-Domain emits Event/Result, renderers interpret.
+A Fact is an intentional observation — something that happened at a
+specific time. Kind is an open string; structure comes from Shape.
 
 Example:
-    from facts import Event, Result, Emitter, ListEmitter
+    from facts import Fact
 
-    def my_command(emitter: Emitter) -> Result:
-        emitter.emit(Event(kind="progress", message="Starting..."))
-        # do work
-        emitter.emit(Event(kind="progress", data={"complete": True}))
-        return Result(status="ok", summary="Done")
-
-    # For testing:
-    emitter = ListEmitter()
-    result = my_command(emitter)
-    emitter.finish(result)
-    assert len(emitter.events) == 2
+    f = Fact.of("heartbeat", service="api", latency=42)
+    assert f.kind == "heartbeat"
+    assert f.payload["service"] == "api"
 """
 
-from facts.emitter import Emitter, ListEmitter, NullEmitter
-from facts.types import Event, Result
+from facts.fact import Fact
 
-__all__ = [
-    "Event",
-    "Result",
-    "Emitter",
-    "ListEmitter",
-    "NullEmitter",
-]
+__all__ = ["Fact"]

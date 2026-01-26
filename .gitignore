@@ -11,3 +11,6 @@ uv.lock
 .pytest_cache/
 .subtask/
 .obsidian/
+.DS_Store
+*.gif
+*.tape

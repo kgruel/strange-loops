@@ -16,16 +16,11 @@ from typing import Any
 import kdl
 
 from .spec import ProjectionSpec, parse_projection_spec
+from .inventory import HostInfo, load_ansible_inventory
 
 
-@dataclass(frozen=True)
-class VMInfo:
-    """A VM from the inventory."""
-    name: str
-    host: str
-    user: str
-    key_file: str
-    service_type: str
+# Backward compatibility alias
+VMInfo = HostInfo
 
 
 @dataclass(frozen=True)
@@ -50,7 +45,7 @@ class AppSpec:
     about: str
     watch: bool
     inventory_path: Path
-    vms: tuple[VMInfo, ...]
+    vms: tuple[HostInfo, ...]
     projections: tuple[ProjectionSpec, ...]  # per-connection specs
     data_sources: tuple[DataSourceSpec, ...]  # collector -> projection mappings
 
@@ -172,27 +167,6 @@ def _resolve_path(path_str: str, base: Path) -> Path:
     return (base / p).resolve()
 
 
-def _load_inventory(path: Path) -> list[VMInfo]:
-    """Load VMs from an Ansible inventory YAML."""
-    data = yaml.safe_load(path.read_text())
-
-    vms: list[VMInfo] = []
-
-    # Walk the inventory structure: all.children.{group}.hosts.{name}
-    children = data.get("all", {}).get("children", {})
-    for group_name, group in children.items():
-        hosts = group.get("hosts", {})
-        if not hosts:
-            continue
-        for host_name, host_data in hosts.items():
-            if not isinstance(host_data, dict):
-                continue
-            vms.append(VMInfo(
-                name=host_name,
-                host=host_data.get("ansible_host", ""),
-                user=host_data.get("ansible_user", ""),
-                key_file=host_data.get("ansible_ssh_private_key_file", ""),
-                service_type=host_data.get("service_type", ""),
-            ))
-
-    return vms
+def _load_inventory(path: Path) -> list[HostInfo]:
+    """Load hosts from an Ansible inventory YAML."""
+    return load_ansible_inventory(path)

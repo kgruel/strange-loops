@@ -1,7 +1,7 @@
 """Tests for the Fact atom."""
 
 import dataclasses
-from datetime import datetime, timezone
+import time
 from types import MappingProxyType
 
 import pytest
@@ -14,19 +14,19 @@ from facts import Fact
 
 class TestConstruction:
     def test_direct_construction(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f = Fact(kind="heartbeat", ts=ts, payload={"service": "api"})
         assert f.kind == "heartbeat"
         assert f.ts == ts
         assert f.payload["service"] == "api"
 
     def test_str_payload(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f = Fact(kind="log", ts=ts, payload="hello")
         assert f.payload == "hello"
 
     def test_int_payload(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f = Fact(kind="metric", ts=ts, payload=42)
         assert f.payload == 42
 
@@ -36,7 +36,7 @@ class TestConstruction:
             name: str
             value: int
 
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         info = Info(name="cpu", value=80)
         f = Fact(kind="metric", ts=ts, payload=info)
         assert f.payload.name == "cpu"
@@ -54,11 +54,11 @@ class TestFactory:
         assert f.payload["latency"] == 42
 
     def test_of_auto_timestamps(self):
-        before = datetime.now(timezone.utc)
+        before = time.time()
         f = Fact.of("deploy", app="web")
-        after = datetime.now(timezone.utc)
+        after = time.time()
         assert before <= f.ts <= after
-        assert f.ts.tzinfo is not None
+        assert isinstance(f.ts, float)
 
     def test_of_empty_payload(self):
         f = Fact.of("ping")
@@ -77,7 +77,7 @@ class TestFrozen:
     def test_cannot_reassign_ts(self):
         f = Fact.of("heartbeat")
         with pytest.raises(dataclasses.FrozenInstanceError):
-            f.ts = datetime.now(timezone.utc)  # type: ignore[misc]
+            f.ts = time.time()  # type: ignore[misc]
 
     def test_cannot_reassign_payload(self):
         f = Fact.of("heartbeat", x=1)
@@ -100,13 +100,13 @@ class TestPayloadImmutability:
 
     def test_original_dict_mutation_does_not_affect_fact(self):
         data = {"service": "api"}
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f = Fact(kind="heartbeat", ts=ts, payload=data)
         data["service"] = "changed"
         assert f.payload["service"] == "api"
 
     def test_non_dict_payload_not_wrapped(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f = Fact(kind="metric", ts=ts, payload=42)
         assert not isinstance(f.payload, MappingProxyType)
 
@@ -114,14 +114,16 @@ class TestPayloadImmutability:
 # --- Serialization ---
 
 
+FIXED_TS = 1736942400.0  # 2025-01-15T12:00:00 UTC
+
+
 class TestSerialization:
     def test_to_dict(self):
-        ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        f = Fact(kind="deploy", ts=ts, payload={"app": "web"})
+        f = Fact(kind="deploy", ts=FIXED_TS, payload={"app": "web"})
         d = f.to_dict()
         assert d == {
             "kind": "deploy",
-            "ts": "2025-01-15T12:00:00+00:00",
+            "ts": FIXED_TS,
             "payload": {"app": "web"},
         }
 
@@ -132,20 +134,19 @@ class TestSerialization:
         assert not isinstance(d["payload"], MappingProxyType)
 
     def test_to_dict_non_dict_payload(self):
-        ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        f = Fact(kind="count", ts=ts, payload=42)
+        f = Fact(kind="count", ts=FIXED_TS, payload=42)
         d = f.to_dict()
         assert d["payload"] == 42
 
     def test_from_dict(self):
         d = {
             "kind": "deploy",
-            "ts": "2025-01-15T12:00:00+00:00",
+            "ts": FIXED_TS,
             "payload": {"app": "web"},
         }
         f = Fact.from_dict(d)
         assert f.kind == "deploy"
-        assert f.ts == datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        assert f.ts == FIXED_TS
         assert f.payload["app"] == "web"
 
     def test_round_trip(self):
@@ -156,8 +157,7 @@ class TestSerialization:
         assert dict(rebuilt.payload) == dict(original.payload)
 
     def test_round_trip_non_dict_payload(self):
-        ts = datetime(2025, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
-        original = Fact(kind="count", ts=ts, payload=99)
+        original = Fact(kind="count", ts=FIXED_TS, payload=99)
         rebuilt = Fact.from_dict(original.to_dict())
         assert rebuilt.kind == original.kind
         assert rebuilt.ts == original.ts
@@ -186,22 +186,19 @@ class TestIsKind:
 
 class TestEqualityAndHashing:
     def test_equal_facts(self):
-        ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        f1 = Fact(kind="heartbeat", ts=ts, payload={"x": 1})
-        f2 = Fact(kind="heartbeat", ts=ts, payload={"x": 1})
+        f1 = Fact(kind="heartbeat", ts=FIXED_TS, payload={"x": 1})
+        f2 = Fact(kind="heartbeat", ts=FIXED_TS, payload={"x": 1})
         assert f1 == f2
 
     def test_unequal_facts(self):
-        ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        f1 = Fact(kind="heartbeat", ts=ts, payload={"x": 1})
-        f2 = Fact(kind="deploy", ts=ts, payload={"x": 1})
+        f1 = Fact(kind="heartbeat", ts=FIXED_TS, payload={"x": 1})
+        f2 = Fact(kind="deploy", ts=FIXED_TS, payload={"x": 1})
         assert f1 != f2
 
     def test_usable_in_set(self):
-        ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        f1 = Fact(kind="heartbeat", ts=ts, payload="a")
-        f2 = Fact(kind="heartbeat", ts=ts, payload="a")
-        f3 = Fact(kind="deploy", ts=ts, payload="b")
+        f1 = Fact(kind="heartbeat", ts=FIXED_TS, payload="a")
+        f2 = Fact(kind="heartbeat", ts=FIXED_TS, payload="a")
+        f3 = Fact(kind="deploy", ts=FIXED_TS, payload="b")
         s = {f1, f2, f3}
         assert len(s) == 2
 
@@ -211,17 +208,17 @@ class TestEqualityAndHashing:
 
 class TestGeneric:
     def test_fact_int(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f: Fact[int] = Fact(kind="count", ts=ts, payload=42)
         assert f.payload == 42
 
     def test_fact_str(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f: Fact[str] = Fact(kind="label", ts=ts, payload="hello")
         assert f.payload == "hello"
 
     def test_fact_dict(self):
-        ts = datetime.now(timezone.utc)
+        ts = time.time()
         f: Fact[dict] = Fact(kind="data", ts=ts, payload={"a": 1})
         assert f.payload["a"] == 1
 

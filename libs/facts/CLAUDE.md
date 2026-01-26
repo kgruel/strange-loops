@@ -13,7 +13,7 @@ uv run --package facts pytest libs/facts/tests
 ```
 Fact[T]
  ├─ kind: str        # open routing key ("heartbeat", "deploy", etc.)
- ├─ ts: datetime     # when observed (timezone-aware UTC)
+ ├─ ts: float        # epoch seconds — when observed. Display formatting is caller's problem.
  └─ payload: T       # the details — Shape knows the structure
 ```
 
@@ -22,16 +22,16 @@ Fact[T]
 | Export | Kind | Purpose |
 |--------|------|---------|
 | `Fact` | frozen dataclass, Generic[T] | the observation atom |
-| `Fact.of(kind, **data)` | classmethod | factory: auto-timestamp, dict payload |
-| `Fact.to_dict()` | method | serialize (ISO ts, unwrap MappingProxy) |
-| `Fact.from_dict(d)` | classmethod | deserialize (parse ISO ts) |
+| `Fact.of(kind, **data)` | classmethod | factory: auto-timestamp (epoch float), dict payload |
+| `Fact.to_dict()` | method | serialize (float ts, unwrap MappingProxy) |
+| `Fact.from_dict(d)` | classmethod | deserialize (float ts) |
 | `Fact.is_kind(*kinds)` | method | predicate: kind membership check |
 
 ## Invariants
 
 - Frozen dataclass. Dict payloads auto-wrapped in `MappingProxyType`.
 - `kind` is an open string — no enum, no constrained set. Structure comes from Shape.
-- `Fact.of()` always produces `Fact[dict]` with UTC timestamp.
+- `Fact.of()` always produces `Fact[dict]` with epoch float timestamp (`time.time()`).
 - Round-trip: `Fact.from_dict(f.to_dict())` preserves kind, ts, payload.
 - Non-dict payloads (int, str, custom dataclass) pass through unwrapped.
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Generic, TypeVar
 
@@ -19,12 +19,12 @@ class Fact(Generic[T]):
 
     Attributes:
         kind: Open, domain-specific routing key ("heartbeat", "deploy", etc.)
-        ts: When observed (timezone-aware datetime)
+        ts: Epoch seconds (float) — when observed. Display formatting is caller's problem.
         payload: The details — Shape knows the structure
     """
 
     kind: str
-    ts: datetime
+    ts: float
     payload: T
 
     def __post_init__(self) -> None:
@@ -42,23 +42,23 @@ class Fact(Generic[T]):
             kind: Domain-specific routing key
             **data: Keyword arguments become the dict payload
         """
-        return cls(kind=kind, ts=datetime.now(timezone.utc), payload=data)
+        return cls(kind=kind, ts=time.time(), payload=data)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
         payload = dict(self.payload) if isinstance(self.payload, MappingProxyType) else self.payload
         return {
             "kind": self.kind,
-            "ts": self.ts.isoformat(),
+            "ts": self.ts,
             "payload": payload,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Fact:
-        """Reconstruct a Fact from a dict. Parses ISO timestamp."""
+        """Reconstruct a Fact from a dict."""
         return cls(
             kind=d["kind"],
-            ts=datetime.fromisoformat(d["ts"]),
+            ts=float(d["ts"]),
             payload=d["payload"],
         )
 

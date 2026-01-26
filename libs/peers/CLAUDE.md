@@ -50,5 +50,5 @@ Delegation hierarchy encodes participation level (direct, delegated, automated).
 
 ```
 src/peers/__init__.py   # All types + functions (single module)
-tests/test_peer.py      # 11 tests
+tests/test_peer.py      # 12 tests
 ```

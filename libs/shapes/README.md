@@ -1,6 +1,6 @@
 # shapes
 
-Declarative schema shapes: Field, Fold, Form
+Declarative schema shapes: Facet, Fold, Shape
 
 ## Atom
 

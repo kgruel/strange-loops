@@ -1,9 +1,9 @@
 # ticks — Handoff
 
 ## 2026-01-26
-Tick atom: `Tick(ts: datetime, payload: T)`, frozen, generic. 15 tests.
+Tick atom: `Tick(ts: datetime, payload: T)`, frozen, generic.
 Projection fold callable: `Projection(initial, fold=fn)` eliminates
-ShapeProjection bridge class. 5 tests.
+ShapeProjection bridge class. 61 tests across 3 test files.
 
 Added `py.typed` marker. Removed dead pytest config (`pythonpath`, empty
 `addopts`).

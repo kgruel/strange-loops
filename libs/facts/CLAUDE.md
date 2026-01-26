@@ -49,5 +49,5 @@ Fact.kind routes to Shape. Fact.payload is what Shape.apply() folds.
 ```
 src/facts/__init__.py   # Re-exports Fact
 src/facts/fact.py       # Fact implementation
-tests/test_fact.py      # 10 test classes
+tests/test_fact.py      # 9 test classes
 ```

@@ -1,7 +1,7 @@
 [project]
 name = "shapes"
 version = "0.1.0"
-description = "Declarative schema shapes: Field, Fold, Form"
+description = "Declarative schema shapes: Facet, Fold, Shape"
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"

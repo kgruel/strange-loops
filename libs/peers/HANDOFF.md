@@ -4,7 +4,7 @@
 Peer atom: `Peer(name, scope)` with `Scope(see, do, ask)` as frozen
 dataclasses. Three pure functions: `grant` (union), `restrict`
 (intersection), `delegate` (restrict + new Peer). Delegation cannot
-escalate — monotonic narrowing. 11 tests.
+escalate — monotonic narrowing. 12 tests.
 
 Dev deps moved from `[project.optional-dependencies]` to
 `[dependency-groups]` (modern uv convention).

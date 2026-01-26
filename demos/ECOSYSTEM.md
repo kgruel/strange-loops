@@ -1,61 +1,150 @@
-# The Reactive Data Visualization Ecosystem
+# The Unified Semantic Ecosystem
 
-How the temporal (ticks/rill) and spatial (cells) layers work together.
+Five libraries. Five atoms. Five questions. One composable ecosystem.
 
-## Naming: Where and When
+## The Five Dimensions
 
 ```
-cells  = spatial atoms  (where)  → characters in a grid
-ticks  = temporal atoms (when)   → events in a sequence
+┌─────────────────────────────────────────────────────────────────┐
+│                     peers (who + scope)                         │
+│           identity and boundaries that cascade through          │
+└─────────────────────────────────────────────────────────────────┘
+          ↓ scopes everything below
+┌─────────────────────────────────────────────────────────────────┐
+│  facts         ticks         forms         cells                │
+│  (what)        (when)        (how)         (where)              │
+│                                                                 │
+│  Fact          Tick          Field         Cell                 │
+│  kind+ts+data  ts+payload    name+type     char+style           │
+│                                                                 │
+│  Verdict       Store         Form          Block                │
+│  status+code   Stream        Fold          Buffer               │
+│                Projection                  Lens                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-| | cells | ticks (rill) |
-|---|-------|--------------|
-| Atomic unit | Cell (char + style) | Tick/Event (timestamp + data) |
-| Collection | Block (2D cells) | Stream (sequence of ticks) |
-| Accumulation | Buffer (mutable grid) | Store (append-only log) |
-| Transform | Lens (state → Block) | Projection (ticks → state) |
-| Output | Writer (ANSI) | FileWriter (JSONL) |
+| Dimension | Library | Atom | Question |
+|-----------|---------|------|----------|
+| **Who** | peers | Peer (name + scope) | Who is acting? What can they see/do? |
+| **What** | facts | Fact (kind + ts + data) | What semantic meaning? |
+| **When** | ticks | Tick (ts + payload) | When did it happen? How does it flow? |
+| **How** | forms | Field (name + type) | What shape? How does it transform? |
+| **Where** | cells | Cell (char + style) | Where does it appear? How does it look? |
 
-The ev library's Event IS a tick - a timestamped fact with context:
+## Vocabulary Summary
+
+| Library | Atom | Composed | Transform | Purpose |
+|---------|------|----------|-----------|---------|
+| **peers** | Peer | Scope | Grant/Restrict | Identity + boundaries |
+| **facts** | Fact | - | Verdict | Semantic meaning |
+| **ticks** | Tick | Store, Stream | Projection | Temporal flow |
+| **forms** | Field | Form | Fold | Shape contracts |
+| **cells** | Cell | Block, Buffer | Lens | Spatial display |
+
+## The Flow
+
+```
+Peer (scoped identity)
+  │
+  ├─ emits ──→ Fact (semantic meaning)
+  │              │
+  │              ├─ stored in ──→ Tick (timestamped)
+  │              │                  │
+  │              │                  ├─ shaped by ──→ Form (field + fold)
+  │              │                  │                  │
+  │              │                  │                  ├─ rendered via ──→ Lens (zoom)
+  │              │                  │                  │                     │
+  │              │                  │                  │                     └─→ Cell/Block
+  │              │                  │                  │
+  │              │                  └─ projected ──→ State
+  │              │
+  │              └─ returns ──→ Verdict (final outcome)
+  │
+  └─ delegates to ──→ Peer (narrower scope)
+```
+
+## The Interlinks
+
+```
+peers ←──────────────────────────────────────────────────┐
+  │                                                       │
+  │ Peer emits Fact (scoped)                             │
+  ↓                                                       │
+facts ←─────────────────────────────────────────────┐    │
+  │                                                  │    │
+  │ Fact stored as Tick                             │    │
+  ↓                                                  │    │
+ticks ←────────────────────────────────────┐        │    │
+  │                                         │        │    │
+  │ Ticks projected via Form → State       │        │    │
+  ↓                                         │        │    │
+forms ←───────────────────────────┐        │        │    │
+  │                                │        │        │    │
+  │ State rendered via Lens       │        │        │    │
+  ↓                                │        │        │    │
+cells ─────────────────────────────┴────────┴────────┴────┘
+  │                                ↑        ↑        ↑
+  │ User sees Cells               │        │        │
+  │ User acts                     │        │        │
+  └─ interaction ─→ Fact ─────────┴─ scoped by Peer ┘
+```
+
+The feedback loop: Cells render for Peer → Peer sees/acts → Fact emitted → flows through ticks/forms → renders in cells
+
+## Composition Patterns
+
+**Standalone usage** - each library works alone:
+
 ```python
-Event(kind="progress", ts=1609459200.123, data={"current": 50})
+# Just facts - semantic events
+from facts import Fact, Verdict
+fact = Fact.log("Starting")
+verdict = Verdict.ok(data={"count": 42})
+
+# Just cells - visual rendering
+from cells import Block, Lens, shape_lens
+block = Block.text("Hello")
+
+# Just ticks - temporal storage
+from ticks import Store, Stream
+store = Store(path="events.jsonl")
+
+# Just forms - shape contracts
+from forms import Form, Field, Fold
+form = Form(name="status", fields=[Field("healthy", bool)])
+
+# Just peers - identity/scope
+from peers import Peer, Scope
+me = Peer("kaygee", scope=Scope(see={"*"}))
 ```
 
-## Architecture
+**Composed usage** - full pipeline:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    TEMPORAL LAYER (ticks/rill)                  │
-│  Stream → Projection → Store → Tailer                           │
-│  "ticks flow, state derives"                                    │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                     CONTRACT LAYER (specs)                      │
-│  Event shapes → Fold ops → State shapes                         │
-│  "declare what, derive how"                                     │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                       VISUAL LAYER (cells)                      │
-│  State → Lens → Block → Buffer → Writer                         │
-│  "state shapes render by convention"                            │
-└─────────────────────────────────────────────────────────────────┘
-```
+```python
+# Peer-scoped facts through ticks, shaped by forms, rendered in cells
+from peers import Peer, Scope
+from facts import Fact
+from ticks import Store, Projection
+from forms import Form, Field, Fold
+from cells import shape_lens
 
-## The Full Pipeline
+# Identity with scope
+me = Peer("kaygee", scope=Scope(see={"*"}, do={"~/Code/*"}))
 
-```
-Ticks → Stream → Projection → State → Lens → Block
-         (tap)     (fold)              (map)
-                    ↑                    ↑
-                fold ops             zoom level
-               (temporal)            (spatial)
-```
+# Shape contract
+status_form = Form(
+    name="service-status",
+    input_fields=[Field("service", str), Field("healthy", bool)],
+    state_fields=[Field("services", dict)],
+    folds=[Fold("upsert", "services", key="service")]
+)
 
-**ticks** handles the temporal dimension: events flow, accumulate, derive state
-**cells** handles the spatial dimension: state renders, composes, displays
+# Emit scoped fact → store → project → render
+fact = Fact.log_signal("status", service="web", healthy=True, _peer=me.name)
+store.add(fact)
+state = projection.advance(store).state
+block = shape_lens(state, zoom=1, width=80)
+```
 
 ## Design Principles
 
@@ -67,83 +156,70 @@ Ticks → Stream → Projection → State → Lens → Block
 | **Convention over primitive** | Reserved keys before new types |
 | **Vocabulary IS API** | Naming choices define the mental model |
 
-## ticks Vocabulary (temporal/data flow)
+## Library Vocabularies
 
-| Primitive | Signature | Verb |
-|-----------|-----------|------|
-| Tick/Event | timestamp + data | (atomic unit) |
-| Stream | fan-out to consumers | emit, tap |
-| Projection | `(State, Tick) → State` | apply, advance |
-| Store | append-only log | add, since, evict |
-| Tailer | offset-tracking reader | poll, reset |
-| FileWriter | JSONL persistence | (consumer) |
-| Forward | stream bridge | transform |
+### peers (who + scope)
 
-Core concepts: **emit**, **tap**, **fold**, **advance**, **version**
+| Primitive | Purpose |
+|-----------|---------|
+| Peer | name + scope (atomic identity) |
+| Scope | see + do + ask (boundaries) |
+| Grant | expand scope |
+| Restrict | narrow scope (delegation) |
 
-Connection to ev: ev's Event is a tick - timestamped fact with kind + data.
-The emitter protocol streams ticks, then finishes with authoritative Result.
+Scope cascades through everything - defines what a peer can see, do, and ask across all layers.
 
-## cells Vocabulary (visual)
+### facts (semantic meaning)
 
-| Primitive | Signature | Verb |
-|-----------|-----------|------|
-| Cell | char + style | (atomic) |
-| Block | 2D cell rectangle | paint, text |
-| Buffer | mutable grid | fill, put_text |
-| BufferView | clipped region | (delegate) |
-| Lens | `(State, zoom) → Block` | render |
-| Layer | modal stacking | push, pop |
+| Primitive | Purpose |
+|-----------|---------|
+| Fact | kind + ts + data (atomic semantic unit) |
+| Verdict | status + code (final authoritative outcome) |
+| FactKind | log, progress, metric, artifact, input |
 
-Core concepts: **paint**, **compose**, **render**, **zoom**
+### ticks (temporal flow)
 
-## The Connection Point
+| Primitive | Purpose |
+|-----------|---------|
+| Tick | timestamp + payload (atomic moment) |
+| Store | append-only log |
+| Stream | fan-out to consumers |
+| Projection | `(State, Tick) → State` fold |
+| Tailer | offset-tracking reader |
 
-```
-rill Projection ──→ State ──→ cells Lens
-     (derives)                 (renders)
-```
+### forms (shape contracts)
 
-State is the handoff. Projection produces it, Lens consumes it.
+| Primitive | Purpose |
+|-----------|---------|
+| Field | name + type (atomic slot) |
+| Form | collection of fields + folds |
+| Fold | upsert, latest, collect, count, sum |
 
-## Spec Layer (contracts)
+### cells (spatial display)
 
-The spec layer declares shapes without code:
-
-```kdl
-projection "process_status" {
-  event {
-    pid "int"
-    state "string"
-  }
-  state {
-    processes "dict"
-  }
-  fold {
-    upsert "processes" key="pid" value="state"
-  }
-}
-```
-
-- Event spec: what shapes are valid input
-- State spec: what shape is derived
-- Fold ops: how events become state (upsert, latest, collect, count)
-- Rendering: derived from state shape (dict→table, list→list-view)
+| Primitive | Purpose |
+|-----------|---------|
+| Cell | char + style (atomic position) |
+| Block | 2D rectangle of cells |
+| Buffer | mutable grid |
+| Lens | (state, zoom) → Block |
 
 ## What This Enables
 
-1. **No custom projection code** - fold ops cover 90% of cases
-2. **No custom render code** - shape conventions handle it
-3. **Replay** - EventStore + Projections give you time travel
-4. **Hot reload** - change spec, see result immediately
-5. **Agent-friendly** - simple enough for agents to wire up
+1. **Standalone or composed** - each library works alone or together
+2. **Scoped by identity** - peers cascade boundaries through everything
+3. **No custom projection code** - forms fold ops cover 90% of cases
+4. **No custom render code** - cells shape conventions handle it
+5. **Replay** - ticks Store gives you time travel
+6. **Hot reload** - change form, see result immediately
+7. **Agent-friendly** - simple enough for agents to wire up
 
-## Direction for cells
+## Repository Locations
 
-cells should remain focused on the visual layer:
-- Primitives for composition (Block, join_*, border, pad)
-- Primitives for interaction (Layer, Search, FocusRing)
-- Primitives for projection (Lens, ShapeLens)
-- Output modes (RenderApp for TUI, print_block for CLI)
-
-The Lens primitive bridges to rill's state. cells doesn't need to know about events or projections - it just renders state at zoom levels.
+| Library | Repository | Status |
+|---------|------------|--------|
+| peers | TBD | Conceptual |
+| facts | ~/Code/ev | Aliases added |
+| ticks | ~/Code/rill | Renamed |
+| forms | ~/Code/experiments/forms | Extracted |
+| cells | ~/Code/cells | Active |

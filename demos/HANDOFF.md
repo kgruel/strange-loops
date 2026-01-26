@@ -221,23 +221,78 @@ See `demos/VERBOSITY.md` for full documentation of the pattern.
 ## Testing
 
 ```bash
-# Run all tests (94 total)
+# Run all tests (128 total with lens tests)
 uv run pytest
 
 # Verify bench imports
 uv run python -c "from demos.bench import BenchApp; print('OK')"
 
-# Verify demo_09 imports
-uv run python -c "from demos.demo_09_layer import Demo09App; print('OK')"
-
-# Verify slide graph
-uv run python -c "
-from demos.bench import build_slides
-slides = build_slides()
-for sid, s in slides.items():
-    for d, t in [('up', s.nav.up), ('down', s.nav.down), ('left', s.nav.left), ('right', s.nav.right)]:
-        if t and t not in slides:
-            print(f'BROKEN: {sid}.{d} -> {t}')
-print(f'{len(slides)} slides, all links valid')
-"
+# Try lens demo
+uv run python demos/demo_10_lens.py
 ```
+
+---
+
+## Session: Unified Semantic Ecosystem
+
+### The Journey
+
+Started with verbosity flags → Lens primitive → connected to rill's Projection → untangled full ecosystem → grounded vocabulary for all five layers.
+
+### The Five Dimensions
+
+| Dimension | Library | Atom | Question |
+|-----------|---------|------|----------|
+| **Who** | peers | Peer (name + scope) | Who is acting? What can they see/do? |
+| **What** | facts | Fact (kind + ts + data) | What semantic meaning? |
+| **When** | ticks | Tick (ts + payload) | When did it happen? How does it flow? |
+| **How** | forms | Field (name + type) | What shape? How does it transform? |
+| **Where** | cells | Cell (char + style) | Where does it appear? How does it look? |
+
+### Implementation Status
+
+| Library | Repository | Status |
+|---------|------------|--------|
+| **peers** | TBD | Conceptual - Peer = name + scope, scope cascades |
+| **facts** | ~/Code/ev | ✓ Aliases added (Fact, Verdict) |
+| **ticks** | ~/Code/rill | ✓ Renamed (rill→ticks, EventStore→Store) |
+| **forms** | ~/Code/experiments/forms | ✓ Extracted (Field, Form, Fold) |
+| **cells** | ~/Code/cells | ✓ Lens added (shape_lens, zoom levels) |
+
+### Key Insight: Scope Cascades
+
+Peer = name + scope, and scope cascades through everything:
+- What facts you can emit/see
+- What ticks you can read/write
+- What forms you can use
+- What cells you can render
+
+### New Artifacts
+
+| File | Purpose |
+|------|---------|
+| `src/cells/lens.py` | Lens primitive: (state, zoom) → Block |
+| `demos/demo_10_lens.py` | JSON inspector with zoom levels |
+| `demos/HIERARCHY.md` | cells primitive hierarchy |
+| `demos/ECOSYSTEM.md` | Unified ecosystem documentation |
+| `demos/VERBOSITY.md` | Verbosity pattern documentation |
+| `demos/RETRO_LENS.md` | Lens discovery journey |
+
+### Open Threads for Next Session
+
+1. **peers library** - Peer = name + scope as atomic unit, needs full vocabulary design
+2. **Scope semantics** - see/do/ask boundaries, how they cascade
+3. **Needs gradient** - Must/Should/May for capability requirements
+4. **Feedback loop** - cells emitting facts back into ticks (UI observability)
+5. **forms integration** - wire forms into experiments, update imports
+
+### The Ecosystem Flow
+
+```
+Peer (scoped identity)
+  └─ emits → Fact → Store → Projection → State → Lens → Block
+                                          ↑
+                                        Form
+```
+
+See `ECOSYSTEM.md` for full documentation.

@@ -5,6 +5,9 @@ Tick atom: `Tick(ts: datetime, payload: T)`, frozen, generic. 15 tests.
 Projection fold callable: `Projection(initial, fold=fn)` eliminates
 ShapeProjection bridge class. 5 tests.
 
+Added `py.typed` marker. Removed dead pytest config (`pythonpath`, empty
+`addopts`).
+
 ## Open
 - **Stream[Tick] downstream**: Validate composability (daily rollups from hourly ticks).
 - **Tick emission from Projection**: Boundary trigger not designed (time, count, or event).

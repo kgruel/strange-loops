@@ -9,6 +9,8 @@ First concrete shape: container-health. Upsert by container name + count
 observations. Input facets: container, image, status, health. State facets:
 containers (dict), count (int). Validated end-to-end with Fact and Projection.
 
+Added `py.typed` marker and `.gitignore` (previously had neither).
+
 ## Open
 - **KDL parser**: Defer until declarative path matures.
 - **Validation/coercion**: Defer until apply() is in use — likely a boundary concern.

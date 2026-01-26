@@ -6,6 +6,9 @@ dataclasses. Three pure functions: `grant` (union), `restrict`
 (intersection), `delegate` (restrict + new Peer). Delegation cannot
 escalate — monotonic narrowing. 11 tests.
 
+Dev deps moved from `[project.optional-dependencies]` to
+`[dependency-groups]` (modern uv convention).
+
 ## Open
 - **Scope semantics**: Strings in see/do/ask are uninterpreted. Need real usage to drive filtering of Facts, Shapes, Lenses.
 - **Needs/capabilities**: Defer until patterns emerge.

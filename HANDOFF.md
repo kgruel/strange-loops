@@ -15,6 +15,13 @@ Monorepo overview. Per-library details live in each lib's own HANDOFF.md.
 ## Cross-cutting
 
 ### 2026-01-26
+Project structure alignment across all five libs. Normalized to a single
+canonical pattern: hatchling build backend, `[dependency-groups]` for dev
+deps, `>=3.11` Python, identical `.gitignore` files, `py.typed` markers,
+canonical `pyproject.toml` section ordering, `authors` field, and README
+structure (Atom/Usage/API). Per-lib CLAUDE.md and HANDOFF.md files added
+to each lib root.
+
 Pipeline experiment reset: old pipeline.py deleted, new test_atoms.py with
 14 tests validating full pipeline stage by stage. Fact->Shape bridge is a
 3-line extraction function at the composition point.

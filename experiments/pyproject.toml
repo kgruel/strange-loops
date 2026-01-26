@@ -1,0 +1,23 @@
+[project]
+name = "experiments"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "wcwidth>=0.2",
+    "kdl-py>=1.2.0",
+    "pyyaml>=6.0",
+    "asyncssh>=2.14",
+    "cells",
+    "ticks",
+]
+
+[tool.uv.sources]
+cells = { path = "../cells", editable = true }
+ticks = { path = "../rill", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

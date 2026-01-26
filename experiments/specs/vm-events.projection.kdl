@@ -1,0 +1,19 @@
+projection "vm-events" {
+    about "Docker container lifecycle events"
+
+    event "container.lifecycle" {
+        source "str"
+        message "str"
+        level "str"
+    }
+
+    state {
+        events "list"
+        containers "set"
+    }
+
+    fold {
+        collect "events" max=500
+        upsert "containers" key="source"
+    }
+}

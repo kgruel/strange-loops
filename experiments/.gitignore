@@ -1,0 +1,5 @@
+/.subtask/
+__pycache__/
+.obsidian/
+.venv
+bench/results/

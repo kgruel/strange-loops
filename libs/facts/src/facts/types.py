@@ -1,6 +1,6 @@
 """Core types: Event and Result.
 
-These are the fundamental building blocks of the ev contract.
+These are the fundamental building blocks of the facts contract.
 Both are frozen dataclasses, immutable and serializable.
 """
 

@@ -6,7 +6,7 @@ ListEmitter and NullEmitter are reference implementations for testing and no-op 
 
 from typing import Protocol
 
-from ev.types import Event, Result
+from facts.types import Event, Result
 
 
 class Emitter(Protocol):

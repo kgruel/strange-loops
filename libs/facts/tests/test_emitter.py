@@ -2,8 +2,8 @@
 
 import pytest
 
-from ev import Event, Result
-from ev.emitter import Emitter, ListEmitter, NullEmitter
+from facts import Event, Result
+from facts.emitter import Emitter, ListEmitter, NullEmitter
 
 
 class TestEmitterProtocol:

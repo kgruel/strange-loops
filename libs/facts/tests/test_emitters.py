@@ -3,9 +3,9 @@
 import json
 from io import StringIO
 
-from ev import Event, Result
-from ev.emitter import Emitter
-from ev.emitters import JsonEmitter, PlainEmitter
+from facts import Event, Result
+from facts.emitter import Emitter
+from facts.emitters import JsonEmitter, PlainEmitter
 
 
 class TestJsonEmitter:

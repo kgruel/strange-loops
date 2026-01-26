@@ -3,7 +3,7 @@
 import sys
 from typing import TextIO
 
-from ev.types import Event, Result
+from facts.types import Event, Result
 
 
 class PlainEmitter:

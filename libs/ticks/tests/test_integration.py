@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from rill import EventStore, FileWriter, Forward, Projection, Stream, Tailer
+from ticks import EventStore, FileWriter, Forward, Projection, Stream, Tailer
 
 from tests.helpers import (
     CountProjection,

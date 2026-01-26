@@ -2,8 +2,8 @@
 
 import pytest
 
-from forms import Field, Fold, Form, ValidationError
-from forms.types import coerce_value, initial_value, type_matches
+from shapes import Field, Fold, Form, ValidationError
+from shapes.types import coerce_value, initial_value, type_matches
 
 
 class TestField:

@@ -1,4 +1,4 @@
-"""Shared fixtures for rill tests.
+"""Shared fixtures for ticks tests.
 
 Fixtures follow the principle: provide building blocks, not pre-wired scenarios.
 Tests compose fixtures to express their specific intent.
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from rill import EventStore, FileWriter, Stream, Tailer
+from ticks import EventStore, FileWriter, Stream, Tailer
 
 from tests.helpers import (
     CountProjection,

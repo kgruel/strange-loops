@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from rill import Projection
+from ticks import Projection
 
 
 # --- Sample event types ---

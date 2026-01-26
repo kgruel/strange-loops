@@ -4,7 +4,7 @@ import json
 import sys
 from typing import TextIO
 
-from ev.types import Event, Result
+from facts.types import Event, Result
 
 
 class JsonEmitter:
@@ -17,7 +17,7 @@ class JsonEmitter:
         include_events: Include events in final output (default: True)
         stream_events: Also stream events as JSONL to stderr (default: False)
 
-    Output streams follow the ev convention:
+    Output streams follow the facts convention:
         - Result (and buffered events) → stdout
         - Streamed events → stderr
     """

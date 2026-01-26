@@ -1,4 +1,4 @@
-"""rill — Personal-scale event infrastructure.
+"""ticks — Personal-scale event infrastructure.
 
 Kafka concepts (append-only logs, offset-tracking consumers, materialized views)
 at individual/homelab scale, using files instead of brokers.

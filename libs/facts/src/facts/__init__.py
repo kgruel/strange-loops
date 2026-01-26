@@ -1,10 +1,10 @@
-"""ev - Renderer-agnostic semantic contract for CLI output.
+"""facts - Renderer-agnostic semantic contract for CLI output.
 
 The missing ViewModel layer between domain logic and presentation.
 Domain emits Event/Result, renderers interpret.
 
 Example:
-    from ev import Event, Result, Emitter, ListEmitter
+    from facts import Event, Result, Emitter, ListEmitter
 
     def my_command(emitter: Emitter) -> Result:
         emitter.emit(Event(kind="progress", message="Starting..."))
@@ -19,8 +19,8 @@ Example:
     assert len(emitter.events) == 2
 """
 
-from ev.emitter import Emitter, ListEmitter, NullEmitter
-from ev.types import Event, Result
+from facts.emitter import Emitter, ListEmitter, NullEmitter
+from facts.types import Event, Result
 
 __all__ = [
     "Event",

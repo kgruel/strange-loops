@@ -5,7 +5,7 @@
 Two demo systems exist:
 
 1. **Progressive demos (01-09)**: Educational, print-based output for primitives, interactive for app/components/layer
-2. **Teaching bench (bench.py)**: Interactive slideshow using cells to teach cells (~1800 lines)
+2. **Teaching bench (bench.py)**: Interactive slideshow using cells to teach cells (~2900 lines)
 
 Both are functional and can be run independently.
 
@@ -107,6 +107,9 @@ block = line.to_block(width)  # direct conversion, no Buffer round-trip
 |-----|---------|
 | `docs/DATA_PATTERNS.md` | Data modeling patterns: frozen state + pure functions |
 | `docs/ARCHITECTURE.md` | Data-flow reference: rendering, input, layer stack |
+| `docs/PRIMITIVES.md` | Quick reference for all primitives |
+| `demos/THREADS.md` | Open threads pinboard |
+| `demos/PLAN_LENS.md` | LensContext implementation plan |
 
 ## Teaching Bench Architecture
 
@@ -128,7 +131,9 @@ intro → cell → style → span → line → buffer → block → compose → 
 ```
 
 ### Key Features
-- Arrow key navigation between slides
+- Left/right arrow navigation between topics
+- Up/down arrow navigation between zoom levels (0=summary, 1=detail, 2=source)
+- `m` for minimap sidebar toggle
 - `/` for fuzzy search/jump to any slide
 - `?` for help overlay
 - Tab to focus interactive demos
@@ -296,3 +301,76 @@ Peer (scoped identity)
 ```
 
 See `ECOSYSTEM.md` for full documentation.
+
+---
+
+## Session: LensContext & peers Library
+
+### The Journey
+
+Picked up from ecosystem documentation → created peers library → deep grounding in cells → lens-first discussion → implemented LensContext in bench.
+
+### peers Library Created
+
+New library at `~/Code/peers` with:
+- `Peer(name, scope)` — atomic identity
+- `Scope(see, do, ask)` — boundaries as frozensets
+- `grant/restrict/delegate` — pure functions for scope manipulation
+
+Follows cells patterns: frozen state + pure functions.
+
+### LensContext Pattern
+
+Introduced context-first rendering to the teaching bench:
+
+```python
+@dataclass(frozen=True)
+class LensContext:
+    width: int
+    zoom: int = 0           # 0=summary, 1=detail, 2=source
+    focus: Focus = ...
+    perspective: str = "content"
+```
+
+**Key changes:**
+- `section_lens(section, ctx) → Block` replaces `render_section()`
+- `ZoomText` / `ZoomCode` section types for multi-level content
+- Up/down = zoom level, left/right = topic navigation
+- `m` key toggles minimap sidebar (cool-view proof of concept)
+
+**Migrated:** `cell` topic (3 slides → 1 with max_zoom=2). Other topics can migrate incrementally.
+
+### New Artifacts
+
+| File | Purpose |
+|------|---------|
+| `docs/PRIMITIVES.md` | Quick reference for all primitives |
+| `demos/THREADS.md` | Open threads pinboard (living backlog) |
+| `demos/PLAN_LENS.md` | LensContext implementation plan |
+
+### Implementation Status (Updated)
+
+| Library | Repository | Status |
+|---------|------------|--------|
+| **peers** | ~/Code/peers | ✓ Created (Peer, Scope, grant, restrict, delegate) |
+| **facts** | ~/Code/ev | ✓ Aliases added (Fact, Verdict) |
+| **ticks** | ~/Code/rill | ✓ Renamed (rill→ticks, EventStore→Store) |
+| **forms** | ~/Code/experiments/forms | ✓ Extracted (Field, Form, Fold) |
+| **cells** | ~/Code/cells | ✓ LensContext pattern in bench |
+
+### Key Insight: Zoom Levels Everywhere
+
+The framework describes itself:
+- **Zoom 0:** One system. Events flow, things render.
+- **Zoom 1:** Five libraries. peers/facts/ticks/forms/cells.
+- **Zoom 2:** The atoms. Frozen dataclasses, pure functions.
+
+The `-q / -v / -vv` pattern isn't just for CLIs. It's for understanding.
+
+### Open Threads
+
+See `demos/THREADS.md` for the full pinboard. Key items:
+- Migrate remaining topics to ZoomText/ZoomCode
+- More cool-views: hierarchy, data-flow, type signatures
+- Wire ecosystem end-to-end (Peer → Fact → Tick → Form → Cell)
+- The dashboard application (original use case)

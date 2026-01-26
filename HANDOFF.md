@@ -104,9 +104,12 @@ This changes the framing:
 |------|------|
 | `spec.py` | ProjectionSpec, SpecProjection — KDL parser + fold ops |
 | `app_spec.py` | AppSpec — composition + inventory + DataSourceSpec |
+| `inventory.py` | HostInfo, load_ansible_inventory — Ansible YAML parser |
 | `orchestrator.py` | Multi-host collection via Stream/FileWriter |
-| `ssh_session.py` | SSHSession — async run() + stream() over SSH |
-| `collectors/` | Collector registry + docker collectors |
+| `ssh_session.py` | SSHSession — async run() + stream() + common_args |
+| `collectors/` | Collector registry + discovery + docker collectors |
+| `collectors/spec.py` | CollectorSpec — KDL parser for .collector files |
+| `collectors/discovery.py` | Scan collectors/ for .collector + .py |
 
 ## Current State
 
@@ -119,12 +122,16 @@ This changes the framing:
 - Source protocol in rill (async iterator shape)
 - SourceBinding wiring (Source → Stream → Projection, recording as tap)
 - SSHConnectionManager collapsed into spec-driven Sources
-- 56 tests passing
+- Collector discovery: `.collector` KDL + `.py` files scanned from `collectors/`
+- `source.error` events emitted on collector failure
+- Ansible inventory loader with `common_args` support
+- SSHSession wires `common_args` → asyncssh (ProxyJump, Port, etc.)
+- 110+ tests passing
 
 **Known limitations:**
 - Single event type per projection (first iteration)
 - No state persistence (memory only)
-- Collectors still use manual registry (drop-in pattern designed, not implemented)
+- App spec inventory syntax not yet wired (next step)
 
 ## Completed: Collapse SSHConnectionManager (2026-01-25)
 
@@ -184,13 +191,68 @@ No special machinery. Fold them or ignore them.
 
 See `docs/COLLECTORS.md` for full design.
 
-## Next: Implement Collector Discovery
+## Completed: Collector Discovery (2026-01-25)
 
-1. Implement `.collector` file parser (KDL)
-2. Implement discovery (scan dir, load both `.collector` and `.py`)
-3. Replace manual `COLLECTORS` registry with discovery
-4. Add `source.error` event emission to Sources
-5. Test with real homelab collectors
+**Drop-in collector pattern implemented:**
+
+- `framework/collectors/spec.py` — `CollectorSpec` dataclass + KDL parser
+- `framework/collectors/discovery.py` — scans `collectors/` for `.collector` + `.py`
+- Lazy registry via module `__getattr__` (PEP 562)
+- `source.error` events on collector failure (PollSource continues, StreamSource stops)
+- 27 tests for parser, discovery, error events
+
+Naming: `collectors/docker/containers.collector` → `docker.containers`
+
+## Completed: Inventory + SSH common_args (2026-01-25)
+
+**Ansible inventory integration:**
+
+- `framework/inventory.py` — `HostInfo` dataclass, `load_ansible_inventory()`
+- Parses `all.children.{group}.hosts.{name}` structure
+- Extracts `ansible_ssh_common_args` from `all.vars`
+- `VMInfo = HostInfo` alias for backward compat
+
+**SSHSession extension:**
+
+- `common_args: str` field parsed via `shlex.split()`
+- Supports `-J jump_host`, `-o ProxyJump=`, `-p port`, `-o Port=`
+- Wired to `asyncssh.connect(**kwargs)`
+
+## Next: App Spec Inventory Syntax
+
+Wire inventory into app spec so dashboard auto-discovers hosts:
+
+```kdl
+app "homelab" {
+    inventory from="ansible" path="~/Code/gruel.network/ansible/inventory.yml"
+
+    per-connection {
+        use "vm-health"
+        collect "docker.containers" as="container.status" into="vm-health"
+    }
+}
+```
+
+Subtask drafted: `app-spec-inventory` (blocked on merged tasks, now unblocked)
+
+## What Inventory Unlocks
+
+**Progressive enhancement path:**
+
+1. **Host autodiscovery** — dashboard iterates `app_spec.hosts`, no hardcoded VMs
+2. **Group filtering** — `inventory ... groups="vms"` to select subset
+3. **Per-host collectors** — different collectors for different service_types
+4. **Multi-inventory** — combine Ansible + static KDL for dev/prod split
+5. **Dynamic refresh** — watch inventory file, add/remove hosts at runtime
+
+**User experiences enabled:**
+
+| Feature | What it means |
+|---------|---------------|
+| Zero-config onboarding | Point at existing Ansible inventory, dashboard works |
+| Proxy jump support | SSH through bastion hosts via `common_args` |
+| Service-aware views | Group containers by `service_type` in UI |
+| Inventory-as-code | Git-tracked host config, Terraform-generated |
 
 ## Deferred
 
@@ -200,6 +262,8 @@ See `docs/COLLECTORS.md` for full design.
 - Recording UI (tap attach/detach from dashboard)
 - Collector parameters (L3)
 - Multi-command collectors (L4)
+- Inventory groups filtering
+- Dynamic inventory refresh
 
 ## Run
 

@@ -172,7 +172,7 @@ def disable_recording(binding: SourceBinding) -> None:
 ```python
 # apps/homelab.py (collapsed)
 
-class HomelabApp(RenderApp):
+class HomelabApp(Surface):
     def __init__(self, app_spec: AppSpec, source_dir: Path | None = None):
         super().__init__()
         self.app_spec = app_spec

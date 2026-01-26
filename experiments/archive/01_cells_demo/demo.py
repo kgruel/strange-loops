@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace, field
 from wcwidth import wcwidth as _wcw
 
 from cells import (
-    RenderApp, Block, Style, Cell,
+    Surface, Block, Style, Cell,
     join_horizontal, join_vertical, pad, border, Align,
     BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII,
     ListState, SpinnerState,
@@ -1102,7 +1102,7 @@ def _line_to_block(line: Line, width: int, indent: int = 0) -> Block:
 
 # -- App --
 
-class DemoApp(RenderApp):
+class DemoApp(Surface):
 
     def __init__(self):
         super().__init__(fps_cap=30)

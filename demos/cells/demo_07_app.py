@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Demo 07: RenderApp — the async application loop.
+"""Demo 07: Surface — the async application loop.
 
-RenderApp handles:
+Surface handles:
 - Alternate screen (clean terminal)
 - Keyboard input
 - Terminal resize (SIGWINCH)
@@ -14,12 +14,12 @@ Press 'q' to quit, arrow keys to move, 'c' to cycle colors.
 """
 
 import asyncio
-from cells import RenderApp, Block, Style, border
+from cells import Surface, Block, Style, border
 
 COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan"]
 
 
-class Demo07App(RenderApp):
+class Demo07App(Surface):
     def __init__(self):
         super().__init__()
         self.x = 5

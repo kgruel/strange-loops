@@ -26,7 +26,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from cells import (
-    RenderApp, Block, Style,
+    Surface, Block, Style,
     join_horizontal, join_vertical, border,
     Line, Span,
     ListState, list_view,
@@ -68,7 +68,7 @@ class VMConnection:
 
 # -- HomelabApp ----------------------------------------------------------------
 
-class HomelabApp(RenderApp):
+class HomelabApp(Surface):
     def __init__(self, app_spec: AppSpec, source: Path | None = None):
         super().__init__(fps_cap=15)
         self.app_spec = app_spec

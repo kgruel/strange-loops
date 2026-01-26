@@ -12,7 +12,7 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from cells import (
-    RenderApp,
+    Surface,
     Block,
     Style,
     join_vertical,
@@ -44,7 +44,7 @@ class AppState:
     height: int = 24
 
 
-class Demo10App(RenderApp):
+class Demo10App(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState()

@@ -35,7 +35,7 @@ from typing import Callable
 import time
 
 from cells import (
-    RenderApp, Block, Style, Span, Line,
+    Surface, Block, Style, Span, Line,
     join_horizontal, join_vertical, pad, border,
     ROUNDED,
     # Focus management
@@ -1405,7 +1405,7 @@ truncate(block, width=20)     # cut to size''',
         # App
         "app": Slide(
             id="app",
-            title="RenderApp",
+            title="Surface",
             sections=(
                 Spacer(1),
                 Text(
@@ -1419,7 +1419,7 @@ truncate(block, width=20)     # cut to size''',
                 ),
                 Spacer(1),
                 Code(
-                    source='''class MyApp(RenderApp):
+                    source='''class MyApp(Surface):
     def render(self):
         # paint into self._buf
 
@@ -1715,7 +1715,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
                 ),
                 Spacer(1),
                 Text(
-                    styled("run with ", ("RenderApp", KEYWORD)),
+                    styled("run with ", ("Surface", KEYWORD)),
                     center=True,
                 ),
                 Spacer(2),
@@ -1945,7 +1945,7 @@ class Block:
 
         "app/source": Slide(
             id="app/source",
-            title="RenderApp (source)",
+            title="Surface (source)",
             sections=(
                 Spacer(1),
                 Text(
@@ -1954,7 +1954,7 @@ class Block:
                 ),
                 Spacer(1),
                 Code(
-                    source='''class RenderApp:
+                    source='''class Surface:
     """Async main loop with diff-based rendering."""
 
     async def run(self):
@@ -2676,7 +2676,7 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 
 # -- Main App --
 
-class BenchApp(RenderApp):
+class BenchApp(Surface):
     """Interactive teaching bench application."""
 
     def __init__(self, slides: dict[str, Slide] | None = None, start_slide: str = "intro", start_zoom: int = 0):

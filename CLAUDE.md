@@ -71,6 +71,27 @@ projection, persistence, or serving. Streams can be tapped at any
 point to split off to external consumers without interrupting
 the main pipeline.
 
+### Feedback Loop (Surface → Facts)
+
+Surface (cells) is the bidirectional boundary — renders state outward,
+emits interactions inward. Facts enter the pipeline from two sources:
+external observations (a deploy happened) and your own interactions
+(you pressed a key, selected an item). Both are Fact. Both flow
+through the same Stream. The pipeline doesn't distinguish.
+
+Surface emits at three strata:
+
+    Stratum        Auto?   Kind       Example payload
+    ────────────────────────────────────────────────────────
+    Raw input      yes     "key"      {key: "j"}
+    UI structure   yes     "action"   {action: "pop", layer: "confirm"}
+                   yes     "resize"   {width: 80, height: 24}
+    Domain         no      (any)      {item: "deploy-prod"}
+
+`Emit = Callable[[str, dict], None]` — cells defines the callback type,
+the integration layer wires it to `Fact.of()` + `Stream.emit()`. No
+cross-lib imports. The loop closes.
+
 ### Core Libraries (libs/)
 
 | Package | Atom | Purpose |
@@ -79,7 +100,7 @@ the main pipeline.
 | **facts** | Fact | Observation atom: kind + ts + payload. An intentional observation — something that happened at a specific time. Kind is an open string for routing; payload structure comes from Shape. |
 | **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
 | **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
-| **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, RenderApp |
+| **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, Surface |
 
 All libraries are independent — no lib imports another. They compose in experiments.
 

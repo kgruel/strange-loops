@@ -22,7 +22,7 @@ cells (libs/cells) — TUI rendering, composition-first
 | Package | What | Where |
 |---------|------|-------|
 | **ticks** | Stream, Projection, Tailer, FileWriter | `libs/ticks` |
-| **cells** | RenderApp, Block, Style, components | `libs/cells` |
+| **cells** | Surface, Block, Style, components | `libs/cells` |
 | **experiments** | Spec layer, orchestration, homelab app | `experiments/` |
 
 **ticks** and **cells** are general-purpose. **experiments** is the integration point where domain-specific work happens (homelab monitoring, KDL specs, SSH collection).

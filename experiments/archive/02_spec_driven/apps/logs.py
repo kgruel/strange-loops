@@ -24,7 +24,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cells import (
-    RenderApp, Style,
+    Surface, Style,
     ListState, SpinnerState, TextInputState,
     Region,
     Span, Line,
@@ -171,7 +171,7 @@ class LogsState:
 # LogsApp
 # =============================================================================
 
-class LogsApp(RenderApp):
+class LogsApp(Surface):
     """Streaming log viewer on the cell-buffer render layer."""
 
     def __init__(self, args: argparse.Namespace):

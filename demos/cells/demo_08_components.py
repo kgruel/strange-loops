@@ -13,7 +13,7 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 
 import asyncio
 from cells import (
-    RenderApp, Style, Line, Span,
+    Surface, Style, Line, Span,
     border,
     SpinnerState, spinner,
     ProgressState, progress_bar,
@@ -23,7 +23,7 @@ from cells import (
 )
 
 
-class Demo08App(RenderApp):
+class Demo08App(Surface):
     def __init__(self):
         super().__init__()
 

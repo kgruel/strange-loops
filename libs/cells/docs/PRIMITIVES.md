@@ -50,7 +50,7 @@ view = buf.region(10, 5, 40, 10)  # x=10, y=5, 40x10
 view.put(0, 0, "X", style)        # writes to buf[10,5]
 ```
 
-**Connects to:** RenderApp owns Buffer. Blocks paint to Buffer/BufferView. Layers receive BufferView.
+**Connects to:** Surface owns Buffer. Blocks paint to Buffer/BufferView. Layers receive BufferView.
 
 ---
 
@@ -132,7 +132,7 @@ def handle(key, state, app):
 search_layer = Layer("search", SearchState(), handle, render)
 ```
 
-**Connects to:** RenderApp uses process_key/render_layers. Layers contain their own state, receive app state.
+**Connects to:** Surface uses process_key/render_layers. Layers contain their own state, receive app state.
 
 ---
 

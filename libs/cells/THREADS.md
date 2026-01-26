@@ -1,11 +1,12 @@
 # THREADS — cells
 
-## Feedback loop
-Cells emitting facts back into ticks — UI observability. When you
-interact with a TUI (keypress, selection, navigation), those actions
-could become Facts on the stream. Discussed in prior sessions, not
-implemented. This closes the pipeline loop: you see state through
-cells, your actions become facts, facts flow through ticks.
+## Feedback loop — implemented
+RenderApp renamed to Surface. Emit protocol added: `Emit = Callable[[str, dict], None]`.
+Surface accepts `on_emit` callback, provides `emit(kind, **data)` method.
+Auto-emits `"key"` after each keypress and `"resize"` on terminal resize.
+The callback is structurally compatible with `Fact.of(kind, **data)` — the
+integration layer wires `on_emit` to `Fact.of()` + `Stream.emit()`.
+No cross-lib imports; cells stays independent.
 
 ## ShapeLens extensions
 Current shape_lens renders by convention: dict->table, list->list-view,

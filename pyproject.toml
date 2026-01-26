@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["libs/peers", "libs/facts", "libs/ticks", "libs/shapes", "libs/cells", "experiments"]
+members = ["libs/peers", "libs/facts", "libs/ticks", "libs/shapes", "libs/cells"]

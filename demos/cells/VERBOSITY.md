@@ -105,7 +105,7 @@ Level 4: Rich TUI (layers, modals, complex state)
 The key insight: **verbosity isn't just "more text" - it can trigger mode transitions**.
 
 ```
-print_block()  ←────────────────────→  RenderApp
+print_block()  ←────────────────────→  Surface
    (inline)            -v/-vv             (TUI)
 ```
 
@@ -162,7 +162,7 @@ Other factors that might drive CLI → TUI transitions:
 **Currently available:**
 - Block/Span work for both CLI and TUI modes
 - `print_block()` for inline output
-- RenderApp for interactive TUI
+- Surface for interactive TUI
 
 **Potential additions:**
 - `is_interactive()` helper (TTY detection)

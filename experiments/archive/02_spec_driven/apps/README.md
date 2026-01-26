@@ -242,7 +242,7 @@ ticks (stdlib only)
 cells (stdlib + wcwidth)
 ├── Buffer, Diff       — cell-level rendering
 ├── Block, Style       — composable layout
-└── RenderApp          — event loop + render
+└── Surface          — event loop + render
 
 framework (ticks + cells + IO)
 ├── Spec parsing       — KDL → contracts

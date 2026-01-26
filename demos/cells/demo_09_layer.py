@@ -14,7 +14,7 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from cells import (
-    RenderApp, Block, Style, BufferView,
+    Surface, Block, Style, BufferView,
     join_vertical, pad, border,
     ROUNDED,
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
@@ -202,7 +202,7 @@ def make_base_layer() -> Layer[None]:
 
 # -- App --
 
-class Demo09App(RenderApp):
+class Demo09App(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState(layers=(make_base_layer(),))

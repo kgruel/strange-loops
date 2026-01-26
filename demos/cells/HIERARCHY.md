@@ -49,7 +49,7 @@ APPLICATION LAYER
   Writer          ANSI escape output, terminal detection
   print_block     inline output (no TUI)
   KeyboardInput   non-blocking key reader
-  RenderApp       async main loop, alt screen, diff rendering
+  Surface       async main loop, alt screen, diff rendering
 
 
 STATE/INTERACTION LAYER

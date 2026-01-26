@@ -12,9 +12,9 @@ uv add cells
 
 ```python
 import asyncio
-from cells import RenderApp, Block, Style, border
+from cells import Surface, Block, Style, border
 
-class HelloApp(RenderApp):
+class HelloApp(Surface):
     def render(self):
         block = Block.text("Hello, cells!", Style(fg="green"))
         bordered = border(block, title="Demo")
@@ -30,7 +30,7 @@ asyncio.run(HelloApp().run())
 - **Block** — immutable rectangle of cells for composition
 - **Span/Line** — styled text primitives
 - **compose** — `join_horizontal`, `join_vertical`, `pad`, `border`, `truncate`
-- **RenderApp** — async main loop with keyboard input and resize handling
+- **Surface** — async main loop with keyboard input and resize handling
 - **components** — spinner, progress bar, list view, text input, table
 
 Extracted from [experiments](https://github.com/kaygee/experiments).

@@ -68,7 +68,7 @@ Terminal
 KeyboardInput.read() ──────► key: str
     │
     ▼
-RenderApp.on_key(key)
+Surface.on_key(key)
     │
     ▼
 process_key(key, state, ...) ─► Layer stack routing
@@ -112,7 +112,7 @@ Layers handle input routing and render ordering for modal UI.
 ## App Loop
 
 ```python
-class RenderApp:
+class Surface:
     async def run(self):
         # Enter alternate screen
         # Initialize buffer
@@ -182,4 +182,4 @@ Push(layer)         # add new layer on top
 | BufferView | Clipped region | Mutable (delegates to Buffer) |
 | Component | Stateful widget | State dataclass + pure functions |
 | Layer | Modal input scope | State + handle + render + stack |
-| RenderApp | Main loop | Owns state, orchestrates flow |
+| Surface | Main loop | Owns state, orchestrates flow |

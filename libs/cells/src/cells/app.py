@@ -1,23 +1,27 @@
-"""RenderApp — base class for buffer-rendered terminal applications."""
+"""Surface — base class for buffer-rendered terminal applications."""
 
 from __future__ import annotations
 
 import asyncio
 import signal
+from typing import Any, Callable
 
 from .buffer import Buffer
+from .layer import Layer, process_key as _process_key
 from .writer import Writer
 from .keyboard import KeyboardInput
 
+Emit = Callable[[str, dict[str, Any]], None]
 
-class RenderApp:
+
+class Surface:
     """Base class for buffer-rendered applications.
 
     Subclasses override layout(), render(), and on_key() to build interactive
     terminal UIs using the cell-buffer rendering system.
     """
 
-    def __init__(self, *, fps_cap: int = 60):
+    def __init__(self, *, fps_cap: int = 60, on_emit: Emit | None = None):
         self._writer = Writer()
         self._fps_cap = fps_cap
         self._buf: Buffer | None = None
@@ -25,6 +29,7 @@ class RenderApp:
         self._keyboard = KeyboardInput()
         self._running = False
         self._dirty = True
+        self._on_emit = on_emit
 
     async def run(self) -> None:
         """Enter alt screen, run main loop, restore terminal on exit."""
@@ -52,6 +57,7 @@ class RenderApp:
                         if key is None:
                             break
                         self.on_key(key)
+                        self.emit("key", key=key)
                         self._dirty = True
                         had_key = True
 
@@ -89,6 +95,37 @@ class RenderApp:
     def on_key(self, key: str) -> None:
         """Called on keypress. Override to dispatch to focused component."""
 
+    def emit(self, kind: str, **data: Any) -> None:
+        """Emit an observation. No-op if no callback registered."""
+        if self._on_emit is not None:
+            self._on_emit(kind, data)
+
+    def handle_key(
+        self,
+        key: str,
+        state: Any,
+        get_layers: Callable[[Any], tuple[Layer, ...]],
+        set_layers: Callable[[Any, tuple[Layer, ...]], Any],
+    ) -> tuple[Any, bool, Any]:
+        """Delegate to process_key() and auto-emit an action fact.
+
+        Returns the same (new_state, should_quit, pop_result) tuple as
+        process_key().  After processing, emits one of:
+          - action="quit"   when should_quit is True
+          - action="pop"    when pop_result is not None
+          - action="stay"   otherwise
+        """
+        new_state, should_quit, pop_result = _process_key(
+            key, state, get_layers, set_layers,
+        )
+        if should_quit:
+            self.emit("action", action="quit")
+        elif pop_result is not None:
+            self.emit("action", action="pop", result=str(pop_result))
+        else:
+            self.emit("action", action="stay")
+        return new_state, should_quit, pop_result
+
     def mark_dirty(self) -> None:
         """Mark the display as needing a re-render."""
         self._dirty = True
@@ -104,6 +141,7 @@ class RenderApp:
         self._prev = Buffer(width, height)
         self.layout(width, height)
         self._dirty = True
+        self.emit("resize", width=width, height=height)
 
     def _flush(self) -> None:
         """Diff current vs previous buffer and write changes to terminal."""

@@ -25,7 +25,7 @@ FileWriter, Tailer       SpecProjection, fold ops              cells rendering
 | Package | Imports from | Provides |
 |---------|--------------|----------|
 | `ticks` | stdlib only | Stream, Projection, Tailer, FileWriter |
-| `cells` | stdlib + wcwidth | RenderApp, Block, Style, components |
+| `cells` | stdlib + wcwidth | Surface, Block, Style, components |
 | `framework` | ticks, kdl-py, asyncssh | SpecProjection, AppSpec, SSH, collectors |
 | `apps` | ticks, cells, framework | Runnable dashboards |
 

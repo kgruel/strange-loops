@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cells import (
-    RenderApp, Block, Style,
+    Surface, Block, Style,
     join_horizontal, join_vertical, pad, border,
     Region,
 )
@@ -92,7 +92,7 @@ class DashboardProjection(Projection[DashboardState, ContainerEvent]):
 # --- Dashboard App ---
 
 
-class TailDashboard(RenderApp):
+class TailDashboard(Surface):
     def __init__(self, path: Path):
         super().__init__(fps_cap=15)
         self._tailer: Tailer[ContainerEvent] = Tailer(path, deserialize)

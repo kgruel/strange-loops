@@ -81,4 +81,4 @@ wide.paint(buf.region(0, 0, 12, 3), x=1, y=1)
 render_buffer(buf)
 print()
 
-print("Span/Line are for inline text. RenderApp runs the event loop (demo_07).")
+print("Span/Line are for inline text. Surface runs the event loop (demo_07).")

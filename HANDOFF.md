@@ -83,7 +83,7 @@ next layers to add:
   terminal output. Validates the shapes→cells bridge.
 - **Persistence**: Stream[Fact] → FileWriter → Tailer → replay.
   Validates the facts→ticks persistence path.
-- **Live app**: RenderApp wiring all five libs end-to-end.
+- **Live app**: Surface wiring all five libs end-to-end.
   The old pipeline.py rebuilt with the new atoms and no bridge classes.
 
 The old experiments/ still has apps (homelab, demo, logs, etc.) and

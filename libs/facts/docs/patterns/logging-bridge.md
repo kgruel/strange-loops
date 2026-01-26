@@ -1,14 +1,14 @@
 # Logging Bridge Pattern
 
-*Bridging Python's stdlib logging to ev events.*
+*Bridging Python's stdlib logging to facts events.*
 
 ## The Problem
 
-Third-party libraries (requests, boto3, sqlalchemy) emit logs via Python's standard `logging` module. These logs bypass ev entirely, potentially breaking the "unified output" experience.
+Third-party libraries (requests, boto3, sqlalchemy) emit logs via Python's standard `logging` module. These logs bypass facts entirely, potentially breaking the "unified output" experience.
 
 ## When You Need This
 
-- You want library warnings/errors to appear in your ev output stream
+- You want library warnings/errors to appear in your facts output stream
 - You're building a comprehensive audit log
 - You want JSON output mode to capture everything
 
@@ -18,25 +18,25 @@ Third-party libraries (requests, boto3, sqlalchemy) emit logs via Python's stand
 - You only care about your application's user-facing facts
 - You want to keep diagnostics separate from user output
 
-ev is designed for **user-facing facts**, not diagnostics. Library logs are diagnostics. Keeping them separate is often the right choice.
+facts is designed for **user-facing facts**, not diagnostics. Library logs are diagnostics. Keeping them separate is often the right choice.
 
 ## The Bridge
 
-A custom `logging.Handler` that emits ev events:
+A custom `logging.Handler` that emits facts events:
 
 ```python
 import logging
-from ev import Event, Emitter
+from facts import Event, Emitter
 
 class EvLoggingHandler(logging.Handler):
-    """Bridge stdlib logging to an ev Emitter."""
+    """Bridge stdlib logging to a facts Emitter."""
 
     def __init__(self, emitter: Emitter, level: int = logging.WARNING):
         super().__init__(level)
         self._emitter = emitter
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Map logging levels to ev levels
+        # Map logging levels to facts levels
         if record.levelno >= logging.ERROR:
             level = "error"
         elif record.levelno >= logging.WARNING:
@@ -62,7 +62,7 @@ class EvLoggingHandler(logging.Handler):
 
 ```python
 import logging
-from ev import ListEmitter
+from facts import ListEmitter
 
 # Create your emitter
 emitter = ListEmitter()
@@ -73,7 +73,7 @@ logging.getLogger().addHandler(handler)
 
 # Now library logs appear in your event stream
 import requests
-requests.get("https://invalid.example.com")  # Connection error → ev event
+requests.get("https://invalid.example.com")  # Connection error → facts event
 ```
 
 ## Filtering by Logger
@@ -126,20 +126,20 @@ class EvLoggingHandler(logging.Handler):
 Instead of bridging, you might keep them separate:
 
 ```python
-# ev events → stdout (via your renderer)
+# facts events → stdout (via your renderer)
 # Library logs → stderr (via logging)
 
 import logging
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 ```
 
-This is often cleaner and matches the "ev is for user facts, logging is for diagnostics" philosophy.
+This is often cleaner and matches the "facts is for user facts, logging is for diagnostics" philosophy.
 
 ## Summary
 
 | Approach | When to Use |
 |----------|-------------|
-| Bridge to ev | Unified output, audit logging, JSON mode |
+| Bridge to facts | Unified output, audit logging, JSON mode |
 | Separate streams | Clean separation of concerns, simple setup |
 | Filtered bridge | Only specific libraries need visibility |
 

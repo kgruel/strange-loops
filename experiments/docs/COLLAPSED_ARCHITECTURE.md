@@ -38,7 +38,7 @@ One path. Spec-driven. Persistence is a tap.
 ### Source Protocol
 
 ```python
-# In rill (stdlib only, no IO)
+# In ticks (stdlib only, no IO)
 from typing import Protocol, TypeVar, AsyncIterator
 
 T = TypeVar("T")
@@ -54,7 +54,7 @@ class Source(Protocol[T]):
         ...
 ```
 
-Sources are async iterators. That's it. rill defines the shape, doesn't implement IO.
+Sources are async iterators. That's it. ticks defines the shape, doesn't implement IO.
 
 ### Source Implementations (framework)
 
@@ -250,7 +250,7 @@ class HomelabApp(RenderApp):
 
 ## Migration Path
 
-1. **Add Source protocol to rill** — just the type shape
+1. **Add Source protocol to ticks** — just the type shape
 2. **Add SSHSource, TailerSource to framework** — implements Source
 3. **Add SourceBinding, bind_data_source to framework** — wiring helpers
 4. **Update homelab.py** — use bindings instead of SSHConnectionManager
@@ -259,7 +259,7 @@ class HomelabApp(RenderApp):
 
 ## What Stays the Same
 
-- `rill` primitives (Stream, Projection, FileWriter, Tailer)
+- `ticks` primitives (Stream, Projection, FileWriter, Tailer)
 - `cells` rendering
 - KDL spec parsing
 - Collector registry and implementations

@@ -135,7 +135,7 @@ def emit(self, event: Event) -> None:
 
 ### Standard Types
 
-ev doesn't mandate types, but these are conventional:
+facts doesn't mandate types, but these are conventional:
 
 | Type | Typical Fields | Meaning |
 |------|---------------|---------|
@@ -245,7 +245,7 @@ To keep the contract clean:
 
 It only says: *"This thing exists because of this run."*
 
-The domain creates the artifact. ev records that it exists.
+The domain creates the artifact. facts records that it exists.
 
 ## Why It Earns Its Place
 

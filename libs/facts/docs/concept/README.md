@@ -1,4 +1,4 @@
-# ev: CLI Event Contract
+# facts: CLI Event Contract
 
 ## The Problem
 
@@ -25,7 +25,7 @@ A thin contract layer that describes CLI behavior semantically:
 Domain Logic
   └─ emits facts
         ↓
-ev (Contract Layer)
+facts (Contract Layer)
   ├─ Event stream (what's happening)
   └─ Result (what happened)
         ↓
@@ -44,13 +44,13 @@ Renderers
 # This is a fact:
 Event.progress("Checking stack", stack="media", healthy=True)
 
-# This is an instruction (NOT what ev does):
+# This is an instruction (NOT what facts does):
 print_green_checkmark("media is healthy")
 ```
 
 The renderer decides how to present facts. The domain just reports them.
 
-## What ev Provides
+## What facts Provides
 
 ### Event (streaming)
 
@@ -116,19 +116,19 @@ See [authority.md](authority.md) for the full model.
 
 The authoritative outcome when execution completes. See [result.md](result.md) for full details.
 
-## What ev Does NOT Provide
+## What facts Does NOT Provide
 
 - **Parsing** - Use Click, Typer, Cappa
 - **Rendering** - Build your own, or use a companion library
 - **Themes** - Renderer concern
 - **Logging** - Events are user facts, not diagnostics
-- **Workflow** - ev describes, doesn't execute
+- **Workflow** - facts describes, doesn't execute
 
 ## Design Philosophy
 
 ### Black-Style Opinionation
 
-ev is intentionally minimal and frozen. Like Black for formatting:
+facts is intentionally minimal and frozen. Like Black for formatting:
 - Few options
 - Strong opinions
 - Stability over flexibility

@@ -232,7 +232,7 @@ specs/
 ## Package Boundaries
 
 ```
-rill (stdlib only)
+ticks (stdlib only)
 ├── Stream, Tap        — typed async fan-out
 ├── Projection         — incremental fold
 ├── FileWriter         — JSONL persistence
@@ -244,7 +244,7 @@ cells (stdlib + wcwidth)
 ├── Block, Style       — composable layout
 └── RenderApp          — event loop + render
 
-framework (rill + cells + IO)
+framework (ticks + cells + IO)
 ├── Spec parsing       — KDL → contracts
 ├── SpecProjection     — declarative fold ops
 ├── Sources            — SSH, collectors

@@ -1,6 +1,6 @@
 # Emitter Patterns
 
-Patterns for building production emitters with ev.
+Patterns for building production emitters with facts.
 
 ## Core Understanding
 
@@ -12,7 +12,7 @@ Patterns for building production emitters with ev.
 
 **[Aggregating Emitter](aggregating-emitter.md)** — Wrap an emitter to count or accumulate while delegating rendering.
 
-**[Live Emitter](live-emitter.md)** — Integrate Rich Live displays with ev. Includes view functions pattern.
+**[Live Emitter](live-emitter.md)** — Integrate Rich Live displays with facts. Includes view functions pattern.
 
 **[Command Context](command-context.md)** — Single injection point for CLI commands, bundling config, emitters, and output.
 
@@ -37,4 +37,4 @@ Patterns for building production emitters with ev.
 ## Related Docs
 
 - [artifact.md](../concept/artifact.md) — The `type` convention for event discrimination
-- [Emitter protocol](../../src/ev/emitter.py) — The minimal interface
+- [Emitter protocol](../../src/facts/emitter.py) — The minimal interface

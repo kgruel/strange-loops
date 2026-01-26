@@ -5,7 +5,7 @@ Spec-driven data contracts for homelab monitoring. See `docs/SPEC_DRIVEN.md` for
 ## Architecture
 
 ```
-rill (primitives)     →  framework (specs + orchestration)  →  apps (dashboards)
+ticks (primitives)    →  framework (specs + orchestration)  →  apps (dashboards)
 Stream, Projection       KDL parsing, SSH, collectors          homelab.py
 FileWriter, Tailer       SpecProjection, fold ops              cells rendering
 ```
@@ -24,12 +24,12 @@ FileWriter, Tailer       SpecProjection, fold ops              cells rendering
 
 | Package | Imports from | Provides |
 |---------|--------------|----------|
-| `rill` | stdlib only | Stream, Projection, Tailer, FileWriter |
+| `ticks` | stdlib only | Stream, Projection, Tailer, FileWriter |
 | `cells` | stdlib + wcwidth | RenderApp, Block, Style, components |
-| `framework` | rill, kdl-py, asyncssh | SpecProjection, AppSpec, SSH, collectors |
-| `apps` | rill, cells, framework | Runnable dashboards |
+| `framework` | ticks, kdl-py, asyncssh | SpecProjection, AppSpec, SSH, collectors |
+| `apps` | ticks, cells, framework | Runnable dashboards |
 
-Apps import primitives from `rill`, spec layer from `framework`. No re-exports.
+Apps import primitives from `ticks`, spec layer from `framework`. No re-exports.
 
 ## Conventions
 

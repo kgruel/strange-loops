@@ -4,25 +4,25 @@
 
 ## Recording, Not Prompting
 
-**ev records that an input event happened. It does not prompt for input.**
+**facts records that an input event happened. It does not prompt for input.**
 
 This is intentional separation of concerns:
 - **Prompting** (asking the question, getting the answer) → Your CLI framework (Click, Typer, Rich Prompt)
-- **Recording** (noting that it happened) → ev
+- **Recording** (noting that it happened) → facts
 
 This means you write the prompt logic separately, then emit an input event:
 
 ```python
-# Your prompt logic (not ev's job)
+# Your prompt logic (not facts' job)
 response = typer.confirm("Delete 47 files?")
 
-# Record that it happened (ev's job)
+# Record that it happened (facts' job)
 emitter.emit(Event.input("Delete 47 files?", response=response))
 ```
 
 **Why this separation?**
-1. ev is not a prompting library — that would duplicate Click, Typer, Rich, etc.
-2. ev describes facts after they happen, not instructions for what to do
+1. facts is not a prompting library — that would duplicate Click, Typer, Rich, etc.
+2. facts describes facts after they happen, not instructions for what to do
 3. The `input` event enables audit, replay, and debugging without being coupled to any specific prompt UI
 
 ## What It Represents
@@ -70,7 +70,7 @@ The moment `input` gains any agency, it becomes a prompt library. That's not the
 
 **Input events are emitted after the interaction completes, never before.**
 
-The CLI framework (Click, Cappa, Rich Prompt, etc.) handles the actual prompting. The domain logic handles branching. ev just records: "this interaction occurred."
+The CLI framework (Click, Cappa, Rich Prompt, etc.) handles the actual prompting. The domain logic handles branching. facts just records: "this interaction occurred."
 
 ## What It Enables
 
@@ -201,4 +201,4 @@ Event(
 )
 ```
 
-Redaction is the domain's responsibility, not ev's.
+Redaction is the domain's responsibility, not facts'.

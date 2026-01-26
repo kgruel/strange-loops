@@ -1,16 +1,16 @@
 # Live Display Emitter Pattern
 
-*Wrapping Rich Live displays as ev emitters.*
+*Wrapping Rich Live displays as facts emitters.*
 
 Live emitters typically respond to **signals** — structured observations about transient state changes. For example, `Event.log_signal("stack_status", stack="media", healthy=True)` drives a live tree display. See [signal.md](../concept/signal.md) for the signal concept.
 
 ## The Pattern
 
-Rich's `Live` context manager provides real-time updating displays (spinners, progress bars, trees). To integrate with ev, wrap the live display in an emitter that's also a context manager:
+Rich's `Live` context manager provides real-time updating displays (spinners, progress bars, trees). To integrate with facts, wrap the live display in an emitter that's also a context manager:
 
 ```python
 from rich.live import Live
-from ev import Event, Result
+from facts import Event, Result
 
 class LiveEmitter:
     """Emitter that updates a Rich Live display."""
@@ -63,7 +63,7 @@ A live-updating tree showing stack health:
 from rich.console import Console
 from rich.live import Live
 from rich.tree import Tree
-from ev import Event, Result
+from facts import Event, Result
 
 class StackLiveEmitter:
     """Live tree display of stack status."""
@@ -305,7 +305,7 @@ class StackStatusDisplay:
         self.live.__exit__(*args)
 
 
-# emitter.py - ev integration
+# emitter.py - facts integration
 class StackLiveEmitter:
     def __init__(self, display: StackStatusDisplay):
         self._display = display
@@ -330,7 +330,7 @@ class StackLiveEmitter:
 
 This separation lets you:
 - Test the display logic independently
-- Reuse the display in non-ev contexts
+- Reuse the display in non-facts contexts
 - Keep the emitter thin
 
 ## finish() vs __exit__
@@ -392,4 +392,4 @@ Live emitter pattern:
 3. Convert events to renderables in `emit()`
 4. Final update in `finish()`, cleanup in `__exit__`
 
-Keep display logic separate from ev integration for testability.
+Keep display logic separate from facts integration for testability.

@@ -37,7 +37,7 @@ class StreamingEmitter:
 - Each event is independent (can't reference others)
 - Output order matches event order
 
-**ev's reference emitters:**
+**facts' reference emitters:**
 - `PlainEmitter` — streaming to stderr
 
 For Rich terminal output, see `RichEmitter` in ev-toolkit.
@@ -76,7 +76,7 @@ class BatchEmitter:
 - Can aggregate across events (counts, totals)
 - Can reorder or filter based on full event stream
 
-**ev's reference emitters:**
+**facts' reference emitters:**
 - `JsonEmitter` — batch to stdout (buffers events, writes JSON object)
 
 ### Output Stream Convention

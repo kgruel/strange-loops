@@ -1,6 +1,6 @@
 # Factory Methods vs Raw Constructors
 
-ev provides two ways to create Events and Results:
+facts provides two ways to create Events and Results:
 
 1. **Factory methods** (recommended) — the blessed path with guardrails
 2. **Raw constructors** — the escape hatch for edge cases

@@ -153,7 +153,7 @@ Plain and Rich emitters write presentation to stderr; the structured result rema
 ## Quick Example
 
 ```python
-from ev import Event, Result, Emitter
+from facts import Event, Result, Emitter
 
 def check_health(emitter: Emitter) -> Result:
     emitter.emit(Event.log("Checking services..."))

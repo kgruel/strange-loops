@@ -34,7 +34,7 @@ Many systems accidentally:
 
 This creates brittle automation that breaks when wording changes, events are reordered, or output format evolves.
 
-ev explicitly designs against this:
+facts explicitly designs against this:
 - **Result** is the *only* authoritative outcome
 - **Events** are informational, not contractual
 

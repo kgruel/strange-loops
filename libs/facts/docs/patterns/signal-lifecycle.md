@@ -39,7 +39,7 @@ The domain prefix (`deploy.`) groups related signals for routing.
 
 ```python
 import time
-from ev import Event, Result, Emitter
+from facts import Event, Result, Emitter
 
 STAGES = ["decrypt", "rsync", "compose_up", "health_check"]
 
@@ -183,7 +183,7 @@ Renderers can:
 Use `ListEmitter` to verify signal sequence:
 
 ```python
-from ev import ListEmitter
+from facts import ListEmitter
 
 def test_deploy_emits_lifecycle_signals():
     emitter = ListEmitter()

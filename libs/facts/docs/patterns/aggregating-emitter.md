@@ -80,7 +80,7 @@ If you find yourself writing many counting wrappers:
 
 ```python
 from typing import Callable
-from ev import Event, Result, Emitter
+from facts import Event, Result, Emitter
 
 class PredicateCounter:
     """Generic wrapper that counts events matching a predicate."""
@@ -172,7 +172,7 @@ do_work(counted)
 
 Each wrapper in the chain sees events, does its thing, and passes along.
 
-## Why Not Build This Into ev?
+## Why Not Build This Into facts?
 
 This pattern is simple and varies by domain:
 - What to count differs per CLI

@@ -9,8 +9,8 @@ hlab (exploration)
   ↓ patterns emerged
 experiments (proving ground)
   ↓ extracted what stabilized
-rill (../rill) — streaming primitives, stdlib only
-cells (../cells) — TUI rendering, composition-first
+ticks (libs/ticks) — streaming primitives, stdlib only
+cells (libs/cells) — TUI rendering, composition-first
 ```
 
 **The question that started this:** How do I monitor my homelab without adopting heavyweight infrastructure?
@@ -21,11 +21,11 @@ cells (../cells) — TUI rendering, composition-first
 
 | Package | What | Where |
 |---------|------|-------|
-| **rill** | Stream, Projection, Tailer, FileWriter | `../rill` |
-| **cells** | RenderApp, Block, Style, components | `../cells` |
-| **experiments** | Spec layer, orchestration, homelab app | here |
+| **ticks** | Stream, Projection, Tailer, FileWriter | `libs/ticks` |
+| **cells** | RenderApp, Block, Style, components | `libs/cells` |
+| **experiments** | Spec layer, orchestration, homelab app | `experiments/` |
 
-**rill** and **cells** are general-purpose. **experiments** is the integration point where domain-specific work happens (homelab monitoring, KDL specs, SSH collection).
+**ticks** and **cells** are general-purpose. **experiments** is the integration point where domain-specific work happens (homelab monitoring, KDL specs, SSH collection).
 
 ## The Thesis
 
@@ -132,7 +132,7 @@ tbd query -w experiments -n 10
 # Semantic search for key concepts
 tbd ask -w experiments "spec-driven projections"
 tbd ask -w experiments "validation coercion"
-tbd ask -w experiments "rill extraction"
+tbd ask -w experiments "ticks extraction"
 ```
 
 **Step 2: Recover decision context**
@@ -161,7 +161,7 @@ tbd ask -w experiments --first "spec-driven"
 | Query | What it finds |
 |-------|---------------|
 | `tbd ask -w experiments "spec-driven data contracts"` | The thesis and conceptual model |
-| `tbd ask -w experiments "rill cells extraction"` | Package boundary decisions |
+| `tbd ask -w experiments "ticks cells extraction"` | Package boundary decisions |
 | `tbd ask -w experiments "fold ops upsert collect"` | Fold operation design |
 | `tbd ask -w experiments "SSHConnectionManager collectors"` | Collection architecture |
 | `tbd ask -w experiments "KDL validation coercion"` | Event validation decisions |
@@ -193,7 +193,7 @@ When picking this up after a break:
 3. [ ] Read `docs/SPEC_DRIVEN.md` for the thesis
 4. [ ] Run `uv run pytest tests/ -v` to verify things work
 5. [ ] Run the simulator + dashboard to see it in action
-6. [ ] Check `HANDOFF.md` for current state and next steps
+6. [ ] Check `apps/README.md` for current state
 
 ## Asking Good Questions
 

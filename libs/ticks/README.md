@@ -1,4 +1,4 @@
-# rill
+# ticks
 
 Personal-scale event infrastructure. Kafka concepts at file scale.
 
@@ -87,13 +87,6 @@ Bridge between typed streams with transform.
 ```python
 forward = Forward(target_stream, transform=lambda e: enrich(e))
 source_stream.tap(forward)
-```
-
-## Install
-
-```bash
-# Local development
-uv pip install -e ~/Code/rill
 ```
 
 ## Dependencies

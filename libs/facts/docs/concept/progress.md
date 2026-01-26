@@ -166,8 +166,8 @@ Event.progress("Build complete", phase="build", status="ok")
 Event.progress("Scanning repository", phase="scan", status="running")
 ```
 
-These are conventions in `Event.data`, not enforced by ev.
+These are conventions in `Event.data`, not enforced by facts.
 
 ### Hierarchical Progress
 
-For nested task trees (GitHub Actions-style workflows), see the `ProgressTree` pattern in ev-toolkit. This keeps ev's core minimal while providing a blessed pattern for complex workflows.
+For nested task trees (GitHub Actions-style workflows), see the `ProgressTree` pattern in ev-toolkit. This keeps facts' core minimal while providing a blessed pattern for complex workflows.

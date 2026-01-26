@@ -126,12 +126,11 @@ This changes the framing:
 - `source.error` events emitted on collector failure
 - Ansible inventory loader with `common_args` support
 - SSHSession wires `common_args` → asyncssh (ProxyJump, Port, etc.)
-- 110+ tests passing
+- 115 tests passing
 
 **Known limitations:**
 - Single event type per projection (first iteration)
 - No state persistence (memory only)
-- App spec inventory syntax not yet wired (next step)
 
 ## Completed: Collapse SSHConnectionManager (2026-01-25)
 
@@ -218,14 +217,34 @@ Naming: `collectors/docker/containers.collector` → `docker.containers`
 - Supports `-J jump_host`, `-o ProxyJump=`, `-p port`, `-o Port=`
 - Wired to `asyncssh.connect(**kwargs)`
 
-## Next: App Spec Inventory Syntax
+## Completed: App Spec Inventory Syntax (2026-01-25)
 
-Wire inventory into app spec so dashboard auto-discovers hosts:
+**Inventory wiring into AppSpec:**
 
+- `AppSpec.hosts: tuple[HostInfo, ...]` loaded from inventory
+- `AppSpec.vms` property as backward compat alias
+- `inventory_type: str` field (defaults to "ansible")
+- Supports both syntaxes:
+  - Legacy: `inventory "path"`
+  - New: `inventory from="ansible" path="..."`
+- 9 tests in `tests/test_app_spec.py`
+
+**Dashboard integration:**
+
+- `homelab.py` passes `common_args` to SSHSession
+- ProxyJump and SSH options from Ansible inventory now work
+- Empty hosts handled gracefully (UI shows "No VMs")
+
+## Completed: rill → ticks rename (2026-01-25)
+
+The `rill` package was renamed to `ticks` upstream. All imports updated.
+
+## What's Now Possible
+
+**Zero-config onboarding:**
 ```kdl
 app "homelab" {
-    inventory from="ansible" path="~/Code/gruel.network/ansible/inventory.yml"
-
+    inventory from="ansible" path="~/ansible/inventory.yml"
     per-connection {
         use "vm-health"
         collect "docker.containers" as="container.status" into="vm-health"
@@ -233,26 +252,13 @@ app "homelab" {
 }
 ```
 
-Subtask drafted: `app-spec-inventory` (blocked on merged tasks, now unblocked)
+Point at existing Ansible inventory → dashboard auto-discovers hosts with ProxyJump support.
 
-## What Inventory Unlocks
+## Next: Progressive Enhancement
 
-**Progressive enhancement path:**
-
-1. **Host autodiscovery** — dashboard iterates `app_spec.hosts`, no hardcoded VMs
-2. **Group filtering** — `inventory ... groups="vms"` to select subset
-3. **Per-host collectors** — different collectors for different service_types
-4. **Multi-inventory** — combine Ansible + static KDL for dev/prod split
-5. **Dynamic refresh** — watch inventory file, add/remove hosts at runtime
-
-**User experiences enabled:**
-
-| Feature | What it means |
-|---------|---------------|
-| Zero-config onboarding | Point at existing Ansible inventory, dashboard works |
-| Proxy jump support | SSH through bastion hosts via `common_args` |
-| Service-aware views | Group containers by `service_type` in UI |
-| Inventory-as-code | Git-tracked host config, Terraform-generated |
+1. **Group filtering** — `inventory ... groups="vms"` to select subset
+2. **Per-host collectors** — different collectors for different `service_types`
+3. **Service-aware views** — group containers by `service_type` in UI
 
 ## Deferred
 

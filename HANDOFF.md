@@ -239,26 +239,69 @@ Naming: `collectors/docker/containers.collector` → `docker.containers`
 
 The `rill` package was renamed to `ticks` upstream. All imports updated.
 
-## What's Now Possible
+## Working Now (2026-01-25)
 
-**Zero-config onboarding:**
+**End-to-end flow operational:**
 ```kdl
 app "homelab" {
-    inventory from="ansible" path="~/ansible/inventory.yml"
+    inventory from="ansible" path="~/Code/gruel.network/ansible/inventory.yml"
     per-connection {
         use "vm-health"
-        collect "docker.containers" as="container.status" into="vm-health"
+        collect "docker:containers" as="container.status" into="vm-health" interval=10
     }
 }
 ```
 
-Point at existing Ansible inventory → dashboard auto-discovers hosts with ProxyJump support.
+```bash
+uv run python apps/homelab.py
+# → Loads inventory, shows hosts, Enter connects, polls containers every 10s
+```
 
-## Next: Progressive Enhancement
+**What works:**
+- Ansible inventory → hosts with ProxyJump support
+- SSH connection per host
+- `docker:containers` collector polls `docker ps --format json`
+- Events folded into `vm-health` projection
+- Live TUI rendering
 
-1. **Group filtering** — `inventory ... groups="vms"` to select subset
-2. **Per-host collectors** — different collectors for different `service_types`
-3. **Service-aware views** — group containers by `service_type` in UI
+## Session Retrospective (2026-01-25)
+
+### Friction Analysis
+
+We hit four friction points, all at **boundaries between components**:
+
+| Friction | Boundary | What Happened | Root Cause |
+|----------|----------|---------------|------------|
+| rill → ticks | Package | Tests failed, had to update 8 files | Cross-repo rename without sync |
+| Field mismatch | Collector → Projection | Collector outputs `name`, projection expects `container` | Two contracts, no alignment check |
+| Naming convention | Registry lookup | `docker.containers` vs `docker:containers` | Two naming schemes, no suggestion on error |
+| Silent exception | SSH → UI | Connection failed, no feedback | Broad `except: pass` hiding errors |
+
+### Pattern: Information Hiding at Boundaries
+
+The architecture has clean boundaries (good), but **errors and mismatches at those boundaries are silent** (bad). Each friction required reading source code to diagnose.
+
+### What Would Help
+
+1. **Naming convention doc** — Single place: "built-in = colon, discovered = dot"
+2. **Field compatibility check** — Warn if collector output fields don't match projection event spec
+3. **Helpful errors** — On `KeyError`, list available collectors or suggest alternatives
+4. **Error visibility** — Surface connection failures in UI (added `_last_error` as quick fix)
+5. **Integration test** — Parse spec → create binding → run collector → fold → assert state
+
+### Open Questions for Review
+
+1. **Two naming conventions** — Keep `docker:containers` (built-in) vs `docker.containers` (discovered)? Or unify?
+2. **Field mapping** — Should `collect` support field remapping? Or require collectors to output projection-compatible shapes?
+3. **Debug mode** — The `_last_key` / `_last_error` debug code — formalize as debug flag or remove?
+4. **Test gap** — No integration test exercises full path. Add one?
+
+## Next: Take Stock
+
+Before adding features, review:
+1. Is the collector naming split justified?
+2. Should we add tooling for contract alignment (collector ↔ projection)?
+3. What's the simplest path to "add a new collector" for a user?
 
 ## Deferred
 

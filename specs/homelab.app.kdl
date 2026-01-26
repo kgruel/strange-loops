@@ -6,6 +6,6 @@ app "homelab" {
 
     per-connection {
         use "vm-health"
-        collect "docker.containers" as="container.status" into="vm-health" interval=10
+        collect "docker:containers" as="container.status" into="vm-health" interval=10
     }
 }

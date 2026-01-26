@@ -84,6 +84,8 @@ class HomelabApp(RenderApp):
         self._list_state = ListState(item_count=len(self.vms))
         self._width = 80
         self._height = 24
+        self._last_error: str | None = None
+        self._last_key: str | None = None
 
     async def on_start(self) -> None:
         """Called after render loop starts. Start watcher if configured."""
@@ -164,6 +166,11 @@ class HomelabApp(RenderApp):
                 Block.text("", Style(), width=width),
                 Block.text(" Press Enter to connect", Style(dim=True), width=width),
             ]
+            if self._last_key:
+                lines.append(Block.text(f" Last key: {self._last_key}", Style(dim=True), width=width))
+            if self._last_error and vm.name in self._last_error:
+                lines.append(Block.text("", Style(), width=width))
+                lines.append(Block.text(f" Error: {self._last_error}", Style(fg="red"), width=width))
             return join_vertical(*lines)
 
         if not conn.projections:
@@ -185,6 +192,10 @@ class HomelabApp(RenderApp):
     # -- Key handling ----------------------------------------------------------
 
     def on_key(self, key: str) -> None:
+        # Debug: track last key for visibility
+        self._last_key = repr(key)
+        self.mark_dirty()
+
         if key in ("q", "escape"):
             asyncio.ensure_future(self._shutdown())
         elif key == "up":
@@ -262,9 +273,14 @@ class HomelabApp(RenderApp):
                     conn.bindings[ds.projection] = binding
                     await start_binding(binding)
 
-            except Exception:
-                # Connection failed, clean up
+            except Exception as e:
+                # Connection failed, clean up and store error
+                import sys
+                print(f"Connection error for {vm.name}: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
                 self.connections.pop(vm.name, None)
+                self._last_error = f"{vm.name}: {e}"
 
         self.mark_dirty()
 

@@ -104,6 +104,9 @@ cross-lib imports. The loop closes.
 
 All libraries are independent — no lib imports another. They compose in experiments.
 
+Each lib has its own `CLAUDE.md` with detailed API, invariants, and source layout.
+Each lib has its own `HANDOFF.md` with change log and open threads.
+
 ### Peer Participation
 
 A Peer's level of participation is encoded in the delegation hierarchy,

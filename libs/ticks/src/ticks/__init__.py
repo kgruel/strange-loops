@@ -4,6 +4,7 @@ Kafka concepts (append-only logs, offset-tracking consumers, materialized views)
 at individual/homelab scale, using files instead of brokers.
 
 Core primitives:
+  Tick        Frozen temporal snapshot (the atom)
   Stream      Typed async fan-out
   EventStore  Append-only log with optional JSONL persistence
   Projection  Incremental fold (materialized view)
@@ -12,6 +13,7 @@ Core primitives:
   Forward     Stream-to-stream bridge with transform
 """
 
+from .tick import Tick
 from .stream import Stream, Tap, Consumer
 from .store import EventStore
 from .projection import Projection
@@ -21,6 +23,7 @@ from .forward import Forward
 from .source import Source, ClosableSource
 
 __all__ = [
+    "Tick",
     "Stream",
     "Tap",
     "Consumer",

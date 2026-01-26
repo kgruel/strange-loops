@@ -16,6 +16,20 @@ Typed event → Stream → FileWriter → JSONL file
 
 ## Core primitives
 
+### Tick[T]
+
+Frozen temporal snapshot — the atom. Wraps any payload with the timestamp of when a temporal boundary fell.
+
+```python
+from datetime import datetime, timezone
+from ticks import Tick
+
+tick: Tick[dict] = Tick(
+    ts=datetime.now(timezone.utc),
+    payload={"count": 5, "total": 100},
+)
+```
+
 ### Stream[T]
 
 Typed async fan-out. Emits to all tapped consumers.

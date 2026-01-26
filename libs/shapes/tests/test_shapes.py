@@ -451,6 +451,46 @@ class TestShapeApply:
             s.apply({"x": {}}, {})
 
 
+class TestApplyPurity:
+    """Tests that Shape.apply() never mutates the original state's nested containers."""
+
+    def test_collect_does_not_mutate_original_list(self):
+        """apply() with collect must not modify the original state's list."""
+        s = Shape(
+            name="collector",
+            folds=(Fold(op="collect", target="items"),),
+        )
+        original = {"items": [{"v": 1}]}
+        result = s.apply(original, {"v": 2})
+        assert result["items"] == [{"v": 1}, {"v": 2}]
+        assert original["items"] == [{"v": 1}], "original list was mutated"
+
+    def test_upsert_does_not_mutate_original_dict(self):
+        """apply() with upsert must not modify the original state's nested dict."""
+        s = Shape(
+            name="registry",
+            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+        )
+        original = {"users": {"a": {"id": "a", "name": "Alice"}}}
+        result = s.apply(original, {"id": "b", "name": "Bob"})
+        assert "b" in result["users"]
+        assert "b" not in original["users"], "original dict was mutated"
+
+    def test_two_applies_from_same_base_are_independent(self):
+        """Two apply() calls from the same base state produce independent results."""
+        s = Shape(
+            name="collector",
+            folds=(Fold(op="collect", target="items"),),
+        )
+        base = {"items": []}
+        r1 = s.apply(base, {"v": 1})
+        r2 = s.apply(base, {"v": 2})
+        assert r1["items"] == [{"v": 1}]
+        assert r2["items"] == [{"v": 2}]
+        assert base["items"] == [], "base state was mutated"
+        assert r1["items"] is not r2["items"], "results share the same list object"
+
+
 class TestValidationError:
     """Tests for ValidationError exception."""
 

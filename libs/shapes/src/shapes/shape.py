@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 
@@ -68,10 +69,10 @@ class Shape:
     def apply(self, state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         """Apply fold rules to state given a payload, return new state.
 
-        Shallow-copies state, builds fold fns from self.folds, applies each
-        in order. Pure: never mutates the input state dict.
+        Deep-copies state so fold fns (which mutate in place) never affect
+        the input dict or its nested containers. Pure.
         """
-        new = dict(state)
+        new = copy.deepcopy(state)
         for fn in build_fold_fns(self.folds):
             fn(new, payload)
         return new

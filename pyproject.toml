@@ -8,12 +8,12 @@ dependencies = [
     "pyyaml>=6.0",
     "asyncssh>=2.14",
     "cells",
-    "rill",
+    "ticks",
 ]
 
 [tool.uv.sources]
 cells = { path = "../cells", editable = true }
-rill = { path = "../rill", editable = true }
+ticks = { path = "../rill", editable = true }
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.23"]

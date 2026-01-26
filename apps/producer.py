@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from rill import FileWriter
+from ticks import FileWriter
 
 
 @dataclass(frozen=True)

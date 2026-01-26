@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from rill import Stream, Tap, FileWriter
+from ticks import Stream, Tap, FileWriter
 
 from .sources import TailerSource, PollSource, StreamSource
 from .collectors import get_collector

@@ -24,7 +24,7 @@ import asyncio
 import random
 from datetime import datetime, timezone
 
-from rill import FileWriter
+from ticks import FileWriter
 
 from framework import parse_app_spec
 

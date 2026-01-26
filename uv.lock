@@ -180,7 +180,7 @@ dependencies = [
     { name = "cells" },
     { name = "kdl-py" },
     { name = "pyyaml" },
-    { name = "rill" },
+    { name = "ticks" },
     { name = "wcwidth" },
 ]
 
@@ -196,7 +196,7 @@ requires-dist = [
     { name = "cells", editable = "../cells" },
     { name = "kdl-py", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rill", editable = "../rill" },
+    { name = "ticks", editable = "../rill" },
     { name = "wcwidth", specifier = ">=0.2" },
 ]
 
@@ -345,7 +345,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rill"
+name = "ticks"
 version = "0.1.0"
 source = { editable = "../rill" }
 

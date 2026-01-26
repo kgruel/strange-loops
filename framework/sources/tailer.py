@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import AsyncIterator, Callable, Generic, TypeVar
 
-from rill import Tailer
+from ticks import Tailer
 
 T = TypeVar("T")
 

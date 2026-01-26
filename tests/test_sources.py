@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rill import Stream, Source, ClosableSource, FileWriter
+from ticks import Stream, Source, ClosableSource, FileWriter
 from framework.sources import TailerSource, PollSource, StreamSource
 from framework.binding import (
     SourceBinding,

@@ -25,7 +25,7 @@ from cells import (
     Region,
 )
 
-from rill import Tailer, Projection
+from ticks import Tailer, Projection
 
 
 # --- Event type (matches producer) ---

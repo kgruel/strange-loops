@@ -1,15 +1,20 @@
 # THREADS — ticks
 
-## Tick class
-Design done: `Tick = ts + payload`, frozen dataclass, Generic[T].
-Implementation subtask (`implement/tick-atom`) is in flight. After
-merge, the atom table in CLAUDE.md matches reality.
+## [resolved] Tick class
+Tick atom implemented: `Tick(ts: datetime, payload: T)`, frozen,
+Generic[T]. Exported from ticks. Atom table in CLAUDE.md matches.
+
+## [resolved] Projection fold callable
+Projection now accepts an optional `fold` callable in __init__:
+`Projection(initial, fold=fn)`. If provided, `apply()` delegates to
+the callable. Subclass pattern still works. This eliminates the need
+for bridge classes at composition points.
 
 ## Stream[Tick] downstream
-Once Tick exists, experiment with Projection emitting Tick[dict] into
-a downstream Stream[Tick] for further projection or persistence. This
-validates composability — e.g., daily rollups from hourly ticks, weekly
-summaries from daily ticks.
+Once the pipeline is rebuilt, experiment with Projection emitting
+Tick[dict] into a downstream Stream[Tick] for further projection or
+persistence. This validates composability — e.g., daily rollups from
+hourly ticks, weekly summaries from daily ticks.
 
 ## Tick emission from Projection
 Currently Projection maintains live state (continuously updating dict).

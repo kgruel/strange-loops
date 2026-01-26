@@ -3,7 +3,7 @@
 ## Feedback loop
 Cells emitting facts back into ticks — UI observability. When you
 interact with a TUI (keypress, selection, navigation), those actions
-could become Events on the stream. Discussed in prior sessions, not
+could become Facts on the stream. Discussed in prior sessions, not
 implemented. This closes the pipeline loop: you see state through
 cells, your actions become facts, facts flow through ticks.
 

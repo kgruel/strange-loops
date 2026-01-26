@@ -1,14 +1,11 @@
 # THREADS — shapes
 
-## Shape.apply()
-CLAUDE.md mentions `Shape (facets + folds + apply)` but no apply method
-exists on Shape. Fold application currently lives in ShapeProjection in
-experiments. Decision: does Shape get an `apply(state, event) -> state`
-method, or does application stay in the experiments bridge?
-
-Argument for: Shape becomes self-contained, any consumer can fold.
-Argument against: Shape stays pure contract (declaration), application
-is infrastructure (ticks domain).
+## [resolved] Shape.apply()
+Shape now has `apply(state: dict, payload: dict) -> dict`. Fold engine
+lives in `engine.py` — closures built from Fold descriptors, pure dict
+manipulation. Shape is self-contained: declare + execute. The
+experiments bridge (ShapeProjection) dissolves into a one-liner:
+`Projection(initial=shape.initial_state(), fold=shape.apply)`.
 
 ## KDL parser
 Shapes can be defined programmatically (Python API) or declaratively
@@ -19,5 +16,6 @@ dependency. Defer until the declarative path matures.
 ## Validation and coercion
 Shape has type utilities (coerce_value, type_matches, initial_value)
 but no validate/coerce methods on Shape itself. These live in types.py
-as standalone functions. Consider whether Shape should expose
-`shape.validate(event)` and `shape.coerce(event)` directly.
+as standalone functions. Defer until Shape.apply() is in use and we
+see where validation naturally fits in the fold pipeline (likely a
+boundary concern — before apply, not during).

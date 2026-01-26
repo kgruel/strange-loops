@@ -28,9 +28,9 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 | Package | Atom | Structure | Question | Metaphor |
 |---------|------|-----------|----------|----------|
 | **peers** | Peer | name + scope | *who* | social |
-| **facts** | Event | kind + data + ts | *what* | narrative |
-| **ticks** | Tick | timestamp + payload | *when* | temporal |
-| **shapes** | Shape | facets + folds | *how* | geometric |
+| **facts** | Fact | kind + ts + payload | *what* | narrative |
+| **ticks** | Tick | ts + payload | *when* | temporal |
+| **shapes** | Shape | facets + folds + apply | *how* | geometric |
 | **cells** | Cell | char + style | *where* | spatial |
 
 ### Data Flow
@@ -38,18 +38,18 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 The pipeline is a loop. You are a Peer in it.
 
     ┌─────────────────────────────────────────────────────────┐
-    │  You (Peer) — your choices become new Events            │
+    │  You (Peer) — your choices become new Facts             │
     │                                                         │
     ▼                                                         │
-  Event                                            facts      │
+  Fact                                             facts      │
     │                                                         │
     ▼                                                         │
-  Stream[Event] ─── tap ──→ any external consumer  ticks      │
+  Stream[Fact] ─── tap ──→ any external consumer   ticks      │
     │                                                         │
     ├──→ Store ──→ FileWriter                      ticks      │
     │                                                         │
     ▼                                                         │
-  Projection ← Shape                          ticks + shapes  │
+  Projection(fold=shape.apply) ← Shape        ticks + shapes  │
     │                                                         │
     ├── live state ──→ Lens → Block → You ────────────────────┘
     │                              cells   peers
@@ -60,10 +60,10 @@ The pipeline is a loop. You are a Peer in it.
                          downstream
                    (project, persist, serve)
 
-A Peer emits an Event. The Event flows through a Stream. A
-Projection applies a Shape to fold events into state. You see
-state through a Lens rendered as Cells. Your choices become new
-Events — the loop continues.
+A Peer observes a Fact. The Fact flows through a Stream. A
+Projection applies a Shape (via shape.apply) to fold facts into
+state. You see state through a Lens rendered as Cells. Your
+choices become new Facts — the loop continues.
 
 At a temporal boundary, the folded state becomes a Tick — a frozen
 snapshot. Ticks flow downstream as a new Stream for further
@@ -76,9 +76,9 @@ the main pipeline.
 | Package | Atom | Purpose |
 |---------|------|---------|
 | **peers** | Peer | Scoped identity: name + scope (see, do, ask). Delegation creates child peers with narrower scope — the hierarchy encodes participation level (direct, delegated, automated). |
-| **facts** | Event | Semantic contract: kind + data + ts. Result for completion. Emitter protocol. |
-| **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding events through a Shape over a period. |
-| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds). Defines how events become state. |
+| **facts** | Fact | Observation atom: kind + ts + payload. An intentional observation — something that happened at a specific time. Kind is an open string for routing; payload structure comes from Shape. |
+| **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
+| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
 | **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, RenderApp |
 
 All libraries are independent — no lib imports another. They compose in experiments.
@@ -95,7 +95,7 @@ behalf of the root with restricted scope.
       └─ delegate("kyle/subtask-worker")    → delegated, task-scoped
 
 Stance (direct, guided, delegated, automated, observing) is an emergent
-property of the topology — which peer emitted the event tells you the
+property of the topology — which peer observed the fact tells you the
 participation level. No enum needed; the identity is the stance.
 
 ### experiments/
@@ -112,4 +112,6 @@ Standalone demo scripts and teaching materials extracted from the cells library.
 - Workspace dependencies use `{ workspace = true }` in `[tool.uv.sources]`
 - Each lib has its own pyproject.toml, tests/, and build config
 - Immutable by default: frozen dataclasses, pure functions, compose don't mutate
-- Shape is the contract at every boundary — describes what data looks like
+- Shape is the contract at every boundary — describes what data looks like and how to fold it
+- Projection accepts a fold callable: `Projection(initial, fold=shape.apply)` — no bridge class needed
+- Facts go in, Ticks come out: Fact is the raw observation (input), Tick is the derived snapshot (output)

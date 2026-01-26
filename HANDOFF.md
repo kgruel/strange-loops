@@ -4,120 +4,103 @@ Last session: 2026-01-26
 
 ## What happened
 
-Alignment review of the prism monorepo against the vision in CLAUDE.md.
-Five issues found, three resolved, two advanced.
+Full review of all five libraries for vocabulary consistency before
+rebuilding the pipeline experiment from scratch. Three atoms
+implemented/refactored, one design tension resolved, one clean break.
 
 ### Resolved
 
-**Shapes vocabulary** — `Field`/`Form` renamed to `Facet`/`Shape`.
-Package stays `shapes`. Geometric metaphor domain (origami: a Shape
-is the result of Folds applied to flat material, Facets are the
-measurable faces). `Fold.props` immutability fixed with
-`MappingProxyType`. Merged to main.
+**Tick atom** — Cherry-picked from `implement/tick-atom` branch
+(branch had collateral HANDOFF/THREADS deletions from diverged
+subtask). `Tick(ts: datetime, payload: T)`, frozen, generic. 15 tests.
+The ticks package now has its actual atom.
 
-**Tick concept** — Tick is not the input to the stream, it's the
-output of Projection. A frozen snapshot at a temporal boundary.
-`Tick = ts + payload`, generic, opt-in. Events go in, Ticks come
-out. If you don't need temporal windowing, you get live state
-instead. Same fold, same Shape, different output mode. Subtask
-`implement/tick-atom` is drafted and planning.
+**Shape.apply()** — Fold execution moved from experiments into shapes.
+New `engine.py` with fold closures (latest, count, sum, collect,
+upsert) built from Fold descriptors. `Shape.apply(state, payload)`
+is pure dict→dict, no cross-lib imports. Shape is now self-contained:
+declare + execute. 17 new tests.
 
-**Peer participation** — Stance (direct/guided/delegated/automated/
-observing) dissolves into the delegation hierarchy. Root peer acts
-directly, child peers act on behalf with restricted scope. The
-identity IS the stance. No new type needed. Possibly a convenience
-labeller later.
+**Projection fold callable** — `Projection(initial, fold=fn)` accepts
+an optional callable. Subclass pattern preserved for backwards compat.
+This eliminates the ShapeProjection bridge class — composition at the
+call site: `Projection(initial=shape.initial_state(), fold=shape.apply)`.
+5 new tests.
+
+**Fact atom (clean break)** — Event→Fact rename executed as a full
+redesign, not just a rename. Stripped all CLI output framework: Event,
+Result, Emitter, ListEmitter, NullEmitter, JsonEmitter, PlainEmitter,
+docs/. 6,081 lines removed.
+
+Fact is the observation atom: `Fact(kind: str, ts: datetime, payload: T)`.
+- kind is an open string — no enum, no constrained set. Routing key.
+- Structure comes from Shape, not from kind.
+- Factory: `Fact.of("heartbeat", service="api", latency=42)`
+- Serialization: `to_dict()` / `from_dict()` for JSONL persistence
+- Dict payloads wrapped in MappingProxyType for immutability
+- `is_kind(*kinds)` predicate for filtering
+
+Design rationale: Facts go in, Ticks come out. Fact is an intentional
+observation (raw, from the world). Tick is a derived snapshot (cooked,
+at a boundary). Same envelope pattern, different semantics. Fact has
+`kind` which Tick doesn't — observations always have a category.
 
 ### Updated
 
-CLAUDE.md now has: metaphor column on atoms table, revised data flow
-diagram with stream taps and peer feedback loop, Tick definition,
-Peer participation section.
+- CLAUDE.md: atoms table, data flow diagram, core libraries table,
+  key patterns — all updated for Fact/Shape.apply/Projection fold.
+- All five THREADS.md files updated with resolved threads and
+  vocabulary corrections (Event→Fact).
 
-THREADS.md seeded in all five libraries with open design questions
-from this and prior sessions. Convention: keep these updated as
-threads open/close.
+## Next session
 
-## In flight
+Dump the old pipeline experiment and rebuild it iteratively, using
+the now-consistent atoms:
 
-- `implement/tick-atom` subtask — worker drafting plan. Small scope:
-  one frozen dataclass, tests, export. Review and merge.
+```
+Fact.of("heartbeat", service="api") → Stream[Fact]
+    → Projection(initial=shape.initial_state(), fold=shape.apply)
+    → live state → Lens → Cells
+    → Tick[state] at boundary → Stream[Tick] → downstream
+```
+
+No bridge classes. Shape.apply() does the folding. Projection accepts
+the callable. Fact carries the observation. Tick carries the snapshot.
 
 ## Open threads
 
-### peers
-
-- **Scope semantics**: see/do/ask are frozensets of strings. What do
-  those strings concretely mean when they cascade through the
-  pipeline? e.g., `see={"metrics"}` — does that filter which Events
-  you receive? Which Shapes you can read? Which Lenses render for
-  you?
-- **Needs and capabilities**: Different from permissions. Needs = what
-  a peer requires to function (Must/Should/May gradient). Capabilities
-  = what a peer can offer. These compose with scope. Defer until
-  patterns emerge from real usage.
-- **Stance convenience**: A utility that reads the delegation
-  hierarchy and labels the participation level. Not a type, possibly
-  a function: `stance(peer) -> str`.
-
 ### facts
-
-- **Vocabulary rename**: Prior session planned Event -> Fact,
-  Result -> Verdict. Code in prism still uses Event/Result. Decision
-  needed: do we still want this rename? Event has earned its place
-  in the codebase — the pipeline reads naturally with "Event". But
-  "Fact" was the original grounded vocabulary choice.
-- **API refinement**: The original discussion noted facts needs
-  vocabulary and API work. Specifics not yet scoped.
-
-### ticks
-
-- **Tick class**: Design done, implementation in flight. After merge,
-  the pipeline wiring in experiments should demonstrate Tick as the
-  output of ShapeProjection at temporal boundaries.
-- **Stream[Tick] downstream**: Once Tick exists, experiment with
-  Projection emitting `Tick[dict]` into a downstream `Stream[Tick]`
-  for further projection/persistence. This validates the "ticks of
-  ticks" composability (e.g., daily rollups from hourly ticks).
+- **Kind conventions**: Open string by design. Review conventions as
+  usage patterns emerge from pipeline rebuild.
 
 ### shapes
+- **KDL parser**: Defer until declarative path matures.
+- **Validation/coercion on Shape**: Defer until apply() is in use and
+  we see where validation fits (likely boundary concern, before apply).
 
-- **Shape.apply()**: CLAUDE.md mentions `Shape (facets + folds + apply)`
-  but no `apply` method exists on Shape. Fold application currently
-  lives in `ShapeProjection` in experiments. Decision: does Shape get
-  an `apply(state, event) -> state` method, or does application stay
-  in the experiments bridge?
+### ticks
+- **Stream[Tick] downstream**: Validate composability once pipeline
+  is rebuilt (daily rollups from hourly ticks).
+- **Tick emission from Projection**: Boundary trigger mechanism not
+  designed — time-based, count-based, or event-driven.
+- **EventStore naming**: Still called EventStore, should be Store.
+
+### peers
+- **Scope semantics**: Strings in see/do/ask are uninterpreted. Need
+  real usage to ground them.
+- **Needs/capabilities**: Defer until patterns emerge.
+- **Stance convenience**: Low priority utility function.
+- **Pipeline bridging**: Topological, not structural.
 
 ### cells
-
-- **Feedback loop**: Cells emitting facts back into ticks (UI
-  observability). Discussed in prior sessions, not implemented.
-- **ShapeLens extensions**: Tree lens, chart lens, other conventions
-  beyond the current dict->table, list->list-view defaults.
-
-### cross-cutting
-
-- **Per-lib THREADS.md**: Seeded across all five libraries. Each
-  THREADS.md captures open design questions, unresolved vocabulary
-  decisions, and deferred work for that library. Convention: update
-  THREADS.md as threads open/close during sessions.
-
-  ```
-  libs/peers/THREADS.md  — scope semantics, needs/capabilities, stance, pipeline bridging
-  libs/facts/THREADS.md  — Event vs Fact rename, API refinement, Emitter protocol
-  libs/ticks/THREADS.md  — Tick class, Stream[Tick] downstream, emission boundaries, Store naming
-  libs/shapes/THREADS.md — Shape.apply(), KDL parser, validation/coercion methods
-  libs/cells/THREADS.md  — feedback loop, ShapeLens extensions, zoom propagation, CLI->TUI continuum
-  ```
+- **Feedback loop**: User actions → Facts on the stream. Not implemented.
+- **ShapeLens extensions**: Tree lens, chart lens. Future.
+- **Zoom propagation**: Global vs independent vs relative. Not decided.
 
 ## Commits this session
 
 ```
-007a67d Update CLAUDE.md with data flow, metaphor domains, Tick/Peer concepts
-85c072b Update CLAUDE.md with atoms vocabulary and data flow diagram
-```
-
-Plus squash-merged from subtask:
-```
-Refactor shapes vocabulary: Field->Facet, Form->Shape, fix Fold.props immutability
+49ea6a0 Replace Event with Fact atom, strip CLI framework from facts library
+9738280 Add Shape.apply() fold engine and Projection fold callable
+b8d5879 Add Tick atom to ticks library: frozen dataclass ts + payload
 ```

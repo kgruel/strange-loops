@@ -8,5 +8,6 @@ build/
 uv.lock
 *.jsonl
 .coverage
+.pytest_cache/
 .subtask/
 .obsidian/

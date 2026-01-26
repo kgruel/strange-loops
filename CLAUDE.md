@@ -21,27 +21,61 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 
 ## Architecture
 
-`prism` is a uv workspace monorepo containing five core libraries and an experiments layer.
+`prism` is a uv workspace monorepo. Five core libraries, each with one atom.
+
+### Atoms
+
+| Package | Atom | Structure | Question |
+|---------|------|-----------|----------|
+| **peers** | Peer | name + scope | *who* |
+| **facts** | Event | kind + data + ts | *what* |
+| **ticks** | Tick | timestamp + payload | *when* |
+| **shapes** | Shape | facets + folds | *how* |
+| **cells** | Cell | char + style | *where* |
+
+### Data Flow
+
+The pipeline is a loop. The human is a Peer in it.
+
+    ┌──────────────────────────────────────────────────────────┐
+    │                                                          │
+    ▼                                                          │
+  Event                                            facts       │
+    │                                                          │
+    ▼                                                          │
+  Stream                                           ticks       │
+    │                                                          │
+    ▼                                                          │
+  Store ──→ FileWriter                             ticks       │
+    │                                                          │
+    ▼                                                          │
+  Projection                                       ticks       │
+    │  delegates to Shape                          shapes      │
+    │                                                          │
+    ▼                                                          │
+  state ─── shaped by Shape ───                                │
+    │                          │              │                │
+    ▼                          ▼              ▼                │
+  Lens → Block → You    Store → SQLite    OpenAPI spec         │
+  cells          peers   ticks             shapes              │
+    │                                                          │
+    └──────────────────────────────────────────────────────────┘
+
+State is a dict that conforms to a Shape. Any consumer that reads
+the Shape can use the state: render it, persist it, serve it,
+or feed it downstream.
 
 ### Core Libraries (libs/)
 
-| Package | Purpose |
-|---------|---------|
-| **peers** | Scoped identity primitives: Peer = name + scope |
-| **facts** | Renderer-agnostic semantic contract for CLI output (Event/Result/Emitter) |
-| **ticks** | Personal-scale event infrastructure (Stream, EventStore, Projection, FileWriter, Tailer) |
-| **shapes** | Declarative schema shapes (Field, Fold, Form) |
-| **cells** | Cell-buffer terminal UI framework (Cell, Buffer, Block, Span, Layer, App) |
+| Package | Atom | Purpose |
+|---------|------|---------|
+| **peers** | Peer | Scoped identity: name + scope (see, do, ask) |
+| **facts** | Event | Semantic contract: kind + data + ts. Result for completion. Emitter protocol. |
+| **ticks** | Tick | Event infrastructure: Stream, Store, Projection, FileWriter, Tailer |
+| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply) |
+| **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, RenderApp |
 
-### Dependency Flow
-
-```
-peers (identity) ─┐
-facts (events)  ──┤
-shapes (schema) ──┼── experiments (apps + framework)
-ticks (streams) ──┤
-cells (terminal) ─┘
-```
+All libraries are independent — no lib imports another. They compose in experiments.
 
 ### experiments/
 
@@ -56,4 +90,5 @@ Standalone demo scripts and teaching materials extracted from the cells library.
 - All libs use `src/` layout with hatchling (except facts which uses uv_build)
 - Workspace dependencies use `{ workspace = true }` in `[tool.uv.sources]`
 - Each lib has its own pyproject.toml, tests/, and build config
-- Blocks are immutable; compose via functions, don't mutate
+- Immutable by default: frozen dataclasses, pure functions, compose don't mutate
+- Shape is the contract at every boundary — describes what data looks like

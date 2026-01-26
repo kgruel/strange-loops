@@ -124,7 +124,6 @@ def test_repr():
 
 # -- Projection fold callable --
 
-import asyncio
 import pytest
 from ticks import Projection, EventStore
 
@@ -132,13 +131,13 @@ from ticks import Projection, EventStore
 class TestProjectionFoldCallable:
     """Tests for Projection with a fold callable instead of subclassing."""
 
-    def test_fold_callable_via_consume(self):
+    async def test_fold_callable_via_consume(self):
         def add(state: int, event: int) -> int:
             return state + event
 
         proj = Projection(0, fold=add)
-        asyncio.get_event_loop().run_until_complete(proj.consume(5))
-        asyncio.get_event_loop().run_until_complete(proj.consume(3))
+        await proj.consume(5)
+        await proj.consume(3)
         assert proj.state == 8
         assert proj.version == 2
 
@@ -173,16 +172,16 @@ class TestProjectionFoldCallable:
         assert proj.state == 6
         assert proj.cursor == 3
 
-    def test_no_fold_raises_not_implemented(self):
+    async def test_no_fold_raises_not_implemented(self):
         proj = Projection(0)
         with pytest.raises(NotImplementedError):
-            asyncio.get_event_loop().run_until_complete(proj.consume(1))
+            await proj.consume(1)
 
-    def test_subclass_still_works(self):
+    async def test_subclass_still_works(self):
         class SumProjection(Projection[int, int]):
             def apply(self, state: int, event: int) -> int:
                 return state + event
 
         proj = SumProjection(0)
-        asyncio.get_event_loop().run_until_complete(proj.consume(7))
+        await proj.consume(7)
         assert proj.state == 7

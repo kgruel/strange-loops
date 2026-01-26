@@ -1,0 +1,21 @@
+[project]
+name = "shapes"
+version = "0.1.0"
+description = "Declarative schema shapes: Field, Fold, Form"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shapes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

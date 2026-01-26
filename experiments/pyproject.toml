@@ -12,11 +12,18 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cells = { path = "../cells", editable = true }
-ticks = { path = "../rill", editable = true }
+cells = { workspace = true }
+ticks = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["framework", "apps"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

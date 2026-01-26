@@ -1,5 +1,5 @@
 [project]
-name = "rill"
+name = "ticks"
 version = "0.1.0"
 description = "Personal-scale event infrastructure. Kafka concepts at file scale."
 readme = "README.md"
@@ -18,16 +18,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["rill"]
+packages = ["src/ticks"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-addopts = "--cov=rill --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=ticks --cov-report=term-missing --cov-fail-under=100"
 
 [tool.coverage.run]
-source = ["rill"]
+source = ["src/ticks"]
 branch = true
 
 [tool.coverage.report]

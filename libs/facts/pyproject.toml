@@ -1,5 +1,5 @@
 [project]
-name = "ev"
+name = "facts"
 version = "0.6.0"
 description = "Renderer-agnostic semantic contract for CLI output"
 readme = "README.md"
@@ -22,10 +22,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=ev --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=facts --cov-report=term-missing --cov-fail-under=100"
 
 [tool.coverage.run]
-source = ["src/ev"]
+source = ["src/facts"]
 branch = true
 
 [tool.coverage.report]

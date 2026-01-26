@@ -3,22 +3,25 @@
 
 A 2D navigable space where:
 - left/right moves between topics (sibling concepts)
-- up/down moves between depths (same concept, more/less detail)
+- up/down moves between zoom levels (same concept, more/less detail)
 
 Run: uv run python demos/bench.py
 
-Three depth levels:
-- Level 0 (main):   intro -> cell -> style -> span -> ...
-- Level 1 (detail): cell/detail -> style/detail -> ...
-- Level 2 (source): cell/source -> style/source -> ...
+Zoom levels (per slide via max_zoom):
+- Zoom 0: summary (intro text + minimal code)
+- Zoom 1: detail (full definition)
+- Zoom 2: source (from actual file)
 
-Verbosity = starting zoom level (navigation structure unchanged):
+Slides with max_zoom > 0 support in-slide zooming via up/down keys.
+Some topics are still separate slides (style/detail, etc.) during migration.
+
+Verbosity = starting zoom level:
 - -q, --quiet: Print slides inline with rendered demos, then exit
-- default:     Start at level 0 (main slides)
-- -v:          Start at level 1 (detail slides)
-- -vv:         Start at level 2 (source slides)
+- default:     Start at intro, zoom 0
+- -v:          Start at cell, zoom 1 (detail level)
+- -vv:         Start at cell, zoom 2 (source level)
 
-User can always navigate up/down between levels with arrow keys.
+User can always navigate up/down between zoom levels with arrow keys.
 """
 
 from __future__ import annotations
@@ -106,17 +109,54 @@ class Demo:
     center: bool = True
 
 
+@dataclass(frozen=True)
+class ZoomText:
+    """Text with content per zoom level.
+
+    levels[0] = summary (zoom 0)
+    levels[1] = detail (zoom 1)
+    levels[2] = source (zoom 2)
+
+    If zoom exceeds available levels, uses the highest available level.
+    """
+    levels: tuple[str | Line, ...]
+    style: Style = field(default_factory=Style)
+    center: bool = True
+
+
+@dataclass(frozen=True)
+class ZoomCode:
+    """Code with source per zoom level.
+
+    levels[0] = summary code (zoom 0)
+    levels[1] = detail code (zoom 1)
+    levels[2] = full source (zoom 2)
+
+    If zoom exceeds available levels, uses the highest available level.
+    """
+    levels: tuple[str, ...]
+    title: str = ""
+    center: bool = True
+
+
 # Section is any of these types
-Section = Text | Code | Spacer | Demo
+Section = Text | Code | Spacer | Demo | ZoomText | ZoomCode
 
 
 @dataclass(frozen=True)
 class Slide:
-    """A single slide in the teaching bench."""
+    """A single slide in the teaching bench.
+
+    max_zoom determines how many zoom levels this slide supports:
+    - 0: just the main content
+    - 1: main + detail
+    - 2: main + detail + source
+    """
     id: str
     title: str
     sections: tuple[Section, ...] = ()
     nav: Navigation = field(default_factory=Navigation)
+    max_zoom: int = 0
     on_key: Callable[[str, "BenchState"], "BenchState"] | None = None
 
 
@@ -124,6 +164,8 @@ class Slide:
 class BenchState:
     """Application state for the teaching bench."""
     current_slide: str = "intro"
+    zoom: int = 0  # current zoom level (0=summary, 1=detail, 2=source)
+    show_minimap: bool = False  # whether to show minimap sidebar
     focus: Focus = field(default_factory=lambda: Focus(id="demo"))  # .captured = keys go to widget
 
     # Layer stack (base layer + modal overlays)
@@ -149,6 +191,67 @@ class BenchState:
     # Terminal dimensions (for layers to access)
     width: int = 80
     height: int = 24
+
+
+@dataclass(frozen=True)
+class LensContext:
+    """Rendering context for all section lenses.
+
+    Provides uniform context to all section renderers:
+    - width: available rendering width
+    - zoom: detail level (0=summary, 1=detail, 2=source)
+    - focus: current focus state
+    - perspective: rendering mode ("content", "minimap")
+
+    Component states are passed through for Demo sections.
+    """
+    width: int
+    zoom: int = 0
+    focus: Focus = field(default_factory=lambda: Focus(id="demo"))
+    perspective: str = "content"  # "content", "minimap"
+
+    # Component states for Demo sections
+    spinner_state: SpinnerState = field(default_factory=SpinnerState)
+    spinner_braille: SpinnerState = field(default_factory=lambda: SpinnerState(frames=BRAILLE))
+    spinner_line: SpinnerState = field(default_factory=lambda: SpinnerState(frames=LINE))
+    progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
+    list_state: ListState = field(default_factory=lambda: ListState(item_count=5))
+    text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
+    table_state: TableState = field(default_factory=lambda: TableState(row_count=4))
+
+    # Focus demo state
+    focus_demo_item: str = "a"
+    focus_demo_mode: str = "ring"
+
+    # Search demo state
+    search_state: Search = field(default_factory=Search)
+    search_mode: str = "contains"
+
+    @classmethod
+    def from_state(cls, state: BenchState, width: int, zoom: int | None = None) -> "LensContext":
+        """Create LensContext from BenchState.
+
+        This factory extracts all relevant state from BenchState and packages it
+        for rendering. The width parameter is the available content width.
+        If zoom is None, uses state.zoom.
+        """
+        return cls(
+            width=width,
+            zoom=zoom if zoom is not None else state.zoom,
+            focus=state.focus,
+            perspective="content",
+            spinner_state=state.spinner_state,
+            spinner_braille=state.spinner_braille,
+            spinner_line=state.spinner_line,
+            progress_state=state.progress_state,
+            list_state=state.list_state,
+            text_state=state.text_state,
+            table_state=state.table_state,
+            focus_demo_item=state.focus_demo_item,
+            focus_demo_mode=state.focus_demo_mode,
+            search_state=state.search_state,
+            search_mode=state.search_mode,
+        )
 
 
 # -- Styles --
@@ -576,6 +679,328 @@ def render_section(section: Section, width: int, state: BenchState | None = None
     return Block.empty(width, 1)
 
 
+# -- Section Lenses (context-first API) --
+
+
+def text_lens(section: Text, ctx: LensContext) -> Block:
+    """Render a text section via LensContext.
+
+    Currently a passthrough to render_text; future: zoom-aware rendering.
+    """
+    return render_text(section, ctx.width)
+
+
+def code_lens(section: Code, ctx: LensContext) -> Block:
+    """Render a code section via LensContext.
+
+    Currently a passthrough to render_code; future: zoom-aware rendering.
+    """
+    return render_code(section, ctx.width)
+
+
+def spacer_lens(section: Spacer, ctx: LensContext) -> Block:
+    """Render vertical spacing via LensContext."""
+    return render_spacer(section, ctx.width)
+
+
+def demo_lens(section: Demo, ctx: LensContext) -> Block:
+    """Render an interactive demo widget via LensContext.
+
+    Extracts all needed state from the context.
+    """
+    demo_id = section.demo_id
+    focused = ctx.focus.captured
+
+    # Border style changes based on focus
+    def demo_border_style(base_color: str) -> Style:
+        if focused:
+            return Style(fg=base_color, bold=True)
+        return Style(fg=base_color, dim=True)
+
+    if demo_id == "spinner":
+        # Show all three spinner types side by side
+        spin1 = spinner(ctx.spinner_state, style=Style(fg="cyan"))
+        spin2 = spinner(ctx.spinner_braille, style=Style(fg="magenta"))
+        spin3 = spinner(ctx.spinner_line, style=Style(fg="yellow"))
+
+        label1 = Block.text("dots ", Style(dim=True))
+        label2 = Block.text("braille ", Style(dim=True))
+        label3 = Block.text("line ", Style(dim=True))
+
+        row = join_horizontal(
+            label1, spin1,
+            Block.text("   ", Style()),
+            label2, spin2,
+            Block.text("   ", Style()),
+            label3, spin3,
+        )
+        content = border(pad(row, left=1, right=1), ROUNDED, demo_border_style("cyan"))
+
+    elif demo_id == "progress":
+        bar = progress_bar(
+            ctx.progress_state,
+            width=30,
+            filled_style=Style(fg="green"),
+            empty_style=Style(dim=True),
+        )
+        pct = int(ctx.progress_state.value * 100)
+        pct_label = Block.text(f" {pct}%", Style(fg="green" if pct > 50 else "yellow"))
+        row = join_horizontal(bar, pct_label)
+        if focused:
+            hint = Block.text("  left/right adjust  esc: done", Style(fg="green"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+        content = join_vertical(row, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("green"))
+
+    elif demo_id == "list":
+        lst = list_view(
+            ctx.list_state,
+            items=DEMO_LIST_ITEMS,
+            visible_height=5,
+            selected_style=Style(fg="black", bg="cyan", bold=True),
+            cursor_char="*",
+        )
+        if focused:
+            hint = Block.text("  up/down navigate  esc: done", Style(fg="magenta"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+        content = join_vertical(lst, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("magenta"))
+
+    elif demo_id == "text_input":
+        inp = text_input(
+            ctx.text_state,
+            width=20,
+            focused=focused,
+            style=Style(fg="white"),
+            cursor_style=Style(reverse=True),
+            placeholder="type here...",
+        )
+        if focused:
+            hint = Block.text("  type to edit  esc: done", Style(fg="yellow"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+        content = join_vertical(inp, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("yellow"))
+
+    elif demo_id == "table":
+        # Scroll into view before rendering
+        table_state = ctx.table_state.scroll_into_view(visible_height=3)
+        tbl = table(
+            table_state,
+            columns=DEMO_TABLE_COLUMNS,
+            rows=DEMO_TABLE_ROWS,
+            visible_height=3,
+            header_style=Style(fg="cyan", bold=True),
+            selected_style=Style(fg="black", bg="cyan", bold=True),
+        )
+        if focused:
+            hint = Block.text("  up/down navigate  esc: done", Style(fg="cyan"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+        content = join_vertical(tbl, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("cyan"))
+
+    elif demo_id == "focus_nav":
+        # Demo showing navigation patterns
+        items = ("a", "b", "c")
+        current = ctx.focus_demo_item
+        mode = ctx.focus_demo_mode
+
+        # Render items with highlight on current
+        item_blocks = []
+        for item in items:
+            if item == current:
+                item_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="green", bold=True)))
+            else:
+                item_blocks.append(Block.text(f" {item} ", Style(dim=True)))
+        items_row = join_horizontal(*item_blocks, gap=1)
+
+        # Mode indicator
+        mode_text = f"mode: {mode}"
+        mode_block = Block.text(mode_text, Style(fg="cyan"))
+
+        if focused:
+            hint = Block.text("  left/right nav  m: mode  esc: done", Style(fg="green"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+
+        content = join_vertical(items_row, mode_block, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("green"))
+
+    elif demo_id == "search":
+        # Demo showing search/filter patterns
+        all_items = ("Cell", "Style", "Span", "Line", "Block", "Buffer", "Focus", "Search")
+        search = ctx.search_state
+        mode = ctx.search_mode
+
+        # Filter based on mode
+        if mode == "contains":
+            matches = filter_contains(all_items, search.query)
+        elif mode == "prefix":
+            matches = filter_prefix(all_items, search.query)
+        else:
+            matches = filter_fuzzy(all_items, search.query)
+
+        # Query display
+        query_display = search.query if search.query else "(type to filter)"
+        query_style = Style(fg="cyan") if search.query else Style(dim=True)
+        query_block = Block.text(f"query: {query_display}", query_style)
+
+        # Render matches with selection highlight
+        match_blocks = []
+        for i, item in enumerate(matches[:5]):  # Show max 5
+            if i == search.selected:
+                match_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True)))
+            else:
+                match_blocks.append(Block.text(f" {item} ", Style(dim=True)))
+
+        if match_blocks:
+            matches_row = join_horizontal(*match_blocks, gap=0)
+        else:
+            matches_row = Block.text("  (no matches)", Style(dim=True))
+
+        # Mode indicator
+        mode_block = Block.text(f"mode: {mode}", Style(fg="cyan"))
+
+        if focused:
+            hint = Block.text("  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta"))
+        else:
+            hint = Block.text("  tab: focus", HINT_STYLE)
+
+        content = join_vertical(query_block, matches_row, mode_block, hint)
+        content = border(pad(content, left=1, right=1), ROUNDED, demo_border_style("magenta"))
+
+    else:
+        content = Block.text(f"[unknown demo: {demo_id}]", Style(fg="red"))
+
+    # Add label if provided
+    if section.label:
+        label_block = Block.text(f" {section.label} ", Style(fg="white", bold=True))
+        content = join_vertical(label_block, Spacer(1), content)
+
+    if section.center:
+        padding = max(0, (ctx.width - content.width) // 2)
+        return pad(content, left=padding)
+    return content
+
+
+def zoom_text_lens(section: ZoomText, ctx: LensContext) -> Block:
+    """Render zoom-aware text section.
+
+    Selects content based on ctx.zoom, clamped to available levels.
+    """
+    zoom = min(ctx.zoom, len(section.levels) - 1)
+    content = section.levels[zoom]
+
+    if isinstance(content, Line):
+        block = content.to_block(content.width)
+    else:
+        block = Block.text(content, section.style)
+
+    if section.center:
+        padding = max(0, (ctx.width - block.width) // 2)
+        return pad(block, left=padding)
+    return block
+
+
+def zoom_code_lens(section: ZoomCode, ctx: LensContext) -> Block:
+    """Render zoom-aware code section.
+
+    Selects source based on ctx.zoom, clamped to available levels.
+    """
+    zoom = min(ctx.zoom, len(section.levels) - 1)
+    source = section.levels[zoom]
+
+    # Reuse render_code logic
+    temp_code = Code(source=source, title=section.title, center=section.center)
+    return render_code(temp_code, ctx.width)
+
+
+def section_lens(section: Section, ctx: LensContext) -> Block:
+    """Dispatch to appropriate section lens.
+
+    This is the primary entry point for rendering sections with LensContext.
+    """
+    match section:
+        case Text():
+            return text_lens(section, ctx)
+        case Code():
+            return code_lens(section, ctx)
+        case Spacer():
+            return spacer_lens(section, ctx)
+        case Demo():
+            return demo_lens(section, ctx)
+        case ZoomText():
+            return zoom_text_lens(section, ctx)
+        case ZoomCode():
+            return zoom_code_lens(section, ctx)
+        case _:
+            return Block.empty(ctx.width, 1)
+
+
+# -- Minimap Lens --
+
+
+def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, height: int) -> Block:
+    """Render slide graph as a minimap sidebar.
+
+    Shows all slide titles with the current slide highlighted.
+    Includes zoom indicator for slides with zoom support.
+    """
+    # Build ordered list of main slides (exclude detail/source slides)
+    main_slides = [
+        sid for sid in slides.keys()
+        if "/" not in sid or slides[sid].max_zoom > 0
+    ]
+
+    nodes: list[Block] = []
+
+    # Title
+    title_block = Block.text(" Minimap ", Style(fg="cyan", bold=True))
+    nodes.append(title_block)
+    nodes.append(Block.empty(1, 1))
+
+    for slide_id in main_slides:
+        slide = slides[slide_id]
+        is_current = slide_id == current
+
+        if is_current:
+            # Current slide: highlighted with zoom indicator
+            style = Style(fg="black", bg="cyan", bold=True)
+            zoom_str = f"+{current_zoom}" if current_zoom > 0 else ""
+            text = f" > {slide.title}{zoom_str} "
+        else:
+            # Other slides: dimmed
+            style = Style(dim=True)
+            text = f"   {slide.title} "
+
+        # Truncate if too wide
+        max_width = 20
+        if len(text) > max_width:
+            text = text[:max_width-1] + "\u2026"
+
+        nodes.append(Block.text(text, style))
+
+    # Limit to available height (minus title and spacing)
+    available = height - 3
+    if len(nodes) > available:
+        nodes = nodes[:available]
+        nodes.append(Block.text("   ...", Style(dim=True)))
+
+    # Add footer hint
+    nodes.append(Block.empty(1, 1))
+    nodes.append(Block.text(" m: close ", Style(dim=True)))
+
+    result = join_vertical(*nodes)
+
+    # Add right border
+    bordered = border(result, ROUNDED, Style(fg="cyan", dim=True))
+
+    return bordered
+
+
 # -- Slide Registry --
 
 def build_slides() -> dict[str, Slide]:
@@ -611,61 +1036,75 @@ def build_slides() -> dict[str, Slide]:
             nav=Navigation(right="cell"),
         ),
 
-        # Cell - the atom
+        # Cell - the atom (zoom-aware: 3 levels)
         "cell": Slide(
             id="cell",
             title="Cell",
             sections=(
                 Spacer(1),
-                Text(
-                    styled(
-                        "the atomic unit: one ", ("character", KEYWORD),
-                        " + one ", ("style", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(2),
-                Code(
-                    source='cell = Cell("A", Style(fg="red", bold=True))',
-                    title="cell.py",
-                ),
-                Spacer(1),
-                Text("down for more detail", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="intro", right="style", down="cell/detail"),
-        ),
-
-        "cell/detail": Slide(
-            id="cell/detail",
-            title="Cell (detail)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Cell", KEYWORD), " is a frozen dataclass - ",
-                        ("immutable", EMPH), " by design"
+                ZoomText(
+                    levels=(
+                        # Zoom 0: summary
+                        styled(
+                            "the atomic unit: one ", ("character", KEYWORD),
+                            " + one ", ("style", KEYWORD),
+                        ),
+                        # Zoom 1: detail
+                        styled(
+                            ("Cell", KEYWORD), " is a frozen dataclass - ",
+                            ("immutable", EMPH), " by design"
+                        ),
+                        # Zoom 2: source
+                        styled("from ", ("cells/cell.py", KEYWORD)),
                     ),
                     center=True,
                 ),
                 Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
+                ZoomCode(
+                    levels=(
+                        # Zoom 0: minimal example
+                        'cell = Cell("A", Style(fg="red", bold=True))',
+                        # Zoom 1: class definition
+                        '''@dataclass(frozen=True)
 class Cell:
     char: str
     style: Style
 
 EMPTY_CELL = Cell(" ", Style())''',
-                    title="definition",
+                        # Zoom 2: full source
+                        '''@dataclass(frozen=True)
+class Cell:
+    """A single cell in the buffer: one character + one style."""
+    char: str = " "
+    style: Style = field(default_factory=Style)
+
+    def __post_init__(self):
+        # Enforce single character (but allow multi-byte)
+        if len(self.char) != 1:
+            object.__setattr__(self, "char", self.char[0] if self.char else " ")
+
+EMPTY_CELL = Cell(" ", Style())''',
+                    ),
+                    title="cell.py",
                 ),
                 Spacer(1),
-                Text(
-                    styled(
-                        ("EMPTY_CELL", KEYWORD), " is the default for unfilled buffer positions"
+                ZoomText(
+                    levels=(
+                        # Zoom 0: hint
+                        "down for more detail",
+                        # Zoom 1: footer note
+                        styled(
+                            ("EMPTY_CELL", KEYWORD), " is the default for unfilled buffer positions"
+                        ),
+                        # Zoom 2: empty (no extra text)
+                        "",
                     ),
+                    style=HINT_STYLE,
                     center=True,
                 ),
             ),
-            nav=Navigation(up="cell", right="style/detail", down="cell/source"),
+            nav=Navigation(left="intro", right="style"),
+            max_zoom=2,
         ),
 
         # Style
@@ -722,7 +1161,7 @@ class Style:
                     center=True,
                 ),
             ),
-            nav=Navigation(up="style", left="cell/detail", right="span/detail", down="style/source"),
+            nav=Navigation(up="style", left="cell", right="span/detail", down="style/source"),
         ),
 
         # Span
@@ -1292,35 +1731,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
 
         # -- Source slides (level 2) --
         # These show the actual implementation code from the cells library
-
-        "cell/source": Slide(
-            id="cell/source",
-            title="Cell (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("cells/cell.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Cell:
-    """A single cell in the buffer: one character + one style."""
-    char: str = " "
-    style: Style = field(default_factory=Style)
-
-    def __post_init__(self):
-        # Enforce single character (but allow multi-byte)
-        if len(self.char) != 1:
-            object.__setattr__(self, "char", self.char[0] if self.char else " ")
-
-EMPTY_CELL = Cell(" ", Style())''',
-                    title="cell.py",
-                ),
-            ),
-            nav=Navigation(up="cell/detail", right="style/source"),
-        ),
+        # Note: "cell" topic now uses zoom levels instead of separate slides
 
         "style/source": Slide(
             id="style/source",
@@ -1355,7 +1766,7 @@ class Style:
                     title="cell.py",
                 ),
             ),
-            nav=Navigation(up="style/detail", left="cell/source", right="span/source"),
+            nav=Navigation(up="style/detail", left="cell", right="span/source"),
         ),
 
         "span/source": Slide(
@@ -1673,8 +2084,10 @@ def spinner(state: SpinnerState, style: Style = Style()) -> Block:
 
 HELP_CONTENT = [
     ("Navigation", [
-        ("left right up down", "move between slides"),
+        ("left right", "move between topics"),
+        ("up down", "zoom in/out (detail levels)"),
         ("/", "search/jump to slide"),
+        ("m", "toggle minimap sidebar"),
         ("q / esc", "quit"),
         ("?", "toggle this help"),
     ]),
@@ -2062,6 +2475,10 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
     if key == "/" and not app_state.focus.captured:
         return layer_state, app_state, Push(make_search_layer(slides))
 
+    # Minimap toggle
+    if key == "m" and not app_state.focus.captured:
+        return layer_state, replace(app_state, show_minimap=not app_state.show_minimap), Stay()
+
     slide = slides.get(app_state.current_slide)
     if not slide:
         return layer_state, app_state, Stay()
@@ -2083,19 +2500,37 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
     # Navigation (only when not focused on demo)
     nav = slide.nav
     new_slide = None
+    new_zoom = app_state.zoom
 
     if key == "left" and nav.left:
         new_slide = nav.left
+        new_zoom = 0  # Reset zoom when changing slides
     elif key == "right" and nav.right:
         new_slide = nav.right
-    elif key == "up" and nav.up:
-        new_slide = nav.up
-    elif key == "down" and nav.down:
-        new_slide = nav.down
+        new_zoom = 0  # Reset zoom when changing slides
+    elif key == "up":
+        # First try decreasing zoom, then navigate to nav.up
+        if app_state.zoom > 0:
+            new_zoom = app_state.zoom - 1
+        elif nav.up:
+            new_slide = nav.up
+            # When navigating up, start at max zoom of target slide
+            target_slide = slides.get(nav.up)
+            new_zoom = target_slide.max_zoom if target_slide else 0
+    elif key == "down":
+        # First try increasing zoom, then navigate to nav.down
+        if app_state.zoom < slide.max_zoom:
+            new_zoom = app_state.zoom + 1
+        elif nav.down:
+            new_slide = nav.down
+            new_zoom = 0  # Start at zoom 0 when going deeper
 
     if new_slide and new_slide in slides:
         # Reset focus when changing slides
-        return layer_state, replace(app_state, current_slide=new_slide, focus=app_state.focus.release()), Stay()
+        return layer_state, replace(app_state, current_slide=new_slide, zoom=new_zoom, focus=app_state.focus.release()), Stay()
+    elif new_zoom != app_state.zoom:
+        # Just change zoom level
+        return layer_state, replace(app_state, zoom=new_zoom), Stay()
 
     # Delegate to slide-specific handler
     if slide.on_key:
@@ -2106,7 +2541,7 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
 
 
 def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferView) -> None:
-    """Render the main slide content."""
+    """Render the main slide content, with optional minimap sidebar."""
     slides = layer_state.slides
     slide = slides.get(app_state.current_slide)
     if not slide:
@@ -2116,24 +2551,40 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     width = app_state.width
     height = app_state.height
 
-    # Header
-    header = render_header(slide, width)
-    header.paint(view, 0, 0)
+    # Calculate minimap width if shown
+    minimap_width = 0
+    if app_state.show_minimap:
+        minimap_block = minimap_lens(slides, app_state.current_slide, app_state.zoom, height - 2)
+        minimap_width = minimap_block.width + 1  # +1 for gap
+
+        # Render minimap on the left
+        minimap_block.paint(view, 0, 1)
+
+    # Content area starts after minimap
+    content_x = minimap_width
+    content_width = width - minimap_width
+
+    # Header (in content area)
+    header = render_header(slide, content_width)
+    header.paint(view, content_x, 0)
 
     # Content area
     content_y = header.height
 
+    # Create LensContext for section rendering (narrower when minimap shown)
+    ctx = LensContext.from_state(app_state, content_width - 4)
+
     content_blocks = []
     for section in slide.sections:
-        block = render_section(section, width - 4, app_state)
+        block = section_lens(section, ctx)
         content_blocks.append(block)
 
     if content_blocks:
         content = join_vertical(*content_blocks)
         content = pad(content, left=2)
-        content.paint(view, 0, content_y)
+        content.paint(view, content_x, content_y)
 
-    # Footer
+    # Footer (full width, at bottom)
     footer = render_footer(slide, slide.nav, width, slides, app_state)
     footer.paint(view, 0, height - 1)
 
@@ -2176,9 +2627,21 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
         nav_hints.append(("left", slides[nav.left].title if nav.left in slides else nav.left))
     if nav.right:
         nav_hints.append(("right", slides[nav.right].title if nav.right in slides else nav.right))
-    if nav.up:
+
+    # Up: show if zoom > 0 or nav.up exists
+    can_zoom_up = state.zoom > 0
+    can_nav_up = nav.up is not None
+    if can_zoom_up:
         nav_hints.append(("up", "less"))
-    if nav.down:
+    elif can_nav_up:
+        nav_hints.append(("up", "less"))
+
+    # Down: show if zoom < max_zoom or nav.down exists
+    can_zoom_down = state.zoom < slide.max_zoom
+    can_nav_down = nav.down is not None
+    if can_zoom_down:
+        nav_hints.append(("down", "more"))
+    elif can_nav_down:
         nav_hints.append(("down", "more"))
 
     for key, label in nav_hints:
@@ -2190,9 +2653,10 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 
     nav_row = join_horizontal(*parts) if parts else Block.empty(1, 1)
 
-    # Right side: help hint + position
+    # Right side: help hint + position (include zoom level if > 0)
     help_hint = Block.text(" ?:help ", Style(dim=True))
-    position = Block.text(f" {slide.id} ", POSITION_STYLE)
+    zoom_indicator = f"+{state.zoom}" if state.zoom > 0 else ""
+    position = Block.text(f" {slide.id}{zoom_indicator} ", POSITION_STYLE)
     right_side = join_horizontal(help_hint, position)
 
     # Build footer: nav on left, position on right
@@ -2215,12 +2679,13 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 class BenchApp(RenderApp):
     """Interactive teaching bench application."""
 
-    def __init__(self, slides: dict[str, Slide] | None = None, start_slide: str = "intro"):
+    def __init__(self, slides: dict[str, Slide] | None = None, start_slide: str = "intro", start_zoom: int = 0):
         super().__init__(fps_cap=30)
         self._slides = slides or build_slides()
         # Initialize state with base navigation layer (slides passed via layer state)
         self._state = BenchState(
             current_slide=start_slide,
+            zoom=start_zoom,
             layers=(make_nav_layer(self._slides),),
         )
         self._width = 80
@@ -2272,13 +2737,14 @@ def parse_args() -> argparse.Namespace:
         description="Teaching Bench: Interactive educational platform for cells",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
-            Verbosity = starting zoom level (navigation structure unchanged):
-              default   : Start at main slides (intro -> cell -> style -> ...)
-              -q        : Quiet - print all slides inline and exit
-              -v        : Start at detail level (cell/detail -> style/detail -> ...)
-              -vv       : Start at source level (cell/source -> style/source -> ...)
+            Verbosity = starting zoom level:
+              default   : Start at intro, zoom 0
+              -q        : Quiet - print all slides (with zoom levels) and exit
+              -v        : Start at cell, zoom 1 (detail level)
+              -vv       : Start at cell, zoom 2 (source level)
 
-            User can always navigate up/down between levels with arrow keys.
+            User can navigate up/down between zoom levels with arrow keys.
+            Slides with max_zoom > 0 support in-slide zooming.
         """),
     )
     group = parser.add_mutually_exclusive_group()
@@ -2332,6 +2798,7 @@ def get_navigation_order(slides: dict[str, Slide]) -> list[str]:
 def run_quiet_mode(slides: dict[str, Slide]) -> None:
     """Print all slides inline and exit (quiet mode).
 
+    For slides with max_zoom > 0, prints each zoom level.
     Demos are rendered in their default/initial state (not interactive).
     """
     import sys
@@ -2342,40 +2809,52 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
     for slide_id in order:
         slide = slides[slide_id]
 
-        # Build slide content as a Block
-        content_blocks: list[Block] = []
+        # For slides with zoom support, render each zoom level
+        zoom_levels = range(slide.max_zoom + 1) if slide.max_zoom > 0 else [0]
 
-        # Title
-        title_block = Block.text(f"=== {slide.title} ===", TITLE_STYLE)
-        content_blocks.append(title_block)
-        content_blocks.append(Block.empty(1, 1))
+        for zoom in zoom_levels:
+            ctx = LensContext.from_state(state, 78, zoom=zoom)
 
-        # Render all sections including demos
-        for section in slide.sections:
-            block = render_section(section, 78, state)
-            content_blocks.append(block)
+            # Build slide content as a Block
+            content_blocks: list[Block] = []
 
-        content_blocks.append(Block.empty(1, 1))
+            # Title (include zoom indicator for slides with zoom support)
+            if slide.max_zoom > 0 and zoom > 0:
+                zoom_suffix = " (detail)" if zoom == 1 else " (source)"
+                title_block = Block.text(f"=== {slide.title}{zoom_suffix} ===", TITLE_STYLE)
+            else:
+                title_block = Block.text(f"=== {slide.title} ===", TITLE_STYLE)
+            content_blocks.append(title_block)
+            content_blocks.append(Block.empty(1, 1))
 
-        # Combine and print
-        if content_blocks:
-            content = join_vertical(*content_blocks)
-            print_block(content, sys.stdout)
+            # Render all sections including demos
+            for section in slide.sections:
+                block = section_lens(section, ctx)
+                content_blocks.append(block)
+
+            content_blocks.append(Block.empty(1, 1))
+
+            # Combine and print
+            if content_blocks:
+                content = join_vertical(*content_blocks)
+                print_block(content, sys.stdout)
 
 
-def get_start_slide(verbosity: int) -> str:
-    """Get the starting slide based on verbosity level.
+def get_start_slide(verbosity: int) -> tuple[str, int]:
+    """Get the starting slide and zoom based on verbosity level.
 
-    - default (0): Start at main slides (intro)
-    - -v (1): Start at detail level (cell/detail)
-    - -vv (2): Start at source level (cell/source)
+    Returns (slide_id, zoom) tuple.
+
+    - default (0): Start at intro, zoom 0
+    - -v (1): Start at cell, zoom 1 (detail level)
+    - -vv (2): Start at cell, zoom 2 (source level)
     """
     if verbosity >= 2:
-        return "cell/source"
+        return ("cell", 2)
     elif verbosity >= 1:
-        return "cell/detail"
+        return ("cell", 1)
     else:
-        return "intro"
+        return ("intro", 0)
 
 
 async def main():
@@ -2387,9 +2866,9 @@ async def main():
         run_quiet_mode(slides)
         return
 
-    # Verbosity determines starting slide, not navigation structure
-    start_slide = get_start_slide(args.verbose)
-    app = BenchApp(slides=slides, start_slide=start_slide)
+    # Verbosity determines starting slide and zoom level
+    start_slide, start_zoom = get_start_slide(args.verbose)
+    app = BenchApp(slides=slides, start_slide=start_slide, start_zoom=start_zoom)
 
     await app.run()
 

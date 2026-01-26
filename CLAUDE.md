@@ -27,6 +27,10 @@ uv run pytest tests/test_span.py::TestSpanWidth::test_ascii
 - **Buffer/BufferView** (`buffer.py`) — 2D grid of Cells. BufferView provides clipped coordinate-translated regions.
 - **Block** (`block.py`) — immutable rectangle of Cells with known dimensions. Supports text wrapping modes.
 - **Span/Line** (`span.py`) — styled text primitives. Line is a sequence of Spans that can paint to BufferView.
+- **Layer** (`layer.py`) — modal stacking primitive: state + handle + render. Actions: Stay, Pop, Push, Quit.
+- **Focus** (`focus.py`) — two-tier focus state (navigation vs captured) + ring/linear navigation functions.
+- **Search** (`search.py`) — filtered selection state: query + selected index + filter functions (contains/prefix/fuzzy).
+- **Lens** (`lens.py`) — zoom-based content renderer. `shape_lens` renders Python data at zoom levels 0-2.
 
 ### Composition Layer
 - **compose.py** — `join_horizontal`, `join_vertical`, `pad`, `border`, `truncate` for combining Blocks.
@@ -36,7 +40,8 @@ uv run pytest tests/test_span.py::TestSpanWidth::test_ascii
 - **RenderApp** (`app.py`) — async main loop base class. Handles alternate screen, keyboard input, resize (SIGWINCH), and diff-based rendering.
 - **Writer** (`writer.py`) — ANSI escape sequence output and terminal size detection.
 - **KeyboardInput** (`keyboard.py`) — non-blocking keyboard reader.
-- **FocusRing** (`focus.py`) — component focus management.
+- **layer.py** — `process_key()` routes input through layer stack; `render_layers()` renders bottom-to-top.
+- **FocusRing** (`focus.py`) — legacy mutable focus ring (prefer `Focus` + navigation functions for new code).
 
 ### Components (`components/`)
 Stateful UI widgets: `spinner`, `progress_bar`, `list_view`, `text_input`, `table`. Each has a State dataclass and a render function that returns a Block.

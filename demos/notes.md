@@ -1,0 +1,6 @@
+- #cool-views this slide graph behavior makes me think it would be a very cool idea to add a 'mini map' like view showing where you are in the graph
+- #cool-views a variation, or a different view is the more graphical blocks that brighten as you get to them in a flat view with up-down arrows that partially show the block (dim) above aned below
+- #cool-views a view that shows you your data-flow (I guess this is kind of mini-mappish in its way as well)?
+- #cool-views one that shows types/signatures from source? is that possible? a --help with --vv concept 
+- #render #bug what can we do about re-render on re-size? right now it looks a bit of a mess with duplicate snatches all over the place
+- #render #demo? #view - a full cells heirarchy view? I guess this is just more 'cool views' things

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .engine import build_fold_fns
 from .facet import Facet
 from .fold import Fold
 from .types import initial_value
@@ -63,3 +64,14 @@ class Shape:
             if f.name == name:
                 return f
         return None
+
+    def apply(self, state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply fold rules to state given a payload, return new state.
+
+        Shallow-copies state, builds fold fns from self.folds, applies each
+        in order. Pure: never mutates the input state dict.
+        """
+        new = dict(state)
+        for fn in build_fold_fns(self.folds):
+            fn(new, payload)
+        return new

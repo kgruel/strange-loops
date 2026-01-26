@@ -1,1 +1,1 @@
-"""Tests for the forms package."""
+"""Tests for the shapes package."""

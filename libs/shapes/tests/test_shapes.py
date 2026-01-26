@@ -298,6 +298,159 @@ class TestTypeUtilities:
         assert type_matches("anything", "custom_type") is True
 
 
+class TestShapeApply:
+    """Tests for Shape.apply() fold execution."""
+
+    def test_apply_count(self):
+        s = Shape(
+            name="counter",
+            folds=(Fold(op="count", target="n"),),
+        )
+        state = {"n": 0}
+        result = s.apply(state, {"anything": True})
+        assert result == {"n": 1}
+
+    def test_apply_count_accumulates(self):
+        s = Shape(
+            name="counter",
+            folds=(Fold(op="count", target="n"),),
+        )
+        state = {"n": 0}
+        state = s.apply(state, {})
+        state = s.apply(state, {})
+        state = s.apply(state, {})
+        assert state == {"n": 3}
+
+    def test_apply_sum(self):
+        s = Shape(
+            name="summer",
+            folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
+        )
+        state = {"total": 0}
+        result = s.apply(state, {"amount": 10})
+        assert result == {"total": 10}
+        result = s.apply(result, {"amount": 5})
+        assert result == {"total": 15}
+
+    def test_apply_sum_missing_field_defaults_zero(self):
+        s = Shape(
+            name="summer",
+            folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
+        )
+        result = s.apply({"total": 7}, {"other": 99})
+        assert result == {"total": 7}
+
+    def test_apply_latest(self):
+        s = Shape(
+            name="tracker",
+            folds=(Fold(op="latest", target="last_ts"),),
+        )
+        result = s.apply({"last_ts": None}, {"_ts": 1234567890})
+        assert result == {"last_ts": 1234567890}
+
+    def test_apply_latest_uses_time_when_no_ts(self):
+        s = Shape(
+            name="tracker",
+            folds=(Fold(op="latest", target="last_ts"),),
+        )
+        result = s.apply({"last_ts": None}, {})
+        assert isinstance(result["last_ts"], float)
+
+    def test_apply_collect(self):
+        s = Shape(
+            name="collector",
+            folds=(Fold(op="collect", target="items"),),
+        )
+        state = {"items": []}
+        state = s.apply(state, {"x": 1})
+        state = s.apply(state, {"x": 2})
+        assert len(state["items"]) == 2
+        assert state["items"][0] == {"x": 1}
+        assert state["items"][1] == {"x": 2}
+
+    def test_apply_collect_bounded(self):
+        s = Shape(
+            name="collector",
+            folds=(Fold(op="collect", target="items", props={"max": 2}),),
+        )
+        state = {"items": []}
+        state = s.apply(state, {"v": 1})
+        state = s.apply(state, {"v": 2})
+        state = s.apply(state, {"v": 3})
+        assert len(state["items"]) == 2
+        assert state["items"][0] == {"v": 2}
+        assert state["items"][1] == {"v": 3}
+
+    def test_apply_upsert(self):
+        s = Shape(
+            name="registry",
+            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+        )
+        state = {"users": {}}
+        state = s.apply(state, {"id": "a", "name": "Alice"})
+        state = s.apply(state, {"id": "b", "name": "Bob"})
+        state = s.apply(state, {"id": "a", "name": "Alicia"})
+        assert len(state["users"]) == 2
+        assert state["users"]["a"]["name"] == "Alicia"
+        assert state["users"]["b"]["name"] == "Bob"
+
+    def test_apply_upsert_ignores_missing_key(self):
+        s = Shape(
+            name="registry",
+            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+        )
+        state = {"users": {}}
+        result = s.apply(state, {"name": "NoId"})
+        assert result == {"users": {}}
+
+    def test_apply_preserves_immutability(self):
+        """apply() returns a new dict, never mutates original."""
+        s = Shape(
+            name="counter",
+            folds=(Fold(op="count", target="n"),),
+        )
+        original = {"n": 0}
+        result = s.apply(original, {})
+        assert result == {"n": 1}
+        assert original == {"n": 0}
+
+    def test_apply_empty_folds_returns_state_copy(self):
+        s = Shape(name="passthrough")
+        state = {"x": 1, "y": 2}
+        result = s.apply(state, {"z": 3})
+        assert result == {"x": 1, "y": 2}
+        assert result is not state
+
+    def test_apply_multiple_folds(self):
+        s = Shape(
+            name="multi",
+            folds=(
+                Fold(op="count", target="n"),
+                Fold(op="sum", target="total", props={"field": "amount"}),
+                Fold(op="latest", target="last_ts"),
+            ),
+        )
+        state = {"n": 0, "total": 0, "last_ts": None}
+        result = s.apply(state, {"amount": 42, "_ts": 1000})
+        assert result == {"n": 1, "total": 42, "last_ts": 1000}
+
+    def test_apply_unknown_op_raises(self):
+        s = Shape(
+            name="bad",
+            folds=(Fold(op="explode", target="x"),),
+        )
+        with pytest.raises(ValueError, match="Unknown fold op"):
+            s.apply({"x": 0}, {})
+
+    def test_apply_upsert_missing_key_prop_raises(self):
+        s = Shape(
+            name="bad",
+            folds=(Fold(op="upsert", target="x"),),
+        )
+        with pytest.raises(ValueError, match="upsert fold requires key="):
+            s.apply({"x": {}}, {})
+
+
 class TestValidationError:
     """Tests for ValidationError exception."""
 

@@ -12,7 +12,7 @@ Subclass and override `apply()` to define how each event updates state.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 if TYPE_CHECKING:
     from .store import EventStore
@@ -27,13 +27,16 @@ class Projection(Generic[S, T]):
     Maintains `.state` (current value) and `.version` (bumped on each change).
     Implements the Consumer protocol so it can be tapped onto a Stream.
 
-    Subclass and override `apply(state, event)` to define the fold.
+    Two usage modes:
+      1. Subclass and override `apply(state, event)` to define the fold.
+      2. Pass a `fold` callable to __init__ for inline use.
     """
 
-    def __init__(self, initial: S):
+    def __init__(self, initial: S, *, fold: Callable[[S, T], S] | None = None):
         self._state: S = initial
         self._version: int = 0
         self.cursor: int = 0
+        self._fold: Callable[[S, T], S] | None = fold
 
     @property
     def state(self) -> S:
@@ -52,8 +55,12 @@ class Projection(Generic[S, T]):
     def apply(self, state: S, event: T) -> S:
         """Process one event, return new state.
 
-        Override in subclass. Called once per event during advance()/consume().
+        If a fold callable was provided at construction, it is used.
+        Otherwise, override in subclass. Called once per event during
+        advance()/consume().
         """
+        if self._fold is not None:
+            return self._fold(state, event)
         raise NotImplementedError
 
     async def consume(self, event: T) -> None:

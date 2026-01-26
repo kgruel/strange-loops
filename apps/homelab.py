@@ -229,7 +229,7 @@ class HomelabApp(RenderApp):
         else:
             # Live mode: SSH + data source bindings
             try:
-                ssh = SSHSession(vm.host, vm.user, vm.key_file)
+                ssh = SSHSession(vm.host, vm.user, vm.key_file, common_args=vm.common_args)
                 await ssh.__aenter__()
                 conn.ssh = ssh
 

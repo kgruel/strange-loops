@@ -98,8 +98,8 @@ cross-lib imports. The loop closes.
 |---------|------|---------|
 | **peers** | Peer | Identity: name + horizon + potential. Delegation creates child peers with narrower permissions — the hierarchy encodes participation level (direct, delegated, automated). |
 | **facts** | Fact | Observation atom: kind + ts + payload. An intentional observation — something that happened at a specific time. Kind is an open string for routing; payload structure comes from Shape. |
-| **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
-| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
+| **ticks** | Tick | Temporal envelope: name + ts + payload. Infrastructure: Vertex (kind routing + fold engines), Store protocol (EventStore, FileStore), Stream, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
+| **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Boundary (kind + reset), Shape (facets + folds + boundary + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
 | **cells** | Cell | Terminal UI: Cell, Block, Buffer, Span, Layer, Lens, Surface |
 
 All libraries are independent — no lib imports another. They compose in experiments.
@@ -124,7 +124,7 @@ participation level. No enum needed; the identity is the stance.
 
 ### experiments/
 
-Integration layer that wires the libraries together. Contains `framework/` (reusable patterns), `apps/` (concrete applications), `specs/` (declarative config), and `tests/`.
+Integration layer that wires the libraries together. Contains `daemon/` (mill — the daemon primitive), `capability.py` (capability-as-fact pattern), `archive/` (earlier experiments), and `tests/`.
 
 ### demos/cells/
 

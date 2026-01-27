@@ -1,0 +1,15 @@
+{
+    "name": "request-total",
+    "about": "Sums a numeric field from each event",
+    "input_facets": [
+        {"name": "bytes", "kind": "int"}
+    ],
+    "state_facets": [
+        {"name": "total_bytes", "kind": "int"},
+        {"name": "request_count", "kind": "int"}
+    ],
+    "folds": [
+        {"op": "sum", "target": "total_bytes", "props": {"field": "bytes"}},
+        {"op": "count", "target": "request_count"}
+    ]
+}

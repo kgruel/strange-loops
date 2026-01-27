@@ -1,0 +1,15 @@
+{
+    "name": "counter",
+    "about": "Counts events and tracks the last timestamp",
+    "input_facets": [
+        {"name": "v", "kind": "int"}
+    ],
+    "state_facets": [
+        {"name": "count", "kind": "int"},
+        {"name": "last_seen", "kind": "datetime"}
+    ],
+    "folds": [
+        {"op": "count", "target": "count"},
+        {"op": "latest", "target": "last_seen"}
+    ]
+}

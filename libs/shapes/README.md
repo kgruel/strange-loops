@@ -10,7 +10,8 @@ Shape
  ├─ about: str
  ├─ input_facets: tuple[Facet, ...]    # what events look like
  ├─ state_facets: tuple[Facet, ...]    # what state looks like
- └─ folds: tuple[Fold, ...]           # how events update state
+ ├─ folds: tuple[Fold, ...]           # how events update state
+ └─ boundary: Boundary | None         # when a fold cycle completes
 
 Facet
  ├─ name: str       # field name
@@ -20,6 +21,10 @@ Fold
  ├─ op: str         # operation (latest, collect, count, upsert, sum)
  ├─ target: str     # which state facet to update
  └─ props: dict     # operation-specific config
+
+Boundary
+ ├─ kind: str       # fact kind that triggers the boundary
+ └─ reset: bool     # True = reset state, False = carry forward
 ```
 
 ## Usage
@@ -65,7 +70,8 @@ state = shape.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
 |--------|---------|
 | `Facet` | Named, typed face of a shape (name + kind) |
 | `Fold` | Transformation rule (op + target + props) |
-| `Shape` | Complete contract: input facets + state facets + folds |
+| `Boundary` | Cycle completion declaration (kind + reset) |
+| `Shape` | Complete contract: input facets + state facets + folds + boundary |
 | `Shape.apply()` | Execute folds: pure dict → dict |
 | `Shape.initial_state()` | Generate initial state from state facets |
 

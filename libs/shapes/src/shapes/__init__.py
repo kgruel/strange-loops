@@ -12,9 +12,10 @@ Part of the ecosystem:
 - cells = spatial atoms (where)
 """
 
+from .boundary import Boundary
 from .facet import Facet
 from .fold import Fold
 from .shape import Shape
 from .types import ValidationError
 
-__all__ = ["Facet", "Fold", "Shape", "ValidationError"]
+__all__ = ["Boundary", "Facet", "Fold", "Shape", "ValidationError"]

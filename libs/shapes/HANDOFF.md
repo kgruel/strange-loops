@@ -1,5 +1,13 @@
 # shapes — Handoff
 
+## 2026-01-27
+Added `Boundary(kind: str, reset: bool)` frozen dataclass in `boundary.py`.
+Added `boundary: Boundary | None = None` field to Shape. Boundary declares which
+fact kind completes a fold cycle and whether state resets or carries. Purely
+declarative — Shape.apply() does not check boundary; the fold engine checks it
+externally. A Shape with no boundary folds continuously (no cycle, no Tick).
+12 new tests across 2 test classes (TestBoundary, TestShapeBoundary). 72 total.
+
 ## 2026-01-26
 Shape.apply() fold engine: `engine.py` with fold closures (latest, count,
 sum, collect, upsert) built from Fold descriptors. Shape.apply(state, payload)

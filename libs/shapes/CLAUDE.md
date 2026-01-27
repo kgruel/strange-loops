@@ -16,16 +16,22 @@ Shape
  ├─ about: str                     # human description
  ├─ input_facets: tuple[Facet, ...]  # what incoming payloads contain
  ├─ state_facets: tuple[Facet, ...]  # what accumulated state looks like
- └─ folds: tuple[Fold, ...]        # transformation rules
+ ├─ folds: tuple[Fold, ...]        # transformation rules
+ └─ boundary: Boundary | None      # cycle completion declaration
+
+Boundary
+ ├─ kind: str                      # fact kind that triggers the boundary
+ └─ reset: bool                    # True = reset state, False = carry state
 ```
 
 ## Public API
 
 | Export | Kind | Purpose |
 |--------|------|---------|
-| `Shape` | frozen dataclass | facets + folds + apply |
+| `Shape` | frozen dataclass | facets + folds + boundary + apply |
 | `Facet` | frozen dataclass | name + kind (+ optional flag) |
 | `Fold` | frozen dataclass | op + target + props |
+| `Boundary` | frozen dataclass | kind + reset (cycle completion) |
 | `ValidationError` | exception | contract violation |
 
 ### Shape Methods
@@ -50,6 +56,8 @@ Shape
 
 - All types frozen. `Fold.props` wrapped in `MappingProxyType`.
 - `Shape.apply()` is pure: copies state, applies folds, returns new dict. Never mutates input.
+- `Shape.apply()` does not check boundary — boundary is declarative, checked externally by the fold engine.
+- A Shape with no boundary (`None`) folds continuously — no cycle, no Tick produced.
 - Fold closures built by `engine.py` at call time from Fold descriptors.
 - `Facet.kind` is a string from: str, int, float, bool, dict, list, set, datetime.
 - `Facet.from_type_str("int?")` parses optional suffix.
@@ -71,12 +79,13 @@ Projection uses: Projection(initial=shape.initial_state(), fold=shape.apply)
 
 ```
 src/shapes/
-  __init__.py    # Re-exports: Facet, Fold, Shape, ValidationError
+  __init__.py    # Re-exports: Boundary, Facet, Fold, Shape, ValidationError
+  boundary.py    # Boundary (kind + reset)
   facet.py       # Facet (name + kind + optional)
   fold.py        # Fold (op + target + props)
-  shape.py       # Shape (facets + folds + apply)
+  shape.py       # Shape (facets + folds + boundary + apply)
   engine.py      # Fold closure builder (_make_latest, _make_count, etc.)
   types.py       # initial_value, coerce_value, type_matches, ValidationError
 tests/
-  test_shapes.py # 58 tests across 6 test classes
+  test_shapes.py # 72 tests across 8 test classes
 ```

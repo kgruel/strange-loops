@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any
 
+from .boundary import Boundary
 from .engine import build_fold_fns
 from .facet import Facet
 from .fold import Fold
@@ -34,6 +35,7 @@ class Shape:
     input_facets: tuple[Facet, ...] = ()
     state_facets: tuple[Facet, ...] = ()
     folds: tuple[Fold, ...] = ()
+    boundary: Boundary | None = None
 
     def initial_state(self) -> dict[str, Any]:
         """Create the initial state dict from state_facets.

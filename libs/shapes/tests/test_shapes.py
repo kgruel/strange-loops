@@ -1,8 +1,8 @@
-"""Tests for shapes core types: Facet, Fold, Shape."""
+"""Tests for shapes core types: Facet, Fold, Shape, Boundary."""
 
 import pytest
 
-from shapes import Facet, Fold, Shape, ValidationError
+from shapes import Boundary, Facet, Fold, Shape, ValidationError
 from shapes.types import coerce_value, initial_value, type_matches
 
 
@@ -489,6 +489,86 @@ class TestApplyPurity:
         assert r2["items"] == [{"v": 2}]
         assert base["items"] == [], "base state was mutated"
         assert r1["items"] is not r2["items"], "results share the same list object"
+
+
+class TestBoundary:
+    """Tests for Boundary dataclass."""
+
+    def test_basic_boundary(self):
+        b = Boundary(kind="deploy")
+        assert b.kind == "deploy"
+        assert b.reset is True
+
+    def test_boundary_reset_false(self):
+        b = Boundary(kind="heartbeat", reset=False)
+        assert b.kind == "heartbeat"
+        assert b.reset is False
+
+    def test_boundary_reset_true_explicit(self):
+        b = Boundary(kind="cycle-end", reset=True)
+        assert b.reset is True
+
+    def test_frozen(self):
+        b = Boundary(kind="deploy")
+        with pytest.raises(AttributeError):
+            b.kind = "other"
+
+    def test_equality(self):
+        b1 = Boundary(kind="deploy", reset=True)
+        b2 = Boundary(kind="deploy", reset=True)
+        assert b1 == b2
+
+    def test_inequality_kind(self):
+        b1 = Boundary(kind="deploy")
+        b2 = Boundary(kind="heartbeat")
+        assert b1 != b2
+
+    def test_inequality_reset(self):
+        b1 = Boundary(kind="deploy", reset=True)
+        b2 = Boundary(kind="deploy", reset=False)
+        assert b1 != b2
+
+
+class TestShapeBoundary:
+    """Tests for Shape with boundary field."""
+
+    def test_shape_default_no_boundary(self):
+        s = Shape(name="continuous")
+        assert s.boundary is None
+
+    def test_shape_with_boundary(self):
+        b = Boundary(kind="deploy")
+        s = Shape(name="deploy-monitor", boundary=b)
+        assert s.boundary is not None
+        assert s.boundary.kind == "deploy"
+        assert s.boundary.reset is True
+
+    def test_shape_with_carry_boundary(self):
+        b = Boundary(kind="heartbeat", reset=False)
+        s = Shape(
+            name="health-check",
+            state_facets=(Facet("count", "int"),),
+            folds=(Fold(op="count", target="count"),),
+            boundary=b,
+        )
+        assert s.boundary.reset is False
+
+    def test_shape_boundary_does_not_affect_apply(self):
+        """Boundary is declarative — apply() behavior is unchanged."""
+        b = Boundary(kind="deploy")
+        s = Shape(
+            name="counter",
+            folds=(Fold(op="count", target="n"),),
+            boundary=b,
+        )
+        result = s.apply({"n": 0}, {})
+        assert result == {"n": 1}
+
+    def test_shape_frozen_boundary(self):
+        b = Boundary(kind="deploy")
+        s = Shape(name="test", boundary=b)
+        with pytest.raises(AttributeError):
+            s.boundary = None
 
 
 class TestValidationError:

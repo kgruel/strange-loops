@@ -45,9 +45,9 @@ def join_horizontal(*blocks: Block, gap: int = 0,
     return Block(rows, total_width)
 
 
-def join_vertical(*blocks: Block,
+def join_vertical(*blocks: Block, gap: int = 0,
                   align: Align = Align.START) -> Block:
-    """Join blocks top-to-bottom with horizontal alignment."""
+    """Join blocks top-to-bottom with optional gap and horizontal alignment."""
     if not blocks:
         return Block.empty(0, 0)
 
@@ -56,7 +56,7 @@ def join_vertical(*blocks: Block,
 
     rows: list[list[Cell]] = []
 
-    for block in blocks:
+    for i, block in enumerate(blocks):
         offset = _halign_offset(block.width, max_width, align)
 
         for row_idx in range(block.height):
@@ -71,6 +71,11 @@ def join_vertical(*blocks: Block,
             if right_pad > 0:
                 row.extend([pad_cell] * right_pad)
             rows.append(row)
+
+        # Insert gap rows between blocks (not after the last)
+        if i < len(blocks) - 1 and gap > 0:
+            for _ in range(gap):
+                rows.append([pad_cell] * max_width)
 
     return Block(rows, max_width)
 

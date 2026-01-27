@@ -1,8 +1,8 @@
-"""Tests for cells.compose: vslice."""
+"""Tests for cells.compose: vslice, join_vertical."""
 
 from cells.block import Block
 from cells.cell import Style, Cell
-from cells.compose import vslice
+from cells.compose import vslice, join_vertical, Align
 
 
 def _text_block(lines: list[str], style: Style = Style()) -> Block:
@@ -86,3 +86,57 @@ class TestVslice:
         assert _row_text(result, 0) == "aa"
         assert _row_text(result, 1) == "bb"
         assert _row_text(result, 2) == "cc"
+
+
+class TestJoinVerticalGap:
+    def test_join_vertical_no_gap(self):
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        result = join_vertical(a, b)
+        assert result.height == 2
+        assert result.width == 3
+        assert _row_text(result, 0) == "aaa"
+        assert _row_text(result, 1) == "bbb"
+
+    def test_join_vertical_gap_1(self):
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        result = join_vertical(a, b, gap=1)
+        assert result.height == 3
+        assert result.width == 3
+        assert _row_text(result, 0) == "aaa"
+        assert _row_text(result, 1) == "   "
+        assert _row_text(result, 2) == "bbb"
+
+    def test_join_vertical_gap_2(self):
+        a = _text_block(["aa"])
+        b = _text_block(["bb"])
+        c = _text_block(["cc"])
+        result = join_vertical(a, b, c, gap=2)
+        # 3 blocks, 2 gaps of 2 rows each = 3 + 4 = 7 rows
+        assert result.height == 7
+        assert _row_text(result, 0) == "aa"
+        assert _row_text(result, 1) == "  "
+        assert _row_text(result, 2) == "  "
+        assert _row_text(result, 3) == "bb"
+        assert _row_text(result, 4) == "  "
+        assert _row_text(result, 5) == "  "
+        assert _row_text(result, 6) == "cc"
+
+    def test_join_vertical_gap_single_block(self):
+        a = _text_block(["aaa"])
+        result = join_vertical(a, gap=3)
+        assert result.height == 1
+        assert result.width == 3
+        assert _row_text(result, 0) == "aaa"
+
+    def test_join_vertical_gap_with_align(self):
+        a = _text_block(["aa"])
+        b = _text_block(["bbbb"])
+        result = join_vertical(a, b, gap=1, align=Align.CENTER)
+        assert result.height == 3
+        assert result.width == 4
+        # "aa" centered in width 4 → offset 1 → " aa "
+        assert _row_text(result, 0) == " aa "
+        assert _row_text(result, 1) == "    "
+        assert _row_text(result, 2) == "bbbb"

@@ -97,6 +97,33 @@ loop-centric.
 **Bug found.** Surface.on_start is a callback (`__init__` parameter),
 not a method override. Both fleet.py and containers.py had this wrong.
 
+### 2026-01-27 — Genesis document + strata semantic tagging
+
+Reconstructed the project's origin story from archived conversations via
+strata. Six strata queries covered: intellectual pivots, vocabulary
+evolution, dead ends, design principles, human story, AI collaboration
+patterns. Synthesized into `docs/GENESIS.md` — a nine-act narrative from
+the corrupt movie file through five-atom crystallization to the feedback
+loop closing.
+
+Discovered strata's `tag` and `query -l` CLI capabilities (not surfaced
+by the skill interface). Used `strata ask --conversations` to semantic-
+search for conversations matching 10 conceptual themes, then applied tags
+to 58 conversations across ev, cells, experiments, gruel.network, and
+prism workspaces. Tags are now durable retrieval keys:
+`strata query -l dissolution` returns the exact conversations where
+false distinctions were explored.
+
+Tags applied: `inciting-friction`, `vocabulary-as-architecture`,
+`dissolution`, `declaration-over-procedure`, `self-similarity`,
+`the-great-deletion`, `forcing-function`, `observation-as-participation`,
+`the-missing-middle`, `co-creation`.
+
+Strata feedback and retrospective written to `docs/STRATA_FEEDBACK.md`
+and `docs/STRATA_RETROSPECTIVE.md`. Key finding: the strata skill and
+strata CLI are two separate interfaces to the same system — the skill
+doesn't surface tagging/querying capabilities.
+
 ### 2026-01-27 — Refactor complete
 
 Four refactors landed across three parallel subtasks:

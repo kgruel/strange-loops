@@ -23,6 +23,7 @@ Fact[T]
 |--------|------|---------|
 | `Fact` | frozen dataclass, Generic[T] | the observation atom |
 | `Fact.of(kind, **data)` | classmethod | factory: auto-timestamp (epoch float), dict payload |
+| `Fact.tick(name, **data)` | classmethod | boundary factory: auto-prefixes kind to `tick.{name}`, same semantics as `of()` |
 | `Fact.to_dict()` | method | serialize (float ts, unwrap MappingProxy) |
 | `Fact.from_dict(d)` | classmethod | deserialize (float ts) |
 | `Fact.is_kind(*kinds)` | method | predicate: kind membership check |
@@ -32,6 +33,7 @@ Fact[T]
 - Frozen dataclass. Dict payloads auto-wrapped in `MappingProxyType`.
 - `kind` is an open string — no enum, no constrained set. Structure comes from Shape.
 - `Fact.of()` always produces `Fact[dict]` with epoch float timestamp (`time.time()`).
+- `Fact.tick(name)` produces `Fact[dict]` with `kind="tick.{name}"` — same semantics as `of()`.
 - Round-trip: `Fact.from_dict(f.to_dict())` preserves kind, ts, payload.
 - Non-dict payloads (int, str, custom dataclass) pass through unwrapped.
 

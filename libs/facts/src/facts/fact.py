@@ -44,6 +44,16 @@ class Fact(Generic[T]):
         """
         return cls(kind=kind, ts=time.time(), payload=data)
 
+    @classmethod
+    def tick(cls, name: str, **data: Any) -> Fact[dict]:
+        """Create a boundary-related Fact with tick. prefix.
+
+        Args:
+            name: Boundary name — auto-prefixed to kind="tick.{name}"
+            **data: Keyword arguments become the dict payload
+        """
+        return cls(kind=f"tick.{name}", ts=time.time(), payload=data)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
         payload = dict(self.payload) if isinstance(self.payload, MappingProxyType) else self.payload

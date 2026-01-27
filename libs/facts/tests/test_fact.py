@@ -65,6 +65,46 @@ class TestFactory:
         assert f.payload == {}
 
 
+# --- Tick factory ---
+
+
+class TestTickFactory:
+    def test_tick_prefixes_kind(self):
+        f = Fact.tick("hourly", count=42)
+        assert f.kind == "tick.hourly"
+
+    def test_tick_payload(self):
+        f = Fact.tick("hourly", count=42)
+        assert f.payload["count"] == 42
+
+    def test_tick_auto_timestamps(self):
+        before = time.time()
+        f = Fact.tick("daily")
+        after = time.time()
+        assert before <= f.ts <= after
+        assert isinstance(f.ts, float)
+
+    def test_tick_empty_payload(self):
+        f = Fact.tick("midnight")
+        assert f.payload == {}
+
+    def test_tick_payload_wrapped_in_mapping_proxy(self):
+        f = Fact.tick("hourly", count=42)
+        assert isinstance(f.payload, MappingProxyType)
+
+    def test_tick_round_trip(self):
+        original = Fact.tick("hourly", count=42, source="cron")
+        rebuilt = Fact.from_dict(original.to_dict())
+        assert rebuilt.kind == original.kind
+        assert rebuilt.ts == original.ts
+        assert dict(rebuilt.payload) == dict(original.payload)
+
+    def test_tick_is_kind(self):
+        f = Fact.tick("hourly")
+        assert f.is_kind("tick.hourly") is True
+        assert f.is_kind("hourly") is False
+
+
 # --- Frozen ---
 
 

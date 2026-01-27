@@ -124,6 +124,27 @@ and `docs/STRATA_RETROSPECTIVE.md`. Key finding: the strata skill and
 strata CLI are two separate interfaces to the same system — the skill
 doesn't surface tagging/querying capabilities.
 
+### 2026-01-27 — Boundary triggering implemented
+
+Implemented HANDOFF #5 (boundary triggering on Vertex). `Projection.reset()`
+added. Vertex internals restructured: `_FoldEngine` dataclass (projection +
+boundary config + initial), `_boundary_map` for O(1) lookup. `register()`
+gains `boundary: str | None` and `reset: bool`. `receive()` returns
+`Tick | None` — fold-before-boundary, optional reset, boundary kind uniqueness
+enforced. Manual `tick()` unchanged.
+
+Async ergonomics resolved by design: Vertex is a sync fold machine. The
+Consumer protocol has no return channel, so the async bridge (kind extraction,
+Tick routing to downstream Stream) lives at the composition point. Same
+pattern as the Fact→Shape bridge. Closed as intentional, not deferred.
+
+E2e integration tests: boundary→Stream[Tick]→Projection, two-level nested
+loops, Shape.boundary descriptor wired to Vertex.register. 122 ticks tests.
+
+**Next session**: review prior experiments (`fleet.py`, `containers.py`),
+decide whether to update them for boundary triggering or design a new
+experiment from scratch.
+
 ### 2026-01-27 — Refactor complete
 
 Four refactors landed across three parallel subtasks:
@@ -155,6 +176,7 @@ All structural refactors complete. Remaining: documentation alignment (in progre
 - **peers**: horizon + potential replacing scope (2026-01-27)
 - **ticks**: Tick name + Vertex + Store + FileStore + fold_one (2026-01-27)
 - **ticks**: Tick.origin + Vertex.name (2026-01-27)
+- **ticks**: Boundary triggering on Vertex + Projection.reset (2026-01-27)
 - **facts**: Fact.tick() convenience (2026-01-27)
 - **cells**: no structural changes needed
 
@@ -184,15 +206,13 @@ Open questions — resolved items kept for context.
    is the routing key, not name. No conversion to Fact needed. Same
    primitive at every level. Proven in `experiments/fleet.py`.
 
-5. **Boundary triggering + reset**: Designed, not implemented.
-   Per-kind boundaries on Vertex, not per-vertex. Each registered kind
-   can declare its own boundary kind and reset behavior. `receive()`
-   checks after each fold — when the boundary kind arrives, that kind's
-   fold engine auto-produces a Tick and optionally resets. Different
-   loops tick independently at their own cadence. Design:
-   `register(kind, initial, fold, boundary=..., reset=...)` and
-   `receive()` returns `Tick | None`. Manual `tick()` survives as
-   escape hatch for snapshot-everything. **Next session: implement.**
+5. ~~**Boundary triggering + reset**~~: Resolved. Implemented as designed.
+   `register(kind, initial, fold, boundary=..., reset=...)` with
+   `receive()` returning `Tick | None`. Fold-before-boundary, optional
+   reset, boundary kind uniqueness enforced. `Projection.reset()` added.
+   Vertex stays sync by design — async bridge lives at composition point.
+   E2e tests prove: boundary→Stream[Tick], nested loops (upstream→Tick→
+   downstream), Shape.boundary→Vertex wiring. 122 ticks tests.
 
 6. **Fact.tick() role**: Open. The `Fact.tick(name, **data)` convenience
    was built for tick-to-fact conversion. That path dissolved. May still

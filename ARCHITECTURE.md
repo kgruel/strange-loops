@@ -17,7 +17,7 @@ Five atoms. No atom imports another. They compose at vertices.
 A **vertex** is where loops meet. Facts arrive at a vertex. The vertex
 routes them to fold engines. Fold engines accumulate state through
 shapes. When a boundary fires, the fold produces a Tick. The Tick
-propagates to connected vertices. State projects through a lens to
+propagates to downstream vertices. State projects through a lens to
 cells. Cells emit facts back to vertices.
 
 ```
@@ -154,7 +154,7 @@ inward as facts. The loop closes here.
     |                                                                  |
     +--- boundary? ---> Tick(name, ts, payload)                        |
     |                       |                                          |
-    |                       +---> propagates to connected vertices     |
+    |                       +---> propagates to downstream vertices     |
     |                             (other loops receive as input)       |
     |                                                                  |
     v                                                                  |
@@ -166,18 +166,24 @@ inward as facts. The loop closes here.
 
 Facts arrive. Ticks propagate. Interactions emit. The loop continues.
 
-## How Loops Connect
+## How Loops Intersect
 
-A Tick produced at one vertex propagates to connected vertices. The
-receiving vertex folds it like any other Fact. Because Ticks are
-immutable, this is safe. No coordination, no locking, no conflict.
+A Tick produced at one vertex propagates to downstream vertices. The
+receiving vertex folds it as its atomic input — not converted to a Fact.
+At the leaves, vertices fold Facts. Above the leaves, vertices fold
+Ticks. Same primitive at every level. Because Ticks are immutable,
+propagation requires no coordination, no locking, no conflict.
+
+Ticks are a level above Facts. A Tick is a temporal grouping — a
+window, a frame, a boundary snapshot. At level N, a Tick groups facts.
+At level N+1, that Tick is the atomic input. No conversion needed.
 
 ```
   Vertex A                        Vertex B
   +----------+                    +----------+
   | arrive   |                    | arrive   |
   | fold     |                    | fold     |
-  | boundary --> Tick ----------> | (as Fact)|
+  | boundary --> Tick ----------> | (Tick)   |
   |          |   frozen state     | fold     |
   |          |                    | boundary --> Tick ---> ...
   +----------+                    +----------+
@@ -200,6 +206,15 @@ Same architecture at every scale:
 
 ## Vocabulary
 
+### The loop
+
+A loop is the full cycle: facts arrive, state folds, cells render,
+interactions emit new facts. Loop is the conceptual term. Stream is
+the plumbing class that moves events between participants.
+
+A vertex is where loops meet. Loops nest: a Tick from one loop is
+the atomic input to the next. Same primitive at every level.
+
 ### The cycle — what happens inside a loop
 
 ```
@@ -212,10 +227,10 @@ boundary, the fold produces a Tick.
 ### The topology — how loops relate
 
 ```
-propagate   Ticks propagate from one vertex to connected vertices
-connect     a peer connects to a vertex
-expose      a vertex is made available to external peers
-route       a vertex routes facts by kind to fold engines
+propagate   Ticks flow from a vertex to downstream vertices in the topology
+intersect   a loop passes through a vertex — the vertex is the intersection point
+expose      a vertex is made reachable to external peers
+route       a vertex routes by kind to fold engines
 ```
 
 ### The surface — how state becomes visible

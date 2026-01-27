@@ -29,9 +29,15 @@ class Vertex:
     is appended to the store before routing.
     """
 
-    def __init__(self, *, store: Store | None = None) -> None:
+    def __init__(self, name: str = "", *, store: Store | None = None) -> None:
+        self._name = name
         self._folds: dict[str, Projection] = {}
         self._store = store
+
+    @property
+    def name(self) -> str:
+        """Vertex name — stamped as origin on produced Ticks."""
+        return self._name
 
     def register(
         self,
@@ -69,9 +75,10 @@ class Vertex:
 
         Snapshots all fold engine states into a dict keyed by kind,
         wraps in a Tick with the given name and timestamp.
+        Origin is stamped from the vertex name.
         """
         state = {kind: proj.state for kind, proj in self._folds.items()}
-        return Tick(name=name, ts=ts, payload=state)
+        return Tick(name=name, ts=ts, payload=state, origin=self._name)
 
     @property
     def kinds(self) -> list[str]:

@@ -11,11 +11,13 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Tick(Generic[T]):
-    """Frozen temporal snapshot: name + timestamp + payload.
+    """Frozen temporal snapshot: the output primitive of a loop.
 
-    A Tick wraps any payload with the name of the loop that produced it
-    and the timestamp of when a temporal boundary fell.  It is the output
-    of folding events through a Shape over a time period.
+    A Tick is what a loop produces when a temporal boundary fires.
+    It carries what cycle completed (name), when (ts), the folded
+    state at that boundary (payload), and which vertex produced it
+    (origin). The tree of origins is reconstructable from nested
+    payloads — each Tick is a node, not the tree.
 
     The payload is generic:
       Tick[Event]       — single fact, stamped with observation time
@@ -26,3 +28,4 @@ class Tick(Generic[T]):
     name: str
     ts: datetime
     payload: T
+    origin: str = ""

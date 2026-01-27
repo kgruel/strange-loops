@@ -35,49 +35,46 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 
 ### Data Flow
 
-The pipeline is a loop. You are a Peer in it.
+The system is loops. You are a Peer in one.
 
-    ┌─────────────────────────────────────────────────────────┐
-    │  You (Peer) — your choices become new Facts             │
-    │                                                         │
-    ▼                                                         │
-  Fact                                             facts      │
-    │                                                         │
-    ▼                                                         │
-  Stream[Fact] ─── tap ──→ any external consumer   ticks      │
-    │                                                         │
-    ├──→ Store ──→ FileWriter                      ticks      │
-    │                                                         │
-    ▼                                                         │
-  Projection(fold=shape.apply) ← Shape        ticks + shapes  │
-    │                                                         │
-    ├── live state ──→ Lens → Block → You ────────────────────┘
-    │                              cells   peers
+    ┌──────────────────────────────────────────────────────┐
+    │  You (Peer) — your choices become new Facts          │
+    │                                                      │
+    ▼                                                      │
+  Fact(kind, ts, payload)                                  │
+    │                                                      │
+    ▼                                                      │
+  Vertex ── routes by kind to fold engines                 │
+    │         optionally backed by Store                   │
+    ▼                                                      │
+  Fold engine (Shape.apply)                                │
+    │                                                      │
+    ├── live state ──→ Lens → Block → You ─────────────────┘
+    │                              cells
     │
-    └── Tick[state] ──→ Stream[Tick] ─── tap ──→ any external consumer
-                              │                      ticks
-                              ▼
-                         downstream
-                   (project, persist, serve)
+    └── boundary ──→ Tick(name, ts, payload)
+                         │
+                         ▼
+                    next Vertex
+                    (folds Ticks — same primitive, next level)
 
-A Peer observes a Fact. The Fact flows through a Stream. A
-Projection applies a Shape (via shape.apply) to fold facts into
-state. You see state through a Lens rendered as Cells. Your
-choices become new Facts — the loop continues.
+A Peer observes a Fact. The Fact arrives at a Vertex, which routes
+it by kind to fold engines. A Shape folds facts into state. You see
+state through a Lens rendered as Cells. Your choices become new
+Facts — the loop continues.
 
 At a temporal boundary, the folded state becomes a Tick — a frozen
-snapshot. Ticks flow downstream as a new Stream for further
-projection, persistence, or serving. Streams can be tapped at any
-point to split off to external consumers without interrupting
-the main pipeline.
+snapshot. Ticks are a level above Facts: temporal groupings that can
+enter another loop as atomic input. The receiving vertex folds Ticks,
+not Facts. Same primitive at every level. Loops nest.
 
 ### Feedback Loop (Surface → Facts)
 
 Surface (cells) is the bidirectional boundary — renders state outward,
-emits interactions inward. Facts enter the pipeline from two sources:
+emits interactions inward. Facts enter the loop from two sources:
 external observations (a deploy happened) and your own interactions
-(you pressed a key, selected an item). Both are Fact. Both flow
-through the same Stream. The pipeline doesn't distinguish.
+(you pressed a key, selected an item). Both are Fact. Both arrive
+at the same Vertex. The loop doesn't distinguish.
 
 Surface emits at three strata:
 
@@ -124,7 +121,7 @@ participation level. No enum needed; the identity is the stance.
 
 ### experiments/
 
-Integration layer that wires the libraries together. Contains `daemon/` (mill — the daemon primitive), `capability.py` (capability-as-fact pattern), `archive/` (earlier experiments), and `tests/`.
+Integration layer that wires the libraries together. Contains `fleet.py` (three-level vertex hierarchy with heterogeneous VMs — proves tick nesting), `containers.py` (single-loop Docker dashboard), `daemon/` (mill — the daemon primitive), `capability.py` (capability-as-fact pattern), `archive/` (earlier experiments), and `tests/`.
 
 ### demos/cells/
 

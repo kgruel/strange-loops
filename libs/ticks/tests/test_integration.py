@@ -149,9 +149,9 @@ class TestEventStoreToProjection:
     """EventStore advances -> Projection catches up."""
 
     async def test_projection_advance_catches_up(self, event_store: EventStore[Event]):
-        event_store.add(Event(1))
-        event_store.add(Event(2))
-        event_store.add(Event(3))
+        event_store.append(Event(1))
+        event_store.append(Event(2))
+        event_store.append(Event(3))
 
         proj = SumProjection(initial=0)
         proj.advance(event_store)
@@ -164,12 +164,12 @@ class TestEventStoreToProjection:
     ):
         proj = SumProjection(initial=0)
 
-        event_store.add(Event(1))
+        event_store.append(Event(1))
         proj.advance(event_store)
         assert proj.state == 1
 
-        event_store.add(Event(2))
-        event_store.add(Event(3))
+        event_store.append(Event(2))
+        event_store.append(Event(3))
         proj.advance(event_store)
         assert proj.state == 6
 
@@ -266,8 +266,8 @@ class TestEventStorePersistence:
             serialize=serialize_event,
             deserialize=deserialize_event,
         ) as store:
-            store.add(Event(1))
-            store.add(Event(2))
+            store.append(Event(1))
+            store.append(Event(2))
 
         # Reload from file
         with EventStore[Event](

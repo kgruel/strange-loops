@@ -1,28 +1,48 @@
-"""Append-only event store.
+"""Store abstraction and EventStore implementation.
 
-EventStore is the log. Events go in, version increments, consumers read.
-Optional JSONL persistence — pass path + serialize/deserialize.
-
-Implements the Consumer protocol so it can be tapped onto a Stream.
+Store is the protocol — append, since, close.
+EventStore is the in-memory implementation with optional JSONL persistence.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, Protocol, TypeVar, runtime_checkable
 
 T = TypeVar("T")
+T_contra = TypeVar("T_contra", contravariant=True)
+
+
+@runtime_checkable
+class Store(Protocol[T_contra]):
+    """Append-only event log interface.
+
+    Three operations: append events, read since cursor, close resources.
+    Implementations: EventStore (in-memory), FileStore (JSONL files).
+    """
+
+    def append(self, event: T_contra) -> None:
+        """Append one event to the log."""
+        ...
+
+    def since(self, cursor: int) -> list:
+        """Return events from logical index `cursor` onward."""
+        ...
+
+    def close(self) -> None:
+        """Release resources."""
+        ...
 
 
 class EventStore(Generic[T]):
-    """Append-only event store with version counter.
+    """Append-only in-memory event store with version counter.
 
-    The version bumps on each add — consumers check it to detect new events.
+    The version bumps on each append — consumers check it to detect new events.
 
     Optional persistence: pass path, serialize, and deserialize to enable
     JSON Lines append-only file storage. Events are loaded on init and
-    appended on each add(). The file handle is kept open for the lifetime
+    appended on each append(). The file handle is kept open for the lifetime
     of the store — call close() when done, or use as a context manager.
     """
 
@@ -60,14 +80,14 @@ class EventStore(Generic[T]):
 
     async def consume(self, event: T) -> None:
         """Consumer protocol: append event to store."""
-        self.add(event)
+        self.append(event)
 
     @property
     def version(self) -> int:
-        """Bumped on each add. Use to detect new events."""
+        """Bumped on each append. Use to detect new events."""
         return self._version
 
-    def add(self, event: T) -> None:
+    def append(self, event: T) -> None:
         self._events.append(event)
         if self._file is not None:
             self._file.write(json.dumps(self._serialize(event)) + "\n")

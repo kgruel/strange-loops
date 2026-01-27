@@ -71,21 +71,21 @@ class TestEventStoreEdgeCases:
 
     def test_context_manager_without_file(self):
         with EventStore[Event]() as store:
-            store.add(Event(1))
+            store.append(Event(1))
         assert store.events == [Event(1)]
 
     def test_total_tracks_logical_count(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
+        store.append(Event(1))
+        store.append(Event(2))
 
         assert store.total == 2
 
     def test_since_returns_events_from_cursor(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
-        store.add(Event(3))
+        store.append(Event(1))
+        store.append(Event(2))
+        store.append(Event(3))
 
         assert store.since(0) == [Event(1), Event(2), Event(3)]
         assert store.since(1) == [Event(2), Event(3)]
@@ -93,9 +93,9 @@ class TestEventStoreEdgeCases:
 
     def test_evict_below_removes_old_events(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
-        store.add(Event(3))
+        store.append(Event(1))
+        store.append(Event(2))
+        store.append(Event(3))
 
         store.evict_below(2)
 
@@ -105,8 +105,8 @@ class TestEventStoreEdgeCases:
 
     def test_evict_below_raises_on_old_cursor(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
+        store.append(Event(1))
+        store.append(Event(2))
 
         store.evict_below(1)
 
@@ -115,8 +115,8 @@ class TestEventStoreEdgeCases:
 
     def test_evict_below_noop_when_already_evicted(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
+        store.append(Event(1))
+        store.append(Event(2))
 
         store.evict_below(1)
         store.evict_below(0)  # no-op, already past 0
@@ -125,8 +125,8 @@ class TestEventStoreEdgeCases:
 
     def test_evict_beyond_total_clamps(self):
         store = EventStore[Event]()
-        store.add(Event(1))
-        store.add(Event(2))
+        store.append(Event(1))
+        store.append(Event(2))
 
         store.evict_below(10)  # beyond current total
 
@@ -188,7 +188,7 @@ class TestProjectionBehavior:
                 return state
 
         store = EventStore[Event]()
-        store.add(Event(1))
+        store.append(Event(1))
 
         proj = IdentityProjection(initial=[])
         proj.advance(store)

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 if TYPE_CHECKING:
-    from .store import EventStore
+    from .store import EventStore, Store
 
 S = TypeVar("S")  # State type
 T = TypeVar("T")  # Event type
@@ -63,13 +63,21 @@ class Projection(Generic[S, T]):
             return self._fold(state, event)
         raise NotImplementedError
 
-    async def consume(self, event: T) -> None:
-        """Consumer protocol: fold a single event into state."""
+    def fold_one(self, event: T) -> None:
+        """Fold a single event into state (synchronous).
+
+        Applies the fold, bumps version on identity change, increments cursor.
+        This is the core fold step — consume() and advance() delegate here.
+        """
         new_state = self.apply(self._state, event)
         if new_state is not self._state:
             self._state = new_state
             self._version += 1
         self.cursor += 1
+
+    async def consume(self, event: T) -> None:
+        """Consumer protocol: fold a single event into state."""
+        self.fold_one(event)
 
     def advance(self, store: "EventStore[T]") -> None:
         """Process all new events since last cursor, update state once."""

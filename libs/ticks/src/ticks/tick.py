@@ -11,11 +11,11 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Tick(Generic[T]):
-    """Frozen temporal snapshot: timestamp + payload.
+    """Frozen temporal snapshot: name + timestamp + payload.
 
-    A Tick wraps any payload with the timestamp of when a temporal
-    boundary fell.  It is the output of folding events through a Shape
-    over a time period.
+    A Tick wraps any payload with the name of the loop that produced it
+    and the timestamp of when a temporal boundary fell.  It is the output
+    of folding events through a Shape over a time period.
 
     The payload is generic:
       Tick[Event]       — single fact, stamped with observation time
@@ -23,5 +23,6 @@ class Tick(Generic[T]):
       Tick[dict]        — folded state snapshot at a boundary
     """
 
+    name: str
     ts: datetime
     payload: T

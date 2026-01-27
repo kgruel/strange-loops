@@ -1,13 +1,15 @@
 """ticks — Personal-scale event infrastructure.
 
-Kafka concepts (append-only logs, offset-tracking consumers, materialized views)
-at individual/homelab scale, using files instead of brokers.
+The respiratory system: Tick atom + Vertex + Store + fold engine.
 
 Core primitives:
-  Tick        Frozen temporal snapshot (the atom)
+  Tick        Frozen temporal snapshot: name + ts + payload (the atom)
+  Vertex      Where loops meet: kind-based routing + fold engines + boundary ticks
+  Store       Protocol for append-only logs (append, since, close)
+  EventStore  In-memory Store implementation
+  FileStore   JSONL-backed Store implementation
   Stream      Typed async fan-out
-  EventStore  Append-only log with optional JSONL persistence
-  Projection  Incremental fold (materialized view)
+  Projection  Incremental fold (materialized view, internal to Vertex)
   FileWriter  JSONL append (persistence tap)
   Tailer      JSONL reader with byte-offset tracking
   Forward     Stream-to-stream bridge with transform
@@ -15,11 +17,13 @@ Core primitives:
 
 from .tick import Tick
 from .stream import Stream, Tap, Consumer
-from .store import EventStore
+from .store import Store, EventStore
 from .projection import Projection
+from .file_store import FileStore
 from .file_writer import FileWriter
 from .tailer import Tailer
 from .forward import Forward
+from .vertex import Vertex
 from .source import Source, ClosableSource
 
 __all__ = [
@@ -27,11 +31,14 @@ __all__ = [
     "Stream",
     "Tap",
     "Consumer",
+    "Store",
     "EventStore",
+    "FileStore",
     "Projection",
     "FileWriter",
     "Tailer",
     "Forward",
+    "Vertex",
     "Source",
     "ClosableSource",
 ]

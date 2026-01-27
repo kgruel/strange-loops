@@ -1,70 +1,49 @@
-# peers: scoped identity primitives
+# peers: identity primitives
 #
-# Peer = name + scope (atomic identity)
-# Scope = see + do + ask (boundaries that cascade)
+# Peer = name + horizon + potential (atomic identity)
+# horizon = what you can see, potential = what you can do
 
 from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True, slots=True)
-class Scope:
-    """Boundaries: what a peer can see, do, and ask.
-
-    Scope cascades through the ecosystem:
-    - What facts you can emit/see
-    - What ticks you can read/write
-    - What forms you can use
-    - What cells you can render
-    """
-
-    see: frozenset[str] = frozenset()  # what you can observe
-    do: frozenset[str] = frozenset()  # what you can modify
-    ask: frozenset[str] = frozenset()  # what you can request
-
-
-@dataclass(frozen=True, slots=True)
 class Peer:
-    """Atomic identity: name + scope.
+    """Atomic identity: name + horizon + potential.
 
-    A Peer is who is acting and what they can see/do/ask.
+    A Peer is who is acting, what they can see (horizon),
+    and what they can do (potential).
     """
 
     name: str
-    scope: Scope = Scope()
-
-
-# Scope operations (pure functions, following cells patterns)
+    horizon: frozenset[str] = frozenset()   # what you can observe
+    potential: frozenset[str] = frozenset()  # what you can do/emit
 
 
 def grant(
-    scope: Scope,
+    peer: Peer,
     *,
-    see: set[str] | None = None,
-    do: set[str] | None = None,
-    ask: set[str] | None = None,
-) -> Scope:
-    """Expand scope with additional permissions."""
+    horizon: set[str] | None = None,
+    potential: set[str] | None = None,
+) -> Peer:
+    """Expand peer with additional permissions (union)."""
     return replace(
-        scope,
-        see=scope.see | frozenset(see or ()),
-        do=scope.do | frozenset(do or ()),
-        ask=scope.ask | frozenset(ask or ()),
+        peer,
+        horizon=peer.horizon | frozenset(horizon or ()),
+        potential=peer.potential | frozenset(potential or ()),
     )
 
 
 def restrict(
-    scope: Scope,
+    peer: Peer,
     *,
-    see: set[str] | None = None,
-    do: set[str] | None = None,
-    ask: set[str] | None = None,
-) -> Scope:
-    """Narrow scope (intersection). Used for delegation."""
+    horizon: set[str] | None = None,
+    potential: set[str] | None = None,
+) -> Peer:
+    """Narrow peer permissions (intersection). Used for delegation."""
     return replace(
-        scope,
-        see=scope.see & frozenset(see) if see is not None else scope.see,
-        do=scope.do & frozenset(do) if do is not None else scope.do,
-        ask=scope.ask & frozenset(ask) if ask is not None else scope.ask,
+        peer,
+        horizon=peer.horizon & frozenset(horizon) if horizon is not None else peer.horizon,
+        potential=peer.potential & frozenset(potential) if potential is not None else peer.potential,
     )
 
 
@@ -72,19 +51,16 @@ def delegate(
     peer: Peer,
     name: str,
     *,
-    see: set[str] | None = None,
-    do: set[str] | None = None,
-    ask: set[str] | None = None,
+    horizon: set[str] | None = None,
+    potential: set[str] | None = None,
 ) -> Peer:
-    """Create a child peer with restricted scope.
+    """Create a child peer with restricted permissions.
 
-    Delegation can only narrow, never expand. If see/do/ask are None,
-    inherits parent's scope for that dimension.
+    Delegation can only narrow, never expand. If horizon/potential are None,
+    inherits parent's value for that dimension.
     """
-    return Peer(
-        name=name,
-        scope=restrict(peer.scope, see=see, do=do, ask=ask),
-    )
+    restricted = restrict(peer, horizon=horizon, potential=potential)
+    return replace(restricted, name=name)
 
 
-__all__ = ["Peer", "Scope", "grant", "restrict", "delegate"]
+__all__ = ["Peer", "grant", "restrict", "delegate"]

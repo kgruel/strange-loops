@@ -1,46 +1,41 @@
 # peers
 
-Scoped identity primitives: Peer = name + scope
+Identity primitives: Peer = name + horizon + potential
 
 ## Atom
 
 ```
 Peer
- ├─ name: str        # identity label
- └─ scope: Scope
-     ├─ see: frozenset[str]   # what you can observe
-     ├─ do: frozenset[str]    # what you can act on
-     └─ ask: frozenset[str]   # what you can query
+ ├─ name: str                    # identity label
+ ├─ horizon: frozenset[str]      # what you can observe
+ └─ potential: frozenset[str]    # what you can do/emit
 ```
 
 ## Usage
 
 ```python
-from peers import Peer, Scope, grant, restrict, delegate
+from peers import Peer, grant, restrict, delegate
 
-# Create a peer with scope
+# Create a peer with permissions
 admin = Peer(
     name="admin",
-    scope=Scope(
-        see=frozenset({"logs", "metrics", "secrets"}),
-        do=frozenset({"deploy", "rollback"}),
-    ),
+    horizon=frozenset({"logs", "metrics", "secrets"}),
+    potential=frozenset({"deploy", "rollback"}),
 )
 
-# Delegate with restricted scope
-operator = delegate(admin, "operator", see={"logs", "metrics"}, do={"deploy"})
+# Delegate with restricted permissions
+operator = delegate(admin, "operator", horizon={"logs", "metrics"}, potential={"deploy"})
 # operator can see logs/metrics, do deploy, but not secrets or rollback
 
 # Grant additional permissions
-expanded = grant(operator.scope, see={"alerts"})
+expanded = grant(operator, horizon={"alerts"})
 ```
 
 ## API
 
 | Export | Purpose |
 |--------|---------|
-| `Peer` | name + scope (atomic identity) |
-| `Scope` | see + do + ask (boundaries) |
-| `grant` | expand scope |
-| `restrict` | narrow scope (intersection) |
-| `delegate` | create child peer with restricted scope |
+| `Peer` | name + horizon + potential (atomic identity) |
+| `grant` | expand permissions (union) |
+| `restrict` | narrow permissions (intersection) |
+| `delegate` | create child peer with restricted permissions |

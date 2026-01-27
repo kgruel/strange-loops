@@ -271,12 +271,13 @@ Key concepts:
    loops is ontological (it's what reality is). The argument for volta
    is brand (distinctive, story). Decision pending.
 
-2. **Peer: horizon + potential**: What does this look like in the actual
-   peers lib? Does Peer(name, scope) refactor cleanly to
-   Peer(name, horizon, potential)? What are the concrete types?
+2. **Peer: horizon + potential**: ✅ Resolved. `Scope(see, do, ask)` replaced
+   with `horizon` + `potential` directly on `Peer`. `ask` collapsed into
+   `potential`. `grant`/`restrict` operate on `Peer`. See `libs/peers/`.
 
-3. **Capability-as-Fact**: What shape folds capability facts into current
-   potential? What does revocation look like as a fact?
+3. **Capability-as-Fact**: Direction demonstrated in `experiments/capability.py`.
+   `peer-potential` Shape folds grant/revoke facts into current potential.
+   Revocation = fact with `granted=False`. Full audit trail via collect fold.
 
 4. **Ticks identity**: Is "ticks" still the right name for the library
    that provides loop intersection infrastructure? The Tick data type

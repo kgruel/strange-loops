@@ -1,6 +1,6 @@
 # CLAUDE.md — peers
 
-Scoped identity primitives. Answers: **who is acting, what can they see/do/ask?**
+Identity primitives. Answers: **who is acting, what can they see, what can they do?**
 
 ## Build & Test
 
@@ -12,27 +12,24 @@ uv run --package peers pytest libs/peers/tests
 
 ```
 Peer
- ├─ name: str              # identity label
- └─ scope: Scope
-     ├─ see: frozenset[str] # what you can observe
-     ├─ do: frozenset[str]  # what you can modify
-     └─ ask: frozenset[str] # what you can request
+ ├─ name: str                    # identity label
+ ├─ horizon: frozenset[str]      # what you can observe
+ └─ potential: frozenset[str]    # what you can do/emit
 ```
 
 ## Public API
 
 | Export | Kind | Purpose |
 |--------|------|---------|
-| `Peer` | frozen dataclass | name + scope |
-| `Scope` | frozen dataclass | see + do + ask (frozensets) |
-| `grant(scope, see=, do=, ask=)` | function | expand permissions (union) |
-| `restrict(scope, see=, do=, ask=)` | function | narrow permissions (intersection) |
-| `delegate(peer, name, see=, do=, ask=)` | function | child peer with restricted scope |
+| `Peer` | frozen dataclass | name + horizon + potential |
+| `grant(peer, horizon=, potential=)` | function | expand permissions (union) |
+| `restrict(peer, horizon=, potential=)` | function | narrow permissions (intersection) |
+| `delegate(peer, name, horizon=, potential=)` | function | child peer with restricted permissions |
 
 ## Invariants
 
-- Frozen + slots on both Scope and Peer. All operations return new instances.
-- `grant` = union. `restrict` = intersection. `delegate` = restrict + new Peer.
+- Frozen + slots on Peer. All operations return new instances.
+- `grant` = union. `restrict` = intersection. `delegate` = restrict + new name.
 - Delegation is monotonic: can only narrow, never escalate.
 - `None` on any dimension preserves the parent's value.
 
@@ -42,7 +39,8 @@ Peer
 Peer ─ observes ─→ Fact
                      │
 Peer.name appears in headers, audit trails.
-Peer.scope cascades: filters which Facts, Shapes, Lenses are accessible.
+Peer.horizon cascades: filters which Facts, Shapes, Lenses are accessible.
+Peer.potential cascades: filters what actions/emissions are permitted.
 Delegation hierarchy encodes participation level (direct, delegated, automated).
 ```
 
@@ -50,5 +48,5 @@ Delegation hierarchy encodes participation level (direct, delegated, automated).
 
 ```
 src/peers/__init__.py   # All types + functions (single module)
-tests/test_peer.py      # 12 tests
+tests/test_peer.py      # 11 tests
 ```

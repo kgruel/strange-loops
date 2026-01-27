@@ -1,17 +1,23 @@
 # THREADS — peers
 
-## Scope semantics
-What do see/do/ask concretely mean when cascading through the pipeline?
-e.g., `see={"metrics"}` — does that filter which Facts a peer receives?
+## Horizon/potential semantics
+What do horizon/potential concretely mean when cascading through the pipeline?
+e.g., `horizon={"metrics"}` — does that filter which Facts a peer receives?
 Which Shapes they can read? Which Lenses render for them? The strings
 are uninterpreted right now. Need concrete examples from real usage to
 ground them.
 
+Previously "scope semantics" with see/do/ask. Vocabulary corrected to
+horizon + potential. Strings still uninterpreted — same open question,
+clearer vocabulary.
+
 ## Needs and capabilities
-Different from permissions (scope). Needs = what a peer requires to
+Different from permissions (horizon/potential). Needs = what a peer requires to
 function. Capabilities = what a peer can offer. Discussed as a
-Must/Should/May gradient. Likely frozenset-based composable types
-matching the Scope pattern. Defer until patterns emerge from real usage.
+Must/Should/May gradient. The capability-as-fact pattern
+(`experiments/capability.py`) demonstrates the direction: capabilities are
+facts, folded via Shape into derived potential. Revocation is a fact too.
+Authorization becomes event-sourced.
 
 ## Stance convenience
 Participation level (direct/guided/delegated/automated/observing) is

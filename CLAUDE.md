@@ -27,7 +27,7 @@ uv run --package cells pytest libs/cells/tests/test_span.py
 
 | Package | Atom | Structure | Question | Metaphor |
 |---------|------|-----------|----------|----------|
-| **peers** | Peer | name + scope | *who* | social |
+| **peers** | Peer | name + horizon + potential | *who* | social |
 | **facts** | Fact | kind + ts + payload | *what* | narrative |
 | **ticks** | Tick | ts + payload | *when* | temporal |
 | **shapes** | Shape | facets + folds + apply | *how* | geometric |
@@ -96,7 +96,7 @@ cross-lib imports. The loop closes.
 
 | Package | Atom | Purpose |
 |---------|------|---------|
-| **peers** | Peer | Scoped identity: name + scope (see, do, ask). Delegation creates child peers with narrower scope — the hierarchy encodes participation level (direct, delegated, automated). |
+| **peers** | Peer | Identity: name + horizon + potential. Delegation creates child peers with narrower permissions — the hierarchy encodes participation level (direct, delegated, automated). |
 | **facts** | Fact | Observation atom: kind + ts + payload. An intentional observation — something that happened at a specific time. Kind is an open string for routing; payload structure comes from Shape. |
 | **ticks** | Tick | Temporal envelope: ts + payload. Infrastructure: Stream, Store, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
 | **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Shape (facets + folds + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
@@ -111,11 +111,11 @@ Each lib has its own `HANDOFF.md` with change log and open threads.
 
 A Peer's level of participation is encoded in the delegation hierarchy,
 not as a separate type. The root peer acts directly; children act on
-behalf of the root with restricted scope.
+behalf of the root with restricted horizon and potential.
 
-    You (Peer: "kyle")                      → direct, full scope
-      ├─ delegate("kyle/deploy-agent")      → autonomous, narrower scope
-      ├─ delegate("kyle/backup-cron")       → automated, narrowest scope
+    You (Peer: "kyle")                      → direct, full horizon + potential
+      ├─ delegate("kyle/deploy-agent")      → autonomous, narrower potential
+      ├─ delegate("kyle/backup-cron")       → automated, narrowest potential
       └─ delegate("kyle/subtask-worker")    → delegated, task-scoped
 
 Stance (direct, guided, delegated, automated, observing) is an emergent

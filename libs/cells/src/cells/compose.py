@@ -1,4 +1,4 @@
-"""Composition functions for Block: join, pad, border, truncate."""
+"""Composition functions for Block: join, pad, border, truncate, vslice."""
 
 from __future__ import annotations
 
@@ -167,6 +167,23 @@ def truncate(block: Block, width: int, ellipsis: str = "…") -> Block:
             rows.append(new_row)
 
     return Block(rows, width)
+
+
+def vslice(block: Block, offset: int, height: int) -> Block:
+    """Extract a vertical slice of rows [offset, offset+height) from a block.
+
+    Clamps offset to [0, block.height]. If offset+height exceeds block height,
+    returns fewer rows (no padding). If offset >= block height, returns an
+    empty block preserving the original width.
+    """
+    offset = max(0, min(offset, block.height))
+    end = min(offset + height, block.height)
+
+    if offset >= end:
+        return Block.empty(block.width, 0)
+
+    rows = [list(block.row(r)) for r in range(offset, end)]
+    return Block(rows, block.width)
 
 
 def _valign_offset(block_height: int, container_height: int, align: Align) -> int:

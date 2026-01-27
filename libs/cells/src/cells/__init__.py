@@ -4,7 +4,7 @@ from .cell import Style, Cell, EMPTY_CELL
 from .buffer import Buffer, BufferView, CellWrite
 from .writer import Writer, ColorDepth, print_block
 from .block import Block, Wrap
-from .compose import Align, join_horizontal, join_vertical, pad, border, truncate
+from .compose import Align, join_horizontal, join_vertical, pad, border, truncate, vslice
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 from .region import Region
 from .focus import Focus, FocusRing, ring_next, ring_prev, linear_next, linear_prev
@@ -40,6 +40,7 @@ __all__ = [
     "pad",
     "border",
     "truncate",
+    "vslice",
     "BorderChars",
     "ROUNDED",
     "HEAVY",

@@ -22,7 +22,7 @@ Tick[T]
 | Export | Kind | Purpose |
 |--------|------|---------|
 | `Tick` | frozen dataclass, Generic[T] | temporal snapshot: name + ts + payload |
-| `Vertex` | class | where loops meet: kind routing + fold engines + tick emission |
+| `Vertex` | class | where loops meet: kind routing + fold engines + boundary auto-tick + manual tick |
 | `Store` | Protocol | append-only log interface: append, since, close |
 | `EventStore[T]` | class | in-memory Store with optional JSONL persistence |
 | `FileStore[T]` | class | JSONL-backed Store (wraps FileWriter + Tailer) |
@@ -42,8 +42,11 @@ Tick[T]
 ```python
 v = Vertex(store=my_store)         # optional Store backing
 v.register("metric", 0, fold_fn)  # register fold for a kind
-v.receive("metric", payload)       # route fact to fold engine
-tick = v.tick("my-loop", now)      # fire boundary → Tick
+v.register("metric", 0, fold_fn,  # with boundary triggering:
+    boundary="end-of-day",         #   which kind triggers boundary
+    reset=True)                    #   reset engine to initial after tick
+v.receive("metric", payload)       # route fact to fold engine → Tick | None
+tick = v.tick("my-loop", now)      # manual boundary → Tick (all engines)
 v.state("metric")                  # current fold state
 v.kinds                            # registered kinds
 ```
@@ -72,6 +75,7 @@ stream.detach(tap)          # safe mid-emit
 proj = Projection(initial={}, fold=shape.apply)
 await proj.consume(event)   # fold single event, bump version
 proj.advance(store)          # catch up from cursor position
+proj.reset(new_state)        # reset state, bump version, cursor unchanged
 proj.state                   # current folded state
 proj.version                 # bumped only on identity change (is not)
 ```
@@ -88,9 +92,12 @@ store.evict_below(n)         # free memory, invalidate old cursors
 
 - Tick is frozen. Name identifies which loop produced it. Payload type is unconstrained.
 - Vertex routes facts by kind to registered fold engines. Unregistered kinds are silently ignored (but stored if a Store is attached).
+- Vertex boundary: one boundary kind per engine, unique across all engines. `receive()` returns `Tick | None`. Fold-before-boundary: if boundary kind == fold kind, fold completes first. Auto-tick name = fold kind, payload = single engine state.
+- Vertex is sync by design. The async bridge (extracting kind/payload, routing boundary Ticks to a Stream) lives at the composition point, not inside Vertex.
 - Store protocol: append, since, close. Two implementations: EventStore (memory), FileStore (JSONL).
 - Stream snapshots tap list during emit — safe to detach mid-iteration.
 - Projection.version only bumps when `new_state is not self._state` (identity check).
+- Projection.reset() bumps version unconditionally. Cursor unchanged.
 - EventStore tracks logical offset for eviction-safe cursors.
 - Tailer only processes complete lines (trailing `\n`). Incomplete lines wait.
 - All consumers implement `async consume(event) -> None`.
@@ -101,18 +108,22 @@ store.evict_below(n)         # free memory, invalidate old cursors
 Fact (kind, payload)
   │
   ▼
-Vertex ──────────────────────────────────────
-  ├─ register(kind, initial, fold)   # setup
-  ├─ receive(kind, payload)          # route + fold
-  ├─ tick(name, ts) → Tick           # boundary snapshot
+Vertex ──────────────────────────────────────────────────
+  ├─ register(kind, initial, fold)              # setup
+  ├─ register(kind, ..., boundary=, reset=)     # with auto-tick
+  ├─ receive(kind, payload) → Tick | None       # route + fold + boundary
+  ├─ tick(name, ts) → Tick                      # manual snapshot (all engines)
   └─ optional Store (append on receive)
 
-Stream[Fact] ──┬──→ Store (persist)
-               ├──→ Projection(fold=shape.apply) ──→ state ──→ Lens
-               └──→ tap (external consumers)
+Two boundary modes:
+  Auto:   receive(boundary_kind, ...) → Tick   # single engine, optional reset
+  Manual: tick(name, ts) → Tick                # all engines, no reset
 
-At temporal boundary:
-  Vertex.tick() ──→ Tick[state] ──→ Stream[Tick] ──→ downstream
+Stream integration (at composition point, not inside Vertex):
+  async def consume(fact):
+      tick = vertex.receive(fact.kind, fact.payload)
+      if tick is not None:
+          await downstream.emit(tick)
 ```
 
 ## Source Layout

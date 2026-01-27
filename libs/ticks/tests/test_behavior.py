@@ -197,6 +197,34 @@ class TestProjectionBehavior:
         assert proj.version == 0  # same identity
 
 
+class TestProjectionReset:
+    """Projection.reset() behavior."""
+
+    def test_reset_changes_state(self):
+        proj = SumProjection(initial=0)
+        proj.fold_one(Event(10))
+        assert proj.state == 10
+
+        proj.reset(0)
+        assert proj.state == 0
+
+    def test_reset_bumps_version(self):
+        proj = SumProjection(initial=0)
+        assert proj.version == 0
+
+        proj.reset(42)
+        assert proj.version == 1
+
+    def test_reset_preserves_cursor(self):
+        proj = SumProjection(initial=0)
+        proj.fold_one(Event(1))
+        proj.fold_one(Event(2))
+        assert proj.cursor == 2
+
+        proj.reset(0)
+        assert proj.cursor == 2
+
+
 class TestFileWriterBehavior:
     """FileWriter edge cases."""
 

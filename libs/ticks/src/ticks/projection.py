@@ -79,6 +79,11 @@ class Projection(Generic[S, T]):
         """Consumer protocol: fold a single event into state."""
         self.fold_one(event)
 
+    def reset(self, state: S) -> None:
+        """Reset to a new state. Bumps version. Cursor unchanged."""
+        self._state = state
+        self._version += 1
+
     def advance(self, store: "EventStore[T]") -> None:
         """Process all new events since last cursor, update state once."""
         new_events = store.since(self.cursor)

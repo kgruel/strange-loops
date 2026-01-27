@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ticks import EventStore, FileWriter, Forward, Projection, Stream, Tailer
+from ticks import EventStore, FileWriter, Forward, Projection, Stream, Tailer, Tick, Vertex
 
 from tests.helpers import (
     CountProjection,
@@ -279,3 +279,246 @@ class TestEventStorePersistence:
             assert store2.events[0].value == 1
             assert store2.events[1].value == 2
             assert store2.version == 2
+
+
+# --- Folds used by boundary tests ---
+
+
+def sum_fold(state: int, payload: dict) -> int:
+    return state + payload["value"]
+
+
+def count_fold(state: int, payload: dict) -> int:
+    return state + 1
+
+
+class TestBoundaryToStreamTick:
+    """Boundary trigger → Tick emitted on Stream[Tick] → Projection receives."""
+
+    async def test_boundary_produces_tick_on_stream(self):
+        v = Vertex("meter")
+        v.register("metric", 0, sum_fold, boundary="flush", reset=True)
+
+        v.receive("metric", {"value": 10})
+        v.receive("metric", {"value": 5})
+        assert v.state("metric") == 15
+
+        tick = v.receive("flush", {})
+        assert isinstance(tick, Tick)
+        assert tick.name == "metric"
+        assert tick.payload == 15
+        assert tick.origin == "meter"
+
+        tick_stream: Stream[Tick] = Stream()
+        tick_proj = Projection(
+            initial=[],
+            fold=lambda state, t: [*state, t],
+        )
+        tick_stream.tap(tick_proj)
+
+        await tick_stream.emit(tick)
+
+        assert len(tick_proj.state) == 1
+        assert tick_proj.state[0] is tick
+        assert tick_proj.state[0].payload == 15
+
+    async def test_boundary_resets_engine_state(self):
+        v = Vertex("meter")
+        v.register("metric", 0, sum_fold, boundary="flush", reset=True)
+
+        v.receive("metric", {"value": 10})
+        tick = v.receive("flush", {})
+        assert tick is not None
+        assert tick.payload == 10
+
+        assert v.state("metric") == 0
+
+        v.receive("metric", {"value": 3})
+        assert v.state("metric") == 3
+
+    async def test_boundary_no_reset_carries_state(self):
+        v = Vertex("meter")
+        v.register("metric", 0, sum_fold, boundary="flush", reset=False)
+
+        v.receive("metric", {"value": 10})
+        tick = v.receive("flush", {})
+        assert tick is not None
+        assert tick.payload == 10
+
+        assert v.state("metric") == 10
+
+        v.receive("metric", {"value": 5})
+        assert v.state("metric") == 15
+
+    async def test_non_boundary_receive_returns_none(self):
+        v = Vertex("meter")
+        v.register("metric", 0, sum_fold, boundary="flush", reset=True)
+
+        result = v.receive("metric", {"value": 10})
+        assert result is None
+
+
+class TestNestedLoops:
+    """Tick nesting: upstream Vertex → Tick → downstream Vertex."""
+
+    def test_two_level_nesting(self):
+        upstream = Vertex("upstream")
+        upstream.register("metric", 0, sum_fold, boundary="flush", reset=True)
+
+        def tick_sum_fold(state: int, payload: dict) -> int:
+            return state + payload["value"]
+
+        downstream = Vertex("downstream")
+        downstream.register("tick-metric", 0, tick_sum_fold)
+
+        upstream.receive("metric", {"value": 10})
+        upstream.receive("metric", {"value": 5})
+        tick1 = upstream.receive("flush", {})
+
+        upstream.receive("metric", {"value": 20})
+        tick2 = upstream.receive("flush", {})
+
+        assert tick1 is not None
+        assert tick2 is not None
+        assert tick1.payload == 15
+        assert tick2.payload == 20
+
+        downstream.receive("tick-metric", {"value": tick1.payload})
+        downstream.receive("tick-metric", {"value": tick2.payload})
+
+        assert downstream.state("tick-metric") == 35
+
+    def test_nested_loop_downstream_boundary(self):
+        upstream = Vertex("upstream")
+        upstream.register("event", 0, count_fold, boundary="close", reset=True)
+
+        def accumulate_count(state: int, payload: dict) -> int:
+            return state + payload["count"]
+
+        downstream = Vertex("downstream")
+        downstream.register(
+            "tick-count", 0, accumulate_count,
+            boundary="rollup", reset=True,
+        )
+
+        upstream.receive("event", {})
+        upstream.receive("event", {})
+        upstream.receive("event", {})
+        tick1 = upstream.receive("close", {})
+
+        upstream.receive("event", {})
+        upstream.receive("event", {})
+        tick2 = upstream.receive("close", {})
+
+        assert tick1.payload == 3
+        assert tick2.payload == 2
+
+        downstream.receive("tick-count", {"count": tick1.payload})
+        downstream.receive("tick-count", {"count": tick2.payload})
+        assert downstream.state("tick-count") == 5
+
+        rollup_tick = downstream.receive("rollup", {})
+        assert rollup_tick is not None
+        assert rollup_tick.name == "tick-count"
+        assert rollup_tick.payload == 5
+        assert rollup_tick.origin == "downstream"
+
+        assert downstream.state("tick-count") == 0
+
+
+class TestShapeBoundaryToVertex:
+    """Shape boundary descriptor → Vertex wiring at the composition point.
+
+    The test IS the integration layer: it imports Shape + Boundary from
+    shapes and Vertex from ticks. No cross-lib imports in the atoms.
+    """
+
+    def test_shape_boundary_wires_to_vertex(self):
+        from shapes import Boundary, Facet, Fold, Shape
+
+        shape = Shape(
+            name="container-health",
+            about="Tracks container health check counts",
+            input_facets=(Facet("status", "str"),),
+            state_facets=(Facet("checks", "int"),),
+            folds=(Fold("count", "checks"),),
+            boundary=Boundary(kind="container-health.close", reset=True),
+        )
+
+        assert shape.boundary is not None
+        boundary_kind = shape.boundary.kind
+        boundary_reset = shape.boundary.reset
+
+        v = Vertex("health-vertex")
+        v.register(
+            "container-health", 0, count_fold,
+            boundary=boundary_kind,
+            reset=boundary_reset,
+        )
+
+        v.receive("container-health", {"status": "healthy"})
+        v.receive("container-health", {"status": "healthy"})
+        v.receive("container-health", {"status": "degraded"})
+        assert v.state("container-health") == 3
+
+        tick = v.receive("container-health.close", {})
+        assert isinstance(tick, Tick)
+        assert tick.name == "container-health"
+        assert tick.payload == 3
+        assert tick.origin == "health-vertex"
+
+        assert v.state("container-health") == 0
+
+    def test_shape_boundary_no_reset(self):
+        from shapes import Boundary, Facet, Fold, Shape
+
+        shape = Shape(
+            name="deploy-count",
+            about="Running deploy count, no reset",
+            input_facets=(Facet("env", "str"),),
+            state_facets=(Facet("deploys", "int"),),
+            folds=(Fold("count", "deploys"),),
+            boundary=Boundary(kind="deploy.snapshot", reset=False),
+        )
+
+        v = Vertex("deploy-vertex")
+        v.register(
+            "deploy", 0, count_fold,
+            boundary=shape.boundary.kind,
+            reset=shape.boundary.reset,
+        )
+
+        v.receive("deploy", {"env": "prod"})
+        v.receive("deploy", {"env": "staging"})
+
+        tick = v.receive("deploy.snapshot", {})
+        assert tick.payload == 2
+
+        assert v.state("deploy") == 2
+        v.receive("deploy", {"env": "prod"})
+        assert v.state("deploy") == 3
+
+    def test_shape_without_boundary(self):
+        from shapes import Facet, Fold, Shape
+
+        shape = Shape(
+            name="simple-counter",
+            about="No boundary — continuous fold",
+            input_facets=(Facet("x", "int"),),
+            state_facets=(Facet("total", "int"),),
+            folds=(Fold("count", "total"),),
+        )
+
+        assert shape.boundary is None
+
+        v = Vertex("counter-vertex")
+        v.register("counter", 0, count_fold)
+
+        v.receive("counter", {"x": 1})
+        v.receive("counter", {"x": 2})
+        assert v.state("counter") == 2
+
+        from datetime import datetime, timezone
+
+        tick = v.tick("counter-loop", datetime(2025, 6, 1, tzinfo=timezone.utc))
+        assert tick.payload == {"counter": 2}

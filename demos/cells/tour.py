@@ -21,8 +21,8 @@ from typing import Callable
 
 from cells import (
     Surface, Block, Style, Span, Line,
-    join_horizontal, join_vertical, pad, border, truncate,
-    ROUNDED, HEAVY,
+    join_horizontal, join_vertical, pad, border, truncate, vslice,
+    Align, ROUNDED, HEAVY,
     Focus,
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
     BufferView,
@@ -166,7 +166,7 @@ def highlight_line(text: str) -> Line:
     return Line(spans=tuple(spans)) if spans else Line.plain("", CODE_DEFAULT)
 
 
-def render_code_block(source: str, width: int, title: str = "", center: bool = True) -> Block:
+def render_code_block(source: str, title: str = "") -> Block:
     """Render source code in a bordered box with syntax highlighting."""
     source_lines = source.strip().split('\n')
     highlighted = [highlight_line(line) for line in source_lines]
@@ -176,30 +176,21 @@ def render_code_block(source: str, width: int, title: str = "", center: bool = T
     content = join_vertical(*code_blocks) if code_blocks else Block.empty(1, 1)
     content = pad(content, left=1, right=1)
 
-    bordered = border(
+    return border(
         content, ROUNDED, CODE_BORDER_STYLE,
         title=title if title else None,
         title_style=CODE_TITLE_STYLE,
     )
 
-    if center:
-        padding = max(0, (width - bordered.width) // 2)
-        return pad(bordered, left=padding)
-    return bordered
+
+def styled_block(line: Line) -> Block:
+    """Render a styled Line as a Block (centering handled by join_vertical)."""
+    return line.to_block(line.width)
 
 
-def centered_text(line: Line, width: int) -> Block:
-    """Render a styled Line centered in the given width."""
-    block = line.to_block(line.width)
-    padding = max(0, (width - block.width) // 2)
-    return pad(block, left=padding)
-
-
-def centered_plain(text: str, style: Style, width: int) -> Block:
-    """Render plain text centered."""
-    block = Block.text(text, style)
-    padding = max(0, (width - block.width) // 2)
-    return pad(block, left=padding)
+def plain_block(text: str, style: Style) -> Block:
+    """Render plain text as a Block (centering handled by join_vertical)."""
+    return Block.text(text, style)
 
 
 # ── Stop Content ────────────────────────────────────────────────────
@@ -214,30 +205,253 @@ def centered_plain(text: str, style: Style, width: int) -> Block:
 # Content functions: (width: int) -> list[Block]
 
 def _cell_main(w: int) -> list[Block]:
-    return [
-        Block.empty(w, 1),
-        centered_text(
-            styled("the atomic unit: one ", ("character", KEYWORD), " + one ", ("style", KEYWORD)),
-            w,
-        ),
-        Block.empty(w, 1),
-        render_code_block(
-            'cell = Cell("A", Style(fg="red", bold=True))',
-            w, title="cell.py",
-        ),
-        Block.empty(w, 1),
-        centered_plain("a Cell is one character with visual attributes", HINT_STYLE, w),
+    rows: list[Block] = []
+
+    # Rendered cell examples
+    examples = [
+        Block.text(" A ", Style(fg="red", bold=True)),
+        Block.text(" B ", Style(fg="green")),
+        Block.text(" C ", Style(fg="blue", underline=True)),
+        Block.text(" D ", Style(fg="yellow", italic=True)),
+        Block.text(" E ", Style(fg="magenta", bg="white", reverse=True)),
+        Block.text(" F ", Style(fg="cyan", dim=True)),
     ]
+    example_row = join_horizontal(*examples, gap=1)
+
+    # Examples at the top edge (preview of what's up)
+    rows.append(Block.empty(1, 1))
+    rows.append(example_row)
+
+    rows.append(plain_block("↑ formatting patterns", HINT_STYLE))
+
+    # Generous breathing room
+    rows.append(Block.empty(1, 1))
+
+    # Tagline in the middle, cradled top and bottom
+    tagline = styled(
+        "the atomic unit: one ", ("character", KEYWORD), " + one ", ("style", KEYWORD),
+    )
+    cradle_style = Style(fg="white", dim=True)
+    cradle_bot = "╰" + "─" * tagline.width + "╯"
+    rows.append(styled_block(tagline))
+    rows.append(plain_block(cradle_bot, cradle_style))
+
+    # Generous breathing room
+    rows.append(Block.empty(1, 1))
+
+    # Code at the bottom edge (preview of what's down)
+    rows.append(plain_block("↓ internals", HINT_STYLE))
+
+    rows.append(render_code_block(
+        'cell = Cell("A", Style(fg="red", bold=True))',
+        title="cell.py",
+    ))
+
+    return rows
 
 
-def _cell_down(w: int) -> list[Block]:
+def _cell_up1(w: int) -> list[Block]:
+    """Cell formatting patterns — what one character can express."""
+    rows: list[Block] = []
+
+    rows.append(styled_block(styled("what one character can express")))
+
+
+    # Up arrow hint
+    rows.append(plain_block("↑ absurd", HINT_STYLE))
+
+
+    # Color spectrum
+    rows.append(styled_block(styled("foreground colors:")))
+
+    named_colors = ["red", "green", "yellow", "blue", "magenta", "cyan", "white"]
+    fg_cells = [Block.text(f" {c[0].upper()} ", Style(fg=c, bold=True)) for c in named_colors]
+    fg_row = join_horizontal(*fg_cells, gap=1)
+    rows.append(fg_row)
+
+
+    # Background colors
+    rows.append(styled_block(styled("background colors:")))
+
+    bg_cells = [Block.text(f" {c[0].upper()} ", Style(fg="black", bg=c)) for c in named_colors]
+    bg_row = join_horizontal(*bg_cells, gap=1)
+    rows.append(bg_row)
+
+
+    # Attribute combinations
+    rows.append(styled_block(styled("attributes:")))
+
+    attrs = [
+        ("bold", Style(bold=True)),
+        ("dim", Style(dim=True)),
+        ("italic", Style(italic=True)),
+        ("under", Style(underline=True)),
+        ("reverse", Style(reverse=True)),
+    ]
+    attr_cells = [Block.text(f" {name} ", style) for name, style in attrs]
+    attr_row = join_horizontal(*attr_cells, gap=1)
+    rows.append(attr_row)
+
+
+    # Stacked: bold+color, dim+underline, etc.
+    rows.append(styled_block(styled("combined:")))
+
+    combos = [
+        Block.text(" X ", Style(fg="red", bold=True, underline=True)),
+        Block.text(" X ", Style(fg="cyan", italic=True, dim=True)),
+        Block.text(" X ", Style(fg="black", bg="yellow", bold=True)),
+        Block.text(" X ", Style(fg="green", bold=True, reverse=True)),
+        Block.text(" X ", Style(fg="magenta", underline=True, italic=True)),
+    ]
+    combo_row = join_horizontal(*combos, gap=1)
+    rows.append(combo_row)
+
+
+    # Down arrow hint
+    rows.append(plain_block("↓ main", HINT_STYLE))
+
+    return rows
+
+
+def _cell_up2(w: int) -> list[Block]:
+    """Absurd things you can do at the cell level."""
+    rows: list[Block] = []
+
+    rows.append(styled_block(styled("one character, pushed to the edge")))
+
+
+    # ── 256-color gradient ──
+    rows.append(styled_block(styled("256-color gradient — one cell each:")))
+
+    gradient = [Block.text("█", Style(fg=i)) for i in range(16, 52)]
+    grad_row = join_horizontal(*gradient)
+    rows.append(grad_row)
+    gradient2 = [Block.text("█", Style(fg=i)) for i in range(52, 88)]
+    grad_row2 = join_horizontal(*gradient2)
+    rows.append(grad_row2)
+
+
+    # ── Block element density ──
+    rows.append(styled_block(styled("block density — four levels in one cell:")))
+
+    density_chars = ["░", "▒", "▓", "█"]
+    density_demo = []
+    for ch in density_chars:
+        for color in ["red", "green", "blue", "cyan"]:
+            density_demo.append(Block.text(ch, Style(fg=color)))
+        density_demo.append(Block.text(" ", Style()))
+    density_row = join_horizontal(*density_demo)
+    rows.append(density_row)
+
+
+    # ── Pixel art gallery ──
+    rows.append(styled_block(styled("pixel art — three techniques:")))
+
+
+    # Technique 1: bg-colored spaces (smiley)
+    Y = Style(bg="yellow")
+    K = Style(bg="black")
+    E = Style()
+    smiley_data = [
+        [E, Y, Y, Y, E],
+        [Y, K, Y, K, Y],
+        [Y, Y, Y, Y, Y],
+        [Y, K, K, K, Y],
+        [E, Y, Y, Y, E],
+    ]
+    smiley_blocks = []
+    for row in smiley_data:
+        cells = [Block.text("  ", s) for s in row]
+        smiley_blocks.append(join_horizontal(*cells))
+    smiley = join_vertical(*smiley_blocks)
+
+    # Technique 2: bg-colored spaces (heart)
+    R = Style(bg="red")
+    P = Style(bg="#ff69b4")
+    heart_data = [
+        [E, R, R, E, R, R, E],
+        [R, P, R, R, P, R, R],
+        [R, R, R, R, R, R, R],
+        [E, R, R, R, R, R, E],
+        [E, E, R, R, R, E, E],
+        [E, E, E, R, E, E, E],
+    ]
+    heart_blocks = []
+    for row in heart_data:
+        cells = [Block.text("  ", s) for s in row]
+        heart_blocks.append(join_horizontal(*cells))
+    heart = join_vertical(*heart_blocks)
+
+    # Technique 3: half-blocks — fg=top color, bg=bottom color
+    G = ("green", "green")
+    D = ("green", "#006400")
+    T = ("#8b4513", "#8b4513")
+    _ = (None, None)
+    tree_data = [
+        [_, _, G, _, _],
+        [_, G, D, G, _],
+        [G, D, G, D, G],
+        [_, _, T, _, _],
+        [_, _, T, _, _],
+    ]
+    tree_blocks = []
+    for row in tree_data:
+        cells = []
+        for top, bot in row:
+            if top and bot:
+                cells.append(Block.text("▀", Style(fg=top, bg=bot)))
+            elif top:
+                cells.append(Block.text("▀", Style(fg=top)))
+            elif bot:
+                cells.append(Block.text("▄", Style(fg=bot)))
+            else:
+                cells.append(Block.text(" ", Style()))
+        tree_blocks.append(join_horizontal(*cells))
+    tree = join_vertical(*tree_blocks)
+
+    # Labels under each piece
+    smiley_label = plain_block("bg spaces", HINT_STYLE)
+    heart_label = plain_block("bg spaces", HINT_STYLE)
+    tree_label = plain_block("half-blocks", HINT_STYLE)
+
+    smiley_col = join_vertical(smiley, smiley_label, align=Align.CENTER)
+    heart_col = join_vertical(heart, heart_label, align=Align.CENTER)
+    tree_col = join_vertical(tree, tree_label, align=Align.CENTER)
+
+    gallery = join_horizontal(smiley_col, heart_col, tree_col, gap=4)
+    rows.append(gallery)
+
+
+    # ── Box drawing + braille ──
+    rows.append(styled_block(styled("unicode repertoire — each is one ", ("Cell", KEYWORD), ":")))
+
+    box_chars = "╔═╗║╚╝╠╣╬╮╰╯"
+    box_cells = [Block.text(f" {ch} ", Style(fg="cyan")) for ch in box_chars]
+    box_row = join_horizontal(*box_cells)
+    rows.append(box_row)
+    braille = "⠁⠃⠇⠏⠟⠿⡿⣿⣾⣼⣸⣰⣠⣀⢀"
+    braille_cells = [Block.text(f" {ch} ", Style(fg="green", bold=True)) for ch in braille]
+    braille_row = join_horizontal(*braille_cells)
+    rows.append(braille_row)
+
+
+    rows.append(plain_block("all of this is just Cell(char, style)", HINT_STYLE))
+
+
+    # Down arrow hint
+    rows.append(plain_block("↓ formatting patterns", HINT_STYLE))
+
+    return rows
+
+
+def _cell_down1(w: int) -> list[Block]:
+    """What a Cell is — the dataclass definition."""
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Cell", KEYWORD), " is a frozen dataclass — ", ("immutable", EMPH), " by design"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''@dataclass(frozen=True)
 class Cell:
@@ -250,28 +464,136 @@ class Cell:
             object.__setattr__(self, "char", self.char[0] if self.char else " ")
 
 EMPTY_CELL = Cell(" ", Style())''',
-            w, title="cell.py — definition",
+            title="cell.py — definition",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("EMPTY_CELL", KEYWORD), " is the default for unfilled buffer positions"),
-            w,
         ),
+
+        plain_block("↑ main  ↓ how it renders", HINT_STYLE),
     ]
+
+
+def _cell_down2(w: int) -> list[Block]:
+    """How a Cell becomes pixels — ANSI escape sequences."""
+    rows: list[Block] = []
+
+    rows.append(styled_block(
+        styled("how a ", ("Cell", KEYWORD), " becomes pixels on screen"),
+    ))
+
+
+    rows.append(render_code_block(
+        r'''# Style(fg="red", bold=True) becomes:
+\e[1;31m                  # bold + red foreground
+
+# Named colors → SGR codes (0-7)
+\e[31m  red     \e[32m  green    \e[34m  blue
+\e[33m  yellow  \e[35m  magenta  \e[36m  cyan
+
+# 256-color palette → extended sequence
+\e[38;5;196m              # fg color 196 (bright red)
+\e[48;5;21m               # bg color 21 (blue)
+
+# Hex/truecolor → RGB sequence
+\e[38;2;255;107;53m       # fg #ff6b35
+\e[48;2;0;100;0m          # bg #006400''',
+        title="ANSI escape sequences",
+    ))
+
+
+    rows.append(render_code_block(
+        '''# The rendering pipeline for one Cell:
+#
+#   Cell("A", Style(fg="red", bold=True))
+#     → Style.to_ansi()
+#       → "\\e[1;31m"
+#         → terminal interprets escape
+#           → red bold "A" on screen
+#
+# Then: \\e[0m resets for the next cell''',
+        title="cell → terminal",
+    ))
+
+
+    rows.append(styled_block(
+        styled("each attribute is a flag: ",
+               ("1", KEYWORD), "=bold ",
+               ("2", KEYWORD), "=dim ",
+               ("3", KEYWORD), "=italic ",
+               ("4", KEYWORD), "=underline ",
+               ("7", KEYWORD), "=reverse"),
+    ))
+
+    rows.append(plain_block("↑ definition  ↓ terminal compatibility", HINT_STYLE))
+
+    return rows
+
+
+def _cell_down3(w: int) -> list[Block]:
+    """Where it breaks — terminal compatibility and color depth."""
+    rows: list[Block] = []
+
+    rows.append(styled_block(
+        styled("where it breaks — ", ("terminal compatibility", EMPH)),
+    ))
+
+
+    rows.append(render_code_block(
+        '''# Color depth varies by terminal:
+#
+#   ColorDepth.NONE       no color       (pipe, dumb terminal)
+#   ColorDepth.BASIC      8 colors       (very old terminals)
+#   ColorDepth.EIGHT_BIT  256 colors     (xterm-256color)
+#   ColorDepth.TRUE       16M colors     (most modern terminals)
+#
+# Writer detects depth and falls back:
+#   #ff6b35 (truecolor)
+#     → 209 (nearest 256-color)
+#       → red (nearest basic)
+#         → nothing (no color)''',
+        title="color depth fallback",
+    ))
+
+
+    rows.append(render_code_block(
+        '''# Attribute support also varies:
+#
+#   bold       ✓ everywhere
+#   dim        ✓ most terminals
+#   italic     ~ some terminals render as reverse
+#   underline  ✓ everywhere
+#   reverse    ✓ everywhere
+#
+# The Writer handles this — Cell and Style
+# don't know about terminals. They describe
+# intent; Writer translates to capability.''',
+        title="attribute support",
+    ))
+
+
+    rows.append(styled_block(
+        styled("Cell describes ", ("intent", EMPH), ". Writer translates to ", ("capability", EMPH), "."),
+    ))
+
+    rows.append(plain_block("↑ ANSI sequences", HINT_STYLE))
+
+    return rows
 
 
 def _style_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled("colors and attributes for rendering"), w),
-        Block.empty(w, 1),
+
+        styled_block(styled("colors and attributes for rendering")),
+
         render_code_block(
             '''Style(fg="red")           # foreground color
 Style(bg="blue")          # background color
 Style(bold=True)          # bold text
 Style(fg="#ff6b35")       # hex colors
 Style(fg=196)             # 256-palette''',
-            w, title="style.py",
+            title="style.py",
         ),
     ]
 
@@ -279,20 +601,18 @@ Style(fg=196)             # 256-palette''',
 def _style_up(w: int) -> list[Block]:
     """Color palette demo."""
     rows: list[Block] = []
-    rows.append(Block.empty(w, 1))
-    rows.append(centered_text(styled("color palette showcase"), w))
-    rows.append(Block.empty(w, 1))
+
+    rows.append(styled_block(styled("color palette showcase")))
+
 
     # Named colors
     named = ["red", "green", "yellow", "blue", "magenta", "cyan", "white"]
     color_blocks = [Block.text(f" {c} ", Style(fg="black", bg=c)) for c in named]
     palette_row = join_horizontal(*color_blocks, gap=1)
-    rows.append(centered_text(styled("named colors:"), w))
-    rows.append(Block.empty(w, 1))
-    p = max(0, (w - palette_row.width) // 2)
-    rows.append(pad(palette_row, left=p))
+    rows.append(styled_block(styled("named colors:")))
 
-    rows.append(Block.empty(w, 1))
+    rows.append(palette_row)
+
 
     # Attributes
     attrs = [
@@ -303,19 +623,18 @@ def _style_up(w: int) -> list[Block]:
         Block.text(" reverse ", Style(reverse=True)),
     ]
     attr_row = join_horizontal(*attrs, gap=1)
-    rows.append(centered_text(styled("attributes:"), w))
-    rows.append(Block.empty(w, 1))
-    p2 = max(0, (w - attr_row.width) // 2)
-    rows.append(pad(attr_row, left=p2))
+    rows.append(styled_block(styled("attributes:")))
+
+    rows.append(attr_row)
 
     return rows
 
 
 def _style_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled(("Style", KEYWORD), " attributes — all optional, all composable"), w),
-        Block.empty(w, 1),
+
+        styled_block(styled(("Style", KEYWORD), " attributes — all optional, all composable")),
+
         render_code_block(
             '''@dataclass(frozen=True)
 class Style:
@@ -329,38 +648,36 @@ class Style:
 
     def merge(self, other: "Style") -> "Style":
         """Merge styles; other wins on conflict."""''',
-            w, title="full signature",
+            title="full signature",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Style.merge(other)", KEYWORD), " combines styles — other wins on conflict"),
-            w,
         ),
     ]
 
 
 def _span_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled("a run of text with one ", ("style", KEYWORD)), w),
-        Block.empty(w, 1),
+
+        styled_block(styled("a run of text with one ", ("style", KEYWORD))),
+
         render_code_block(
             '''span = Span("hello", Style(fg="green", bold=True))
 # span.text = "hello"
 # span.width = 5''',
-            w, title="span.py",
+            title="span.py",
         ),
     ]
 
 
 def _span_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Span", KEYWORD), " handles wide characters via ", ("wcwidth", EMPH)),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''@dataclass(frozen=True)
 class Span:
@@ -371,40 +688,38 @@ class Span:
     def width(self) -> int:
         # accounts for CJK double-width chars
         return span_width(self.text)''',
-            w, title="definition",
+            title="definition",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("span.width", KEYWORD), " is display width, not ", ("len(text)", KEYWORD)),
-            w,
         ),
     ]
 
 
 def _line_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled("a sequence of ", ("Spans", KEYWORD), " — styled inline text"), w),
-        Block.empty(w, 1),
+
+        styled_block(styled("a sequence of ", ("Spans", KEYWORD), " — styled inline text")),
+
         render_code_block(
             '''line = Line(spans=(
     Span("error: ", Style(fg="red", bold=True)),
     Span("file not found", Style(fg="white")),
 ))
 # line.width = 21''',
-            w, title="line.py",
+            title="line.py",
         ),
     ]
 
 
 def _line_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Line", KEYWORD), " is a sequence of ", ("Spans", KEYWORD)),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''@dataclass(frozen=True)
 class Line:
@@ -420,30 +735,28 @@ class Line:
             view.put_text(x, y, span.text, span.style)
             x += span.width
         return x''',
-            w, title="definition",
+            title="definition",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Line.plain(text, style)", KEYWORD), " — convenience constructor"),
-            w,
         ),
     ]
 
 
 def _block_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("immutable rectangle of ", ("Cells", KEYWORD), " — the composition unit"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''block = Block.text("hello", Style(fg="cyan"))
 # block.width = 5, block.height = 1
 
 block.paint(buf, x=10, y=5)  # copy into buffer''',
-            w, title="block.py",
+            title="block.py",
         ),
     ]
 
@@ -451,9 +764,9 @@ block.paint(buf, x=10, y=5)  # copy into buffer''',
 def _block_up(w: int) -> list[Block]:
     """Composition operations — the visual payoff of understanding Block."""
     rows: list[Block] = []
-    rows.append(Block.empty(w, 1))
-    rows.append(centered_text(styled("composition operations on ", ("Block", KEYWORD)), w))
-    rows.append(Block.empty(w, 1))
+
+    rows.append(styled_block(styled("composition operations on ", ("Block", KEYWORD))))
+
 
     # Demo: join_horizontal
     a = border(Block.text(" A ", Style(fg="red")), ROUNDED, Style(fg="red", dim=True))
@@ -461,40 +774,36 @@ def _block_up(w: int) -> list[Block]:
     c = border(Block.text(" C ", Style(fg="blue")), ROUNDED, Style(fg="blue", dim=True))
     joined_h = join_horizontal(a, b, c, gap=1)
 
-    rows.append(centered_text(styled(("join_horizontal", KEYWORD), "(a, b, c)"), w))
-    rows.append(Block.empty(w, 1))
-    ph = max(0, (w - joined_h.width) // 2)
-    rows.append(pad(joined_h, left=ph))
-    rows.append(Block.empty(w, 1))
+    rows.append(styled_block(styled(("join_horizontal", KEYWORD), "(a, b, c)")))
+
+    rows.append(joined_h)
+
 
     # Demo: join_vertical
     joined_v = join_vertical(a, b, c)
-    rows.append(centered_text(styled(("join_vertical", KEYWORD), "(a, b, c)"), w))
-    rows.append(Block.empty(w, 1))
-    pv = max(0, (w - joined_v.width) // 2)
-    rows.append(pad(joined_v, left=pv))
-    rows.append(Block.empty(w, 1))
+    rows.append(styled_block(styled(("join_vertical", KEYWORD), "(a, b, c)")))
+
+    rows.append(joined_v)
+
 
     # Demo: pad + border
     inner = Block.text(" padded + bordered ", Style(fg="yellow"))
     padded = pad(inner, left=2, right=2, top=1, bottom=1)
     bordered = border(padded, ROUNDED, Style(fg="yellow", dim=True))
-    rows.append(centered_text(styled(("border", KEYWORD), "(", ("pad", KEYWORD), "(block))"), w))
-    rows.append(Block.empty(w, 1))
-    pb = max(0, (w - bordered.width) // 2)
-    rows.append(pad(bordered, left=pb))
+    rows.append(styled_block(styled(("border", KEYWORD), "(", ("pad", KEYWORD), "(block))")))
+
+    rows.append(bordered)
 
     return rows
 
 
 def _block_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("Block", KEYWORD), " stores rows of ", ("Cells", KEYWORD), " — ", ("immutable", EMPH)),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''@dataclass(frozen=True)
 class Block:
@@ -511,52 +820,49 @@ class Block:
 
     def paint(self, view: BufferView, x: int, y: int):
         # copy this block into the buffer view''',
-            w, title="definition",
+            title="definition",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("compose via ", ("join", KEYWORD), ", ", ("pad", KEYWORD), ", ", ("border", KEYWORD)),
-            w,
         ),
     ]
 
 
 def _buffer_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled("the 2D canvas — a mutable grid of ", ("Cells", KEYWORD)), w),
-        Block.empty(w, 1),
+
+        styled_block(styled("the 2D canvas — a mutable grid of ", ("Cells", KEYWORD))),
+
         render_code_block(
             '''buf = Buffer(80, 24)
 buf.put(0, 0, "A", Style(fg="red"))
 buf.put_text(0, 1, "hello", Style())
 buf.fill(10, 10, 5, 3, "X", Style(fg="blue"))''',
-            w, title="buffer.py",
+            title="buffer.py",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("BufferView", KEYWORD), " provides clipped, translated regions"),
-            w,
         ),
     ]
 
 
 def _buffer_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("BufferView", KEYWORD), " — write without bounds checking"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''view = buf.region(10, 5, 20, 10)
 # view.width = 20, view.height = 10
 # writes at (0,0) in view -> (10,5) in buffer
 # writes outside view bounds are silently clipped''',
-            w, title="bufferview",
+            title="bufferview",
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''class Buffer:
     def __init__(self, width: int, height: int):
@@ -568,43 +874,40 @@ def _buffer_down(w: int) -> list[Block]:
 
     def region(self, x: int, y: int, w: int, h: int) -> BufferView:
         return BufferView(self, x, y, w, h)''',
-            w, title="buffer.py — definition",
+            title="buffer.py — definition",
         ),
     ]
 
 
 def _lens_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("state → ", ("Block", KEYWORD), " — a rendering function"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''def my_lens(state: MyState, width: int, height: int) -> Block:
     """Pure function: state in, Block out."""
     title = Block.text(state.name, Style(fg="cyan"))
     body = Block.text(state.value, Style())
     return join_vertical(title, body)''',
-            w, title="lens.py",
+            title="lens.py",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("the ", ("Shape", KEYWORD), " integration — fold produces state, ", ("Lens", KEYWORD), " renders it"),
-            w,
         ),
     ]
 
 
 def _lens_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("the Shape → Lens connection"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''# ticks owns data transformation:
 #   Projection[S, E]: fold events into state
@@ -616,29 +919,27 @@ def _lens_down(w: int) -> list[Block]:
 
 lens = shape_lens(my_shape)
 block = lens.render(state, width, height)''',
-            w, title="shape integration",
+            title="shape integration",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("shape_lens", KEYWORD), " renders any Python value: dict→table, list→list, set→tags"),
-            w,
         ),
     ]
 
 
 def _surface_main(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(
                 "the application loop — ",
                 ("keyboard", KEYWORD), ", ",
                 ("resize", KEYWORD), ", ",
                 ("diff rendering", KEYWORD),
             ),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''class MyApp(Surface):
     def render(self):
@@ -647,12 +948,11 @@ def _surface_main(w: int) -> list[Block]:
     def on_key(self, key: str):
         if key == "q":
             self.quit()''',
-            w, title="app.py",
+            title="app.py",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("you're inside a ", ("Surface", KEYWORD), " right now"),
-            w,
         ),
     ]
 
@@ -660,9 +960,9 @@ def _surface_main(w: int) -> list[Block]:
 def _surface_up(w: int) -> list[Block]:
     """Layer stacking and FocusRing."""
     return [
-        Block.empty(w, 1),
-        centered_text(styled(("Layer", KEYWORD), " — modal stacking"), w),
-        Block.empty(w, 1),
+
+        styled_block(styled(("Layer", KEYWORD), " — modal stacking")),
+
         render_code_block(
             '''# Layer stack: top layer handles keys, all render bottom-to-top
 Layer(
@@ -673,14 +973,13 @@ Layer(
 )
 
 # Actions: Stay | Pop(result) | Push(new_layer) | Quit''',
-            w, title="layer.py",
+            title="layer.py",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled(("FocusRing", KEYWORD), " — component focus management"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''focus = Focus(id="sidebar")
 focus = focus.capture()   # widget handles keys
@@ -689,16 +988,16 @@ focus = focus.release()   # nav handles keys
 # Navigation: ring_next wraps, linear_next stops
 ring_next(items, current)    # "c" -> "a" (wraps)
 linear_next(items, current)  # "c" -> "c" (stops)''',
-            w, title="focus.py",
+            title="focus.py",
         ),
     ]
 
 
 def _surface_down(w: int) -> list[Block]:
     return [
-        Block.empty(w, 1),
-        centered_text(styled(("Writer", KEYWORD), " — the ANSI flush mechanism"), w),
-        Block.empty(w, 1),
+
+        styled_block(styled(("Writer", KEYWORD), " — the ANSI flush mechanism")),
+
         render_code_block(
             '''class Surface:
     """Async main loop with diff-based rendering."""
@@ -716,14 +1015,13 @@ def _surface_down(w: int) -> list[Block]:
                 await asyncio.sleep(1 / self._fps_cap)
         finally:
             self._writer.exit_alt_screen()''',
-            w, title="app.py — the loop",
+            title="app.py — the loop",
         ),
-        Block.empty(w, 1),
-        centered_text(
+
+        styled_block(
             styled("the ", ("Emit", KEYWORD), " protocol closes the feedback loop"),
-            w,
         ),
-        Block.empty(w, 1),
+
         render_code_block(
             '''# Emit = Callable[[str, dict], None]
 # Surface emits observations that become Facts upstream
@@ -732,7 +1030,7 @@ def _surface_down(w: int) -> list[Block]:
 #   Raw input  (auto)   "ui.key"    {key: "j"}
 #   UI action  (auto)   "ui.action" {action: "pop", layer: "confirm"}
 #   Domain     (manual)  (any)   {item: "deploy-prod"}''',
-            w, title="emit protocol",
+            title="emit protocol",
         ),
     ]
 
@@ -760,7 +1058,7 @@ class Stop:
 
 
 STOPS: tuple[Stop, ...] = (
-    Stop("Cell",    {0: _cell_main, 1: _cell_down}),
+    Stop("Cell",    {-2: _cell_up2, -1: _cell_up1, 0: _cell_main, 1: _cell_down1, 2: _cell_down2, 3: _cell_down3}),
     Stop("Style",   {-1: _style_up, 0: _style_main, 1: _style_down}),
     Stop("Span",    {0: _span_main, 1: _span_down}),
     Stop("Line",    {0: _line_main, 1: _line_down}),
@@ -863,6 +1161,7 @@ class TourState:
     """Application state for the tour."""
     stop_index: int = 0
     depth: int = 0
+    scroll_offset: int = 0
     width: int = 80
     height: int = 24
     layers: tuple[Layer, ...] = ()
@@ -884,6 +1183,7 @@ HELP_CONTENT = [
     ("Navigation", [
         ("← →  (left right)", "move between concept stops"),
         ("↑ ↓  (up down)", "change depth (more visual / more detail)"),
+        ("j / k", "scroll content when it overflows"),
         ("?", "toggle this help"),
         ("q / esc", "quit"),
     ]),
@@ -961,22 +1261,31 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: TourState) -> t
 
     if key == "left":
         if app_state.stop_index > 0:
-            new_state = replace(app_state, stop_index=app_state.stop_index - 1, depth=0)
+            new_state = replace(app_state, stop_index=app_state.stop_index - 1, depth=0, scroll_offset=0)
             return layer_state, new_state, Stay()
 
     elif key == "right":
         if app_state.stop_index < len(STOPS) - 1:
-            new_state = replace(app_state, stop_index=app_state.stop_index + 1, depth=0)
+            new_state = replace(app_state, stop_index=app_state.stop_index + 1, depth=0, scroll_offset=0)
             return layer_state, new_state, Stay()
 
     elif key == "up":
         if app_state.depth > stop.min_depth:
-            new_state = replace(app_state, depth=app_state.depth - 1)
+            new_state = replace(app_state, depth=app_state.depth - 1, scroll_offset=0)
             return layer_state, new_state, Stay()
 
     elif key == "down":
         if app_state.depth < stop.max_depth:
-            new_state = replace(app_state, depth=app_state.depth + 1)
+            new_state = replace(app_state, depth=app_state.depth + 1, scroll_offset=0)
+            return layer_state, new_state, Stay()
+
+    elif key == "j":
+        new_state = replace(app_state, scroll_offset=app_state.scroll_offset + 1)
+        return layer_state, new_state, Stay()
+
+    elif key == "k":
+        if app_state.scroll_offset > 0:
+            new_state = replace(app_state, scroll_offset=app_state.scroll_offset - 1)
             return layer_state, new_state, Stay()
 
     return layer_state, app_state, Stay()
@@ -995,16 +1304,22 @@ def _render_nav(layer_state: NavLayerState, app_state: TourState, view: BufferVi
     header.paint(view, 0, 0)
 
     # ── Content ──
-    content_y = header.height
+    content_y = header.height + 1  # +1 for top padding
     content_width = width - 4  # margins
+    viewport_height = height - content_y - 1  # 1 for nav bar
 
     content_fn = stop.depths.get(app_state.depth)
     if content_fn:
         blocks = content_fn(content_width)
         if blocks:
-            content = join_vertical(*blocks)
-            content = pad(content, left=2)
-            content.paint(view, 0, content_y)
+            content = join_vertical(*blocks, gap=1, align=Align.CENTER)
+
+            # Clamp scroll offset and vslice to viewport
+            max_offset = max(0, content.height - viewport_height)
+            offset = max(0, min(app_state.scroll_offset, max_offset))
+            visible = vslice(content, offset, viewport_height)
+            x_offset = max(0, (width - visible.width) // 2)
+            visible.paint(view, x_offset, content_y)
 
     # ── Nav Bar (bottom) ──
     nav_bar = render_nav_bar(app_state.stop_index, app_state.depth, width)
@@ -1079,7 +1394,7 @@ def run_quiet_mode() -> None:
             content_fn = stop.depths[depth]
             blocks = content_fn(78)
             if blocks:
-                content = join_vertical(*blocks)
+                content = join_vertical(*blocks, gap=1, align=Align.CENTER)
                 print_block(content, sys.stdout)
             print()
 

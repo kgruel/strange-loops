@@ -93,7 +93,7 @@ cross-lib imports. The loop closes.
 
 | Package | Atom | Purpose |
 |---------|------|---------|
-| **peers** | Peer | Identity: name + horizon + potential. Delegation creates child peers with narrower permissions — the hierarchy encodes participation level (direct, delegated, automated). |
+| **peers** | Peer | Identity: name + horizon + potential. None = unrestricted; constraints emerge through delegation. The hierarchy encodes participation level (direct, delegated, automated). |
 | **facts** | Fact | Observation atom: kind + ts + payload. An intentional observation — something that happened at a specific time. Kind is an open string for routing; payload structure comes from Shape. |
 | **ticks** | Tick | Temporal envelope: name + ts + payload. Infrastructure: Vertex (kind routing + fold engines), Store protocol (EventStore, FileStore), Stream, Projection, FileWriter, Tailer. A Tick is a frozen snapshot at a temporal boundary — the output of folding facts through a Shape over a period. |
 | **shapes** | Shape | Data contracts: Facet (name + kind), Fold (op + target), Boundary (kind + reset), Shape (facets + folds + boundary + apply). Shape.apply(state, payload) executes folds — pure dict→dict, no cross-lib imports. |
@@ -107,10 +107,10 @@ Each lib has its own `HANDOFF.md` with change log and open threads.
 ### Peer Participation
 
 A Peer's level of participation is encoded in the delegation hierarchy,
-not as a separate type. The root peer acts directly; children act on
-behalf of the root with restricted horizon and potential.
+not as a separate type. The root peer is unrestricted (None); children
+act on behalf of the root with narrower horizon and potential.
 
-    You (Peer: "kyle")                      → direct, full horizon + potential
+    You (Peer: "kyle")                      → unrestricted (None)
       ├─ delegate("kyle/deploy-agent")      → autonomous, narrower potential
       ├─ delegate("kyle/backup-cron")       → automated, narrowest potential
       └─ delegate("kyle/subtask-worker")    → delegated, task-scoped
@@ -121,7 +121,7 @@ participation level. No enum needed; the identity is the stance.
 
 ### experiments/
 
-Integration layer that wires the libraries together. Contains `fleet.py` (three-level vertex hierarchy with heterogeneous VMs — proves tick nesting), `containers.py` (single-loop Docker dashboard), `daemon/` (mill — the daemon primitive), `capability.py` (capability-as-fact pattern), `archive/` (earlier experiments), and `tests/`.
+Integration layer that wires the libraries together. Contains `fleet.py` (three-level vertex hierarchy — proves tick nesting), `boundary.py` (data-driven boundaries — three semantics from one mechanism), `observe.py` (feedback loop — user interactions are Facts), `review.py` (peer actions trigger temporal boundaries — None=unrestricted peers), `daemon/` (mill — the daemon primitive), `capability.py` (capability-as-fact pattern), `archive/` (earlier experiments), and `tests/`.
 
 ### demos/cells/
 

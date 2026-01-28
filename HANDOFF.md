@@ -28,11 +28,12 @@ live in `experiments/LOG.md`.
 | `fleet.py` | Temporal nesting — Facts fold, Ticks cascade, same primitive at every level |
 | `boundary.py` | Data-driven boundaries — data fires the temporal boundary, not an external clock |
 | `observe.py` | Feedback loop closes — user interactions are Facts through the same Vertex |
+| `review.py` | Peer actions trigger boundaries — your last ack completes the cycle, state resets |
 
-Key emergent findings (from observe.py session): debug is a horizon
-configuration not a separate system, meta-actions have a clean boundary
-with the loop, composition layer is thin (~50 lines) because there's one
-abstraction. See `experiments/LOG.md` for full analysis.
+Key emergent findings: debug is a lens (rendering depth) not a horizon
+(data access), None=unrestricted Peer simplifies root and exposes category
+errors, composition layer decides when sentinels fire. See
+`experiments/LOG.md` for full analysis.
 
 ## Recent History
 
@@ -179,9 +180,39 @@ pattern as the Fact→Shape bridge. Closed as intentional, not deferred.
 E2e integration tests: boundary→Stream[Tick]→Projection, two-level nested
 loops, Shape.boundary descriptor wired to Vertex.register. 122 ticks tests.
 
-**Next session**: review prior experiments (`fleet.py`, `containers.py`),
-decide whether to update them for boundary triggering or design a new
-experiment from scratch.
+### 2026-01-28 — Peer-driven boundaries + None=unrestricted + lens distinction
+
+`review.py`: two loops through one vertex. Health ticks at timer cadence
+(passive). Review ticks when peer acks all containers (active — composition
+layer sends `review.complete` sentinel). Same vertex, same boundary mechanism,
+different drivers.
+
+**Peer model change**: `horizon` and `potential` default to `None` (unrestricted)
+instead of `frozenset()` (empty). `None` = no constraints. `frozenset()` =
+explicitly empty (locked out). Constraints emerge through `delegate()`, not
+upfront enumeration. `grant()` is a no-op on unrestricted dimensions.
+16 peer tests updated. Breaking change for observe.py (uses old grant-based
+pattern — needs update).
+
+**Debug is a lens, not a horizon.** The None model exposed a category error
+in observe.py's design: "debug" was a horizon string alongside container names,
+but it's a rendering mode, not a data domain. Debug panel is now a lens toggle
+available to any peer. The debug peer is dissolved. Two peers (operator +
+monitor), not three.
+
+Played out both models (None vs explicit) across 5 scenarios with increasing
+complexity. Key finding: identical from delegation level 1 down. Only root
+differs. None is simpler for root and automatically supports new kinds.
+
+**Known issue**: Enter key in review.py shows empty value in debug trace
+(`key=` with nothing after). keyboard.py maps 0x0D → "enter" but the
+terminal may be sending a different byte. Investigate keyboard.get_key()
+mapping. j/k/d/q all work — only Enter affected.
+
+**Next session**: fix Enter key in review.py. observe.py needs updating
+for new Peer model (imports `grant`, uses explicit horizon checks that
+don't handle `None`). Open threads: lens as first-class concept,
+simultaneous peers, store persistence.
 
 ### 2026-01-27 — Refactor complete
 
@@ -258,11 +289,12 @@ Open questions — resolved items kept for context.
    occurred) but no longer on the critical path. Revisit when real usage
    clarifies.
 
-7. ~~**Peer horizon/potential semantics**~~: Resolved. `observe.py` gives
-   concrete semantics. Horizon strings = domain entities (container names)
-   + capability flags ("debug"). Potential strings = fact kinds the peer
-   can emit ("focus", "ack"). The composition layer interprets them —
-   render checks horizon, bridge checks potential. `frozenset[str]` is
-   the right type; meaning comes from usage, not from the type.
+7. ~~**Peer horizon/potential semantics**~~: Resolved (updated 2026-01-28).
+   `frozenset[str] | None` where `None` = unrestricted. Horizon strings =
+   domain entities (container names, kinds). Potential strings = fact kinds
+   the peer can emit. "Debug" is NOT a horizon string — it's a lens concern
+   (rendering depth, not data access). Constraints emerge through delegation.
+   The composition layer interprets: render checks horizon, bridge checks
+   potential, lens is a separate toggle.
 
 8. **Monorepo name**: Still prism.

@@ -25,7 +25,40 @@ from datetime import datetime, timezone
 
 from facts import Fact
 from ticks import Tick, Vertex
+from shapes import Shape, Facet, Fold
 from cells import Surface, Block, Style, join_vertical, border
+
+
+# -- Shapes ------------------------------------------------------------------
+# Shape descriptors define contracts. No boundary — fleet uses manual tick.
+
+health_shape = Shape(
+    name="health",
+    about="Container health observations",
+    input_facets=(Facet("container", "str"), Facet("status", "str")),
+    state_facets=(Facet("count", "int"), Facet("last", "str"), Facet("status", "str")),
+    # No folds — hand-written fold (needs last-container-name logic)
+)
+
+deploy_shape = Shape(
+    name="deploy",
+    about="Deploy progression through stages",
+    input_facets=(Facet("target", "str"), Facet("stage", "str")),
+    state_facets=(Facet("target", "str"), Facet("stage", "str"), Facet("step", "int")),
+    # No folds — hand-written fold (needs stage tracking logic)
+)
+
+audit_shape = Shape(
+    name="audit",
+    about="Audit scan results",
+    input_facets=(Facet("scanned", "int"), Facet("issues", "int"), Facet("fixed", "int")),
+    state_facets=(Facet("scanned", "int"), Facet("issues", "int"), Facet("fixed", "int")),
+    folds=(
+        Fold("sum", "scanned", {"field": "scanned"}),
+        Fold("sum", "issues", {"field": "issues"}),
+        Fold("sum", "fixed", {"field": "fixed"}),
+    ),
+)
 
 
 # -- Folds -------------------------------------------------------------------
@@ -48,15 +81,6 @@ def deploy_fold(state: dict, payload: dict) -> dict:
     }
 
 
-def audit_fold(state: dict, payload: dict) -> dict:
-    """Accumulate audit scan results."""
-    return {
-        "scanned": state.get("scanned", 0) + payload.get("scanned", 0),
-        "issues": state.get("issues", 0) + payload.get("issues", 0),
-        "fixed": state.get("fixed", 0) + payload.get("fixed", 0),
-    }
-
-
 def collect_fold(state: dict, tick_payload: dict) -> dict:
     """Higher-level fold: latest tick payload replaces state."""
     return tick_payload
@@ -66,45 +90,41 @@ def collect_fold(state: dict, tick_payload: dict) -> dict:
 
 VM_REGION = {"vm-1": "east", "vm-2": "east", "vm-3": "west", "vm-4": "west"}
 
-# What each VM does — which loops intersect at that vertex
-VM_KINDS: dict[str, dict[str, tuple[dict, object]]] = {
-    "vm-1": {
-        "health": ({"count": 0}, health_fold),
-    },
-    "vm-2": {
-        "health": ({"count": 0}, health_fold),
-        "deploy": ({"stage": "pending"}, deploy_fold),
-    },
-    "vm-3": {
-        "audit": ({"scanned": 0, "issues": 0, "fixed": 0}, audit_fold),
-    },
-    "vm-4": {
-        "health": ({"count": 0}, health_fold),
-        "audit": ({"scanned": 0, "issues": 0, "fixed": 0}, audit_fold),
-    },
+# What each VM does — (shape, fold) pairs.
+# shape.apply() for audit (ops fit), hand-written folds for health/deploy.
+VM_SHAPES: dict[str, list[tuple[Shape, object]]] = {
+    "vm-1": [(health_shape, health_fold)],
+    "vm-2": [(health_shape, health_fold), (deploy_shape, deploy_fold)],
+    "vm-3": [(audit_shape, audit_shape.apply)],
+    "vm-4": [(health_shape, health_fold), (audit_shape, audit_shape.apply)],
 }
 
-# Level 0: leaf vertices
-vms: dict[str, Vertex] = {}
-for _name, _kinds in VM_KINDS.items():
-    _v = Vertex(_name)
-    for _kind, (_initial, _fold) in _kinds.items():
-        _v.register(_kind, _initial, _fold)
-    vms[_name] = _v
 
-# Level 1: region vertices
-regions: dict[str, Vertex] = {}
-for _region in ("east", "west"):
-    _r = Vertex(_region)
-    for _vm_name, _vm_region in VM_REGION.items():
-        if _vm_region == _region:
-            _r.register(_vm_name, {}, collect_fold)
-    regions[_region] = _r
+def build_topology() -> tuple[dict[str, Vertex], dict[str, Vertex], Vertex]:
+    """Wire vertices from Shape descriptors."""
+    # L0: leaf vertices — Shape drives registration
+    vms: dict[str, Vertex] = {}
+    for vm_name, shapes in VM_SHAPES.items():
+        v = Vertex(vm_name)
+        for shape, fold in shapes:
+            v.register(shape.name, shape.initial_state(), fold)
+        vms[vm_name] = v
 
-# Level 2: global vertex
-globe = Vertex("global")
-for _region in regions:
-    globe.register(_region, {}, collect_fold)
+    # L1: region vertices — collect fold, no shape needed
+    regions: dict[str, Vertex] = {}
+    for region_name in ("east", "west"):
+        r = Vertex(region_name)
+        for vm_name, vm_region in VM_REGION.items():
+            if vm_region == region_name:
+                r.register(vm_name, {}, collect_fold)
+        regions[region_name] = r
+
+    # L2: global vertex
+    globe = Vertex("global")
+    for region in regions:
+        globe.register(region, {}, collect_fold)
+
+    return vms, regions, globe
 
 
 # -- Fact generators ---------------------------------------------------------
@@ -120,7 +140,7 @@ STATUSES = ["running", "running", "running", "unhealthy", "stopped"]
 DEPLOY_STAGES = ["build", "test", "push", "rollout", "done"]
 
 
-def generate_facts(cycle: int) -> list[str]:
+def generate_facts(cycle: int, vms: dict[str, Vertex]) -> list[str]:
     """Generate one round of facts. Returns log entries."""
     log = []
 
@@ -169,7 +189,7 @@ KIND_STYLE = {
 def render_vm_tick(vm_name: str, tick: Tick | None, w: int) -> list[Block]:
     """Render a VM's tick payload — one line per kind."""
     lines = []
-    kinds = sorted(VM_KINDS[vm_name].keys())
+    kinds = [s.name for s, _ in VM_SHAPES[vm_name]]
     kind_tags = " ".join(f"[{k}]" for k in kinds)
 
     if tick is None:
@@ -213,6 +233,7 @@ class FleetApp(Surface):
         self._h = 24
         self._task: asyncio.Task | None = None
 
+        self.vms, self.regions, self.globe = build_topology()
         self.vm_ticks: dict[str, Tick] = {}
         self.region_ticks: dict[str, Tick] = {}
         self.global_tick: Tick | None = None
@@ -230,37 +251,37 @@ class FleetApp(Surface):
 
                 # --- Facts arrive ---
                 self.active_level = 0
-                fact_log = generate_facts(self.cycle)
+                fact_log = generate_facts(self.cycle, self.vms)
                 self.log.append(f"cycle {self.cycle}: {len(fact_log)} sources")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
 
                 # --- L0: leaf vertices tick ---
                 now = datetime.now(timezone.utc)
-                for vm_name, vertex in vms.items():
+                for vm_name, vertex in self.vms.items():
                     tick = vertex.tick(vm_name, now)
                     self.vm_ticks[vm_name] = tick
-                    regions[VM_REGION[vm_name]].receive(tick.origin, tick.payload)
+                    self.regions[VM_REGION[vm_name]].receive(tick.origin, tick.payload)
                 kinds_seen = set()
-                for vm_name in vms:
-                    kinds_seen.update(VM_KINDS[vm_name].keys())
-                self.log.append(f"  L0: {len(vms)} VMs ticked ({', '.join(sorted(kinds_seen))})")
+                for vm_name in self.vms:
+                    kinds_seen.update(s.name for s, _ in VM_SHAPES[vm_name])
+                self.log.append(f"  L0: {len(self.vms)} VMs ticked ({', '.join(sorted(kinds_seen))})")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
 
                 # --- L1: region vertices tick ---
                 self.active_level = 1
-                for region_name, vertex in regions.items():
+                for region_name, vertex in self.regions.items():
                     tick = vertex.tick(region_name, now)
                     self.region_ticks[region_name] = tick
-                    globe.receive(tick.origin, tick.payload)
-                self.log.append(f"  L1: {', '.join(sorted(regions))} ticked")
+                    self.globe.receive(tick.origin, tick.payload)
+                self.log.append(f"  L1: {', '.join(sorted(self.regions))} ticked")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
 
                 # --- L2: global ticks ---
                 self.active_level = 2
-                self.global_tick = globe.tick("global", now)
+                self.global_tick = self.globe.tick("global", now)
                 self.log.append(f"  L2: global ticked")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
@@ -293,7 +314,7 @@ class FleetApp(Surface):
         # -- L0: Leaf vertices --
         l0_style = self._level_style(0)
         vm_lines: list[Block] = []
-        for vm_name in sorted(vms):
+        for vm_name in sorted(self.vms):
             tick = self.vm_ticks.get(vm_name)
             vm_lines.extend(render_vm_tick(vm_name, tick, w - 6))
 
@@ -305,7 +326,7 @@ class FleetApp(Surface):
         # -- L1: Region vertices --
         l1_style = self._level_style(1)
         region_lines: list[Block] = []
-        for region_name in sorted(regions):
+        for region_name in sorted(self.regions):
             tick = self.region_ticks.get(region_name)
             if tick:
                 vm_names = sorted(tick.payload.keys())

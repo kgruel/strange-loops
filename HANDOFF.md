@@ -17,6 +17,23 @@ Monorepo overview. Per-library details live in each lib's own HANDOFF.md.
 See `ARCHITECTURE.md` for the definitive system overview (atoms, topology,
 data flow, vocabulary). See `ARCHITECTURE-JOURNEY.md` for how we got there.
 
+## Experiments
+
+Integration layer (`experiments/`). Each wires the libraries together to
+prove a specific aspect of the model. Details and accumulated insights
+live in `experiments/LOG.md`.
+
+| Experiment | Proves |
+|---|---|
+| `fleet.py` | Temporal nesting — Facts fold, Ticks cascade, same primitive at every level |
+| `boundary.py` | Data-driven boundaries — data fires the temporal boundary, not an external clock |
+| `observe.py` | Feedback loop closes — user interactions are Facts through the same Vertex |
+
+Key emergent findings (from observe.py session): debug is a horizon
+configuration not a separate system, meta-actions have a clean boundary
+with the loop, composition layer is thin (~50 lines) because there's one
+abstraction. See `experiments/LOG.md` for full analysis.
+
 ## Recent History
 
 ### 2026-01-26 — Structure alignment
@@ -124,6 +141,27 @@ and `docs/STRATA_RETROSPECTIVE.md`. Key finding: the strata skill and
 strata CLI are two separate interfaces to the same system — the skill
 doesn't surface tagging/querying capabilities.
 
+### 2026-01-27 — Feedback loop closed, experiment log established
+
+`experiments/observe.py`: first experiment that closes the feedback loop.
+User interactions (j/k/enter) are Facts through the same `vertex.receive()`
+as external observations (health timer). Three peers demonstrate the model:
+kyle (operator: focus + ack), kyle/monitor (navigate only), kyle/debug
+(expanded horizon, sees fold state + event trace). Debug panel slides in
+from right with `vertex.receive()` instrumentation at the composition layer.
+
+Emergent insights captured in `experiments/LOG.md`: debug as horizon (not
+infrastructure), meta-actions outside the loop (clean boundary), thin
+composition layer (one abstraction, one interface). Open threads: temporal
+boundaries + interaction, simultaneous peers, meta-as-loop promotion, store
+persistence.
+
+Resolved open question #7 (peer horizon/potential semantics): observe.py
+gives concrete semantics. Horizon strings = container names + capability
+flags ("debug"). Potential strings = fact kinds the peer can emit. The
+composition layer (render, bridge) interprets them. The Peer type stays
+generic — `frozenset[str]` is correct.
+
 ### 2026-01-27 — Boundary triggering implemented
 
 Implemented HANDOFF #5 (boundary triggering on Vertex). `Projection.reset()`
@@ -220,9 +258,11 @@ Open questions — resolved items kept for context.
    occurred) but no longer on the critical path. Revisit when real usage
    clarifies.
 
-7. **Peer horizon/potential semantics**: Open. Concrete type is
-   `frozenset[str]`. Semantic interpretation (what do the strings mean
-   to a Vertex?) unresolved. Tick.origin connects here — horizon could
-   filter by origin. Needs real usage to drive.
+7. ~~**Peer horizon/potential semantics**~~: Resolved. `observe.py` gives
+   concrete semantics. Horizon strings = domain entities (container names)
+   + capability flags ("debug"). Potential strings = fact kinds the peer
+   can emit ("focus", "ack"). The composition layer interprets them —
+   render checks horizon, bridge checks potential. `frozenset[str]` is
+   the right type; meaning comes from usage, not from the type.
 
 8. **Monorepo name**: Still prism.

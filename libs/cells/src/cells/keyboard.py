@@ -156,6 +156,8 @@ class KeyboardInput:
             return "backspace"
         if byte == 0x0D:
             return "enter"
+        if byte == 0x0A:
+            return "enter"
         if byte == 0x09:
             return "tab"
 

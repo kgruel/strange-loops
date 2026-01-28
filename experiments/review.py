@@ -168,6 +168,9 @@ class ReviewApp(Surface):
         self.vertex = build_vertex()
         self._trace: deque[str] = deque(maxlen=20)
 
+        # Replay facts before wrapping (reconstructs state, doesn't re-log)
+        self._facts_replayed = self._replay_facts()
+
         # Fact log — all raw observations
         self._fact_log = Path("review.jsonl").open("a")
         # Tick log — completed cycles (boundaries fired)
@@ -189,8 +192,33 @@ class ReviewApp(Surface):
         self._tick_flash_ttl: int = 0  # frames remaining
 
         # Log restored state
+        if self._facts_replayed > 0:
+            self.log.append(f"replayed {self._facts_replayed} facts")
         if self.review_ticks or self.health_ticks:
             self.log.append(f"restored {len(self.review_ticks)}r + {len(self.health_ticks)}h ticks")
+
+    def _replay_facts(self) -> int:
+        """Replay facts from disk to reconstruct vertex state.
+
+        Called before _wrap_receive() so replayed facts don't get re-logged.
+        Returns count of facts replayed.
+        """
+        fact_path = Path("review.jsonl")
+        if not fact_path.exists():
+            return 0
+
+        count = 0
+        for line in fact_path.read_text().strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                self.vertex.receive(data["kind"], data["payload"])
+                count += 1
+            except (json.JSONDecodeError, KeyError):
+                continue  # skip malformed lines
+
+        return count
 
     def _load_ticks(self):
         """Load previous ticks from disk. Cross-session continuity."""

@@ -8,12 +8,15 @@ Peer constrains the loop:
   - potential gates what you can emit (on_emit checks)
   - horizon gates what you can see (render filters)
 
-Three peers:
-  kyle          — full operator (focus + ack)
+Two peers:
+  kyle          — unrestricted operator (None = can do anything)
   kyle/monitor  — read-only navigator (focus only, can't ack)
-  kyle/debug    — navigator + debug view (sees fold state, keystrokes)
 
-1/2/3 selects peer directly. Fold doesn't know the source.
+Debug panel is a lens, not a peer. The 'd' key toggles rendering depth,
+not access level. Any peer can view debug — it's a presentation
+mode, not a data boundary.
+
+1/2 selects peer directly. Fold doesn't know the source.
 
 Run:
     uv run python experiments/observe.py
@@ -25,7 +28,7 @@ import asyncio
 import random
 from collections import deque
 
-from peers import Peer, grant, delegate
+from peers import Peer, delegate
 from ticks import Vertex
 from shapes import Shape, Facet
 from cells import Surface, Block, Style, join_vertical, join_horizontal, border
@@ -116,15 +119,15 @@ def build_vertex() -> Vertex:
 # -- Peers -------------------------------------------------------------------
 
 def build_peers() -> tuple[Peer, ...]:
-    """kyle: full operator. kyle/monitor: can't ack. kyle/debug: sees plumbing."""
-    kyle = Peer("kyle")
-    kyle = grant(kyle, horizon=set(CONTAINERS), potential={"focus", "ack"})
+    """kyle: unrestricted operator. monitor: can navigate but can't ack.
+
+    Debug panel is a lens, not a peer. The 'd' key toggles rendering depth,
+    not access level. Any peer can view debug — it's a presentation
+    mode, not a data boundary. Two peers, not three.
+    """
+    kyle = Peer("kyle")  # unrestricted: horizon=None, potential=None
     monitor = delegate(kyle, "kyle/monitor", potential={"focus"})
-    debug = grant(
-        delegate(kyle, "kyle/debug", potential={"focus"}),
-        horizon={"debug"},
-    )
-    return (kyle, monitor, debug)
+    return (kyle, monitor)
 
 
 # -- App ---------------------------------------------------------------------
@@ -175,7 +178,7 @@ class ObserveApp(Surface):
     def _make_bridge(self):
         """on_emit callback: potential gates which facts the peer can produce."""
         def on_emit(kind: str, data: dict) -> None:
-            if kind not in self.peer.potential:
+            if self.peer.potential is not None and kind not in self.peer.potential:
                 self.log.append(f"blocked: {self.peer.name} cannot emit '{kind}'")
                 self.mark_dirty()
                 return
@@ -205,6 +208,8 @@ class ObserveApp(Surface):
 
     def _visible_containers(self) -> list[str]:
         """Containers this peer can see, filtered by horizon."""
+        if self.peer.horizon is None:
+            return list(CONTAINERS)
         return [c for c in CONTAINERS if c in self.peer.horizon]
 
     def on_key(self, key: str) -> None:
@@ -327,7 +332,7 @@ class ObserveApp(Surface):
         )
 
         # Line 2: potential (distinct color)
-        potential_str = ", ".join(sorted(peer.potential)) or "none"
+        potential_str = "*" if peer.potential is None else ", ".join(sorted(peer.potential)) or "none"
         line2 = Block.text(
             f" potential: {{{potential_str}}}",
             Style(fg="cyan"), width=w,
@@ -383,25 +388,17 @@ class ObserveApp(Surface):
 
         # -- Footer --
         blocks.append(Block.text(
-            " j/k nav  enter ack  1/2/3 peer  d debug  q quit",
+            " j/k nav  enter ack  1/2 peer  d debug  q quit",
             DIM, width=w,
         ))
 
         return join_vertical(*blocks)
 
     def _render_debug(self, w: int, peer: Peer, target_h: int) -> Block:
+        """Debug panel is a lens — rendering depth, not access control."""
         inner = w - 2  # border edges
         # border adds 2 rows; fill content to match body_left height
         content_h = max(target_h - 2, 1)
-
-        if "debug" not in peer.horizon:
-            lines = [Block.text(" (restricted)", DIM, width=inner)]
-            while len(lines) < content_h:
-                lines.append(Block.text("", DIM, width=inner))
-            return border(
-                join_vertical(*lines),
-                title="debug", style=DIM,
-            )
 
         lines: list[Block] = []
 
@@ -430,7 +427,7 @@ class ObserveApp(Surface):
 
         return border(
             join_vertical(*lines),
-            title="debug (horizon-gated)", style=DIM,
+            title="debug (lens)", style=DIM,
         )
 
 

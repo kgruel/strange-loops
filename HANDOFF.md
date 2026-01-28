@@ -22,6 +22,7 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 | Doc | Purpose |
 |-----|---------|
 | `LOOPS.md` | The fundamental model — truths, atoms, topology |
+| `VOCABULARY.md` | Canonical definitions — atoms, runtime concepts, allowed verbs |
 | `CLAUDE.md` | Build commands, structure, conventions |
 | `LOG.md` | Session history — what happened when |
 | `docs/VERTEX.md` | Intersection point — routing, folding, branching |
@@ -41,42 +42,44 @@ prove a specific aspect of the model.
 | `fleet.py` | Temporal nesting — Facts fold, Ticks cascade, same primitive at every level |
 | `boundary.py` | Data-driven boundaries — data fires the temporal boundary, not an external clock |
 | `observe.py` | Feedback loop closes — user interactions are Facts through the same Vertex |
-| `review.py` | Peer actions trigger boundaries — your last ack completes the cycle, state resets |
+| `review.py` | Peer actions trigger boundaries + persistence — facts/ticks to JSONL, replay on startup |
+| `summary.py` | Tick-as-input — ticks from review.py become facts to summary loop |
+| `cascade.py` | Live composition — two vertices connected via Stream, ticks flow in real-time |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Vocabulary refactor** — Plan exists as subtask. Review alignment between
-   current code and LOOPS.md model. Potential renames: "Store" terminology,
-   observe.py update for None=unrestricted Peer model.
+1. **Lens as first-class** — Next experiment. Debug-as-lens emerged, verbosity
+   (-q/-v/-vv) is the same pattern. Is Lens a primitive or composition-layer?
+   What would a Lens atom look like?
 
-2. **Persistence experiment** — Wire FileStore into review.py or new experiment.
-   Test: facts survive restart, replay reconstructs state, tick storage emits
-   "stored" facts.
+2. **Shape→Spec rename** — Subtask in progress. VOCABULARY.md says Spec, code
+   says Shape. Migrate the shapes library to specs.
 
-3. **observe.py update** — Uses old grant-based Peer pattern. Needs update for
-   None=unrestricted model.
+3. **Loop as explicit runtime** — Subtask exploring design. VOCABULARY.md
+   separates Loop (execution) from Vertex (plumbing). Current code merges them.
+   Worth separating?
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
+
+- **Lens as first-class** — Debug panel is a lens (rendering depth), not a
+  horizon (data access). Verbosity (-q/-v/-vv) is the same pattern. Is Lens a
+  primitive or composition-layer pattern? **Next experiment.**
+
+- **Simultaneous peers** — Focus is shared (one vertex, one focus engine).
+  When does this break? Probably networked/multi-user scenarios.
+
+- **Network boundary** — Vertices that span processes/machines. VOCABULARY.md
+  mentions "Connection" but no code exists yet.
 
 - **Naming tension: Peer** — "Peer" implies equality but delegation is
   hierarchical. Alternative: "Identity." Deferred — model works, name can evolve.
 
 - **Naming tension: Tick** — "Tick" implies clock time but boundaries are
   semantic. Current framing: "tick" = arbitrary unit, cycle completed. Deferred.
-
-- **Lens as first-class** — Debug panel is a lens (rendering depth), not a
-  horizon (data access). What other lenses exist? Is Lens a primitive or
-  composition-layer pattern?
-
-- **Simultaneous peers** — Focus is shared (one vertex, one focus engine).
-  When does this break?
-
-- **Store persistence experiment** — No experiment touches Store durability yet.
-  What changes when state survives across sessions?
 
 ## Resolved
 
@@ -89,3 +92,7 @@ Resolved questions kept for context. See `LOG.md` for full history.
 5. ~~Boundary triggering~~ — Implemented. `receive()` returns `Tick | None`.
 6. ~~Peer horizon/potential~~ — `None` = unrestricted. Delegation narrows.
 7. ~~Sink/Store/Witness~~ — All dissolved into existing atoms.
+8. ~~Store persistence~~ — review.py logs facts/ticks to JSONL, replays on startup.
+9. ~~Tick-as-input~~ — summary.py and cascade.py prove ticks become facts to next loop.
+10. ~~Live composition~~ — cascade.py: Stream connects vertices, ticks flow in real-time.
+11. ~~Vocabulary~~ — VOCABULARY.md: canonical definitions, one page, no ambiguity.

@@ -24,6 +24,10 @@ import asyncio
 import random
 from collections import deque
 
+import json
+import time
+from pathlib import Path
+
 from peers import Peer, delegate
 from ticks import Tick, Vertex
 from shapes import Shape, Facet, Boundary
@@ -163,6 +167,12 @@ class ReviewApp(Surface):
 
         self.vertex = build_vertex()
         self._trace: deque[str] = deque(maxlen=20)
+
+        # Fact log — all raw observations
+        self._fact_log = Path("review.jsonl").open("a")
+        # Tick log — completed cycles (boundaries fired)
+        self._tick_log = Path("review.ticks.jsonl").open("a")
+
         self._wrap_receive()
 
         self.peers = build_peers()
@@ -171,20 +181,70 @@ class ReviewApp(Surface):
         self._debug_open = False
         self._debug_width = 0
 
-        # Tick history
+        # Tick history — load from disk if available
         self.review_ticks: list[Tick] = []
         self.health_ticks: list[Tick] = []
+        self._load_ticks()
         self._tick_flash: str = ""  # brief flash text on boundary fire
         self._tick_flash_ttl: int = 0  # frames remaining
 
+        # Log restored state
+        if self.review_ticks or self.health_ticks:
+            self.log.append(f"restored {len(self.review_ticks)}r + {len(self.health_ticks)}h ticks")
+
+    def _load_ticks(self):
+        """Load previous ticks from disk. Cross-session continuity."""
+        tick_path = Path("review.ticks.jsonl")
+        if not tick_path.exists():
+            return
+
+        from datetime import datetime, timezone
+
+        for line in tick_path.read_text().strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                tick = Tick(
+                    name=data["name"],
+                    ts=datetime.fromtimestamp(data["ts"], tz=timezone.utc),
+                    payload=data["payload"],
+                    origin=data.get("origin", ""),
+                )
+                if tick.name == "health":
+                    self.health_ticks.append(tick)
+                elif tick.name == "ack":
+                    self.review_ticks.append(tick)
+            except (json.JSONDecodeError, KeyError):
+                continue  # skip malformed lines
+
     def _wrap_receive(self):
-        """Instrument vertex.receive() — captures the full event stream + ticks."""
+        """Instrument vertex.receive() — captures the full event stream + ticks.
+
+        Facts → review.jsonl (raw observations)
+        Ticks → review.ticks.jsonl (completed cycles)
+        """
         real_receive = self.vertex.receive
 
         def traced(kind, payload):
+            ts = time.time()
+
+            # Log fact
+            self._fact_log.write(json.dumps({"ts": ts, "kind": kind, "payload": payload}) + "\n")
+            self._fact_log.flush()
+
             result = real_receive(kind, payload)
             if result is not None:
                 self._trace.append(f"{kind} \u2192 TICK {result.name}")
+
+                # Log tick to separate store
+                self._tick_log.write(json.dumps({
+                    "ts": result.ts.timestamp(),
+                    "name": result.name,
+                    "origin": result.origin,
+                    "payload": result.payload,
+                }) + "\n")
+                self._tick_log.flush()
             else:
                 parts = " ".join(f"{k}={v}" for k, v in payload.items())
                 self._trace.append(f"{kind}  {parts}")
@@ -312,6 +372,8 @@ class ReviewApp(Surface):
                 await self._task
             except asyncio.CancelledError:
                 pass
+        self._fact_log.close()
+        self._tick_log.close()
         self.quit()
 
     # -- Animation -----------------------------------------------------------

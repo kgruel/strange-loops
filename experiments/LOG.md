@@ -23,9 +23,9 @@ Carry forward across sessions. Resolve or refine as experiments answer them.
 - ~~**Lens as first-class concept**~~: Explored. review_lens.py: Lens = zoom +
   scope. Pairs with Projection (write-side vs read-side). Leaving conceptual —
   placement TBD.
-- **Network boundary**: Explored. network_boundary.py: Ticks serialize to JSON,
-  Connection bridges via Queue, same model works. Open: discovery, failure,
-  ordering, backpressure.
+- ~~**Network boundary**~~: Resolved. network_boundary_extended.py explores all
+  four open questions. Pattern: network concerns become facts that fold. Policy
+  is composition-layer. The primitives don't change.
 
 ---
 
@@ -382,3 +382,84 @@ The abstraction is: serialize, transport, deserialize.
 | Tick → Fact at boundary | Consumer receives tick, folds `tick.payload` as fact |
 | Origin preserved | `tick.origin` carries provenance across boundary |
 | Same model, different topology | Loops nest across processes like they nest within |
+
+---
+
+## Session: network_boundary_extended.py — network concerns as facts
+
+### What was built
+
+`network_boundary_extended.py`: four scenarios exploring the open questions from
+network_boundary.py. Each demonstrates one concern:
+
+1. **Discovery** — Registry pattern: producers register, consumers lookup
+2. **Failure** — Heartbeat timeout: missing beats trigger failure detection
+3. **Ordering** — Sequence numbers: gaps detected, becomes information for fold
+4. **Backpressure** — Drop policies: oldest vs newest, drops become facts
+
+### What emerged
+
+**Network concerns become facts.**
+
+Every network concern maps to a fact kind:
+- `producer.registered` — discovery event
+- `connection.failed` — failure event
+- `sequence.gap` — ordering anomaly
+- `message.dropped` — backpressure event
+
+These aren't exceptions or error codes. They're observations that fold into state.
+The consumer's fold decides what they mean. A gap might be critical (financial
+transactions) or ignorable (telemetry). The fact carries the information; the
+fold interprets.
+
+**Policy is composition-layer.**
+
+The primitives don't change. The wiring chooses:
+- Discovery: registry vs announcement vs subscription
+- Failure: timeout duration, reconnect strategy
+- Ordering: wait for replay vs proceed vs fail
+- Backpressure: block vs drop-oldest vs drop-newest
+
+Same `receive()`, same `fold()`, same `boundary()`. Different composition
+produces different behavior. This matches the pattern from review.py: semantic
+decisions live at wiring points.
+
+**Network is just another boundary.**
+
+Process boundary, network boundary, function boundary — same pattern:
+1. State exits one context (serialize)
+2. State crosses boundary (transport)
+3. State enters new context (deserialize → fact)
+
+The tick doesn't know it crossed a network. The receiving vertex doesn't know
+the tick came from another process. The topology is composition-layer; the
+primitives are topology-agnostic.
+
+**Failure is observable, not exceptional.**
+
+Traditional model: connection drops → exception → retry logic → error handling.
+Loop model: connection drops → `connection.failed` fact → folds into state →
+boundary might fire → downstream sees the failure as data.
+
+The failure becomes part of the observed history. You can query it, fold it,
+trigger boundaries from it. Reconnect is just another fact (`connection.established`)
+entering the vertex.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Network concerns are facts | Registration, failure, gaps, drops all map to kinds |
+| Policy at composition layer | Same primitives, different wiring → different behavior |
+| Boundary-agnostic primitives | Vertex doesn't know fact came from network |
+| Failure as data | `connection.failed` folds like any other fact |
+| Observability by default | Every network event is already observable |
+
+### What remains open
+
+- **Replay protocol**: When gaps detected, how does consumer request replay?
+  Likely: emit `replay.request` fact to producer, producer re-sends range.
+- **Registry as vertex**: Registry could be a vertex folding `register`/`unregister`
+  facts. Would enable: persistence, replication, subscription to changes.
+- **Multi-producer coordination**: Multiple producers to one consumer. Ordering
+  across producers needs vector clocks or central sequencer.

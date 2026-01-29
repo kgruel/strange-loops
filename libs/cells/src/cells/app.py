@@ -84,6 +84,9 @@ class Surface:
                                 button=inp.button.name,
                                 x=inp.x,
                                 y=inp.y,
+                                shift=inp.shift,
+                                meta=inp.meta,
+                                ctrl=inp.ctrl,
                             )
                         else:
                             self.on_key(inp)

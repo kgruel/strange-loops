@@ -132,7 +132,7 @@ def parse_sgr_mouse(params: str, final: str) -> MouseEvent | None:
         elif scroll_button == 67:
             button = MouseButton.SCROLL_RIGHT
         else:
-            button = MouseButton.SCROLL_DOWN  # Fallback
+            return None  # Unknown scroll value
         action = MouseAction.SCROLL
     elif motion:
         # Motion event (drag or hover)

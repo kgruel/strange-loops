@@ -12,14 +12,10 @@ Formats:
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from .block import Block
 from .cell import Style, Cell
 from .compose import join_horizontal
-
-if TYPE_CHECKING:
-    pass
 
 
 class BigTextFormat(Enum):

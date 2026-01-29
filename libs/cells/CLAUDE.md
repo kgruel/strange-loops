@@ -108,33 +108,44 @@ Three emission strata:
   Domain       (manual) (any)    {item: "deploy-prod"}
 ```
 
+## Package Structure
+
+Layered submodules — CLI core at top level, TUI features in subpackages:
+
+```python
+from cells import Style, Cell, Span, Line, Block, print_block  # CLI core
+from cells.tui import Surface, Layer, Focus, Search             # Interactive apps
+from cells.lens import shape_lens, tree_lens, chart_lens        # Data rendering
+from cells.widgets import spinner, list_view, progress_bar      # Components
+from cells.mouse import MouseEvent, MouseButton                 # Optional mouse
+from cells.effects import render_big                            # Visual effects
+```
+
 ## Source Layout
 
 ```
 src/cells/
+  __init__.py       # CLI core exports (Style, Cell, Span, Line, Block, compose, Writer, theme)
   cell.py           # Cell, Style, EMPTY_CELL
   span.py           # Span, Line
-  buffer.py         # Buffer, BufferView, CellWrite
   block.py          # Block, Wrap
-  borders.py        # BorderChars presets
   compose.py        # join, pad, border, truncate, Align
-  region.py         # Region
+  borders.py        # BorderChars presets
   writer.py         # Writer, ColorDepth, print_block
-  keyboard.py       # KeyboardInput
-  focus.py          # Focus, FocusRing, ring/linear navigation
-  search.py         # Search, filter_contains/prefix/fuzzy
-  lens.py           # Lens, shape_lens
-  layer.py          # Layer, Action (Stay/Pop/Push/Quit), process_key, render_layers
-  app.py            # Surface, Emit
-  theme.py          # Style constants (header, footer, levels, etc.)
-  timer.py          # FrameTimer, FrameRecord (profiling)
-  components/
-    spinner.py      # SpinnerState, SpinnerFrames, spinner
-    progress.py     # ProgressState, progress_bar
-    list_view.py    # ListState, list_view
-    text_input.py   # TextInputState, text_input
-    table.py        # Column, TableState, table
-tests/
-  test_span.py      test_focus.py     test_search.py
-  test_layer.py     test_lens.py      test_surface.py
+  theme.py          # Style constants
+  big_text.py       # render_big implementation
+  _lens.py          # Lens implementations (internal)
+  _mouse.py         # Mouse implementations (internal)
+  tui/              # Interactive app primitives
+    __init__.py     # Buffer, Surface, Layer, Focus, Search, KeyboardInput
+  lens/             # Data structure rendering
+    __init__.py     # Lens, shape_lens, tree_lens, chart_lens
+  widgets/          # Pre-built components
+    __init__.py     # spinner, progress_bar, list_view, text_input, table
+  mouse/            # Mouse support
+    __init__.py     # MouseEvent, MouseButton, MouseAction
+  effects/          # Visual effects
+    __init__.py     # render_big, BigTextFormat
+  components/       # Component implementations
+    spinner.py, progress.py, list_view.py, text_input.py, table.py
 ```

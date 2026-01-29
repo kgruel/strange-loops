@@ -11,7 +11,7 @@ from .region import Region
 from .focus import Focus, FocusRing, ring_next, ring_prev, linear_next, linear_prev
 from .search import Search, filter_contains, filter_prefix, filter_fuzzy
 from .layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
-from .lens import Lens, shape_lens, SHAPE_LENS
+from .lens import Lens, shape_lens, SHAPE_LENS, tree_lens, TREE_LENS, chart_lens, CHART_LENS
 from .span import Span, Line
 from .keyboard import KeyboardInput, Input
 from .mouse import MouseEvent, MouseButton, MouseAction
@@ -74,6 +74,10 @@ __all__ = [
     "Lens",
     "shape_lens",
     "SHAPE_LENS",
+    "tree_lens",
+    "TREE_LENS",
+    "chart_lens",
+    "CHART_LENS",
     "Span",
     "Line",
     "KeyboardInput",

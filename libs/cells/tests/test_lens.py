@@ -1,8 +1,16 @@
-"""Tests for Lens primitive and shape_lens function."""
+"""Tests for Lens primitive and lens functions (shape, tree, chart)."""
 
 import pytest
 
-from cells import Lens, shape_lens, SHAPE_LENS
+from cells import (
+    Lens,
+    shape_lens,
+    SHAPE_LENS,
+    tree_lens,
+    TREE_LENS,
+    chart_lens,
+    CHART_LENS,
+)
 
 
 class TestLensDataclass:
@@ -290,3 +298,264 @@ def _block_to_text(block) -> str:
         line = "".join(cell.char for cell in row)
         result.append(line)
     return "\n".join(result)
+
+
+# ---------------------------------------------------------------------------
+# Tree Lens Tests
+# ---------------------------------------------------------------------------
+
+
+class TestTreeLensConstant:
+    """Tests for TREE_LENS constant."""
+
+    def test_tree_lens_constant(self):
+        """TREE_LENS is a Lens with tree_lens as render."""
+        assert isinstance(TREE_LENS, Lens)
+        assert TREE_LENS.render is tree_lens
+        assert TREE_LENS.max_zoom == 4
+
+
+class TestTreeLensZoom:
+    """Tests for tree_lens at each zoom level."""
+
+    def test_zoom_0_shows_root_and_count(self):
+        """At zoom 0, tree shows root label + child count."""
+        data = {"a": 1, "b": 2, "c": 3}
+        block = tree_lens(data, 0, 40)
+
+        text = _block_to_text(block)
+        assert "root" in text
+        assert "[3]" in text
+
+    def test_zoom_1_shows_immediate_children(self):
+        """At zoom 1, tree shows root + immediate children."""
+        data = {"alpha": {"nested": 1}, "beta": 2}
+        block = tree_lens(data, 1, 40)
+
+        text = _block_to_text(block)
+        assert "root" in text
+        assert "alpha" in text
+        assert "beta" in text
+        # Children of alpha should show as collapsed count
+        assert "[1]" in text
+
+    def test_zoom_2_expands_nested(self):
+        """At zoom 2, tree expands one more level."""
+        data = {"parent": {"child": "value"}}
+        block = tree_lens(data, 2, 40)
+
+        text = _block_to_text(block)
+        assert "parent" in text
+        assert "child" in text
+
+    def test_branch_characters_present(self):
+        """Tree rendering includes branch characters."""
+        data = {"a": 1, "b": 2}
+        block = tree_lens(data, 1, 40)
+
+        text = _block_to_text(block)
+        # Should have tree branch chars
+        assert "├" in text or "└" in text
+
+
+class TestTreeLensStructures:
+    """Tests for tree_lens with different data structures."""
+
+    def test_nested_dict(self):
+        """Nested dict renders as tree."""
+        data = {"level1": {"level2": {"level3": "leaf"}}}
+        block = tree_lens(data, 3, 60)
+
+        text = _block_to_text(block)
+        assert "level1" in text
+        assert "level2" in text
+        assert "level3" in text
+
+    def test_tuple_form(self):
+        """Tuple (label, children) form is recognized."""
+        data = ("root", {"child1": None, "child2": None})
+        block = tree_lens(data, 1, 40)
+
+        text = _block_to_text(block)
+        assert "root" in text
+        assert "child1" in text
+        assert "child2" in text
+
+    def test_empty_dict(self):
+        """Empty dict shows empty marker."""
+        block = tree_lens({}, 2, 40)
+        text = _block_to_text(block)
+        assert "{}" in text
+
+    def test_leaf_values_shown(self):
+        """Leaf values are displayed with their values."""
+        data = {"name": "Alice", "age": 30}
+        block = tree_lens(data, 1, 40)
+
+        text = _block_to_text(block)
+        assert "Alice" in text
+        assert "30" in text
+
+
+class TestTreeLensWidth:
+    """Tests for tree_lens width handling."""
+
+    def test_respects_width(self):
+        """Tree respects width constraint."""
+        data = {"very_long_key_name": {"another_long_key": "value"}}
+        block = tree_lens(data, 2, 20)
+
+        assert block.width == 20
+
+    def test_zero_width_returns_empty(self):
+        """Zero width returns empty block."""
+        block = tree_lens({"a": 1}, 2, 0)
+        assert block.width == 0
+
+    def test_truncates_long_labels(self):
+        """Long labels are truncated with ellipsis."""
+        data = {"this_is_a_very_very_long_key_name": 1}
+        block = tree_lens(data, 1, 25)
+
+        text = _block_to_text(block)
+        assert "…" in text
+
+
+# ---------------------------------------------------------------------------
+# Chart Lens Tests
+# ---------------------------------------------------------------------------
+
+
+class TestChartLensConstant:
+    """Tests for CHART_LENS constant."""
+
+    def test_chart_lens_constant(self):
+        """CHART_LENS is a Lens with chart_lens as render."""
+        assert isinstance(CHART_LENS, Lens)
+        assert CHART_LENS.render is chart_lens
+        assert CHART_LENS.max_zoom == 2
+
+
+class TestChartLensZoom:
+    """Tests for chart_lens at each zoom level."""
+
+    def test_zoom_0_shows_stats(self):
+        """At zoom 0, chart shows count and range."""
+        data = [10, 20, 30, 40, 50]
+        block = chart_lens(data, 0, 40)
+
+        text = _block_to_text(block)
+        assert "5 values" in text
+        assert "10" in text
+        assert "50" in text
+
+    def test_zoom_1_shows_sparkline(self):
+        """At zoom 1, chart shows sparkline characters."""
+        data = [1, 3, 5, 3, 1]
+        block = chart_lens(data, 1, 40)
+
+        text = _block_to_text(block)
+        # Should contain sparkline block characters
+        assert any(c in text for c in "▁▂▃▄▅▆▇█")
+
+    def test_zoom_2_shows_bars(self):
+        """At zoom 2, chart shows horizontal bars."""
+        data = {"cpu": 70, "mem": 50}
+        block = chart_lens(data, 2, 40)
+
+        text = _block_to_text(block)
+        assert "cpu" in text
+        assert "mem" in text
+        # Should contain bar characters
+        assert "█" in text
+        assert "░" in text
+
+
+class TestChartLensData:
+    """Tests for chart_lens with different data formats."""
+
+    def test_list_of_numbers(self):
+        """List of numbers renders as chart."""
+        data = [1, 2, 3, 4, 5]
+        block = chart_lens(data, 1, 20)
+
+        # Should produce valid output
+        assert block.height >= 1
+        assert block.width == 20
+
+    def test_labeled_dict(self):
+        """Dict with numeric values shows labels."""
+        data = {"alpha": 25, "beta": 75}
+        block = chart_lens(data, 2, 40)
+
+        text = _block_to_text(block)
+        assert "alpha" in text
+        assert "beta" in text
+
+    def test_single_value(self):
+        """Single number produces output."""
+        block = chart_lens(42, 1, 20)
+        assert block.height >= 1
+
+    def test_empty_data(self):
+        """Empty data shows no-data message."""
+        block = chart_lens([], 2, 40)
+        text = _block_to_text(block)
+        assert "no data" in text
+
+    def test_percentage_format(self):
+        """Values 0-100 format as percentages."""
+        data = {"test": 50}
+        block = chart_lens(data, 2, 40)
+
+        text = _block_to_text(block)
+        assert "%" in text
+
+
+class TestChartLensSparkline:
+    """Tests for sparkline rendering specifics."""
+
+    def test_sparkline_maps_range(self):
+        """Sparkline maps values to character heights."""
+        # Low value should use low char, high should use high char
+        data = [0, 100]
+        block = chart_lens(data, 1, 10)
+
+        text = _block_to_text(block)
+        # First char should be lowest, last should be highest
+        assert "▁" in text
+        assert "█" in text
+
+    def test_sparkline_samples_long_data(self):
+        """Sparkline samples when data exceeds width."""
+        data = list(range(100))
+        block = chart_lens(data, 1, 20)
+
+        text = _block_to_text(block).strip()
+        # Should fit within width (minus padding)
+        assert len(text) <= 20
+
+
+class TestChartLensWidth:
+    """Tests for chart_lens width handling."""
+
+    def test_respects_width(self):
+        """Chart respects width constraint."""
+        data = {"very_long_label_name": 50}
+        block = chart_lens(data, 2, 30)
+
+        assert block.width == 30
+
+    def test_zero_width_returns_empty(self):
+        """Zero width returns empty block."""
+        block = chart_lens([1, 2, 3], 2, 0)
+        assert block.width == 0
+
+    def test_narrow_width_still_works(self):
+        """Very narrow width produces valid output."""
+        data = {"x": 50}
+        block = chart_lens(data, 2, 15)
+
+        assert block.width == 15
+        text = _block_to_text(block)
+        assert len(text.strip()) > 0

@@ -5,6 +5,41 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-01-29 — Framework collapse: peer-aware Vertex + Lens
+
+**The collapse.** Experiments converged, patterns validated. Moved from exploration
+to framework: `Vertex.receive(fact: Fact, peer: Peer) -> Tick | None`.
+
+**What was implemented:**
+
+1. **Lens in ticks** — `Lens(zoom, scope)` dataclass. Pairs with Projection
+   (write-side vs read-side). Factory methods: `minimal()`, `summary()`, `detail()`,
+   `verbose()`. Fluent: `with_zoom()`, `with_scope()`.
+
+2. **Peer-aware Vertex** — `receive(fact, peer)` signature. Two gates:
+   - Potential check: `fact.kind` must be in `peer.potential`
+   - Observer-state ownership: `focus.kyle` can only be updated by kyle
+
+3. **Per-peer focus pattern** — `{kind}.{peer}` for observer state. Concurrent
+   peers don't conflict. ObserverState/ObserverActions protocols.
+
+4. **Network concerns as facts** — discovery, failure, ordering, backpressure
+   all map to fact kinds. Policy is composition-layer. Primitives unchanged.
+
+**Key insight:** The signature change `receive(Fact, Peer)` makes the model
+explicit. Origin (recorded provenance) vs peer (live context for gating).
+On live input they match. On replay they might differ.
+
+**New experiments:**
+- `peer_focus.py` — per-peer observer state, no conflicts
+- `lens_code.py` — Lens placement analysis
+- `network_boundary_extended.py` — four network scenarios
+- `peer_aware_vertex.py` — full model demonstration
+
+131 ticks tests passing.
+
+---
+
 ## 2026-01-28 — Loops model crystallized + persistence exploration
 
 Explored adding persistence to experiments. The exploration dissolved multiple

@@ -49,42 +49,39 @@ prove a specific aspect of the model.
 | `review_lens.py` | Lens as primitive — zoom + scope, lens per peer, orthogonal to horizon |
 | `simultaneous_peers.py` | Concurrent peer conflict — shared focus breaks, per-peer focus recommended |
 | `network_boundary.py` | Cross-process vertices — Ticks serialize, Connection bridges, same model works |
+| `network_boundary_extended.py` | Network concerns as facts — discovery, failure, ordering, backpressure |
+| `peer_focus.py` | Per-peer observer state — `focus.{peer}` pattern, no conflicts |
+| `lens_code.py` | Lens placement analysis — core Lens (ticks) vs render Lens (cells) |
+| `peer_aware_vertex.py` | Full model — Vertex.receive(Fact, Peer), gating, observer-state ownership |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Peer-aware pipeline** — Vertex.receive() takes (kind, payload) tuples.
-   Should it take Fact objects? Should Peer be passed explicitly? The pipeline
-   doc (PLAN.md) identified Peer as implicit. Worth making explicit?
+1. **Update existing experiments** — Migrate remaining experiments to use
+   `Vertex.receive(fact, peer)` signature for consistency.
 
-2. **Lens placement** — Lens (zoom + scope) pairs with Projection. Does it
-   belong in ticks alongside Projection? Or stay conceptual?
+2. **Cells integration** — Connect peer-aware Vertex to Surface. Bridge emits
+   Facts with explicit Peer. Demonstrate gating in a live TUI.
 
-3. **Per-peer focus** — simultaneous_peers.py recommends per-peer focus state.
-   Implement and test.
+3. **Network + Peer** — Combine network_boundary_extended with peer-aware
+   pipeline. How does Peer context flow across process boundaries?
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
 
-- **Lens as first-class** — Explored in review_lens.py. Lens = zoom + scope,
-  pairs with Projection (write-side vs read-side). Leaving conceptual for now.
-  Placement TBD (ticks? cells? new lib?).
-
-- **Simultaneous peers** — Explored in simultaneous_peers.py. Shared focus
-  breaks with concurrent peers. Recommendation: per-peer focus (focus.kyle,
-  focus.alice). Aligns with "observer is first-class."
-
-- **Network boundary** — Explored in network_boundary.py. Ticks serialize to
-  JSON, Connection bridges via Queue, same model works. Open: discovery,
-  failure handling, ordering guarantees.
+- **Network open questions** — Explored in network_boundary_extended.py.
+  Replay protocol, registry as vertex, multi-producer coordination.
 
 - **Naming tension: Peer** — "Peer" implies equality but delegation is
   hierarchical. Alternative: "Identity." Deferred — model works, name can evolve.
 
 - **Naming tension: Tick** — "Tick" implies clock time but boundaries are
   semantic. Current framing: "tick" = arbitrary unit, cycle completed. Deferred.
+
+- **Meta-as-loop** — When does meta-state (peer switching, debug toggle) need
+  to enter a loop? Signal: when it needs to be shared, persisted, or folded.
 
 ## Resolved
 
@@ -104,3 +101,7 @@ Resolved questions kept for context. See `LOG.md` for full history.
 12. ~~Shape→Spec rename~~ — libs/shapes → libs/specs. Code matches vocabulary.
 13. ~~Loop as explicit runtime~~ — Loop class in ticks. Vertex.register_loop(). Separation done.
 14. ~~Pipeline formalization~~ — PLAN.md documents 8 stages, identifies gaps.
+15. ~~Peer-aware pipeline~~ — Vertex.receive(Fact, Peer). Gating at integration point. Observer is first-class.
+16. ~~Lens placement~~ — Core Lens (zoom + scope) in ticks. Render lenses stay in cells.
+17. ~~Per-peer focus~~ — `{kind}.{peer}` pattern. Observer state belongs to observer. Ownership enforced at receive.
+18. ~~Network concerns~~ — Discovery, failure, ordering, backpressure all become facts that fold. Policy is composition-layer.

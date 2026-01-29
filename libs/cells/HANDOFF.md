@@ -21,18 +21,15 @@ Added `py.typed` marker and `[tool.pytest.ini_options]`.
 - **ShapeLens extensions**: Tree lens, chart lens, other convention-based renderers.
 - **Zoom propagation**: Global vs independent vs relative in composed views. Undecided.
 - **CLI -> TUI continuum**: Verbosity spectrum (Level 0-4). Documented in demos/VERBOSITY.md.
-- **Big text rendering**: 3-row block-character font using `█▀▄` elements. Prototype built
-  during tour development — renders any text at 3× height using a glyph map. Could become
-  a convenience method (e.g. `Block.big("title", style)` or `render_big(text, style) -> Block`).
-  Glyph set covers lowercase a-z and common symbols. Implementation pattern:
-  ```python
-  _BIG = {
-      'a': ('▄▀▄', '█▀█', '▀ ▀'),
-      'c': ('▄▀▀', '█  ', '▀▀▀'),
-      # ... width-3 glyphs, 3 rows each
-  }
-  def render_big_text(text: str, style: Style) -> Block:
-      # concatenate glyph rows with 1-char gaps, return join_vertical of 3 Block.text rows
-  ```
-  Looked good in practice — readable, fits 80 cols for ~15 char strings. Deferred: add full
-  alphabet, variable-width glyphs, optional font selection.
+## 2026-01-28
+Big text rendering API: `render_big(text, style, size=1, format=BigTextFormat.FILLED) -> Block`
+
+Features:
+- **Two sizes**: size=1 (3-row, 3-wide glyphs), size=2 (5-row, 5-wide glyphs)
+- **Two formats**: `BigTextFormat.FILLED` (solid), `BigTextFormat.OUTLINE` (hollow)
+- **Glyph coverage**: a-z, 0-9, space, 30+ punctuation/symbols
+- **Case-folding**: uppercase converted to lowercase
+- **Fallback**: unknown chars render as box placeholder
+
+Demo at `demos/cells/demo_big_text.py` — 4 modes (rainbow, fire, size comparison, showcase),
+toggle size with 's', format with 'f'.

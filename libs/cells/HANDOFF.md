@@ -52,7 +52,7 @@ Deep review of all additions completed. High-priority fixes in progress:
 2. Unused TYPE_CHECKING import in big_text.py
 3. Missing modifiers in mouse emit
 
-### Architecture Layering (2026-01-29)
+### Architecture Layering
 Reorganized into layered submodules:
 ```
 cells                # CLI core: Style, Cell, Span, Line, Block, composition, Writer, theme
@@ -63,10 +63,33 @@ cells.mouse          # Optional: MouseEvent, MouseButton, MouseAction
 cells.effects        # Visual: render_big
 ```
 Internal implementations use underscore prefix (`_mouse.py`, `_lens.py`).
-All demos and tests updated. Commit: `8798596`.
+
+### Viewport Dataclass
+`Viewport(offset, visible, content)` for scroll state management:
+- scroll(), page_up/down(), home/end(), scroll_to()
+- scroll_into_view(index) — ensures item visible
+- with_content(), with_visible() — dimension updates that auto-clamp
+- Works with vslice() for rendering visible portion
+
+### Zoom Propagation
+Research completed, pattern documented in `experiments/ZOOM_PATTERNS.md`:
+- **Global zoom with per-lens overrides** (not pure independent)
+- Per-peer defaults separate render function (library) from view config (app)
+- Zoom and width orthogonal — truncate, don't auto-reduce
+- Added `Lens.default_zoom` as optional metadata hint
+
+### Demo Restructure
+Reorganized `demos/cells/` by complexity:
+```
+demos/cells/
+├── bench.py           # Teaching platform (top-level entry)
+├── README.md          # Index with descriptions and run commands
+├── primitives/        # CLI demos (cell, span, block, buffer, compose)
+├── apps/              # TUI demos (minimal, layers, widgets, mouse, lenses)
+└── patterns/          # Real-world patterns (verbosity spectrum)
+```
+Deleted tour.py (superseded by bench.py). Pattern documented in `experiments/DEMO_PATTERNS.md`.
 
 ## Open
-- **Viewport dataclass**: Still needed. Mouse scroll events now available to feed it.
-- **Zoom propagation**: Global vs independent. `review_lens.py` experiment showed per-peer
-  defaults (independent mode). Pattern clarified but not codified.
-- **Code review fixes**: Three items identified but not yet addressed.
+- **Code review fixes**: Three items identified but not yet addressed (mouse scroll fallback,
+  TYPE_CHECKING import, mouse modifiers in emit).

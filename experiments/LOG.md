@@ -463,3 +463,57 @@ entering the vertex.
   facts. Would enable: persistence, replication, subscription to changes.
 - **Multi-producer coordination**: Multiple producers to one consumer. Ordering
   across producers needs vector clocks or central sequencer.
+
+---
+
+## Session: ZOOM_PATTERNS.md — zoom propagation research
+
+### What was researched
+
+Investigated zoom propagation patterns for multi-lens applications. Four questions:
+global vs independent zoom, state management, zoom-width interaction, Lens defaults.
+
+### Conclusions
+
+**Global zoom with per-lens overrides.**
+
+Default to global zoom (user-controlled, same density everywhere). Allow per-lens
+overrides for exceptions (health at zoom=2, metrics at zoom=0). Per-peer defaults
+give role-appropriate starting points — operator gets full detail, monitor gets
+summary.
+
+**Zoom state in vertex for persistence/sharing.**
+
+Lens changes become facts (`emit("lens", zoom=2)`) that fold into state. This
+enables persistence (restart reconstructs view config) and sharing (multiple
+observers see zoom changes). Local state only when purely presentation (debug
+panel width).
+
+**Zoom and width are orthogonal.**
+
+Don't auto-reduce zoom when width is narrow. Truncate instead. User chose zoom=2,
+respect it. Ellipsis signals lost information — user can adjust if needed.
+Auto-reduction creates mode confusion ("why did my detail disappear?").
+
+**Lens carries optional default_zoom metadata.**
+
+Added `default_zoom: int = 1` to Lens dataclass. It's a hint, not enforced.
+Composition layer decides: `zoom = user_zoom if user_zoom is not None else lens.default_zoom`.
+Keeps Lens stateless while allowing per-lens preferences.
+
+**Key separation: render function (library) vs view config (app).**
+
+The experiment's per-peer Lens (`PEER_LENS: dict[str, Lens]`) is richer than the
+library's Lens. The library Lens is minimal — render + metadata. The app builds
+view configuration on top. Same pattern as Peer/delegate: primitives compose at
+the application layer.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Global zoom as default | Single `-/=` control affects all views consistently |
+| Per-lens override for exceptions | Mixed-priority data needs different detail levels |
+| Per-peer defaults | review_lens.py: operator zoom=2, monitor zoom=1 |
+| Zoom changes as facts | `emit("lens", zoom=...)` persists and shares |
+| Truncate, don't auto-reduce | Width constraint doesn't silently change zoom |

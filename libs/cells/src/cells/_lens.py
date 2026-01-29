@@ -19,10 +19,12 @@ class Lens(Generic[T]):
 
     render: (content, zoom, width) -> Block
     max_zoom: highest meaningful zoom level (default 2)
+    default_zoom: suggested starting zoom level (default 1, caller decides)
     """
 
     render: Callable[[T, int, int], Block]
     max_zoom: int = 2
+    default_zoom: int = 1
 
 
 def shape_lens(content: Any, zoom: int, width: int) -> Block:

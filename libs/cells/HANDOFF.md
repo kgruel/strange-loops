@@ -52,10 +52,21 @@ Deep review of all additions completed. High-priority fixes in progress:
 2. Unused TYPE_CHECKING import in big_text.py
 3. Missing modifiers in mouse emit
 
+### Architecture Layering (2026-01-29)
+Reorganized into layered submodules:
+```
+cells                # CLI core: Style, Cell, Span, Line, Block, composition, Writer, theme
+cells.tui            # Interactive: Buffer, Surface, Layer, Focus, Search, KeyboardInput
+cells.lens           # Data rendering: shape_lens, tree_lens, chart_lens
+cells.widgets        # Components: spinner, progress_bar, list_view, text_input, table
+cells.mouse          # Optional: MouseEvent, MouseButton, MouseAction
+cells.effects        # Visual: render_big
+```
+Internal implementations use underscore prefix (`_mouse.py`, `_lens.py`).
+All demos and tests updated. Commit: `8798596`.
+
 ## Open
 - **Viewport dataclass**: Still needed. Mouse scroll events now available to feed it.
-- **Architecture layering**: What's cells core vs optional? Mouse, big text, lenses,
-  components — should these be separate packages or optional imports? Research in progress,
-  findings will go to `docs/CELLS-ARCHITECTURE.md`.
 - **Zoom propagation**: Global vs independent. `review_lens.py` experiment showed per-peer
   defaults (independent mode). Pattern clarified but not codified.
+- **Code review fixes**: Three items identified but not yet addressed.

@@ -2487,9 +2487,15 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
 
     demo_id = _get_demo_id(slide)
 
-    # Escape when not focused = quit
+    # Escape: go back (reduce zoom, or go to parent slide)
     if key == "escape":
-        return layer_state, app_state, Quit()
+        if app_state.zoom > 0:
+            return layer_state, replace(app_state, zoom=app_state.zoom - 1), Stay()
+        elif slide.nav.up:
+            target = slides.get(slide.nav.up)
+            new_zoom = target.max_zoom if target else 0
+            return layer_state, replace(app_state, current_slide=slide.nav.up, zoom=new_zoom), Stay()
+        return layer_state, app_state, Stay()
 
     # Tab: toggle focus capture (only if slide has interactive demo)
     if key == "tab" and demo_id:

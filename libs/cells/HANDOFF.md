@@ -90,6 +90,12 @@ demos/cells/
 ```
 Deleted tour.py (superseded by bench.py). Pattern documented in `experiments/DEMO_PATTERNS.md`.
 
+## Resolved (2026-01-29 cont.)
+- ~~Arrow keys broken~~ — CSI parsing bug: `_read_csi()` assumed parameter bytes before final byte.
+  For simple sequences (ESC [ A), the first byte IS the final byte. Fixed by checking before loop.
+- ~~test_lifecycle hanging~~ — Test mocked `get_key` but Surface calls `get_input`. Fixed.
+- ~~bench.py escape quits~~ — Changed to go back (reduce zoom, or parent slide) instead of quit.
+
 ## Open
 - **Code review fixes**: Three items identified but not yet addressed (mouse scroll fallback,
   TYPE_CHECKING import, mouse modifiers in emit).

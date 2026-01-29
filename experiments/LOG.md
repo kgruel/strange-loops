@@ -11,18 +11,19 @@ Carry forward across sessions. Resolve or refine as experiments answer them.
   acks accumulate until all containers are acked, the composition layer sends
   a sentinel, boundary fires, Tick produced, state resets. The boundary is
   something you *cause*. Temporal structure from participation.
-- ~~**Multiple simultaneous peers**~~: Resolved. simultaneous_peers.py: shared
-  focus breaks with concurrent peers (last-write-wins). Solution: per-peer
-  focus (`focus.{peer}`). Observer state belongs to observer.
+- ~~**Multiple simultaneous peers**~~: Resolved. peer_focus.py: per-peer state
+  (`focus.{peer}`, `scroll.{peer}`, `selection.{peer}`) eliminates conflicts.
+  ObserverState/ObserverActions protocols bundle read/write operations.
+  Generalizes to any observer-scoped state.
 - **Meta-as-loop**: Peer switching is currently meta (outside the loop). When
   does meta-state need to enter a loop? Signal: when it needs to be shared,
   persisted, or folded.
 - ~~**Store persistence**~~: Resolved. review.py logs facts/ticks to JSONL,
   replays on startup to reconstruct state. Persistence is a composition-layer
   property, not a primitive change.
-- ~~**Lens as first-class concept**~~: Explored. review_lens.py: Lens = zoom +
-  scope. Pairs with Projection (write-side vs read-side). Leaving conceptual —
-  placement TBD.
+- ~~**Lens as first-class concept**~~: Resolved. lens_code.py: Lens = zoom +
+  scope, pairs with Projection as read-side projection. Split recommendation:
+  core Lens → ticks (data-level), render Lens → cells (widget-level).
 - ~~**Network boundary**~~: Resolved. network_boundary_extended.py explores all
   four open questions. Pattern: network concerns become facts that fold. Policy
   is composition-layer. The primitives don't change.
@@ -517,3 +518,150 @@ the application layer.
 | Per-peer defaults | review_lens.py: operator zoom=2, monitor zoom=1 |
 | Zoom changes as facts | `emit("lens", zoom=...)` persists and shares |
 | Truncate, don't auto-reduce | Width constraint doesn't silently change zoom |
+
+---
+
+## Session: peer_focus.py — per-peer observer state
+
+### What was built
+
+`peer_focus.py`: concurrent peers (kyle, alice, bob) navigate independently
+via asyncio. Each peer has their own state kinds (`focus.{peer}`, `scroll.{peer}`,
+`selection.{peer}`). ObserverState/ObserverActions protocols bundle read/write.
+
+### What emerged
+
+**Observer state belongs to the observer.**
+
+The `{kind}.{peer}` pattern partitions state by observer:
+- `focus.kyle`, `focus.alice` — cursor position per peer
+- `scroll.kyle`, `scroll.alice` — scroll offset per peer
+- `selection.kyle` — selected items per peer
+
+This is different from shared state (health status, domain facts) which exists
+independent of who's looking. The distinction:
+- **Shared state**: objective fact about the world
+- **Observer state**: subjective view of the observer
+
+**ObserverState/ObserverActions is a clean protocol.**
+
+```python
+@dataclass
+class ObserverState:
+    """Read-side: bundle all per-peer state."""
+    peer: str
+    focus: int
+    scroll: int
+    selection: frozenset[str]
+
+    @classmethod
+    def load(cls, vertex: Vertex, peer: str) -> ObserverState: ...
+
+class ObserverActions:
+    """Write-side: emit per-peer state changes."""
+    def set_focus(self, index: int) -> None: ...
+    def set_scroll(self, offset: int) -> None: ...
+    def select(self, item: str) -> None: ...
+```
+
+The protocol is thin — it just namespaces the state and provides type-safe access.
+
+**Rendering layer decides which observer state to display.**
+
+Split view, active peer, follow mode — these are rendering decisions.
+The vertex stores all peers' state; the surface chooses what to show.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| State partitioning by peer | `focus.kyle`, `scroll.alice` — no conflicts |
+| Shared vs observer distinction | Health is shared; focus is per-peer |
+| Protocol over convention | ObserverState/Actions bundles access |
+| Rendering decides display | Split view shows all peers; single view shows active |
+
+---
+
+## Session: lens_code.py — Lens as explicit primitive
+
+### What was built
+
+`lens_code.py`: Lens as standalone dataclass (zoom + scope), separate from
+cells rendering. LensedProjection demonstrates Projection + Lens pairing.
+Placement analysis explores where Lens should live.
+
+### What emerged
+
+**Projection and Lens are dual.**
+
+```
+Projection: Facts → state    (reduce over time, write-side)
+Lens:       state → view     (reduce for display, read-side)
+```
+
+Both are projections in the mathematical sense — many-to-fewer. The pipeline:
+
+```
+Facts → Projection(fold) → state → Lens(zoom, scope) → view → Surface
+```
+
+**Lens has two orthogonal dimensions.**
+
+| Dimension | Controls | Default |
+|-----------|----------|---------|
+| zoom | Detail level (0=minimal, 3+=verbose) | 1 (summary) |
+| scope | Kind filter (None=all, frozenset=specific) | None (all) |
+
+Zoom affects rendering depth. Scope filters which kinds appear.
+These are independent — you can have minimal zoom with all kinds,
+or verbose zoom with filtered kinds.
+
+**Lens is orthogonal to Peer.**
+
+| Primitive | Question | Dimension |
+|-----------|----------|-----------|
+| Peer.horizon | What CAN you see? | Access |
+| Peer.potential | What CAN you emit? | Capability |
+| Lens.scope | What DO you see? | Presentation |
+| Lens.zoom | How much detail? | Depth |
+
+Horizon gates data existence. Lens gates data display. Different concerns.
+
+**Split recommendation: core Lens vs render Lens.**
+
+Analysis revealed two distinct concepts using "Lens":
+
+1. **Core Lens** (data-level)
+   - Lens dataclass: zoom + scope
+   - Pure configuration, no rendering
+   - Pairs with Projection conceptually
+   - Belongs in: **ticks**
+
+2. **Render Lens** (widget-level)
+   - shape_lens, tree_lens, chart_lens in cells._lens
+   - Block rendering at zoom levels
+   - Surface-specific implementation
+   - Stays in: **cells**
+
+Core Lens goes in ticks because it's used to project state, which is what
+ticks does. The existing cells.Lens (render functions) stays in cells because
+it's about terminal rendering.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Projection + Lens dual | Write-side vs read-side projections |
+| Zoom + scope orthogonal | Independent control of depth and filtering |
+| Per-peer lens | Each peer can have default lens based on role |
+| Lens as fact | `emit('lens', zoom=2)` persists lens changes |
+| Split placement | Core (ticks) vs render (cells) |
+
+### Recommendation
+
+1. Add core `Lens` dataclass to `libs/ticks/src/ticks/lens.py`
+2. Keep render lenses in `libs/cells/src/cells/_lens.py`
+3. Export both from their respective `__init__.py`
+
+The naming collision is intentional — they're related concepts at different
+levels. ticks.Lens is configuration; cells.Lens is implementation.

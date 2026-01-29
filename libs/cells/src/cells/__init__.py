@@ -17,6 +17,7 @@ from .block import Block, Wrap
 
 # Composition
 from .compose import Align, join_horizontal, join_vertical, pad, border, truncate, vslice
+from .viewport import Viewport
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 
 # Output
@@ -63,6 +64,7 @@ __all__ = [
     "border",
     "truncate",
     "vslice",
+    "Viewport",
     "BorderChars",
     "ROUNDED",
     "HEAVY",

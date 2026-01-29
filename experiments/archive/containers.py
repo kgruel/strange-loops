@@ -15,7 +15,7 @@ import re
 
 from facts import Fact
 from ticks import Stream, Projection
-from shapes import Shape, Facet, Fold
+from specs import Shape, Facet, Fold
 from cells import (
     Surface, Block, Style,
     shape_lens,

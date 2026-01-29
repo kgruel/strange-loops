@@ -25,7 +25,7 @@ import sys
 from datetime import datetime, timezone
 
 from facts import Fact
-from shapes import Facet, Fold, Shape
+from specs import Facet, Fold, Shape
 from ticks import Tick
 
 

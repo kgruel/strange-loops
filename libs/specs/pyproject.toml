@@ -1,7 +1,7 @@
 [project]
-name = "shapes"
+name = "specs"
 version = "0.1.0"
-description = "Declarative schema shapes: Facet, Fold, Shape"
+description = "Declarative schema specs: Facet, Fold, Spec"
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
@@ -20,13 +20,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shapes"]
+packages = ["src/specs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["src/shapes"]
+source = ["src/specs"]
 branch = true
 
 [tool.coverage.report]

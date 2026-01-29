@@ -23,12 +23,12 @@ engine's state → Tick (name = fold kind, payload = single engine state,
 origin = vertex name) and optionally resets. Fold-before-boundary: if
 boundary kind == fold kind, payload folds first. Manual `tick()` unchanged
 (snapshots all engines, no reset). `Projection.reset()` added to support
-engine reset. Primitive params only — no Boundary import from shapes.
+engine reset. Primitive params only — no Boundary import from specs.
 
 **(E) Stream[Tick] downstream validated** — Integration tests prove:
 boundary → Stream[Tick] → Projection receives Tick; two-level nested
 loops (upstream facts → boundary Tick → downstream Vertex folds Ticks);
-Shape.boundary descriptor wired to Vertex.register at composition point.
+Spec.boundary descriptor wired to Vertex.register at composition point.
 
 122 tests across 5 test files.
 
@@ -42,14 +42,14 @@ Added `py.typed` marker. Removed dead pytest config (`pythonpath`, empty
 
 ## Closed
 - **Stream[Tick] downstream** — Validated. Integration tests prove boundary
-  Tick → Stream → consumer, nested loops, and Shape→Vertex wiring.
+  Tick → Stream → consumer, nested loops, and Spec→Vertex wiring.
 - **Vertex async receive** — Closed by design. Vertex is a sync fold machine.
   `receive()` returns `Tick | None` — the return value is the output channel.
   The Consumer protocol (`async consume() -> None`) has no return channel, so
   Vertex doesn't implement it directly. The async bridge lives at the
   composition point (~5 lines) where the real decisions are: extract
   kind/payload from event type, call receive, route Tick to downstream
-  Stream. Same pattern as the Fact→Shape bridge. If boilerplate accumulates
+  Stream. Same pattern as the Fact→Spec bridge. If boilerplate accumulates
   across integrations, extract a thin convenience then.
 
 ## Open

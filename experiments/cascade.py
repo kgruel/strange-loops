@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from peers import Peer, delegate
 from ticks import Tick, Vertex, Stream
-from shapes import Shape, Facet, Boundary
+from specs import Shape, Facet, Boundary
 from cells import Surface, Block, Style, join_vertical, join_horizontal, border
 
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from facts import Fact
 from ticks import Stream, Projection, Tick
-from shapes import Facet, Fold, Shape
+from specs import Facet, Fold, Shape
 
 
 # ---------------------------------------------------------------------------

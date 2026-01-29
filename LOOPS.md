@@ -24,7 +24,7 @@ Five primitives. Everything else is composition.
 Fact     what happened       kind + ts + payload
 Peer     who observed        name + horizon + potential
 Tick     when a cycle ended  name + ts + payload + origin
-Shape    how state folds     facets + folds + boundary
+Spec     how state folds     facets + folds + boundary
 Vertex   where loops meet    routes facts, manages folds, produces ticks
 ```
 
@@ -42,8 +42,8 @@ fold state is snapshot into a Tick. The Tick is the output of one loop and
 can be the input of another. `origin` identifies which vertex produced it.
 Ticks are how loops nest.
 
-**Shape** — The fold contract. Declares what fields exist (facets) and how
-they accumulate (folds). `Shape.apply(state, payload) -> state` is pure.
+**Spec** — The fold contract. Declares what fields exist (facets) and how
+they accumulate (folds). `Spec.apply(state, payload) -> state` is pure.
 An optional `boundary` declares which fact kind triggers a Tick.
 
 **Vertex** — Where loops intersect. Facts arrive, get routed by `kind` to
@@ -67,7 +67,7 @@ Peer observes ──→ Fact(kind, ts, payload)
                  │  Route by kind│
                  │   │   │   │   │
                  │   ▼   ▼   ▼   │
-                 │  Fold Fold Fold│    Shape.apply() per kind
+                 │  Fold Fold Fold│    Spec.apply() per kind
                  │   │   │   │   │
                  │   └───┴───┘   │
                  │       │       │

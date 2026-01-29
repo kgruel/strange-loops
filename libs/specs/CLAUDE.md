@@ -1,17 +1,17 @@
-# CLAUDE.md — shapes
+# CLAUDE.md — specs
 
 Data contracts and fold rules. Answers: **how does raw data become state?**
 
 ## Build & Test
 
 ```bash
-uv run --package shapes pytest libs/shapes/tests
+uv run --package specs pytest libs/specs/tests
 ```
 
 ## Atom
 
 ```
-Shape
+Spec
  ├─ name: str                      # identity (matches Fact.kind by convention)
  ├─ about: str                     # human description
  ├─ input_facets: tuple[Facet, ...]  # what incoming payloads contain
@@ -28,13 +28,14 @@ Boundary
 
 | Export | Kind | Purpose |
 |--------|------|---------|
-| `Shape` | frozen dataclass | facets + folds + boundary + apply |
+| `Spec` | frozen dataclass | facets + folds + boundary + apply |
+| `Shape` | alias | backward compat alias for Spec |
 | `Facet` | frozen dataclass | name + kind (+ optional flag) |
 | `Fold` | frozen dataclass | op + target + props |
 | `Boundary` | frozen dataclass | kind + reset (cycle completion) |
 | `ValidationError` | exception | contract violation |
 
-### Shape Methods
+### Spec Methods
 
 | Method | Purpose |
 |--------|---------|
@@ -55,9 +56,9 @@ Boundary
 ## Invariants
 
 - All types frozen. `Fold.props` wrapped in `MappingProxyType`.
-- `Shape.apply()` is pure: copies state, applies folds, returns new dict. Never mutates input.
-- `Shape.apply()` does not check boundary — boundary is declarative, checked externally by the fold engine.
-- A Shape with no boundary (`None`) folds continuously — no cycle, no Tick produced.
+- `Spec.apply()` is pure: copies state, applies folds, returns new dict. Never mutates input.
+- `Spec.apply()` does not check boundary — boundary is declarative, checked externally by the fold engine.
+- A Spec with no boundary (`None`) folds continuously — no cycle, no Tick produced.
 - Fold closures built by `engine.py` at call time from Fold descriptors.
 - `Facet.kind` is a string from: str, int, float, bool, dict, list, set, datetime.
 - `Facet.from_type_str("int?")` parses optional suffix.
@@ -65,25 +66,25 @@ Boundary
 ## Pipeline Role
 
 ```
-Fact.payload ──→ Shape.apply(state, payload) ──→ new state
+Fact.payload ──→ Spec.apply(state, payload) ──→ new state
                       │
-Shape is the contract at every boundary:
+Spec is the contract at every boundary:
   - Describes what input looks like (input_facets)
   - Describes what state looks like (state_facets)
   - Describes how input becomes state (folds)
 
-Projection uses: Projection(initial=shape.initial_state(), fold=shape.apply)
+Projection uses: Projection(initial=spec.initial_state(), fold=spec.apply)
 ```
 
 ## Source Layout
 
 ```
-src/shapes/
-  __init__.py    # Re-exports: Boundary, Facet, Fold, Shape, ValidationError
+src/specs/
+  __init__.py    # Re-exports: Boundary, Facet, Fold, Shape, Spec, ValidationError
   boundary.py    # Boundary (kind + reset)
   facet.py       # Facet (name + kind + optional)
   fold.py        # Fold (op + target + props)
-  shape.py       # Shape (facets + folds + boundary + apply)
+  spec.py        # Spec (facets + folds + boundary + apply) + Shape alias
   engine.py      # Fold closure builder (_make_latest, _make_count, etc.)
   types.py       # initial_value, coerce_value, type_matches, ValidationError
 tests/

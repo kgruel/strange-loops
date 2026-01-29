@@ -434,7 +434,7 @@ class TestShapeBoundaryToVertex:
     """
 
     def test_shape_boundary_wires_to_vertex(self):
-        from shapes import Boundary, Facet, Fold, Shape
+        from specs import Boundary, Facet, Fold, Shape
 
         shape = Shape(
             name="container-health",
@@ -470,7 +470,7 @@ class TestShapeBoundaryToVertex:
         assert v.state("container-health") == 0
 
     def test_shape_boundary_no_reset(self):
-        from shapes import Boundary, Facet, Fold, Shape
+        from specs import Boundary, Facet, Fold, Shape
 
         shape = Shape(
             name="deploy-count",
@@ -499,7 +499,7 @@ class TestShapeBoundaryToVertex:
         assert v.state("deploy") == 3
 
     def test_shape_without_boundary(self):
-        from shapes import Facet, Fold, Shape
+        from specs import Facet, Fold, Shape
 
         shape = Shape(
             name="simple-counter",

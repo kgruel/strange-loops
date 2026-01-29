@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 
 from facts import Fact
 from ticks import Tick, Vertex
-from shapes import Shape, Facet, Fold
+from specs import Shape, Facet, Fold
 from cells import Surface, Block, Style, join_vertical, border
 
 

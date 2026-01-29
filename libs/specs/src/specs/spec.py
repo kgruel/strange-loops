@@ -1,4 +1,4 @@
-"""Shape: data contracts composed of facets and fold rules."""
+"""Spec: data contracts composed of facets and fold rules."""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ from .types import initial_value
 
 
 @dataclass(frozen=True)
-class Shape:
+class Spec:
     """Data contract: input facets + state facets + fold rules.
 
-    A Shape defines the contract for transforming events into state:
+    A Spec defines the contract for transforming events into state:
     - input_facets: what the incoming events must contain
     - state_facets: what the accumulated state looks like
     - folds: how events update state
 
     Attributes:
-        name: Unique identifier for this shape.
+        name: Unique identifier for this spec.
         about: Human-readable description.
         input_facets: Facets expected in incoming events.
         state_facets: Facets in the accumulated state.
@@ -78,3 +78,7 @@ class Shape:
         for fn in build_fold_fns(self.folds):
             fn(new, payload)
         return new
+
+
+# Backward compatibility alias (deprecated)
+Shape = Spec

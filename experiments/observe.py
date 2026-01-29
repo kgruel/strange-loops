@@ -30,7 +30,7 @@ from collections import deque
 
 from peers import Peer, delegate
 from ticks import Vertex
-from shapes import Shape, Facet
+from specs import Shape, Facet
 from cells import Surface, Block, Style, join_vertical, join_horizontal, border
 
 

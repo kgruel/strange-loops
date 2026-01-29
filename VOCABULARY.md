@@ -109,14 +109,14 @@ That's the smallest live system: a loop that runs and periodically emits ticks.
 |------------|--------------|---------|
 | Peer | `Peer` | peers |
 | Fact | `Fact` | facts |
-| Spec | `Shape` | shapes |
+| Spec | `Spec` | specs |
 | Tick | `Tick` | ticks |
 | Cell | `Cell` | cells |
 | Loop | fold engine in `Vertex` | ticks |
 | Vertex | `Vertex` | ticks |
 | Surface | `Surface` | cells |
 
-The code uses "Shape" where this vocabulary says "Spec". The concepts align; the name may migrate.
+Vocabulary and code now use the same names.
 
 ---
 

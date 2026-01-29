@@ -1,9 +1,9 @@
-"""Tests for shapes core types: Facet, Fold, Shape, Boundary."""
+"""Tests for specs core types: Facet, Fold, Spec, Boundary."""
 
 import pytest
 
-from shapes import Boundary, Facet, Fold, Shape, ValidationError
-from shapes.types import coerce_value, initial_value, type_matches
+from specs import Boundary, Facet, Fold, Shape, ValidationError
+from specs.types import coerce_value, initial_value, type_matches
 
 
 class TestFacet:

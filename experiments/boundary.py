@@ -26,7 +26,7 @@ from collections import deque
 
 from facts import Fact
 from ticks import Tick, Vertex
-from shapes import Shape, Facet, Fold, Boundary
+from specs import Shape, Facet, Fold, Boundary
 from cells import Surface, Block, Style, join_vertical, border
 
 

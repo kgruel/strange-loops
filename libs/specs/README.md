@@ -1,11 +1,11 @@
-# shapes
+# specs
 
-Declarative schema shapes: Facet, Fold, Shape
+Declarative schema specs: Facet, Fold, Spec
 
 ## Atom
 
 ```
-Shape
+Spec
  ├─ name: str
  ├─ about: str
  ├─ input_facets: tuple[Facet, ...]    # what events look like
@@ -30,7 +30,7 @@ Boundary
 ## Usage
 
 ```python
-from shapes import Facet, Fold, Shape
+from specs import Facet, Fold, Spec
 
 # Define what events look like
 input_facets = (
@@ -53,7 +53,7 @@ folds = (
     Fold("count", "count"),
 )
 
-shape = Shape(
+spec = Spec(
     name="host_monitor",
     about="Track host CPU readings",
     input_facets=input_facets,
@@ -61,19 +61,20 @@ shape = Shape(
     folds=folds,
 )
 
-state = shape.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
+state = spec.initial_state()  # {"hosts": {}, "readings": [], "count": 0}
 ```
 
 ## API
 
 | Export | Purpose |
 |--------|---------|
-| `Facet` | Named, typed face of a shape (name + kind) |
+| `Facet` | Named, typed face of a spec (name + kind) |
 | `Fold` | Transformation rule (op + target + props) |
 | `Boundary` | Cycle completion declaration (kind + reset) |
-| `Shape` | Complete contract: input facets + state facets + folds + boundary |
-| `Shape.apply()` | Execute folds: pure dict → dict |
-| `Shape.initial_state()` | Generate initial state from state facets |
+| `Spec` | Complete contract: input facets + state facets + folds + boundary |
+| `Shape` | Backward compat alias for Spec |
+| `Spec.apply()` | Execute folds: pure dict → dict |
+| `Spec.initial_state()` | Generate initial state from state facets |
 
 ### Fold operations
 

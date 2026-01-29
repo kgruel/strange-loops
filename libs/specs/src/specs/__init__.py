@@ -1,21 +1,21 @@
-"""shapes — Data contracts for the reactive data ecosystem.
+"""specs — Data contracts for the reactive data ecosystem.
 
-shapes = data contracts (how), defining:
+specs = data contracts (how), defining:
 - Facet: atomic face (name + kind)
 - Fold: transformation rule (upsert, latest, collect, count, sum)
-- Shape: composed contract (facets + folds)
+- Spec: composed contract (facets + folds)
 
 Part of the ecosystem:
 - facts = semantic atoms (what)
 - ticks = temporal atoms (when)
-- shapes = data contracts (how)
+- specs = data contracts (how)
 - cells = spatial atoms (where)
 """
 
 from .boundary import Boundary
 from .facet import Facet
 from .fold import Fold
-from .shape import Shape
+from .spec import Shape, Spec
 from .types import ValidationError
 
-__all__ = ["Boundary", "Facet", "Fold", "Shape", "ValidationError"]
+__all__ = ["Boundary", "Facet", "Fold", "Shape", "Spec", "ValidationError"]

@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from ticks import Tick, Vertex
-from shapes import Shape, Facet, Boundary
+from specs import Shape, Facet, Boundary
 
 
 # -- Shapes ------------------------------------------------------------------

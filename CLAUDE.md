@@ -18,7 +18,7 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 | Fact | kind + ts + payload | *what happened* |
 | Peer | name + horizon + potential | *who observed* |
 | Tick | name + ts + payload + origin | *when a cycle completed* |
-| Shape | facets + folds + boundary | *how state accumulates* |
+| Spec | facets + folds + boundary | *how state accumulates* |
 | Vertex | routes + folds + ticks | *where loops meet* |
 
 Cell is a surface primitive (terminal), not a loop atom.
@@ -38,7 +38,7 @@ libs/
   peers/    Identity: name + horizon + potential
   facts/    Observation: kind + ts + payload
   ticks/    Temporal: Tick, Vertex, Store, Stream, Projection
-  shapes/   Contract: Facet, Fold, Boundary, Shape
+  specs/    Contract: Facet, Fold, Boundary, Spec
   cells/    Surface: Cell, Block, Buffer, Lens, Surface
 
 experiments/   Integration layer — wires libs together
@@ -53,7 +53,7 @@ Each lib has its own `CLAUDE.md` (API, invariants) and `HANDOFF.md` (changelog).
 Peer observes ──→ Fact(kind, ts, payload)
                         │
                         ▼
-                    Vertex ── routes by kind ── Fold (Shape.apply)
+                    Vertex ── routes by kind ── Fold (Spec.apply)
                         │                           │
                         │                      state accumulates
                         │                           │
@@ -71,8 +71,8 @@ Same primitive at every level. Loops nest.
 
 - Libs are independent — no cross-lib imports. Composition in experiments.
 - Immutable by default — frozen dataclasses, pure functions
-- Shape is the contract — describes structure and fold operations
-- `Projection(initial, fold=shape.apply)` — no bridge class needed
+- Spec is the contract — describes structure and fold operations
+- `Projection(initial, fold=spec.apply)` — no bridge class needed
 - Vertex is sync — async bridge lives at composition point
 
 ## Conventions
@@ -80,7 +80,7 @@ Same primitive at every level. Loops nest.
 **Kind namespacing:** Infrastructure facts prefixed by origin (`ui.key`, `ui.action`).
 Domain facts stay bare (`"health"`, `"deploy"`).
 
-**Kind → Shape naming:** Name Shape after the Fact kind it folds. Legibility, not dispatch.
+**Kind → Spec naming:** Name Spec after the Fact kind it folds. Legibility, not dispatch.
 
 ## References
 

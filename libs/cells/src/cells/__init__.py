@@ -12,7 +12,8 @@ from .search import Search, filter_contains, filter_prefix, filter_fuzzy
 from .layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
 from .lens import Lens, shape_lens, SHAPE_LENS
 from .span import Span, Line
-from .keyboard import KeyboardInput
+from .keyboard import KeyboardInput, Input
+from .mouse import MouseEvent, MouseButton, MouseAction
 from .app import Surface, Emit, LifecycleHook
 from .components import (
     SpinnerState, SpinnerFrames, DOTS, LINE, BRAILLE, spinner,
@@ -72,6 +73,10 @@ __all__ = [
     "Span",
     "Line",
     "KeyboardInput",
+    "Input",
+    "MouseEvent",
+    "MouseButton",
+    "MouseAction",
     "Surface",
     "Emit",
     "LifecycleHook",

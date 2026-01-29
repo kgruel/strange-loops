@@ -1,4 +1,4 @@
-"""Terminal cbreak-mode keyboard input context manager."""
+"""Terminal cbreak-mode keyboard and mouse input context manager."""
 
 from __future__ import annotations
 
@@ -8,8 +8,13 @@ import sys
 import termios
 import tty
 
+from .mouse import MouseEvent, parse_sgr_mouse
+
 # Timeout (seconds) to wait for bytes following ESC
 _ESC_TIMEOUT = 0.005
+
+# Union type for input events
+Input = str | MouseEvent
 
 # CSI final byte → key name (no parameters)
 _CSI_FINAL: dict[str, str] = {
@@ -50,13 +55,15 @@ class KeyboardInput:
 
     Usage:
         with KeyboardInput() as kb:
-            key = kb.get_key()  # returns str | None (non-blocking)
+            inp = kb.get_input()  # returns str | MouseEvent | None (non-blocking)
+            key = kb.get_key()    # returns str | None (ignores mouse events)
     """
 
     def __init__(self):
         self._old_settings = None
         self._available = True
         self._fd: int = -1
+        self._mouse_enabled = False
 
     def __enter__(self):
         try:
@@ -102,13 +109,22 @@ class KeyboardInput:
         # ESC followed by something else — treat as escape
         return "escape"
 
-    def _read_csi(self) -> str:
+    def _read_csi(self) -> Input:
         """Read a CSI sequence: parameter bytes, then final byte.
 
         CSI structure: ESC [ <params: 0x30-0x3F>* <intermediate: 0x20-0x2F>* <final: 0x40-0x7E>
-        Drains all bytes through the final byte, returns named key or "escape".
+        Drains all bytes through the final byte, returns named key, MouseEvent, or "escape".
         """
-        params: list[bytes] = []
+        # Check for SGR mouse prefix '<'
+        first = self._read_byte(_ESC_TIMEOUT)
+        if first is None:
+            return "escape"
+
+        if first == b"<":
+            # SGR mouse sequence
+            return self._read_sgr_mouse()
+
+        params: list[bytes] = [first]
         while True:
             b = self._read_byte(_ESC_TIMEOUT)
             if b is None:
@@ -126,6 +142,23 @@ class KeyboardInput:
             # Parameter or intermediate byte — accumulate
             params.append(b)
 
+    def _read_sgr_mouse(self) -> Input:
+        """Read SGR mouse sequence after CSI <.
+
+        Format: CSI < Cb ; Cx ; Cy M (press) or CSI < Cb ; Cx ; Cy m (release)
+        """
+        params: list[bytes] = []
+        while True:
+            b = self._read_byte(_ESC_TIMEOUT)
+            if b is None:
+                return "escape"
+            code = b[0]
+            if code in (0x4D, 0x6D):  # 'M' or 'm'
+                param_str = b"".join(params).decode("ascii", errors="replace")
+                event = parse_sgr_mouse(param_str, chr(code))
+                return event if event else "escape"
+            params.append(b)
+
     def _read_ss3(self) -> str:
         """Read an SS3 sequence: ESC O <final byte>."""
         b = self._read_byte(_ESC_TIMEOUT)
@@ -133,13 +166,14 @@ class KeyboardInput:
             return "escape"
         return _SS3.get(chr(b[0]), "escape")
 
-    def get_key(self) -> str | None:
-        """Non-blocking key read. Handles escape sequences atomically.
+    def get_input(self) -> Input | None:
+        """Non-blocking input read. Returns key string, MouseEvent, or None.
 
-        Returns named keys ("up", "down", "left", "right", "home", "end",
-        "escape", "backspace", "enter", "delete", "page_up", "page_down",
-        "insert", "shift_tab", "f1"-"f4") or single character strings.
-        Returns None if no key is available.
+        Handles escape sequences atomically. Returns named keys ("up", "down",
+        "left", "right", "home", "end", "escape", "backspace", "enter",
+        "delete", "page_up", "page_down", "insert", "shift_tab", "f1"-"f4"),
+        single character strings, or MouseEvent for mouse input.
+        Returns None if no input is available.
         """
         if not self._available:
             return None
@@ -178,3 +212,14 @@ class KeyboardInput:
                 break
             buf.extend(cont)
         return buf.decode("utf-8", errors="replace")
+
+    def get_key(self) -> str | None:
+        """Non-blocking key read. Ignores mouse events.
+
+        Returns named keys or single character strings.
+        Returns None if no key is available (or if input was a mouse event).
+        """
+        inp = self.get_input()
+        if isinstance(inp, str):
+            return inp
+        return None

@@ -10,6 +10,7 @@ from .buffer import Buffer
 from .layer import Layer, process_key as _process_key
 from .writer import Writer
 from .keyboard import KeyboardInput
+from .mouse import MouseEvent
 
 Emit = Callable[[str, dict[str, Any]], None]
 LifecycleHook = Callable[[], Awaitable[None]]
@@ -26,6 +27,8 @@ class Surface:
         self,
         *,
         fps_cap: int = 60,
+        enable_mouse: bool = False,
+        mouse_all_motion: bool = False,
         on_emit: Emit | None = None,
         on_start: LifecycleHook | None = None,
         on_stop: LifecycleHook | None = None,
@@ -37,6 +40,8 @@ class Surface:
         self._keyboard = KeyboardInput()
         self._running = False
         self._dirty = True
+        self._enable_mouse = enable_mouse
+        self._mouse_all_motion = mouse_all_motion
         self._on_emit = on_emit
         self._on_start = on_start
         self._on_stop = on_stop
@@ -46,6 +51,8 @@ class Surface:
         self._running = True
         self._writer.enter_alt_screen()
         self._writer.hide_cursor()
+        if self._enable_mouse:
+            self._writer.enable_mouse(all_motion=self._mouse_all_motion)
 
         # Initial sizing
         width, height = self._writer.size()
@@ -63,16 +70,26 @@ class Surface:
                     await self._on_start()
 
                 while self._running:
-                    # Drain all available keypresses before rendering
-                    had_key = False
+                    # Drain all available input before rendering
+                    had_input = False
                     while True:
-                        key = self._keyboard.get_key()
-                        if key is None:
+                        inp = self._keyboard.get_input()
+                        if inp is None:
                             break
-                        self.on_key(key)
-                        self.emit("ui.key", key=key)
+                        if isinstance(inp, MouseEvent):
+                            self.on_mouse(inp)
+                            self.emit(
+                                "ui.mouse",
+                                action=inp.action.name,
+                                button=inp.button.name,
+                                x=inp.x,
+                                y=inp.y,
+                            )
+                        else:
+                            self.on_key(inp)
+                            self.emit("ui.key", key=inp)
                         self._dirty = True
-                        had_key = True
+                        had_input = True
 
                     # Advance state (animations, timers)
                     self.update()
@@ -84,7 +101,7 @@ class Surface:
                         self._flush()
 
                     # Adaptive sleep: short yield when active, full frame sleep when idle
-                    if had_key or self._dirty:
+                    if had_input or self._dirty:
                         await asyncio.sleep(0.001)
                     else:
                         await asyncio.sleep(1.0 / self._fps_cap)
@@ -92,6 +109,8 @@ class Surface:
             if self._on_stop is not None:
                 await self._on_stop()
             loop.remove_signal_handler(signal.SIGWINCH)
+            if self._enable_mouse:
+                self._writer.disable_mouse()
             self._writer.show_cursor()
             self._writer.exit_alt_screen()
 
@@ -109,6 +128,9 @@ class Surface:
 
     def on_key(self, key: str) -> None:
         """Called on keypress. Override to dispatch to focused component."""
+
+    def on_mouse(self, event: MouseEvent) -> None:
+        """Called on mouse event. Override to handle clicks, drags, scrolls."""
 
     def emit(self, kind: str, **data: Any) -> None:
         """Emit an observation. No-op if no callback registered."""

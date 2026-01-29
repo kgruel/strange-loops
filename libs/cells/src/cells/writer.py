@@ -165,6 +165,27 @@ class Writer:
         self._stream.write("\x1b[?25h")
         self._stream.flush()
 
+    def enable_mouse(self, *, all_motion: bool = False) -> None:
+        """Enable SGR mouse tracking.
+
+        Args:
+            all_motion: If True, report all mouse motion (mode 1003).
+                        If False, only report button events and drags (mode 1002).
+        """
+        # Mode 1002 = button-event tracking (press, release, drag)
+        # Mode 1003 = any-event tracking (all motion, high volume)
+        tracking_mode = 1003 if all_motion else 1002
+        self._stream.write(f"\x1b[?{tracking_mode}h")  # Enable tracking
+        self._stream.write("\x1b[?1006h")  # Enable SGR encoding
+        self._stream.flush()
+
+    def disable_mouse(self) -> None:
+        """Disable mouse tracking."""
+        self._stream.write("\x1b[?1002l")  # Disable button-event
+        self._stream.write("\x1b[?1003l")  # Disable any-event
+        self._stream.write("\x1b[?1006l")  # Disable SGR encoding
+        self._stream.flush()
+
 
 def print_block(block: "Block", stream: TextIO = sys.stdout) -> None:
     """Print a Block to a stream with ANSI styling, without TUI.

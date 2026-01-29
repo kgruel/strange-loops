@@ -11,7 +11,8 @@ import tty
 from ._mouse import MouseEvent, parse_sgr_mouse
 
 # Timeout (seconds) to wait for bytes following ESC
-_ESC_TIMEOUT = 0.005
+# 50ms handles SSH latency while still feeling responsive for bare ESC
+_ESC_TIMEOUT = 0.050
 
 # Union type for input events
 Input = str | MouseEvent
@@ -124,6 +125,12 @@ class KeyboardInput:
             # SGR mouse sequence
             return self._read_sgr_mouse()
 
+        # Check if first byte is already the final byte (simple sequences like ESC [ A)
+        code = first[0]
+        if 0x40 <= code <= 0x7E:
+            return _CSI_FINAL.get(chr(code), "escape")
+
+        # Accumulate parameter bytes until final byte
         params: list[bytes] = [first]
         while True:
             b = self._read_byte(_ESC_TIMEOUT)

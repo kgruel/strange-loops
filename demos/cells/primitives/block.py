@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Demo 04: Block — immutable rectangles for composition.
+"""Block — immutable rectangles for composition.
 
 Block is a rectangle of Cells with known dimensions.
 Unlike Buffer, blocks are immutable — you compose them, not mutate them.
 This is the unit of composition for building UIs.
 
-Run: uv run python demos/demo_04_block.py
+Run: uv run python demos/cells/primitives/block.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cells import Block, Style, Wrap
 from cells.tui import Buffer

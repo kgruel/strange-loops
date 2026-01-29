@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Demo 01: Cell and Style — the atomic unit.
+"""Cell and Style — the atomic unit.
 
 A Cell is a single character with a Style. That's it.
 Style holds colors (fg/bg) and attributes (bold, italic, etc).
 Both are immutable (frozen dataclasses).
 
-Run: uv run python demos/demo_01_cell.py
+Run: uv run python demos/cells/primitives/cell.py
 """
 
 from cells import Cell, Style, EMPTY_CELL

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Demo 09: Layer — modal stacking for input and rendering.
+"""Layers — modal stacking for input and rendering.
 
 Layer bundles input handling and rendering for modal UI:
 - Base layer handles normal interaction
 - Push overlays (help, settings) on top
 - Pop to dismiss and return to previous layer
 
-Run: uv run python demos/demo_09_layer.py
+Run: uv run python demos/cells/apps/layers.py
 Press 'h' for help, 's' for settings, 'q' to quit.
 """
 
@@ -205,7 +205,7 @@ def make_base_layer() -> Layer[None]:
 
 # -- App --
 
-class Demo09App(Surface):
+class LayersApp(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState(layers=(make_base_layer(),))
@@ -226,4 +226,4 @@ class Demo09App(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(Demo09App().run())
+    asyncio.run(LayersApp().run())

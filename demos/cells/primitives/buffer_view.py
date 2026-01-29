@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Demo 03: BufferView — clipped, translated regions.
+"""BufferView — clipped, translated regions.
 
 BufferView wraps a Buffer region with coordinate translation.
 Write at (0,0) in the view, it appears at the view's origin in the buffer.
 Writes outside the view bounds are silently clipped.
 
-Run: uv run python demos/demo_03_buffer_view.py
+Run: uv run python demos/cells/primitives/buffer_view.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cells import Style
 from cells.tui import Buffer

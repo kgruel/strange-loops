@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo: Big Text — block character rendering with multiple sizes and styles.
+"""Big Text — block character rendering with multiple sizes and styles.
 
 Features:
 - Size 1 (3-row) and Size 2 (5-row) fonts
@@ -7,7 +7,7 @@ Features:
 - Rainbow color cycling
 - Multiple demo modes
 
-Run: uv run python demos/cells/demo_big_text.py
+Run: uv run python demos/cells/apps/big_text.py
 Keys: 1-4 modes, s=size, f=format, q=quit
 """
 

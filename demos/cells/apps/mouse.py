@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo: Mouse input — drawable canvas with click, drag, and scroll.
+"""Mouse — drawable canvas with click, drag, and scroll.
 
 Features:
 - Click to place colored dots
@@ -9,7 +9,7 @@ Features:
 - 'c' to clear canvas
 - 'q' to quit
 
-Run: uv run python demos/cells/demo_mouse.py
+Run: uv run python demos/cells/apps/mouse.py
 """
 
 import asyncio

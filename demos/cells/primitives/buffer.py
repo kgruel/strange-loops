@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Demo 02: Buffer — the 2D canvas.
+"""Buffer — the 2D canvas.
 
 Buffer is a 2D grid of Cells. You put characters at coordinates,
 and it stores them. Writer converts the buffer to ANSI for display.
 
-Run: uv run python demos/demo_02_buffer.py
+Run: uv run python demos/cells/primitives/buffer.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cells import Style
 from cells.tui import Buffer

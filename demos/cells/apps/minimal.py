@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo 07: Surface — the async application loop.
+"""Minimal — the simplest Surface application.
 
 Surface handles:
 - Alternate screen (clean terminal)
@@ -9,7 +9,7 @@ Surface handles:
 
 Subclass and override: layout(), render(), on_key(), update()
 
-Run: uv run python demos/demo_07_app.py
+Run: uv run python demos/cells/apps/minimal.py
 Press 'q' to quit, arrow keys to move, 'c' to cycle colors.
 """
 
@@ -20,7 +20,7 @@ from cells.tui import Surface
 COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan"]
 
 
-class Demo07App(Surface):
+class MinimalApp(Surface):
     def __init__(self):
         super().__init__()
         self.x = 5
@@ -68,4 +68,4 @@ class Demo07App(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(Demo07App().run())
+    asyncio.run(MinimalApp().run())

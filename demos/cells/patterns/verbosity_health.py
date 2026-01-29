@@ -3,10 +3,10 @@
 
 Demonstrates the verbosity spectrum with service health monitoring:
 
-    uv run python demos/cells/demo_verbosity_health.py -q     # "5/6 healthy"
-    uv run python demos/cells/demo_verbosity_health.py        # Service list
-    uv run python demos/cells/demo_verbosity_health.py -v     # Styled table
-    uv run python demos/cells/demo_verbosity_health.py -vv    # Live TUI dashboard
+    uv run python demos/cells/patterns/verbosity_health.py -q     # "5/6 healthy"
+    uv run python demos/cells/patterns/verbosity_health.py        # Service list
+    uv run python demos/cells/patterns/verbosity_health.py -v     # Styled table
+    uv run python demos/cells/patterns/verbosity_health.py -vv    # Live TUI dashboard
 
 The TUI mode simulates live updates with changing latencies and status.
 """

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Demo: Tree and Chart Lenses — convention-based renderers.
+"""Lenses — tree and chart data visualization.
 
 Interactive demo showing tree_lens and chart_lens at different zoom levels.
 Switch between data sets and adjust zoom to see how the lenses adapt.
 
-Run: uv run python demos/cells/demo_lenses.py
+Run: uv run python demos/cells/apps/lenses.py
 
 Controls:
   Tab       Toggle between Tree and Chart lens
@@ -143,7 +143,7 @@ class AppState:
     height: int = 24
 
 
-class LensDemo(Surface):
+class LensesApp(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState()
@@ -269,4 +269,4 @@ class LensDemo(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(LensDemo().run())
+    asyncio.run(LensesApp().run())

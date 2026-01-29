@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo 08: Components — interactive UI widgets.
+"""Widgets — interactive UI components.
 
 Built-in components with state management:
 - spinner: animated loading indicator
@@ -7,7 +7,7 @@ Built-in components with state management:
 - list_view: scrollable selection list
 - text_input: editable text field
 
-Run: uv run python demos/demo_08_components.py
+Run: uv run python demos/cells/apps/widgets.py
 Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 
@@ -22,7 +22,7 @@ from cells.widgets import (
 )
 
 
-class Demo08App(Surface):
+class WidgetsApp(Surface):
     def __init__(self):
         super().__init__()
 
@@ -157,4 +157,4 @@ class Demo08App(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(Demo08App().run())
+    asyncio.run(WidgetsApp().run())

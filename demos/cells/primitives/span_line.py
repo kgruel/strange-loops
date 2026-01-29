@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Demo 06: Span and Line — styled text primitives.
+"""Span and Line — styled text primitives.
 
 Span: a run of text with one style.
 Line: a sequence of Spans that paints to a BufferView.
 
 These are lighter-weight than Block for inline styled text.
 
-Run: uv run python demos/demo_06_span_line.py
+Run: uv run python demos/cells/primitives/span_line.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cells import Style, Span, Line
 from cells.tui import Buffer

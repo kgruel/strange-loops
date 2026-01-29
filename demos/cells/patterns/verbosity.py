@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Verbosity spectrum demo — same data, four presentations.
+"""Verbosity spectrum — same data, four presentations.
 
 This demo shows how cells enables the CLI→TUI continuum. Run with different
 verbosity flags to see the same task data rendered at each level:
 
-    uv run python demos/cells/demo_verbosity.py -q     # Level 0: one line
-    uv run python demos/cells/demo_verbosity.py        # Level 1: standard output
-    uv run python demos/cells/demo_verbosity.py -v     # Level 2: styled output
-    uv run python demos/cells/demo_verbosity.py -vv    # Level 3: interactive TUI
+    uv run python demos/cells/patterns/verbosity.py -q     # Level 0: one line
+    uv run python demos/cells/patterns/verbosity.py        # Level 1: standard output
+    uv run python demos/cells/patterns/verbosity.py -v     # Level 2: styled output
+    uv run python demos/cells/patterns/verbosity.py -vv    # Level 3: interactive TUI
 
 The demo simulates a task runner showing build status. The same underlying
 TaskData structure drives all four presentations.

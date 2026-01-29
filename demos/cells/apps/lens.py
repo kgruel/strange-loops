@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Demo 10: Lens — content-to-Block transformation at zoom levels.
+"""Lens — content-to-Block transformation at zoom levels.
 
 Lens bundles a render function with zoom metadata for semantic zooming.
 This demo shows a JSON inspector with adjustable zoom levels.
 
-Run: uv run python demos/demo_10_lens.py
+Run: uv run python demos/cells/apps/lens.py
 Press '+'/'-' to adjust zoom level, 'q' to quit.
 """
 
@@ -43,7 +43,7 @@ class AppState:
     height: int = 24
 
 
-class Demo10App(Surface):
+class LensApp(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState()
@@ -110,4 +110,4 @@ class Demo10App(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(Demo10App().run())
+    asyncio.run(LensApp().run())

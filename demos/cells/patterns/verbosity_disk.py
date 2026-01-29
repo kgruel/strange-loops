@@ -3,10 +3,10 @@
 
 Demonstrates the verbosity spectrum with hierarchical data:
 
-    uv run python demos/cells/demo_verbosity_disk.py -q     # "67% used (134G/200G)"
-    uv run python demos/cells/demo_verbosity_disk.py        # Top directories list
-    uv run python demos/cells/demo_verbosity_disk.py -v     # Styled bars per directory
-    uv run python demos/cells/demo_verbosity_disk.py -vv    # TUI file tree browser
+    uv run python demos/cells/patterns/verbosity_disk.py -q     # "67% used (134G/200G)"
+    uv run python demos/cells/patterns/verbosity_disk.py        # Top directories list
+    uv run python demos/cells/patterns/verbosity_disk.py -v     # Styled bars per directory
+    uv run python demos/cells/patterns/verbosity_disk.py -vv    # TUI file tree browser
 
 The TUI mode shows a navigable tree with expandable directories.
 """

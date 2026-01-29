@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Demo 05: Compose — combining blocks.
+"""Compose — combining blocks.
 
 Blocks are immutable, so you combine them with functions:
 join_horizontal, join_vertical, pad, border, truncate.
 Each returns a new Block.
 
-Run: uv run python demos/demo_05_compose.py
+Run: uv run python demos/cells/primitives/compose.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cells import (
     Block, Style, Align,

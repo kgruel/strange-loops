@@ -20,7 +20,7 @@ def _make_surface(**kwargs):
     kb = MagicMock()
     kb.__enter__ = MagicMock(return_value=kb)
     kb.__exit__ = MagicMock(return_value=False)
-    kb.get_key.return_value = None
+    kb.get_input.return_value = None
     surface._keyboard = kb
     return surface
 

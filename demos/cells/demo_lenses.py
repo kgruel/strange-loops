@@ -17,7 +17,6 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from cells import (
-    Surface,
     Block,
     Style,
     join_vertical,
@@ -25,11 +24,9 @@ from cells import (
     pad,
     border,
     ROUNDED,
-    tree_lens,
-    chart_lens,
-    TREE_LENS,
-    CHART_LENS,
 )
+from cells.tui import Surface
+from cells.lens import tree_lens, chart_lens, TREE_LENS, CHART_LENS
 
 
 # ---------------------------------------------------------------------------

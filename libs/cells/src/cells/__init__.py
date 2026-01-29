@@ -1,41 +1,61 @@
-"""Cell-buffer rendering system."""
+"""Cell-buffer rendering system.
 
+CLI core: styled output primitives for dressing up scripts.
+
+For interactive TUI apps, import from submodules:
+    from cells.tui import Surface, Layer
+    from cells.lens import shape_lens
+    from cells.widgets import spinner, list_view
+    from cells.mouse import MouseEvent
+    from cells.effects import render_big
+"""
+
+# Primitives
 from .cell import Style, Cell, EMPTY_CELL
-from .buffer import Buffer, BufferView, CellWrite
-from .writer import Writer, ColorDepth, print_block
-from .block import Block, Wrap
-from .compose import Align, join_horizontal, join_vertical, pad, border, truncate, vslice
-from .big_text import render_big, BIG_GLYPHS, BigTextFormat
-from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
-from .region import Region
-from .focus import Focus, FocusRing, ring_next, ring_prev, linear_next, linear_prev
-from .search import Search, filter_contains, filter_prefix, filter_fuzzy
-from .layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
-from .lens import Lens, shape_lens, SHAPE_LENS, tree_lens, TREE_LENS, chart_lens, CHART_LENS
 from .span import Span, Line
-from .keyboard import KeyboardInput, Input
-from .mouse import MouseEvent, MouseButton, MouseAction
-from .app import Surface, Emit, LifecycleHook
-from .components import (
-    SpinnerState, SpinnerFrames, DOTS, LINE, BRAILLE, spinner,
-    ProgressState, progress_bar,
-    ListState, list_view,
-    TextInputState, text_input,
-    Column, TableState, table,
+from .block import Block, Wrap
+
+# Composition
+from .compose import Align, join_horizontal, join_vertical, pad, border, truncate, vslice
+from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
+
+# Output
+from .writer import Writer, ColorDepth, print_block
+
+# Theme
+from .theme import (
+    HEADER_BG,
+    SELECTION_BG,
+    DEBUG_BG,
+    HEADER_BASE,
+    HEADER_BOLD,
+    HEADER_DIM,
+    HEADER_CONNECTED,
+    HEADER_ERROR,
+    HEADER_SPINNER,
+    HEADER_LEVEL_FILTER,
+    FOOTER_KEY,
+    FOOTER_DIM,
+    FOOTER_ACTIVE_FILTER,
+    FILTER_PROMPT,
+    FILTER_CURSOR,
+    LEVEL_STYLES,
+    SELECTION_CURSOR,
+    SELECTION_HIGHLIGHT,
+    SOURCE_DIM,
+    DEBUG_OVERLAY,
 )
 
 __all__ = [
+    # Primitives
     "Style",
     "Cell",
     "EMPTY_CELL",
-    "Buffer",
-    "BufferView",
-    "CellWrite",
-    "Writer",
-    "ColorDepth",
-    "print_block",
+    "Span",
+    "Line",
     "Block",
     "Wrap",
+    # Composition
     "Align",
     "join_horizontal",
     "join_vertical",
@@ -43,64 +63,35 @@ __all__ = [
     "border",
     "truncate",
     "vslice",
-    "render_big",
-    "BIG_GLYPHS",
-    "BigTextFormat",
     "BorderChars",
     "ROUNDED",
     "HEAVY",
     "DOUBLE",
     "LIGHT",
     "ASCII",
-    "Region",
-    "Focus",
-    "FocusRing",
-    "ring_next",
-    "ring_prev",
-    "linear_next",
-    "linear_prev",
-    "Search",
-    "filter_contains",
-    "filter_prefix",
-    "filter_fuzzy",
-    "Layer",
-    "Stay",
-    "Pop",
-    "Push",
-    "Quit",
-    "Action",
-    "process_key",
-    "render_layers",
-    "Lens",
-    "shape_lens",
-    "SHAPE_LENS",
-    "tree_lens",
-    "TREE_LENS",
-    "chart_lens",
-    "CHART_LENS",
-    "Span",
-    "Line",
-    "KeyboardInput",
-    "Input",
-    "MouseEvent",
-    "MouseButton",
-    "MouseAction",
-    "Surface",
-    "Emit",
-    "LifecycleHook",
-    "SpinnerState",
-    "SpinnerFrames",
-    "DOTS",
-    "LINE",
-    "BRAILLE",
-    "spinner",
-    "ProgressState",
-    "progress_bar",
-    "ListState",
-    "list_view",
-    "TextInputState",
-    "text_input",
-    "Column",
-    "TableState",
-    "table",
+    # Output
+    "Writer",
+    "ColorDepth",
+    "print_block",
+    # Theme
+    "HEADER_BG",
+    "SELECTION_BG",
+    "DEBUG_BG",
+    "HEADER_BASE",
+    "HEADER_BOLD",
+    "HEADER_DIM",
+    "HEADER_CONNECTED",
+    "HEADER_ERROR",
+    "HEADER_SPINNER",
+    "HEADER_LEVEL_FILTER",
+    "FOOTER_KEY",
+    "FOOTER_DIM",
+    "FOOTER_ACTIVE_FILTER",
+    "FILTER_PROMPT",
+    "FILTER_CURSOR",
+    "LEVEL_STYLES",
+    "SELECTION_CURSOR",
+    "SELECTION_HIGHLIGHT",
+    "SOURCE_DIM",
+    "DEBUG_OVERLAY",
 ]

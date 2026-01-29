@@ -23,14 +23,14 @@ from dataclasses import dataclass, replace
 from cells import (
     Block,
     Style,
-    Surface,
-    ListState,
     border,
     join_vertical,
     join_horizontal,
     ROUNDED,
+    print_block,
 )
-from cells.writer import print_block
+from cells.tui import Surface
+from cells.widgets import ListState
 
 from .common import Verbosity, parse_verbosity, is_interactive, terminal_width
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cells.app import Surface
+from cells.tui import Surface
 
 
 def _make_surface(**kwargs):

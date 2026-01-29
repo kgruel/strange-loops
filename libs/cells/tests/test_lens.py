@@ -2,7 +2,7 @@
 
 import pytest
 
-from cells import (
+from cells.lens import (
     Lens,
     shape_lens,
     SHAPE_LENS,

@@ -1,7 +1,7 @@
 """Shared utilities for demos."""
 
-from cells import Buffer
-from cells.writer import Writer
+from cells import Writer
+from cells.tui import Buffer
 
 # Shared writer instance
 writer = Writer()

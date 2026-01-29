@@ -20,18 +20,22 @@ from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from cells import (
-    Surface, Block, Style, Span, Line,
+    Block, Style, Span, Line,
     join_horizontal, join_vertical, pad, border, truncate, vslice,
     Align, ROUNDED, HEAVY,
+    print_block,
+)
+from cells.tui import (
+    Surface, BufferView,
     Focus,
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
-    BufferView,
+)
+from cells.widgets import (
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
     ListState, list_view,
     TextInputState, text_input,
     Column, TableState, table,
-    print_block,
 )
 
 

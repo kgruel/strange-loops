@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from cells.keyboard import KeyboardInput
+from cells.tui import KeyboardInput
 
 
 class TestGetKey:

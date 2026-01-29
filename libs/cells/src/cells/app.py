@@ -10,7 +10,7 @@ from .buffer import Buffer
 from .layer import Layer, process_key as _process_key
 from .writer import Writer
 from .keyboard import KeyboardInput
-from .mouse import MouseEvent
+from ._mouse import MouseEvent
 
 Emit = Callable[[str, dict[str, Any]], None]
 LifecycleHook = Callable[[], Awaitable[None]]

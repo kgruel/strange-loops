@@ -6,8 +6,7 @@ import os
 import sys
 from enum import IntEnum
 
-from cells import Block
-from cells.writer import print_block
+from cells import Block, print_block
 
 
 class Verbosity(IntEnum):

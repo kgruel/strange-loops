@@ -23,17 +23,19 @@ from enum import Enum
 from cells import (
     Block,
     Style,
-    Surface,
-    ListState,
-    SpinnerState,
-    DOTS,
-    spinner,
     border,
     join_vertical,
     join_horizontal,
     ROUNDED,
+    print_block,
 )
-from cells.writer import print_block
+from cells.tui import Surface
+from cells.widgets import (
+    ListState,
+    SpinnerState,
+    DOTS,
+    spinner,
+)
 
 
 class HealthStatus(Enum):

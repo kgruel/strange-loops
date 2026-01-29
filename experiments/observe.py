@@ -31,7 +31,8 @@ from collections import deque
 from peers import Peer, delegate
 from ticks import Vertex
 from specs import Shape, Facet
-from cells import Surface, Block, Style, join_vertical, join_horizontal, border
+from cells import Block, Style, join_vertical, join_horizontal, border
+from cells.tui import Surface
 
 
 # -- Shapes ------------------------------------------------------------------

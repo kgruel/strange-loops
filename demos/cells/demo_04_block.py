@@ -8,7 +8,8 @@ This is the unit of composition for building UIs.
 Run: uv run python demos/demo_04_block.py
 """
 
-from cells import Buffer, Block, Style, Wrap
+from cells import Block, Style, Wrap
+from cells.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Block.text: create from a string ---

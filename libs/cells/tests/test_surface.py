@@ -1,7 +1,6 @@
 """Tests for Surface emit mechanism."""
 
-from cells.app import Surface, Emit
-from cells.layer import Layer, Stay, Pop, Quit
+from cells.tui import Surface, Emit, Layer, Stay, Pop, Quit
 
 
 class TestEmitWithCallback:

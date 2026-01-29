@@ -8,7 +8,7 @@ import sys
 import termios
 import tty
 
-from .mouse import MouseEvent, parse_sgr_mouse
+from ._mouse import MouseEvent, parse_sgr_mouse
 
 # Timeout (seconds) to wait for bytes following ESC
 _ESC_TIMEOUT = 0.005

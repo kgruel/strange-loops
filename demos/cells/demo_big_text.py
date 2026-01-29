@@ -12,11 +12,9 @@ Keys: 1-4 modes, s=size, f=format, q=quit
 """
 
 import asyncio
-from cells import (
-    Surface, Style,
-    render_big, BigTextFormat, border, pad, join_horizontal,
-    ROUNDED,
-)
+from cells import Style, border, pad, join_horizontal, ROUNDED
+from cells.tui import Surface
+from cells.effects import render_big, BigTextFormat
 
 
 # Color palettes using hex strings (the Color type supports str, int, or hex)

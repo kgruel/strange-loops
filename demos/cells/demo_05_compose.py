@@ -9,10 +9,11 @@ Run: uv run python demos/demo_05_compose.py
 """
 
 from cells import (
-    Buffer, Block, Style, Align,
+    Block, Style, Align,
     join_horizontal, join_vertical, pad, border, truncate,
     ROUNDED, HEAVY, DOUBLE,
 )
+from cells.tui import Buffer
 from demo_utils import render_buffer
 
 # --- join_horizontal: left to right ---

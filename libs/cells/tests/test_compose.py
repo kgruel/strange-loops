@@ -1,8 +1,6 @@
 """Tests for cells.compose: vslice, join_vertical."""
 
-from cells.block import Block
-from cells.cell import Style, Cell
-from cells.compose import vslice, join_vertical, Align
+from cells import Block, Style, Cell, vslice, join_vertical, Align
 
 
 def _text_block(lines: list[str], style: Style = Style()) -> Block:

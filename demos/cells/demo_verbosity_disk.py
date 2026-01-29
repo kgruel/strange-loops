@@ -21,13 +21,13 @@ from dataclasses import dataclass
 from cells import (
     Block,
     Style,
-    Surface,
     border,
     join_vertical,
     join_horizontal,
     ROUNDED,
+    print_block,
 )
-from cells.writer import print_block
+from cells.tui import Surface
 
 
 @dataclass(frozen=True)

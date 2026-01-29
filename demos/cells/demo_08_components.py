@@ -12,14 +12,13 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 
 import asyncio
-from cells import (
-    Surface, Style, Line, Span,
-    border,
+from cells import Style, Line, Span, border
+from cells.tui import Surface, FocusRing
+from cells.widgets import (
     SpinnerState, spinner,
     ProgressState, progress_bar,
     ListState, list_view,
     TextInputState, text_input,
-    FocusRing,
 )
 
 

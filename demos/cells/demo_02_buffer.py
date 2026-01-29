@@ -7,7 +7,8 @@ and it stores them. Writer converts the buffer to ANSI for display.
 Run: uv run python demos/demo_02_buffer.py
 """
 
-from cells import Buffer, Style
+from cells import Style
+from cells.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Create a buffer ---

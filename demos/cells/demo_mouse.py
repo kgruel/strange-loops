@@ -13,14 +13,9 @@ Run: uv run python demos/cells/demo_mouse.py
 """
 
 import asyncio
-from cells import (
-    Surface,
-    Block,
-    Style,
-    MouseEvent,
-    MouseButton,
-    MouseAction,
-)
+from cells import Block, Style
+from cells.tui import Surface
+from cells.mouse import MouseEvent, MouseButton, MouseAction
 
 PALETTE = [
     "#ff5555",  # red

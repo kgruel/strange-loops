@@ -35,24 +35,26 @@ from typing import Callable
 import time
 
 from cells import (
-    Surface, Block, Style, Span, Line,
+    Block, Style, Span, Line,
     join_horizontal, join_vertical, pad, border,
     ROUNDED,
+    print_block,
+)
+from cells.tui import (
+    Surface, BufferView,
     # Focus management
     Focus, ring_next, ring_prev, linear_next, linear_prev,
     # Search
     Search, filter_contains, filter_prefix, filter_fuzzy,
     # Layer
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
-    BufferView,
-    # Components for interactive demos
+)
+from cells.widgets import (
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
     ListState, list_view,
     TextInputState, text_input,
     Column, TableState, table,
-    # Output
-    print_block,
 )
 
 

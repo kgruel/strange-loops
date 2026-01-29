@@ -8,7 +8,8 @@ Writes outside the view bounds are silently clipped.
 Run: uv run python demos/demo_03_buffer_view.py
 """
 
-from cells import Buffer, Style
+from cells import Style
+from cells.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Setup: buffer with border markers ---

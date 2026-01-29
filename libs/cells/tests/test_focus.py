@@ -1,7 +1,7 @@
 """Tests for Focus primitive and navigation functions."""
 
 import pytest
-from cells import Focus, ring_next, ring_prev, linear_next, linear_prev
+from cells.tui import Focus, ring_next, ring_prev, linear_next, linear_prev
 
 
 class TestFocus:

@@ -1,7 +1,8 @@
 """Tests for big text rendering."""
 
 import pytest
-from cells import render_big, BIG_GLYPHS, BigTextFormat, Style
+from cells import Style
+from cells.effects import render_big, BIG_GLYPHS, BigTextFormat
 
 
 class TestRenderBig:

@@ -12,16 +12,15 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from cells import (
-    Surface,
     Block,
     Style,
     join_vertical,
     pad,
     border,
     ROUNDED,
-    shape_lens,
-    SHAPE_LENS,
 )
+from cells.tui import Surface
+from cells.lens import shape_lens, SHAPE_LENS
 
 
 SAMPLE_DATA = {

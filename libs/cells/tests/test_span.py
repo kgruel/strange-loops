@@ -1,8 +1,7 @@
 """Tests for cells.span: Span and Line primitives."""
 
-from cells.buffer import Buffer
-from cells.cell import Style
-from cells.span import Line, Span
+from cells import Style, Span, Line
+from cells.tui import Buffer
 
 
 class TestSpanWidth:

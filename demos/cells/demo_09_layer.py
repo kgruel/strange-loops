@@ -14,9 +14,12 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from cells import (
-    Surface, Block, Style, BufferView,
+    Block, Style,
     join_vertical, pad, border,
     ROUNDED,
+)
+from cells.tui import (
+    Surface, BufferView,
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
 )
 

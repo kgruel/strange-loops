@@ -22,16 +22,15 @@ from dataclasses import dataclass
 from cells import (
     Block,
     Style,
-    Surface,
-    ListState,
-    list_view,
     border,
     join_vertical,
     join_horizontal,
     pad,
     ROUNDED,
+    print_block,
 )
-from cells.writer import print_block
+from cells.tui import Surface
+from cells.widgets import ListState, list_view
 
 from .common import Verbosity, parse_verbosity, is_interactive, terminal_width
 

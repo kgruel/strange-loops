@@ -9,7 +9,8 @@ These are lighter-weight than Block for inline styled text.
 Run: uv run python demos/demo_06_span_line.py
 """
 
-from cells import Buffer, Style, Span, Line
+from cells import Style, Span, Line
+from cells.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Span: text + style ---

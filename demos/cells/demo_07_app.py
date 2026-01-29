@@ -14,7 +14,8 @@ Press 'q' to quit, arrow keys to move, 'c' to cycle colors.
 """
 
 import asyncio
-from cells import Surface, Block, Style, border
+from cells import Block, Style, border
+from cells.tui import Surface
 
 COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan"]
 

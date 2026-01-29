@@ -96,6 +96,9 @@ Deleted tour.py (superseded by bench.py). Pattern documented in `experiments/DEM
 - ~~test_lifecycle hanging~~ — Test mocked `get_key` but Surface calls `get_input`. Fixed.
 - ~~bench.py escape quits~~ — Changed to go back (reduce zoom, or parent slide) instead of quit.
 
+## Resolved (earlier)
+- ~~Code review fixes~~ — Fixed in 5e8558c: mouse scroll returns None for unknown values,
+  removed unused TYPE_CHECKING import from big_text.py, added modifiers to mouse emit.
+
 ## Open
-- **Code review fixes**: Three items identified but not yet addressed (mouse scroll fallback,
-  TYPE_CHECKING import, mouse modifiers in emit).
+(none)

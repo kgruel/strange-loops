@@ -23,6 +23,7 @@ from .file_store import FileStore
 from .file_writer import FileWriter
 from .tailer import Tailer
 from .forward import Forward
+from .loop import Loop
 from .vertex import Vertex
 from .source import Source, ClosableSource
 
@@ -38,6 +39,7 @@ __all__ = [
     "FileWriter",
     "Tailer",
     "Forward",
+    "Loop",
     "Vertex",
     "Source",
     "ClosableSource",

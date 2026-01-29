@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .loop import Loop
 from .projection import Projection
 from .store import Store
 from .tick import Tick
@@ -50,6 +51,7 @@ class Vertex:
     def __init__(self, name: str = "", *, store: Store | None = None) -> None:
         self._name = name
         self._engines: dict[str, _FoldEngine] = {}
+        self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._store = store
 
@@ -94,8 +96,26 @@ class Vertex:
             initial=copy.deepcopy(initial),
         )
 
+    def register_loop(self, loop: Loop) -> None:
+        """Register an explicit Loop object.
+
+        The loop's name becomes the routing kind. If the loop has a
+        boundary_kind, that kind will trigger fire() on boundary receipt.
+
+        Raises ValueError if the loop name is already registered or the
+        boundary kind is already claimed.
+        """
+        kind = loop.name
+        if kind in self._loops or kind in self._engines:
+            raise ValueError(f"Kind already registered: {kind}")
+        if loop.boundary_kind is not None:
+            if loop.boundary_kind in self._boundary_map:
+                raise ValueError(f"Boundary kind already registered: {loop.boundary_kind}")
+            self._boundary_map[loop.boundary_kind] = kind
+        self._loops[kind] = loop
+
     def receive(self, kind: str, payload: Any) -> Tick | None:
-        """Route a fact payload to the fold engine registered for `kind`.
+        """Route a fact payload to the fold engine or Loop registered for `kind`.
 
         If a Store is attached, the (kind, payload) tuple is appended
         before routing. Unregistered kinds are silently ignored — they
@@ -107,14 +127,29 @@ class Vertex:
         """
         if self._store is not None:
             self._store.append((kind, payload))
-        proj = self._engines.get(kind)
-        if proj is not None:
-            proj.projection.fold_one(payload)
+
+        # Route to _FoldEngine (legacy)
+        engine = self._engines.get(kind)
+        if engine is not None:
+            engine.projection.fold_one(payload)
+
+        # Route to Loop
+        loop = self._loops.get(kind)
+        if loop is not None:
+            loop.receive(payload)
 
         # Check boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
             return None
+
+        # Fire from Loop if registered there
+        if fold_kind in self._loops:
+            loop = self._loops[fold_kind]
+            # Loop.fire() handles reset internally
+            return loop.fire(datetime.now(timezone.utc), origin=self._name)
+
+        # Fire from _FoldEngine (legacy)
         engine = self._engines[fold_kind]
         tick = Tick(
             name=fold_kind,
@@ -129,23 +164,26 @@ class Vertex:
     def tick(self, name: str, ts: datetime) -> Tick[dict[str, Any]]:
         """Fire a temporal boundary.
 
-        Snapshots all fold engine states into a dict keyed by kind,
+        Snapshots all fold engine and Loop states into a dict keyed by kind,
         wraps in a Tick with the given name and timestamp.
         Origin is stamped from the vertex name.
         """
         state = {kind: eng.projection.state for kind, eng in self._engines.items()}
+        state.update({kind: loop.state for kind, loop in self._loops.items()})
         return Tick(name=name, ts=ts, payload=state, origin=self._name)
 
     @property
     def kinds(self) -> list[str]:
         """Registered kinds, in registration order."""
-        return list(self._engines.keys())
+        return list(self._engines.keys()) + list(self._loops.keys())
 
     def state(self, kind: str) -> Any:
         """Current fold state for a registered kind.
 
         Raises KeyError if kind is not registered.
         """
+        if kind in self._loops:
+            return self._loops[kind].state
         return self._engines[kind].projection.state
 
     def version(self, kind: str) -> int:
@@ -153,4 +191,6 @@ class Vertex:
 
         Raises KeyError if kind is not registered.
         """
+        if kind in self._loops:
+            return self._loops[kind].version
         return self._engines[kind].projection.version

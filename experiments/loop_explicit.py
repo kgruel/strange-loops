@@ -1,0 +1,570 @@
+"""Loop explicit: same as review.py but using explicit Loop + Vertex API.
+
+Demonstrates:
+  - Creating Loop objects directly with Projection
+  - Registering Loops with Vertex via register_loop()
+  - Same behavior as review.py — two loops, one vertex
+
+Run:
+    uv run python experiments/loop_explicit.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import random
+from collections import deque
+
+import json
+import time
+from pathlib import Path
+
+from peers import Peer, delegate
+from ticks import Tick, Vertex, Loop, Projection
+from shapes import Shape, Facet, Boundary
+from cells import Surface, Block, Style, join_vertical, join_horizontal, border
+
+
+# -- Shapes ------------------------------------------------------------------
+
+health_shape = Shape(
+    name="health",
+    about="Container health status per container",
+    input_facets=(Facet("container", "str"), Facet("status", "str")),
+    state_facets=(Facet("statuses", "dict"),),
+    boundary=Boundary("health.close", reset=True),
+)
+
+focus_shape = Shape(
+    name="focus",
+    about="Observer cursor position",
+    input_facets=(Facet("index", "int"),),
+    state_facets=(Facet("index", "int"),),
+)
+
+ack_shape = Shape(
+    name="ack",
+    about="Acknowledged containers this review cycle",
+    input_facets=(Facet("container", "str"), Facet("peer", "str")),
+    state_facets=(Facet("acked", "dict"),),
+    boundary=Boundary("review.complete", reset=True),
+)
+
+keys_shape = Shape(
+    name="ui.key",
+    about="Raw keystroke capture (infrastructure)",
+    input_facets=(Facet("key", "str"),),
+    state_facets=(Facet("keys", "list"), Facet("count", "int")),
+)
+
+
+# -- Folds -------------------------------------------------------------------
+
+def health_fold(state: dict, payload: dict) -> dict:
+    """Track per-container status."""
+    statuses = dict(state.get("statuses", {}))
+    statuses[payload["container"]] = payload["status"]
+    return {"statuses": statuses}
+
+
+def focus_fold(state: dict, payload: dict) -> dict:
+    """Set cursor index."""
+    return {"index": payload.get("index", 0)}
+
+
+def ack_fold(state: dict, payload: dict) -> dict:
+    """Record which peer acknowledged which container."""
+    acked = dict(state.get("acked", {}))
+    acked[payload["container"]] = payload["peer"]
+    return {"acked": acked}
+
+
+def keys_fold(state: dict, payload: dict) -> dict:
+    """Collect recent keystrokes. Infrastructure fold."""
+    keys = list(state.get("keys", []))
+    keys.append(payload["key"])
+    return {"keys": keys[-20:], "count": state.get("count", 0) + 1}
+
+
+# -- Topology ----------------------------------------------------------------
+
+CONTAINERS = ["nginx", "api", "redis", "postgres", "worker"]
+STATUSES = ["running", "running", "running", "unhealthy", "stopped"]
+
+SHAPES: list[tuple[Shape, object]] = [
+    (health_shape, health_fold),
+    (focus_shape, focus_fold),
+    (ack_shape, ack_fold),
+    (keys_shape, keys_fold),
+]
+
+
+def build_loop(shape: Shape, fold) -> Loop:
+    """Create a Loop from a Shape and fold function."""
+    projection = Projection(shape.initial_state(), fold=fold)
+    return Loop(
+        name=shape.name,
+        projection=projection,
+        boundary_kind=shape.boundary.kind if shape.boundary else None,
+        reset=shape.boundary.reset if shape.boundary else True,
+    )
+
+
+def build_vertex() -> Vertex:
+    """One vertex, four explicit Loops. Shape drives boundary wiring."""
+    v = Vertex("reviewer")
+    for shape, fold in SHAPES:
+        loop = build_loop(shape, fold)
+        v.register_loop(loop)
+    return v
+
+
+# -- Peers -------------------------------------------------------------------
+
+def build_peers() -> tuple[Peer, ...]:
+    """kyle: unrestricted. monitor: can navigate but can't ack."""
+    kyle = Peer("kyle")
+    monitor = delegate(kyle, "kyle/monitor", potential={"focus"})
+    return (kyle, monitor)
+
+
+# -- App ---------------------------------------------------------------------
+
+DIM = Style(dim=True)
+BOLD = Style(bold=True)
+ACTIVE = Style(fg="cyan", bold=True)
+
+STATUS_STYLE = {
+    "running": Style(fg="green"),
+    "unhealthy": Style(fg="yellow"),
+    "stopped": Style(fg="red"),
+}
+
+
+class LoopExplicitApp(Surface):
+    """Two loops, one vertex: timer-driven health + peer-driven review.
+
+    Same as ReviewApp but uses explicit Loop objects.
+    """
+
+    def __init__(self):
+        super().__init__(fps_cap=100, on_emit=self._make_bridge(), on_start=self._start)
+        self._w = 80
+        self._h = 24
+        self._task: asyncio.Task | None = None
+
+        self.vertex = build_vertex()
+        self._trace: deque[str] = deque(maxlen=20)
+
+        # Replay facts before wrapping (reconstructs state, doesn't re-log)
+        self._facts_replayed = self._replay_facts()
+
+        # Fact log — all raw observations
+        self._fact_log = Path("loop_explicit.jsonl").open("a")
+        # Tick log — completed cycles (boundaries fired)
+        self._tick_log = Path("loop_explicit.ticks.jsonl").open("a")
+
+        self._wrap_receive()
+
+        self.peers = build_peers()
+        self.peer_idx = 0
+        self.log: deque[str] = deque(maxlen=8)
+        self._debug_open = False
+        self._debug_width = 0
+
+        # Tick history — load from disk if available
+        self.review_ticks: list[Tick] = []
+        self.health_ticks: list[Tick] = []
+        self._load_ticks()
+        self._tick_flash: str = ""
+        self._tick_flash_ttl: int = 0
+
+        # Log restored state
+        if self._facts_replayed > 0:
+            self.log.append(f"replayed {self._facts_replayed} facts")
+        if self.review_ticks or self.health_ticks:
+            self.log.append(f"restored {len(self.review_ticks)}r + {len(self.health_ticks)}h ticks")
+
+    def _replay_facts(self) -> int:
+        """Replay facts from disk to reconstruct vertex state."""
+        fact_path = Path("loop_explicit.jsonl")
+        if not fact_path.exists():
+            return 0
+
+        count = 0
+        for line in fact_path.read_text().strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                self.vertex.receive(data["kind"], data["payload"])
+                count += 1
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+        return count
+
+    def _load_ticks(self):
+        """Load previous ticks from disk."""
+        tick_path = Path("loop_explicit.ticks.jsonl")
+        if not tick_path.exists():
+            return
+
+        from datetime import datetime, timezone
+
+        for line in tick_path.read_text().strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                tick = Tick(
+                    name=data["name"],
+                    ts=datetime.fromtimestamp(data["ts"], tz=timezone.utc),
+                    payload=data["payload"],
+                    origin=data.get("origin", ""),
+                )
+                if tick.name == "health":
+                    self.health_ticks.append(tick)
+                elif tick.name == "ack":
+                    self.review_ticks.append(tick)
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+    def _wrap_receive(self):
+        """Instrument vertex.receive() — captures events + ticks."""
+        real_receive = self.vertex.receive
+
+        def traced(kind, payload):
+            ts = time.time()
+
+            self._fact_log.write(json.dumps({"ts": ts, "kind": kind, "payload": payload}) + "\n")
+            self._fact_log.flush()
+
+            result = real_receive(kind, payload)
+            if result is not None:
+                self._trace.append(f"{kind} -> TICK {result.name}")
+
+                self._tick_log.write(json.dumps({
+                    "ts": result.ts.timestamp(),
+                    "name": result.name,
+                    "origin": result.origin,
+                    "payload": result.payload,
+                }) + "\n")
+                self._tick_log.flush()
+            else:
+                parts = " ".join(f"{k}={v}" for k, v in payload.items())
+                self._trace.append(f"{kind}  {parts}")
+            return result
+
+        self.vertex.receive = traced
+
+    @property
+    def peer(self) -> Peer:
+        return self.peers[self.peer_idx]
+
+    def _make_bridge(self):
+        """on_emit callback: potential gates + review completion check."""
+        def on_emit(kind: str, data: dict) -> None:
+            if self.peer.potential is not None and kind not in self.peer.potential:
+                self.log.append(f"blocked: {self.peer.name} cannot emit '{kind}'")
+                self.mark_dirty()
+                return
+            self.vertex.receive(kind, {**data, "peer": self.peer.name})
+            self.log.append(f"{self.peer.name}: {kind}")
+
+            if kind == "ack":
+                acked = self.vertex.state("ack").get("acked", {})
+                if len(acked) >= len(CONTAINERS) and all(
+                    c in acked for c in CONTAINERS
+                ):
+                    tick = self.vertex.receive("review.complete", {})
+                    if tick:
+                        self.review_ticks.append(tick)
+                        n = len(self.review_ticks)
+                        count = len(tick.payload.get("acked", {}))
+                        self.log.append(f"-> Review #{n} complete! ({count} acked)")
+                        self._tick_flash = f"Review #{n} complete"
+                        self._tick_flash_ttl = 8
+
+            self.mark_dirty()
+        return on_emit
+
+    # -- Lifecycle -----------------------------------------------------------
+
+    async def _start(self):
+        self._task = asyncio.create_task(self._source())
+
+    async def _source(self):
+        """External health facts + health boundary sentinel."""
+        try:
+            while True:
+                for c in CONTAINERS:
+                    status = random.choice(STATUSES)
+                    self.vertex.receive("health", {"container": c, "status": status})
+
+                tick = self.vertex.receive("health.close", {})
+                if tick:
+                    self.health_ticks.append(tick)
+                    n = len(self.health_ticks)
+                    count = len(tick.payload.get("statuses", {}))
+                    self.log.append(f"health #{n}: {count} containers")
+
+                self.mark_dirty()
+                await asyncio.sleep(3.0)
+        except asyncio.CancelledError:
+            pass
+
+    # -- Input ---------------------------------------------------------------
+
+    def _visible_containers(self) -> list[str]:
+        if self.peer.horizon is None:
+            return list(CONTAINERS)
+        return [c for c in CONTAINERS if c in self.peer.horizon]
+
+    def on_key(self, key: str) -> None:
+        self.vertex.receive("ui.key", {"key": key})
+
+        visible = self._visible_containers()
+        if not visible:
+            if key in ("q", "escape"):
+                asyncio.ensure_future(self._shutdown())
+            return
+
+        focus = self.vertex.state("focus")
+        current = focus.get("index", 0)
+        max_idx = len(visible) - 1
+
+        if key == "j":
+            self.emit("focus", index=min(current + 1, max_idx))
+        elif key == "k":
+            self.emit("focus", index=max(current - 1, 0))
+        elif key in ("enter", "return"):
+            idx = min(current, max_idx)
+            self.emit("ack", container=visible[idx])
+        elif key in ("1", "2", "3"):
+            self._select_peer(int(key) - 1)
+        elif key == "d":
+            self._debug_open = not self._debug_open
+            self.mark_dirty()
+        elif key in ("q", "escape"):
+            asyncio.ensure_future(self._shutdown())
+
+    def _select_peer(self, idx: int):
+        if idx < 0 or idx >= len(self.peers):
+            return
+        if idx == self.peer_idx:
+            return
+        self.peer_idx = idx
+        visible = self._visible_containers()
+        if visible:
+            focus = self.vertex.state("focus")
+            current = focus.get("index", 0)
+            max_idx = len(visible) - 1
+            if current > max_idx:
+                self.emit("focus", index=max_idx)
+        self.log.append(f"switched to {self.peer.name}")
+        self.mark_dirty()
+
+    async def _shutdown(self):
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._fact_log.close()
+        self._tick_log.close()
+        self.quit()
+
+    # -- Animation -----------------------------------------------------------
+
+    def update(self) -> None:
+        target = min(self._w * 2 // 5, 44) if self._debug_open else 0
+        if self._debug_width != target:
+            step = 4
+            if self._debug_width < target:
+                self._debug_width = min(self._debug_width + step, target)
+            else:
+                self._debug_width = max(self._debug_width - step, target)
+            self.mark_dirty()
+
+        if self._tick_flash_ttl > 0:
+            self._tick_flash_ttl -= 1
+            if self._tick_flash_ttl == 0:
+                self._tick_flash = ""
+            self.mark_dirty()
+
+    # -- Rendering -----------------------------------------------------------
+
+    def layout(self, width: int, height: int) -> None:
+        self._w = width
+        self._h = height
+
+    def render(self) -> None:
+        if self._buf is None:
+            return
+
+        w = self._w
+        dw = self._debug_width
+        body_w = w - dw
+        peer = self.peer
+
+        header = self._render_header(w, peer)
+
+        body_left = self._render_body(body_w, peer)
+
+        if dw >= 8:
+            body_right = self._render_debug(dw, peer, body_left.height)
+            body = join_horizontal(body_left, body_right)
+        elif dw > 0:
+            body = join_horizontal(body_left, Block.empty(dw, 1))
+        else:
+            body = body_left
+
+        composed = join_vertical(header, body)
+
+        self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
+        composed.paint(
+            self._buf.region(0, 0, self._buf.width, self._buf.height),
+            0, 0,
+        )
+
+    def _render_header(self, w: int, peer: Peer) -> Block:
+        review_n = len(self.review_ticks)
+        health_n = len(self.health_ticks)
+        selector_parts = []
+        for i, p in enumerate(self.peers):
+            tag = f" {i + 1}:{p.name} "
+            if i == self.peer_idx:
+                selector_parts.append(f"[{tag}]")
+            else:
+                selector_parts.append(f" {tag} ")
+
+        line1 = Block.text(
+            f" loop_explicit - cycle {review_n + 1}  health #{health_n} {''.join(selector_parts)}",
+            BOLD, width=w,
+        )
+
+        potential_str = "*" if peer.potential is None else ", ".join(sorted(peer.potential)) or "none"
+        flash = f"  | {self._tick_flash}" if self._tick_flash else ""
+        line2 = Block.text(
+            f" potential: {{{potential_str}}}{flash}",
+            ACTIVE if self._tick_flash else Style(fg="cyan"),
+            width=w,
+        )
+
+        return join_vertical(line1, line2)
+
+    def _render_body(self, w: int, peer: Peer) -> Block:
+        inner = w - 6
+        blocks: list[Block] = []
+
+        visible = self._visible_containers()
+        focus = self.vertex.state("focus")
+        current = min(focus.get("index", 0), max(len(visible) - 1, 0))
+        health = self.vertex.state("health")
+        statuses = health.get("statuses", {})
+        ack_state = self.vertex.state("ack")
+        acked = ack_state.get("acked", {})
+
+        container_lines: list[Block] = []
+        for i, name in enumerate(visible):
+            cursor = ">" if i == current else " "
+            status = statuses.get(name, "unknown")
+            style = STATUS_STYLE.get(status, DIM)
+
+            ack_mark = ""
+            if name in acked:
+                ack_mark = f"  [acked by {acked[name]}]"
+
+            text = f"  {cursor} {name:<12} {status:<12}{ack_mark}"
+            container_lines.append(Block.text(text, style, width=inner))
+
+        ack_progress = f"{len(acked)}/{len(CONTAINERS)}"
+        if container_lines:
+            blocks.append(border(
+                join_vertical(*container_lines),
+                title=f"containers ({len(visible)}/{len(CONTAINERS)}) acked {ack_progress}",
+                style=DIM,
+            ))
+        else:
+            blocks.append(border(
+                Block.text("  (no containers in horizon)", DIM, width=inner),
+                title="containers",
+                style=DIM,
+            ))
+
+        all_ticks = []
+        for t in self.review_ticks:
+            count = len(t.payload.get("acked", {}))
+            all_ticks.append((t.ts, f"review: {count} acked"))
+        for t in self.health_ticks:
+            count = len(t.payload.get("statuses", {}))
+            all_ticks.append((t.ts, f"health: {count} containers"))
+        all_ticks.sort(key=lambda x: x[0], reverse=True)
+
+        if all_ticks:
+            tick_lines = [
+                Block.text(f"  {desc}", DIM, width=inner)
+                for _, desc in all_ticks[:6]
+            ]
+            blocks.append(border(
+                join_vertical(*tick_lines),
+                title=f"ticks ({len(self.review_ticks)}r + {len(self.health_ticks)}h)",
+                style=DIM,
+            ))
+
+        if self.log:
+            log_lines = [Block.text(f"  {e}", DIM, width=inner) for e in self.log]
+            blocks.append(border(
+                join_vertical(*log_lines), title="log", style=DIM,
+            ))
+
+        blocks.append(Block.text(
+            " j/k nav  enter ack  1/2 peer  d debug  q quit",
+            DIM, width=w,
+        ))
+
+        return join_vertical(*blocks)
+
+    def _render_debug(self, w: int, peer: Peer, target_h: int) -> Block:
+        inner = w - 2
+        content_h = max(target_h - 2, 1)
+
+        lines: list[Block] = []
+
+        versions = "  ".join(
+            f"{k}:v{self.vertex.version(k)}" for k in self.vertex.kinds
+        )
+        lines.append(Block.text(f" {versions}", DIM, width=inner))
+        lines.append(Block.text("", DIM, width=inner))
+
+        lines.append(Block.text(
+            " trace (vertex.receive)", BOLD, width=inner,
+        ))
+        if self._trace:
+            for entry in self._trace:
+                lines.append(Block.text(
+                    f"  {entry}", Style(fg="cyan", dim=True), width=inner,
+                ))
+        else:
+            lines.append(Block.text("  (waiting)", DIM, width=inner))
+
+        while len(lines) < content_h:
+            lines.append(Block.text("", DIM, width=inner))
+
+        return border(
+            join_vertical(*lines),
+            title="debug (lens)", style=DIM,
+        )
+
+
+# -- Main --------------------------------------------------------------------
+
+async def main():
+    app = LoopExplicitApp()
+    await app.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

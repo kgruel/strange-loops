@@ -13,19 +13,32 @@ Boundary triggering: a fold engine can declare a boundary kind.
 When a fact with that kind arrives, the engine's state is snapshot
 into a Tick and optionally reset. The boundary fires after the fold
 completes (fold-before-boundary).
+
+Peer-aware receive: the Vertex gates facts against the peer's potential.
+Observer-state kinds (focus.{peer}, scroll.{peer}, selection.{peer})
+must match the acting peer.
 """
 
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .loop import Loop
 from .projection import Projection
 from .store import Store
 from .tick import Tick
+
+if TYPE_CHECKING:
+    from facts import Fact
+    from peers import Peer
+
+
+# Observer-state kind pattern: kind.{peer_name}
+_OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
 
 
 @dataclass
@@ -46,6 +59,10 @@ class Vertex:
 
     Optionally backed by a Store — if provided, every received fact
     is appended to the store before routing.
+
+    Peer-aware: receive() takes a Fact and Peer explicitly. The Vertex
+    gates facts against the peer's potential and enforces observer-state
+    kind ownership.
     """
 
     def __init__(self, name: str = "", *, store: Store | None = None) -> None:
@@ -114,17 +131,39 @@ class Vertex:
             self._boundary_map[loop.boundary_kind] = kind
         self._loops[kind] = loop
 
-    def receive(self, kind: str, payload: Any) -> Tick | None:
-        """Route a fact payload to the fold engine or Loop registered for `kind`.
+    def receive(self, fact: Fact, peer: Peer) -> Tick | None:
+        """Route a fact to the appropriate fold engine, gated by peer.
 
-        If a Store is attached, the (kind, payload) tuple is appended
-        before routing. Unregistered kinds are silently ignored — they
-        pass through to the store but don't fold.
+        Gating rules:
+        1. If peer.potential is not None and fact.kind not in potential → reject
+        2. For observer-state kinds (focus.{name}, scroll.{name}, selection.{name}),
+           the {name} must match peer.name → reject if mismatch
+
+        If a Store is attached, the fact is appended before routing.
+        Unregistered kinds are silently ignored — they pass through to the
+        store but don't fold.
 
         After folding, checks if the incoming kind triggers a boundary.
         If so, snapshots the triggered engine's state into a Tick and
         optionally resets the engine. Returns the Tick, or None.
+
+        Returns None on rejection (fact not permitted for this peer).
         """
+        kind = fact.kind
+        payload = fact.payload
+
+        # Gate 1: potential check
+        if peer.potential is not None and kind not in peer.potential:
+            return None
+
+        # Gate 2: observer-state ownership
+        match = _OBSERVER_STATE_PATTERN.match(kind)
+        if match:
+            owner_name = match.group(2)
+            if owner_name != peer.name:
+                return None
+
+        # Store the fact
         if self._store is not None:
             self._store.append((kind, payload))
 

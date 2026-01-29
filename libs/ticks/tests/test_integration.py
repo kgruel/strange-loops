@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from facts import Fact
+from peers import Peer
 from ticks import EventStore, FileWriter, Forward, Projection, Stream, Tailer, Tick, Vertex
 
 from tests.helpers import (
@@ -21,6 +23,15 @@ from tests.helpers import (
     serialize_event,
     serialize_named,
 )
+
+
+# Default unrestricted peer for integration tests
+ROOT = Peer("root")
+
+
+def fact(kind: str, **payload) -> Fact:
+    """Create a Fact for testing."""
+    return Fact.of(kind, **payload)
 
 
 class TestStreamToProjection:
@@ -299,11 +310,11 @@ class TestBoundaryToStreamTick:
         v = Vertex("meter")
         v.register("metric", 0, sum_fold, boundary="flush", reset=True)
 
-        v.receive("metric", {"value": 10})
-        v.receive("metric", {"value": 5})
+        v.receive(fact("metric", value=10), ROOT)
+        v.receive(fact("metric", value=5), ROOT)
         assert v.state("metric") == 15
 
-        tick = v.receive("flush", {})
+        tick = v.receive(fact("flush"), ROOT)
         assert isinstance(tick, Tick)
         assert tick.name == "metric"
         assert tick.payload == 15
@@ -326,35 +337,35 @@ class TestBoundaryToStreamTick:
         v = Vertex("meter")
         v.register("metric", 0, sum_fold, boundary="flush", reset=True)
 
-        v.receive("metric", {"value": 10})
-        tick = v.receive("flush", {})
+        v.receive(fact("metric", value=10), ROOT)
+        tick = v.receive(fact("flush"), ROOT)
         assert tick is not None
         assert tick.payload == 10
 
         assert v.state("metric") == 0
 
-        v.receive("metric", {"value": 3})
+        v.receive(fact("metric", value=3), ROOT)
         assert v.state("metric") == 3
 
     async def test_boundary_no_reset_carries_state(self):
         v = Vertex("meter")
         v.register("metric", 0, sum_fold, boundary="flush", reset=False)
 
-        v.receive("metric", {"value": 10})
-        tick = v.receive("flush", {})
+        v.receive(fact("metric", value=10), ROOT)
+        tick = v.receive(fact("flush"), ROOT)
         assert tick is not None
         assert tick.payload == 10
 
         assert v.state("metric") == 10
 
-        v.receive("metric", {"value": 5})
+        v.receive(fact("metric", value=5), ROOT)
         assert v.state("metric") == 15
 
     async def test_non_boundary_receive_returns_none(self):
         v = Vertex("meter")
         v.register("metric", 0, sum_fold, boundary="flush", reset=True)
 
-        result = v.receive("metric", {"value": 10})
+        result = v.receive(fact("metric", value=10), ROOT)
         assert result is None
 
 
@@ -371,20 +382,20 @@ class TestNestedLoops:
         downstream = Vertex("downstream")
         downstream.register("tick-metric", 0, tick_sum_fold)
 
-        upstream.receive("metric", {"value": 10})
-        upstream.receive("metric", {"value": 5})
-        tick1 = upstream.receive("flush", {})
+        upstream.receive(fact("metric", value=10), ROOT)
+        upstream.receive(fact("metric", value=5), ROOT)
+        tick1 = upstream.receive(fact("flush"), ROOT)
 
-        upstream.receive("metric", {"value": 20})
-        tick2 = upstream.receive("flush", {})
+        upstream.receive(fact("metric", value=20), ROOT)
+        tick2 = upstream.receive(fact("flush"), ROOT)
 
         assert tick1 is not None
         assert tick2 is not None
         assert tick1.payload == 15
         assert tick2.payload == 20
 
-        downstream.receive("tick-metric", {"value": tick1.payload})
-        downstream.receive("tick-metric", {"value": tick2.payload})
+        downstream.receive(fact("tick-metric", value=tick1.payload), ROOT)
+        downstream.receive(fact("tick-metric", value=tick2.payload), ROOT)
 
         assert downstream.state("tick-metric") == 35
 
@@ -401,23 +412,23 @@ class TestNestedLoops:
             boundary="rollup", reset=True,
         )
 
-        upstream.receive("event", {})
-        upstream.receive("event", {})
-        upstream.receive("event", {})
-        tick1 = upstream.receive("close", {})
+        upstream.receive(fact("event"), ROOT)
+        upstream.receive(fact("event"), ROOT)
+        upstream.receive(fact("event"), ROOT)
+        tick1 = upstream.receive(fact("close"), ROOT)
 
-        upstream.receive("event", {})
-        upstream.receive("event", {})
-        tick2 = upstream.receive("close", {})
+        upstream.receive(fact("event"), ROOT)
+        upstream.receive(fact("event"), ROOT)
+        tick2 = upstream.receive(fact("close"), ROOT)
 
         assert tick1.payload == 3
         assert tick2.payload == 2
 
-        downstream.receive("tick-count", {"count": tick1.payload})
-        downstream.receive("tick-count", {"count": tick2.payload})
+        downstream.receive(fact("tick-count", count=tick1.payload), ROOT)
+        downstream.receive(fact("tick-count", count=tick2.payload), ROOT)
         assert downstream.state("tick-count") == 5
 
-        rollup_tick = downstream.receive("rollup", {})
+        rollup_tick = downstream.receive(fact("rollup"), ROOT)
         assert rollup_tick is not None
         assert rollup_tick.name == "tick-count"
         assert rollup_tick.payload == 5
@@ -456,12 +467,12 @@ class TestShapeBoundaryToVertex:
             reset=boundary_reset,
         )
 
-        v.receive("container-health", {"status": "healthy"})
-        v.receive("container-health", {"status": "healthy"})
-        v.receive("container-health", {"status": "degraded"})
+        v.receive(fact("container-health", status="healthy"), ROOT)
+        v.receive(fact("container-health", status="healthy"), ROOT)
+        v.receive(fact("container-health", status="degraded"), ROOT)
         assert v.state("container-health") == 3
 
-        tick = v.receive("container-health.close", {})
+        tick = v.receive(fact("container-health.close"), ROOT)
         assert isinstance(tick, Tick)
         assert tick.name == "container-health"
         assert tick.payload == 3
@@ -488,14 +499,14 @@ class TestShapeBoundaryToVertex:
             reset=shape.boundary.reset,
         )
 
-        v.receive("deploy", {"env": "prod"})
-        v.receive("deploy", {"env": "staging"})
+        v.receive(fact("deploy", env="prod"), ROOT)
+        v.receive(fact("deploy", env="staging"), ROOT)
 
-        tick = v.receive("deploy.snapshot", {})
+        tick = v.receive(fact("deploy.snapshot"), ROOT)
         assert tick.payload == 2
 
         assert v.state("deploy") == 2
-        v.receive("deploy", {"env": "prod"})
+        v.receive(fact("deploy", env="prod"), ROOT)
         assert v.state("deploy") == 3
 
     def test_shape_without_boundary(self):
@@ -514,8 +525,8 @@ class TestShapeBoundaryToVertex:
         v = Vertex("counter-vertex")
         v.register("counter", 0, count_fold)
 
-        v.receive("counter", {"x": 1})
-        v.receive("counter", {"x": 2})
+        v.receive(fact("counter", x=1), ROOT)
+        v.receive(fact("counter", x=2), ROOT)
         assert v.state("counter") == 2
 
         from datetime import datetime, timezone

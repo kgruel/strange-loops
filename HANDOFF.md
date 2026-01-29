@@ -13,8 +13,8 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 |---------|---------|-------|
 | **peers** | `libs/peers/HANDOFF.md` | Identity + constraints |
 | **facts** | `libs/facts/HANDOFF.md` | Observation atom |
-| **ticks** | `libs/ticks/HANDOFF.md` | Temporal infrastructure |
-| **shapes** | `libs/shapes/HANDOFF.md` | Data contracts + fold rules |
+| **ticks** | `libs/ticks/HANDOFF.md` | Temporal infrastructure (includes Loop) |
+| **specs** | `libs/specs/HANDOFF.md` | Data contracts + fold rules |
 | **cells** | `libs/cells/HANDOFF.md` | Terminal UI |
 
 ## Documentation
@@ -45,35 +45,40 @@ prove a specific aspect of the model.
 | `review.py` | Peer actions trigger boundaries + persistence — facts/ticks to JSONL, replay on startup |
 | `summary.py` | Tick-as-input — ticks from review.py become facts to summary loop |
 | `cascade.py` | Live composition — two vertices connected via Stream, ticks flow in real-time |
+| `loop_explicit.py` | Explicit Loop class — Loop wraps Projection, Vertex routes to Loops |
+| `review_lens.py` | Lens as primitive — zoom + scope, lens per peer, orthogonal to horizon |
+| `simultaneous_peers.py` | Concurrent peer conflict — shared focus breaks, per-peer focus recommended |
+| `network_boundary.py` | Cross-process vertices — Ticks serialize, Connection bridges, same model works |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Lens as first-class** — Next experiment. Debug-as-lens emerged, verbosity
-   (-q/-v/-vv) is the same pattern. Is Lens a primitive or composition-layer?
-   What would a Lens atom look like?
+1. **Peer-aware pipeline** — Vertex.receive() takes (kind, payload) tuples.
+   Should it take Fact objects? Should Peer be passed explicitly? The pipeline
+   doc (PLAN.md) identified Peer as implicit. Worth making explicit?
 
-2. **Shape→Spec rename** — Subtask in progress. VOCABULARY.md says Spec, code
-   says Shape. Migrate the shapes library to specs.
+2. **Lens placement** — Lens (zoom + scope) pairs with Projection. Does it
+   belong in ticks alongside Projection? Or stay conceptual?
 
-3. **Loop as explicit runtime** — Subtask exploring design. VOCABULARY.md
-   separates Loop (execution) from Vertex (plumbing). Current code merges them.
-   Worth separating?
+3. **Per-peer focus** — simultaneous_peers.py recommends per-peer focus state.
+   Implement and test.
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
 
-- **Lens as first-class** — Debug panel is a lens (rendering depth), not a
-  horizon (data access). Verbosity (-q/-v/-vv) is the same pattern. Is Lens a
-  primitive or composition-layer pattern? **Next experiment.**
+- **Lens as first-class** — Explored in review_lens.py. Lens = zoom + scope,
+  pairs with Projection (write-side vs read-side). Leaving conceptual for now.
+  Placement TBD (ticks? cells? new lib?).
 
-- **Simultaneous peers** — Focus is shared (one vertex, one focus engine).
-  When does this break? Probably networked/multi-user scenarios.
+- **Simultaneous peers** — Explored in simultaneous_peers.py. Shared focus
+  breaks with concurrent peers. Recommendation: per-peer focus (focus.kyle,
+  focus.alice). Aligns with "observer is first-class."
 
-- **Network boundary** — Vertices that span processes/machines. VOCABULARY.md
-  mentions "Connection" but no code exists yet.
+- **Network boundary** — Explored in network_boundary.py. Ticks serialize to
+  JSON, Connection bridges via Queue, same model works. Open: discovery,
+  failure handling, ordering guarantees.
 
 - **Naming tension: Peer** — "Peer" implies equality but delegation is
   hierarchical. Alternative: "Identity." Deferred — model works, name can evolve.
@@ -96,3 +101,6 @@ Resolved questions kept for context. See `LOG.md` for full history.
 9. ~~Tick-as-input~~ — summary.py and cascade.py prove ticks become facts to next loop.
 10. ~~Live composition~~ — cascade.py: Stream connects vertices, ticks flow in real-time.
 11. ~~Vocabulary~~ — VOCABULARY.md: canonical definitions, one page, no ambiguity.
+12. ~~Shape→Spec rename~~ — libs/shapes → libs/specs. Code matches vocabulary.
+13. ~~Loop as explicit runtime~~ — Loop class in ticks. Vertex.register_loop(). Separation done.
+14. ~~Pipeline formalization~~ — PLAN.md documents 8 stages, identifies gaps.

@@ -11,18 +11,21 @@ Carry forward across sessions. Resolve or refine as experiments answer them.
   acks accumulate until all containers are acked, the composition layer sends
   a sentinel, boundary fires, Tick produced, state resets. The boundary is
   something you *cause*. Temporal structure from participation.
-- **Multiple simultaneous peers**: Focus is shared (one vertex, one focus
-  engine). If two peers existed concurrently, they'd share cursor state.
-  When does this break?
+- ~~**Multiple simultaneous peers**~~: Resolved. simultaneous_peers.py: shared
+  focus breaks with concurrent peers (last-write-wins). Solution: per-peer
+  focus (`focus.{peer}`). Observer state belongs to observer.
 - **Meta-as-loop**: Peer switching is currently meta (outside the loop). When
   does meta-state need to enter a loop? Signal: when it needs to be shared,
   persisted, or folded.
-- **Store persistence**: No experiment touches Store yet. What changes when
-  state survives across sessions?
-- **Lens as first-class concept**: Debug panel is a lens (rendering depth),
-  not a horizon (data access). What other lenses exist? Verbosity (-q/-v/-vv)
-  is the CLI analogy. Does Lens need to be a primitive, or is it always a
-  composition-layer choice?
+- ~~**Store persistence**~~: Resolved. review.py logs facts/ticks to JSONL,
+  replays on startup to reconstruct state. Persistence is a composition-layer
+  property, not a primitive change.
+- ~~**Lens as first-class concept**~~: Explored. review_lens.py: Lens = zoom +
+  scope. Pairs with Projection (write-side vs read-side). Leaving conceptual —
+  placement TBD.
+- **Network boundary**: Explored. network_boundary.py: Ticks serialize to JSON,
+  Connection bridges via Queue, same model works. Open: discovery, failure,
+  ordering, backpressure.
 
 ---
 
@@ -184,3 +187,198 @@ you have access to — they change how much of it you see.
 | None = unrestricted simplifies root | No enumeration, automatically works with new kinds and across vertices |
 | Delegation is the constraint mechanism | restrict/delegate narrow from unrestricted; grant expands explicit sets |
 | Horizon ≠ lens | Horizon = data access, lens = rendering depth. Different mechanisms. |
+
+---
+
+## Session: review_lens.py — Lens as primitive
+
+### What was built
+
+`review_lens.py`: copy of review.py with Lens added as a first-class primitive.
+Lens = zoom (detail level) + scope (visible kinds). Lens changes are facts that
+flow through the vertex and persist.
+
+### What emerged
+
+**Lens pairs with Projection.**
+
+```
+Projection: Facts → state    (reduce over time, write-side)
+Lens:       state → view     (reduce for display, read-side)
+```
+
+Both are projections in the mathematical sense — many-to-fewer. Projection
+accumulates, Lens filters/zooms. The full pipeline:
+
+```
+Facts → Projection(fold) → state → Lens(zoom, scope) → view → Surface
+```
+
+**Lens is orthogonal to Peer.**
+
+| Primitive | Question | Dimension |
+|-----------|----------|-----------|
+| Peer.horizon | What CAN you see? | Access |
+| Peer.potential | What CAN you emit? | Capability |
+| Lens.scope | What DO you see? | Presentation |
+| Lens.zoom | How much detail? | Depth |
+
+Horizon gates data existence. Lens gates data display. Different concerns.
+
+**Lens per peer works.**
+
+Each peer can have a default lens. kyle (operator) gets zoom=2/scope=all.
+monitor gets zoom=1/scope=domain (no infrastructure noise). Switching peers
+applies their default lens — but any peer can adjust their own lens.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Lens changes are facts | `emit("lens", zoom=2)` flows through vertex |
+| Scope filters presentation | Trace panel only shows kinds in lens.scope |
+| Zoom controls depth | Container list shows name-only (z0), +status (z1), +ack info (z2) |
+| Lens + Peer orthogonal | Per-peer defaults, independent adjustment |
+
+---
+
+## Session: loop_explicit.py — Loop as explicit runtime
+
+### What was built
+
+`loop_explicit.py`: same as review.py but using explicit Loop class. Loop wraps
+Projection with boundary semantics: name, projection, boundary_kind, reset.
+Vertex gains `register_loop()` alongside legacy `register()`.
+
+### What emerged
+
+**Loop is execution, Vertex is plumbing.**
+
+Before: Vertex contained `_FoldEngine` internally, mixed routing and folding.
+After: Loop owns fold + boundary + tick emission. Vertex just routes.
+
+```python
+Loop:
+  receive(payload) → fold into projection
+  fire(ts, origin) → emit Tick, optionally reset
+
+Vertex:
+  register_loop(loop)
+  receive(kind, payload) → route to loop, check boundary, return Tick|None
+```
+
+**Separation enables isolated testing.**
+
+Test Loop: give it payloads, check state, fire boundary, verify Tick.
+Test Vertex: register Loops, route facts, verify boundary coordination.
+No need to test both together for basic behaviors.
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Loop is a coherent unit | name + projection + boundary = complete fold cycle |
+| Vertex becomes routing | Routes facts, coordinates boundaries, attaches Store |
+| Backward compatible | Legacy `register()` still works alongside `register_loop()` |
+
+---
+
+## Session: simultaneous_peers.py — when shared focus breaks
+
+### What was built
+
+`simultaneous_peers.py`: three peers (kyle, alice, bob) navigate concurrently
+via asyncio. Single shared focus state creates race condition — last write wins,
+cursor jumps chaotically.
+
+### What emerged
+
+**Observer state belongs to the observer.**
+
+Focus isn't "the cursor" — it's "this peer's cursor." With shared focus:
+- kyle moves to index 2
+- alice moves to index 4 (overwrites kyle)
+- kyle sees index 4, confused
+
+With per-peer focus (`focus.kyle`, `focus.alice`):
+- Each peer has their own state
+- No conflicts
+- Rendering layer decides which to display
+
+**This generalizes beyond focus.**
+
+Any state representing an observer's perspective should be peer-scoped:
+- Cursor position → `focus.{peer}`
+- Scroll offset → `scroll.{peer}`
+- Selection → `selection.{peer}`
+- Collapse state → `collapse.{peer}`
+
+Aligns with "observer is first-class" — the observer's view is their own.
+
+### Solutions explored
+
+| Solution | Approach | Trade-off |
+|----------|----------|-----------|
+| Per-peer focus | `focus.kyle`, `focus.alice` | Clean isolation, state partitioning |
+| Ownership | One peer owns focus at a time | Coordination overhead |
+| Requests | `focus_request` with arbitration | Complexity, latency |
+| CRDTs | Vector clocks, merge | Eventually consistent, complex |
+
+Recommendation: per-peer focus. Matches the model.
+
+---
+
+## Session: network_boundary.py — vertices across processes
+
+### What was built
+
+`network_boundary.py`: two vertices in separate asyncio tasks (simulating
+processes). Connection primitive bridges them via `asyncio.Queue[bytes]`.
+Ticks serialize to JSON, cross the boundary, become facts to consumer vertex.
+
+### What emerged
+
+**The loop model doesn't care about process boundaries.**
+
+```
+Process A              Process B
+┌─────────────┐        ┌─────────────┐
+│ facts → fold│        │ fold ← tick │
+│      ↓      │  JSON  │      ↓      │
+│   boundary  │───────→│  (as fact)  │
+│      ↓      │        │      ↓      │
+│    Tick     │        │   state     │
+└─────────────┘        └─────────────┘
+```
+
+Same primitives: Facts fold, boundaries fire, Ticks emit. The serialization
+boundary is just another composition-layer concern.
+
+**Connection is minimal.**
+
+```python
+@dataclass
+class Connection:
+    queue: asyncio.Queue[bytes]
+    async def send(self, tick: Tick)
+    async def receive(self) -> Tick
+```
+
+Queue simulates network. In production: socket, pipe, message broker.
+The abstraction is: serialize, transport, deserialize.
+
+**Open questions (deferred).**
+
+- Discovery: how does B find A? (registry, announcement, subscription)
+- Failure: what if connection drops? (heartbeat, reconnect)
+- Ordering: what if ticks arrive out of order? (sequence numbers)
+- Backpressure: what if consumer is slow? (bounded queue, drop policy)
+
+### Patterns confirmed
+
+| Pattern | Evidence |
+|---------|----------|
+| Tick serializes trivially | JSON with ISO datetime, payload already dict |
+| Tick → Fact at boundary | Consumer receives tick, folds `tick.payload` as fact |
+| Origin preserved | `tick.origin` carries provenance across boundary |
+| Same model, different topology | Loops nest across processes like they nest within |

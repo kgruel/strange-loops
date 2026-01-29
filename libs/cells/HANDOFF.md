@@ -10,26 +10,52 @@ No cross-lib imports; integration layer wires to Fact.of() + Stream.emit().
 Python minimum bumped from 3.10 to 3.11 (aligning with all other libs).
 Added `py.typed` marker and `[tool.pytest.ini_options]`.
 
+## Resolved (2026-01-29)
+- ~~Mouse/trackpad input~~ — Implemented. SGR mouse protocol, Surface opt-in.
+- ~~ShapeLens extensions~~ — Implemented. `tree_lens`, `chart_lens`.
+- ~~CLI -> TUI continuum~~ — Implemented. Verbosity spectrum pattern with demos.
+## 2026-01-29
+
+### Mouse Support
+Full SGR mouse protocol implementation:
+- `MouseEvent`, `MouseButton`, `MouseAction` types in `mouse.py`
+- SGR parsing integrated into `KeyboardInput` — `get_input()` returns `str | MouseEvent`
+- `Writer.enable_mouse()` / `disable_mouse()` for tracking modes
+- `Surface(enable_mouse=True)` opt-in with `on_mouse()` callback
+- Research documented in `docs/MOUSE.md`
+- Demo: `demos/cells/demo_mouse.py` (drawable canvas)
+
+### Lens Extensions
+Two new lenses following `shape_lens` pattern:
+- `tree_lens(data, zoom, width)` — nested dicts/objects as indented trees with `├─└─│`
+- `chart_lens(data, zoom, width)` — numeric data as sparklines (`▁▂▄▆█`) or bar charts
+- Zoom controls depth (tree) or detail level (chart)
+- Demo: `demos/cells/demo_lenses.py`
+
+### Verbosity Spectrum Pattern
+CLI→TUI progression: same data, different render paths based on verbosity:
+- `-q` minimal, default standard, `-v` styled, `-vv` interactive TUI
+- `experiments/verbosity/` with common utilities
+- Demos: `demo_verbosity.py` (build status), `demo_verbosity_health.py` (API health),
+  `demo_verbosity_disk.py` (disk usage with file tree browser)
+
+### Big Text Rendering
+`render_big(text, style, size=1, format=BigTextFormat.FILLED) -> Block`
+- Two sizes: size=1 (3-row), size=2 (5-row)
+- Two formats: `FILLED` (solid blocks), `OUTLINE` (box-drawing)
+- Glyph coverage: a-z, 0-9, 30+ symbols
+- Demo: `demos/cells/demo_big_text.py`
+
+### Code Review
+Deep review of all additions completed. High-priority fixes in progress:
+1. Mouse scroll button fallback (arbitrary default)
+2. Unused TYPE_CHECKING import in big_text.py
+3. Missing modifiers in mouse emit
+
 ## Open
-- **Viewport dataclass**: `vslice` compose function landed. Next: frozen `Viewport` dataclass
-  carrying `offset`, `content_height`, `visible_height` with clamping methods. Signal: scroll
-  offset overshoot in tour (handler can't clamp because it doesn't know content height — render
-  clamps visually but state drifts). The dataclass solves this by owning the clamping.
-- **Mouse/trackpad input**: Surface currently keyboard-only. Trackpad scroll events arrive as
-  terminal escape sequences (SGR mouse mode). Tour exposed this — trackpad scrolling felt odd
-  against keyboard-only navigation. Defer until Viewport exists to receive scroll deltas.
-- **ShapeLens extensions**: Tree lens, chart lens, other convention-based renderers.
-- **Zoom propagation**: Global vs independent vs relative in composed views. Undecided.
-- **CLI -> TUI continuum**: Verbosity spectrum (Level 0-4). Documented in demos/VERBOSITY.md.
-## 2026-01-28
-Big text rendering API: `render_big(text, style, size=1, format=BigTextFormat.FILLED) -> Block`
-
-Features:
-- **Two sizes**: size=1 (3-row, 3-wide glyphs), size=2 (5-row, 5-wide glyphs)
-- **Two formats**: `BigTextFormat.FILLED` (solid), `BigTextFormat.OUTLINE` (hollow)
-- **Glyph coverage**: a-z, 0-9, space, 30+ punctuation/symbols
-- **Case-folding**: uppercase converted to lowercase
-- **Fallback**: unknown chars render as box placeholder
-
-Demo at `demos/cells/demo_big_text.py` — 4 modes (rainbow, fire, size comparison, showcase),
-toggle size with 's', format with 'f'.
+- **Viewport dataclass**: Still needed. Mouse scroll events now available to feed it.
+- **Architecture layering**: What's cells core vs optional? Mouse, big text, lenses,
+  components — should these be separate packages or optional imports? Research in progress,
+  findings will go to `docs/CELLS-ARCHITECTURE.md`.
+- **Zoom propagation**: Global vs independent. `review_lens.py` experiment showed per-peer
+  defaults (independent mode). Pattern clarified but not codified.

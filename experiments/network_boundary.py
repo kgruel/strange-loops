@@ -63,8 +63,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from facts import Fact
+from peers import Peer
 from ticks import Tick, Vertex, Stream
 from specs import Shape, Facet, Boundary
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Serialization -----------------------------------------------------------
@@ -181,11 +186,11 @@ async def producer_task(conn: Connection, stop_event: asyncio.Event) -> None:
         # Simulate 3 heartbeats per cycle
         for _ in range(3):
             seq += 1
-            vertex.receive("heartbeat", {"seq": seq})
+            vertex.receive(Fact.of("heartbeat", seq=seq), SYSTEM)
             await asyncio.sleep(0.1)
 
         # Fire boundary → produces Tick
-        tick = vertex.receive("heartbeat.close", {})
+        tick = vertex.receive(Fact.of("heartbeat.close"), SYSTEM)
         if tick:
             print(f"[producer] tick #{tick.payload['count']} (seq {tick.payload['last_seq']})")
             await conn.send(tick)
@@ -214,7 +219,7 @@ async def consumer_task(conn: Connection, stop_event: asyncio.Event) -> None:
 
         # Tick from producer becomes fact to consumer
         # The tick.name determines routing kind
-        vertex.receive(f"{tick.name}.tick", tick.payload)
+        vertex.receive(Fact.of(f"{tick.name}.tick", **tick.payload), SYSTEM)
 
         state = vertex.state("heartbeat.tick")
         print(

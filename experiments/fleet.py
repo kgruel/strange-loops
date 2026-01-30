@@ -24,10 +24,14 @@ from collections import deque
 from datetime import datetime, timezone
 
 from facts import Fact
+from peers import Peer
 from ticks import Tick, Vertex
 from specs import Shape, Facet, Fold
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -150,14 +154,14 @@ def generate_facts(cycle: int, vms: dict[str, Vertex]) -> list[str]:
         for c in containers:
             status = random.choice(STATUSES)
             f = Fact.of("health", container=c, status=status)
-            vms[vm_name].receive(f.kind, dict(f.payload))
+            vms[vm_name].receive(f, SYSTEM)
         log.append(f"{vm_name}: {len(containers)} health facts")
 
     # Deploy facts for vm-2
     stage_idx = min(cycle - 1, len(DEPLOY_STAGES) - 1)
     stage = DEPLOY_STAGES[stage_idx]
     f = Fact.of("deploy", target="api-v2.3", stage=stage)
-    vms["vm-2"].receive(f.kind, dict(f.payload))
+    vms["vm-2"].receive(f, SYSTEM)
     log.append(f"vm-2: deploy -> {stage}")
 
     # Audit facts for vm-3 and vm-4
@@ -166,7 +170,7 @@ def generate_facts(cycle: int, vms: dict[str, Vertex]) -> list[str]:
         issues = random.randint(0, 3)
         fixed = min(issues, random.randint(0, issues + 1))
         f = Fact.of("audit", scanned=scanned, issues=issues, fixed=fixed)
-        vms[vm_name].receive(f.kind, dict(f.payload))
+        vms[vm_name].receive(f, SYSTEM)
         log.append(f"{vm_name}: audit +{scanned} scanned")
 
     return log
@@ -262,7 +266,9 @@ class FleetApp(Surface):
                 for vm_name, vertex in self.vms.items():
                     tick = vertex.tick(vm_name, now)
                     self.vm_ticks[vm_name] = tick
-                    self.regions[VM_REGION[vm_name]].receive(tick.origin, tick.payload)
+                    self.regions[VM_REGION[vm_name]].receive(
+                        Fact.of(tick.origin, **tick.payload), SYSTEM
+                    )
                 kinds_seen = set()
                 for vm_name in self.vms:
                     kinds_seen.update(s.name for s, _ in VM_SHAPES[vm_name])
@@ -275,7 +281,7 @@ class FleetApp(Surface):
                 for region_name, vertex in self.regions.items():
                     tick = vertex.tick(region_name, now)
                     self.region_ticks[region_name] = tick
-                    self.globe.receive(tick.origin, tick.payload)
+                    self.globe.receive(Fact.of(tick.origin, **tick.payload), SYSTEM)
                 self.log.append(f"  L1: {', '.join(sorted(self.regions))} ticked")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)

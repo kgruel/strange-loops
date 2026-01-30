@@ -19,11 +19,15 @@ import json
 import time
 from pathlib import Path
 
+from facts import Fact
 from peers import Peer, delegate
 from ticks import Tick, Vertex, Loop, Projection
 from specs import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
+
+# System peer — unrestricted, for infrastructure facts (health timer, raw keys).
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -198,7 +202,7 @@ class LoopExplicitApp(Surface):
                 continue
             try:
                 data = json.loads(line)
-                self.vertex.receive(data["kind"], data["payload"])
+                self.vertex.receive(Fact.of(data["kind"], **data["payload"]), SYSTEM)
                 count += 1
             except (json.JSONDecodeError, KeyError):
                 continue
@@ -235,15 +239,15 @@ class LoopExplicitApp(Surface):
         """Instrument vertex.receive() — captures events + ticks."""
         real_receive = self.vertex.receive
 
-        def traced(kind, payload):
+        def traced(fact: Fact, peer: Peer):
             ts = time.time()
 
-            self._fact_log.write(json.dumps({"ts": ts, "kind": kind, "payload": payload}) + "\n")
+            self._fact_log.write(json.dumps({"ts": ts, "kind": fact.kind, "payload": dict(fact.payload)}) + "\n")
             self._fact_log.flush()
 
-            result = real_receive(kind, payload)
+            result = real_receive(fact, peer)
             if result is not None:
-                self._trace.append(f"{kind} -> TICK {result.name}")
+                self._trace.append(f"{fact.kind} -> TICK {result.name}")
 
                 self._tick_log.write(json.dumps({
                     "ts": result.ts.timestamp(),
@@ -253,8 +257,8 @@ class LoopExplicitApp(Surface):
                 }) + "\n")
                 self._tick_log.flush()
             else:
-                parts = " ".join(f"{k}={v}" for k, v in payload.items())
-                self._trace.append(f"{kind}  {parts}")
+                parts = " ".join(f"{k}={v}" for k, v in fact.payload.items())
+                self._trace.append(f"{fact.kind}  {parts}")
             return result
 
         self.vertex.receive = traced
@@ -270,7 +274,7 @@ class LoopExplicitApp(Surface):
                 self.log.append(f"blocked: {self.peer.name} cannot emit '{kind}'")
                 self.mark_dirty()
                 return
-            self.vertex.receive(kind, {**data, "peer": self.peer.name})
+            self.vertex.receive(Fact.of(kind, **data, peer=self.peer.name), self.peer)
             self.log.append(f"{self.peer.name}: {kind}")
 
             if kind == "ack":
@@ -278,7 +282,7 @@ class LoopExplicitApp(Surface):
                 if len(acked) >= len(CONTAINERS) and all(
                     c in acked for c in CONTAINERS
                 ):
-                    tick = self.vertex.receive("review.complete", {})
+                    tick = self.vertex.receive(Fact.of("review.complete"), self.peer)
                     if tick:
                         self.review_ticks.append(tick)
                         n = len(self.review_ticks)
@@ -301,9 +305,9 @@ class LoopExplicitApp(Surface):
             while True:
                 for c in CONTAINERS:
                     status = random.choice(STATUSES)
-                    self.vertex.receive("health", {"container": c, "status": status})
+                    self.vertex.receive(Fact.of("health", container=c, status=status), SYSTEM)
 
-                tick = self.vertex.receive("health.close", {})
+                tick = self.vertex.receive(Fact.of("health.close"), SYSTEM)
                 if tick:
                     self.health_ticks.append(tick)
                     n = len(self.health_ticks)
@@ -323,7 +327,7 @@ class LoopExplicitApp(Surface):
         return [c for c in CONTAINERS if c in self.peer.horizon]
 
     def on_key(self, key: str) -> None:
-        self.vertex.receive("ui.key", {"key": key})
+        self.vertex.receive(Fact.of("ui.key", key=key), SYSTEM)
 
         visible = self._visible_containers()
         if not visible:

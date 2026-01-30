@@ -25,10 +25,14 @@ import random
 from collections import deque
 
 from facts import Fact
+from peers import Peer
 from ticks import Tick, Vertex
 from specs import Shape, Facet, Fold, Boundary
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -252,7 +256,7 @@ class BoundaryApp(Surface):
                     for c in containers:
                         status = random.choice(STATUSES)
                         f = Fact.of("health", container=c, status=status)
-                        self.vms[vm_name].receive(f.kind, dict(f.payload))
+                        self.vms[vm_name].receive(f, SYSTEM)
                     self.log.append(f"{vm_name}: {len(containers)} health facts")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
@@ -260,7 +264,7 @@ class BoundaryApp(Surface):
                 # Phase 2: health.close — sentinel → boundary ticks (resets)
                 self.phase = "health.close"
                 for vm_name in ("vm-1", "vm-2", "vm-4"):
-                    tick = self.vms[vm_name].receive("health.close", {})
+                    tick = self.vms[vm_name].receive(Fact.of("health.close"), SYSTEM)
                     if tick:
                         l0_ticks.append(tick)
                         self.recent_ticks.add((vm_name, "health"))
@@ -275,7 +279,7 @@ class BoundaryApp(Surface):
                 self.phase = "deploy"
                 stage = DEPLOY_STAGES[(self.round - 1) % len(DEPLOY_STAGES)]
                 f = Fact.of("deploy", target="api-v2.3", stage=stage)
-                self.vms["vm-2"].receive(f.kind, dict(f.payload))
+                self.vms["vm-2"].receive(f, SYSTEM)
                 self.log.append(f"vm-2: deploy stage={stage}")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
@@ -283,7 +287,7 @@ class BoundaryApp(Surface):
                 # Phase 4: deploy.done — boundary only when stage=done
                 self.phase = "deploy.done"
                 if stage == "done":
-                    tick = self.vms["vm-2"].receive("deploy.done", {})
+                    tick = self.vms["vm-2"].receive(Fact.of("deploy.done"), SYSTEM)
                     if tick:
                         l0_ticks.append(tick)
                         self.recent_ticks.add(("vm-2", "deploy"))
@@ -302,7 +306,7 @@ class BoundaryApp(Surface):
                     scanned = random.randint(10, 50)
                     issues = random.randint(0, 3)
                     f = Fact.of("audit", scanned=scanned, issues=issues)
-                    self.vms[vm_name].receive(f.kind, dict(f.payload))
+                    self.vms[vm_name].receive(f, SYSTEM)
                     self.log.append(f"{vm_name}: audit +{scanned} scanned")
                 self.mark_dirty()
                 await asyncio.sleep(DELAY)
@@ -310,7 +314,7 @@ class BoundaryApp(Surface):
                 # Phase 6: audit.complete — sentinel → boundary ticks (carries)
                 self.phase = "audit.complete"
                 for vm_name in ("vm-3", "vm-4"):
-                    tick = self.vms[vm_name].receive("audit.complete", {})
+                    tick = self.vms[vm_name].receive(Fact.of("audit.complete"), SYSTEM)
                     if tick:
                         l0_ticks.append(tick)
                         self.recent_ticks.add((vm_name, "audit"))
@@ -325,13 +329,12 @@ class BoundaryApp(Surface):
                 self.phase = "L0→L1"
                 for tick in l0_ticks:
                     region_name = VM_REGION[tick.origin]
-                    self.regions[region_name].receive("collect", {
-                        "origin": tick.origin,
-                        "kind": tick.name,
-                        "data": tick.payload,
-                    })
+                    self.regions[region_name].receive(
+                        Fact.of("collect", origin=tick.origin, kind=tick.name, data=tick.payload),
+                        SYSTEM
+                    )
                 for region_name, vertex in sorted(self.regions.items()):
-                    tick = vertex.receive("region.close", {})
+                    tick = vertex.receive(Fact.of("region.close"), SYSTEM)
                     if tick:
                         self.l1_ticks[region_name] = tick
                         self.recent_ticks.add((region_name, "region"))

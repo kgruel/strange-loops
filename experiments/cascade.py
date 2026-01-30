@@ -23,11 +23,15 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
+from facts import Fact
 from peers import Peer, delegate
 from ticks import Tick, Vertex, Stream
 from specs import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
+
+# System peer — unrestricted, for infrastructure facts (health timer).
+SYSTEM = Peer("system")
 
 
 # -- Review Shapes (level 1) -------------------------------------------------
@@ -161,10 +165,10 @@ class SummaryConsumer:
     async def consume(self, tick: Tick) -> None:
         """Route tick to summary vertex based on tick name."""
         if tick.name == "health":
-            self.vertex.receive("health.tick", tick.payload)
+            self.vertex.receive(Fact.of("health.tick", **tick.payload), SYSTEM)
             self.log.append(f"summary ← health tick")
         elif tick.name == "ack":
-            self.vertex.receive("review.tick", tick.payload)
+            self.vertex.receive(Fact.of("review.tick", **tick.payload), SYSTEM)
             self.log.append(f"summary ← review tick")
 
 
@@ -212,7 +216,7 @@ class CascadeApp(Surface):
     def _make_bridge(self):
         """Emit callback: route to review vertex, emit ticks to stream."""
         def on_emit(kind: str, data: dict) -> None:
-            tick = self.review.receive(kind, {**data, "peer": self.peer.name})
+            tick = self.review.receive(Fact.of(kind, **data, peer=self.peer.name), self.peer)
 
             if tick is not None:
                 # Tick fired — emit to stream (async bridge)
@@ -241,9 +245,9 @@ class CascadeApp(Surface):
             while True:
                 for c in CONTAINERS:
                     status = random.choice(STATUSES)
-                    self.review.receive("health", {"container": c, "status": status})
+                    self.review.receive(Fact.of("health", container=c, status=status), SYSTEM)
 
-                tick = self.review.receive("health.close", {})
+                tick = self.review.receive(Fact.of("health.close"), SYSTEM)
                 if tick:
                     self.health_ticks += 1
                     await self.tick_stream.emit(tick)
@@ -268,7 +272,7 @@ class CascadeApp(Surface):
             # Check if all acked
             acked = self.review.state("ack").get("acked", {})
             if len(acked) >= len(CONTAINERS):
-                tick = self.review.receive("review.complete", {})
+                tick = self.review.receive(Fact.of("review.complete"), self.peer)
                 if tick:
                     self.review_ticks += 1
                     asyncio.create_task(self._emit_tick(tick))

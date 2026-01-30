@@ -28,11 +28,15 @@ import asyncio
 import random
 from collections import deque
 
+from facts import Fact
 from peers import Peer, delegate
 from ticks import Vertex
 from specs import Shape, Facet
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
+
+# System peer — unrestricted, for infrastructure facts (health timer, raw keys).
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -166,10 +170,10 @@ class ObserveApp(Surface):
     def _wrap_receive(self):
         """Instrument vertex.receive() — captures the full event stream."""
         real_receive = self.vertex.receive
-        def traced(kind, payload):
-            parts = " ".join(f"{k}={v}" for k, v in payload.items())
-            self._trace.append(f"{kind}  {parts}")
-            return real_receive(kind, payload)
+        def traced(fact: Fact, peer: Peer):
+            parts = " ".join(f"{k}={v}" for k, v in fact.payload.items())
+            self._trace.append(f"{fact.kind}  {parts}")
+            return real_receive(fact, peer)
         self.vertex.receive = traced
 
     @property
@@ -183,7 +187,7 @@ class ObserveApp(Surface):
                 self.log.append(f"blocked: {self.peer.name} cannot emit '{kind}'")
                 self.mark_dirty()
                 return
-            self.vertex.receive(kind, {**data, "peer": self.peer.name})
+            self.vertex.receive(Fact.of(kind, **data, peer=self.peer.name), self.peer)
             self.log.append(f"{self.peer.name}: {kind}")
             self.mark_dirty()
         return on_emit
@@ -199,7 +203,7 @@ class ObserveApp(Surface):
             while True:
                 for c in CONTAINERS:
                     status = random.choice(STATUSES)
-                    self.vertex.receive("health", {"container": c, "status": status})
+                    self.vertex.receive(Fact.of("health", container=c, status=status), SYSTEM)
                 self.mark_dirty()
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
@@ -216,7 +220,7 @@ class ObserveApp(Surface):
     def on_key(self, key: str) -> None:
         # Infrastructure: raw key capture, direct to vertex (like health timer).
         # Not the peer's action — no potential gating.
-        self.vertex.receive("ui.key", {"key": key})
+        self.vertex.receive(Fact.of("ui.key", key=key), SYSTEM)
 
         visible = self._visible_containers()
         if not visible:

@@ -16,8 +16,13 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from facts import Fact
+from peers import Peer
 from ticks import Tick, Vertex
 from specs import Shape, Facet, Boundary
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -156,17 +161,17 @@ def main():
 
         # Route tick to appropriate fold based on its origin
         if name == "health":
-            vertex.receive("health.tick", payload)
+            vertex.receive(Fact.of("health.tick", **payload), SYSTEM)
         elif name == "ack":
-            vertex.receive("review.tick", payload)
+            vertex.receive(Fact.of("review.tick", **payload), SYSTEM)
 
         # Also count for batch boundary
-        vertex.receive("batch", {"tick_name": name})
+        vertex.receive(Fact.of("batch", tick_name=name), SYSTEM)
 
         # Check if batch boundary should fire
         batch_state = vertex.state("batch")
         if batch_state.get("count", 0) >= BATCH_SIZE:
-            tick = vertex.receive("batch.complete", {})
+            tick = vertex.receive(Fact.of("batch.complete"), SYSTEM)
             if tick:
                 summary_ticks.append(tick)
                 print(f"  → Summary tick #{len(summary_ticks)} after {BATCH_SIZE} ticks")

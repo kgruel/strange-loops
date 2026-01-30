@@ -76,9 +76,13 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from facts import Fact
 from peers import Peer
 from ticks import Tick, Vertex
 from specs import Shape, Facet
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -205,7 +209,7 @@ async def peer_navigation_loop(
         peer_state[peer.name] = current_intended
 
         # Emit focus change
-        vertex.receive("focus", {"index": current_intended, "peer": peer.name})
+        vertex.receive(Fact.of("focus", index=current_intended, peer=peer.name), SYSTEM)
 
         # Yield to allow other tasks to run (simulates real async interleaving)
         await asyncio.sleep(0)
@@ -303,7 +307,7 @@ async def run_per_peer_solution(peers: tuple[Peer, ...]) -> SimulationResult:
                 current = 0
                 direction = 1
 
-            vertex.receive(kind, {"index": current, "peer": peer.name})
+            vertex.receive(Fact.of(kind, index=current, peer=peer.name), SYSTEM)
 
             # Verify our own state (always matches, no conflict)
             actual = vertex.state(kind)

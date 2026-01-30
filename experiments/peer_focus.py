@@ -31,9 +31,13 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
+from facts import Fact
 from peers import Peer, delegate
 from ticks import Tick, Vertex
 from specs import Shape, Facet
+
+# System peer — unrestricted, used for all fact emissions in this experiment.
+SYSTEM = Peer("system")
 
 
 # -- Shapes ------------------------------------------------------------------
@@ -189,19 +193,19 @@ class ObserverActions:
 
     def set_focus(self, index: int) -> None:
         """Set cursor position."""
-        self._vertex.receive(f"focus.{self._peer}", {"index": index})
+        self._vertex.receive(Fact.of(f"focus.{self._peer}", index=index), SYSTEM)
 
     def set_scroll(self, offset: int) -> None:
         """Set scroll offset."""
-        self._vertex.receive(f"scroll.{self._peer}", {"offset": offset})
+        self._vertex.receive(Fact.of(f"scroll.{self._peer}", offset=offset), SYSTEM)
 
     def select(self, item: str) -> None:
         """Add item to selection."""
-        self._vertex.receive(f"selection.{self._peer}", {"item": item, "selected": True})
+        self._vertex.receive(Fact.of(f"selection.{self._peer}", item=item, selected=True), SYSTEM)
 
     def deselect(self, item: str) -> None:
         """Remove item from selection."""
-        self._vertex.receive(f"selection.{self._peer}", {"item": item, "selected": False})
+        self._vertex.receive(Fact.of(f"selection.{self._peer}", item=item, selected=False), SYSTEM)
 
     def toggle_selection(self, item: str, current_selection: frozenset[str]) -> None:
         """Toggle item selection."""
@@ -445,7 +449,7 @@ async def main():
     # Seed some health data
     for c in CONTAINERS:
         status = random.choice(["running", "running", "running", "unhealthy"])
-        vertex.receive("health", {"container": c, "status": status})
+        vertex.receive(Fact.of("health", container=c, status=status), SYSTEM)
 
     # Run concurrent navigation
     print("-" * 60)

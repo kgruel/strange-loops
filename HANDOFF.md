@@ -55,29 +55,38 @@ prove a specific aspect of the model.
 | `lens_code.py` | Lens placement analysis — core Lens (ticks) vs render Lens (cells) |
 | `peer_aware_vertex.py` | Full model — Vertex.receive(Fact, Peer), gating, observer-state ownership |
 | `peer_surface.py` | Cells integration — peer-aware Vertex wired to Surface, gating visible in TUI |
+| `sources/heartbeat.py` | First sources experiment — CommandSource → Vertex → Fold → Query (liveness) |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **First sources experiment** — Use new sources lib to prove the flow:
-   CommandSource → Runner → Vertex → Ticks. Real external data.
+1. **Personal data loop** — Build toward a real personal loop with local data:
+   - Docker containers (`docker stats`)
+   - Disk space (`df`)
+   - Process metrics (`ps`)
+   - Start simple, grow organically
 
-2. **Custom Spec DSL** — Explore building a custom spec file format. Analysis
-   in `.subtask/tasks/explore--custom-spec-dsl/ANALYSIS.md` covers:
-   - Proposed syntax (HCL-inspired block structure)
-   - Parser options (Lark recommended)
-   - Key question: Is declarative spec definition worth the investment?
+2. **Complete sources experiments** — In progress:
+   - `heartbeat_rate.py` — boundary + tick emission
+   - `multi_source.py` — two sources, one vertex
+   - `cascade.py` — tick from one vertex → fact to another
 
-3. **Update existing experiments** — Migrate remaining experiments to use
-   `Vertex.receive(fact, observer)` signature for consistency.
+3. **Spec file format** — Design the `.loop` file that combines source + spec.
+   Enables: drop a file, data flows. No code for common cases.
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
 
-- **Spec DSL decision** — Custom DSL vs YAML. Analysis done, need to decide
-  if 2-3 week investment is worth the cleaner file format.
+- **Spec atomicity** — Spec reduced to `folds + boundary?`. Facets are derivable.
+  Source is separate (ingress adapter). File format combines both for ergonomics.
+
+- **Ingress/egress vocabulary** — Analysis recommends partial adoption. Add
+  "Boundary Crossing" section to VOCABULARY.md. No code renames needed.
+
+- **ticks/source.py cleanup** — Orphaned Source protocol in ticks conflicts with
+  libs/sources. Remove it.
 
 - **Meta-as-loop** — When does meta-state (peer switching, debug toggle) need
   to enter a loop? Signal: when it needs to be shared, persisted, or folded.
@@ -112,3 +121,5 @@ Resolved questions kept for context. See `LOG.md` for full history.
 24. ~~Experiments organized~~ — Grouped by concept: observer/, temporal/, network/, presentation/.
 25. ~~Fidelity rename~~ — Verbosity → Fidelity for CLI→TUI spectrum. Fidelity = presentation richness.
 26. ~~Source concept~~ — Sources are adapters at the ingress boundary. Not atoms. Interface: vertex.ingest(kind, payload, observer).
+27. ~~Sources lib~~ — libs/sources with Source protocol, CommandSource, Runner. First experiment: heartbeat liveness check.
+28. ~~Minimal meaningful flow~~ — Source → Fold → Consumer. Purpose comes from consumer, not spec. Fold without consumer is mechanics without meaning.

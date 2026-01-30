@@ -121,6 +121,19 @@ from cells.mouse import MouseEvent, MouseButton                 # Optional mouse
 from cells.effects import render_big                            # Visual effects
 ```
 
+## Documentation
+
+```
+docs/
+  ARCHITECTURE.md     # Stack visualization, data flow, layer pattern
+  PRIMITIVES.md       # Quick reference for all primitives
+  DATA_PATTERNS.md    # Frozen state + pure functions patterns
+  MOUSE.md            # Terminal mouse protocol research
+  VIEWPORT_DESIGN.md  # Scroll state management
+  ZOOM_PATTERNS.md    # Lens zoom propagation patterns
+  DEMO_PATTERNS.md    # TUI app pattern, demo organization
+```
+
 ## Source Layout
 
 ```

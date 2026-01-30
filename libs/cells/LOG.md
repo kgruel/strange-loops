@@ -33,7 +33,7 @@ demos/cells/demo_big_text.py          (new)
 demos/cells/demo_lenses.py            (new)
 demos/cells/demo_verbosity*.py        (new, 3 files)
 experiments/verbosity/                (new module)
-docs/MOUSE.md                         (new)
+libs/cells/docs/MOUSE.md              (new)
 ```
 
 ---

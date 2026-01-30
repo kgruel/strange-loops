@@ -22,7 +22,7 @@ Full SGR mouse protocol implementation:
 - SGR parsing integrated into `KeyboardInput` — `get_input()` returns `str | MouseEvent`
 - `Writer.enable_mouse()` / `disable_mouse()` for tracking modes
 - `Surface(enable_mouse=True)` opt-in with `on_mouse()` callback
-- Research documented in `docs/MOUSE.md`
+- Research documented in `libs/cells/docs/MOUSE.md`
 - Demo: `demos/cells/demo_mouse.py` (drawable canvas)
 
 ### Lens Extensions
@@ -72,7 +72,7 @@ Internal implementations use underscore prefix (`_mouse.py`, `_lens.py`).
 - Works with vslice() for rendering visible portion
 
 ### Zoom Propagation
-Research completed, pattern documented in `experiments/ZOOM_PATTERNS.md`:
+Research completed, pattern documented in `libs/cells/docs/ZOOM_PATTERNS.md`:
 - **Global zoom with per-lens overrides** (not pure independent)
 - Per-peer defaults separate render function (library) from view config (app)
 - Zoom and width orthogonal — truncate, don't auto-reduce
@@ -88,7 +88,7 @@ demos/cells/
 ├── apps/              # TUI demos (minimal, layers, widgets, mouse, lenses)
 └── patterns/          # Real-world patterns (verbosity spectrum)
 ```
-Deleted tour.py (superseded by bench.py). Pattern documented in `experiments/DEMO_PATTERNS.md`.
+Deleted tour.py (superseded by bench.py). Pattern documented in `libs/cells/docs/DEMO_PATTERNS.md`.
 
 ## Resolved (2026-01-29 cont.)
 - ~~Arrow keys broken~~ — CSI parsing bug: `_read_csi()` assumed parameter bytes before final byte.

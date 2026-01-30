@@ -183,18 +183,18 @@ DEFAULT_THEME = Theme(
 
 LIGHT_THEME = Theme(
     name="light",
-    primary=32,   # Blue
+    primary=25,   # Darker blue for better contrast on white
     secondary=30,  # Teal
-    accent=32,
-    success=34,   # Green
-    warning=172,  # Orange
-    error=160,    # Red
-    muted=242,    # Gray
-    text=235,     # Dark gray
-    text_dim=242,
-    bg_base=255,  # White
-    bg_subtle=254,
-    bg_emphasis=253,
+    accent=25,    # Match primary
+    success=28,   # Darker green for contrast
+    warning=166,  # Darker orange for contrast
+    error=124,    # Darker red for contrast
+    muted=244,    # Medium gray (readable on white)
+    text=235,     # Dark gray (good contrast)
+    text_dim=244,
+    bg_base=231,  # Pure white (#ffffff)
+    bg_subtle=255, # Light gray
+    bg_emphasis=254, # Slightly darker for selections
 )
 
 SOLARIZED_THEME = Theme(

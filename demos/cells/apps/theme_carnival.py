@@ -56,9 +56,10 @@ class ThemeCarnival(Surface):
     def render(self) -> None:
         theme = current_theme()
         w, h = self._buf.width, self._buf.height
+        bg = theme.bg_base  # Main background for all content
 
         # Clear background
-        self._buf.fill(0, 0, w, h, " ", Style(bg=theme.bg_base))
+        self._buf.fill(0, 0, w, h, " ", Style(bg=bg))
 
         # Title bar
         title = f"  Theme Carnival  "
@@ -73,7 +74,7 @@ class ThemeCarnival(Surface):
 
         # Current theme display
         theme_label = f"Current: {theme.name.upper()}"
-        self._buf.put_text(4, content_y, theme_label, Style(fg=theme.accent, bold=True))
+        self._buf.put_text(4, content_y, theme_label, Style(fg=theme.accent, bold=True, bg=bg))
         content_y += 2
 
         # Preview panel
@@ -81,29 +82,29 @@ class ThemeCarnival(Surface):
         panel_width = min(50, w - 8)
 
         # Status indicators row
-        self._buf.put_text(panel_x, content_y, "Status:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Status:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         # Connected indicator
-        self._buf.put_text(panel_x + 2, content_y, "●", theme.header_connected)
-        self._buf.put_text(panel_x + 4, content_y, "Connected", Style(fg=theme.text))
+        self._buf.put_text(panel_x + 2, content_y, "●", Style(fg=theme.success, bg=bg))
+        self._buf.put_text(panel_x + 4, content_y, "Connected", Style(fg=theme.text, bg=bg))
 
         # Error indicator
-        self._buf.put_text(panel_x + 16, content_y, "✕", theme.header_error)
-        self._buf.put_text(panel_x + 18, content_y, "Error", Style(fg=theme.text))
+        self._buf.put_text(panel_x + 16, content_y, "✕", Style(fg=theme.error, bg=bg))
+        self._buf.put_text(panel_x + 18, content_y, "Error", Style(fg=theme.text, bg=bg))
 
         # Warning indicator
-        self._buf.put_text(panel_x + 28, content_y, "⚡", theme.header_spinner)
-        self._buf.put_text(panel_x + 30, content_y, "Warning", Style(fg=theme.text))
+        self._buf.put_text(panel_x + 28, content_y, "⚡", Style(fg=theme.warning, bg=bg))
+        self._buf.put_text(panel_x + 30, content_y, "Warning", Style(fg=theme.text, bg=bg))
 
         # Spinner
-        spin_block = spinner(self.spinner_state, style=Style(fg=theme.warning))
+        spin_block = spinner(self.spinner_state, style=Style(fg=theme.warning, bg=bg))
         spin_block.paint(self._buf, panel_x + 42, content_y)
 
         content_y += 2
 
         # Log levels
-        self._buf.put_text(panel_x, content_y, "Log Levels:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Log Levels:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         levels = [
@@ -115,29 +116,30 @@ class ThemeCarnival(Surface):
 
         for label, level, msg in levels:
             level_style = theme.level_style(level)
-            self._buf.put_text(panel_x + 2, content_y, label, level_style)
-            self._buf.put_text(panel_x + 8, content_y, msg, Style(fg=theme.text))
+            # Merge background into level style
+            self._buf.put_text(panel_x + 2, content_y, label, Style(fg=level_style.fg, bold=level_style.bold, dim=level_style.dim, bg=bg))
+            self._buf.put_text(panel_x + 8, content_y, msg, Style(fg=theme.text, bg=bg))
             content_y += 1
 
         content_y += 1
 
         # Progress bar
-        self._buf.put_text(panel_x, content_y, "Progress:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Progress:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         pbar = progress_bar(
             ProgressState(value=self.progress_value),
             width=panel_width - 8,
-            filled_style=Style(fg=theme.success),
-            empty_style=Style(dim=True),
+            filled_style=Style(fg=theme.success, bg=bg),
+            empty_style=Style(dim=True, bg=bg),
         )
         pbar.paint(self._buf, panel_x + 2, content_y)
         pct = int(self.progress_value * 100)
-        self._buf.put_text(panel_x + panel_width - 4, content_y, f"{pct:3d}%", Style(fg=theme.text))
+        self._buf.put_text(panel_x + panel_width - 4, content_y, f"{pct:3d}%", Style(fg=theme.text, bg=bg))
         content_y += 2
 
         # Buttons
-        self._buf.put_text(panel_x, content_y, "Actions:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Actions:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         # Button styles
@@ -151,23 +153,23 @@ class ThemeCarnival(Surface):
         content_y += 2
 
         # Selection highlight demo
-        self._buf.put_text(panel_x, content_y, "Selection:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Selection:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         items = ["Apple", "Banana", "Cherry"]
         for i, item in enumerate(items):
             if i == 1:  # Highlight middle item
-                self._buf.put_text(panel_x + 2, content_y, "▸", theme.selection_cursor)
+                self._buf.put_text(panel_x + 2, content_y, "▸", Style(fg=theme.accent, bold=True, bg=bg))
                 self._buf.fill(panel_x + 4, content_y, panel_width - 6, 1, " ", theme.selection_highlight)
                 self._buf.put_text(panel_x + 4, content_y, item, Style(fg=theme.text, bg=theme.bg_emphasis))
             else:
-                self._buf.put_text(panel_x + 4, content_y, item, Style(fg=theme.text))
+                self._buf.put_text(panel_x + 4, content_y, item, Style(fg=theme.text, bg=bg))
             content_y += 1
 
         content_y += 1
 
         # Palette preview
-        self._buf.put_text(panel_x, content_y, "Palette:", Style(fg=theme.text, dim=True))
+        self._buf.put_text(panel_x, content_y, "Palette:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         palette_items = [
@@ -179,14 +181,14 @@ class ThemeCarnival(Surface):
         ]
         x_offset = panel_x + 2
         for name, color in palette_items:
-            self._buf.put_text(x_offset, content_y, "██", Style(fg=color))
+            self._buf.put_text(x_offset, content_y, "██", Style(fg=color, bg=bg))
             x_offset += 3
 
         content_y += 2
 
         # Theme selector at bottom
         selector_y = h - 5
-        self._buf.put_text(4, selector_y, "Themes:", Style(fg=theme.text, bold=True))
+        self._buf.put_text(4, selector_y, "Themes:", Style(fg=theme.text, bold=True, bg=bg))
         selector_y += 1
 
         # Two columns of themes
@@ -199,14 +201,14 @@ class ThemeCarnival(Surface):
             num = i + 1
             is_current = name == theme.name
             prefix = "▸" if is_current else " "
-            style = Style(fg=theme.accent, bold=True) if is_current else Style(fg=theme.text)
+            style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
             self._buf.put_text(col1_x, selector_y + i, f"{prefix} {num}. {name.capitalize()}", style)
 
         for i, name in enumerate(themes_col2):
             num = i + 4
             is_current = name == theme.name
             prefix = "▸" if is_current else " "
-            style = Style(fg=theme.accent, bold=True) if is_current else Style(fg=theme.text)
+            style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
             self._buf.put_text(col2_x, selector_y + i, f"{prefix} {num}. {name.capitalize()}", style)
 
         # Footer

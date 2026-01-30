@@ -164,9 +164,9 @@ class Vertex:
             if owner_name != observer:
                 return None
 
-        # Store the fact
+        # Store the full fact (not just kind/payload) for replay
         if self._store is not None:
-            self._store.append((kind, payload))
+            self._store.append(fact)
 
         # Route to _FoldEngine (legacy)
         engine = self._engines.get(kind)

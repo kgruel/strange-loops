@@ -27,6 +27,7 @@ from .lens import Lens
 from .loop import Loop
 from .vertex import Vertex
 from .source import Source, ClosableSource
+from .replay import replay
 
 __all__ = [
     "Tick",
@@ -45,4 +46,5 @@ __all__ = [
     "Vertex",
     "Source",
     "ClosableSource",
+    "replay",
 ]

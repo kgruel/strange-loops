@@ -164,8 +164,11 @@ class TestVertexWithStore:
         v.receive(fact("metric", value=5))
 
         assert len(store.events) == 2
-        assert store.events[0] == ("metric", {"value": 10})
-        assert store.events[1] == ("metric", {"value": 5})
+        # Store now holds full Fact objects (for replay support)
+        assert store.events[0].kind == "metric"
+        assert store.events[0].payload["value"] == 10
+        assert store.events[1].kind == "metric"
+        assert store.events[1].payload["value"] == 5
 
     def test_unknown_kind_still_stored(self):
         store = EventStore()
@@ -175,7 +178,9 @@ class TestVertexWithStore:
         v.receive(fact("unknown", data="x"))
 
         assert len(store.events) == 1
-        assert store.events[0] == ("unknown", {"data": "x"})
+        # Store now holds full Fact objects (for replay support)
+        assert store.events[0].kind == "unknown"
+        assert store.events[0].payload["data"] == "x"
 
     def test_vertex_without_store(self):
         v = Vertex()

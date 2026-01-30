@@ -53,6 +53,7 @@ prove a specific aspect of the model.
 | `peer_focus.py` | Per-peer observer state — `focus.{peer}` pattern, no conflicts |
 | `lens_code.py` | Lens placement analysis — core Lens (ticks) vs render Lens (cells) |
 | `peer_aware_vertex.py` | Full model — Vertex.receive(Fact, Peer), gating, observer-state ownership |
+| `peer_surface.py` | Cells integration — peer-aware Vertex wired to Surface, gating visible in TUI |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
@@ -61,10 +62,7 @@ Experiment insights accumulate in `experiments/LOG.md`.
 1. **Update existing experiments** — Migrate remaining experiments to use
    `Vertex.receive(fact, peer)` signature for consistency.
 
-2. **Cells integration** — Connect peer-aware Vertex to Surface. Bridge emits
-   Facts with explicit Peer. Demonstrate gating in a live TUI.
-
-3. **Network + Peer** — Combine network_boundary_extended with peer-aware
+2. **Network + Peer** — Combine network_boundary_extended with peer-aware
    pipeline. How does Peer context flow across process boundaries?
 
 ## Open Threads
@@ -105,3 +103,4 @@ Resolved questions kept for context. See `LOG.md` for full history.
 16. ~~Lens placement~~ — Core Lens (zoom + scope) in ticks. Render lenses stay in cells.
 17. ~~Per-peer focus~~ — `{kind}.{peer}` pattern. Observer state belongs to observer. Ownership enforced at receive.
 18. ~~Network concerns~~ — Discovery, failure, ordering, backpressure all become facts that fold. Policy is composition-layer.
+19. ~~Cells integration~~ — peer_surface.py: Surface.emit() → Fact → Vertex.receive(fact, peer). Gating visible in TUI debug panel.

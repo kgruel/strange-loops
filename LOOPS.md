@@ -54,7 +54,12 @@ One loop can branch at a vertex (one fact triggers multiple paths).
 ## The data flow
 
 ```
-Peer observes ──→ Fact(kind, ts, payload)
+                 ┌──────────────┐
+                 │    Source    │  adapter: command, feed, endpoint, file...
+                 └──────┬───────┘
+                        │ vertex.ingest(kind, payload, observer)
+                        ▼
+Observer ────────→ Fact(kind, ts, payload)
                          │
                          ▼
                  ┌───────────────┐
@@ -89,6 +94,9 @@ Peer observes ──→ Fact(kind, ts, payload)
                          │
                          └──→ loops back to any vertex
 ```
+
+Source adapters convert external input to Facts. They are infrastructure, not
+atoms. See [VERTEX.md](docs/VERTEX.md) for the ingest interface.
 
 ## The topology
 

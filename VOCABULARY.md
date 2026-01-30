@@ -70,6 +70,14 @@ Interactive renderer that closes the loop:
 
 State goes out as cells. Interactions come back as facts. Surface emits Facts with its user as observer.
 
+### Source
+
+An adapter that produces Facts from external input. Infrastructure, not an atom.
+
+- **Adapters**: command, feed, endpoint, file, timer, etc.
+- **Interface**: `vertex.ingest(kind, payload, observer)`
+- **Responsibility**: translate external events into Facts with proper observer attribution
+
 ---
 
 ## Allowed Verbs
@@ -84,6 +92,7 @@ State goes out as cells. Interactions come back as facts. Surface emits Facts wi
 | Vertex | receive, gate, route, stamp, store, forward |
 | Grant | lookup, restrict |
 | Surface | render, emit |
+| Source | ingest, adapt |
 | Cell | paint |
 
 ---

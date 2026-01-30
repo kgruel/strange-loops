@@ -27,6 +27,43 @@ think about architecture, think Vertex.
 
 ---
 
+## Ingress: How Facts Enter
+
+Sources are adapters that produce Facts from external input. They are
+infrastructure, not atoms.
+
+**The ingest interface:**
+
+```python
+vertex.ingest(kind, payload, observer)
+```
+
+The vertex creates the Fact (stamping `ts`) and routes it. The source provides
+the kind, payload, and observer attribution.
+
+**Source registration:**
+
+```python
+vertex.register_source("stdin", stdin_source)
+vertex.register_source("http", http_source)
+```
+
+Sources are registered at the composition layer. Each source type adapts a
+different external interface to the same ingest contract.
+
+**Common source types:**
+
+- **command** — CLI input, shell commands
+- **feed** — streaming data (websocket, SSE)
+- **endpoint** — HTTP request/response
+- **file** — file system events, content changes
+- **timer** — periodic signals
+
+Sources don't know about routing or folding. They just translate external events
+into Facts with proper observer attribution.
+
+---
+
 ## Routing by Kind
 
 Every Fact has a `kind` — an open string that determines where it goes.

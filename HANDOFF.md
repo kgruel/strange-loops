@@ -59,11 +59,14 @@ Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Update existing experiments** — Migrate remaining experiments to use
+1. **Implement Source adapters** — Build concrete adapters (command, file,
+   timer) using `vertex.ingest(kind, payload, observer)` interface.
+
+2. **Update existing experiments** — Migrate remaining experiments to use
    `Vertex.receive(fact, peer)` signature for consistency.
 
-2. **Network + Peer** — Combine network_boundary_extended with peer-aware
-   pipeline. How does Peer context flow across process boundaries?
+3. **Network + Peer** — Combine network_boundary_extended with peer-aware
+   pipeline. How does observer context flow across process boundaries?
 
 ## Open Threads
 
@@ -104,3 +107,4 @@ Resolved questions kept for context. See `LOG.md` for full history.
 17. ~~Per-peer focus~~ — `{kind}.{peer}` pattern. Observer state belongs to observer. Ownership enforced at receive.
 18. ~~Network concerns~~ — Discovery, failure, ordering, backpressure all become facts that fold. Policy is composition-layer.
 19. ~~Cells integration~~ — peer_surface.py: Surface.emit() → Fact → Vertex.receive(fact, peer). Gating visible in TUI debug panel.
+20. ~~Source concept~~ — Sources are adapters at the ingress boundary. Not atoms. Interface: vertex.ingest(kind, payload, observer).

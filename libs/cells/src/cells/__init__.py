@@ -8,6 +8,9 @@ For interactive TUI apps, import from submodules:
     from cells.widgets import spinner, list_view
     from cells.mouse import MouseEvent
     from cells.effects import render_big
+
+For runtime theming:
+    from cells.themes import current_theme, use_theme, list_themes
 """
 
 # Primitives

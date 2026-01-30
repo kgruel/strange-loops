@@ -29,7 +29,7 @@ import random
 from collections import deque
 
 from facts import Fact
-from peers import Peer, delegate
+from peers import Peer, Grant, delegate, grant_of
 from ticks import Vertex
 from specs import Shape, Facet
 from cells import Block, Style, join_vertical, join_horizontal, border
@@ -170,10 +170,10 @@ class ObserveApp(Surface):
     def _wrap_receive(self):
         """Instrument vertex.receive() — captures the full event stream."""
         real_receive = self.vertex.receive
-        def traced(fact: Fact, peer: Peer):
+        def traced(fact: Fact, grant: Grant | None = None):
             parts = " ".join(f"{k}={v}" for k, v in fact.payload.items())
             self._trace.append(f"{fact.kind}  {parts}")
-            return real_receive(fact, peer)
+            return real_receive(fact, grant)
         self.vertex.receive = traced
 
     @property
@@ -187,7 +187,7 @@ class ObserveApp(Surface):
                 self.log.append(f"blocked: {self.peer.name} cannot emit '{kind}'")
                 self.mark_dirty()
                 return
-            self.vertex.receive(Fact.of(kind, **data, peer=self.peer.name), self.peer)
+            self.vertex.receive(Fact.of(kind, self.peer.name, **data), grant_of(self.peer))
             self.log.append(f"{self.peer.name}: {kind}")
             self.mark_dirty()
         return on_emit
@@ -203,7 +203,7 @@ class ObserveApp(Surface):
             while True:
                 for c in CONTAINERS:
                     status = random.choice(STATUSES)
-                    self.vertex.receive(Fact.of("health", container=c, status=status), SYSTEM)
+                    self.vertex.receive(Fact.of("health", SYSTEM.name, container=c, status=status))
                 self.mark_dirty()
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
@@ -220,7 +220,7 @@ class ObserveApp(Surface):
     def on_key(self, key: str) -> None:
         # Infrastructure: raw key capture, direct to vertex (like health timer).
         # Not the peer's action — no potential gating.
-        self.vertex.receive(Fact.of("ui.key", key=key), SYSTEM)
+        self.vertex.receive(Fact.of("ui.key", SYSTEM.name, key=key))
 
         visible = self._visible_containers()
         if not visible:

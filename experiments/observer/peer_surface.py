@@ -23,7 +23,7 @@ import random
 from collections import deque
 
 from facts import Fact
-from peers import Peer, delegate
+from peers import Peer, Grant, delegate, grant_of
 from ticks import Lens, Tick, Vertex
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
@@ -162,8 +162,8 @@ class PeerSurfaceApp(Surface):
         becomes a Fact with explicit Peer, routed through the Vertex.
         """
         def on_emit(kind: str, data: dict) -> None:
-            fact = Fact.of(kind, **data)
-            result = self.vertex.receive(fact, self.peer)
+            fact = Fact.of(kind, self.peer.name, **data)
+            result = self.vertex.receive(fact, grant_of(self.peer))
 
             # Track for visualization
             allowed = self._was_allowed(kind, result)
@@ -214,8 +214,8 @@ class PeerSurfaceApp(Surface):
             while True:
                 for c in CONTAINERS:
                     status = random.choice(STATUSES)
-                    fact = Fact.of("health", container=c, status=status)
-                    self.vertex.receive(fact, root)
+                    fact = Fact.of("health", root.name, container=c, status=status)
+                    self.vertex.receive(fact, grant_of(root))
                 self.mark_dirty()
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
@@ -226,7 +226,7 @@ class PeerSurfaceApp(Surface):
     def on_key(self, key: str) -> None:
         # Infrastructure: raw key capture, direct to vertex as root (no gating)
         root = self.peers["kyle"]
-        self.vertex.receive(Fact.of("ui.key", key=key), root)
+        self.vertex.receive(Fact.of("ui.key", root.name, key=key))
 
         focus_state = self.vertex.state(self._focus_kind())
         current = focus_state.get("index", 0)

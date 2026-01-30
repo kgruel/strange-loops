@@ -250,3 +250,29 @@ class Vertex:
             payload=tick.payload,
             observer=self._name,
         )
+
+    def ingest(
+        self,
+        kind: str,
+        payload: dict,
+        observer: str,
+        grant: Grant | None = None,
+    ) -> Tick | None:
+        """Convenience: create a Fact and receive it in one call.
+
+        Useful for sources and bridges that have raw data rather than
+        pre-constructed Facts.
+
+        Args:
+            kind: Fact kind
+            payload: Dict payload (will be wrapped in Fact.of)
+            observer: Who produced this observation
+            grant: Optional Grant for potential gating
+
+        Returns:
+            Tick if a boundary fired, None otherwise.
+        """
+        from facts import Fact
+
+        fact = Fact.of(kind, observer, **payload)
+        return self.receive(fact, grant)

@@ -9,7 +9,7 @@ Keys: 1-6 jump to theme, ←/→ cycle, q quit
 """
 
 import asyncio
-from cells import Style, Block, Line, Span, border, pad, join_vertical, join_horizontal
+from cells import Style, Block, Line, Span, border, pad, join_vertical, join_horizontal, join_responsive
 from cells.tui import Surface
 from cells.themes import (
     Theme,
@@ -67,41 +67,36 @@ class ThemeCarnival(Surface):
         self._buf.put_text(2, 0, title, Style(fg=theme.primary, bold=True, bg=theme.bg_subtle))
 
         keys_hint = "[1-6] switch  [←/→] cycle  [q] quit"
-        self._buf.put_text(w - len(keys_hint) - 2, 0, keys_hint, Style(fg=theme.muted, bg=theme.bg_subtle))
+        hint_x = max(len(title) + 4, w - len(keys_hint) - 2)
+        self._buf.put_text(hint_x, 0, keys_hint, Style(fg=theme.muted, bg=theme.bg_subtle))
 
         # Main content area
         content_y = 3
+        panel_x = 4
+        panel_width = max(20, w - 8)
 
         # Current theme display
         theme_label = f"Current: {theme.name.upper()}"
-        self._buf.put_text(4, content_y, theme_label, Style(fg=theme.accent, bold=True, bg=bg))
+        self._buf.put_text(panel_x, content_y, theme_label, Style(fg=theme.accent, bold=True, bg=bg))
         content_y += 2
 
-        # Preview panel
-        panel_x = 4
-        panel_width = min(50, w - 8)
-
-        # Status indicators row
+        # Status indicators row — using join_responsive
         self._buf.put_text(panel_x, content_y, "Status:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
-        # Connected indicator
-        self._buf.put_text(panel_x + 2, content_y, "●", Style(fg=theme.success, bg=bg))
-        self._buf.put_text(panel_x + 4, content_y, "Connected", Style(fg=theme.text, bg=bg))
-
-        # Error indicator
-        self._buf.put_text(panel_x + 16, content_y, "✕", Style(fg=theme.error, bg=bg))
-        self._buf.put_text(panel_x + 18, content_y, "Error", Style(fg=theme.text, bg=bg))
-
-        # Warning indicator
-        self._buf.put_text(panel_x + 28, content_y, "⚡", Style(fg=theme.warning, bg=bg))
-        self._buf.put_text(panel_x + 30, content_y, "Warning", Style(fg=theme.text, bg=bg))
-
-        # Spinner
+        # Build status indicator blocks
+        connected_block = Block.text("● Connected", Style(fg=theme.success, bg=bg))
+        error_block = Block.text("✕ Error", Style(fg=theme.error, bg=bg))
+        warning_block = Block.text("⚡ Warning", Style(fg=theme.warning, bg=bg))
         spin_block = spinner(self.spinner_state, style=Style(fg=theme.warning, bg=bg))
-        spin_block.paint(self._buf, panel_x + 42, content_y)
 
-        content_y += 2
+        status_row = join_responsive(
+            connected_block, error_block, warning_block, spin_block,
+            available_width=panel_width - 2,
+            gap=2
+        )
+        status_row.paint(self._buf, panel_x + 2, content_y)
+        content_y += status_row.height + 1
 
         # Log levels
         self._buf.put_text(panel_x, content_y, "Log Levels:", Style(fg=theme.text, dim=True, bg=bg))
@@ -127,40 +122,49 @@ class ThemeCarnival(Surface):
         self._buf.put_text(panel_x, content_y, "Progress:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
+        pbar_width = max(10, panel_width - 12)
         pbar = progress_bar(
             ProgressState(value=self.progress_value),
-            width=panel_width - 8,
+            width=pbar_width,
             filled_style=Style(fg=theme.success, bg=bg),
             empty_style=Style(dim=True, bg=bg),
         )
         pbar.paint(self._buf, panel_x + 2, content_y)
         pct = int(self.progress_value * 100)
-        self._buf.put_text(panel_x + panel_width - 4, content_y, f"{pct:3d}%", Style(fg=theme.text, bg=bg))
+        self._buf.put_text(panel_x + 4 + pbar_width, content_y, f"{pct:3d}%", Style(fg=theme.text, bg=bg))
         content_y += 2
 
-        # Buttons
+        # Buttons — using join_responsive
         self._buf.put_text(panel_x, content_y, "Actions:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         # Button styles
-        btn_style = Style(fg=theme.text, bg=theme.bg_emphasis)
         btn_accent = Style(fg=theme.primary, bg=theme.bg_emphasis, bold=True)
+        btn_style = Style(fg=theme.text, bg=theme.bg_emphasis)
         btn_danger = Style(fg=theme.error, bg=theme.bg_emphasis)
 
-        self._buf.put_text(panel_x + 2, content_y, " Save ", btn_accent)
-        self._buf.put_text(panel_x + 10, content_y, " Cancel ", btn_style)
-        self._buf.put_text(panel_x + 20, content_y, " Delete ", btn_danger)
-        content_y += 2
+        save_btn = Block.text(" Save ", btn_accent)
+        cancel_btn = Block.text(" Cancel ", btn_style)
+        delete_btn = Block.text(" Delete ", btn_danger)
+
+        buttons_row = join_responsive(
+            save_btn, cancel_btn, delete_btn,
+            available_width=panel_width - 2,
+            gap=2
+        )
+        buttons_row.paint(self._buf, panel_x + 2, content_y)
+        content_y += buttons_row.height + 1
 
         # Selection highlight demo
         self._buf.put_text(panel_x, content_y, "Selection:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
         items = ["Apple", "Banana", "Cherry"]
+        item_width = min(panel_width - 6, 20)
         for i, item in enumerate(items):
             if i == 1:  # Highlight middle item
                 self._buf.put_text(panel_x + 2, content_y, "▸", Style(fg=theme.accent, bold=True, bg=bg))
-                self._buf.fill(panel_x + 4, content_y, panel_width - 6, 1, " ", theme.selection_highlight)
+                self._buf.fill(panel_x + 4, content_y, item_width, 1, " ", theme.selection_highlight)
                 self._buf.put_text(panel_x + 4, content_y, item, Style(fg=theme.text, bg=theme.bg_emphasis))
             else:
                 self._buf.put_text(panel_x + 4, content_y, item, Style(fg=theme.text, bg=bg))
@@ -168,48 +172,50 @@ class ThemeCarnival(Surface):
 
         content_y += 1
 
-        # Palette preview
+        # Palette preview — using join_responsive
         self._buf.put_text(panel_x, content_y, "Palette:", Style(fg=theme.text, dim=True, bg=bg))
         content_y += 1
 
-        palette_items = [
-            ("primary", theme.primary),
-            ("accent", theme.accent),
-            ("success", theme.success),
-            ("warning", theme.warning),
-            ("error", theme.error),
+        palette_blocks = [
+            Block.text("██", Style(fg=theme.primary, bg=bg)),
+            Block.text("██", Style(fg=theme.accent, bg=bg)),
+            Block.text("██", Style(fg=theme.success, bg=bg)),
+            Block.text("██", Style(fg=theme.warning, bg=bg)),
+            Block.text("██", Style(fg=theme.error, bg=bg)),
         ]
-        x_offset = panel_x + 2
-        for name, color in palette_items:
-            self._buf.put_text(x_offset, content_y, "██", Style(fg=color, bg=bg))
-            x_offset += 3
+        palette_row = join_responsive(
+            *palette_blocks,
+            available_width=panel_width - 2,
+            gap=1
+        )
+        palette_row.paint(self._buf, panel_x + 2, content_y)
+        content_y += palette_row.height + 1
 
-        content_y += 2
-
-        # Theme selector at bottom
-        selector_y = h - 5
+        # Theme selector at bottom — using join_responsive
+        selector_y = max(content_y + 1, h - 5)
         self._buf.put_text(4, selector_y, "Themes:", Style(fg=theme.text, bold=True, bg=bg))
         selector_y += 1
 
-        # Two columns of themes
-        col1_x = 6
-        col2_x = 24
-        themes_col1 = self.theme_names[:3]
-        themes_col2 = self.theme_names[3:6]
+        # Build theme columns as blocks
+        def theme_column(names: list[str], start_num: int) -> Block:
+            lines = []
+            for i, name in enumerate(names):
+                num = start_num + i
+                is_current = name == theme.name
+                prefix = "▸" if is_current else " "
+                style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
+                lines.append(Block.text(f"{prefix} {num}. {name.capitalize()}", style))
+            return join_vertical(*lines) if lines else Block.empty(0, 0)
 
-        for i, name in enumerate(themes_col1):
-            num = i + 1
-            is_current = name == theme.name
-            prefix = "▸" if is_current else " "
-            style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
-            self._buf.put_text(col1_x, selector_y + i, f"{prefix} {num}. {name.capitalize()}", style)
+        col1 = theme_column(self.theme_names[:3], 1)
+        col2 = theme_column(self.theme_names[3:6], 4)
 
-        for i, name in enumerate(themes_col2):
-            num = i + 4
-            is_current = name == theme.name
-            prefix = "▸" if is_current else " "
-            style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
-            self._buf.put_text(col2_x, selector_y + i, f"{prefix} {num}. {name.capitalize()}", style)
+        theme_cols = join_responsive(
+            col1, col2,
+            available_width=w - 12,
+            gap=4
+        )
+        theme_cols.paint(self._buf, 6, selector_y)
 
         # Footer
         self._buf.fill(0, h - 1, w, 1, " ", theme.header_base)

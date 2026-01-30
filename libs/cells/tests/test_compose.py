@@ -1,6 +1,6 @@
 """Tests for cells.compose: vslice, join_vertical."""
 
-from cells import Block, Style, Cell, vslice, join_vertical, Align
+from cells import Block, Style, Cell, vslice, join_vertical, join_horizontal, join_responsive, Align
 
 
 def _text_block(lines: list[str], style: Style = Style()) -> Block:
@@ -138,3 +138,77 @@ class TestJoinVerticalGap:
         assert _row_text(result, 0) == " aa "
         assert _row_text(result, 1) == "    "
         assert _row_text(result, 2) == "bbbb"
+
+
+class TestJoinResponsive:
+    def test_fits_horizontal(self):
+        """When blocks fit, join horizontally."""
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        result = join_responsive(a, b, available_width=10)
+        # Horizontal: 3 + 3 = 6, fits in 10
+        assert result.width == 6
+        assert result.height == 1
+        assert _row_text(result, 0) == "aaabbb"
+
+    def test_does_not_fit_vertical(self):
+        """When blocks don't fit, join vertically."""
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        result = join_responsive(a, b, available_width=5)
+        # 3 + 3 = 6 > 5, so vertical
+        assert result.width == 3
+        assert result.height == 2
+        assert _row_text(result, 0) == "aaa"
+        assert _row_text(result, 1) == "bbb"
+
+    def test_exact_fit_is_horizontal(self):
+        """Exactly fitting is horizontal."""
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        result = join_responsive(a, b, available_width=6)
+        assert result.width == 6
+        assert result.height == 1
+
+    def test_gap_included_in_fit_calculation(self):
+        """Gap is counted when checking fit."""
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        # 3 + 2 (gap) + 3 = 8
+        result = join_responsive(a, b, available_width=8, gap=2)
+        assert result.width == 8
+        assert result.height == 1
+        assert _row_text(result, 0) == "aaa  bbb"
+
+    def test_gap_causes_overflow(self):
+        """Gap can cause switch to vertical."""
+        a = _text_block(["aaa"])
+        b = _text_block(["bbb"])
+        # 3 + 2 (gap) + 3 = 8 > 7, so vertical
+        result = join_responsive(a, b, available_width=7, gap=2)
+        assert result.height == 4  # 1 + 2 (gap) + 1
+        assert result.width == 3
+
+    def test_empty_blocks(self):
+        """Empty input returns empty block."""
+        result = join_responsive(available_width=10)
+        assert result.width == 0
+        assert result.height == 0
+
+    def test_single_block(self):
+        """Single block returns as-is."""
+        a = _text_block(["hello"])
+        result = join_responsive(a, available_width=3)
+        # Single block, no joining needed
+        assert result.width == 5
+        assert result.height == 1
+
+    def test_alignment_passed_through(self):
+        """Alignment is used in both modes."""
+        a = _text_block(["aa"])
+        b = _text_block(["bbbb"])
+        # Vertical with center align
+        result = join_responsive(a, b, available_width=5, align=Align.CENTER)
+        assert result.height == 2
+        assert _row_text(result, 0) == " aa "
+        assert _row_text(result, 1) == "bbbb"

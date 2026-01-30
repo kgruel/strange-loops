@@ -211,3 +211,31 @@ def _halign_offset(block_width: int, container_width: int, align: Align) -> int:
         return diff // 2
     else:  # END
         return diff
+
+
+def join_responsive(
+    *blocks: Block,
+    available_width: int,
+    gap: int = 0,
+    align: Align = Align.START,
+) -> Block:
+    """Join blocks horizontally if they fit, vertically if not.
+
+    Args:
+        blocks: Blocks to compose
+        available_width: Container width to fit within
+        gap: Space between blocks
+        align: Alignment for both orientations
+
+    Returns:
+        Horizontal join if total width fits, vertical join otherwise.
+    """
+    if not blocks:
+        return Block.empty(0, 0)
+
+    total_width = sum(b.width for b in blocks) + gap * (len(blocks) - 1)
+
+    if total_width <= available_width:
+        return join_horizontal(*blocks, gap=gap, align=align)
+    else:
+        return join_vertical(*blocks, gap=gap, align=align)

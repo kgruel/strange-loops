@@ -1,6 +1,6 @@
 """Tests for peers primitives."""
 
-from peers import Peer, grant, restrict, delegate
+from peers import Peer, Grant, grant, restrict, delegate, grant_of, expand_grant, restrict_grant
 
 
 class TestPeer:
@@ -136,3 +136,74 @@ class TestDelegate:
         child = delegate(parent, "clone")
         assert child.horizon is None
         assert child.potential is None
+
+
+class TestGrantDataclass:
+    def test_grant_defaults_unrestricted(self):
+        """A new grant is unrestricted by default."""
+        g = Grant()
+        assert g.horizon is None
+        assert g.potential is None
+
+    def test_grant_with_explicit_sets(self):
+        g = Grant(
+            horizon=frozenset({"logs", "metrics"}),
+            potential=frozenset({"deploy"}),
+        )
+        assert "logs" in g.horizon
+        assert "deploy" in g.potential
+
+    def test_grant_is_frozen(self):
+        g = Grant()
+        try:
+            g.horizon = frozenset({"a"})
+            assert False, "should raise"
+        except AttributeError:
+            pass
+
+
+class TestGrantOf:
+    def test_grant_of_extracts_policy(self):
+        p = Peer(
+            name="alice",
+            horizon=frozenset({"a", "b"}),
+            potential=frozenset({"x"}),
+        )
+        g = grant_of(p)
+        assert g.horizon == frozenset({"a", "b"})
+        assert g.potential == frozenset({"x"})
+
+    def test_grant_of_unrestricted(self):
+        p = Peer(name="root")
+        g = grant_of(p)
+        assert g.horizon is None
+        assert g.potential is None
+
+
+class TestExpandGrant:
+    def test_expand_adds_to_explicit(self):
+        g = Grant(horizon=frozenset({"a"}), potential=frozenset({"w"}))
+        g2 = expand_grant(g, horizon={"b"}, potential={"x"})
+        assert g2.horizon == frozenset({"a", "b"})
+        assert g2.potential == frozenset({"w", "x"})
+        # Original unchanged
+        assert g.horizon == frozenset({"a"})
+
+    def test_expand_noop_on_unrestricted(self):
+        g = Grant()
+        g2 = expand_grant(g, horizon={"a"}, potential={"x"})
+        assert g2.horizon is None
+        assert g2.potential is None
+
+
+class TestRestrictGrant:
+    def test_restrict_narrows_explicit(self):
+        g = Grant(horizon=frozenset({"a", "b", "c"}))
+        g2 = restrict_grant(g, horizon={"a", "b"})
+        assert g2.horizon == frozenset({"a", "b"})
+
+    def test_restrict_narrows_unrestricted(self):
+        g = Grant()
+        g2 = restrict_grant(g, horizon={"a", "b"})
+        assert g2.horizon == frozenset({"a", "b"})
+        assert g2.potential is None  # untouched

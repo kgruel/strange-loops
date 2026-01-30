@@ -14,7 +14,8 @@ uv run --package ticks pytest libs/ticks/tests
 Tick[T]
  ├─ name: str       # which loop produced this tick
  ├─ ts: datetime    # temporal boundary timestamp
- └─ payload: T      # frozen snapshot (folded state, batch, or single value)
+ ├─ payload: T      # frozen snapshot (folded state, batch, or single value)
+ └─ origin: str     # which vertex produced this tick
 ```
 
 ## Public API
@@ -40,15 +41,17 @@ Tick[T]
 
 ### Vertex
 ```python
-v = Vertex(store=my_store)         # optional Store backing
-v.register("metric", 0, fold_fn)  # register fold for a kind
-v.register("metric", 0, fold_fn,  # with boundary triggering:
-    boundary="end-of-day",         #   which kind triggers boundary
-    reset=True)                    #   reset engine to initial after tick
-v.receive("metric", payload)       # route fact to fold engine → Tick | None
-tick = v.tick("my-loop", now)      # manual boundary → Tick (all engines)
-v.state("metric")                  # current fold state
-v.kinds                            # registered kinds
+v = Vertex("my-vertex", store=my_store)  # name + optional Store backing
+v.register("metric", 0, fold_fn)         # register fold for a kind
+v.register("metric", 0, fold_fn,         # with boundary triggering:
+    boundary="end-of-day",                #   which kind triggers boundary
+    reset=True)                           #   reset engine to initial after tick
+v.receive(fact)                           # route fact to fold engine → Tick | None
+v.receive(fact, grant)                    # with optional Grant for potential gating
+tick = v.tick("my-loop", now)             # manual boundary → Tick (all engines)
+fact = v.to_fact(tick)                    # convert Tick to Fact (vertex as observer)
+v.state("metric")                         # current fold state
+v.kinds                                   # registered kinds
 ```
 
 ### Store
@@ -105,25 +108,27 @@ store.evict_below(n)         # free memory, invalidate old cursors
 ## Pipeline Role
 
 ```
-Fact (kind, payload)
+Fact (kind, payload, observer)
   │
   ▼
 Vertex ──────────────────────────────────────────────────
   ├─ register(kind, initial, fold)              # setup
   ├─ register(kind, ..., boundary=, reset=)     # with auto-tick
-  ├─ receive(kind, payload) → Tick | None       # route + fold + boundary
+  ├─ receive(fact) → Tick | None                # route + fold + boundary
+  ├─ receive(fact, grant) → Tick | None         # with potential gating
   ├─ tick(name, ts) → Tick                      # manual snapshot (all engines)
+  ├─ to_fact(tick) → Fact                       # convert tick to fact (vertex as observer)
   └─ optional Store (append on receive)
 
 Two boundary modes:
-  Auto:   receive(boundary_kind, ...) → Tick   # single engine, optional reset
+  Auto:   receive(boundary_fact) → Tick        # single engine, optional reset
   Manual: tick(name, ts) → Tick                # all engines, no reset
 
-Stream integration (at composition point, not inside Vertex):
-  async def consume(fact):
-      tick = vertex.receive(fact.kind, fact.payload)
-      if tick is not None:
-          await downstream.emit(tick)
+Tick-to-Fact forwarding (at composition point):
+  tick = vertex_a.receive(fact)
+  if tick is not None:
+      tick_fact = vertex_a.to_fact(tick)       # vertex-a becomes observer
+      vertex_b.receive(tick_fact)               # forward to next vertex
 ```
 
 ## Source Layout

@@ -14,9 +14,9 @@ When a fact with that kind arrives, the engine's state is snapshot
 into a Tick and optionally reset. The boundary fires after the fold
 completes (fold-before-boundary).
 
-Peer-aware receive: the Vertex gates facts against the peer's potential.
-Observer-state kinds (focus.{peer}, scroll.{peer}, selection.{peer})
-must match the acting peer.
+Grant-aware receive: the Vertex gates facts against an optional Grant's
+potential. Observer-state kinds (focus.{observer}, scroll.{observer},
+selection.{observer}) must match the fact's observer.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ from .tick import Tick
 
 if TYPE_CHECKING:
     from facts import Fact
-    from peers import Peer
+    from peers import Grant
 
 
-# Observer-state kind pattern: kind.{peer_name}
+# Observer-state kind pattern: kind.{observer_name}
 _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
 
 
@@ -60,9 +60,9 @@ class Vertex:
     Optionally backed by a Store — if provided, every received fact
     is appended to the store before routing.
 
-    Peer-aware: receive() takes a Fact and Peer explicitly. The Vertex
-    gates facts against the peer's potential and enforces observer-state
-    kind ownership.
+    Grant-aware: receive() takes a Fact (with observer) and optional Grant.
+    The Vertex gates facts against the grant's potential (if provided) and
+    enforces observer-state kind ownership based on fact.observer.
     """
 
     def __init__(self, name: str = "", *, store: Store | None = None) -> None:
@@ -131,13 +131,13 @@ class Vertex:
             self._boundary_map[loop.boundary_kind] = kind
         self._loops[kind] = loop
 
-    def receive(self, fact: Fact, peer: Peer) -> Tick | None:
-        """Route a fact to the appropriate fold engine, gated by peer.
+    def receive(self, fact: Fact, grant: Grant | None = None) -> Tick | None:
+        """Route a fact to the appropriate fold engine, gated by optional grant.
 
         Gating rules:
-        1. If peer.potential is not None and fact.kind not in potential → reject
+        1. If grant.potential is not None and fact.kind not in potential → reject
         2. For observer-state kinds (focus.{name}, scroll.{name}, selection.{name}),
-           the {name} must match peer.name → reject if mismatch
+           the {name} must match fact.observer → reject if mismatch
 
         If a Store is attached, the fact is appended before routing.
         Unregistered kinds are silently ignored — they pass through to the
@@ -147,20 +147,21 @@ class Vertex:
         If so, snapshots the triggered engine's state into a Tick and
         optionally resets the engine. Returns the Tick, or None.
 
-        Returns None on rejection (fact not permitted for this peer).
+        Returns None on rejection (fact not permitted by grant).
         """
         kind = fact.kind
         payload = fact.payload
+        observer = fact.observer
 
-        # Gate 1: potential check
-        if peer.potential is not None and kind not in peer.potential:
+        # Gate 1: potential check (only if grant provided)
+        if grant is not None and grant.potential is not None and kind not in grant.potential:
             return None
 
         # Gate 2: observer-state ownership
         match = _OBSERVER_STATE_PATTERN.match(kind)
         if match:
             owner_name = match.group(2)
-            if owner_name != peer.name:
+            if owner_name != observer:
                 return None
 
         # Store the fact
@@ -233,3 +234,19 @@ class Vertex:
         if kind in self._loops:
             return self._loops[kind].version
         return self._engines[kind].projection.version
+
+    def to_fact(self, tick: Tick) -> Fact:
+        """Convert a Tick to a Fact with this vertex as observer.
+
+        Used when forwarding ticks from one vertex to another.
+        The tick becomes a fact with kind="tick.{tick.name}" and
+        the vertex name as observer.
+        """
+        from facts import Fact
+
+        return Fact(
+            kind=f"tick.{tick.name}",
+            ts=tick.ts.timestamp(),
+            payload=tick.payload,
+            observer=self._name,
+        )

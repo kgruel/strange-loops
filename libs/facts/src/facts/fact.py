@@ -21,11 +21,13 @@ class Fact(Generic[T]):
         kind: Open, domain-specific routing key ("heartbeat", "deploy", etc.)
         ts: Epoch seconds (float) — when observed. Display formatting is caller's problem.
         payload: The details — Shape knows the structure
+        observer: Who produced this observation (required)
     """
 
     kind: str
     ts: float
     payload: T
+    observer: str
 
     def __post_init__(self) -> None:
         """Wrap dict payloads in MappingProxyType for immutability."""
@@ -35,24 +37,26 @@ class Fact(Generic[T]):
             )
 
     @classmethod
-    def of(cls, kind: str, **data: Any) -> Fact[dict]:
+    def of(cls, kind: str, observer: str, **data: Any) -> Fact[dict]:
         """Create a Fact with auto-timestamp and dict payload.
 
         Args:
             kind: Domain-specific routing key
+            observer: Who produced this observation
             **data: Keyword arguments become the dict payload
         """
-        return cls(kind=kind, ts=time.time(), payload=data)
+        return cls(kind=kind, ts=time.time(), payload=data, observer=observer)
 
     @classmethod
-    def tick(cls, name: str, **data: Any) -> Fact[dict]:
+    def tick(cls, name: str, observer: str, **data: Any) -> Fact[dict]:
         """Create a boundary-related Fact with tick. prefix.
 
         Args:
             name: Boundary name — auto-prefixed to kind="tick.{name}"
+            observer: Who produced this observation
             **data: Keyword arguments become the dict payload
         """
-        return cls(kind=f"tick.{name}", ts=time.time(), payload=data)
+        return cls(kind=f"tick.{name}", ts=time.time(), payload=data, observer=observer)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""
@@ -61,6 +65,7 @@ class Fact(Generic[T]):
             "kind": self.kind,
             "ts": self.ts,
             "payload": payload,
+            "observer": self.observer,
         }
 
     @classmethod
@@ -70,6 +75,7 @@ class Fact(Generic[T]):
             kind=d["kind"],
             ts=float(d["ts"]),
             payload=d["payload"],
+            observer=d["observer"],
         )
 
     def is_kind(self, *kinds: str) -> bool:

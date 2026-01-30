@@ -6,8 +6,9 @@ specific time. Kind is an open string; structure comes from Shape.
 Example:
     from facts import Fact
 
-    f = Fact.of("heartbeat", service="api", latency=42)
+    f = Fact.of("heartbeat", "alice", service="api", latency=42)
     assert f.kind == "heartbeat"
+    assert f.observer == "alice"
     assert f.payload["service"] == "api"
 """
 

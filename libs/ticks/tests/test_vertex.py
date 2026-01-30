@@ -5,19 +5,16 @@ from datetime import datetime, timezone
 import pytest
 
 from facts import Fact
-from peers import Peer
+from peers import Grant
 from ticks import EventStore, Tick, Vertex
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-# Default unrestricted peer for most tests
-ROOT = Peer("root")
 
-
-def fact(kind: str, **payload) -> Fact:
+def fact(kind: str, observer: str = "test", **payload) -> Fact:
     """Create a Fact for testing."""
-    return Fact.of(kind, **payload)
+    return Fact.of(kind, observer, **payload)
 
 
 def sum_fold(state: int, payload: dict) -> int:
@@ -64,8 +61,8 @@ class TestVertexReceive:
         v = Vertex()
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("metric", value=5))
 
         assert v.state("metric") == 15
 
@@ -73,7 +70,7 @@ class TestVertexReceive:
         v = Vertex()
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("unknown", value=99), ROOT)
+        v.receive(fact("unknown", value=99))
 
         assert v.state("metric") == 0
 
@@ -82,9 +79,9 @@ class TestVertexReceive:
         v.register("metric", 0, sum_fold)
         v.register("event", 0, count_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("event", type="deploy"), ROOT)
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("event", type="deploy"))
+        v.receive(fact("metric", value=5))
 
         assert v.state("metric") == 15
         assert v.state("event") == 1
@@ -94,7 +91,7 @@ class TestVertexReceive:
         v.register("metric", 0, sum_fold)
 
         assert v.version("metric") == 0
-        v.receive(fact("metric", value=1), ROOT)
+        v.receive(fact("metric", value=1))
         assert v.version("metric") == 1
 
     def test_state_raises_for_unregistered_kind(self):
@@ -116,8 +113,8 @@ class TestVertexTick:
         v.register("metric", 0, sum_fold)
         v.register("event", 0, count_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("event", type="deploy"), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("event", type="deploy"))
 
         tick = v.tick("my-loop", NOW)
 
@@ -145,10 +142,10 @@ class TestVertexTick:
         v = Vertex()
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
+        v.receive(fact("metric", value=10))
         tick1 = v.tick("loop", NOW)
 
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=5))
         tick2 = v.tick("loop", datetime(2025, 6, 1, 13, 0, 0, tzinfo=timezone.utc))
 
         assert tick1.payload == {"metric": 10}
@@ -163,8 +160,8 @@ class TestVertexWithStore:
         v = Vertex(store=store)
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("metric", value=5))
 
         assert len(store.events) == 2
         assert store.events[0] == ("metric", {"value": 10})
@@ -175,7 +172,7 @@ class TestVertexWithStore:
         v = Vertex(store=store)
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("unknown", data="x"), ROOT)
+        v.receive(fact("unknown", data="x"))
 
         assert len(store.events) == 1
         assert store.events[0] == ("unknown", {"data": "x"})
@@ -184,7 +181,7 @@ class TestVertexWithStore:
         v = Vertex()
         v.register("metric", 0, sum_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
+        v.receive(fact("metric", value=10))
 
         assert v.state("metric") == 10
 
@@ -196,8 +193,8 @@ class TestVertexCollectFold:
         v = Vertex()
         v.register("log", [], collect_fold)
 
-        v.receive(fact("log", msg="start"), ROOT)
-        v.receive(fact("log", msg="end"), ROOT)
+        v.receive(fact("log", msg="start"))
+        v.receive(fact("log", msg="end"))
 
         assert v.state("log") == [{"msg": "start"}, {"msg": "end"}]
 
@@ -205,7 +202,7 @@ class TestVertexCollectFold:
         v = Vertex()
         v.register("log", [], collect_fold)
 
-        v.receive(fact("log", msg="hello"), ROOT)
+        v.receive(fact("log", msg="hello"))
 
         tick = v.tick("collector", NOW)
         assert tick.payload == {"log": [{"msg": "hello"}]}
@@ -235,7 +232,7 @@ class TestVertexBoundaryRegistration:
         """Without boundary kwarg, no boundary is configured."""
         v = Vertex()
         v.register("metric", 0, sum_fold)
-        result = v.receive(fact("metric", value=1), ROOT)
+        result = v.receive(fact("metric", value=1))
         assert result is None
 
 
@@ -245,16 +242,16 @@ class TestVertexBoundaryReceive:
     def test_returns_none_without_boundary(self):
         v = Vertex()
         v.register("metric", 0, sum_fold)
-        result = v.receive(fact("metric", value=10), ROOT)
+        result = v.receive(fact("metric", value=10))
         assert result is None
 
     def test_returns_tick_on_boundary(self):
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day")
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("metric", value=5))
 
-        tick = v.receive(fact("end-of-day"), ROOT)
+        tick = v.receive(fact("end-of-day"))
         assert isinstance(tick, Tick)
         assert tick.name == "metric"
         assert tick.payload == 15
@@ -262,16 +259,16 @@ class TestVertexBoundaryReceive:
     def test_correct_origin(self):
         v = Vertex("my-vertex")
         v.register("metric", 0, sum_fold, boundary="end-of-day")
-        v.receive(fact("metric", value=10), ROOT)
+        v.receive(fact("metric", value=10))
 
-        tick = v.receive(fact("end-of-day"), ROOT)
+        tick = v.receive(fact("end-of-day"))
         assert tick.origin == "my-vertex"
 
     def test_reset_clears_state(self):
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day", reset=True)
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("end-of-day"), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("end-of-day"))
 
         # State should be reset to initial
         assert v.state("metric") == 0
@@ -279,8 +276,8 @@ class TestVertexBoundaryReceive:
     def test_carry_without_reset(self):
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day", reset=False)
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("end-of-day"), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("end-of-day"))
 
         # State carries forward
         assert v.state("metric") == 10
@@ -290,7 +287,7 @@ class TestVertexBoundaryReceive:
         v = Vertex()
         v.register("heartbeat", 0, count_fold, boundary="heartbeat")
 
-        tick = v.receive(fact("heartbeat"), ROOT)
+        tick = v.receive(fact("heartbeat"))
         assert isinstance(tick, Tick)
         # Fold happened first: 0 → 1, then boundary snapshots 1
         assert tick.payload == 1
@@ -302,11 +299,11 @@ class TestVertexBoundaryReceive:
         v.register("metric", 0, sum_fold, boundary="flush")
         v.register("event", 0, count_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("event", type="deploy"), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("event", type="deploy"))
 
         # "flush" is not a registered fold kind, but it's a boundary kind for "metric"
-        tick = v.receive(fact("flush"), ROOT)
+        tick = v.receive(fact("flush"))
         assert isinstance(tick, Tick)
         assert tick.name == "metric"
         assert tick.payload == 10
@@ -317,18 +314,18 @@ class TestVertexBoundaryReceive:
         """A kind that isn't registered and isn't a boundary returns None."""
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day")
-        result = v.receive(fact("unknown"), ROOT)
+        result = v.receive(fact("unknown"))
         assert result is None
 
     def test_multiple_cycles(self):
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day")
 
-        v.receive(fact("metric", value=10), ROOT)
-        tick1 = v.receive(fact("end-of-day"), ROOT)
+        v.receive(fact("metric", value=10))
+        tick1 = v.receive(fact("end-of-day"))
 
-        v.receive(fact("metric", value=7), ROOT)
-        tick2 = v.receive(fact("end-of-day"), ROOT)
+        v.receive(fact("metric", value=7))
+        tick2 = v.receive(fact("end-of-day"))
 
         assert tick1.payload == 10
         assert tick2.payload == 7  # reset after first boundary
@@ -338,8 +335,8 @@ class TestVertexBoundaryReceive:
         v = Vertex(store=store)
         v.register("metric", 0, sum_fold, boundary="end-of-day")
 
-        v.receive(fact("metric", value=10), ROOT)
-        tick = v.receive(fact("end-of-day"), ROOT)
+        v.receive(fact("metric", value=10))
+        tick = v.receive(fact("end-of-day"))
 
         assert isinstance(tick, Tick)
         assert tick.payload == 10
@@ -350,10 +347,10 @@ class TestVertexBoundaryReceive:
         v.register("metric", 0, sum_fold, boundary="end-of-day")
         v.register("event", 0, count_fold)
 
-        result = v.receive(fact("metric", value=10), ROOT)
+        result = v.receive(fact("metric", value=10))
         assert result is None
 
-        result = v.receive(fact("event", type="deploy"), ROOT)
+        result = v.receive(fact("event", type="deploy"))
         assert result is None
 
 
@@ -365,8 +362,8 @@ class TestVertexBoundaryWithManualTick:
         v.register("metric", 0, sum_fold, boundary="end-of-day")
         v.register("event", 0, count_fold)
 
-        v.receive(fact("metric", value=10), ROOT)
-        v.receive(fact("event", type="deploy"), ROOT)
+        v.receive(fact("metric", value=10))
+        v.receive(fact("event", type="deploy"))
 
         tick = v.tick("snapshot", NOW)
         assert tick.payload == {"metric": 10, "event": 1}
@@ -376,98 +373,91 @@ class TestVertexBoundaryWithManualTick:
         v = Vertex()
         v.register("metric", 0, sum_fold, boundary="end-of-day")
 
-        v.receive(fact("metric", value=10), ROOT)
+        v.receive(fact("metric", value=10))
         v.tick("snapshot", NOW)
 
         # State preserved after manual tick
         assert v.state("metric") == 10
-        v.receive(fact("metric", value=5), ROOT)
+        v.receive(fact("metric", value=5))
         assert v.state("metric") == 15
 
 
-class TestVertexPeerGating:
-    """Peer-aware receive: potential and observer-state gating."""
+class TestVertexGrantGating:
+    """Grant-aware receive: potential and observer-state gating."""
 
-    def test_unrestricted_peer_can_emit_any_kind(self):
+    def test_no_grant_allows_any_kind(self):
         v = Vertex()
         v.register("metric", 0, sum_fold)
         v.register("event", 0, count_fold)
 
-        unrestricted = Peer("alice")
-
-        v.receive(fact("metric", value=10), unrestricted)
-        v.receive(fact("event", type="deploy"), unrestricted)
+        # No grant = unrestricted
+        v.receive(fact("metric", "alice", value=10))
+        v.receive(fact("event", "alice", type="deploy"))
 
         assert v.state("metric") == 10
         assert v.state("event") == 1
 
-    def test_restricted_peer_blocked_outside_potential(self):
+    def test_restricted_grant_blocked_outside_potential(self):
         v = Vertex()
         v.register("metric", 0, sum_fold)
         v.register("event", 0, count_fold)
 
         # Can only emit "metric"
-        restricted = Peer("bob", potential=frozenset({"metric"}))
+        restricted = Grant(potential=frozenset({"metric"}))
 
-        v.receive(fact("metric", value=10), restricted)
-        result = v.receive(fact("event", type="deploy"), restricted)
+        v.receive(fact("metric", "bob", value=10), restricted)
+        result = v.receive(fact("event", "bob", type="deploy"), restricted)
 
         assert v.state("metric") == 10
         assert v.state("event") == 0  # blocked, not folded
         assert result is None
 
-    def test_restricted_peer_allowed_within_potential(self):
+    def test_restricted_grant_allowed_within_potential(self):
         v = Vertex()
         v.register("metric", 0, sum_fold)
         v.register("event", 0, count_fold)
 
-        restricted = Peer("bob", potential=frozenset({"metric", "event"}))
+        restricted = Grant(potential=frozenset({"metric", "event"}))
 
-        v.receive(fact("metric", value=10), restricted)
-        v.receive(fact("event", type="deploy"), restricted)
+        v.receive(fact("metric", "bob", value=10), restricted)
+        v.receive(fact("event", "bob", type="deploy"), restricted)
 
         assert v.state("metric") == 10
         assert v.state("event") == 1
 
     def test_observer_state_kind_ownership_enforced(self):
-        """focus.{peer} kinds must match the acting peer."""
+        """focus.{observer} kinds must match fact.observer."""
         v = Vertex()
         v.register("focus.alice", {"index": 0}, lambda s, p: {"index": p.get("index", 0)})
         v.register("focus.bob", {"index": 0}, lambda s, p: {"index": p.get("index", 0)})
 
-        alice = Peer("alice")
-        bob = Peer("bob")
-
-        # Alice can update her own focus
-        v.receive(fact("focus.alice", index=5), alice)
+        # Alice can update her own focus (observer="alice" matches focus.alice)
+        v.receive(fact("focus.alice", "alice", index=5))
         assert v.state("focus.alice") == {"index": 5}
 
-        # Alice cannot update Bob's focus
-        v.receive(fact("focus.bob", index=10), alice)
+        # Alice cannot update Bob's focus (observer="alice" doesn't match focus.bob)
+        v.receive(fact("focus.bob", "alice", index=10))
         assert v.state("focus.bob") == {"index": 0}  # unchanged
 
         # Bob can update his own focus
-        v.receive(fact("focus.bob", index=3), bob)
+        v.receive(fact("focus.bob", "bob", index=3))
         assert v.state("focus.bob") == {"index": 3}
 
     def test_observer_state_kinds_scroll_and_selection(self):
-        """scroll.{peer} and selection.{peer} also enforce ownership."""
+        """scroll.{observer} and selection.{observer} also enforce ownership."""
         v = Vertex()
         v.register("scroll.alice", {"y": 0}, lambda s, p: {"y": p.get("y", 0)})
         v.register("selection.alice", {"start": 0, "end": 0}, lambda s, p: p)
 
-        alice = Peer("alice")
-        bob = Peer("bob")
-
-        # Alice can update her own
-        v.receive(fact("scroll.alice", y=100), alice)
-        v.receive(fact("selection.alice", start=5, end=10), alice)
+        # Alice can update her own (observer matches kind suffix)
+        v.receive(fact("scroll.alice", "alice", y=100))
+        v.receive(fact("selection.alice", "alice", start=5, end=10))
         assert v.state("scroll.alice") == {"y": 100}
         assert v.state("selection.alice") == {"start": 5, "end": 10}
 
-        # Bob cannot
-        v.receive(fact("scroll.alice", y=200), bob)
-        v.receive(fact("selection.alice", start=0, end=0), bob)
+        # Bob cannot (observer="bob" doesn't match "alice" suffix)
+        v.receive(fact("scroll.alice", "bob", y=200))
+        v.receive(fact("selection.alice", "bob", start=0, end=0))
         assert v.state("scroll.alice") == {"y": 100}  # unchanged
         assert v.state("selection.alice") == {"start": 5, "end": 10}  # unchanged
 
@@ -476,14 +466,11 @@ class TestVertexPeerGating:
         v = Vertex()
         v.register("focus", {"index": 0}, lambda s, p: {"index": p.get("index", 0)})
 
-        alice = Peer("alice")
-        bob = Peer("bob")
-
-        # Both can update plain "focus" (no .{peer} suffix)
-        v.receive(fact("focus", index=5), alice)
+        # Both observers can update plain "focus" (no .{observer} suffix)
+        v.receive(fact("focus", "alice", index=5))
         assert v.state("focus") == {"index": 5}
 
-        v.receive(fact("focus", index=10), bob)
+        v.receive(fact("focus", "bob", index=10))
         assert v.state("focus") == {"index": 10}
 
     def test_potential_and_observer_state_combined(self):
@@ -491,17 +478,17 @@ class TestVertexPeerGating:
         v = Vertex()
         v.register("focus.alice", {"index": 0}, lambda s, p: {"index": p.get("index", 0)})
 
-        # Alice restricted to only focus.alice
-        alice = Peer("alice", potential=frozenset({"focus.alice"}))
-        # Bob restricted to only focus.bob (which isn't registered)
-        bob = Peer("bob", potential=frozenset({"focus.bob"}))
+        # Grant restricted to only focus.alice
+        alice_grant = Grant(potential=frozenset({"focus.alice"}))
+        # Grant restricted to only focus.bob (which isn't registered)
+        bob_grant = Grant(potential=frozenset({"focus.bob"}))
 
-        # Alice can update her focus
-        v.receive(fact("focus.alice", index=5), alice)
+        # Alice's grant allows focus.alice, and observer matches
+        v.receive(fact("focus.alice", "alice", index=5), alice_grant)
         assert v.state("focus.alice") == {"index": 5}
 
-        # Bob blocked by potential (focus.alice not in his potential)
-        v.receive(fact("focus.alice", index=10), bob)
+        # Bob's grant blocks focus.alice (not in potential)
+        v.receive(fact("focus.alice", "bob", index=10), bob_grant)
         assert v.state("focus.alice") == {"index": 5}  # unchanged
 
     def test_rejected_fact_not_stored(self):
@@ -510,9 +497,9 @@ class TestVertexPeerGating:
         v = Vertex(store=store)
         v.register("metric", 0, sum_fold)
 
-        restricted = Peer("bob", potential=frozenset({"other"}))
+        restricted = Grant(potential=frozenset({"other"}))
 
-        v.receive(fact("metric", value=10), restricted)
+        v.receive(fact("metric", "bob", value=10), restricted)
 
         assert len(store.events) == 0  # rejected, not stored
 
@@ -522,10 +509,34 @@ class TestVertexPeerGating:
         v.register("metric", 0, sum_fold, boundary="flush")
 
         # Has potential for metric but not flush
-        restricted = Peer("bob", potential=frozenset({"metric"}))
+        restricted = Grant(potential=frozenset({"metric"}))
 
-        v.receive(fact("metric", value=10), restricted)
-        tick = v.receive(fact("flush"), restricted)
+        v.receive(fact("metric", "bob", value=10), restricted)
+        tick = v.receive(fact("flush", "bob"), restricted)
 
         assert v.state("metric") == 10  # folded
         assert tick is None  # boundary blocked
+
+
+class TestVertexToFact:
+    """Convert Tick to Fact for forwarding."""
+
+    def test_to_fact_converts_tick(self):
+        v = Vertex("my-vertex")
+        v.register("metric", 0, sum_fold, boundary="flush")
+        v.receive(fact("metric", "alice", value=10))
+        tick = v.receive(fact("flush", "alice"))
+
+        f = v.to_fact(tick)
+
+        assert f.kind == "tick.metric"
+        assert f.observer == "my-vertex"
+        assert f.payload == 10
+
+    def test_to_fact_timestamp_from_tick(self):
+        v = Vertex("v1")
+        tick = Tick(name="test", ts=NOW, payload={"x": 1}, origin="v1")
+
+        f = v.to_fact(tick)
+
+        assert f.ts == NOW.timestamp()

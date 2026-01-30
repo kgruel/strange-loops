@@ -15,6 +15,7 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 | **facts** | `libs/facts/HANDOFF.md` | Observation atom |
 | **ticks** | `libs/ticks/HANDOFF.md` | Temporal infrastructure (includes Loop) |
 | **specs** | `libs/specs/HANDOFF.md` | Data contracts + fold rules |
+| **sources** | `libs/sources/HANDOFF.md` | Ingress adapters |
 | **cells** | `libs/cells/HANDOFF.md` | Terminal UI |
 
 ## Documentation
@@ -59,27 +60,24 @@ Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Implement Source adapters** — Build concrete adapters (command, file,
-   timer) using `vertex.ingest(kind, payload, observer)` interface.
+1. **First sources experiment** — Use new sources lib to prove the flow:
+   CommandSource → Runner → Vertex → Ticks. Real external data.
 
-2. **Update existing experiments** — Migrate remaining experiments to use
-   `Vertex.receive(fact, peer)` signature for consistency.
+2. **Custom Spec DSL** — Explore building a custom spec file format. Analysis
+   in `.subtask/tasks/explore--custom-spec-dsl/ANALYSIS.md` covers:
+   - Proposed syntax (HCL-inspired block structure)
+   - Parser options (Lark recommended)
+   - Key question: Is declarative spec definition worth the investment?
 
-3. **Network + Peer** — Combine network_boundary_extended with peer-aware
-   pipeline. How does observer context flow across process boundaries?
+3. **Update existing experiments** — Migrate remaining experiments to use
+   `Vertex.receive(fact, observer)` signature for consistency.
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
 
-- **Network open questions** — Explored in network_boundary_extended.py.
-  Replay protocol, registry as vertex, multi-producer coordination.
-
-- **Naming tension: Peer** — "Peer" implies equality but delegation is
-  hierarchical. Alternative: "Identity." Deferred — model works, name can evolve.
-
-- **Naming tension: Tick** — "Tick" implies clock time but boundaries are
-  semantic. Current framing: "tick" = arbitrary unit, cycle completed. Deferred.
+- **Spec DSL decision** — Custom DSL vs YAML. Analysis done, need to decide
+  if 2-3 week investment is worth the cleaner file format.
 
 - **Meta-as-loop** — When does meta-state (peer switching, debug toggle) need
   to enter a loop? Signal: when it needs to be shared, persisted, or folded.
@@ -107,4 +105,10 @@ Resolved questions kept for context. See `LOG.md` for full history.
 17. ~~Per-peer focus~~ — `{kind}.{peer}` pattern. Observer state belongs to observer. Ownership enforced at receive.
 18. ~~Network concerns~~ — Discovery, failure, ordering, backpressure all become facts that fold. Policy is composition-layer.
 19. ~~Cells integration~~ — peer_surface.py: Surface.emit() → Fact → Vertex.receive(fact, peer). Gating visible in TUI debug panel.
-20. ~~Source concept~~ — Sources are adapters at the ingress boundary. Not atoms. Interface: vertex.ingest(kind, payload, observer).
+20. ~~Observer model~~ — Fact.observer required. Grant is optional policy. Vertex.to_fact() bridges boundaries.
+21. ~~Persistence~~ — replay(vertex, store) for event sourcing. Facts are truth, state is derived.
+22. ~~Network transport~~ — experiments/transport/ with vertex_server.py and vertex_client.py. Real TCP.
+23. ~~Flowable layouts~~ — join_responsive() for adaptive horizontal/vertical composition.
+24. ~~Experiments organized~~ — Grouped by concept: observer/, temporal/, network/, presentation/.
+25. ~~Fidelity rename~~ — Verbosity → Fidelity for CLI→TUI spectrum. Fidelity = presentation richness.
+26. ~~Source concept~~ — Sources are adapters at the ingress boundary. Not atoms. Interface: vertex.ingest(kind, payload, observer).

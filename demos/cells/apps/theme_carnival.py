@@ -63,7 +63,7 @@ class ThemeCarnival(Surface):
         # Current theme display
         theme_label = f"Current: {theme.name.upper()}"
         sections.append(Block.text(theme_label, Style(fg=theme.accent, bold=True, bg=bg)))
-        sections.append(Block.empty(panel_width, 1))  # blank line
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))  # blank line
 
         # Status section
         sections.append(Block.text("Status:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -77,7 +77,7 @@ class ThemeCarnival(Surface):
             gap=2
         )
         sections.append(pad(status_row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Log levels section
         sections.append(Block.text("Log Levels:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -93,7 +93,7 @@ class ThemeCarnival(Surface):
             msg_block = Block.text(" " + msg, Style(fg=theme.text, bg=bg))
             row = join_horizontal(label_block, msg_block)
             sections.append(pad(row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Progress bar section
         sections.append(Block.text("Progress:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -108,7 +108,7 @@ class ThemeCarnival(Surface):
         pct_block = Block.text(f" {pct:3d}%", Style(fg=theme.text, bg=bg))
         pbar_row = join_horizontal(pbar, pct_block)
         sections.append(pad(pbar_row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Buttons section
         sections.append(Block.text("Actions:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -124,7 +124,7 @@ class ThemeCarnival(Surface):
             gap=2
         )
         sections.append(pad(buttons_row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Selection section
         sections.append(Block.text("Selection:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -142,7 +142,7 @@ class ThemeCarnival(Surface):
                 item_block = Block.text(item, Style(fg=theme.text, bg=bg))
                 row = join_horizontal(prefix, item_block)
             sections.append(pad(row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Palette section
         sections.append(Block.text("Palette:", Style(fg=theme.text, dim=True, bg=bg)))
@@ -159,7 +159,7 @@ class ThemeCarnival(Surface):
             gap=1
         )
         sections.append(pad(palette_row, left=2))
-        sections.append(Block.empty(panel_width, 1))
+        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
 
         # Theme selector section
         sections.append(Block.text("Themes:", Style(fg=theme.text, bold=True, bg=bg)))
@@ -172,7 +172,7 @@ class ThemeCarnival(Surface):
                 prefix = "▸" if is_current else " "
                 style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
                 lines.append(Block.text(f"{prefix} {num}. {name.capitalize()}", style))
-            return join_vertical(*lines) if lines else Block.empty(0, 0)
+            return join_vertical(*lines) if lines else Block.empty(0, 0, Style(bg=bg))
 
         col1 = theme_column(self.theme_names[:3], 1)
         col2 = theme_column(self.theme_names[3:6], 4)

@@ -60,11 +60,11 @@ Real-world patterns showing the CLI→TUI spectrum.
 
 | File | Pattern | Run |
 |------|---------|-----|
-| `verbosity.py` | Task runner at 4 verbosity levels | `uv run python demos/cells/patterns/verbosity.py -vv` |
-| `verbosity_disk.py` | Disk usage browser | `uv run python demos/cells/patterns/verbosity_disk.py -vv` |
-| `verbosity_health.py` | Health check dashboard | `uv run python demos/cells/patterns/verbosity_health.py -vv` |
+| `fidelity.py` | Task runner at 4 fidelity levels | `uv run python demos/cells/patterns/fidelity.py -vv` |
+| `fidelity_disk.py` | Disk usage browser | `uv run python demos/cells/patterns/fidelity_disk.py -vv` |
+| `fidelity_health.py` | Health check dashboard | `uv run python demos/cells/patterns/fidelity_health.py -vv` |
 
-Each verbosity demo supports:
+Each fidelity demo supports:
 - `-q` : One-line summary
 - (default) : Standard output
 - `-v` : Styled output

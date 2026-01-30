@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Disk usage at different verbosity levels.
+"""Disk usage at different fidelity levels.
 
-Demonstrates the verbosity spectrum with hierarchical data:
+Demonstrates the fidelity spectrum with hierarchical data:
 
-    uv run python demos/cells/patterns/verbosity_disk.py -q     # "67% used (134G/200G)"
-    uv run python demos/cells/patterns/verbosity_disk.py        # Top directories list
-    uv run python demos/cells/patterns/verbosity_disk.py -v     # Styled bars per directory
-    uv run python demos/cells/patterns/verbosity_disk.py -vv    # TUI file tree browser
+    uv run python demos/cells/patterns/fidelity_disk.py -q     # "67% used (134G/200G)"
+    uv run python demos/cells/patterns/fidelity_disk.py        # Top directories list
+    uv run python demos/cells/patterns/fidelity_disk.py -v     # Styled bars per directory
+    uv run python demos/cells/patterns/fidelity_disk.py -vv    # TUI file tree browser
 
 The TUI mode shows a navigable tree with expandable directories.
 """
@@ -150,7 +150,7 @@ def terminal_width() -> int:
 # ============================================================================
 
 
-def render_quiet(data: DiskData) -> str:
+def render_minimal(data: DiskData) -> str:
     """Level 0: Minimal one-line output."""
     return f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human})"
 
@@ -187,7 +187,7 @@ def render_standard(data: DiskData) -> str:
 # ============================================================================
 
 
-def render_verbose(data: DiskData, width: int) -> Block:
+def render_styled(data: DiskData, width: int) -> Block:
     """Level 2: Styled output with visual bars."""
     sections: list[Block] = []
 
@@ -483,8 +483,8 @@ def run_interactive(data: DiskData) -> None:
 # ============================================================================
 
 
-def parse_verbosity(args: list[str]) -> int:
-    """Parse verbosity level from args."""
+def parse_fidelity(args: list[str]) -> int:
+    """Parse fidelity level from args."""
     if "-q" in args or "--quiet" in args:
         return 0
     v_count = 0
@@ -507,21 +507,21 @@ def main() -> int:
         print(__doc__)
         return 0
 
-    verbosity = parse_verbosity(args)
+    fidelity = parse_fidelity(args)
     width = terminal_width()
 
-    if verbosity == 0:
-        print(render_quiet(SAMPLE_DISK))
-    elif verbosity == 1:
+    if fidelity == 0:
+        print(render_minimal(SAMPLE_DISK))
+    elif fidelity == 1:
         print(render_standard(SAMPLE_DISK))
-    elif verbosity == 2:
-        block = render_verbose(SAMPLE_DISK, width)
+    elif fidelity == 2:
+        block = render_styled(SAMPLE_DISK, width)
         print_block(block)
     else:
         if is_interactive():
             run_interactive(SAMPLE_DISK)
         else:
-            block = render_verbose(SAMPLE_DISK, width)
+            block = render_styled(SAMPLE_DISK, width)
             print_block(block)
 
     return 0

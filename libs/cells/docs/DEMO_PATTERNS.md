@@ -27,7 +27,7 @@ bench.py is a ~2880-line interactive teaching platform implementing:
 | TUI primitives coverage | Complete (Surface, Layer, Focus, Search) |
 | Widget demos | Complete (all 5 components) |
 | Quiet mode | Complete |
-| Verbosity flags | Complete |
+| Fidelity flags | Complete |
 
 ### What's Missing
 
@@ -72,9 +72,9 @@ demos/cells/
 ├── demo_big_text.py      # Effects
 ├── demo_lenses.py        # Interactive lens demo
 ├── demo_mouse.py         # Mouse input
-├── demo_verbosity.py     # CLI→TUI spectrum
-├── demo_verbosity_disk.py    # Variant
-├── demo_verbosity_health.py  # Variant
+├── demo_fidelity.py     # CLI→TUI spectrum
+├── demo_fidelity_disk.py    # Variant
+├── demo_fidelity_health.py  # Variant
 ├── demo_utils.py         # Helper
 ├── slide_loader.py       # Helper
 ├── bench.py              # Teaching platform
@@ -86,7 +86,7 @@ demos/cells/
 1. **Mixed naming conventions**
    - Numbered: `demo_01_*` through `demo_10_*` (learning path)
    - Feature-named: `demo_mouse.py`, `demo_lenses.py`, `demo_big_text.py`
-   - Variants: `demo_verbosity*.py` (3 files, one pattern)
+   - Variants: `demo_fidelity*.py` (3 files, one pattern)
 
 2. **Unclear categories**
    - CLI-only demos mixed with TUI demos
@@ -118,9 +118,9 @@ demos/cells/
 │   └── lenses.py               # Data visualization
 │
 ├── patterns/                    # Real-world patterns
-│   ├── verbosity.py            # CLI→TUI spectrum
-│   ├── verbosity_disk.py       # Variant: disk monitor
-│   └── verbosity_health.py     # Variant: health checker
+│   ├── fidelity.py            # CLI→TUI spectrum
+│   ├── fidelity_disk.py       # Variant: disk monitor
+│   └── fidelity_health.py     # Variant: health checker
 │
 └── bench.py                     # Teaching platform (keep at top level)
 ```
@@ -139,7 +139,7 @@ demos/cells/
 |----------|---------|---------|
 | Primitives | `{concept}.py` | `block.py` |
 | Apps | `{feature}.py` | `layers.py` |
-| Patterns | `{pattern}_{variant}.py` | `verbosity_disk.py` |
+| Patterns | `{pattern}_{variant}.py` | `fidelity_disk.py` |
 
 No numbered prefixes — use README for learning path ordering.
 

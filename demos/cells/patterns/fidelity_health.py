@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""API health check at different verbosity levels.
+"""API health check at different fidelity levels.
 
-Demonstrates the verbosity spectrum with service health monitoring:
+Demonstrates the fidelity spectrum with service health monitoring:
 
-    uv run python demos/cells/patterns/verbosity_health.py -q     # "5/6 healthy"
-    uv run python demos/cells/patterns/verbosity_health.py        # Service list
-    uv run python demos/cells/patterns/verbosity_health.py -v     # Styled table
-    uv run python demos/cells/patterns/verbosity_health.py -vv    # Live TUI dashboard
+    uv run python demos/cells/patterns/fidelity_health.py -q     # "5/6 healthy"
+    uv run python demos/cells/patterns/fidelity_health.py        # Service list
+    uv run python demos/cells/patterns/fidelity_health.py -v     # Styled table
+    uv run python demos/cells/patterns/fidelity_health.py -vv    # Live TUI dashboard
 
 The TUI mode simulates live updates with changing latencies and status.
 """
@@ -106,7 +106,7 @@ def terminal_width() -> int:
 # ============================================================================
 
 
-def render_quiet(data: HealthData) -> str:
+def render_minimal(data: HealthData) -> str:
     """Level 0: Minimal one-line output."""
     total = len(data.services)
     if data.unhealthy > 0:
@@ -155,7 +155,7 @@ def render_standard(data: HealthData) -> str:
 # ============================================================================
 
 
-def render_verbose(data: HealthData, width: int) -> Block:
+def render_styled(data: HealthData, width: int) -> Block:
     """Level 2: Styled table with colors."""
     rows: list[Block] = []
 
@@ -493,8 +493,8 @@ def run_interactive(data: HealthData) -> None:
 # ============================================================================
 
 
-def parse_verbosity(args: list[str]) -> int:
-    """Parse verbosity level from args."""
+def parse_fidelity(args: list[str]) -> int:
+    """Parse fidelity level from args."""
     if "-q" in args or "--quiet" in args:
         return 0
     v_count = 0
@@ -517,21 +517,21 @@ def main() -> int:
         print(__doc__)
         return 0
 
-    verbosity = parse_verbosity(args)
+    fidelity = parse_fidelity(args)
     width = terminal_width()
 
-    if verbosity == 0:
-        print(render_quiet(SAMPLE_HEALTH))
-    elif verbosity == 1:
+    if fidelity == 0:
+        print(render_minimal(SAMPLE_HEALTH))
+    elif fidelity == 1:
         print(render_standard(SAMPLE_HEALTH))
-    elif verbosity == 2:
-        block = render_verbose(SAMPLE_HEALTH, width)
+    elif fidelity == 2:
+        block = render_styled(SAMPLE_HEALTH, width)
         print_block(block)
     else:
         if is_interactive():
             run_interactive(SAMPLE_HEALTH)
         else:
-            block = render_verbose(SAMPLE_HEALTH, width)
+            block = render_styled(SAMPLE_HEALTH, width)
             print_block(block)
 
     return 1 if SAMPLE_HEALTH.unhealthy > 0 else 0

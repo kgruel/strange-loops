@@ -1,10 +1,10 @@
-# Verbosity Pattern
+# Fidelity Pattern
 
-This document describes the verbosity pattern implemented in the cells demo bench.
+This document describes the fidelity pattern implemented in the cells demo bench.
 
 ## General Pattern
 
-CLI verbosity flags follow standard conventions:
+CLI fidelity flags follow standard conventions:
 
 | Flag | Meaning |
 |------|---------|
@@ -15,9 +15,9 @@ CLI verbosity flags follow standard conventions:
 
 The flags are mutually exclusive: you cannot combine `-q` with `-v`.
 
-## Navigation Verbosity
+## Navigation Fidelity
 
-The demo bench expresses the general verbosity pattern as "navigation verbosity" - how much content you navigate through by default.
+The demo bench expresses the general fidelity pattern as "navigation fidelity" - how much content you navigate through by default.
 
 ### Default Mode
 
@@ -34,7 +34,7 @@ intro -> cell -> style -> span -> ...
         detail  detail  detail
 ```
 
-### Quiet Mode (-q)
+### Minimal Mode (-q)
 
 Prints all slides inline and exits. No TUI, no interaction.
 
@@ -49,7 +49,7 @@ Use cases:
 
 Interactive demos show as `[interactive demo: spinner]` placeholders.
 
-### Verbose Mode (-v)
+### Styled Mode (-v)
 
 Detail slides become part of the primary left/right navigation flow. The navigation graph is "inverted" so you see all content linearly:
 
@@ -61,7 +61,7 @@ intro -> cell -> cell/detail -> style -> style/detail -> ...
 
 This mode is useful when you want to see all content without needing to explore down.
 
-### Very Verbose Mode (-vv)
+### Interactive Mode (-vv)
 
 Adds source view showing the code that builds each slide. Press `s` to toggle the source panel.
 
@@ -92,7 +92,7 @@ The source panel uses the same syntax highlighting as code blocks in slides.
 
 ## The CLI → TUI Continuum
 
-Verbosity can be understood as movement along an output sophistication spectrum:
+Fidelity can be understood as movement along an output sophistication spectrum:
 
 ```
 Level 0: Plain text (no styling)
@@ -102,7 +102,7 @@ Level 3: Interactive TUI (alternate screen)
 Level 4: Rich TUI (layers, modals, complex state)
 ```
 
-The key insight: **verbosity isn't just "more text" - it can trigger mode transitions**.
+The key insight: **fidelity isn't just "more text" - it can trigger mode transitions**.
 
 ```
 print_block()  ←────────────────────→  Surface
@@ -111,7 +111,7 @@ print_block()  ←────────────────────�
 
 cells makes this transition smooth because the same primitives (Block, Span) work in both paths. Content is mode-agnostic; only the output path changes.
 
-### Flow Triggers Beyond Verbosity
+### Flow Triggers Beyond Fidelity
 
 Other factors that might drive CLI → TUI transitions:
 
@@ -123,7 +123,7 @@ Other factors that might drive CLI → TUI transitions:
 | **Content volume** | Inline if <20 lines, TUI if more |
 | **Error state** | Inline for success, TUI for errors (to explore) |
 
-### Verbosity Patterns by Domain
+### Fidelity Patterns by Domain
 
 **Build/Task Runner**
 ```
@@ -170,9 +170,9 @@ Other factors that might drive CLI → TUI transitions:
 - Progressive render: start inline, transition to TUI if long-running
 - Graceful degradation patterns
 
-## Expressing Verbosity in Other Apps
+## Expressing Fidelity in Other Apps
 
-The verbosity pattern can be expressed differently depending on the application:
+The fidelity pattern can be expressed differently depending on the application:
 
 | App Type | -q | default | -v | -vv |
 |----------|----|---------|----|-----|
@@ -181,7 +181,7 @@ The verbosity pattern can be expressed differently depending on the application:
 | Build tool | Silent | Summary | Per-file | Commands |
 | API client | Response only | Status + body | Headers | Raw HTTP |
 
-The key insight: verbosity controls **how much information flows to the user**, but what "information" means varies by domain.
+The key insight: fidelity controls **how much information flows to the user**, but what "information" means varies by domain.
 
 ## Usage
 
@@ -189,13 +189,13 @@ The key insight: verbosity controls **how much information flows to the user**, 
 # Default: interactive slideshow
 uv run python -m demos.bench
 
-# Quiet: print all slides
+# Minimal: print all slides
 uv run python -m demos.bench -q
 
-# Verbose: detail slides in main flow
+# Styled: detail slides in main flow
 uv run python -m demos.bench -v
 
-# Very verbose: with source view (s to toggle)
+# Interactive: with source view (s to toggle)
 uv run python -m demos.bench -vv
 
 # Help

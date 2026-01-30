@@ -15,7 +15,7 @@ Zoom levels (per slide via max_zoom):
 Slides with max_zoom > 0 support in-slide zooming via up/down keys.
 Some topics are still separate slides (style/detail, etc.) during migration.
 
-Verbosity = starting zoom level:
+Fidelity = starting zoom level:
 - -q, --quiet: Print slides inline with rendered demos, then exit
 - default:     Start at intro, zoom 0
 - -v:          Start at cell, zoom 1 (detail level)
@@ -2745,7 +2745,7 @@ def parse_args() -> argparse.Namespace:
         description="Teaching Bench: Interactive educational platform for cells",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
-            Verbosity = starting zoom level:
+            Fidelity = starting zoom level:
               default   : Start at intro, zoom 0
               -q        : Quiet - print all slides (with zoom levels) and exit
               -v        : Start at cell, zoom 1 (detail level)
@@ -2848,8 +2848,8 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
                 print_block(content, sys.stdout)
 
 
-def get_start_slide(verbosity: int) -> tuple[str, int]:
-    """Get the starting slide and zoom based on verbosity level.
+def get_start_slide(fidelity: int) -> tuple[str, int]:
+    """Get the starting slide and zoom based on fidelity level.
 
     Returns (slide_id, zoom) tuple.
 
@@ -2857,9 +2857,9 @@ def get_start_slide(verbosity: int) -> tuple[str, int]:
     - -v (1): Start at cell, zoom 1 (detail level)
     - -vv (2): Start at cell, zoom 2 (source level)
     """
-    if verbosity >= 2:
+    if fidelity >= 2:
         return ("cell", 2)
-    elif verbosity >= 1:
+    elif fidelity >= 1:
         return ("cell", 1)
     else:
         return ("intro", 0)
@@ -2874,7 +2874,7 @@ async def main():
         run_quiet_mode(slides)
         return
 
-    # Verbosity determines starting slide and zoom level
+    # Fidelity determines starting slide and zoom level
     start_slide, start_zoom = get_start_slide(args.verbose)
     app = BenchApp(slides=slides, start_slide=start_slide, start_zoom=start_zoom)
 

@@ -53,12 +53,12 @@ Smallest running loop.
 |------------|------------------|
 | daemon/mill.py | stdin JSON → Shape fold → stdout Ticks |
 
-### Verbosity
+### Fidelity
 CLI→TUI spectrum.
 
 | Experiment | What it explores |
 |------------|------------------|
-| verbosity/ | Verbosity flags (-q, -v, -vv) for CLI tools |
+| fidelity/ | Fidelity flags (-q, -v, -vv) for CLI tools |
 
 ## Archive
 

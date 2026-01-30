@@ -1,4 +1,4 @@
-"""Help text at different verbosity levels.
+"""Help text at different fidelity levels.
 
 Demonstrates Concept 1: same HelpData rendered at 4 levels:
 - Level 0 (-q): One line — name: brief
@@ -7,10 +7,10 @@ Demonstrates Concept 1: same HelpData rendered at 4 levels:
 - Level 3 (-vv): Interactive TUI with section navigation
 
 Run:
-    uv run python experiments/verbosity/help_demo.py       # Level 1
-    uv run python experiments/verbosity/help_demo.py -q    # Level 0
-    uv run python experiments/verbosity/help_demo.py -v    # Level 2
-    uv run python experiments/verbosity/help_demo.py -vv   # Level 3
+    uv run python experiments/fidelity/help_demo.py       # Level 1
+    uv run python experiments/fidelity/help_demo.py -q    # Level 0
+    uv run python experiments/fidelity/help_demo.py -v    # Level 2
+    uv run python experiments/fidelity/help_demo.py -vv   # Level 3
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from cells import (
 from cells.tui import Surface
 from cells.widgets import ListState, list_view
 
-from .common import Verbosity, parse_verbosity, is_interactive, terminal_width
+from .common import Fidelity, parse_fidelity, is_interactive, terminal_width
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ SAMPLE_HELP = HelpData(
         OptionHelp("-d, --dry-run", "Show what would happen without executing"),
         OptionHelp("-f, --force", "Force deployment even if checks fail"),
         OptionHelp("-q, --quiet", "Minimal output"),
-        OptionHelp("-v, --verbose", "Increase verbosity (-v, -vv)"),
+        OptionHelp("-v, --verbose", "Increase fidelity (-v, -vv)"),
     ],
     examples=[
         Example("deploy api", "Deploy api service to default environment"),
@@ -88,7 +88,7 @@ SAMPLE_HELP = HelpData(
 )
 
 
-def render_quiet(data: HelpData, width: int) -> Block:
+def render_minimal(data: HelpData, width: int) -> Block:
     """Level 0: One line — name: brief."""
     text = f"{data.name}: {data.brief}"
     if len(text) > width:
@@ -131,7 +131,7 @@ def render_standard(data: HelpData, width: int) -> Block:
     return Block.text("\n".join(lines), Style(), width=width)
 
 
-def render_verbose(data: HelpData, width: int) -> Block:
+def render_styled(data: HelpData, width: int) -> Block:
     """Level 2: Styled sections with borders."""
     sections: list[Block] = []
 
@@ -322,24 +322,24 @@ def main(args: list[str] | None = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
-    verbosity = parse_verbosity(args)
+    fidelity = parse_fidelity(args)
     width = terminal_width()
 
-    if verbosity == Verbosity.QUIET:
-        block = render_quiet(SAMPLE_HELP, width)
+    if fidelity == Fidelity.MINIMAL:
+        block = render_minimal(SAMPLE_HELP, width)
         print_block(block)
-    elif verbosity == Verbosity.STANDARD:
+    elif fidelity == Fidelity.STANDARD:
         block = render_standard(SAMPLE_HELP, width)
         print_block(block)
-    elif verbosity == Verbosity.VERBOSE:
-        block = render_verbose(SAMPLE_HELP, width)
+    elif fidelity == Fidelity.STYLED:
+        block = render_styled(SAMPLE_HELP, width)
         print_block(block)
     else:  # INTERACTIVE
         if is_interactive():
             run_interactive(SAMPLE_HELP)
         else:
-            # Fall back to verbose if not a TTY
-            block = render_verbose(SAMPLE_HELP, width)
+            # Fall back to styled if not a TTY
+            block = render_styled(SAMPLE_HELP, width)
             print_block(block)
 
     return 0

@@ -1,4 +1,4 @@
-"""Command with flags that becomes a TUI at high verbosity.
+"""Command with flags that becomes a TUI at high fidelity.
 
 Demonstrates Concept 2: CLI flags → TUI form progression:
 - Level 0 (-q): Silent, exit code only
@@ -7,10 +7,10 @@ Demonstrates Concept 2: CLI flags → TUI form progression:
 - Level 3 (-vv): Interactive TUI to fill fields
 
 Run:
-    uv run python experiments/verbosity/deploy_demo.py api           # Level 1
-    uv run python experiments/verbosity/deploy_demo.py -q api        # Level 0
-    uv run python experiments/verbosity/deploy_demo.py -v api        # Level 2
-    uv run python experiments/verbosity/deploy_demo.py -vv           # Level 3 (TUI)
+    uv run python experiments/fidelity/deploy_demo.py api           # Level 1
+    uv run python experiments/fidelity/deploy_demo.py -q api        # Level 0
+    uv run python experiments/fidelity/deploy_demo.py -v api        # Level 2
+    uv run python experiments/fidelity/deploy_demo.py -vv           # Level 3 (TUI)
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from cells import (
 from cells.tui import Surface
 from cells.widgets import ListState
 
-from .common import Verbosity, parse_verbosity, is_interactive, terminal_width
+from .common import Fidelity, parse_fidelity, is_interactive, terminal_width
 
 
 @dataclass(frozen=True)
@@ -79,12 +79,12 @@ def parse_config(args: list[str]) -> DeployConfig:
             config = replace(config, service=arg)
             i += 1
         else:
-            i += 1  # skip verbosity flags, etc.
+            i += 1  # skip fidelity flags, etc.
     return config
 
 
-def deploy_quiet(config: DeployConfig) -> int:
-    """Level 0: Silent execution."""
+def deploy_minimal(config: DeployConfig) -> int:
+    """Level 0: Minimal execution."""
     if not config.service:
         return 1
     # Simulate deployment (would actually do work here)
@@ -102,7 +102,7 @@ def deploy_standard(config: DeployConfig) -> int:
     return 0
 
 
-def deploy_verbose(config: DeployConfig, width: int) -> int:
+def deploy_styled(config: DeployConfig, width: int) -> int:
     """Level 2: Styled progress output."""
     if not config.service:
         error = Block.text("Error: service required", Style(fg="red", bold=True))
@@ -390,9 +390,9 @@ def deploy_interactive(context: DeployContext, initial: DeployConfig, width: int
         print("Cancelled")
         return 1
 
-    # After TUI, run the actual deployment with verbose output
+    # After TUI, run the actual deployment with styled output
     print()  # Blank line after TUI
-    return deploy_verbose(surface.final_config, width)
+    return deploy_styled(surface.final_config, width)
 
 
 def main(args: list[str] | None = None) -> int:
@@ -400,22 +400,22 @@ def main(args: list[str] | None = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
-    verbosity = parse_verbosity(args)
+    fidelity = parse_fidelity(args)
     config = parse_config(args)
     width = terminal_width()
 
-    if verbosity == Verbosity.QUIET:
-        return deploy_quiet(config)
-    elif verbosity == Verbosity.STANDARD:
+    if fidelity == Fidelity.MINIMAL:
+        return deploy_minimal(config)
+    elif fidelity == Fidelity.STANDARD:
         return deploy_standard(config)
-    elif verbosity == Verbosity.VERBOSE:
-        return deploy_verbose(config, width)
+    elif fidelity == Fidelity.STYLED:
+        return deploy_styled(config, width)
     else:  # INTERACTIVE
         if is_interactive():
             return deploy_interactive(SAMPLE_CONTEXT, config, width)
         else:
-            # Fall back to verbose if not a TTY
-            return deploy_verbose(config, width)
+            # Fall back to styled if not a TTY
+            return deploy_styled(config, width)
 
 
 if __name__ == "__main__":

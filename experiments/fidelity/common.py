@@ -1,4 +1,4 @@
-"""Common utilities for verbosity spectrum demos."""
+"""Common utilities for fidelity spectrum demos."""
 
 from __future__ import annotations
 
@@ -9,25 +9,25 @@ from enum import IntEnum
 from cells import Block, print_block
 
 
-class Verbosity(IntEnum):
-    """Verbosity levels from minimal to interactive."""
+class Fidelity(IntEnum):
+    """Fidelity levels from minimal to interactive."""
 
-    QUIET = 0  # -q: one line, bare minimum
+    MINIMAL = 0  # -q: one line, bare minimum
     STANDARD = 1  # default: typical CLI output
-    VERBOSE = 2  # -v: styled, structured output
+    STYLED = 2  # -v: styled, structured output
     INTERACTIVE = 3  # -vv: full TUI
 
 
-def parse_verbosity(args: list[str]) -> Verbosity:
-    """Parse verbosity from command-line args.
+def parse_fidelity(args: list[str]) -> Fidelity:
+    """Parse fidelity from command-line args.
 
-    -q/--quiet -> QUIET (0)
+    -q/--quiet -> MINIMAL (0)
     (nothing)  -> STANDARD (1)
-    -v         -> VERBOSE (2)
+    -v         -> STYLED (2)
     -vv        -> INTERACTIVE (3)
     """
     if "-q" in args or "--quiet" in args:
-        return Verbosity.QUIET
+        return Fidelity.MINIMAL
 
     v_count = 0
     for arg in args:
@@ -36,7 +36,7 @@ def parse_verbosity(args: list[str]) -> Verbosity:
         elif arg == "-v" or arg == "--verbose":
             v_count += 1
 
-    return Verbosity(min(v_count + 1, 3))
+    return Fidelity(min(v_count + 1, 3))
 
 
 def is_interactive() -> bool:

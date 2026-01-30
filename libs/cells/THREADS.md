@@ -22,10 +22,10 @@ has its own zoom), relative (child zoom is offset from parent).
 Not yet decided.
 
 ## CLI -> TUI continuum
-Verbosity as a spectrum from plain text (Level 0) through styled text
+Fidelity as a spectrum from plain text (Level 0) through styled text
 (Level 1), composed layout (Level 2), interactive TUI (Level 3), to
 full application (Level 4). print_block() bridges Level 1-2. The
-continuum pattern is documented in demos/VERBOSITY.md.
+continuum pattern is documented in demos/FIDELITY.md.
 
 ## Block serialization — multi-format output
 Cells' rendering pipeline is terminal-agnostic up to Block. The only

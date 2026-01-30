@@ -21,7 +21,7 @@ from primitives. The last two teach **orchestration** — how the output
 comes alive in a running application. This is a natural difficulty curve,
 not a genre shift.
 
-### Down: Detail and Verbosity
+### Down: Detail and Fidelity
 
 Each stop expands downward into implementation detail, API surface, edge
 cases, internals. The "tell me more" axis.
@@ -65,7 +65,7 @@ New core concept → new column, slotted by dependency order. Each column
 grows independently on the vertical axes. The tour gains a stop without
 restructuring.
 
-## Verbosity Mapping
+## Fidelity Mapping
 
 The CLI flags map directly to this model:
 

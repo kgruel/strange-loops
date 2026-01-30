@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Verbosity spectrum — same data, four presentations.
+"""Fidelity spectrum — same data, four presentations.
 
 This demo shows how cells enables the CLI→TUI continuum. Run with different
-verbosity flags to see the same task data rendered at each level:
+fidelity flags to see the same task data rendered at each level:
 
-    uv run python demos/cells/patterns/verbosity.py -q     # Level 0: one line
-    uv run python demos/cells/patterns/verbosity.py        # Level 1: standard output
-    uv run python demos/cells/patterns/verbosity.py -v     # Level 2: styled output
-    uv run python demos/cells/patterns/verbosity.py -vv    # Level 3: interactive TUI
+    uv run python demos/cells/patterns/fidelity.py -q     # Level 0: one line
+    uv run python demos/cells/patterns/fidelity.py        # Level 1: standard output
+    uv run python demos/cells/patterns/fidelity.py -v     # Level 2: styled output
+    uv run python demos/cells/patterns/fidelity.py -vv    # Level 3: interactive TUI
 
 The demo simulates a task runner showing build status. The same underlying
 TaskData structure drives all four presentations.
@@ -104,11 +104,11 @@ def terminal_width() -> int:
 
 
 # ============================================================================
-# Level 0: Quiet — one line summary
+# Level 0: Minimal — one line summary
 # ============================================================================
 
 
-def render_quiet(data: BuildData) -> str:
+def render_minimal(data: BuildData) -> str:
     """Level 0: Minimal one-line output."""
     if data.failed > 0:
         return f"{data.name}: {data.failed} failed, {data.passed} passed"
@@ -151,11 +151,11 @@ def render_standard(data: BuildData) -> str:
 
 
 # ============================================================================
-# Level 2: Verbose — styled Block output
+# Level 2: Styled — styled Block output
 # ============================================================================
 
 
-def render_verbose(data: BuildData, width: int) -> Block:
+def render_styled(data: BuildData, width: int) -> Block:
     """Level 2: Styled output with borders and colors."""
     task_rows: list[Block] = []
 
@@ -425,8 +425,8 @@ def run_interactive(data: BuildData) -> None:
 # ============================================================================
 
 
-def parse_verbosity(args: list[str]) -> int:
-    """Parse verbosity level from args."""
+def parse_fidelity(args: list[str]) -> int:
+    """Parse fidelity level from args."""
     if "-q" in args or "--quiet" in args:
         return 0
     v_count = 0
@@ -449,20 +449,20 @@ def main() -> int:
         print(__doc__)
         return 0
 
-    verbosity = parse_verbosity(args)
+    fidelity = parse_fidelity(args)
     width = terminal_width()
 
-    if verbosity == 0:
-        # Level 0: One line
-        print(render_quiet(SAMPLE_BUILD))
+    if fidelity == 0:
+        # Level 0: Minimal
+        print(render_minimal(SAMPLE_BUILD))
 
-    elif verbosity == 1:
+    elif fidelity == 1:
         # Level 1: Standard multi-line
         print(render_standard(SAMPLE_BUILD))
 
-    elif verbosity == 2:
+    elif fidelity == 2:
         # Level 2: Styled blocks
-        block = render_verbose(SAMPLE_BUILD, width)
+        block = render_styled(SAMPLE_BUILD, width)
         print_block(block)
 
     else:
@@ -470,8 +470,8 @@ def main() -> int:
         if is_interactive():
             run_interactive(SAMPLE_BUILD)
         else:
-            # Fall back to level 2 if not a TTY
-            block = render_verbose(SAMPLE_BUILD, width)
+            # Fall back to styled if not a TTY
+            block = render_styled(SAMPLE_BUILD, width)
             print_block(block)
 
     return 1 if SAMPLE_BUILD.failed > 0 else 0

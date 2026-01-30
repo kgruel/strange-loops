@@ -13,7 +13,7 @@ Added `py.typed` marker and `[tool.pytest.ini_options]`.
 ## Resolved (2026-01-29)
 - ~~Mouse/trackpad input~~ — Implemented. SGR mouse protocol, Surface opt-in.
 - ~~ShapeLens extensions~~ — Implemented. `tree_lens`, `chart_lens`.
-- ~~CLI -> TUI continuum~~ — Implemented. Verbosity spectrum pattern with demos.
+- ~~CLI -> TUI continuum~~ — Implemented. Fidelity spectrum pattern with demos.
 ## 2026-01-29
 
 ### Mouse Support
@@ -32,12 +32,12 @@ Two new lenses following `shape_lens` pattern:
 - Zoom controls depth (tree) or detail level (chart)
 - Demo: `demos/cells/demo_lenses.py`
 
-### Verbosity Spectrum Pattern
-CLI→TUI progression: same data, different render paths based on verbosity:
+### Fidelity Spectrum Pattern
+CLI→TUI progression: same data, different render paths based on fidelity:
 - `-q` minimal, default standard, `-v` styled, `-vv` interactive TUI
-- `experiments/verbosity/` with common utilities
-- Demos: `demo_verbosity.py` (build status), `demo_verbosity_health.py` (API health),
-  `demo_verbosity_disk.py` (disk usage with file tree browser)
+- `experiments/fidelity/` with common utilities
+- Demos: `fidelity.py` (build status), `fidelity_health.py` (API health),
+  `fidelity_disk.py` (disk usage with file tree browser)
 
 ### Big Text Rendering
 `render_big(text, style, size=1, format=BigTextFormat.FILLED) -> Block`
@@ -86,7 +86,7 @@ demos/cells/
 ├── README.md          # Index with descriptions and run commands
 ├── primitives/        # CLI demos (cell, span, block, buffer, compose)
 ├── apps/              # TUI demos (minimal, layers, widgets, mouse, lenses)
-└── patterns/          # Real-world patterns (verbosity spectrum)
+└── patterns/          # Real-world patterns (fidelity spectrum)
 ```
 Deleted tour.py (superseded by bench.py). Pattern documented in `libs/cells/docs/DEMO_PATTERNS.md`.
 

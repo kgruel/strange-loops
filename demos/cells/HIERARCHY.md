@@ -108,4 +108,4 @@ zoom 1: structure  {"users": ["alice", "bob", "charlie"]}
 zoom 2: full       {"users": [{"id": 1, "name": "alice", ...}, ...]}
 ```
 
-Same state, different visual projection. Verbosity flags (`-v`, `-vv`) map to zoom levels.
+Same state, different visual projection. Fidelity flags (`-v`, `-vv`) map to zoom levels.

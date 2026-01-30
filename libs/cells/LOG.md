@@ -8,7 +8,7 @@
 - Mouse support (+1047 lines) — `MouseEvent`, SGR parsing, Surface integration, drawable canvas demo
 - Big text rendering (+832 lines) — `render_big()` with sizes, formats, glyph sets
 - Lens extensions (+869 lines) — `tree_lens`, `chart_lens` following shape_lens pattern
-- Verbosity spectrum (+2392 lines) — CLI→TUI pattern, 3 domain demos (build, health, disk)
+- Fidelity spectrum (+2392 lines) — CLI→TUI pattern, 3 domain demos (build, health, disk)
 
 **Reviewed:**
 - Deep code review of all additions
@@ -31,8 +31,8 @@ libs/cells/src/cells/app.py           (mouse callback)
 demos/cells/demo_mouse.py             (new)
 demos/cells/demo_big_text.py          (new)
 demos/cells/demo_lenses.py            (new)
-demos/cells/demo_verbosity*.py        (new, 3 files)
-experiments/verbosity/                (new module)
+demos/cells/patterns/fidelity*.py     (new, 3 files)
+experiments/fidelity/                 (new module)
 libs/cells/docs/MOUSE.md              (new)
 ```
 

@@ -1,8 +1,104 @@
-"""Tests for parse vocabulary: Split, Pick, Rename, Transform, Coerce, run_parse."""
+"""Tests for parse vocabulary: Skip, Split, Pick, Rename, Transform, Coerce, run_parse."""
 
 import pytest
 
-from specs import Coerce, Pick, Rename, Split, Transform, run_parse
+from specs import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
+
+
+class TestSkip:
+    """Tests for Skip dataclass."""
+
+    def test_startswith_string(self):
+        """Skip line starting with prefix."""
+        pipeline = [Skip(startswith="Filesystem"), Split(), Rename({0: "a"})]
+        # Header line skipped
+        assert run_parse("Filesystem      Size  Used", pipeline) is None
+        # Data line passes
+        assert run_parse("/dev/sda1       100G  50G", pipeline) == {"a": "/dev/sda1"}
+
+    def test_contains_string(self):
+        """Skip line containing substring."""
+        pipeline = [Skip(contains="/System"), Split(), Rename({0: "mount"})]
+        assert run_parse("/System/Volumes/Data", pipeline) is None
+        assert run_parse("/Users/home", pipeline) == {"mount": "/Users/home"}
+
+    def test_equals_string(self):
+        """Skip line exactly matching value."""
+        pipeline = [Skip(equals=""), Split(), Rename({0: "a"})]
+        assert run_parse("", pipeline) is None
+        assert run_parse("data", pipeline) == {"a": "data"}
+
+    def test_field_startswith(self):
+        """Skip based on dict field value."""
+        pipeline = [
+            Split(),
+            Rename({0: "mount", 1: "size"}),
+            Skip(field="mount", startswith="/System"),
+        ]
+        assert run_parse("/System/Volumes 100G", pipeline) is None
+        assert run_parse("/Users 200G", pipeline) == {"mount": "/Users", "size": "200G"}
+
+    def test_field_contains(self):
+        """Skip dict where field contains substring."""
+        pipeline = [
+            Split(),
+            Rename({0: "name", 1: "status"}),
+            Skip(field="status", contains="idle"),
+        ]
+        assert run_parse("proc1 idle", pipeline) is None
+        assert run_parse("proc2 running", pipeline) == {"name": "proc2", "status": "running"}
+
+    def test_field_equals(self):
+        """Skip dict where field equals value."""
+        pipeline = [
+            Split(),
+            Rename({0: "name", 1: "cpu"}),
+            Skip(field="cpu", equals="0"),
+        ]
+        assert run_parse("idle_proc 0", pipeline) is None
+        assert run_parse("busy_proc 50", pipeline) == {"name": "busy_proc", "cpu": "50"}
+
+    def test_predicate_on_string(self):
+        """Skip using predicate on string input."""
+        pipeline = [
+            Skip(predicate=lambda x: len(x) < 5),
+            Split(),
+            Rename({0: "word"}),
+        ]
+        assert run_parse("hi", pipeline) is None
+        assert run_parse("hello", pipeline) == {"word": "hello"}
+
+    def test_predicate_on_dict(self):
+        """Skip using predicate on dict input (after Coerce)."""
+        pipeline = [
+            Split(),
+            Rename({0: "name", 1: "cpu"}),
+            Coerce({"cpu": int}),
+            Skip(predicate=lambda x: x.get("cpu", 0) == 0),
+        ]
+        assert run_parse("idle 0", pipeline) is None
+        assert run_parse("busy 75", pipeline) == {"name": "busy", "cpu": 75}
+
+    def test_field_missing_passes(self):
+        """Skip passes when field doesn't exist."""
+        pipeline = [
+            Split(),
+            Rename({0: "a"}),
+            Skip(field="missing", equals="x"),
+        ]
+        # Field doesn't exist, so don't skip
+        assert run_parse("value", pipeline) == {"a": "value"}
+
+    def test_no_conditions_passes(self):
+        """Skip with no conditions passes everything."""
+        pipeline = [Skip(), Split(), Rename({0: "a"})]
+        assert run_parse("hello", pipeline) == {"a": "hello"}
+
+    def test_frozen(self):
+        """Skip is immutable."""
+        s = Skip(startswith="x")
+        with pytest.raises(AttributeError):
+            s.startswith = "y"
 
 
 class TestSplit:

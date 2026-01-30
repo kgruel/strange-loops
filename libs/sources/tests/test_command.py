@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from sources import CommandSource
+from specs import Coerce, Pick, Rename, Skip, Split, Transform
 
 
 class TestCommandSource:
@@ -149,6 +150,149 @@ class TestCommandSource:
 
         assert len(facts) == 3
         assert [f.payload["line"] for f in facts] == ["a", "b", "c"]
+
+
+class TestCommandSourceParse:
+    """Tests for CommandSource with parse parameter."""
+
+    async def test_parse_basic_pipeline(self):
+        """Parse pipeline transforms line into structured payload."""
+        source = CommandSource(
+            command='echo "alice 1234 95.5"',
+            kind="user",
+            observer="parse-source",
+            parse=[
+                Split(),
+                Rename({0: "name", 1: "id", 2: "score"}),
+                Coerce({"id": int, "score": float}),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 1
+        assert facts[0].payload == {"name": "alice", "id": 1234, "score": 95.5}
+
+    async def test_parse_skip_header(self):
+        """Skip primitive filters out header lines."""
+        source = CommandSource(
+            command='printf "NAME ID\\nalice 1\\nbob 2"',
+            kind="user",
+            observer="skip-source",
+            parse=[
+                Skip(startswith="NAME"),
+                Split(),
+                Rename({0: "name", 1: "id"}),
+                Coerce({"id": int}),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 2
+        assert facts[0].payload == {"name": "alice", "id": 1}
+        assert facts[1].payload == {"name": "bob", "id": 2}
+
+    async def test_parse_skip_by_field(self):
+        """Skip can filter based on parsed field value."""
+        source = CommandSource(
+            command='printf "proc1 0\\nproc2 50\\nproc3 0"',
+            kind="process",
+            observer="field-skip-source",
+            parse=[
+                Split(),
+                Rename({0: "name", 1: "cpu"}),
+                Skip(field="cpu", equals="0"),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 1
+        assert facts[0].payload == {"name": "proc2", "cpu": "50"}
+
+    async def test_parse_failed_coercion_skips_line(self):
+        """Lines that fail coercion are skipped (None from pipeline)."""
+        source = CommandSource(
+            command='printf "valid 42\\ninvalid NaN\\nalso_valid 99"',
+            kind="data",
+            observer="coerce-source",
+            parse=[
+                Split(),
+                Rename({0: "label", 1: "value"}),
+                Coerce({"value": int}),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 2
+        assert facts[0].payload == {"label": "valid", "value": 42}
+        assert facts[1].payload == {"label": "also_valid", "value": 99}
+
+    async def test_parse_transform_then_coerce(self):
+        """Transform strips characters before coercion."""
+        source = CommandSource(
+            command='echo "disk1 75%"',
+            kind="disk",
+            observer="transform-source",
+            parse=[
+                Split(),
+                Rename({0: "name", 1: "usage"}),
+                Transform("usage", strip="%"),
+                Coerce({"usage": int}),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 1
+        assert facts[0].payload == {"name": "disk1", "usage": 75}
+
+    async def test_no_parse_uses_line_payload(self):
+        """Without parse, payload is {"line": text}."""
+        source = CommandSource(
+            command='echo "raw text"',
+            kind="raw",
+            observer="no-parse-source",
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 1
+        assert facts[0].payload == {"line": "raw text"}
+
+    async def test_parse_pick_subset(self):
+        """Pick selects only specific fields."""
+        source = CommandSource(
+            command='echo "a b c d e"',
+            kind="picked",
+            observer="pick-source",
+            parse=[
+                Split(),
+                Pick(0, 2, 4),
+                Rename({0: "first", 1: "third", 2: "fifth"}),
+            ],
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        assert len(facts) == 1
+        assert facts[0].payload == {"first": "a", "third": "c", "fifth": "e"}
 
 
 class TestCommandSourceProtocol:

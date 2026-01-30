@@ -10,6 +10,7 @@ dependencies = []
 facts = { workspace = true }
 ticks = { workspace = true }
 peers = { workspace = true }
+specs = { workspace = true }
 
 [dependency-groups]
 dev = [

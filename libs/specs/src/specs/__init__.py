@@ -16,7 +16,7 @@ Part of the ecosystem:
 from .boundary import Boundary
 from .facet import Facet
 from .fold import Fold
-from .parse import Coerce, Pick, Rename, Split, Transform, run_parse
+from .parse import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
 from .spec import Shape, Spec
 from .types import ValidationError
 
@@ -28,6 +28,7 @@ __all__ = [
     "Pick",
     "Rename",
     "Shape",
+    "Skip",
     "Spec",
     "Split",
     "Transform",

@@ -6,6 +6,7 @@ Pipeline composition: each op takes input, produces output.
 Applied left to right: [Split(), Pick(0, 2), Rename({0: "a", 1: "b"})]
 
 Operations:
+    - Skip: Filter out lines/records (returns None to exclude)
     - Split: Divide text into fields by delimiter
     - Pick: Select specific fields by position
     - Rename: Map positional indices to named keys
@@ -15,10 +16,38 @@ Operations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
+
+
+@dataclass(frozen=True)
+class Skip:
+    """Filter out lines/records from the pipeline.
+
+    Skip returns None (stopping the pipeline) when a condition matches.
+    Works on strings (before Split) or dicts (after Rename).
+
+    Attributes:
+        startswith: Skip if value starts with this prefix.
+        contains: Skip if value contains this substring.
+        equals: Skip if value equals this exactly.
+        field: For dict input, check this field instead of whole value.
+        predicate: Escape hatch — callable returns True to skip.
+
+    Examples:
+        Skip(startswith="Filesystem")     # Skip header line
+        Skip(contains="System/Volumes")   # Skip system paths
+        Skip(field="cpu", equals="0")     # Skip idle processes (string compare)
+        Skip(predicate=lambda x: x.get("cpu", 0) == 0)  # Skip where cpu==0 (after Coerce)
+    """
+
+    startswith: str | None = None
+    contains: str | None = None
+    equals: str | None = None
+    field: str | None = None
+    predicate: Callable[[Any], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +149,45 @@ class Coerce:
 
 
 # Type alias for parse operations
-ParseOp = Split | Pick | Rename | Transform | Coerce
+ParseOp = Skip | Split | Pick | Rename | Transform | Coerce
+
+
+def _apply_skip(value: str | dict[str, Any], op: Skip) -> str | dict[str, Any] | None:
+    """Apply Skip operation — returns None if the value should be filtered out.
+
+    Skip works on strings (before Split) or dicts (after Rename).
+    Returns the value unchanged if not skipped, None if skipped.
+    """
+    # Predicate takes priority — escape hatch for complex logic
+    if op.predicate is not None:
+        if op.predicate(value):
+            return None
+        return value
+
+    # Determine what to check
+    if op.field is not None:
+        # Field mode: extract field from dict
+        if not isinstance(value, dict):
+            return None  # Can't access field on non-dict
+        if op.field not in value:
+            return value  # Field missing — don't skip
+        check_value = value[op.field]
+    else:
+        # Direct mode: check the value itself
+        check_value = value
+
+    # Convert to string for comparison
+    check_str = str(check_value)
+
+    # Apply filters
+    if op.startswith is not None and check_str.startswith(op.startswith):
+        return None
+    if op.contains is not None and op.contains in check_str:
+        return None
+    if op.equals is not None and check_str == op.equals:
+        return None
+
+    return value
 
 
 def _apply_split(value: str, op: Split) -> list[str] | None:
@@ -264,7 +331,9 @@ def run_parse(line: str, pipeline: list[ParseOp]) -> dict[str, Any] | None:
     value: Any = line
 
     for op in pipeline:
-        if isinstance(op, Split):
+        if isinstance(op, Skip):
+            value = _apply_skip(value, op)
+        elif isinstance(op, Split):
             value = _apply_split(value, op)
         elif isinstance(op, Pick):
             value = _apply_pick(value, op)

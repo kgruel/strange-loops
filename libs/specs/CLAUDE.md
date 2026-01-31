@@ -32,7 +32,16 @@ Boundary
 | `Shape` | alias | backward compat alias for Spec |
 | `Field` | frozen dataclass | name + kind (+ optional flag) |
 | `Facet` | alias | backward compat alias for Field |
-| `Fold` | frozen dataclass | op + target + props |
+| `Fold` | frozen dataclass | op + target + props (legacy) |
+| `Latest` | frozen dataclass | typed fold: store timestamp |
+| `Count` | frozen dataclass | typed fold: increment counter |
+| `Sum` | frozen dataclass | typed fold: accumulate value |
+| `Collect` | frozen dataclass | typed fold: append to list |
+| `Upsert` | frozen dataclass | typed fold: insert/update by key |
+| `TopN` | frozen dataclass | typed fold: keep top N by field |
+| `Min` | frozen dataclass | typed fold: track minimum |
+| `Max` | frozen dataclass | typed fold: track maximum |
+| `FoldOp` | type alias | union of all fold types |
 | `Boundary` | frozen dataclass | kind + reset (cycle completion) |
 | `ValidationError` | exception | contract violation |
 
@@ -44,7 +53,41 @@ Boundary
 | `initial_state() -> dict` | zero-value dict from state_fields |
 | `input_field(name)` / `state_field(name)` | lookup by name |
 
-### Fold Operations
+### Typed Folds (preferred)
+
+Type-safe fold classes with IDE support and self-documenting signatures.
+
+**Primitive folds** — direct mappings to fundamental operations:
+
+| Class | Signature | Behavior |
+|-------|-----------|----------|
+| `Latest` | `(target)` | `state[target] = payload._ts` |
+| `Count` | `(target)` | `state[target] += 1` |
+| `Sum` | `(target, field)` | `state[target] += payload[field]` |
+| `Collect` | `(target, max=0)` | append to list, 0 = unbounded |
+| `Upsert` | `(target, key)` | `state[target][payload[key]] = payload` |
+
+**Convenience folds** — compositions for common patterns:
+
+| Class | Signature | Behavior |
+|-------|-----------|----------|
+| `TopN` | `(target, key, by, n, desc=True)` | keep top N items by field value |
+| `Min` | `(target, field)` | track minimum value seen |
+| `Max` | `(target, field)` | track maximum value seen |
+
+```python
+# Examples
+Latest(target="last_seen")
+Count(target="events")
+Sum(target="total", field="amount")
+Collect(target="history", max=100)
+Upsert(target="users", key="id")
+TopN(target="top_procs", key="pid", by="cpu", n=5)
+Min(target="coldest", field="temp")
+Max(target="peak", field="memory")
+```
+
+### Legacy Fold (string-based)
 
 | Op | Behavior | Props |
 |----|----------|-------|
@@ -53,6 +96,12 @@ Boundary
 | `sum` | `state[target] += payload[field]` | `field=` |
 | `collect` | append to list, bounded | `max=` (optional) |
 | `upsert` | `state[target][key_value] = payload` | `key=` (required) |
+
+```python
+# Legacy syntax — prefer typed classes for new code
+Fold(op="latest", target="last_seen")
+Fold(op="sum", target="total", props={"field": "amount"})
+```
 
 ## Invariants
 
@@ -81,10 +130,11 @@ Projection uses: Projection(initial=spec.initial_state(), fold=spec.apply)
 
 ```
 src/specs/
-  __init__.py    # Re-exports: Boundary, Facet, Field, Fold, Shape, Spec, ValidationError
+  __init__.py    # Re-exports: Boundary, Facet, Field, Fold, FoldOp, Shape, Spec, ValidationError
+                 #             + typed folds: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
   boundary.py    # Boundary (kind + reset)
   facet.py       # Field (name + kind + optional) + Facet alias
-  fold.py        # Fold (op + target + props)
+  fold.py        # Typed folds + legacy Fold + FoldOp alias
   spec.py        # Spec (fields + folds + boundary + apply) + Shape alias
   engine.py      # Fold closure builder (_make_latest, _make_count, etc.)
   types.py       # initial_value, coerce_value, type_matches, ValidationError

@@ -56,40 +56,60 @@ prove a specific aspect of the model.
 | `peer_aware_vertex.py` | Full model — Vertex.receive(Fact, Peer), gating, observer-state ownership |
 | `peer_surface.py` | Cells integration — peer-aware Vertex wired to Surface, gating visible in TUI |
 | `sources/heartbeat.py` | First sources experiment — CommandSource → Vertex → Fold → Query (liveness) |
+| `sources/system_health.py` | Real machine data — df + ps through the loop, custom parsers |
+| `sources/system_health_spec.py` | Spec-driven — declarative Specs with upsert/collect folds |
+| `sources/system_health_parse.py` | Parse vocabulary — Skip, Split, Pick, Rename, Transform, Coerce in CommandSource |
+| `sources/alert_automation.py` | Alert pattern — full pipeline: Source → Parse → Fold → Tick → Alert → back to Vertex, with Store |
 
 Experiment insights accumulate in `experiments/LOG.md`.
 
 ## Next Steps
 
-1. **Personal data loop** — Build toward a real personal loop with local data:
-   - Docker containers (`docker stats`)
-   - Disk space (`df`)
-   - Process metrics (`ps`)
-   - Start simple, grow organically
+1. **HTTPSource + JSON parse** — Next source adapter to prove the pattern generalizes:
+   - Fetch a JSON API (HN, weather, etc.)
+   - JSON parse vocabulary (or parse pipeline extension)
+   - Same Vertex/Fold/Store pattern, different ingress
+   - Proves: "point at data, it flows in"
 
-2. **Complete sources experiments** — In progress:
-   - `heartbeat_rate.py` — boundary + tick emission
-   - `multi_source.py` — two sources, one vertex
-   - `cascade.py` — tick from one vertex → fact to another
+2. **FileSource** — Watch a file, emit facts on change:
+   - Reactive ingress (not just polling)
+   - Use case: maildir, log files, config changes
 
-3. **Spec file format** — Design the `.loop` file that combines source + spec.
-   Enables: drop a file, data flows. No code for common cases.
+3. **`.loop` file format** — Configuration layer for "oh it would be nice if":
+   - Minimal syntax, minimal parser
+   - One file → Source + Parse + Spec + Vertex wiring
+   - Deferred until HTTPSource/FileSource prove the runtime
+
+4. **Multi-loop runner** — Orchestration for personal data system:
+   - Scan `~/.loops/`, run all `.loop` files
+   - Hot reload on change
+   - Dashboard of active loops, recent facts
+
+5. **input_fields validation** — Validate at registration/wiring time:
+   - Check parse pipeline output matches spec.input_fields
+   - One-time check, not per-fact overhead
+   - Catches mismatches early
 
 ## Open Threads
 
 Carry forward across sessions. Resolve or refine as experiments answer them.
 
-- **Spec atomicity** — Spec reduced to `folds + boundary?`. Facets are derivable.
-  Source is separate (ingress adapter). File format combines both for ergonomics.
-
-- **Ingress/egress vocabulary** — Analysis recommends partial adoption. Add
-  "Boundary Crossing" section to VOCABULARY.md. No code renames needed.
+- **Consumer logic as code** — Fold ops accumulate, but sorting/ranking for
+  display is still custom code. TopN convenience fold helps but doesn't cover
+  all cases. Is this the right boundary?
 
 - **ticks/source.py cleanup** — Orphaned Source protocol in ticks conflicts with
   libs/sources. Remove it.
 
 - **Meta-as-loop** — When does meta-state (peer switching, debug toggle) need
   to enter a loop? Signal: when it needs to be shared, persisted, or folded.
+
+- **Store policy** — "Store everything" isn't the right default for all vertices.
+  Options: no store (ephemeral), sliding window, sampling, full history.
+  Store implements policy, vertex just calls append(). Pattern needs proving.
+
+- **Tick.ts type** — Tick uses `datetime`, Fact uses `float` (epoch seconds).
+  Should align to float everywhere for simpler serialization. Low priority.
 
 ## Resolved
 
@@ -123,3 +143,12 @@ Resolved questions kept for context. See `LOG.md` for full history.
 26. ~~Source concept~~ — Sources are adapters at the ingress boundary. Not atoms. Interface: vertex.ingest(kind, payload, observer).
 27. ~~Sources lib~~ — libs/sources with Source protocol, CommandSource, Runner. First experiment: heartbeat liveness check.
 28. ~~Minimal meaningful flow~~ — Source → Fold → Consumer. Purpose comes from consumer, not spec. Fold without consumer is mechanics without meaning.
+29. ~~Parse vocabulary~~ — Split, Pick, Rename, Transform, Coerce, Skip in specs. Declarative primitives for raw → structured.
+30. ~~Parse location~~ — Parse belongs in Source (CommandSource.parse parameter). Source produces structured data, Spec folds it.
+31. ~~Real machine data~~ — system_health experiments prove df/ps data flows through the model correctly.
+32. ~~Typed fold vocabulary~~ — Latest, Count, Sum, Collect, Upsert, TopN, Min, Max. Pure frozen dataclasses.
+33. ~~Facet → Field rename~~ — Spec uses `input_fields`/`state_fields`. `Field` class. Old names kept as deprecated aliases.
+34. ~~Legacy Fold removed~~ — No string-based `Fold(op=..., target=...)`. Pure typed classes. mill.py marked for update when .loop format lands.
+35. ~~Alert automation pattern~~ — alert_automation.py: Source → Parse → Fold → Tick → inline consumer → Alert Fact → back to Vertex.
+36. ~~Store in experiments~~ — alert_automation.py wires EventStore to Vertex. Facts persist to JSONL, survive restarts.
+37. ~~Spec vocabulary consistency~~ — Typed folds aligned with parse pattern. All frozen dataclasses, IDE-friendly.

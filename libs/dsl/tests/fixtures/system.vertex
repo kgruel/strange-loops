@@ -1,0 +1,23 @@
+# Full .vertex file
+name: system-monitor
+store: ./data/system.jsonl
+discover: ./**/*.loop
+
+loops:
+  disk:
+    fold:
+      mounts: by mount
+      updated: latest
+    boundary: when disk.complete
+
+  memory:
+    fold:
+      usage: latest
+      peak: max used
+    boundary: when memory.complete
+
+routes:
+  disk: disk
+  memory: memory
+
+emit: system.health

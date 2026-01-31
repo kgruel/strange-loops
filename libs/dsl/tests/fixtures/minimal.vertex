@@ -1,0 +1,6 @@
+# Minimal .vertex file
+name: simple
+loops:
+  counter:
+    fold:
+      count: +1

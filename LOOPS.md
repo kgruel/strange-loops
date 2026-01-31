@@ -2,142 +2,152 @@
 
 The fundamental model. Everything else references back here.
 
-## The truths
+## The Truths
 
 **Time is fundamental.** The past happened. Facts are observations of what occurred.
-Events have a total order. There are no concurrency concerns — you are always in
-the present, observing an ordered past.
+Events have a total order. You are always in the present, observing an ordered past.
 
-**The observer is first-class.** Facts exist because a Peer observed them.
-Without observation, nothing is recorded. The act of observing is itself
-observable — observations about observations are still just facts.
+**The observer is first-class.** Facts exist because someone observed them. Without
+observation, nothing is recorded. The act of observing is itself observable —
+observations about observations are still just facts.
 
-**Everything is loops.** Facts flow, accumulate into state, state renders,
-the observer sees, the observer acts, new facts flow. The loop closes.
-There are no endpoints. There are no sinks. Everything continues.
+**Everything is loops.** Facts flow in, accumulate into state, boundaries fire,
+ticks flow out. The end connects to the beginning. There are no endpoints.
 
-## The atoms
+**Everything flows one direction.** Failures, conditionals, nested spans — they're
+all just more facts. No special handling. No rollback. Just accumulation.
 
-Five primitives. Everything else is composition.
+## The Atoms
 
-```
-Fact     what happened       kind + ts + payload
-Peer     who observed        name + horizon + potential
-Tick     when a cycle ended  name + ts + payload + origin
-Spec     how state folds     fields + folds + boundary
-Vertex   where loops meet    routes facts, manages folds, produces ticks
-```
-
-**Fact** — An intentional observation. Something happened, a peer cared enough
-to record it. The `kind` is a routing key. The `ts` is when. The `payload` is
-what. Facts are immutable.
-
-**Peer** — Identity with constraints. `horizon` bounds what a peer can see.
-`potential` bounds what a peer can emit. `None` means unrestricted. Constraints
-emerge through delegation: `kyle` delegates to `kyle/monitor` with narrower
-potential. The hierarchy encodes participation level.
-
-**Tick** — A temporal boundary marker. When a cycle completes, the accumulated
-fold state is snapshot into a Tick. The Tick is the output of one loop and
-can be the input of another. `origin` identifies which vertex produced it.
-Ticks are how loops nest.
-
-**Spec** — The fold contract. Declares what fields exist (fields) and how
-they accumulate (folds). `Spec.apply(state, payload) -> state` is pure.
-An optional `boundary` declares which fact kind triggers a Tick.
-
-**Vertex** — Where loops intersect. Facts arrive, get routed by `kind` to
-fold engines, accumulate into state. When a boundary fires, a Tick is produced.
-Multiple loops can merge at a vertex (facts from different sources).
-One loop can branch at a vertex (one fact triggers multiple paths).
-
-## The data flow
+Three primitives. Everything else is composition or runtime.
 
 ```
-                 ┌──────────────┐
-                 │    Source    │  adapter: command, feed, endpoint, file...
-                 └──────┬───────┘
-                        │ vertex.ingest(kind, payload, observer)
-                        ▼
-Observer ────────→ Fact(kind, ts, payload)
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │    Vertex     │
-                 │               │
-                 │  ┌─────────┐  │     Memory: boundary-less durable fold
-                 │  │ Memory  │  │     Records everything, emits nothing
-                 │  └─────────┘  │     (queryable for replay)
-                 │       │       │
-                 │  Route by kind│
-                 │   │   │   │   │
-                 │   ▼   ▼   ▼   │
-                 │  Fold Fold Fold│    Spec.apply() per kind
-                 │   │   │   │   │
-                 │   └───┴───┘   │
-                 │       │       │
-                 │   Boundary?   │     Configured per fold
-                 │       │       │
-                 └───────│───────┘
-                         │
-            ┌────────────┴────────────┐
-            │                         │
-            ▼                         ▼
-    Tick(name, ts, payload)     (other branches)
-            │
-            ├──→ Downstream Vertex (Tick is atomic input at next level)
-            │
-            └──→ Persist Vertex (stores tick, emits "tick.stored" fact)
-                         │
-                         ▼
-                 Fact("tick.stored", ts, {...})
-                         │
-                         └──→ loops back to any vertex
+Fact    what happened           kind + ts + payload + observer
+Spec    how state accumulates   fields + folds + boundary
+Tick    what a period became    name + ts + payload + origin
 ```
 
-Source adapters convert external input to Facts. They are infrastructure, not
-atoms. See [VERTEX.md](docs/VERTEX.md) for the ingest interface.
+**Fact** — A single observation. Something happened, someone cared enough to record
+it. The `kind` is a routing key. The `ts` is when. The `payload` is what. The
+`observer` is who. Facts are immutable.
 
-## The topology
+**Spec** — The contract. Declares what fields exist (shape), how they accumulate
+(folds), and when a cycle completes (boundary). `Spec.apply(state, payload) → state`
+is pure. Parse vocabulary (Split, Pick, Rename...) shapes raw input. Fold vocabulary
+(Latest, Count, Sum, Collect...) transforms state.
 
-**Loop** — A closed path. Facts enter a vertex, fold into state, state renders
-through a surface, the observer sees, the observer acts, new facts enter.
-The end connects to the beginning.
+**Tick** — A handle to a semantic period. When a boundary fires, accumulated state
+snapshots into a Tick. The `payload` is the fold result. The period is the facts
+between the last boundary and this one. At full fidelity, you can traverse into
+those facts — some are themselves Ticks from other loops. Depth emerges from
+ticks-as-facts flowing into other loops.
 
-**Vertex** — The intersection point. Where loops meet. A vertex is the only
-structural primitive in the topology.
+## Two Libraries
 
-**Branch** — At a vertex, one fact can trigger multiple paths. The fact enters
-once, routes to multiple destinations (fold engines, downstream vertices,
-memory). This is not duplication — it's the loop branching.
+### data
 
-**Merge** — At a vertex, facts from multiple sources converge. A health timer
-and a user keypress both arrive at the same vertex. The vertex doesn't know
-or care about the source. This is loops intersecting.
+Everything about the data itself.
 
-**Memory** — A fold with no boundary. Accumulates all facts, never produces
-a Tick. Durable if persisted, ephemeral if not. The loop's silent record.
-Queryable for replay. Not a separate primitive — just a fold configuration.
+```
+Fact        the observation record
+Spec        the contract (fields, folds, boundary)
+Source      ingress adapter (run command → parse → facts)
+Parse       shaping vocabulary (Split, Pick, Rename, Transform, Coerce, Skip)
+Fold        transformation vocabulary (Latest, Count, Sum, Collect, Upsert, TopN)
+Validation  static shape checking (parse output vs spec input_fields)
+```
 
-## What dissolved
+One concern: **what data looks like, how to get it, how to shape it.**
 
-During model development, these concepts were introduced and then dissolved
-back into the atoms:
+### vertex
 
-| Concept | Dissolved into | Why |
-|---------|---------------|-----|
-| Sink | Fold state | Loops have no terminals. "Sink" implies an endpoint. |
-| Store | Durable fold | Storage is a property of state, not a separate type. |
-| Witness | Peer + Vertex | A "witness" is just a peer whose job is to observe and emit. |
-| Tap | Vertex | Emission from storage is vertex behavior. |
-| Memory | Boundary-less fold | Silent accumulation is just a fold that never ticks. |
+Everything about execution.
 
-The atoms are complete. New requirements don't require new primitives.
+```
+Vertex      receives facts, routes by kind, manages loops
+Loop        executes Spec.apply, tracks state between boundaries
+Store       persistence (facts and ticks survive restarts)
+Peer/Grant  identity and gating policy
+```
+
+One concern: **how it runs, where state lives, when boundaries fire.**
+
+## The Data Flow
+
+```
+External World
+      │
+      │  command, script, curl, whatever
+      ▼
+┌─────────────────────────────────────────────────────────┐
+│  Source                                                 │
+│    run: "df -h"                                         │
+│    format: lines | json | blob                          │
+│    parse: [Split, Pick, Rename, Coerce]                 │
+│    kind: "disk"                                         │
+│    observer: "disk-monitor"                             │
+└─────────────────────────────────────────────────────────┘
+      │
+      │  Fact(kind, ts, payload, observer)
+      ▼
+┌─────────────────────────────────────────────────────────┐
+│  Vertex                                                 │
+│                                                         │
+│    Store ─── append fact, queryable by time range       │
+│      │                                                  │
+│      │                                                  │
+│    Route by kind                                        │
+│      │                                                  │
+│      ├────────────┬────────────┐                        │
+│      ▼            ▼            ▼                        │
+│    Loop         Loop         Loop                       │
+│    Spec.apply   Spec.apply   Spec.apply                 │
+│      │                                                  │
+│    Boundary?                                            │
+│      │                                                  │
+└──────│──────────────────────────────────────────────────┘
+       │
+       ▼
+  Tick(name, ts, payload, origin)
+       │
+       ├──→ Store.append(tick)
+       │
+       ├──→ Downstream Vertex (tick becomes fact, origin becomes observer)
+       │
+       └──→ Surface renders → observer sees → observer acts → new facts
+                                                    │
+                                                    └──→ back to Vertex
+```
+
+## Fidelity and Depth
+
+A Tick is a handle to a semantic period.
+
+**Minimal fidelity:** Just the payload. `{status: "success", count: 47}`
+
+**Full fidelity:** The payload, plus every fact in the period (`Store.since(last_tick)`),
+plus recursive traversal into any facts that are themselves Ticks from other loops.
+
+Examples at different scales:
+
+- **Auth failure:** 9 attempts, timer ticks, threshold → Tick `{locked: true}`. No
+  exception handling. Just facts that accumulated to locked state.
+
+- **Deploy:** Build tick + test tick + push tick + logs → Tick `{status: "success"}`.
+  At full fidelity, descend into each phase.
+
+- **Board meeting:** Month of project facts, incident ticks → meeting Tick. The month
+  collapses into a few hours where new observers discuss and decide.
+
+- **Grandma's Birthday:** Year of family facts → Tick `{celebrated: true}`. The year
+  is in there if you want it.
+
+The hierarchy isn't designed. It emerges from ticks-as-facts flowing into other loops.
 
 ## Surfaces
 
-A **Surface** is where the loop touches the observer. It renders state outward
-and emits interactions inward as new facts.
+A **Surface** is where the loop touches the observer. Renders state outward,
+emits interactions inward as new facts.
 
 ```
 Vertex.state ──→ Surface ──→ Observer sees
@@ -145,26 +155,34 @@ Vertex.state ──→ Surface ──→ Observer sees
 Observer acts ──→ Surface.emit ──→ Fact ──→ Vertex
 ```
 
-**Cell** is the first surface (terminal, character grid). Other surfaces would
-use different paradigms (web, API, documents) but the same contract: consume
-state, render outward, emit inward.
+**cells** is the terminal surface — character grid, styles, layouts. Other surfaces
+(web, API, documents) would use different paradigms but the same contract.
 
-Surfaces are not atoms. They are the boundary where loops meet reality.
+Surfaces close the loop. They are not atoms.
+
+## What Dissolved
+
+During model development, these concepts were introduced and then dissolved:
+
+| Concept | Dissolved into | Why |
+|---------|---------------|-----|
+| Peer (as atom) | observer field + Grant policy | Identity is a string on Fact, policy is runtime |
+| Vertex (as atom) | Runtime library | Vertex is execution, not data |
+| Sink | Fold state | Loops have no terminals |
+| Store (as atom) | Vertex capability | Persistence is a runtime property |
+| Witness | Observer + Vertex | A witness is just an observer whose job is to emit |
+| Memory | Boundary-less fold | Silent accumulation is just a fold that never ticks |
+
+Three atoms remain: Fact, Spec, Tick.
 
 ## References
 
-Deeper dives that loop back here:
-
 | Doc | Focus |
 |-----|-------|
-| [VERTEX.md](docs/VERTEX.md) | The intersection point — routing, folding, branching |
-| [TEMPORAL.md](docs/TEMPORAL.md) | Boundaries, ticks, nesting — how loops mark time |
-| [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, memory, replay — how loops remember |
-| [PEERS.md](docs/PEERS.md) | Identity, delegation, constraints — who observes |
-
-Each doc unpacks one aspect of the model and references back to LOOPS.md
-as the ground truth.
+| [VERTEX.md](docs/VERTEX.md) | Routing, folding, branching |
+| [TEMPORAL.md](docs/TEMPORAL.md) | Boundaries, nesting, how loops mark time |
+| [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, replay, how loops remember |
 
 ---
 
-*The system is loops. You are a Peer in one.*
+*The system is loops. You are an observer in one.*

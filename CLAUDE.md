@@ -27,7 +27,8 @@ Cell is a surface primitive (terminal), not a loop atom.
 
 ```bash
 uv sync                                                    # install all
-uv run --package peers pytest libs/peers/tests             # test one lib
+uv run --package data pytest libs/data/tests               # test one lib
+uv run --package vertex pytest libs/vertex/tests           # test another
 uv run --package cells pytest libs/cells/tests/test_span.py  # single file
 ```
 
@@ -35,17 +36,15 @@ uv run --package cells pytest libs/cells/tests/test_span.py  # single file
 
 ```
 libs/
-  peers/    Identity: name + horizon + potential
-  facts/    Observation: kind + ts + payload
-  ticks/    Temporal: Tick, Vertex, Store, Stream, Projection
-  specs/    Contract: Facet, Fold, Boundary, Spec
+  data/     Observation + Contract + Ingress: Fact, Spec, Source
+  vertex/   Temporal + Identity: Tick, Vertex, Peer, Grant
   cells/    Surface: Cell, Block, Buffer, Lens, Surface
 
 experiments/   Integration layer — wires libs together
 docs/          Deep dives (VERTEX.md, TEMPORAL.md, PERSISTENCE.md, PEERS.md)
 ```
 
-Each lib has its own `CLAUDE.md` (API, invariants) and `HANDOFF.md` (changelog).
+Each lib has its own README.md with API overview.
 
 ## Data Flow
 
@@ -69,7 +68,8 @@ Same primitive at every level. Loops nest.
 
 ## Key Patterns
 
-- Libs are independent — no cross-lib imports. Composition in experiments.
+- Two libraries: `data` (atoms + contracts), `vertex` (runtime + identity). `cells` is surface.
+- `vertex` depends on `data` (TYPE_CHECKING only). No other cross-lib imports.
 - Immutable by default — frozen dataclasses, pure functions
 - Spec is the contract — describes structure and fold operations
 - `Projection(initial, fold=spec.apply)` — no bridge class needed

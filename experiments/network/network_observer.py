@@ -48,9 +48,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from facts import Fact
-from ticks import Tick, Vertex
-from peers import Grant
+from data import Fact
+from vertex import Tick, Vertex
+from vertex import Grant
 
 
 # -- Wire format: Fact serialization ------------------------------------------

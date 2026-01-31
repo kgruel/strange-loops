@@ -20,9 +20,9 @@ import asyncio
 import platform
 import sys
 
-from sources import CommandSource, Runner
-from specs import Coerce, Pick, Rename, Skip, Split, Transform
-from ticks import Vertex
+from data import CommandSource, Runner
+from data import Coerce, Pick, Rename, Skip, Split, Transform
+from vertex import Vertex
 
 
 # Parse pipelines — declarative transformation from raw text to structured dict

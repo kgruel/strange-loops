@@ -18,8 +18,8 @@ import asyncio
 import re
 from datetime import datetime, timezone
 
-from ticks import Vertex
-from sources import CommandSource, Runner
+from vertex import Vertex
+from data import CommandSource, Runner
 
 
 def now_ts() -> float:

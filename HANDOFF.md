@@ -15,16 +15,13 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 
 **One surface:** cells — terminal UI, separate concern
 
-## Current Libraries (pre-consolidation)
+## Libraries
 
-| Library | Future | Focus |
-|---------|--------|-------|
-| **facts** | → data | Observation atom |
-| **specs** | → data | Contracts + parse + fold |
-| **sources** | → data | Ingress adapters |
-| **ticks** | → vertex | Vertex, Loop, Tick, Store |
-| **peers** | → vertex | Grant (identity policy) |
-| **cells** | cells | Terminal UI |
+| Library | Focus |
+|---------|-------|
+| **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
+| **vertex** | Runtime + Identity: Tick, Vertex, Loop, Store, Peer, Grant |
+| **cells** | Terminal UI: Cell, Block, Buffer, Surface |
 
 ## Documentation
 
@@ -56,14 +53,6 @@ prove a specific aspect of the model.
 | `sources/system_health_spec.py` | Declarative Specs with folds |
 | `sources/system_health_parse.py` | Parse vocabulary in Source |
 | `sources/alert_automation.py` | Full pipeline with Store persistence |
-
-## In Progress
-
-**Library consolidation** — Subtask running: `plan/library-consolidation`
-- facts + specs + sources → `data`
-- ticks + peers → `vertex`
-- cells unchanged
-- Plan: `.subtask/tasks/plan--library-consolidation/PLAN.md`
 
 ## Next Steps
 
@@ -119,5 +108,9 @@ prove a specific aspect of the model.
 
 42. ~~One-way flow truth~~ — Added fourth truth: "Everything flows one direction."
     Failures, conditionals, nested spans are all just more facts.
+
+44. ~~Library consolidation~~ — 6 libs → 3: `data` (facts + specs + sources),
+    `vertex` (ticks + peers), `cells` (unchanged). Clean break, no deprecation
+    aliases. All imports updated to new paths.
 
 See `LOG.md` for older resolved items and full session history.

@@ -17,8 +17,8 @@ import asyncio
 import platform
 import sys
 
-from sources import CommandSource, Runner
-from ticks import Vertex
+from data import CommandSource, Runner
+from vertex import Vertex
 
 
 def heartbeat_fold(state: dict, payload: dict) -> dict:

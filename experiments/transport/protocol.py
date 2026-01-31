@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
-from facts import Fact
+from data import Fact
 
 
 # =============================================================================

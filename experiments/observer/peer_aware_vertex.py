@@ -20,9 +20,9 @@ Run:
 
 from __future__ import annotations
 
-from facts import Fact
-from peers import Peer, delegate
-from ticks import Lens, Tick, Vertex
+from data import Fact
+from vertex import Peer, delegate
+from vertex import Lens, Tick, Vertex
 
 
 # -- Folds -------------------------------------------------------------------

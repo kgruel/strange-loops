@@ -26,8 +26,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from facts import Fact
-from ticks import Vertex
+from data import Fact
+from vertex import Vertex
 
 
 # =============================================================================

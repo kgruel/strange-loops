@@ -23,10 +23,10 @@ import random
 from collections import deque
 from datetime import datetime, timezone
 
-from facts import Fact
-from peers import Peer
-from ticks import Tick, Vertex
-from specs import Shape, Facet, Fold
+from data import Fact
+from vertex import Peer
+from vertex import Tick, Vertex
+from data import Shape, Facet, Fold
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface
 

@@ -13,9 +13,9 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Callable
 
-from ticks import Vertex
-from sources import CommandSource, Runner
-from specs import Spec, Facet, Fold
+from vertex import Vertex
+from data import CommandSource, Runner
+from data import Spec, Facet, Fold
 
 
 # =============================================================================

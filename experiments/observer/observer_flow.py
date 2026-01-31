@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from facts import Fact
-from peers import Grant
-from ticks import Tick, Vertex
+from data import Fact
+from vertex import Grant
+from vertex import Tick, Vertex
 
 
 def count_fold(state: int, payload: dict) -> int:

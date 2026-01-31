@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import asyncio
 
-from facts import Fact
-from sources import CommandSource, Runner
-from ticks import Tick, Vertex
+from data import Fact
+from data import CommandSource, Runner
+from vertex import Tick, Vertex
 
 
 # -- Folds -------------------------------------------------------------------

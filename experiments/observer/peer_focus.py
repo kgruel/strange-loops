@@ -31,10 +31,10 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
-from facts import Fact
-from peers import Peer, delegate
-from ticks import Tick, Vertex
-from specs import Shape, Facet
+from data import Fact
+from vertex import Peer, delegate
+from vertex import Tick, Vertex
+from data import Shape, Facet
 
 # System peer — unrestricted, used for all fact emissions in this experiment.
 SYSTEM = Peer("system")

@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
-from facts import Fact
-from sources import Runner
-from ticks import Tick, Vertex
+from data import Fact
+from data import Runner
+from vertex import Tick, Vertex
 
 
 class HeartbeatSource:

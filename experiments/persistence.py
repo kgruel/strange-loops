@@ -13,8 +13,8 @@ Run: python experiments/persistence.py
 import tempfile
 from pathlib import Path
 
-from facts import Fact
-from ticks import Vertex, FileStore, replay
+from data import Fact
+from vertex import Vertex, FileStore, replay
 
 
 def main():

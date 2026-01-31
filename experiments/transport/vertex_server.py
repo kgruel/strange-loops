@@ -14,8 +14,8 @@ import argparse
 import asyncio
 import signal
 
-from facts import Fact
-from ticks import Vertex
+from data import Fact
+from vertex import Vertex
 
 from .protocol import FactConnection, FactServer
 

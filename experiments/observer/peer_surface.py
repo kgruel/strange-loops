@@ -22,9 +22,9 @@ import asyncio
 import random
 from collections import deque
 
-from facts import Fact
-from peers import Peer, Grant, delegate, grant_of
-from ticks import Lens, Tick, Vertex
+from data import Fact
+from vertex import Peer, Grant, delegate, grant_of
+from vertex import Lens, Tick, Vertex
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
 

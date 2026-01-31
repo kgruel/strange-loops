@@ -45,8 +45,8 @@ from datetime import datetime, timezone
 from typing import Callable, Any
 from enum import Enum
 
-from ticks import Tick, Vertex
-from specs import Shape, Facet, Boundary
+from vertex import Tick, Vertex
+from data import Shape, Facet, Boundary
 
 
 # -- Serialization (from network_boundary.py) --------------------------------

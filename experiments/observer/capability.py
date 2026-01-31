@@ -6,9 +6,9 @@ a peer's current potential. No async, no Surface — pure fold mechanics.
 Run: uv run python experiments/capability.py
 """
 
-from facts import Fact
-from peers import Peer, grant, delegate
-from specs import Facet, Fold, Shape
+from data import Fact
+from vertex import Peer, grant, delegate
+from data import Facet, Fold, Shape
 
 
 # --- Shape: peer-potential ---

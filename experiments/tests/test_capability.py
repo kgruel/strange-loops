@@ -3,9 +3,9 @@
 Self-contained: inlines shape definition and helpers.
 """
 
-from facts import Fact
-from peers import Peer, grant, delegate
-from specs import Facet, Fold, Shape
+from data import Fact
+from vertex import Peer, grant, delegate
+from data import Facet, Fold, Shape
 
 
 # --- Inline shape + helpers (self-contained) ---

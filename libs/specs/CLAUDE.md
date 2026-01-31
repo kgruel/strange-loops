@@ -14,8 +14,8 @@ uv run --package specs pytest libs/specs/tests
 Spec
  ├─ name: str                      # identity (matches Fact.kind by convention)
  ├─ about: str                     # human description
- ├─ input_facets: tuple[Facet, ...]  # what incoming payloads contain
- ├─ state_facets: tuple[Facet, ...]  # what accumulated state looks like
+ ├─ input_fields: tuple[Field, ...]  # what incoming payloads contain
+ ├─ state_fields: tuple[Field, ...]  # what accumulated state looks like
  ├─ folds: tuple[Fold, ...]        # transformation rules
  └─ boundary: Boundary | None      # cycle completion declaration
 
@@ -28,9 +28,10 @@ Boundary
 
 | Export | Kind | Purpose |
 |--------|------|---------|
-| `Spec` | frozen dataclass | facets + folds + boundary + apply |
+| `Spec` | frozen dataclass | fields + folds + boundary + apply |
 | `Shape` | alias | backward compat alias for Spec |
-| `Facet` | frozen dataclass | name + kind (+ optional flag) |
+| `Field` | frozen dataclass | name + kind (+ optional flag) |
+| `Facet` | alias | backward compat alias for Field |
 | `Fold` | frozen dataclass | op + target + props |
 | `Boundary` | frozen dataclass | kind + reset (cycle completion) |
 | `ValidationError` | exception | contract violation |
@@ -40,8 +41,8 @@ Boundary
 | Method | Purpose |
 |--------|---------|
 | `apply(state, payload) -> dict` | execute folds, return new state (pure, never mutates) |
-| `initial_state() -> dict` | zero-value dict from state_facets |
-| `input_facet(name)` / `state_facet(name)` | lookup by name |
+| `initial_state() -> dict` | zero-value dict from state_fields |
+| `input_field(name)` / `state_field(name)` | lookup by name |
 
 ### Fold Operations
 
@@ -60,8 +61,8 @@ Boundary
 - `Spec.apply()` does not check boundary — boundary is declarative, checked externally by the fold engine.
 - A Spec with no boundary (`None`) folds continuously — no cycle, no Tick produced.
 - Fold closures built by `engine.py` at call time from Fold descriptors.
-- `Facet.kind` is a string from: str, int, float, bool, dict, list, set, datetime.
-- `Facet.from_type_str("int?")` parses optional suffix.
+- `Field.kind` is a string from: str, int, float, bool, dict, list, set, datetime.
+- `Field.from_type_str("int?")` parses optional suffix.
 
 ## Pipeline Role
 
@@ -69,8 +70,8 @@ Boundary
 Fact.payload ──→ Spec.apply(state, payload) ──→ new state
                       │
 Spec is the contract at every boundary:
-  - Describes what input looks like (input_facets)
-  - Describes what state looks like (state_facets)
+  - Describes what input looks like (input_fields)
+  - Describes what state looks like (state_fields)
   - Describes how input becomes state (folds)
 
 Projection uses: Projection(initial=spec.initial_state(), fold=spec.apply)
@@ -80,13 +81,13 @@ Projection uses: Projection(initial=spec.initial_state(), fold=spec.apply)
 
 ```
 src/specs/
-  __init__.py    # Re-exports: Boundary, Facet, Fold, Shape, Spec, ValidationError
+  __init__.py    # Re-exports: Boundary, Facet, Field, Fold, Shape, Spec, ValidationError
   boundary.py    # Boundary (kind + reset)
-  facet.py       # Facet (name + kind + optional)
+  facet.py       # Field (name + kind + optional) + Facet alias
   fold.py        # Fold (op + target + props)
-  spec.py        # Spec (facets + folds + boundary + apply) + Shape alias
+  spec.py        # Spec (fields + folds + boundary + apply) + Shape alias
   engine.py      # Fold closure builder (_make_latest, _make_count, etc.)
   types.py       # initial_value, coerce_value, type_matches, ValidationError
 tests/
-  test_shapes.py # 72 tests across 8 test classes
+  test_shapes.py # 72+ tests across 10 test classes
 ```

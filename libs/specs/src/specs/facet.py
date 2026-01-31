@@ -1,4 +1,4 @@
-"""Facet: the atomic measurable face of a shape."""
+"""Field: the atomic typed component of a spec."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Facet:
-    """A named, typed face of a shape.
+class Field:
+    """A named, typed field of a spec.
 
     Attributes:
-        name: The facet identifier.
+        name: The field identifier.
         kind: The type name (str, int, float, bool, dict, list, set, datetime).
-        optional: Whether the facet may be absent.
+        optional: Whether the field may be absent.
     """
 
     name: str
@@ -20,11 +20,15 @@ class Facet:
     optional: bool = False
 
     @classmethod
-    def from_type_str(cls, name: str, type_str: str) -> Facet:
-        """Parse a type string like 'int?' into a Facet.
+    def from_type_str(cls, name: str, type_str: str) -> Field:
+        """Parse a type string like 'int?' into a Field.
 
-        The trailing '?' indicates an optional facet.
+        The trailing '?' indicates an optional field.
         """
         if type_str.endswith("?"):
             return cls(name=name, kind=type_str[:-1], optional=True)
         return cls(name=name, kind=type_str, optional=False)
+
+
+# Backward compatibility alias (deprecated)
+Facet = Field

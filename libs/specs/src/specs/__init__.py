@@ -1,9 +1,9 @@
 """specs — Data contracts for the reactive data ecosystem.
 
 specs = data contracts (how), defining:
-- Facet: atomic face (name + kind)
+- Field: atomic typed component (name + kind)
 - Fold vocabulary: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
-- Spec: composed contract (facets + folds)
+- Spec: composed contract (fields + folds)
 - Parse vocabulary: Split, Pick, Rename, Transform, Coerce, Skip
 
 Part of the ecosystem:
@@ -14,7 +14,7 @@ Part of the ecosystem:
 """
 
 from .boundary import Boundary
-from .facet import Facet
+from .facet import Facet, Field
 from .fold import Collect, Count, Fold, FoldOp, Latest, Max, Min, Sum, TopN, Upsert
 from .parse import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
 from .spec import Shape, Spec
@@ -24,6 +24,7 @@ __all__ = [
     # Core
     "Boundary",
     "Facet",
+    "Field",
     "Shape",
     "Spec",
     "ValidationError",

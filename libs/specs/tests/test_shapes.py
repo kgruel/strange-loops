@@ -1,40 +1,52 @@
-"""Tests for specs core types: Facet, Fold, Spec, Boundary."""
+"""Tests for specs core types: Field, Fold, Spec, Boundary."""
 
 import pytest
 
-from specs import Boundary, Facet, Fold, Shape, ValidationError
+from specs import Boundary, Facet, Field, Fold, Shape, Spec, ValidationError
 from specs.types import coerce_value, initial_value, type_matches
 
 
-class TestFacet:
-    """Tests for Facet dataclass."""
+class TestField:
+    """Tests for Field dataclass."""
 
-    def test_basic_facet(self):
-        f = Facet(name="count", kind="int")
+    def test_basic_field(self):
+        f = Field(name="count", kind="int")
         assert f.name == "count"
         assert f.kind == "int"
         assert f.optional is False
 
-    def test_optional_facet(self):
-        f = Facet(name="label", kind="str", optional=True)
+    def test_optional_field(self):
+        f = Field(name="label", kind="str", optional=True)
         assert f.optional is True
 
     def test_from_type_str_required(self):
-        f = Facet.from_type_str("age", "int")
+        f = Field.from_type_str("age", "int")
         assert f.name == "age"
         assert f.kind == "int"
         assert f.optional is False
 
     def test_from_type_str_optional(self):
-        f = Facet.from_type_str("nickname", "str?")
+        f = Field.from_type_str("nickname", "str?")
         assert f.name == "nickname"
         assert f.kind == "str"
         assert f.optional is True
 
     def test_frozen(self):
-        f = Facet(name="x", kind="int")
+        f = Field(name="x", kind="int")
         with pytest.raises(AttributeError):
             f.name = "y"
+
+
+class TestFacetBackwardCompat:
+    """Tests for Facet backward compatibility alias."""
+
+    def test_facet_is_field(self):
+        assert Facet is Field
+
+    def test_facet_creates_field(self):
+        f = Facet(name="count", kind="int")
+        assert isinstance(f, Field)
+        assert f.name == "count"
 
 
 class TestFold:
@@ -66,38 +78,38 @@ class TestFold:
             f.props["max"] = 200
 
 
-class TestShape:
-    """Tests for Shape dataclass."""
+class TestSpec:
+    """Tests for Spec dataclass."""
 
-    def test_empty_shape(self):
-        f = Shape(name="empty")
+    def test_empty_spec(self):
+        f = Spec(name="empty")
         assert f.name == "empty"
         assert f.about == ""
-        assert f.input_facets == ()
-        assert f.state_facets == ()
+        assert f.input_fields == ()
+        assert f.state_fields == ()
         assert f.folds == ()
 
-    def test_shape_with_about(self):
-        f = Shape(name="counter", about="Counts events")
+    def test_spec_with_about(self):
+        f = Spec(name="counter", about="Counts events")
         assert f.about == "Counts events"
 
-    def test_shape_with_facets(self):
-        f = Shape(
+    def test_spec_with_fields(self):
+        f = Spec(
             name="tracker",
-            input_facets=(
-                Facet("user_id", "str"),
-                Facet("action", "str"),
+            input_fields=(
+                Field("user_id", "str"),
+                Field("action", "str"),
             ),
-            state_facets=(
-                Facet("count", "int"),
-                Facet("users", "set"),
+            state_fields=(
+                Field("count", "int"),
+                Field("users", "set"),
             ),
         )
-        assert len(f.input_facets) == 2
-        assert len(f.state_facets) == 2
+        assert len(f.input_fields) == 2
+        assert len(f.state_fields) == 2
 
-    def test_shape_with_folds(self):
-        f = Shape(
+    def test_spec_with_folds(self):
+        f = Spec(
             name="accumulator",
             folds=(
                 Fold(op="count", target="total"),
@@ -107,69 +119,69 @@ class TestShape:
         assert len(f.folds) == 2
 
     def test_initial_state_dict(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("items", "dict"),),
+            state_fields=(Field("items", "dict"),),
         )
         assert f.initial_state() == {"items": {}}
 
     def test_initial_state_list(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("events", "list"),),
+            state_fields=(Field("events", "list"),),
         )
         assert f.initial_state() == {"events": []}
 
     def test_initial_state_set(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("seen", "set"),),
+            state_fields=(Field("seen", "set"),),
         )
         assert f.initial_state() == {"seen": set()}
 
     def test_initial_state_int(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("count", "int"),),
+            state_fields=(Field("count", "int"),),
         )
         assert f.initial_state() == {"count": 0}
 
     def test_initial_state_float(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("total", "float"),),
+            state_fields=(Field("total", "float"),),
         )
         assert f.initial_state() == {"total": 0}
 
     def test_initial_state_bool(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("active", "bool"),),
+            state_fields=(Field("active", "bool"),),
         )
         assert f.initial_state() == {"active": False}
 
     def test_initial_state_str(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("label", "str"),),
+            state_fields=(Field("label", "str"),),
         )
         assert f.initial_state() == {"label": ""}
 
     def test_initial_state_datetime(self):
-        f = Shape(
+        f = Spec(
             name="test",
-            state_facets=(Facet("last_seen", "datetime"),),
+            state_fields=(Field("last_seen", "datetime"),),
         )
         assert f.initial_state() == {"last_seen": None}
 
-    def test_initial_state_multiple_facets(self):
-        f = Shape(
+    def test_initial_state_multiple_fields(self):
+        f = Spec(
             name="complex",
-            state_facets=(
-                Facet("count", "int"),
-                Facet("items", "dict"),
-                Facet("events", "list"),
-                Facet("seen", "set"),
+            state_fields=(
+                Field("count", "int"),
+                Field("items", "dict"),
+                Field("events", "list"),
+                Field("seen", "set"),
             ),
         )
         state = f.initial_state()
@@ -180,34 +192,71 @@ class TestShape:
             "seen": set(),
         }
 
-    def test_input_facet_lookup(self):
-        f = Shape(
+    def test_input_field_lookup(self):
+        f = Spec(
             name="test",
-            input_facets=(
-                Facet("user_id", "str"),
-                Facet("amount", "int"),
+            input_fields=(
+                Field("user_id", "str"),
+                Field("amount", "int"),
             ),
         )
-        assert f.input_facet("user_id") == Facet("user_id", "str")
-        assert f.input_facet("amount") == Facet("amount", "int")
-        assert f.input_facet("missing") is None
+        assert f.input_field("user_id") == Field("user_id", "str")
+        assert f.input_field("amount") == Field("amount", "int")
+        assert f.input_field("missing") is None
 
-    def test_state_facet_lookup(self):
-        f = Shape(
+    def test_state_field_lookup(self):
+        f = Spec(
             name="test",
-            state_facets=(
-                Facet("total", "int"),
-                Facet("items", "dict"),
+            state_fields=(
+                Field("total", "int"),
+                Field("items", "dict"),
             ),
         )
-        assert f.state_facet("total") == Facet("total", "int")
-        assert f.state_facet("items") == Facet("items", "dict")
-        assert f.state_facet("missing") is None
+        assert f.state_field("total") == Field("total", "int")
+        assert f.state_field("items") == Field("items", "dict")
+        assert f.state_field("missing") is None
 
     def test_frozen(self):
-        f = Shape(name="test")
+        f = Spec(name="test")
         with pytest.raises(AttributeError):
             f.name = "other"
+
+
+class TestSpecBackwardCompat:
+    """Tests for Spec backward compatibility aliases."""
+
+    def test_shape_is_spec(self):
+        assert Shape is Spec
+
+    def test_input_facets_alias(self):
+        f = Spec(
+            name="test",
+            input_fields=(Field("x", "int"),),
+        )
+        assert f.input_facets == f.input_fields
+        assert f.input_facets == (Field("x", "int"),)
+
+    def test_state_facets_alias(self):
+        f = Spec(
+            name="test",
+            state_fields=(Field("y", "str"),),
+        )
+        assert f.state_facets == f.state_fields
+        assert f.state_facets == (Field("y", "str"),)
+
+    def test_input_facet_method_alias(self):
+        f = Spec(
+            name="test",
+            input_fields=(Field("x", "int"),),
+        )
+        assert f.input_facet("x") == f.input_field("x")
+
+    def test_state_facet_method_alias(self):
+        f = Spec(
+            name="test",
+            state_fields=(Field("y", "str"),),
+        )
+        assert f.state_facet("y") == f.state_field("y")
 
 
 class TestTypeUtilities:
@@ -298,11 +347,11 @@ class TestTypeUtilities:
         assert type_matches("anything", "custom_type") is True
 
 
-class TestShapeApply:
-    """Tests for Shape.apply() fold execution."""
+class TestSpecApply:
+    """Tests for Spec.apply() fold execution."""
 
     def test_apply_count(self):
-        s = Shape(
+        s = Spec(
             name="counter",
             folds=(Fold(op="count", target="n"),),
         )
@@ -311,7 +360,7 @@ class TestShapeApply:
         assert result == {"n": 1}
 
     def test_apply_count_accumulates(self):
-        s = Shape(
+        s = Spec(
             name="counter",
             folds=(Fold(op="count", target="n"),),
         )
@@ -322,7 +371,7 @@ class TestShapeApply:
         assert state == {"n": 3}
 
     def test_apply_sum(self):
-        s = Shape(
+        s = Spec(
             name="summer",
             folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
         )
@@ -333,7 +382,7 @@ class TestShapeApply:
         assert result == {"total": 15}
 
     def test_apply_sum_missing_field_defaults_zero(self):
-        s = Shape(
+        s = Spec(
             name="summer",
             folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
         )
@@ -341,7 +390,7 @@ class TestShapeApply:
         assert result == {"total": 7}
 
     def test_apply_latest(self):
-        s = Shape(
+        s = Spec(
             name="tracker",
             folds=(Fold(op="latest", target="last_ts"),),
         )
@@ -349,7 +398,7 @@ class TestShapeApply:
         assert result == {"last_ts": 1234567890}
 
     def test_apply_latest_uses_time_when_no_ts(self):
-        s = Shape(
+        s = Spec(
             name="tracker",
             folds=(Fold(op="latest", target="last_ts"),),
         )
@@ -357,7 +406,7 @@ class TestShapeApply:
         assert isinstance(result["last_ts"], float)
 
     def test_apply_collect(self):
-        s = Shape(
+        s = Spec(
             name="collector",
             folds=(Fold(op="collect", target="items"),),
         )
@@ -369,7 +418,7 @@ class TestShapeApply:
         assert state["items"][1] == {"x": 2}
 
     def test_apply_collect_bounded(self):
-        s = Shape(
+        s = Spec(
             name="collector",
             folds=(Fold(op="collect", target="items", props={"max": 2}),),
         )
@@ -382,7 +431,7 @@ class TestShapeApply:
         assert state["items"][1] == {"v": 3}
 
     def test_apply_upsert(self):
-        s = Shape(
+        s = Spec(
             name="registry",
             folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
         )
@@ -395,7 +444,7 @@ class TestShapeApply:
         assert state["users"]["b"]["name"] == "Bob"
 
     def test_apply_upsert_ignores_missing_key(self):
-        s = Shape(
+        s = Spec(
             name="registry",
             folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
         )
@@ -405,7 +454,7 @@ class TestShapeApply:
 
     def test_apply_preserves_immutability(self):
         """apply() returns a new dict, never mutates original."""
-        s = Shape(
+        s = Spec(
             name="counter",
             folds=(Fold(op="count", target="n"),),
         )
@@ -415,14 +464,14 @@ class TestShapeApply:
         assert original == {"n": 0}
 
     def test_apply_empty_folds_returns_state_copy(self):
-        s = Shape(name="passthrough")
+        s = Spec(name="passthrough")
         state = {"x": 1, "y": 2}
         result = s.apply(state, {"z": 3})
         assert result == {"x": 1, "y": 2}
         assert result is not state
 
     def test_apply_multiple_folds(self):
-        s = Shape(
+        s = Spec(
             name="multi",
             folds=(
                 Fold(op="count", target="n"),
@@ -435,7 +484,7 @@ class TestShapeApply:
         assert result == {"n": 1, "total": 42, "last_ts": 1000}
 
     def test_apply_unknown_op_raises(self):
-        s = Shape(
+        s = Spec(
             name="bad",
             folds=(Fold(op="explode", target="x"),),
         )
@@ -443,7 +492,7 @@ class TestShapeApply:
             s.apply({"x": 0}, {})
 
     def test_apply_upsert_missing_key_prop_raises(self):
-        s = Shape(
+        s = Spec(
             name="bad",
             folds=(Fold(op="upsert", target="x"),),
         )
@@ -452,11 +501,11 @@ class TestShapeApply:
 
 
 class TestApplyPurity:
-    """Tests that Shape.apply() never mutates the original state's nested containers."""
+    """Tests that Spec.apply() never mutates the original state's nested containers."""
 
     def test_collect_does_not_mutate_original_list(self):
         """apply() with collect must not modify the original state's list."""
-        s = Shape(
+        s = Spec(
             name="collector",
             folds=(Fold(op="collect", target="items"),),
         )
@@ -467,7 +516,7 @@ class TestApplyPurity:
 
     def test_upsert_does_not_mutate_original_dict(self):
         """apply() with upsert must not modify the original state's nested dict."""
-        s = Shape(
+        s = Spec(
             name="registry",
             folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
         )
@@ -478,7 +527,7 @@ class TestApplyPurity:
 
     def test_two_applies_from_same_base_are_independent(self):
         """Two apply() calls from the same base state produce independent results."""
-        s = Shape(
+        s = Spec(
             name="collector",
             folds=(Fold(op="collect", target="items"),),
         )
@@ -529,34 +578,34 @@ class TestBoundary:
         assert b1 != b2
 
 
-class TestShapeBoundary:
-    """Tests for Shape with boundary field."""
+class TestSpecBoundary:
+    """Tests for Spec with boundary field."""
 
-    def test_shape_default_no_boundary(self):
-        s = Shape(name="continuous")
+    def test_spec_default_no_boundary(self):
+        s = Spec(name="continuous")
         assert s.boundary is None
 
-    def test_shape_with_boundary(self):
+    def test_spec_with_boundary(self):
         b = Boundary(kind="deploy")
-        s = Shape(name="deploy-monitor", boundary=b)
+        s = Spec(name="deploy-monitor", boundary=b)
         assert s.boundary is not None
         assert s.boundary.kind == "deploy"
         assert s.boundary.reset is True
 
-    def test_shape_with_carry_boundary(self):
+    def test_spec_with_carry_boundary(self):
         b = Boundary(kind="heartbeat", reset=False)
-        s = Shape(
+        s = Spec(
             name="health-check",
-            state_facets=(Facet("count", "int"),),
+            state_fields=(Field("count", "int"),),
             folds=(Fold(op="count", target="count"),),
             boundary=b,
         )
         assert s.boundary.reset is False
 
-    def test_shape_boundary_does_not_affect_apply(self):
+    def test_spec_boundary_does_not_affect_apply(self):
         """Boundary is declarative — apply() behavior is unchanged."""
         b = Boundary(kind="deploy")
-        s = Shape(
+        s = Spec(
             name="counter",
             folds=(Fold(op="count", target="n"),),
             boundary=b,
@@ -564,9 +613,9 @@ class TestShapeBoundary:
         result = s.apply({"n": 0}, {})
         assert result == {"n": 1}
 
-    def test_shape_frozen_boundary(self):
+    def test_spec_frozen_boundary(self):
         b = Boundary(kind="deploy")
-        s = Shape(name="test", boundary=b)
+        s = Spec(name="test", boundary=b)
         with pytest.raises(AttributeError):
             s.boundary = None
 
@@ -579,5 +628,5 @@ class TestValidationError:
             raise ValidationError("test error")
 
     def test_message(self):
-        err = ValidationError("facet 'x' missing")
-        assert str(err) == "facet 'x' missing"
+        err = ValidationError("field 'x' missing")
+        assert str(err) == "field 'x' missing"

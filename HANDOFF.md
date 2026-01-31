@@ -57,37 +57,33 @@ prove a specific aspect of the model.
 | `sources/system_health_parse.py` | Parse vocabulary in Source |
 | `sources/alert_automation.py` | Full pipeline with Store persistence |
 
+## In Progress
+
+**Library consolidation** — Subtask running: `plan/library-consolidation`
+- facts + specs + sources → `data`
+- ticks + peers → `vertex`
+- cells unchanged
+- Plan: `.subtask/tasks/plan--library-consolidation/PLAN.md`
+
 ## Next Steps
 
-1. **Library consolidation** — Merge libs into two packages:
-   - facts + specs + sources → `data`
-   - ticks + peers → `vertex`
-   - cells stays separate
+1. **.loop DSL implementation** — Design complete, ready to build:
+   - Design notes: `.subtask/tasks/research--loop-dsl-design/PLAN.md`
+   - Format: YAML
+   - Files: `.loop` (sources) + `.vertex` (wiring)
+   - Validation: parse-time shape inference
 
-2. **.loop DSL** — Configuration layer for declarative sources:
-   ```yaml
-   run: df -h
-   every: 5s
-   format: lines
-   parse:
-     - skip: startswith "Filesystem"
-     - split
-     - pick: [0, 4, 8]
-     - rename: {0: fs, 1: pct, 2: mount}
-   kind: disk
-   ```
-   Compiles to Source + Spec. Validation at parse time.
-
-3. **Static validation** — specs provides:
+2. **Static validation** — data lib provides:
    - `infer_shape(parse_pipeline) → dict[str, type]`
    - `Spec.validate_input_shape(shape) → errors`
-   - Fail fast at DSL parse time, not runtime
+   - Fail fast at DSL parse time
 
-4. **Tick.since** — Add period start timestamp to Tick for fidelity traversal:
+3. **Tick.since** — Add period start timestamp for fidelity traversal:
    - `Store.facts_between(since, ts)` returns facts in period
    - Enables full-fidelity descent into tick's history
 
-5. **.vertex DSL** — Configuration for vertex wiring (after .loop works)
+4. **DSL CLI** — Commands for working with .loop/.vertex files:
+   - `loop validate`, `loop test`, `loop run`, `loop compile`
 
 ## Open Threads
 
@@ -104,6 +100,9 @@ prove a specific aspect of the model.
   sliding window, sampling. Deferred.
 
 ## Resolved
+
+43. ~~DSL design research~~ — YAML format, .loop + .vertex files, dict-per-op parse
+    syntax, parse-time validation. Design at `.subtask/tasks/research--loop-dsl-design/PLAN.md`
 
 38. ~~Sources refactor~~ — CommandSource → Source. Added format (lines|json|blob).
     interval → every. Shell as universal adapter.

@@ -1,0 +1,13 @@
+# Disk usage monitor
+# Parses df -h output to track capacity per mount point
+
+source: df -h
+every: 5s
+kind: disk
+observer: disk-monitor
+
+parse:
+  skip ^Filesystem
+  split
+  pick 4, 8 -> pct, mount
+  pct: strip "%" | int

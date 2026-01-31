@@ -457,11 +457,18 @@ class Parser:
 
             key = key_token.value
             if key == "source":
-                # Collect rest of line as command
+                # Collect rest of line as command, preserving punctuation spacing
                 parts = []
+                prev_was_punct = False
                 while not self.at(TokenType.NEWLINE, TokenType.EOF):
-                    parts.append(self.advance().value)
-                source = " ".join(parts)
+                    token = self.advance()
+                    is_punct = token.type in (TokenType.COMMA, TokenType.PIPE)
+                    # No space before/after punctuation
+                    if parts and not prev_was_punct and not is_punct:
+                        parts.append(" ")
+                    parts.append(token.value)
+                    prev_was_punct = is_punct
+                source = "".join(parts)
             elif key == "kind":
                 source_token = self.advance()
                 kind = self.parse_string(source_token)

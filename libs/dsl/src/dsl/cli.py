@@ -292,9 +292,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         async def run():
             async for tick in runner.run():
                 if args.json:
-                    print(json.dumps({"name": tick.name, "payload": tick.payload}, default=str))
+                    print(json.dumps({"name": tick.name, "payload": tick.payload}, default=str), flush=True)
                 else:
-                    print(f"[{tick.name}] {tick.payload}")
+                    print(f"[{tick.name}] {tick.payload}", flush=True)
 
         asyncio.run(run())
         return 0

@@ -5,6 +5,50 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-01-31 — DSL experiment: end-to-end proof
+
+**The experiment.** Created real .loop/.vertex files for system monitoring,
+ran `loop start`, watched facts flow through folds into ticks. The DSL works.
+
+**What was built:**
+
+- `experiments/monitors/disk.loop` — parses `df -h` into structured disk facts
+- `experiments/monitors/proc.loop` — parses `ps` into top-10 process facts
+- `experiments/monitors/system.vertex` — wires sources with Upsert/Collect folds
+
+**Issues discovered and fixed:**
+
+1. **Parser comma handling** — source commands like `ps -eo pcpu,pmem` were
+   being reconstructed as `pcpu , pmem`. Fixed to preserve punctuation adjacency.
+
+2. **Completion facts** — boundaries need a signal to fire. Source now emits
+   `{kind}.complete` facts after each command execution. Data-driven boundaries.
+
+3. **MappingProxyType in folds** — Fact payloads are wrapped in MappingProxyType
+   for immutability. Collect/Upsert were storing these directly, breaking deepcopy
+   on subsequent folds. Fixed to convert to dict before storing.
+
+4. **CLI output buffering** — ticks weren't visible until process exit. Added
+   `flush=True` for real-time output.
+
+**The proof:**
+
+```
+$ loop start experiments/monitors/system.vertex
+Discovered: disk.loop
+Discovered: proc.loop
+Starting system with 2 source(s)...
+[disk] {'mounts': {'/': {'pct': 24}, '/dev': {'pct': 100}, ...}, 'updated': ...}
+[proc] {'procs': [{'cmd': 'claude', 'cpu': 41.7}, ...], 'updated': ...}
+```
+
+Facts flow through parse pipelines → fold into state → trigger ticks on boundaries.
+The declarative DSL compiles to runtime types and executes correctly.
+
+514 tests passing (data: 245, vertex: 165, dsl: 104).
+
+---
+
 ## 2026-01-29 — Framework collapse: peer-aware Vertex + Lens
 
 **The collapse.** Experiments converged, patterns validated. Moved from exploration

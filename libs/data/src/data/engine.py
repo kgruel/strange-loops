@@ -56,7 +56,8 @@ def _make_collect(target: str, max_size: int) -> Callable[[dict, dict], None]:
     """Append payload to state[target] list, bounded by max_size."""
     def fold(state: dict, payload: dict) -> None:
         items = state[target]
-        items.append(payload)
+        # Convert to dict in case payload is MappingProxyType
+        items.append(dict(payload))
         if max_size and len(items) > max_size:
             state[target] = items[-max_size:]
     return fold
@@ -67,7 +68,8 @@ def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
     def fold(state: dict, payload: dict) -> None:
         key_value = payload.get(key_field)
         if key_value is not None:
-            state[target][key_value] = payload
+            # Convert to dict in case payload is MappingProxyType
+            state[target][key_value] = dict(payload)
     return fold
 
 

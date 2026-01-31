@@ -1,0 +1,24 @@
+# System health vertex
+# Wires disk and process monitors together
+
+name: system
+discover: ./*.loop
+
+loops:
+  disk:
+    fold:
+      mounts: by mount
+      updated: latest
+    boundary: when disk.complete
+
+  proc:
+    fold:
+      procs: collect 10
+      updated: latest
+    boundary: when proc.complete
+
+routes:
+  disk: disk
+  proc: proc
+
+emit: system.health

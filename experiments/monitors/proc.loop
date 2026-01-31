@@ -1,0 +1,15 @@
+# Process monitor
+# Parses ps output to track top processes by CPU
+
+source: ps -eo pcpu,pmem,pid,comm -r | head -20
+every: 2s
+kind: proc
+observer: proc-monitor
+
+parse:
+  skip "%CPU"
+  split
+  pick 0, 1, 2, 3 -> cpu, mem, pid, cmd
+  cpu: float
+  mem: float
+  pid: int

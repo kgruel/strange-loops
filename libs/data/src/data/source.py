@@ -133,6 +133,13 @@ class Source:
                         returncode=proc.returncode,
                         stderr=stderr.decode(),
                     )
+                else:
+                    # Emit completion signal for boundary triggering
+                    yield Fact.of(
+                        f"{self.kind}.complete",
+                        self.observer,
+                        command=self.command,
+                    )
 
             except Exception as e:
                 yield Fact.of(

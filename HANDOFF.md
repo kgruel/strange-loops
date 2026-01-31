@@ -13,6 +13,8 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 - **data** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
 - **vertex** — how it runs, when boundaries fire (Vertex, Loop, Store, Grant)
 
+**One DSL:** dsl — `.loop` and `.vertex` file parser, compiles to data/vertex types
+
 **One surface:** cells — terminal UI, separate concern
 
 ## Libraries
@@ -21,6 +23,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 |---------|-------|
 | **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
 | **vertex** | Runtime + Identity: Tick, Vertex, Loop, Store, Peer, Grant |
+| **dsl** | DSL parser: .loop/.vertex files → AST → runtime types |
 | **cells** | Terminal UI: Cell, Block, Buffer, Surface |
 
 ## Documentation
@@ -56,23 +59,13 @@ prove a specific aspect of the model.
 
 ## Next Steps
 
-1. **.loop DSL implementation** — Design complete, ready to build:
-   - Design notes: `.subtask/tasks/research--loop-dsl-design/PLAN.md`
-   - Format: YAML
-   - Files: `.loop` (sources) + `.vertex` (wiring)
-   - Validation: parse-time shape inference
-
-2. **Static validation** — data lib provides:
-   - `infer_shape(parse_pipeline) → dict[str, type]`
-   - `Spec.validate_input_shape(shape) → errors`
-   - Fail fast at DSL parse time
-
-3. **Tick.since** — Add period start timestamp for fidelity traversal:
+1. **Tick.since** — Add period start timestamp for fidelity traversal:
    - `Store.facts_between(since, ts)` returns facts in period
    - Enables full-fidelity descent into tick's history
 
-4. **DSL CLI** — Commands for working with .loop/.vertex files:
-   - `loop validate`, `loop test`, `loop run`, `loop compile`
+2. **Cells integration** — Surface that reads from vertex state:
+   - Connect cells to vertex state for live display
+   - Fidelity-aware rendering (zoom in/out on tick periods)
 
 ## Open Threads
 
@@ -90,8 +83,20 @@ prove a specific aspect of the model.
 
 ## Resolved
 
-43. ~~DSL design research~~ — YAML format, .loop + .vertex files, dict-per-op parse
-    syntax, parse-time validation. Design at `.subtask/tasks/research--loop-dsl-design/PLAN.md`
+46. ~~DSL experiment~~ — End-to-end test of .loop/.vertex workflow. Created
+    `experiments/monitors/` with disk.loop, proc.loop, system.vertex. Fixed Source
+    to emit `{kind}.complete` facts for boundary triggering. Fixed fold engines
+    (Collect, Upsert) to convert MappingProxyType payloads to dict. CLI `loop start`
+    works: discovers sources, streams facts through folds, emits ticks on boundaries.
+
+45. ~~DSL implementation~~ — Custom syntax (not YAML). `.loop` for sources with parse
+    pipelines, `.vertex` for wiring with folds and boundaries. Lexer, parser,
+    validator (shape inference), mapper (AST → runtime types), CLI (`loop validate`,
+    `test`, `run`, `compile`, `start`). 104 tests. `libs/dsl/`.
+
+43. ~~DSL design research~~ — Custom syntax over YAML for expressiveness. Parse pipeline
+    notation (`skip`, `split`, `pick -> names`), fold combinators (`by`, `+1`, `latest`).
+    Design at `.subtask/tasks/impl--loop-dsl/PLAN.md`
 
 38. ~~Sources refactor~~ — CommandSource → Source. Added format (lines|json|blob).
     interval → every. Shell as universal adapter.

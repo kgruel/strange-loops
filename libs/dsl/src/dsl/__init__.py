@@ -31,6 +31,7 @@ from .ast import (
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
 from .lexer import Token, TokenType, tokenize
 from .parser import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
+from .validator import validate, validate_loop, validate_vertex
 
 __all__ = [
     # AST types - Loop file
@@ -76,4 +77,8 @@ __all__ = [
     "ParseError",
     "ValidationError",
     "Location",
+    # Validator
+    "validate",
+    "validate_loop",
+    "validate_vertex",
 ]

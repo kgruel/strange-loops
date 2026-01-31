@@ -18,7 +18,7 @@ Atoms are immutable, independent, and compose only at integration points.
 |------|-----------|----------|---------|
 | **Observer** | name | *who* | Identity. Who produced this observation. Just a name. |
 | **Fact** | kind + ts + payload + observer | *what* | Immutable observation. Carries its observer intrinsically. Append-only. |
-| **Spec** | facets + folds + boundary | *how* | Loop contract. Declares input/state shape, fold rules, and boundary semantics. |
+| **Spec** | fields + folds + boundary | *how* | Loop contract. Declares input/state shape, fold rules, and boundary semantics. |
 | **Tick** | name + ts + payload + origin | *when* | Boundary artifact. Frozen snapshot of folded state. Origin = producing vertex. |
 | **Cell** | char + style | *(render)* | Atomic unit of output. Base of surfaces. |
 

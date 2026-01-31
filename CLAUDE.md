@@ -18,7 +18,7 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 | Fact | kind + ts + payload | *what happened* |
 | Peer | name + horizon + potential | *who observed* |
 | Tick | name + ts + payload + origin | *when a cycle completed* |
-| Spec | facets + folds + boundary | *how state accumulates* |
+| Spec | fields + folds + boundary | *how state accumulates* |
 | Vertex | routes + folds + ticks | *where loops meet* |
 
 Cell is a surface primitive (terminal), not a loop atom.

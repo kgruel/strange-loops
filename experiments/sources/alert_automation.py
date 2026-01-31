@@ -32,16 +32,18 @@ Run:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from facts import Fact
 from sources import CommandSource
 from specs import Coerce, Pick, Rename, Skip, Split, Transform
-from ticks import Vertex
+from ticks import EventStore, Vertex
 
 
 # -- Constants ---------------------------------------------------------------
 
 THRESHOLD = 90  # Hardcoded alert threshold
+STORE_PATH = Path(__file__).parent / "alert_automation.jsonl"
 
 
 # -- Parse pipeline ----------------------------------------------------------
@@ -82,11 +84,22 @@ def alert_fold(state: dict, payload: dict) -> dict:
     return {"alerts": alerts}
 
 
+# -- Store setup -------------------------------------------------------------
+
+def build_store() -> EventStore[Fact]:
+    """Build JSONL-backed store for facts."""
+    return EventStore(
+        path=STORE_PATH,
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+
+
 # -- Vertex setup ------------------------------------------------------------
 
-def build_vertex() -> Vertex:
-    """Build vertex with disk and alert folds."""
-    v = Vertex("disk-monitor")
+def build_vertex(store: EventStore[Fact]) -> Vertex:
+    """Build vertex with disk and alert folds, backed by store."""
+    v = Vertex("disk-monitor", store=store)
 
     # Disk fold: upsert by mount, boundary on df.complete
     v.register(
@@ -122,11 +135,17 @@ def make_disk_source() -> CommandSource:
 
 async def main():
     """Run alert automation experiment."""
-    vertex = build_vertex()
+    # Build store first — loads existing facts if any
+    store = build_store()
+    loaded_count = store.total
+
+    vertex = build_vertex(store)
 
     print("Alert automation experiment")
     print("=" * 50)
     print(f"Threshold: {THRESHOLD}%")
+    print(f"Store: {STORE_PATH}")
+    print(f"  Loaded {loaded_count} facts from previous runs")
     print("Flow: df -h → parse → fold → tick → check → alert → vertex")
     print("=" * 50)
     print()
@@ -195,11 +214,22 @@ async def main():
     for alert in alert_state.get("alerts", []):
         print(f"  {alert['mount']} at {alert['pct']}% (threshold: {alert['threshold']}%)")
 
+    # Store stats
+    new_facts = store.total - loaded_count
+    print(f"\nStore stats:")
+    print(f"  Path: {STORE_PATH}")
+    print(f"  Previously loaded: {loaded_count}")
+    print(f"  New this session: {new_facts}")
+    print(f"  Total persisted: {store.total}")
+
+    store.close()
+
     print("\n" + "=" * 50)
     print("Proved:")
     print("  - Source → Parse → Fold → Tick → inline check")
     print("  - Alert emitted as Fact, routed back to same vertex")
     print("  - No new protocol, just Facts and Folds")
+    print("  - Facts are durable (JSONL), not just ephemeral fold state")
 
 
 if __name__ == "__main__":

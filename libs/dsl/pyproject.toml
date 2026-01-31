@@ -5,10 +5,11 @@ description = "DSL parser for .loop and .vertex files"
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["data"]
+dependencies = ["data", "vertex"]
 
 [tool.uv.sources]
 data = { workspace = true }
+vertex = { workspace = true }
 
 [project.scripts]
 loop = "dsl.cli:main"

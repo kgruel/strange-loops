@@ -6,7 +6,6 @@ from specs import (
     Collect,
     Count,
     Facet,
-    Fold,
     Latest,
     Max,
     Min,
@@ -307,54 +306,6 @@ class TestMinMax:
         assert result["max"] == 42
 
 
-class TestTypedVsLegacyEquivalence:
-    """Tests that typed folds produce same results as legacy Fold."""
-
-    def test_latest_equivalence(self):
-        typed = Shape(name="t", folds=(Latest(target="ts"),))
-        legacy = Shape(name="l", folds=(Fold(op="latest", target="ts"),))
-
-        payload = {"_ts": 12345}
-        assert typed.apply({"ts": None}, payload) == legacy.apply({"ts": None}, payload)
-
-    def test_count_equivalence(self):
-        typed = Shape(name="t", folds=(Count(target="n"),))
-        legacy = Shape(name="l", folds=(Fold(op="count", target="n"),))
-
-        assert typed.apply({"n": 0}, {}) == legacy.apply({"n": 0}, {})
-
-    def test_sum_equivalence(self):
-        typed = Shape(name="t", folds=(Sum(target="total", field="amount"),))
-        legacy = Shape(name="l", folds=(Fold(op="sum", target="total", props={"field": "amount"}),))
-
-        payload = {"amount": 42}
-        assert typed.apply({"total": 0}, payload) == legacy.apply({"total": 0}, payload)
-
-    def test_collect_equivalence(self):
-        typed = Shape(name="t", folds=(Collect(target="items", max=2),))
-        legacy = Shape(name="l", folds=(Fold(op="collect", target="items", props={"max": 2}),))
-
-        state_t = {"items": []}
-        state_l = {"items": []}
-        for payload in [{"v": 1}, {"v": 2}, {"v": 3}]:
-            state_t = typed.apply(state_t, payload)
-            state_l = legacy.apply(state_l, payload)
-
-        assert state_t == state_l
-
-    def test_upsert_equivalence(self):
-        typed = Shape(name="t", folds=(Upsert(target="users", key="id"),))
-        legacy = Shape(name="l", folds=(Fold(op="upsert", target="users", props={"key": "id"}),))
-
-        state_t = {"users": {}}
-        state_l = {"users": {}}
-        for payload in [{"id": "a", "name": "Alice"}, {"id": "a", "name": "Alicia"}]:
-            state_t = typed.apply(state_t, payload)
-            state_l = legacy.apply(state_l, payload)
-
-        assert state_t == state_l
-
-
 class TestMultipleFolds:
     """Tests combining multiple typed folds."""
 
@@ -370,19 +321,6 @@ class TestMultipleFolds:
         state = {"n": 0, "total": 0, "last_ts": None}
         result = s.apply(state, {"amount": 42, "_ts": 1000})
         assert result == {"n": 1, "total": 42, "last_ts": 1000}
-
-    def test_mixed_typed_and_legacy(self):
-        """Mixing typed and legacy folds in same Shape works."""
-        s = Shape(
-            name="mixed",
-            folds=(
-                Count(target="n"),
-                Fold(op="sum", target="total", props={"field": "amount"}),
-            ),
-        )
-        state = {"n": 0, "total": 0}
-        result = s.apply(state, {"amount": 10})
-        assert result == {"n": 1, "total": 10}
 
 
 class TestImmutability:

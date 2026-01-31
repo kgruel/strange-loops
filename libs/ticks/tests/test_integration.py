@@ -440,14 +440,14 @@ class TestShapeBoundaryToVertex:
     """
 
     def test_shape_boundary_wires_to_vertex(self):
-        from specs import Boundary, Facet, Fold, Shape
+        from specs import Boundary, Count, Facet, Shape
 
         shape = Shape(
             name="container-health",
             about="Tracks container health check counts",
-            input_facets=(Facet("status", "str"),),
-            state_facets=(Facet("checks", "int"),),
-            folds=(Fold("count", "checks"),),
+            input_fields=(Facet("status", "str"),),
+            state_fields=(Facet("checks", "int"),),
+            folds=(Count(target="checks"),),
             boundary=Boundary(kind="container-health.close", reset=True),
         )
 
@@ -476,14 +476,14 @@ class TestShapeBoundaryToVertex:
         assert v.state("container-health") == 0
 
     def test_shape_boundary_no_reset(self):
-        from specs import Boundary, Facet, Fold, Shape
+        from specs import Boundary, Count, Facet, Shape
 
         shape = Shape(
             name="deploy-count",
             about="Running deploy count, no reset",
-            input_facets=(Facet("env", "str"),),
-            state_facets=(Facet("deploys", "int"),),
-            folds=(Fold("count", "deploys"),),
+            input_fields=(Facet("env", "str"),),
+            state_fields=(Facet("deploys", "int"),),
+            folds=(Count(target="deploys"),),
             boundary=Boundary(kind="deploy.snapshot", reset=False),
         )
 
@@ -505,14 +505,14 @@ class TestShapeBoundaryToVertex:
         assert v.state("deploy") == 3
 
     def test_shape_without_boundary(self):
-        from specs import Facet, Fold, Shape
+        from specs import Count, Facet, Shape
 
         shape = Shape(
             name="simple-counter",
             about="No boundary — continuous fold",
-            input_facets=(Facet("x", "int"),),
-            state_facets=(Facet("total", "int"),),
-            folds=(Fold("count", "total"),),
+            input_fields=(Facet("x", "int"),),
+            state_fields=(Facet("total", "int"),),
+            folds=(Count(target="total"),),
         )
 
         assert shape.boundary is None

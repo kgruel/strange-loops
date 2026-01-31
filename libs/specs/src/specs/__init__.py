@@ -15,7 +15,7 @@ Part of the ecosystem:
 
 from .boundary import Boundary
 from .facet import Facet, Field
-from .fold import Collect, Count, Fold, FoldOp, Latest, Max, Min, Sum, TopN, Upsert
+from .fold import Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert
 from .parse import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
 from .spec import Shape, Spec
 from .types import ValidationError
@@ -28,18 +28,16 @@ __all__ = [
     "Shape",
     "Spec",
     "ValidationError",
-    # Fold vocabulary (typed)
+    # Fold vocabulary
     "Collect",
     "Count",
+    "FoldOp",
     "Latest",
     "Max",
     "Min",
     "Sum",
     "TopN",
     "Upsert",
-    # Fold vocabulary (legacy)
-    "Fold",
-    "FoldOp",
     # Parse vocabulary
     "Coerce",
     "Pick",

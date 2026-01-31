@@ -16,6 +16,10 @@ The shape spec is a JSON file:
         "state_facets": [{"name": "total", "kind": "int"}],
         "folds": [{"op": "count", "target": "total"}]
     }
+
+TODO: Update load_shape() when spec file format lands. Currently uses legacy
+string-based fold format in JSON. Should migrate to typed fold serialization
+once the spec file format is finalized.
 """
 
 from __future__ import annotations
@@ -25,11 +29,37 @@ import sys
 from datetime import datetime, timezone
 
 from facts import Fact
-from specs import Facet, Fold, Shape
+from specs import Collect, Count, Facet, Latest, Shape, Sum, Upsert
 from ticks import Tick
 
 
 # --- Shape loading ---
+
+
+def _fold_from_dict(f: dict):
+    """Convert a JSON fold dict to a typed fold class.
+
+    TODO: This is a stopgap. Replace when spec file format is finalized.
+    """
+    op = f["op"]
+    target = f["target"]
+    props = f.get("props", {})
+
+    if op == "latest":
+        return Latest(target=target)
+    elif op == "count":
+        return Count(target=target)
+    elif op == "sum":
+        return Sum(target=target, field=props.get("field", target))
+    elif op == "collect":
+        return Collect(target=target, max=props.get("max", 0))
+    elif op == "upsert":
+        key = props.get("key")
+        if not key:
+            raise ValueError(f"upsert fold requires 'key' in props (target: {target})")
+        return Upsert(target=target, key=key)
+    else:
+        raise ValueError(f"Unknown fold op: {op}")
 
 
 def load_shape(path: str) -> Shape:
@@ -47,10 +77,7 @@ def load_shape(path: str) -> Shape:
             Facet(name=f["name"], kind=f["kind"], optional=f.get("optional", False))
             for f in spec.get("state_facets", [])
         ),
-        folds=tuple(
-            Fold(op=f["op"], target=f["target"], props=f.get("props", {}))
-            for f in spec.get("folds", [])
-        ),
+        folds=tuple(_fold_from_dict(f) for f in spec.get("folds", [])),
     )
 
 

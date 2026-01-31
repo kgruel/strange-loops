@@ -4,20 +4,17 @@ Each fold op becomes a closure (state: dict, payload: dict) -> None
 that mutates state in place. Spec.apply() uses these to produce new
 state from old state + payload.
 
-Supports both:
-  - Typed classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
-  - Legacy string-based: Fold(op="...", target="...", props={...})
+Typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from .fold import (
     Collect,
     Count,
-    Fold,
     FoldOp,
     Latest,
     Max,
@@ -157,28 +154,6 @@ def build_fold_fn(fold: FoldOp) -> Callable[[dict, dict], None]:
         return _make_min(fold.target, fold.field)
     elif isinstance(fold, Max):
         return _make_max(fold.target, fold.field)
-
-    # Legacy string-based Fold
-    elif isinstance(fold, Fold):
-        target = fold.target
-        match fold.op:
-            case "latest":
-                return _make_latest(target)
-            case "count":
-                return _make_count(target)
-            case "sum":
-                value_field = str(fold.props.get("field", target))
-                return _make_sum(target, value_field)
-            case "collect":
-                max_size = int(fold.props.get("max", 0))
-                return _make_collect(target, max_size)
-            case "upsert":
-                key_field = str(fold.props.get("key", ""))
-                if not key_field:
-                    raise ValueError(f"upsert fold requires key= prop (target: {target})")
-                return _make_upsert(target, key_field)
-            case _:
-                raise ValueError(f"Unknown fold op: {fold.op}")
 
     else:
         raise ValueError(f"Unknown fold type: {type(fold)}")

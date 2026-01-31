@@ -32,7 +32,6 @@ Boundary
 | `Shape` | alias | backward compat alias for Spec |
 | `Field` | frozen dataclass | name + kind (+ optional flag) |
 | `Facet` | alias | backward compat alias for Field |
-| `Fold` | frozen dataclass | op + target + props (legacy) |
 | `Latest` | frozen dataclass | typed fold: store timestamp |
 | `Count` | frozen dataclass | typed fold: increment counter |
 | `Sum` | frozen dataclass | typed fold: accumulate value |
@@ -53,7 +52,7 @@ Boundary
 | `initial_state() -> dict` | zero-value dict from state_fields |
 | `input_field(name)` / `state_field(name)` | lookup by name |
 
-### Typed Folds (preferred)
+### Typed Folds
 
 Type-safe fold classes with IDE support and self-documenting signatures.
 
@@ -87,29 +86,13 @@ Min(target="coldest", field="temp")
 Max(target="peak", field="memory")
 ```
 
-### Legacy Fold (string-based)
-
-| Op | Behavior | Props |
-|----|----------|-------|
-| `latest` | `state[target] = payload._ts or now()` | — |
-| `count` | `state[target] += 1` | — |
-| `sum` | `state[target] += payload[field]` | `field=` |
-| `collect` | append to list, bounded | `max=` (optional) |
-| `upsert` | `state[target][key_value] = payload` | `key=` (required) |
-
-```python
-# Legacy syntax — prefer typed classes for new code
-Fold(op="latest", target="last_seen")
-Fold(op="sum", target="total", props={"field": "amount"})
-```
-
 ## Invariants
 
-- All types frozen. `Fold.props` wrapped in `MappingProxyType`.
+- All types frozen (dataclasses with `frozen=True`).
 - `Spec.apply()` is pure: copies state, applies folds, returns new dict. Never mutates input.
 - `Spec.apply()` does not check boundary — boundary is declarative, checked externally by the fold engine.
 - A Spec with no boundary (`None`) folds continuously — no cycle, no Tick produced.
-- Fold closures built by `engine.py` at call time from Fold descriptors.
+- Fold closures built by `engine.py` at call time from typed fold classes.
 - `Field.kind` is a string from: str, int, float, bool, dict, list, set, datetime.
 - `Field.from_type_str("int?")` parses optional suffix.
 
@@ -130,14 +113,15 @@ Projection uses: Projection(initial=spec.initial_state(), fold=spec.apply)
 
 ```
 src/specs/
-  __init__.py    # Re-exports: Boundary, Facet, Field, Fold, FoldOp, Shape, Spec, ValidationError
+  __init__.py    # Re-exports: Boundary, Facet, Field, FoldOp, Shape, Spec, ValidationError
                  #             + typed folds: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
   boundary.py    # Boundary (kind + reset)
   facet.py       # Field (name + kind + optional) + Facet alias
-  fold.py        # Typed folds + legacy Fold + FoldOp alias
+  fold.py        # Typed fold classes + FoldOp union
   spec.py        # Spec (fields + folds + boundary + apply) + Shape alias
   engine.py      # Fold closure builder (_make_latest, _make_count, etc.)
   types.py       # initial_value, coerce_value, type_matches, ValidationError
 tests/
-  test_shapes.py # 72+ tests across 10 test classes
+  test_shapes.py    # Core type tests
+  test_fold_typed.py # Typed fold tests
 ```

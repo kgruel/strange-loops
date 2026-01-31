@@ -1,8 +1,20 @@
-"""Tests for specs core types: Field, Fold, Spec, Boundary."""
+"""Tests for specs core types: Field, Spec, Boundary, and typed folds."""
 
 import pytest
 
-from specs import Boundary, Facet, Field, Fold, Shape, Spec, ValidationError
+from specs import (
+    Boundary,
+    Collect,
+    Count,
+    Facet,
+    Field,
+    Latest,
+    Shape,
+    Spec,
+    Sum,
+    Upsert,
+    ValidationError,
+)
 from specs.types import coerce_value, initial_value, type_matches
 
 
@@ -49,35 +61,6 @@ class TestFacetBackwardCompat:
         assert f.name == "count"
 
 
-class TestFold:
-    """Tests for Fold dataclass."""
-
-    def test_basic_fold(self):
-        f = Fold(op="count", target="total")
-        assert f.op == "count"
-        assert f.target == "total"
-        assert f.props == {}
-
-    def test_fold_with_props(self):
-        f = Fold(op="collect", target="events", props={"max": 100})
-        assert f.props["max"] == 100
-
-    def test_upsert_fold(self):
-        f = Fold(op="upsert", target="items", props={"key": "id"})
-        assert f.op == "upsert"
-        assert f.props["key"] == "id"
-
-    def test_frozen(self):
-        f = Fold(op="count", target="n")
-        with pytest.raises(AttributeError):
-            f.op = "sum"
-
-    def test_props_immutable(self):
-        f = Fold(op="collect", target="events", props={"max": 100})
-        with pytest.raises(TypeError):
-            f.props["max"] = 200
-
-
 class TestSpec:
     """Tests for Spec dataclass."""
 
@@ -112,8 +95,8 @@ class TestSpec:
         f = Spec(
             name="accumulator",
             folds=(
-                Fold(op="count", target="total"),
-                Fold(op="upsert", target="seen", props={"key": "id"}),
+                Count(target="total"),
+                Upsert(target="seen", key="id"),
             ),
         )
         assert len(f.folds) == 2
@@ -353,7 +336,7 @@ class TestSpecApply:
     def test_apply_count(self):
         s = Spec(
             name="counter",
-            folds=(Fold(op="count", target="n"),),
+            folds=(Count(target="n"),),
         )
         state = {"n": 0}
         result = s.apply(state, {"anything": True})
@@ -362,7 +345,7 @@ class TestSpecApply:
     def test_apply_count_accumulates(self):
         s = Spec(
             name="counter",
-            folds=(Fold(op="count", target="n"),),
+            folds=(Count(target="n"),),
         )
         state = {"n": 0}
         state = s.apply(state, {})
@@ -373,7 +356,7 @@ class TestSpecApply:
     def test_apply_sum(self):
         s = Spec(
             name="summer",
-            folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
+            folds=(Sum(target="total", field="amount"),),
         )
         state = {"total": 0}
         result = s.apply(state, {"amount": 10})
@@ -384,7 +367,7 @@ class TestSpecApply:
     def test_apply_sum_missing_field_defaults_zero(self):
         s = Spec(
             name="summer",
-            folds=(Fold(op="sum", target="total", props={"field": "amount"}),),
+            folds=(Sum(target="total", field="amount"),),
         )
         result = s.apply({"total": 7}, {"other": 99})
         assert result == {"total": 7}
@@ -392,7 +375,7 @@ class TestSpecApply:
     def test_apply_latest(self):
         s = Spec(
             name="tracker",
-            folds=(Fold(op="latest", target="last_ts"),),
+            folds=(Latest(target="last_ts"),),
         )
         result = s.apply({"last_ts": None}, {"_ts": 1234567890})
         assert result == {"last_ts": 1234567890}
@@ -400,7 +383,7 @@ class TestSpecApply:
     def test_apply_latest_uses_time_when_no_ts(self):
         s = Spec(
             name="tracker",
-            folds=(Fold(op="latest", target="last_ts"),),
+            folds=(Latest(target="last_ts"),),
         )
         result = s.apply({"last_ts": None}, {})
         assert isinstance(result["last_ts"], float)
@@ -408,7 +391,7 @@ class TestSpecApply:
     def test_apply_collect(self):
         s = Spec(
             name="collector",
-            folds=(Fold(op="collect", target="items"),),
+            folds=(Collect(target="items"),),
         )
         state = {"items": []}
         state = s.apply(state, {"x": 1})
@@ -420,7 +403,7 @@ class TestSpecApply:
     def test_apply_collect_bounded(self):
         s = Spec(
             name="collector",
-            folds=(Fold(op="collect", target="items", props={"max": 2}),),
+            folds=(Collect(target="items", max=2),),
         )
         state = {"items": []}
         state = s.apply(state, {"v": 1})
@@ -433,7 +416,7 @@ class TestSpecApply:
     def test_apply_upsert(self):
         s = Spec(
             name="registry",
-            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+            folds=(Upsert(target="users", key="id"),),
         )
         state = {"users": {}}
         state = s.apply(state, {"id": "a", "name": "Alice"})
@@ -446,7 +429,7 @@ class TestSpecApply:
     def test_apply_upsert_ignores_missing_key(self):
         s = Spec(
             name="registry",
-            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+            folds=(Upsert(target="users", key="id"),),
         )
         state = {"users": {}}
         result = s.apply(state, {"name": "NoId"})
@@ -456,7 +439,7 @@ class TestSpecApply:
         """apply() returns a new dict, never mutates original."""
         s = Spec(
             name="counter",
-            folds=(Fold(op="count", target="n"),),
+            folds=(Count(target="n"),),
         )
         original = {"n": 0}
         result = s.apply(original, {})
@@ -474,30 +457,14 @@ class TestSpecApply:
         s = Spec(
             name="multi",
             folds=(
-                Fold(op="count", target="n"),
-                Fold(op="sum", target="total", props={"field": "amount"}),
-                Fold(op="latest", target="last_ts"),
+                Count(target="n"),
+                Sum(target="total", field="amount"),
+                Latest(target="last_ts"),
             ),
         )
         state = {"n": 0, "total": 0, "last_ts": None}
         result = s.apply(state, {"amount": 42, "_ts": 1000})
         assert result == {"n": 1, "total": 42, "last_ts": 1000}
-
-    def test_apply_unknown_op_raises(self):
-        s = Spec(
-            name="bad",
-            folds=(Fold(op="explode", target="x"),),
-        )
-        with pytest.raises(ValueError, match="Unknown fold op"):
-            s.apply({"x": 0}, {})
-
-    def test_apply_upsert_missing_key_prop_raises(self):
-        s = Spec(
-            name="bad",
-            folds=(Fold(op="upsert", target="x"),),
-        )
-        with pytest.raises(ValueError, match="upsert fold requires key="):
-            s.apply({"x": {}}, {})
 
 
 class TestApplyPurity:
@@ -507,7 +474,7 @@ class TestApplyPurity:
         """apply() with collect must not modify the original state's list."""
         s = Spec(
             name="collector",
-            folds=(Fold(op="collect", target="items"),),
+            folds=(Collect(target="items"),),
         )
         original = {"items": [{"v": 1}]}
         result = s.apply(original, {"v": 2})
@@ -518,7 +485,7 @@ class TestApplyPurity:
         """apply() with upsert must not modify the original state's nested dict."""
         s = Spec(
             name="registry",
-            folds=(Fold(op="upsert", target="users", props={"key": "id"}),),
+            folds=(Upsert(target="users", key="id"),),
         )
         original = {"users": {"a": {"id": "a", "name": "Alice"}}}
         result = s.apply(original, {"id": "b", "name": "Bob"})
@@ -529,7 +496,7 @@ class TestApplyPurity:
         """Two apply() calls from the same base state produce independent results."""
         s = Spec(
             name="collector",
-            folds=(Fold(op="collect", target="items"),),
+            folds=(Collect(target="items"),),
         )
         base = {"items": []}
         r1 = s.apply(base, {"v": 1})
@@ -597,7 +564,7 @@ class TestSpecBoundary:
         s = Spec(
             name="health-check",
             state_fields=(Field("count", "int"),),
-            folds=(Fold(op="count", target="count"),),
+            folds=(Count(target="count"),),
             boundary=b,
         )
         assert s.boundary.reset is False
@@ -607,7 +574,7 @@ class TestSpecBoundary:
         b = Boundary(kind="deploy")
         s = Spec(
             name="counter",
-            folds=(Fold(op="count", target="n"),),
+            folds=(Count(target="n"),),
             boundary=b,
         )
         result = s.apply({"n": 0}, {})

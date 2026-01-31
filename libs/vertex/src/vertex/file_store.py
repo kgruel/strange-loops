@@ -7,6 +7,7 @@ Events are serialized to a JSONL file on append and deserialized on read.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
@@ -63,6 +64,25 @@ class FileStore(Generic[T]):
     def since(self, cursor: int) -> list[T]:
         """Return events from logical index `cursor` onward."""
         return self._events[cursor:]
+
+    def between(self, start: datetime | float, end: datetime | float) -> list[T]:
+        """Return events in the time range [start, end].
+
+        Used for fidelity traversal: given a Tick with since/ts,
+        retrieve the facts that were folded to produce it.
+
+        Args:
+            start: Period start (datetime or epoch float)
+            end: Period end (datetime or epoch float)
+
+        Returns:
+            Events where start <= event.ts <= end
+
+        Note: Events must have a `ts` attribute (epoch float).
+        """
+        start_ts = start.timestamp() if isinstance(start, datetime) else start
+        end_ts = end.timestamp() if isinstance(end, datetime) else end
+        return [e for e in self._events if start_ts <= e.ts <= end_ts]
 
     def close(self) -> None:
         """Close the underlying file handle."""

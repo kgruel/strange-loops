@@ -7,6 +7,7 @@ EventStore is the in-memory implementation with optional JSONL persistence.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Generic, Protocol, TypeVar, runtime_checkable
 
@@ -20,6 +21,8 @@ class Store(Protocol[T_contra]):
 
     Three operations: append events, read since cursor, close resources.
     Implementations: EventStore (in-memory), FileStore (JSONL files).
+
+    Optional: between() for time-range queries (fidelity traversal).
     """
 
     def append(self, event: T_contra) -> None:
@@ -28,6 +31,21 @@ class Store(Protocol[T_contra]):
 
     def since(self, cursor: int) -> list:
         """Return events from logical index `cursor` onward."""
+        ...
+
+    def between(self, start: datetime | float, end: datetime | float) -> list:
+        """Return events in the time range [start, end].
+
+        Used for fidelity traversal: given a Tick with since/ts,
+        retrieve the facts that were folded to produce it.
+
+        Args:
+            start: Period start (datetime or epoch float)
+            end: Period end (datetime or epoch float)
+
+        Returns:
+            Events where start <= event.ts <= end
+        """
         ...
 
     def close(self) -> None:
@@ -139,3 +157,24 @@ class EventStore(Generic[T]):
             physical = len(self._events)
         self._events = self._events[physical:]
         self._offset = n
+
+    def between(self, start: datetime | float, end: datetime | float) -> list[T]:
+        """Return events in the time range [start, end].
+
+        Used for fidelity traversal: given a Tick with since/ts,
+        retrieve the facts that were folded to produce it.
+
+        Args:
+            start: Period start (datetime or epoch float)
+            end: Period end (datetime or epoch float)
+
+        Returns:
+            Events where start <= event.ts <= end
+
+        Note: Events must have a `ts` attribute (epoch float).
+        """
+        # Normalize to epoch floats
+        start_ts = start.timestamp() if isinstance(start, datetime) else start
+        end_ts = end.timestamp() if isinstance(end, datetime) else end
+
+        return [e for e in self._events if start_ts <= e.ts <= end_ts]

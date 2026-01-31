@@ -168,15 +168,18 @@ class Vertex:
         if self._store is not None:
             self._store.append(fact)
 
-        # Route to _FoldEngine (legacy)
+        # Convert fact timestamp for Loop routing
+        fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
+
+        # Route to _FoldEngine (legacy path - no fidelity tracking)
         engine = self._engines.get(kind)
         if engine is not None:
             engine.projection.fold_one(payload)
 
-        # Route to Loop
+        # Route to Loop (Loop tracks its own period_start internally)
         loop = self._loops.get(kind)
         if loop is not None:
-            loop.receive(payload)
+            loop.receive(payload, ts=fact_ts)
 
         # Check boundary trigger
         fold_kind = self._boundary_map.get(kind)
@@ -187,13 +190,14 @@ class Vertex:
         if fold_kind in self._loops:
             loop = self._loops[fold_kind]
             # Loop.fire() handles reset internally
-            return loop.fire(datetime.now(timezone.utc), origin=self._name)
+            # Use boundary fact's timestamp for consistency with fact-based time tracking
+            return loop.fire(fact_ts, origin=self._name)
 
-        # Fire from _FoldEngine (legacy)
+        # Fire from _FoldEngine (legacy path - no fidelity tracking, since=None)
         engine = self._engines[fold_kind]
         tick = Tick(
             name=fold_kind,
-            ts=datetime.now(timezone.utc),
+            ts=fact_ts,
             payload=engine.projection.state,
             origin=self._name,
         )

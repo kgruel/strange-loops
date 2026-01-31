@@ -30,6 +30,14 @@ class NamedEvent:
     amount: int
 
 
+@dataclass
+class TimestampedEvent:
+    """Event with a timestamp, for time-range query tests."""
+
+    value: int
+    ts: float  # epoch seconds
+
+
 # --- Serialization helpers ---
 
 
@@ -47,6 +55,14 @@ def serialize_named(e: NamedEvent) -> dict[str, Any]:
 
 def deserialize_named(d: dict[str, Any]) -> NamedEvent:
     return NamedEvent(name=d["name"], amount=d["amount"])
+
+
+def serialize_timestamped(e: TimestampedEvent) -> dict[str, Any]:
+    return {"value": e.value, "ts": e.ts}
+
+
+def deserialize_timestamped(d: dict[str, Any]) -> TimestampedEvent:
+    return TimestampedEvent(value=d["value"], ts=d["ts"])
 
 
 # --- Projection implementations ---

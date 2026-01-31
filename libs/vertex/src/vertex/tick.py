@@ -23,9 +23,15 @@ class Tick(Generic[T]):
       Tick[Event]       — single fact, stamped with observation time
       Tick[list[Event]] — batch of facts grouped into a time window
       Tick[dict]        — folded state snapshot at a boundary
+
+    Fidelity traversal:
+      If `since` is set, the tick represents the period [since, ts].
+      Use Store.between(tick.since, tick.ts) to retrieve the facts
+      that were folded to produce this tick's payload.
     """
 
     name: str
     ts: datetime
     payload: T
     origin: str = ""
+    since: datetime | None = None

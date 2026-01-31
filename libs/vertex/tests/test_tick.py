@@ -7,6 +7,7 @@ from vertex import Tick
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+EARLIER = datetime(2025, 6, 1, 11, 0, 0, tzinfo=timezone.utc)
 
 
 # -- Construction --
@@ -50,6 +51,43 @@ def test_construct_with_dataclass_payload():
     snap = Snapshot(value=7)
     tick = Tick(name="test", ts=NOW, payload=snap)
     assert tick.payload.value == 7
+
+
+# -- Tick.since (fidelity traversal) --
+
+
+def test_since_defaults_to_none():
+    tick = Tick(name="test", ts=NOW, payload=42)
+    assert tick.since is None
+
+
+def test_since_can_be_set():
+    tick = Tick(name="test", ts=NOW, payload=42, since=EARLIER)
+    assert tick.since == EARLIER
+
+
+def test_since_included_in_equality():
+    a = Tick(name="test", ts=NOW, payload=42, since=EARLIER)
+    b = Tick(name="test", ts=NOW, payload=42, since=EARLIER)
+    c = Tick(name="test", ts=NOW, payload=42, since=None)
+    assert a == b
+    assert a != c
+
+
+def test_since_included_in_hash():
+    a = Tick(name="test", ts=NOW, payload=42, since=EARLIER)
+    b = Tick(name="test", ts=NOW, payload=42, since=None)
+    # Different since values should produce different hashes
+    assert hash(a) != hash(b)
+
+
+def test_since_frozen():
+    tick = Tick(name="test", ts=NOW, payload=0, since=EARLIER)
+    try:
+        tick.since = None  # type: ignore[misc]
+        assert False, "Should have raised"
+    except FrozenInstanceError:
+        pass
 
 
 # -- Frozen --

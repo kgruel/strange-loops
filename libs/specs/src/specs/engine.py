@@ -1,8 +1,12 @@
-"""Fold engine: build executable fold functions from Fold descriptors.
+"""Fold engine: build executable fold functions from fold descriptors.
 
-Each fold op (latest, count, sum, collect, upsert) becomes a closure
-(state: dict, payload: dict) -> None that mutates state in place.
-Shape.apply() uses these to produce new state from old state + payload.
+Each fold op becomes a closure (state: dict, payload: dict) -> None
+that mutates state in place. Spec.apply() uses these to produce new
+state from old state + payload.
+
+Supports both:
+  - Typed classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
+  - Legacy string-based: Fold(op="...", target="...", props={...})
 """
 
 from __future__ import annotations
@@ -10,7 +14,23 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from .fold import Fold
+from .fold import (
+    Collect,
+    Count,
+    Fold,
+    FoldOp,
+    Latest,
+    Max,
+    Min,
+    Sum,
+    TopN,
+    Upsert,
+)
+
+
+# =============================================================================
+# Primitive fold implementations
+# =============================================================================
 
 
 def _make_latest(target: str) -> Callable[[dict, dict], None]:
@@ -54,29 +74,116 @@ def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
     return fold
 
 
-def build_fold_fn(fold: Fold) -> Callable[[dict, dict], None]:
-    """Build a callable (state, payload) -> None from a Fold descriptor."""
-    target = fold.target
-    match fold.op:
-        case "latest":
-            return _make_latest(target)
-        case "count":
-            return _make_count(target)
-        case "sum":
-            value_field = str(fold.props.get("field", target))
-            return _make_sum(target, value_field)
-        case "collect":
-            max_size = int(fold.props.get("max", 0))
-            return _make_collect(target, max_size)
-        case "upsert":
-            key_field = str(fold.props.get("key", ""))
-            if not key_field:
-                raise ValueError(f"upsert fold requires key= prop (target: {target})")
-            return _make_upsert(target, key_field)
-        case _:
-            raise ValueError(f"Unknown fold op: {fold.op}")
+# =============================================================================
+# Convenience fold implementations
+# =============================================================================
 
 
-def build_fold_fns(folds: tuple[Fold, ...]) -> tuple[Callable[[dict, dict], None], ...]:
-    """Build all fold functions for a sequence of Folds."""
+def _make_top_n(
+    target: str, key_field: str, by_field: str, n: int, desc: bool
+) -> Callable[[dict, dict], None]:
+    """Keep top N items by by_field, keyed by key_field."""
+    def fold(state: dict, payload: dict) -> None:
+        key_value = payload.get(key_field)
+        by_value = payload.get(by_field)
+        if key_value is None or by_value is None:
+            return
+
+        items = state[target]
+        items[key_value] = payload
+
+        # Sort and trim to N items
+        if len(items) > n:
+            sorted_keys = sorted(
+                items.keys(),
+                key=lambda k: items[k].get(by_field, 0),
+                reverse=desc,
+            )
+            # Keep only top N
+            keep = set(sorted_keys[:n])
+            state[target] = {k: v for k, v in items.items() if k in keep}
+
+    return fold
+
+
+def _make_min(target: str, value_field: str) -> Callable[[dict, dict], None]:
+    """Track minimum value of payload[value_field]."""
+    def fold(state: dict, payload: dict) -> None:
+        value = payload.get(value_field)
+        if value is None:
+            return
+        current = state.get(target)
+        if current is None or value < current:
+            state[target] = value
+    return fold
+
+
+def _make_max(target: str, value_field: str) -> Callable[[dict, dict], None]:
+    """Track maximum value of payload[value_field]."""
+    def fold(state: dict, payload: dict) -> None:
+        value = payload.get(value_field)
+        if value is None:
+            return
+        current = state.get(target)
+        if current is None or value > current:
+            state[target] = value
+    return fold
+
+
+# =============================================================================
+# Build functions
+# =============================================================================
+
+
+def build_fold_fn(fold: FoldOp) -> Callable[[dict, dict], None]:
+    """Build a callable (state, payload) -> None from a fold descriptor.
+
+    Supports both typed classes and legacy Fold.
+    """
+    # Typed classes (preferred)
+    if isinstance(fold, Latest):
+        return _make_latest(fold.target)
+    elif isinstance(fold, Count):
+        return _make_count(fold.target)
+    elif isinstance(fold, Sum):
+        return _make_sum(fold.target, fold.field)
+    elif isinstance(fold, Collect):
+        return _make_collect(fold.target, fold.max)
+    elif isinstance(fold, Upsert):
+        return _make_upsert(fold.target, fold.key)
+    elif isinstance(fold, TopN):
+        return _make_top_n(fold.target, fold.key, fold.by, fold.n, fold.desc)
+    elif isinstance(fold, Min):
+        return _make_min(fold.target, fold.field)
+    elif isinstance(fold, Max):
+        return _make_max(fold.target, fold.field)
+
+    # Legacy string-based Fold
+    elif isinstance(fold, Fold):
+        target = fold.target
+        match fold.op:
+            case "latest":
+                return _make_latest(target)
+            case "count":
+                return _make_count(target)
+            case "sum":
+                value_field = str(fold.props.get("field", target))
+                return _make_sum(target, value_field)
+            case "collect":
+                max_size = int(fold.props.get("max", 0))
+                return _make_collect(target, max_size)
+            case "upsert":
+                key_field = str(fold.props.get("key", ""))
+                if not key_field:
+                    raise ValueError(f"upsert fold requires key= prop (target: {target})")
+                return _make_upsert(target, key_field)
+            case _:
+                raise ValueError(f"Unknown fold op: {fold.op}")
+
+    else:
+        raise ValueError(f"Unknown fold type: {type(fold)}")
+
+
+def build_fold_fns(folds: tuple[FoldOp, ...]) -> tuple[Callable[[dict, dict], None], ...]:
+    """Build all fold functions for a sequence of folds."""
     return tuple(build_fold_fn(f) for f in folds)

@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from facts import Fact
 
 
-class Source(Protocol):
+class SourceProtocol(Protocol):
     """Protocol for sources that produce facts from the external world.
 
     Sources are infrastructure at the ingress boundary — adapters that

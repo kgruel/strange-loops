@@ -209,7 +209,7 @@ class TestRunnerWithCommandSource:
             command='echo "hello"',
             kind="greeting",
             observer="echo",
-            interval=None,  # Run once for test
+            every=None,  # Run once for test
         )
 
         vertex = Vertex()

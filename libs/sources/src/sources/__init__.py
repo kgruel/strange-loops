@@ -5,8 +5,8 @@ Infrastructure at the ingress boundary — converts external signals
 Not atoms — sources don't appear in the fundamental model.
 """
 
-from .command import CommandSource
-from .protocol import Source
+from .protocol import SourceProtocol
 from .runner import Runner
+from .source import CommandSource, Source
 
-__all__ = ["Source", "CommandSource", "Runner"]
+__all__ = ["Source", "SourceProtocol", "CommandSource", "Runner"]

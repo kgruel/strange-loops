@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, AsyncIterator
 
 from facts import Fact
 
-from .protocol import Source
+from .protocol import SourceProtocol
 
 if TYPE_CHECKING:
     from ticks import Tick, Vertex
@@ -30,16 +30,16 @@ class Runner:
 
     def __init__(self, vertex: Vertex) -> None:
         self._vertex = vertex
-        self._sources: list[Source] = []
+        self._sources: list[SourceProtocol] = []
         self._tasks: list[asyncio.Task] = []
         self._tick_queue: asyncio.Queue[Tick] = asyncio.Queue()
         self._running = False
 
-    def add(self, source: Source) -> None:
+    def add(self, source: SourceProtocol) -> None:
         """Register a source to be run."""
         self._sources.append(source)
 
-    async def _consume_source(self, source: Source, grant: Grant | None = None) -> None:
+    async def _consume_source(self, source: SourceProtocol, grant: Grant | None = None) -> None:
         """Consume a source's stream and route facts to the vertex."""
         try:
             async for fact in source.stream():

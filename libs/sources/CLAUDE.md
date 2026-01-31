@@ -18,33 +18,41 @@ Facts flow in, the system doesn't care where they came from.
 
 | Export | Kind | Purpose |
 |--------|------|---------|
-| `Source` | Protocol | stream of Facts from external world |
-| `CommandSource` | dataclass | runs shell commands, emits stdout lines as Facts |
+| `Source` | dataclass | runs shell commands, emits output as Facts |
+| `SourceProtocol` | Protocol | interface for sources (observer + stream) |
+| `CommandSource` | alias | deprecated alias for Source |
 | `Runner` | class | orchestrates sources feeding into a Vertex |
 
 ## Key Types
 
-### Source Protocol
+### SourceProtocol
 ```python
-class Source(Protocol):
+class SourceProtocol(Protocol):
     @property
     def observer(self) -> str: ...
 
     async def stream(self) -> AsyncIterator[Fact]: ...
 ```
 
-### CommandSource
+### Source
 ```python
-source = CommandSource(
+source = Source(
     command='echo "hello"',      # Shell command to run
-    kind="greeting",             # Fact kind for stdout lines
+    kind="greeting",             # Fact kind for output
     observer="echo-source",      # Identity for produced facts
-    interval=1.0,                # Re-run interval (None = once)
+    every=1.0,                   # Re-run interval (None = once)
+    format="lines",              # lines | json | blob
 )
 
 async for fact in source.stream():
     print(fact)  # Fact(kind="greeting", payload={"line": "hello"}, ...)
 ```
+
+### Format Options
+
+- **lines**: each stdout line becomes a Fact with `payload={"line": ...}` (default)
+- **json**: parse stdout as JSON, emit single Fact with parsed payload
+- **blob**: entire stdout as single Fact with `payload={"text": ...}`
 
 ### Runner
 ```python
@@ -59,11 +67,13 @@ async for tick in runner.run():
 ## Invariants
 
 - Sources produce Facts — the only output type.
-- CommandSource emits one Fact per stdout line with `payload={"line": ...}`.
+- Source with `format="lines"` emits one Fact per stdout line.
+- Source with `format="json"` parses stdout and emits one Fact.
+- Source with `format="blob"` emits one Fact with entire stdout.
 - Errors become Facts with `kind="source.error"` — never raised.
 - Runner spawns one task per source — sources run concurrently.
 - Runner yields Ticks as vertex boundaries fire.
-- `interval=None` means run once. `interval=float` means re-run after delay.
+- `every=None` means run once. `every=float` means re-run after delay.
 - Sources are stateless — all state lives in Vertex folds.
 
 ## Error Handling
@@ -76,6 +86,13 @@ Fact(kind="source.error", payload={
     "command": "...",
     "returncode": 1,
     "stderr": "..."
+})
+
+# JSON parse failure
+Fact(kind="source.error", payload={
+    "command": "...",
+    "error": "JSON decode error: ...",
+    "error_type": "JSONDecodeError"
 })
 
 # Python exception
@@ -91,8 +108,8 @@ Fact(kind="source.error", payload={
 ```
 External World
   │
-  ├── CommandSource ──→ stdout lines ──→ Fact
-  ├── (future: FileSource, HTTPSource, etc.)
+  ├── Source ──→ command output ──→ Fact
+  │              (lines/json/blob)
   │
   ▼
 Runner
@@ -111,10 +128,10 @@ Vertex
 ```
 src/sources/
   __init__.py      # Public exports
-  protocol.py      # Source protocol
-  command.py       # CommandSource
+  protocol.py      # SourceProtocol
+  source.py        # Source (main implementation)
   runner.py        # Runner
 tests/
-  test_command.py  # CommandSource tests
+  test_source.py   # Source tests
   test_runner.py   # Runner + integration tests
 ```

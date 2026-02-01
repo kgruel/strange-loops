@@ -37,6 +37,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 | `docs/VERTEX.md` | Routing, folding, branching |
 | `docs/TEMPORAL.md` | Boundaries and nesting |
 | `docs/PERSISTENCE.md` | Durable state, replay |
+| `docs/CADENCE.md` | Cadence/Source split — when vs what |
 
 ## Experiments
 
@@ -56,32 +57,80 @@ prove a specific aspect of the model.
 | `sources/system_health_spec.py` | Declarative Specs with folds |
 | `sources/system_health_parse.py` | Parse vocabulary in Source |
 | `sources/alert_automation.py` | Full pipeline with Store persistence |
+| `cells_vertex.py` | Cells-Vertex integration — full feedback loop closes |
+| `temporal/tick_since.py` | Fidelity traversal — Tick.since + Store.between() |
+| `fidelity_lens.py` | Zoom-to-fidelity — Lens renders ticks at varying depth |
+
+## Current Focus: Cadence/Source Split
+
+See `docs/CADENCE.md` for full design. Key insight: Source has two concerns that
+should be separate.
+
+| Concept | Answers | Examples |
+|---------|---------|----------|
+| **Cadence** | When to observe | `every 10s`, `on: minute`, `on: deploy.complete` |
+| **Source** | What to observe | command, API, stream, nothing (pure timer) |
+
+**Timer as fact.** A timer is a loop with cadence but no source — it emits
+time-shaped facts. Other loops trigger `on:` those facts. The clock is just
+another data source.
+
+**Runtime simplification.** Sources don't manage their own timers. One fact
+stream, uniform receive → route → fold. Event-driven and time-driven use the
+same mechanism.
+
+### Open Questions (Cadence/Source)
+
+1. **Sugar vs explicit** — Should `every: 10s` auto-create a timer, or require
+   explicit timer loop? Trade-off: convenience vs visibility.
+
+2. **Multiple triggers** — Can a source have `on: [minute, deploy.complete]`?
+   What's the semantics — OR (either triggers) or AND (both required)?
+
+3. **Feedback loops** — A → B → A is possible. Bug or feature? Control systems
+   are real. Detection/prevention is tooling, not model.
+
+4. **Backpressure** — If trigger fires faster than source executes, queue or
+   drop? Probably queue with bounds, but needs design.
+
+### In Flight
+
+- **chore/doc-audit** — Inventorying all docs for aggressive cleanup
+- **exp/cadence-viz** — Animated TUI showing timer cascade at max fidelity
 
 ## Next Steps
 
-1. **Tick.since** — Add period start timestamp for fidelity traversal:
-   - `Store.facts_between(since, ts)` returns facts in period
-   - Enables full-fidelity descent into tick's history
+1. **Resolve Cadence/Source questions** — work through the open questions above
+2. **Implement cadence experiment** — prove the pattern with visualization
+3. **Update DSL** — add `on:` syntax, separate cadence from source
+4. **Composition** — tick-as-fact mechanics, vertex → vertex wiring
 
-2. **Cells integration** — Surface that reads from vertex state:
-   - Connect cells to vertex state for live display
-   - Fidelity-aware rendering (zoom in/out on tick periods)
+## Open Threads (Deferred)
 
-## Open Threads
+- **String structure** — observer, kind, origin namespacing. Pattern hasn't
+  emerged yet.
 
-- **Fidelity implementation** — Tick as handle to period is conceptual. Need
-  Store.facts_between() and Tick.since to make traversal concrete.
+- **Consumer logic** — ranking/sorting for display is custom code. Right
+  boundary?
 
-- **String structure** — observer, kind, origin are strings. May need namespacing
-  (kyle/monitor), hierarchies (disk.usage), or chaining later.
-
-- **Consumer logic** — Fold ops accumulate, but ranking/sorting for display is
-  still custom code. Right boundary?
-
-- **Store policy** — Not every vertex needs full history. Options: ephemeral,
-  sliding window, sampling. Deferred.
+- **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+49. ~~Fidelity-aware Lens~~ — Zoom maps to fidelity. Build pipeline domain with
+    nested phase ticks. zoom=0 minimal, zoom=1 summary, zoom=2+ expands nested
+    ticks, zoom=4 fetches contributing facts via Store.between(). Interactive
+    mode with +/- navigation. `experiments/fidelity_lens.py`.
+
+48. ~~Cells-Vertex integration~~ — Counter with undo experiment. Keypresses become
+    Facts, Vertex folds, Ticks render to Blocks. Full feedback loop closes.
+    `experiments/cells_vertex.py`.
+
+47. ~~Tick.since fidelity traversal~~ — Tick now has `since: datetime | None` for
+    period start. Store has `between(start, end)` for time-range queries. Loop
+    tracks period start, produces ticks with `since`. Given a tick, retrieve the
+    facts that produced it via `store.between(tick.since, tick.ts)`. 26 new tests.
+    `experiments/temporal/tick_since.py` proves re-fold verification.
 
 46. ~~DSL experiment~~ — End-to-end test of .loop/.vertex workflow. Created
     `experiments/monitors/` with disk.loop, proc.loop, system.vertex. Fixed Source

@@ -5,6 +5,52 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-01-31 — Fidelity-aware Lens
+
+**The experiment.** Zoom level maps to fidelity depth. Build pipeline domain
+with nested phase ticks (lint, compile, test, package).
+
+| Zoom | Fidelity |
+|------|----------|
+| 0 | Minimal — just `✓ build` |
+| 1 | Summary — payload fields |
+| 2 | Expanded — nested ticks as icons |
+| 3 | Deep — nested ticks with payloads |
+| 4 | Full — nested ticks + facts via Store.between() |
+
+**Key design:** `FidelityContent` wraps `(tick, store, nested_ticks)` — keeps
+Lens stateless. Content carries its own context for traversal.
+
+**Note:** Nested ticks are simulated (pre-built) for this experiment. Real
+tick-as-fact composition is the next frontier.
+
+---
+
+## 2026-01-31 — Tick.since + Cells-Vertex integration
+
+**Two experiments completed in parallel:**
+
+1. **Tick.since fidelity traversal** — Tick is now a handle to its period.
+   - `Tick.since: datetime | None` captures when period started
+   - `Store.between(start, end)` retrieves facts in time range
+   - Loop tracks `_period_start`, produces ticks with `since`
+   - Vertex simplified: Loop is single source of truth (removed duplicate tracking)
+   - Experiment: incident timeline with re-fold verification
+
+2. **Cells-Vertex integration** — Full feedback loop closes.
+   - Counter with undo (j/k to dec/inc, u to undo)
+   - Keypresses → emit → Fact → Vertex.receive → fold → Tick → render → Block
+   - Proves: input becomes fact, fact becomes state, state renders
+
+**Key design decisions:**
+- `tick.ts` now uses boundary fact's timestamp (not wall clock) — enables replay
+- Legacy `_FoldEngine` gets no fidelity tracking (`since=None`)
+- Loop encapsulates its own period tracking
+
+191 vertex tests (was 165, +26 new).
+
+---
+
 ## 2026-01-31 — DSL experiment: end-to-end proof
 
 **The experiment.** Created real .loop/.vertex files for system monitoring,

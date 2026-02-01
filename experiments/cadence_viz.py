@@ -581,12 +581,14 @@ class CadenceMonitorApp(Surface):
         pulses_in_breath = self._pulse_count % PULSES_PER_BREATH
         breath_progress = pulses_in_breath / PULSES_PER_BREATH
 
-        # Layout calculations
-        content_width = min(self._w - 4, 76)
-        panel_width = (content_width - 4) // 2
+        # Layout calculations - two column layout
+        content_width = min(self._w - 4, 100)
+        left_width = (content_width * 2) // 3 - 2
+        right_width = content_width - left_width - 2
+        panel_width = (left_width - 4) // 2
 
-        # Build panels
-        pulse_panel = render_pulse_panel(pulse_state, breath_progress, content_width - 4)
+        # Build left column panels
+        pulse_panel = render_pulse_panel(pulse_state, breath_progress, left_width - 4)
         pulse_bordered = border(pulse_panel, title="PULSE", style=CYAN if self._pulse_flash > 0 else DIM, title_style=CYAN_BOLD)
 
         breath_panel = render_breath_panel(breath_state, panel_width - 2)
@@ -595,25 +597,35 @@ class CadenceMonitorApp(Surface):
         minute_panel = render_minute_panel(minute_state, panel_width - 2)
         minute_bordered = border(minute_panel, title="MINUTE", style=MAGENTA if self._minute_flash > 0 else DIM, title_style=MAGENTA_BOLD)
 
-        # Fact stream (dynamic height)
-        stream_height = max(8, self._h - 30)
-        fact_stream = render_fact_stream(list(self._facts), content_width - 4, stream_height)
-        fact_bordered = border(fact_stream, title="FACTS", style=DIM, title_style=WHITE_BOLD)
-
         # Feedback panel
         feedback_panel = render_feedback_panel(
             list(self._rate_history),
             self._pulse_interval,
             self._feedback_active,
-            content_width - 4,
+            left_width - 4,
         )
         feedback_bordered = border(feedback_panel, title="FEEDBACK", style=YELLOW if self._feedback_active else DIM, title_style=YELLOW_BOLD if self._feedback_active else DIM)
 
+        # Compose left column
+        mid_row = join_horizontal(breath_bordered, Block.empty(2, 1), minute_bordered)
+        left_col = join_vertical(
+            pulse_bordered,
+            Block.empty(left_width, 1),
+            mid_row,
+            Block.empty(left_width, 1),
+            feedback_bordered,
+        )
+
+        # Right column: fact stream (fill available height)
+        stream_height = max(8, left_col.height - 2)
+        fact_stream = render_fact_stream(list(self._facts), right_width - 4, stream_height)
+        fact_bordered = border(fact_stream, title="FACTS", style=DIM, title_style=WHITE_BOLD)
+
+        # Compose main area (left + right columns)
+        main_area = join_horizontal(left_col, Block.empty(2, left_col.height), fact_bordered)
+
         # Help line
         help_line = render_help_line(self._paused, content_width)
-
-        # Compose layout
-        mid_row = join_horizontal(breath_bordered, Block.empty(2, 1), minute_bordered)
 
         # Title
         title_text = "CADENCE MONITOR"
@@ -624,13 +636,7 @@ class CadenceMonitorApp(Surface):
         content = join_vertical(
             title,
             Block.empty(content_width, 1),
-            pulse_bordered,
-            Block.empty(content_width, 1),
-            mid_row,
-            Block.empty(content_width, 1),
-            fact_bordered,
-            Block.empty(content_width, 1),
-            feedback_bordered,
+            main_area,
             Block.empty(content_width, 1),
             help_line,
         )

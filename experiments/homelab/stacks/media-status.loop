@@ -1,0 +1,13 @@
+# Media stack container status
+# Simulates: SSH to media VM, run docker compose ps
+#
+# Gap: DSL lexer doesn't support @ in source commands.
+# Real command would be:
+#   ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json"
+
+source: echo '{"Name":"jellyfin","Service":"jellyfin","State":"running","Health":"healthy"}'
+every: 30s
+kind: container.status
+observer: media-monitor
+format: json
+timeout: 60s

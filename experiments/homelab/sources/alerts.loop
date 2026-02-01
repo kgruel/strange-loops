@@ -1,0 +1,17 @@
+# Prometheus alerts
+# Simulates: SSH to infra VM, fetch firing alerts from Prometheus API
+#
+# Gaps:
+# 1. DSL lexer doesn't support @ in source commands
+# 2. JSON response is nested; we get the raw JSON blob
+# 3. Would need JSONPath extraction for real API response
+#
+# Real command would be:
+#   ssh deploy@192.168.1.30 "docker exec prometheus wget -qO- http://localhost:9090/api/v1/alerts"
+
+source: echo '{"status":"success","data":{"alerts":[]}}'
+every: 15s
+kind: alert
+observer: prometheus-monitor
+format: json
+timeout: 30s

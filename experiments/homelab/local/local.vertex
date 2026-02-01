@@ -1,0 +1,21 @@
+# Local system health vertex
+# Aggregates disk and process monitoring on the local machine
+
+name: local
+
+discover: ./*.loop
+
+loops:
+  disk:
+    fold:
+      mounts: by mount
+      updated: latest
+    boundary: when disk
+
+  proc:
+    fold:
+      procs: collect 10
+      updated: latest
+    boundary: when proc
+
+emit: local.health

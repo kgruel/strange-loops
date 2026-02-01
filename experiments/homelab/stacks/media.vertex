@@ -1,0 +1,13 @@
+# Media stack aggregation
+# Folds container status facts into stack health
+
+name: media
+
+loops:
+  containers:
+    fold:
+      services: by Service
+      updated: latest
+    boundary: when container.status
+
+emit: media.health

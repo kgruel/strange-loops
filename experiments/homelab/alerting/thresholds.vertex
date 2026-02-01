@@ -1,0 +1,18 @@
+# Alert threshold evaluation
+# Aggregates alerts and could trigger escalation
+#
+# Gap: No conditional emit or signal emission based on state.
+# The homelab scripts emit stack.error, alert.firing signals
+# when problems are detected. The DSL emits Ticks at boundaries
+# but doesn't have conditional signal emission.
+
+name: alerting
+
+loops:
+  alerts:
+    fold:
+      firing: collect 50
+      updated: latest
+    boundary: when alert
+
+emit: alert.status

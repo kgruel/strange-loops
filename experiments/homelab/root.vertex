@@ -1,0 +1,33 @@
+# Homelab root vertex
+# Top-level aggregation of all monitoring sources
+#
+# Demonstrates:
+# - discover: for auto-finding nested .vertex files
+# - sources: for direct .loop file inclusion
+# - Multi-level aggregation (stacks -> root)
+
+name: homelab
+
+# Auto-discover stack vertices
+discover: ./stacks/*.vertex
+
+# Direct source inclusion for alerting
+sources:
+  - sources/*.loop
+
+# Aggregate health from child vertices
+loops:
+  health:
+    fold:
+      stacks: collect 10
+      events: collect 100
+      updated: latest
+    boundary: when infra.health
+
+  alerts:
+    fold:
+      recent: collect 20
+      updated: latest
+    boundary: when alert.status
+
+emit: homelab.status

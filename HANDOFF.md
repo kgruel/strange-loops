@@ -61,48 +61,53 @@ prove a specific aspect of the model.
 | `temporal/tick_since.py` | Fidelity traversal — Tick.since + Store.between() |
 | `fidelity_lens.py` | Zoom-to-fidelity — Lens renders ticks at varying depth |
 
-## Current Focus: Cadence/Source Split
+## Current Focus: Vertex Nesting + Composition
 
-See `docs/CADENCE.md` for full design. Key insight: Source has two concerns that
-should be separate.
+Vertices nest. Child ticks become facts to parent. No broker — hierarchy is composition.
 
-| Concept | Answers | Examples |
-|---------|---------|----------|
-| **Cadence** | When to observe | `every 10s`, `on: minute`, `on: deploy.complete` |
-| **Source** | What to observe | command, API, stream, nothing (pure timer) |
+```
+┌─ root.vertex ─────────────────────────────────────────────────┐
+│   discover: ./infra/*.vertex                                  │
+│   discover: ./personal/*.vertex                               │
+│                                                               │
+│   ┌─ infra.vertex ──┐     ┌─ personal.vertex ─┐              │
+│   │  disk ─┐        │     │  email ─┐         │              │
+│   │  proc ─┴► tick  │     │  cal ───┴► tick   │              │
+│   └────────┬────────┘     └─────────┬─────────┘              │
+│            │                        │                         │
+│            └────────► root loop ◄───┘                        │
+│                           │                                   │
+│                      emit: root.tick ─────────────────────┐  │
+└───────────────────────────────────────────────────────────│──┘
+                                          (loop closes) ◄───┘
+```
 
-**Timer as fact.** A timer is a loop with cadence but no source — it emits
-time-shaped facts. Other loops trigger `on:` those facts. The clock is just
-another data source.
+**Two mechanisms:**
+- `discover:` — file hierarchy, natural grouping by domain
+- `vertices:` — explicit list, cross-cutting concerns
 
-**Runtime simplification.** Sources don't manage their own timers. One fact
-stream, uniform receive → route → fold. Event-driven and time-driven use the
-same mechanism.
+### Decisions Made (Cadence/Source)
 
-### Open Questions (Cadence/Source)
-
-1. **Sugar vs explicit** — Should `every: 10s` auto-create a timer, or require
-   explicit timer loop? Trade-off: convenience vs visibility.
-
-2. **Multiple triggers** — Can a source have `on: [minute, deploy.complete]`?
-   What's the semantics — OR (either triggers) or AND (both required)?
-
-3. **Feedback loops** — A → B → A is possible. Bug or feature? Control systems
-   are real. Detection/prevention is tooling, not model.
-
-4. **Backpressure** — If trigger fires faster than source executes, queue or
-   drop? Probably queue with bounds, but needs design.
+| Topic | Decision |
+|-------|----------|
+| `on:` single trigger | `on: minute` — pure signal, no payload access |
+| `on:` multiple triggers | `on: [a, b]` — OR semantics |
+| `on:` AND triggers | No — use fold + boundary instead |
+| `on:` filtering | No — use intermediate loop to narrow fact kind |
+| `on:` debounce/throttle | Defer — needs temporal boundary design |
+| Tick naming | `emit:` is verbatim fact kind, user controls namespace |
+| Tick lineage | `origin` field + fidelity traversal, not in name |
+| Vertex wiring | Implicit by kind via nesting — no broker |
 
 ### In Flight
 
-None — both doc-audit and cadence-viz merged.
+- **experiment/nested-flow-viz** — Animated visualization of nested vertex flow
 
 ## Next Steps
 
-1. **Resolve Cadence/Source questions** — work through the open questions above
-2. **Implement cadence experiment** — prove the pattern with visualization
-3. **Update DSL** — add `on:` syntax, separate cadence from source
-4. **Composition** — tick-as-fact mechanics, vertex → vertex wiring
+1. **Complete runtime + mapper** — in progress
+2. **Nested flow experiment** — animated visualization of tick flow
+3. **Personal scale proof** — heterogeneous domains through one root
 
 ## Open Threads (Deferred)
 
@@ -115,6 +120,21 @@ None — both doc-audit and cadence-viz merged.
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+55. ~~Runtime: Vertex nesting~~ — Vertex.add_child(), accepts(kind), tick-to-fact
+    conversion. Child ticks become facts to parent. Loopback prevention. 213 tests.
+
+54. ~~DSL Mapper: on:, timers, vertices:~~ — Source.trigger field for on: kinds.
+    Pure timer sources (command=None). CompiledVertex with recursive children.
+    CircularVertexError for cycle detection. 129 DSL + 245 data tests.
+
+53. ~~DSL: vertices: syntax~~ — Add `vertices:` to VertexFile for explicit child
+    vertex paths. `discover:` handles both `.loop` and `.vertex` by extension.
+    Renamed `parse_sources_list` → `parse_path_list`. 120 tests.
+
+52. ~~DSL: on: trigger syntax~~ — Add `on:` for triggered sources. Single trigger
+    `on: minute`, OR triggers `on: [a, b]`. Pure timer loops (no source, just
+    `every:`). Mutual exclusivity validation. `Trigger` type in AST. 115 tests.
 
 51. ~~Doc audit~~ — 6 archived, 2 removed, 8 revised. Shape→Spec, 5→3 atoms.
     PEERS.md rewritten as IDENTITY.md. New accurate root README.

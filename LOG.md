@@ -5,6 +5,44 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-01-31 — Vertex nesting + DSL completion
+
+**Cadence/Source decisions finalized:**
+- `on:` single trigger — pure signal, no payload access for now
+- `on: [a, b]` — OR semantics (either triggers)
+- AND triggers — no, use fold + boundary (it's a fold concern)
+- Filtering — no, use intermediate loop to narrow kind
+- Debounce/throttle — defer, needs temporal boundary design
+- Tick naming — `emit:` is verbatim fact kind, user controls namespace
+- Tick lineage — `origin` field + fidelity traversal, not encoded in name
+
+**Vertex wiring — implicit by kind, no broker:**
+- Rejected broker/pub-sub model — adds external coordination
+- Vertices nest via `vertices:` or `discover:`
+- Child ticks become facts to parent automatically
+- Children self-describe inputs via routes + loop triggers
+- Parent forwards facts to children that accept them
+- Same mechanism at every level — nesting is composition
+
+**DSL merged:**
+1. `on:` trigger syntax — `on: minute`, `on: [a, b]`, pure timers
+2. `vertices:` — explicit child vertex paths, mirrors `sources:`
+3. `discover:` works with `.vertex` patterns (extension-based dispatch)
+
+**Vision clarified:** Same model serves both ends:
+- Systems scale: CLI-driven, high-volume, infrastructure monitoring
+- Personal scale: progressive, heterogeneous life dashboard
+  - homelab alerts, bills due, social reminders
+  - folder hierarchy = semantic grouping
+  - ticks bubble up, root = "what matters now"
+
+**In flight:**
+- runtime/vertex-nesting — Vertex children, tick-to-fact
+- dsl/mapper-updates — Compile new DSL features
+- experiment/nested-flow-viz — Animated visualization (deferred)
+
+---
+
 ## 2026-01-31 — Cadence/Source split + doc cleanup
 
 **The insight.** Source has two concerns: **what** to observe (command, API,

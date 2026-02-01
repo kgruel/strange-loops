@@ -360,6 +360,7 @@ class CompiledVertex:
     name: str
     specs: dict[str, Spec]
     children: dict[str, "CompiledVertex"]
+    routes: dict[str, str] | None = None
     path: Path | None = None
 
 
@@ -458,6 +459,7 @@ def compile_vertex_recursive(
         name=vertex.name,
         specs=specs,
         children=children,
+        routes=vertex.routes,
         path=vertex.path,
     )
 
@@ -523,6 +525,10 @@ def materialize_vertex(
 
     vertex = Vertex(compiled.name)
     overrides = fold_overrides or {}
+
+    # Set pattern-based routes if specified
+    if compiled.routes:
+        vertex.set_routes(compiled.routes)
 
     # Register specs (or overrides) as fold engines
     for name, spec in compiled.specs.items():

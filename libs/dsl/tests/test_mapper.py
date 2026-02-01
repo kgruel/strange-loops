@@ -1053,3 +1053,170 @@ loops:
         # Child state accumulated
         child = runtime.children[0]
         assert child.state("pulse") == {"count": 3}
+
+
+class TestRouteWiring:
+    """Pattern-based route wiring from DSL to runtime Vertex."""
+
+    def test_routes_in_compiled_vertex(self):
+        """Routes are preserved in CompiledVertex."""
+        vertex = parse_vertex("""\
+name: system
+routes:
+  disk: disk
+  proc: proc
+loops:
+  disk:
+    fold:
+      count: +1
+  proc:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert compiled.routes is not None
+        assert compiled.routes["disk"] == "disk"
+        assert compiled.routes["proc"] == "proc"
+
+    def test_routes_wired_to_runtime(self):
+        """Routes are set on materialized Vertex."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name: system
+routes:
+  disk: disk
+  proc: proc
+loops:
+  disk:
+    fold:
+      count: +1
+  proc:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        # Routes should be set on the vertex
+        assert runtime._routes == {"disk": "disk", "proc": "proc"}
+
+    def test_exact_match_routes(self):
+        """Exact match routes work (backwards compatible)."""
+        from dsl.mapper import materialize_vertex
+        from data import Fact
+
+        vertex = parse_vertex("""\
+name: test
+routes:
+  events: counter
+loops:
+  counter:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        # Fact kind "events" should route to "counter" loop
+        runtime.receive(Fact.of("events", "test"))
+        assert runtime.state("counter") == {"count": 1}
+
+        # Another fact
+        runtime.receive(Fact.of("events", "test"))
+        assert runtime.state("counter") == {"count": 2}
+
+    def test_pattern_routes_glob(self):
+        """Glob pattern routes (* wildcard) work."""
+        from dsl.mapper import materialize_vertex
+        from data import Fact
+
+        vertex = parse_vertex("""\
+name: test
+routes:
+  disk: storage
+loops:
+  storage:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        # Manually set glob pattern routes (parser uses exact match syntax)
+        compiled.routes = {"disk.*": "storage"}
+        runtime = materialize_vertex(compiled)
+
+        # Facts matching disk.* should route to storage
+        runtime.receive(Fact.of("disk.usage", "test"))
+        assert runtime.state("storage") == {"count": 1}
+
+        runtime.receive(Fact.of("disk.io", "test"))
+        assert runtime.state("storage") == {"count": 2}
+
+        # Exact "disk" does NOT match "disk.*" pattern
+        runtime.receive(Fact.of("disk", "test"))
+        assert runtime.state("storage") == {"count": 2}  # unchanged
+
+    def test_direct_kind_match_takes_priority(self):
+        """Direct kind registration takes priority over routes."""
+        from dsl.mapper import materialize_vertex
+        from data import Fact
+
+        vertex = parse_vertex("""\
+name: test
+routes:
+  counter: other
+loops:
+  counter:
+    fold:
+      count: +1
+  other:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        # "counter" kind matches "counter" loop directly, route not used
+        runtime.receive(Fact.of("counter", "test"))
+        assert runtime.state("counter") == {"count": 1}
+        assert runtime.state("other") == {"count": 0}
+
+    def test_accepts_with_routes(self):
+        """Vertex.accepts() checks pattern routes."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name: test
+routes:
+  events: counter
+loops:
+  counter:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        # Set glob pattern
+        compiled.routes = {"event.*": "counter"}
+        runtime = materialize_vertex(compiled)
+
+        # Direct kind match
+        assert runtime.accepts("counter")
+
+        # Pattern match
+        assert runtime.accepts("event.click")
+        assert runtime.accepts("event.scroll")
+
+        # No match
+        assert not runtime.accepts("other.thing")
+
+    def test_no_routes_null(self):
+        """Vertex without routes: has routes=None in compiled."""
+        vertex = parse_vertex("""\
+name: test
+loops:
+  counter:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert compiled.routes is None

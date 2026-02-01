@@ -22,6 +22,7 @@ selection.{observer}) must match the fact's observer.
 from __future__ import annotations
 
 import copy
+import fnmatch
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -76,6 +77,7 @@ class Vertex:
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._store = store
         self._children: list[Vertex] = []
+        self._routes: dict[str, str] = {}  # pattern → loop_name
 
     @property
     def name(self) -> str:
@@ -96,15 +98,51 @@ class Vertex:
         """
         self._children.append(child)
 
+    def set_routes(self, routes: dict[str, str]) -> None:
+        """Set pattern-based routing rules.
+
+        Routes map glob patterns to loop names. When a fact arrives,
+        patterns are checked in order and the first match determines
+        which loop receives the fact.
+
+        Pattern syntax (fnmatch):
+        - * matches any sequence of characters
+        - ? matches any single character
+        - [seq] matches any character in seq
+
+        Examples:
+            {"disk.*": "disk"}      # disk.usage, disk.io → disk loop
+            {"proc.*": "proc"}      # proc.cpu, proc.mem → proc loop
+            {"disk": "disk"}        # exact match (no wildcards)
+
+        Args:
+            routes: Dict mapping glob patterns to loop names
+        """
+        self._routes = routes.copy()
+
+    def _resolve_route(self, kind: str) -> str | None:
+        """Resolve a fact kind to a loop name via route patterns.
+
+        Returns the loop name if a route matches, None otherwise.
+        Patterns are checked in dict order (Python 3.7+ preserves insertion order).
+        """
+        for pattern, loop_name in self._routes.items():
+            if fnmatch.fnmatch(kind, pattern):
+                return loop_name
+        return None
+
     def accepts(self, kind: str) -> bool:
         """Check if this vertex handles a kind.
 
         Returns True if the kind is registered as a route (fold engine),
-        loop name, or boundary kind — or if any child accepts it.
-        Used by parent vertices to determine whether to forward facts
-        to this child.
+        loop name, boundary kind, or matches a pattern route — or if any
+        child accepts it. Used by parent vertices to determine whether
+        to forward facts to this child.
         """
         if kind in self._engines or kind in self._loops or kind in self._boundary_map:
+            return True
+        # Check pattern-based routes
+        if self._resolve_route(kind) is not None:
             return True
         return any(child.accepts(kind) for child in self._children)
 
@@ -217,14 +255,22 @@ class Vertex:
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
 
+        # Resolve routing: exact match first, then pattern-based routes
+        routed_kind = kind  # Default: route to same name as fact kind
+        if kind not in self._engines and kind not in self._loops:
+            # No exact match — try pattern-based routes
+            resolved = self._resolve_route(kind)
+            if resolved is not None:
+                routed_kind = resolved
+
         # Route to _FoldEngine (legacy path - no fidelity tracking)
-        engine = self._engines.get(kind)
+        engine = self._engines.get(routed_kind)
         if engine is not None:
             engine.projection.fold_one(payload)
 
         # Route to Loop (Loop tracks its own period_start internally)
         # Loop.receive() returns True if a count-based boundary should fire
-        loop = self._loops.get(kind)
+        loop = self._loops.get(routed_kind)
         count_boundary_fire = False
         if loop is not None:
             count_boundary_fire = loop.receive(payload, ts=fact_ts)

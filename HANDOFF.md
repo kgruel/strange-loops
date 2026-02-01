@@ -88,6 +88,15 @@ uv run python experiments/fidelity_lens.py    # zoom-to-fidelity lens
 uv run python experiments/personal_scale/main.py  # heterogeneous domains
 ```
 
+### Homelab Monitoring
+
+```bash
+uv run loop start experiments/homelab/root.vertex
+```
+
+Real SSH-based monitoring (needs SSH key auth to targets). Shows nested vertices,
+source errors collected and displayed via `source.error` loop.
+
 ## Experiments
 
 Integration layer (`experiments/`). Each wires the libraries together to
@@ -113,6 +122,7 @@ prove a specific aspect of the model.
 | `nested_flow/viz.py` | Sibling fan-out — root→{timers,sources,infra} |
 | `source_vertex/viz.py` | Live Source→Vertex wiring — real commands through Runner |
 | `personal_scale/main.py` | Heterogeneous domains — disk,proc,email,calendar through root |
+| `homelab/` | Real homelab monitoring — SSH sources, nested vertices, error handling |
 
 ## Current Focus: Vertex Nesting + Composition
 
@@ -158,8 +168,8 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 
 ## Next Steps
 
-1. **Extend declarative folds** — add `Avg` and `Window` per research findings
-2. **Count-based boundaries** — boundary after N events (not just on kind)
+1. **Wire routes: to runtime** — DSL parses `routes:` but mapper doesn't use it. Facts route by kind→loop name match only.
+2. **Homelab SSH auth** — experiment ready but needs SSH key setup to connect to real hosts
 3. **DSL-driven experiments** — migrate viz experiments to `.vertex` files where sensible
 
 ## Open Threads (Deferred)
@@ -173,6 +183,26 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+67. ~~Homelab error handling~~ — `source.error` loop collects SSH failures. Discovered that
+    `routes:` config isn't wired to runtime; workaround is naming loops to match fact kinds.
+
+66. ~~Fix CLI discover/sources confusion~~ — `cmd_start` was using `discover:` (for vertices)
+    to glob sources, then parsing `.vertex` files as `.loop` files. Fixed: `discover:` handled
+    by `compile_vertex_recursive`, `sources:` handled separately with glob expansion.
+
+65. ~~DSL: Allow @ in source strings~~ — Lexer now accepts `@` in identifiers. Enables
+    `ssh user@host` syntax. Shell-safe: `@` only special with `$` prefix.
+
+64. ~~DSL: Count-based boundaries~~ — `boundary: after 10` (one-shot), `boundary: every 50`
+    (repeating). Parsed as identifier values to avoid conflict with `every:` config key.
+    Full implementation across AST, parser, mapper, Loop, Vertex. +362 lines.
+
+63. ~~DSL: Avg and Window folds~~ — `avg field` for running average, `window N field` for
+    sliding buffer. Hidden state (sum/count) managed internally. +399 lines, 12 new tests.
+
+62. ~~Experiment: Homelab monitoring~~ — `experiments/homelab/` with 12 DSL files. Local
+    monitoring works, SSH sources need auth. Discovered gaps: no JSONPath, routes not wired.
 
 61. ~~DSL: discover: for nested vertices~~ — `discover:` glob patterns for `.vertex` files.
     Filters properly, handles self-reference, deduplicates with explicit `vertices:`.

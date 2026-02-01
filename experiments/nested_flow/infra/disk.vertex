@@ -1,0 +1,10 @@
+# Disk monitoring vertex
+name: disk
+
+loops:
+    usage:
+        fold:
+            mounts: by mount
+        boundary: when disk
+
+emit: disk.usage

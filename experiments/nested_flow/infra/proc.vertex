@@ -1,0 +1,10 @@
+# Process monitoring vertex
+name: proc
+
+loops:
+    count:
+        fold:
+            total: latest
+        boundary: when proc
+
+emit: proc.count

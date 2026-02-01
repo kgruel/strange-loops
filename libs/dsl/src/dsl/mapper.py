@@ -372,7 +372,13 @@ def compile_vertex_recursive(
 
     Raises:
         CircularVertexError: If vertex composition creates a cycle
+
+    Child vertices can be specified two ways:
+        - vertices: explicit list of paths
+        - discover: glob pattern matching .vertex files
     """
+    from glob import glob as globfn
+
     from .parser import parse_vertex_file
 
     # Initialize tracking on first call
@@ -392,23 +398,42 @@ def compile_vertex_recursive(
     # Compile this vertex's specs
     specs = map_vertex_file(vertex)
 
-    # Recursively compile children
-    children: dict[str, CompiledVertex] = {}
+    # Collect child vertex paths from explicit list and discovery
+    base_dir = vertex.path.parent if vertex.path else Path.cwd()
+    child_paths: list[Path] = []
+
+    # Add explicit vertices
     if vertex.vertices:
-        base_dir = vertex.path.parent if vertex.path else Path.cwd()
         for child_path in vertex.vertices:
-            # Resolve relative paths against parent vertex's directory
             if not child_path.is_absolute():
                 child_path = base_dir / child_path
+            child_paths.append(child_path)
 
-            # Parse and compile child
-            child_ast = parse_vertex_file(child_path)
-            child_compiled = compile_vertex_recursive(
-                child_ast,
-                _visited=_visited,
-                _chain=_chain.copy(),
-            )
-            children[child_compiled.name] = child_compiled
+    # Discover vertices via glob pattern
+    if vertex.discover:
+        pattern = str(base_dir / vertex.discover)
+        for discovered in globfn(pattern, recursive=True):
+            discovered_path = Path(discovered)
+            # Only include .vertex files from discover pattern
+            if discovered_path.suffix == ".vertex":
+                # Skip self-reference
+                if vertex.path and discovered_path.resolve() == vertex.path.resolve():
+                    continue
+                # Avoid duplicates with explicit vertices
+                if discovered_path.resolve() not in {p.resolve() for p in child_paths}:
+                    child_paths.append(discovered_path)
+
+    # Recursively compile children
+    children: dict[str, CompiledVertex] = {}
+    for child_path in child_paths:
+        # Parse and compile child
+        child_ast = parse_vertex_file(child_path)
+        child_compiled = compile_vertex_recursive(
+            child_ast,
+            _visited=_visited,
+            _chain=_chain.copy(),
+        )
+        children[child_compiled.name] = child_compiled
 
     return CompiledVertex(
         name=vertex.name,

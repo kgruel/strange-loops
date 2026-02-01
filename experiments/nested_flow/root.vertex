@@ -1,12 +1,13 @@
 # Root vertex: top-level aggregation
+# Demonstrates discover: for auto-discovering nested .vertex files
 name: root
 
 sources:
     - timers/*.loop
     - sources/*.loop
 
-vertices:
-    - infra.vertex
+# discover: auto-finds all .vertex files in the infra/ subdirectory
+discover: ./infra/*.vertex
 
 loops:
     health:

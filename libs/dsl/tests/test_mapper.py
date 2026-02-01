@@ -569,6 +569,262 @@ loops:
         assert "child" in compiled.children
 
 
+class TestDiscoverVertices:
+    """Vertex discovery via glob patterns."""
+
+    def test_discover_vertices_simple(self, tmp_path):
+        """discover: pattern finds .vertex files."""
+        # Create child vertices
+        infra = tmp_path / "infra"
+        infra.mkdir()
+        (infra / "disk.vertex").write_text(
+            "name: disk\n"
+            "loops:\n"
+            "  usage:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+        (infra / "proc.vertex").write_text(
+            "name: proc\n"
+            "loops:\n"
+            "  count:\n"
+            "    fold:\n"
+            "      total: +1\n"
+        )
+
+        # Parent with discover pattern
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./infra/*.vertex\n"
+            "loops:\n"
+            "  system:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        assert compiled.name == "root"
+        assert "disk" in compiled.children
+        assert "proc" in compiled.children
+
+    def test_discover_vertices_recursive(self, tmp_path):
+        """Recursive glob **/*.vertex finds nested vertices."""
+        # Create nested structure
+        level1 = tmp_path / "level1"
+        level1.mkdir()
+        level2 = level1 / "level2"
+        level2.mkdir()
+
+        (level1 / "a.vertex").write_text(
+            "name: a\n"
+            "loops:\n"
+            "  x:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+        (level2 / "b.vertex").write_text(
+            "name: b\n"
+            "loops:\n"
+            "  y:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        # Parent with recursive discover
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./**/*.vertex\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        assert "a" in compiled.children
+        assert "b" in compiled.children
+
+    def test_discover_skips_self(self, tmp_path):
+        """discover: pattern does not include the vertex file itself."""
+        # Root vertex with pattern that would match itself
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./*.vertex\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        # Should not include itself as a child
+        assert "root" not in compiled.children
+        assert compiled.children == {}
+
+    def test_discover_combined_with_vertices(self, tmp_path):
+        """discover: and vertices: can be used together."""
+        # Create discovered vertex
+        infra = tmp_path / "infra"
+        infra.mkdir()
+        (infra / "disk.vertex").write_text(
+            "name: disk\n"
+            "loops:\n"
+            "  usage:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        # Create explicit vertex
+        explicit = tmp_path / "explicit.vertex"
+        explicit.write_text(
+            "name: explicit\n"
+            "loops:\n"
+            "  events:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        # Parent with both
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./infra/*.vertex\n"
+            "vertices:\n"
+            "  - ./explicit.vertex\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        assert "disk" in compiled.children  # discovered
+        assert "explicit" in compiled.children  # explicit
+
+    def test_discover_avoids_duplicates(self, tmp_path):
+        """If same vertex is in vertices: and discover:, only included once."""
+        # Create vertex that will be both explicit and discovered
+        (tmp_path / "child.vertex").write_text(
+            "name: child\n"
+            "loops:\n"
+            "  events:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        # Parent lists child explicitly and via discover
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./*.vertex\n"
+            "vertices:\n"
+            "  - ./child.vertex\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        # Should have exactly one child
+        assert len(compiled.children) == 1
+        assert "child" in compiled.children
+
+    def test_discover_circular_detection(self, tmp_path):
+        """Circular references via discover: still detected."""
+        # Create two vertices that would discover each other
+        a_dir = tmp_path / "a_dir"
+        b_dir = tmp_path / "b_dir"
+        a_dir.mkdir()
+        b_dir.mkdir()
+
+        a_path = a_dir / "a.vertex"
+        b_path = b_dir / "b.vertex"
+
+        # a discovers from b's directory, b from a's directory
+        a_path.write_text(
+            f"name: a\n"
+            f"discover: {b_dir}/*.vertex\n"
+            "loops:\n"
+            "  x:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+        b_path.write_text(
+            f"name: b\n"
+            f"discover: {a_dir}/*.vertex\n"
+            "loops:\n"
+            "  y:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        a_ast = parse_vertex_file(a_path)
+        with pytest.raises(CircularVertexError):
+            compile_vertex_recursive(a_ast)
+
+    def test_discover_only_vertex_files(self, tmp_path):
+        """discover: pattern only includes .vertex files, not .loop files."""
+        # Create both .vertex and .loop files
+        (tmp_path / "child.vertex").write_text(
+            "name: child\n"
+            "loops:\n"
+            "  events:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+        (tmp_path / "source.loop").write_text(
+            "source: echo test\n"
+            "kind: test\n"
+            "observer: shell\n"
+        )
+
+        # Parent with pattern that would match both
+        parent_path = tmp_path / "root.vertex"
+        parent_path.write_text(
+            "name: root\n"
+            "discover: ./*\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        # Should only include .vertex, not .loop
+        assert "child" in compiled.children
+        assert len(compiled.children) == 1
+
+
 class TestMaterializeVertex:
     """Vertex tree materialization."""
 

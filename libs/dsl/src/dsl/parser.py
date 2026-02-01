@@ -434,7 +434,13 @@ class Parser:
     # -------------------------------------------------------------------------
 
     def parse_path_list(self) -> tuple[Path, ...]:
-        """Parse a list of paths (used for sources: and vertices:)."""
+        """Parse a list of paths (used for sources: and vertices:).
+
+        Handles paths like:
+          - ./foo.vertex           (single token)
+          - timers/*.loop          (identifier + glob)
+          - ./sub/dir/*.vertex     (glob with leading ./)
+        """
         paths = []
         self.expect(TokenType.INDENT)
         while not self.at(TokenType.DEDENT, TokenType.EOF):
@@ -444,11 +450,17 @@ class Parser:
 
             # - path
             self.expect(TokenType.DASH)
-            path_token = self.advance()
-            if path_token.type in (TokenType.GLOB, TokenType.IDENTIFIER, TokenType.STRING):
-                paths.append(Path(path_token.value))
-            else:
-                raise ParseError(f"Expected path, got {path_token.type.name}", path_token.location)
+
+            # Collect consecutive path-like tokens until newline/dedent
+            path_parts = []
+            while self.at(TokenType.GLOB, TokenType.IDENTIFIER, TokenType.STRING):
+                path_parts.append(self.advance().value)
+
+            if not path_parts:
+                raise ParseError(f"Expected path, got {self.peek().type.name}", self.peek().location)
+
+            # Join parts into full path
+            paths.append(Path("".join(path_parts)))
             self.skip_newlines()
 
         if self.at(TokenType.DEDENT):

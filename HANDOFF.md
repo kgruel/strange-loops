@@ -39,6 +39,55 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 | `docs/PERSISTENCE.md` | Durable state, replay |
 | `docs/CADENCE.md` | Cadence/Source split — when vs what |
 
+## Run Guide
+
+Quick start for recent features.
+
+### Live Source→Vertex Pipeline
+
+Real shell commands (`df`, `ps`) flowing through the full pipeline:
+
+```bash
+uv run python experiments/source_vertex/viz.py
+```
+
+Watch facts stream in, folds accumulate, ticks fire on boundaries.
+
+### Nested Vertex Discovery
+
+The DSL supports `discover:` for auto-finding child vertices:
+
+```
+# root.vertex
+discover: ./infra/*.vertex
+discover: ./personal/*.vertex
+```
+
+Try the nested flow example:
+
+```bash
+uv run loop compile experiments/nested_flow/root.vertex
+```
+
+Shows the full vertex tree: root discovers `infra/disk.vertex` and `infra/proc.vertex`.
+
+### DSL CLI
+
+```bash
+uv run loop validate disk.loop      # syntax check
+uv run loop run disk.loop           # execute, print facts
+uv run loop compile system.vertex   # show compiled structure
+uv run loop start system.vertex     # run the vertex (blocks)
+```
+
+### TUI Experiments
+
+```bash
+uv run python experiments/cadence_viz.py      # nested temporal cascade
+uv run python experiments/fidelity_lens.py    # zoom-to-fidelity lens
+uv run python experiments/personal_scale/main.py  # heterogeneous domains
+```
+
 ## Experiments
 
 Integration layer (`experiments/`). Each wires the libraries together to

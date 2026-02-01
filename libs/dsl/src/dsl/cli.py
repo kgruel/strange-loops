@@ -252,23 +252,20 @@ def cmd_start(args: argparse.Namespace) -> int:
             child_names = list(compiled.children.keys())
             print(f"Nested vertices: {', '.join(child_names)}", file=sys.stderr)
 
-        # Discover and compile sources
+        # Compile sources from sources: config
+        # Note: discover: is for nested .vertex files (handled by compile_vertex_recursive)
+        #       sources: is for .loop files (supports glob patterns)
         sources = []
-        if ast.discover:
-            base = path.parent
-            pattern = str(base / ast.discover)
-            for loop_path in glob(pattern, recursive=True):
-                loop_ast = parse_loop_file(Path(loop_path))
-                validate(loop_ast)
-                sources.append(compile_loop(loop_ast))
-                print(f"Discovered: {loop_path}", file=sys.stderr)
-
         if ast.sources:
-            for source_path in ast.sources:
-                full_path = path.parent / source_path
-                loop_ast = parse_loop_file(full_path)
-                validate(loop_ast)
-                sources.append(compile_loop(loop_ast))
+            for source_pattern in ast.sources:
+                pattern = str(path.parent / source_pattern)
+                matched = glob(pattern, recursive=True)
+                if not matched:
+                    print(f"Warning: no files match {source_pattern}", file=sys.stderr)
+                for loop_path in matched:
+                    loop_ast = parse_loop_file(Path(loop_path))
+                    validate(loop_ast)
+                    sources.append(compile_loop(loop_ast))
 
         if not sources:
             print("Warning: no sources discovered or configured", file=sys.stderr)

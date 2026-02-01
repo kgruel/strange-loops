@@ -175,7 +175,7 @@ class SourceVertexApp(Surface):
     """Live visualization of Source → Vertex wiring."""
 
     def __init__(self):
-        super().__init__(fps_cap=30, on_emit=self._handle_emit)
+        super().__init__(fps_cap=30, on_emit=self._handle_emit, on_start=self._on_start, on_stop=self._on_stop)
         self._w = 80
         self._h = 40
 
@@ -326,11 +326,11 @@ class SourceVertexApp(Surface):
         self._w = width
         self._h = height
 
-    def did_mount(self) -> None:
+    async def _on_start(self) -> None:
         """Start the runner when TUI mounts."""
         self._runner_task = asyncio.create_task(self._run_runner())
 
-    async def cleanup(self) -> None:
+    async def _on_stop(self) -> None:
         """Cleanup when TUI exits."""
         if self._runner_task:
             self._runner_task.cancel()
@@ -555,10 +555,7 @@ class SourceVertexApp(Surface):
 
 async def main():
     app = SourceVertexApp()
-    try:
-        await app.run()
-    finally:
-        await app.cleanup()
+    await app.run()
 
 
 if __name__ == "__main__":

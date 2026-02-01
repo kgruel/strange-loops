@@ -185,7 +185,7 @@ class PersonalScaleApp(Surface):
     """Visualization of heterogeneous domains flowing through one root."""
 
     def __init__(self):
-        super().__init__(fps_cap=30, on_emit=self._handle_emit)
+        super().__init__(fps_cap=30, on_emit=self._handle_emit, on_start=self._on_start)
         self._w = 100
         self._h = 40
 
@@ -291,7 +291,7 @@ class PersonalScaleApp(Surface):
         """Check if node is flashing."""
         return self._flashes.get(node, 0) > 0
 
-    async def on_start(self) -> None:
+    async def _on_start(self) -> None:
         """Start source polling."""
         self._sources_task = asyncio.create_task(self._poll_sources())
 

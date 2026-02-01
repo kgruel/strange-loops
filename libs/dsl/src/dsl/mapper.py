@@ -521,7 +521,7 @@ def materialize_vertex(
             "pulse": (PULSE_INITIAL, pulse_fold),
         })
     """
-    from vertex import Vertex
+    from vertex import Loop, Projection, Vertex
 
     vertex = Vertex(compiled.name)
     overrides = fold_overrides or {}
@@ -532,29 +532,54 @@ def materialize_vertex(
 
     # Register specs (or overrides) as fold engines
     for name, spec in compiled.specs.items():
+        boundary = spec.boundary
+        reset = boundary.reset if boundary else True
+
         if name in overrides:
             # Use custom fold
             initial, fold_fn = overrides[name]
-            boundary_kind = spec.boundary.kind if spec.boundary else None
-            reset = spec.boundary.reset if spec.boundary else True
-            vertex.register(
-                name,
-                initial,
-                fold_fn,
-                boundary=boundary_kind,
-                reset=reset,
-            )
+            if boundary and boundary.count is not None:
+                # Count-based boundary: use Loop
+                loop = Loop(
+                    name=name,
+                    projection=Projection(initial, fold=fold_fn),
+                    boundary_kind=boundary.kind,
+                    boundary_count=boundary.count,
+                    boundary_mode=boundary.mode,
+                    reset=reset,
+                )
+                vertex.register_loop(loop)
+            else:
+                # Kind-based boundary: use register()
+                vertex.register(
+                    name,
+                    initial,
+                    fold_fn,
+                    boundary=boundary.kind if boundary else None,
+                    reset=reset,
+                )
         else:
             # Use declarative Spec.apply
-            boundary_kind = spec.boundary.kind if spec.boundary else None
-            reset = spec.boundary.reset if spec.boundary else True
-            vertex.register(
-                name,
-                spec.initial_state(),
-                spec.apply,
-                boundary=boundary_kind,
-                reset=reset,
-            )
+            if boundary and boundary.count is not None:
+                # Count-based boundary: use Loop
+                loop = Loop(
+                    name=name,
+                    projection=Projection(spec.initial_state(), fold=spec.apply),
+                    boundary_kind=boundary.kind,
+                    boundary_count=boundary.count,
+                    boundary_mode=boundary.mode,
+                    reset=reset,
+                )
+                vertex.register_loop(loop)
+            else:
+                # Kind-based boundary: use register()
+                vertex.register(
+                    name,
+                    spec.initial_state(),
+                    spec.apply,
+                    boundary=boundary.kind if boundary else None,
+                    reset=reset,
+                )
 
     # Recursively materialize and attach children
     for child_name, child_compiled in compiled.children.items():

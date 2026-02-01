@@ -1,8 +1,8 @@
-# Disk usage source: triggered by minute tick
+# Disk usage source: polls every 10 seconds
 kind: disk
 observer: infra
 source: df -h
-on: minute
+every: 10s
 format: lines
 
 parse:

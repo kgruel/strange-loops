@@ -3,13 +3,20 @@
 name: root
 
 sources:
-    - timers/*.loop
+    - timers/second.loop
     - sources/*.loop
 
 # discover: auto-finds all .vertex files in the infra/ subdirectory
 discover: ./infra/*.vertex
 
 loops:
+    # Count seconds, emit minute tick every 10 seconds (accelerated for demo)
+    # Named 'second' to match the kind from second.loop
+    second:
+        fold:
+            count: +1
+        boundary: every 10
+
     health:
         fold:
             events: collect 100

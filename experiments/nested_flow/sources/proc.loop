@@ -1,8 +1,8 @@
-# Process count source: triggered by minute tick
+# Process count source: polls every 10 seconds
 kind: proc
 observer: infra
 source: ps aux | wc -l
-on: minute
+every: 10s
 format: lines
 
 parse:

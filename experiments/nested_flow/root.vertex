@@ -1,0 +1,17 @@
+# Root vertex: top-level aggregation
+name: root
+
+sources:
+    - timers/*.loop
+    - sources/*.loop
+
+vertices:
+    - infra.vertex
+
+loops:
+    health:
+        fold:
+            events: collect 100
+        boundary: when infra.health
+
+emit: system.report

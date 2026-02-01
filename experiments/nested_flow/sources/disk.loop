@@ -1,0 +1,12 @@
+# Disk usage source: triggered by minute tick
+kind: disk
+observer: infra
+source: df -h
+on: minute
+format: lines
+
+parse:
+    skip "^Filesystem"
+    split
+    pick 0, 4, 5 -> fs, pct, mount
+    pct: strip "%" | int

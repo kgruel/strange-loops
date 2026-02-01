@@ -105,17 +105,13 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 
 ### In Flight
 
-Four tasks ready to merge:
-- `exp/personal-scale` — heterogeneous domains TUI (+744 lines)
-- `exp/discover-vertices` — `discover:` for nested `.vertex` files (+334 lines)
-- `exp/source-vertex-wiring` — live Source→Vertex TUI (+565 lines)
-- `research/fold-expressiveness` — research doc recommending `Avg` + `Window` (+265 lines)
+(none)
 
 ## Next Steps
 
-1. **Merge pending tasks** — four experiments/research ready
-2. **Extend declarative folds** — add `Avg` and `Window` per research findings
-3. **Count-based boundaries** — boundary after N events (not just on kind)
+1. **Extend declarative folds** — add `Avg` and `Window` per research findings
+2. **Count-based boundaries** — boundary after N events (not just on kind)
+3. **DSL-driven experiments** — migrate viz experiments to `.vertex` files where sensible
 
 ## Open Threads (Deferred)
 
@@ -128,6 +124,16 @@ Four tasks ready to merge:
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+61. ~~DSL: discover: for nested vertices~~ — `discover:` glob patterns for `.vertex` files.
+    Filters properly, handles self-reference, deduplicates with explicit `vertices:`.
+    Updated nested_flow experiment to demonstrate. 7 new tests.
+
+60. ~~Experiment: Source→Vertex wiring~~ — `experiments/source_vertex/viz.py` shows full
+    pipeline: real commands (df, ps) → parse → Fact → Runner → Vertex → Tick. Live TUI.
+
+59. ~~Experiment: Personal scale~~ — `experiments/personal_scale/` with heterogeneous
+    domains (disk, proc, email, calendar) through infra/personal vertices to root. TUI.
 
 58. ~~Fold expressiveness research~~ — Analyzed 37 custom folds. 35% already expressible,
     14% need primitives (`Avg`, `Window`), 51% genuinely need Python. Recommendation:

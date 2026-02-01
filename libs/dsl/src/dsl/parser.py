@@ -430,12 +430,12 @@ class Parser:
         return routes
 
     # -------------------------------------------------------------------------
-    # Sources list parsing (.vertex files)
+    # Path list parsing (.vertex files)
     # -------------------------------------------------------------------------
 
-    def parse_sources_list(self) -> tuple[Path, ...]:
-        """Parse a sources: list."""
-        sources = []
+    def parse_path_list(self) -> tuple[Path, ...]:
+        """Parse a list of paths (used for sources: and vertices:)."""
+        paths = []
         self.expect(TokenType.INDENT)
         while not self.at(TokenType.DEDENT, TokenType.EOF):
             self.skip_newlines()
@@ -446,14 +446,14 @@ class Parser:
             self.expect(TokenType.DASH)
             path_token = self.advance()
             if path_token.type in (TokenType.GLOB, TokenType.IDENTIFIER, TokenType.STRING):
-                sources.append(Path(path_token.value))
+                paths.append(Path(path_token.value))
             else:
                 raise ParseError(f"Expected path, got {path_token.type.name}", path_token.location)
             self.skip_newlines()
 
         if self.at(TokenType.DEDENT):
             self.advance()
-        return tuple(sources)
+        return tuple(paths)
 
     # -------------------------------------------------------------------------
     # Top-level file parsing
@@ -556,6 +556,7 @@ class Parser:
         store: Path | None = None
         discover: str | None = None
         sources: tuple[Path, ...] | None = None
+        vertices: tuple[Path, ...] | None = None
         loops: dict[str, LoopDef] = {}
         routes: dict[str, str] | None = None
         emit: str | None = None
@@ -580,7 +581,10 @@ class Parser:
                 discover = glob_token.value
             elif key == "sources":
                 self.skip_newlines()
-                sources = self.parse_sources_list()
+                sources = self.parse_path_list()
+            elif key == "vertices":
+                self.skip_newlines()
+                vertices = self.parse_path_list()
             elif key == "loops":
                 self.skip_newlines()
                 loops = self.parse_loops_block()
@@ -607,6 +611,7 @@ class Parser:
             store=store,
             discover=discover,
             sources=sources,
+            vertices=vertices,
             routes=routes,
             emit=emit,
             path=self.path,

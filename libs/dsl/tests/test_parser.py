@@ -342,3 +342,62 @@ parse:
         """Trigger.multi() creates multi-kind trigger."""
         trigger = Trigger.multi(["minute", "hour"])
         assert trigger.kinds == ("minute", "hour")
+
+
+class TestVertexNesting:
+    """Tests for vertices: syntax (nested vertex composition)."""
+
+    def test_explicit_vertices_list(self):
+        """Parse vertices: with explicit list of paths."""
+        vertex = parse_vertex_file(FIXTURES / "nested.vertex")
+        assert vertex.name == "regional"
+        assert vertex.vertices is not None
+        assert len(vertex.vertices) == 2
+        assert vertex.vertices[0] == Path("./system-west.vertex")
+        assert vertex.vertices[1] == Path("./system-east.vertex")
+
+    def test_mixed_sources_and_vertices(self):
+        """Parse vertex with both sources: and vertices: lists."""
+        vertex = parse_vertex_file(FIXTURES / "mixed.vertex")
+        assert vertex.name == "root"
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 1
+        assert vertex.sources[0] == Path("./monitor.loop")
+        assert vertex.vertices is not None
+        assert len(vertex.vertices) == 2
+        assert vertex.vertices[0] == Path("./infra/infra.vertex")
+        assert vertex.vertices[1] == Path("./personal/personal.vertex")
+
+    def test_vertices_from_text(self):
+        """Parse vertices: from text."""
+        text = """\
+name: test
+vertices:
+  - ./child.vertex
+loops:
+  counter:
+    fold:
+      count: +1
+"""
+        vertex = parse_vertex(text)
+        assert vertex.vertices is not None
+        assert len(vertex.vertices) == 1
+        assert vertex.vertices[0] == Path("./child.vertex")
+
+    def test_discover_vertex_pattern(self):
+        """Parse discover: with .vertex pattern."""
+        text = """\
+name: infra
+discover: ./**/*.vertex
+loops:
+  aggregator:
+    fold:
+      total: +1
+"""
+        vertex = parse_vertex(text)
+        assert vertex.discover == "./**/*.vertex"
+
+    def test_no_vertices_is_none(self):
+        """Vertex without vertices: has None."""
+        vertex = parse_vertex_file(FIXTURES / "minimal.vertex")
+        assert vertex.vertices is None

@@ -1,0 +1,11 @@
+# Vertex with explicit child vertices
+name: regional
+vertices:
+  - ./system-west.vertex
+  - ./system-east.vertex
+
+loops:
+  aggregate:
+    fold:
+      count: +1
+      updated: latest

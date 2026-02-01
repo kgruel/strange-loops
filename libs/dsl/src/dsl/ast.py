@@ -299,6 +299,7 @@ class VertexFile:
     store: Path | None = None
     discover: str | None = None
     sources: tuple[Path, ...] | None = None
+    vertices: tuple[Path, ...] | None = None
     routes: dict[str, str] | None = None
     emit: str | None = None
 

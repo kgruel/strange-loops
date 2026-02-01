@@ -31,6 +31,22 @@ class TestTokenize:
         assert len(strings) == 1
         assert strings[0].value == "%"
 
+    def test_string_preserves_quote_char(self):
+        """STRING tokens track their original quote character."""
+        # Double quotes
+        tokens = tokenize('echo "hello"')
+        strings = [t for t in tokens if t.type == TokenType.STRING]
+        assert len(strings) == 1
+        assert strings[0].value == "hello"
+        assert strings[0].quote_char == '"'
+
+        # Single quotes
+        tokens = tokenize("echo 'world'")
+        strings = [t for t in tokens if t.type == TokenType.STRING]
+        assert len(strings) == 1
+        assert strings[0].value == "world"
+        assert strings[0].quote_char == "'"
+
     def test_duration(self):
         tokens = tokenize("every: 5s")
         durations = [t for t in tokens if t.type == TokenType.DURATION]

@@ -534,7 +534,11 @@ class Parser:
                     # No space before/after punctuation
                     if parts and not prev_was_punct and not is_punct:
                         parts.append(" ")
-                    parts.append(token.value)
+                    # Re-wrap STRING tokens in their original quotes
+                    if token.type == TokenType.STRING and token.quote_char:
+                        parts.append(f"{token.quote_char}{token.value}{token.quote_char}")
+                    else:
+                        parts.append(token.value)
                     prev_was_punct = is_punct
                 source = "".join(parts)
             elif key == "kind":

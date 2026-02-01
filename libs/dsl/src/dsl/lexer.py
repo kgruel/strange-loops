@@ -105,6 +105,7 @@ class Token:
     type: TokenType
     value: str
     location: Location
+    quote_char: str | None = None  # For STRING tokens: the original quote (' or ")
 
     def __repr__(self) -> str:
         return f"Token({self.type.name}, {self.value!r}, line={self.location.line})"
@@ -155,8 +156,8 @@ class Lexer:
         while self.peek() and self.peek() != "\n":
             self.advance()
 
-    def read_string(self) -> str:
-        """Read a quoted string."""
+    def read_string(self) -> tuple[str, str]:
+        """Read a quoted string. Returns (value, quote_char)."""
         quote = self.advance()  # consume opening quote
         result = []
         while self.peek() and self.peek() != quote:
@@ -178,7 +179,7 @@ class Lexer:
         if not self.peek():
             raise LexError("Unterminated string", self.location())
         self.advance()  # consume closing quote
-        return "".join(result)
+        return "".join(result), quote
 
     def read_identifier_or_keyword(self) -> tuple[TokenType, str]:
         """Read an identifier or keyword."""
@@ -240,8 +241,8 @@ class Lexer:
 
             # Strings
             if self.peek() in '"\'':
-                value = self.read_string()
-                yield Token(TokenType.STRING, value, loc)
+                value, quote_char = self.read_string()
+                yield Token(TokenType.STRING, value, loc, quote_char=quote_char)
                 continue
 
             # Punctuation

@@ -550,3 +550,47 @@ loops:
         assert folds[1].target == "avg_rate"
         assert isinstance(folds[1].op, FoldAvg)
         assert folds[1].op.field == "interval"
+
+
+class TestSourceQuotePreservation:
+    """Tests for preserving quotes in source: command strings."""
+
+    def test_double_quoted_ssh_command(self):
+        """Double quotes in SSH command should be preserved."""
+        text = '''\
+source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
+kind: logs
+observer: remote
+'''
+        loop = parse_loop(text)
+        assert loop.source == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"'
+
+    def test_single_quoted_argument(self):
+        """Single quotes should be preserved."""
+        text = """\
+source: echo 'single quoted'
+kind: test
+observer: test
+"""
+        loop = parse_loop(text)
+        assert loop.source == "echo 'single quoted'"
+
+    def test_mixed_quotes(self):
+        """Both single and double quotes in same command."""
+        text = '''\
+source: cmd "arg1" 'arg2'
+kind: test
+observer: test
+'''
+        loop = parse_loop(text)
+        assert loop.source == """cmd "arg1" 'arg2'"""
+
+    def test_quoted_with_special_chars(self):
+        """Quotes containing shell special characters."""
+        text = '''\
+source: bash -c "echo $HOME && ls | grep foo"
+kind: test
+observer: test
+'''
+        loop = parse_loop(text)
+        assert loop.source == 'bash -c "echo $HOME && ls | grep foo"'

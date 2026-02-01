@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .ast import (
     BoundaryWhen,
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from data import Skip as RuntimeSkip
     from data import Split as RuntimeSplit
     from data import Transform as RuntimeTransform
+    from vertex import Vertex
 
 
 # -----------------------------------------------------------------------------
@@ -434,3 +435,88 @@ def compile_vertex(vertex: VertexFile) -> dict[str, Spec]:
     for vertices with nested children.
     """
     return map_vertex_file(vertex)
+
+
+# -----------------------------------------------------------------------------
+# Vertex Materialization
+# -----------------------------------------------------------------------------
+
+
+FoldOverride = tuple[dict, "Callable[[dict, dict], dict]"]
+"""A fold override: (initial_state, fold_function)."""
+
+
+def materialize_vertex(
+    compiled: CompiledVertex,
+    *,
+    fold_overrides: dict[str, FoldOverride] | None = None,
+) -> "Vertex":
+    """Instantiate a runtime Vertex tree from a CompiledVertex.
+
+    Creates a Vertex with all specs registered as fold engines, and
+    recursively materializes child vertices via add_child().
+
+    Args:
+        compiled: The compiled vertex tree from compile_vertex_recursive
+        fold_overrides: Optional dict mapping kind → (initial, fold_fn)
+            to use custom fold functions instead of declarative Spec.apply.
+            Useful when Spec's declarative folds can't express the logic.
+
+    Returns:
+        A fully wired Vertex with children attached. Child ticks will
+        automatically become facts that re-enter the parent.
+
+    Example:
+        compiled = compile_vertex_recursive(parse_vertex_file("system.vertex"))
+        vertex = materialize_vertex(compiled)
+
+        # With custom folds:
+        vertex = materialize_vertex(compiled, fold_overrides={
+            "pulse": (PULSE_INITIAL, pulse_fold),
+        })
+    """
+    from vertex import Vertex
+
+    vertex = Vertex(compiled.name)
+    overrides = fold_overrides or {}
+
+    # Register specs (or overrides) as fold engines
+    for name, spec in compiled.specs.items():
+        if name in overrides:
+            # Use custom fold
+            initial, fold_fn = overrides[name]
+            boundary_kind = spec.boundary.kind if spec.boundary else None
+            reset = spec.boundary.reset if spec.boundary else True
+            vertex.register(
+                name,
+                initial,
+                fold_fn,
+                boundary=boundary_kind,
+                reset=reset,
+            )
+        else:
+            # Use declarative Spec.apply
+            boundary_kind = spec.boundary.kind if spec.boundary else None
+            reset = spec.boundary.reset if spec.boundary else True
+            vertex.register(
+                name,
+                spec.initial_state(),
+                spec.apply,
+                boundary=boundary_kind,
+                reset=reset,
+            )
+
+    # Recursively materialize and attach children
+    for child_name, child_compiled in compiled.children.items():
+        # Pass down any overrides that match child kinds
+        child_overrides = {
+            k: v for k, v in overrides.items()
+            if k in child_compiled.specs
+        }
+        child_vertex = materialize_vertex(
+            child_compiled,
+            fold_overrides=child_overrides if child_overrides else None,
+        )
+        vertex.add_child(child_vertex)
+
+    return vertex

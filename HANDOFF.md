@@ -60,6 +60,10 @@ prove a specific aspect of the model.
 | `cells_vertex.py` | Cells-Vertex integration — full feedback loop closes |
 | `temporal/tick_since.py` | Fidelity traversal — Tick.since + Store.between() |
 | `fidelity_lens.py` | Zoom-to-fidelity — Lens renders ticks at varying depth |
+| `cadence_viz.py` | Nested cascade — pulse→breath→minute with feedback loop |
+| `nested_flow/viz.py` | Sibling fan-out — root→{timers,sources,infra} |
+| `source_vertex/viz.py` | Live Source→Vertex wiring — real commands through Runner |
+| `personal_scale/main.py` | Heterogeneous domains — disk,proc,email,calendar through root |
 
 ## Current Focus: Vertex Nesting + Composition
 
@@ -101,13 +105,17 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 
 ### In Flight
 
-- **experiment/nested-flow-viz** — Animated visualization of nested vertex flow
+Four tasks ready to merge:
+- `exp/personal-scale` — heterogeneous domains TUI (+744 lines)
+- `exp/discover-vertices` — `discover:` for nested `.vertex` files (+334 lines)
+- `exp/source-vertex-wiring` — live Source→Vertex TUI (+565 lines)
+- `research/fold-expressiveness` — research doc recommending `Avg` + `Window` (+265 lines)
 
 ## Next Steps
 
-1. **Complete runtime + mapper** — in progress
-2. **Nested flow experiment** — animated visualization of tick flow
-3. **Personal scale proof** — heterogeneous domains through one root
+1. **Merge pending tasks** — four experiments/research ready
+2. **Extend declarative folds** — add `Avg` and `Window` per research findings
+3. **Count-based boundaries** — boundary after N events (not just on kind)
 
 ## Open Threads (Deferred)
 
@@ -120,6 +128,19 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+58. ~~Fold expressiveness research~~ — Analyzed 37 custom folds. 35% already expressible,
+    14% need primitives (`Avg`, `Window`), 51% genuinely need Python. Recommendation:
+    add `Avg` + `Window`, keep Python escape hatch for complex cases.
+
+57. ~~CLI refactor: materialize_vertex~~ — `loop start` now uses `compile_vertex_recursive` +
+    `materialize_vertex`. Supports nested vertices via `vertices:` and `discover:`. Reports
+    nested vertices on startup. 134 DSL tests pass.
+
+56. ~~DSL Mapper: materialize_vertex~~ — `materialize_vertex(compiled, fold_overrides=...)`
+    instantiates runtime Vertex tree from CompiledVertex. Supports custom fold functions
+    for domain logic the declarative folds can't express. Refactored cadence_viz.py to
+    use nested vertex tree (`minute → breath → pulse`). 134 DSL tests, 213 vertex tests.
 
 55. ~~Runtime: Vertex nesting~~ — Vertex.add_child(), accepts(kind), tick-to-fact
     conversion. Child ticks become facts to parent. Loopback prevention. 213 tests.

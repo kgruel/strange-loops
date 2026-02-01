@@ -567,3 +567,183 @@ loops:
         compiled = compile_vertex_recursive(parent_ast)
 
         assert "child" in compiled.children
+
+
+class TestMaterializeVertex:
+    """Vertex tree materialization."""
+
+    def test_materialize_simple(self):
+        """Simple vertex materializes to runtime Vertex."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name: counter
+loops:
+  events:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        assert runtime.name == "counter"
+        assert "events" in runtime.kinds
+        assert runtime.state("events") == {"count": 0}
+
+        # Fold a fact
+        from data import Fact
+
+        fact = Fact.of("events", "test", value=1)
+        runtime.receive(fact)
+        assert runtime.state("events") == {"count": 1}
+
+    def test_materialize_with_boundary(self):
+        """Vertex with boundary emits tick on boundary fact."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name: batcher
+loops:
+  batch:
+    fold:
+      count: +1
+    boundary: when batch.done
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        from data import Fact
+
+        # Regular facts fold
+        runtime.receive(Fact.of("batch", "test", value=1))
+        runtime.receive(Fact.of("batch", "test", value=2))
+        assert runtime.state("batch") == {"count": 2}
+
+        # Boundary fact triggers tick
+        tick = runtime.receive(Fact.of("batch.done", "test"))
+        assert tick is not None
+        assert tick.name == "batch"
+        assert tick.payload == {"count": 2}
+
+        # State was reset
+        assert runtime.state("batch") == {"count": 0}
+
+    def test_materialize_with_fold_override(self):
+        """Custom fold functions override Spec.apply."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name: custom
+loops:
+  counter:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+
+        # Custom fold that doubles instead of counting
+        def custom_fold(state, payload):
+            return {"count": state["count"] + payload.get("value", 1) * 2}
+
+        runtime = materialize_vertex(compiled, fold_overrides={
+            "counter": ({"count": 0}, custom_fold),
+        })
+
+        from data import Fact
+
+        runtime.receive(Fact.of("counter", "test", value=5))
+        assert runtime.state("counter") == {"count": 10}
+
+        runtime.receive(Fact.of("counter", "test", value=3))
+        assert runtime.state("counter") == {"count": 16}
+
+    def test_materialize_nested(self, tmp_path):
+        """Nested vertices materialize with add_child."""
+        from dsl.mapper import materialize_vertex
+        from dsl import parse_vertex_file
+
+        # Create child vertex
+        child_content = """\
+name: child
+loops:
+  events:
+    fold:
+      count: +1
+    boundary: when events.done
+emit: child.tick
+"""
+        child_path = tmp_path / "child.vertex"
+        child_path.write_text(child_content)
+
+        # Create parent vertex
+        parent_content = f"""\
+name: parent
+vertices:
+  - {child_path}
+loops:
+  aggregate:
+    fold:
+      total: +1
+"""
+        parent_path = tmp_path / "parent.vertex"
+        parent_path.write_text(parent_content)
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+        runtime = materialize_vertex(compiled)
+
+        assert runtime.name == "parent"
+        assert len(runtime.children) == 1
+        assert runtime.children[0].name == "child"
+
+    def test_materialize_nested_tick_flow(self, tmp_path):
+        """Child ticks become facts to parent via automatic wiring."""
+        from dsl.mapper import materialize_vertex
+        from dsl import parse_vertex_file
+
+        # Create child vertex that emits tick
+        child_content = """\
+name: pulse
+loops:
+  pulse:
+    fold:
+      count: +1
+    boundary: when pulse.done
+"""
+        child_path = tmp_path / "pulse.vertex"
+        child_path.write_text(child_content)
+
+        # Parent aggregates child ticks
+        parent_content = f"""\
+name: breath
+vertices:
+  - {child_path}
+loops:
+  breath:
+    fold:
+      pulses: +1
+"""
+        parent_path = tmp_path / "breath.vertex"
+        parent_path.write_text(parent_content)
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        # Custom fold for child since emit name needs to match
+        def pulse_fold(state, payload):
+            return {"count": state["count"] + 1}
+
+        runtime = materialize_vertex(compiled, fold_overrides={
+            "pulse": ({"count": 0}, pulse_fold),
+        })
+
+        from data import Fact
+
+        # Send pulse facts through parent
+        runtime.receive(Fact.of("pulse", "test"))
+        runtime.receive(Fact.of("pulse", "test"))
+        runtime.receive(Fact.of("pulse", "test"))
+
+        # Child state accumulated
+        child = runtime.children[0]
+        assert child.state("pulse") == {"count": 3}

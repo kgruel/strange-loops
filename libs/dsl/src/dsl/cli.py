@@ -222,7 +222,7 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
-    from .mapper import compile_loop, compile_vertex
+    from .mapper import compile_loop, compile_vertex_recursive, materialize_vertex
     from .parser import parse_loop_file, parse_vertex_file
     from .validator import validate
 
@@ -239,26 +239,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         from glob import glob
 
         from data import Runner
-        from vertex import Vertex
 
         ast = parse_vertex_file(path)
         validate(ast)
-        specs = compile_vertex(ast)
 
-        # Create vertex
-        vertex = Vertex(ast.name)
+        # Compile vertex tree (handles vertices: and discover: for .vertex files)
+        compiled = compile_vertex_recursive(ast)
+        vertex = materialize_vertex(compiled)
 
-        # Register specs
-        for name, spec in specs.items():
-            boundary_kind = spec.boundary.kind if spec.boundary else None
-            reset = spec.boundary.reset if spec.boundary else False
-            vertex.register(
-                name,
-                spec.initial_state(),
-                spec.apply,
-                boundary=boundary_kind,
-                reset=reset,
-            )
+        # Report nested vertices
+        if compiled.children:
+            child_names = list(compiled.children.keys())
+            print(f"Nested vertices: {', '.join(child_names)}", file=sys.stderr)
 
         # Discover and compile sources
         sources = []

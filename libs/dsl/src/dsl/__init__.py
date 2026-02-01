@@ -39,6 +39,7 @@ from .mapper import (
     compile_loop,
     compile_vertex,
     compile_vertex_recursive,
+    materialize_vertex,
 )
 
 __all__ = [
@@ -94,6 +95,7 @@ __all__ = [
     "compile_loop",
     "compile_vertex",
     "compile_vertex_recursive",
+    "materialize_vertex",
     "CompiledVertex",
     "CircularVertexError",
 ]

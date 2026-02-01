@@ -5,6 +5,11 @@ Demonstrates nested vertex composition with live data flow:
 - Animated tick propagation through the hierarchy
 - ASCII visualization of the loop structure
 
+Refactored to use extracted vertex builder:
+- `build_nested_flow_vertex()` constructs the hierarchy
+- Returns a VertexTree with named references for state access
+- Single root vertex with three sibling children
+
 Run:
     uv run python experiments/nested_flow/viz.py
 """
@@ -12,16 +17,17 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime
+from typing import NamedTuple
 
 from data import Fact
-from vertex import Peer, Vertex, Tick, Loop
+from vertex import Peer, Vertex, Loop
 from vertex.projection import Projection
-from cells import Block, Style, Cell, join_vertical, join_horizontal, border, pad, ROUNDED
+from cells import Block, Style, join_vertical, join_horizontal, border, pad
 from cells.tui import Surface
 from cells.widgets import progress_bar, ProgressState
 
@@ -64,11 +70,13 @@ class EventEntry:
 # -- Fold Functions ----------------------------------------------------------
 
 def count_fold(state: int, payload: dict) -> int:
+    """Count events."""
     return state + 1
 
 
 def collect_fold(state: list, payload: dict) -> list:
-    return [*state[-9:], payload]  # Keep last 10
+    """Collect last 10 payloads."""
+    return [*state[-9:], payload]
 
 
 def health_fold(state: dict, payload: dict) -> dict:
@@ -79,6 +87,76 @@ def health_fold(state: dict, payload: dict) -> dict:
         "last_proc": payload.get("proc_count", state.get("last_proc", 0)),
         "last_ts": time.time(),
     }
+
+
+# -- Initial States ----------------------------------------------------------
+
+HEALTH_INITIAL = {"reports": 0, "last_disk": 0, "last_proc": 0, "last_ts": 0.0}
+
+
+# -- Vertex Tree -------------------------------------------------------------
+
+class VertexTree(NamedTuple):
+    """References to vertices in the hierarchy for state access."""
+    root: Vertex
+    timers: Vertex
+    sources: Vertex
+    infra: Vertex
+
+
+def build_nested_flow_vertex() -> VertexTree:
+    """Build the nested vertex hierarchy.
+
+    Structure:
+        root (system loop)
+        ├── timers (second, minute loops)
+        ├── sources (disk, proc folds)
+        └── infra (health loop)
+
+    Facts flow through root to children. Children fold independently.
+    This demonstrates sibling composition (fan-out) vs the cadence_viz
+    which demonstrates nested composition (cascade).
+    """
+    # Timers vertex: second and minute counters
+    timers = Vertex("timers")
+    timers.register_loop(Loop(
+        name="second",
+        projection=Projection(0, fold=count_fold),
+        boundary_kind=None,
+    ))
+    timers.register_loop(Loop(
+        name="minute",
+        projection=Projection(0, fold=count_fold),
+        boundary_kind="minute.tick",
+    ))
+
+    # Sources vertex: disk and proc collectors
+    sources = Vertex("sources")
+    sources.register("disk", [], collect_fold)
+    sources.register("proc", [], collect_fold)
+
+    # Infra vertex: health aggregator
+    infra = Vertex("infra")
+    infra.register_loop(Loop(
+        name="health",
+        projection=Projection(HEALTH_INITIAL.copy(), fold=health_fold),
+        boundary_kind="infra.tick",
+    ))
+
+    # Root vertex: top-level system state
+    root = Vertex("root")
+    root.register_loop(Loop(
+        name="system",
+        projection=Projection([], fold=collect_fold),
+        boundary_kind="system.tick",
+    ))
+
+    # Wire nesting: root contains all children as siblings
+    root.add_child(timers)
+    root.add_child(sources)
+    root.add_child(infra)
+
+    return VertexTree(root=root, timers=timers, sources=sources, infra=infra)
 
 
 # -- Pulse Rendering ---------------------------------------------------------
@@ -102,7 +180,6 @@ def render_flow_line(nodes: list[tuple[str, bool, Style]], width: int) -> Block:
     parts = []
     for i, (label, active, style) in enumerate(nodes):
         if i > 0:
-            # Arrow between nodes
             parts.append(render_arrow(active))
         parts.append(render_pulse(active, label, style, len(label) + 2))
     return join_horizontal(*parts)
@@ -111,7 +188,11 @@ def render_flow_line(nodes: list[tuple[str, bool, Style]], width: int) -> Block:
 # -- Main Visualization ------------------------------------------------------
 
 class NestedFlowApp(Surface):
-    """Animated visualization of nested vertex hierarchy."""
+    """Animated visualization of nested vertex hierarchy.
+
+    Uses a single vertex tree built by `build_nested_flow_vertex()`.
+    Demonstrates sibling composition: root fans out to children.
+    """
 
     def __init__(self):
         super().__init__(fps_cap=30, on_emit=self._handle_emit)
@@ -120,8 +201,8 @@ class NestedFlowApp(Surface):
 
         self.peer = Peer("nested-flow-viz")
 
-        # Build the vertex hierarchy
-        self._build_vertices()
+        # Build vertex hierarchy
+        self._tree = build_nested_flow_vertex()
 
         # Timer state
         self._last_second = time.time()
@@ -137,65 +218,6 @@ class NestedFlowApp(Surface):
         # UI state
         self._paused = False
 
-    def _build_vertices(self) -> None:
-        """Build the nested vertex hierarchy.
-
-        Structure:
-          root
-          ├── timers (second, minute)
-          ├── sources (disk, proc)
-          └── infra (folds disk + proc → health)
-        """
-        # Timers vertex: contains second and minute loops
-        self.timers = Vertex("timers")
-
-        # Second timer: counts ticks
-        second_loop = Loop(
-            name="second",
-            projection=Projection(0, fold=count_fold),
-            boundary_kind=None,  # No auto-boundary, we tick manually
-        )
-        self.timers.register_loop(second_loop)
-
-        # Minute timer: triggered by second count
-        minute_loop = Loop(
-            name="minute",
-            projection=Projection(0, fold=count_fold),
-            boundary_kind="minute.tick",
-        )
-        self.timers.register_loop(minute_loop)
-
-        # Sources vertex: disk and proc
-        self.sources = Vertex("sources")
-        self.sources.register("disk", [], collect_fold)
-        self.sources.register("proc", [], collect_fold)
-
-        # Infra vertex: folds disk and proc into health
-        self.infra = Vertex("infra")
-        infra_health_loop = Loop(
-            name="health",
-            projection=Projection(
-                {"reports": 0, "last_disk": 0, "last_proc": 0, "last_ts": 0},
-                fold=health_fold,
-            ),
-            boundary_kind="infra.tick",
-        )
-        self.infra.register_loop(infra_health_loop)
-
-        # Root vertex: top-level aggregation
-        self.root = Vertex("root")
-        root_loop = Loop(
-            name="system",
-            projection=Projection([], fold=collect_fold),
-            boundary_kind="system.tick",
-        )
-        self.root.register_loop(root_loop)
-
-        # Wire up nesting: root contains timers, sources, infra
-        self.root.add_child(self.timers)
-        self.root.add_child(self.sources)
-        self.root.add_child(self.infra)
-
     def _flash(self, node: str, frames: int = 5) -> None:
         """Start flash effect for a node."""
         self._flashes[node] = frames
@@ -210,7 +232,6 @@ class NestedFlowApp(Surface):
 
     def update(self) -> None:
         """Drive timers and decay flash effects."""
-        # Decay flashes
         for node in list(self._flashes.keys()):
             if self._flashes[node] > 0:
                 self._flashes[node] -= 1
@@ -229,13 +250,10 @@ class NestedFlowApp(Surface):
         """Emit a second tick, cascading through the hierarchy."""
         self._second_count += 1
 
-        # Create second fact
+        # Route through root - cascades to children that accept "second"
         second_fact = Fact.of("second", "timer", ts=ts, count=self._second_count)
+        self._tree.root.receive(second_fact)
 
-        # Route through root (will cascade to children)
-        self.root.receive(second_fact)
-
-        # Flash the second node
         self._flash("second")
         self._add_event("second", "timer", f"count={self._second_count}", CYAN)
 
@@ -247,35 +265,32 @@ class NestedFlowApp(Surface):
         """Emit a minute tick, triggering sources."""
         self._minute_count += 1
 
-        # Create minute fact
         minute_fact = Fact.of("minute", "timer", ts=ts, count=self._minute_count)
-        self.root.receive(minute_fact)
+        self._tree.root.receive(minute_fact)
 
         self._flash("minute", 8)
         self._add_event("minute", "timer", f"count={self._minute_count}", GREEN_BOLD)
 
-        # Trigger sources (simulated data)
+        # Trigger sources with simulated data
         self._trigger_sources(ts)
 
     def _trigger_sources(self, ts: float) -> None:
         """Simulate source execution on minute trigger."""
-        import random
-
         # Simulate disk usage
         disk_pct = random.randint(30, 85)
         disk_fact = Fact.of("disk", "infra", ts=ts, pct=disk_pct, mount="/")
-        self.root.receive(disk_fact)
+        self._tree.root.receive(disk_fact)
         self._flash("disk")
         self._add_event("disk", "sources", f"usage={disk_pct}%", YELLOW)
 
         # Simulate process count
         proc_count = random.randint(100, 300)
         proc_fact = Fact.of("proc", "infra", ts=ts, count=proc_count)
-        self.root.receive(proc_fact)
+        self._tree.root.receive(proc_fact)
         self._flash("proc")
         self._add_event("proc", "sources", f"count={proc_count}", YELLOW)
 
-        # After sources complete, emit health
+        # After sources complete, emit health summary
         self._emit_health(ts, disk_pct, proc_count)
 
     def _emit_health(self, ts: float, disk_pct: int, proc_count: int) -> None:
@@ -286,12 +301,12 @@ class NestedFlowApp(Surface):
             disk_pct=disk_pct,
             proc_count=proc_count,
         )
-        self.root.receive(health_fact)
+        self._tree.root.receive(health_fact)
 
         self._flash("infra", 6)
         self._add_event("health", "infra", f"disk={disk_pct}% proc={proc_count}", MAGENTA_BOLD)
 
-        # Cascade to root
+        # Cascade to root system report
         self._emit_system(ts)
 
     def _emit_system(self, ts: float) -> None:
@@ -299,9 +314,9 @@ class NestedFlowApp(Surface):
         system_fact = Fact.of(
             "system", "root",
             ts=ts,
-            health=self.infra.state("health"),
+            health=self._tree.infra.state("health"),
         )
-        self.root.receive(system_fact)
+        self._tree.root.receive(system_fact)
 
         self._flash("root", 8)
         self._add_event("system", "root", "report emitted", WHITE_BOLD)
@@ -411,15 +426,15 @@ class NestedFlowApp(Surface):
     def _render_state_panels(self, width: int) -> Block:
         """Render current state of each vertex."""
         panel_width = (width - 8) // 3
+        tree = self._tree
 
         # Timers panel
-        second_state = self.timers.state("second") if "second" in self.timers.kinds else 0
-        minute_state = self.timers.state("minute") if "minute" in self.timers.kinds else 0
+        second_state = tree.timers.state("second") if "second" in tree.timers.kinds else 0
+        minute_state = tree.timers.state("minute") if "minute" in tree.timers.kinds else 0
         timer_lines = [
             Block.text(f"second: {second_state}", CYAN, width=panel_width - 4),
             Block.text(f"minute: {minute_state}", GREEN, width=panel_width - 4),
             Block.empty(panel_width - 4, 1),
-            # Progress bar showing seconds toward next minute
             Block.text("progress:", DIM, width=panel_width - 4),
         ]
         progress = (self._second_count % SECONDS_PER_MINUTE) / SECONDS_PER_MINUTE
@@ -429,8 +444,8 @@ class NestedFlowApp(Surface):
         timer_panel = border(timer_content, title="TIMERS", style=CYAN if self._is_flashing("second") else DIM, title_style=CYAN_BOLD)
 
         # Sources panel
-        disk_state = self.sources.state("disk") if "disk" in self.sources.kinds else []
-        proc_state = self.sources.state("proc") if "proc" in self.sources.kinds else []
+        disk_state = tree.sources.state("disk") if "disk" in tree.sources.kinds else []
+        proc_state = tree.sources.state("proc") if "proc" in tree.sources.kinds else []
         source_lines = [
             Block.text(f"disk samples: {len(disk_state)}", YELLOW, width=panel_width - 4),
             Block.text(f"proc samples: {len(proc_state)}", YELLOW, width=panel_width - 4),
@@ -442,7 +457,7 @@ class NestedFlowApp(Surface):
         source_panel = border(source_content, title="SOURCES", style=YELLOW if self._is_flashing("disk") or self._is_flashing("proc") else DIM, title_style=YELLOW_BOLD)
 
         # Infra panel
-        health_state = self.infra.state("health") if "health" in self.infra.kinds else {}
+        health_state = tree.infra.state("health") if "health" in tree.infra.kinds else {}
         infra_lines = [
             Block.text(f"reports: {health_state.get('reports', 0)}", MAGENTA, width=panel_width - 4),
             Block.text(f"disk: {health_state.get('last_disk', '?')}%", DIM, width=panel_width - 4),
@@ -457,7 +472,6 @@ class NestedFlowApp(Surface):
         """Render scrolling event stream."""
         lines = []
 
-        # Events (newest first)
         events = list(self._events)[-height:]
         for event in reversed(events):
             ts_str = datetime.fromtimestamp(event.ts).strftime("%H:%M:%S")
@@ -466,7 +480,6 @@ class NestedFlowApp(Surface):
                 line = line[:width - 5] + "…"
             lines.append(Block.text(line, event.style, width=width - 4))
 
-        # Pad to height
         while len(lines) < height:
             lines.append(Block.empty(width - 4, 1))
 
@@ -490,8 +503,8 @@ class NestedFlowApp(Surface):
         self._events.clear()
         self._flashes.clear()
 
-        # Rebuild vertices
-        self._build_vertices()
+        # Rebuild vertex tree
+        self._tree = build_nested_flow_vertex()
 
         self._add_event("reset", "viz", "all state cleared", WHITE_BOLD)
         self.mark_dirty()

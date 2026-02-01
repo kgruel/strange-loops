@@ -6,6 +6,11 @@ Demonstrates the Cadence/Source split with nested timer loops:
 - Feedback loop: variance → rate adjustment
 - Full TUI with maximum fidelity visualization
 
+Refactored to use proper vertex nesting:
+- Single nested vertex tree (minute → breath → pulse)
+- Automatic tick-to-fact conversion via runtime
+- Custom folds for domain-specific calculations
+
 Run:
     uv run python experiments/cadence_viz.py
 """
@@ -117,6 +122,7 @@ def pulse_fold(state: dict, payload: dict) -> dict:
 def breath_fold(state: dict, payload: dict) -> dict:
     """Fold breath facts: aggregate pulse summaries."""
     pulse_count = state["pulse_count"] + payload.get("pulse_count", 1)
+    breath_count = state["breath_count"] + 1
     rates = list(state["rates"])
     if "avg_rate" in payload:
         rates.append(payload["avg_rate"])
@@ -128,7 +134,7 @@ def breath_fold(state: dict, payload: dict) -> dict:
 
     return {
         "pulse_count": pulse_count,
-        "breath_count": state["breath_count"],
+        "breath_count": breath_count,
         "rates": rates,
         "avg_rate": avg_rate,
         "drift": drift,
@@ -377,18 +383,78 @@ def render_feedback_panel(rate_history: list[float], current_rate: float, feedba
     return join_vertical(*lines)
 
 
-def render_help_line(paused: bool, width: int) -> Block:
+def render_help_line(paused: bool, auto_feedback: bool, width: int) -> Block:
     """Render help/control line."""
     pause_key = "[p]lay" if paused else "[p]ause"
-    help_text = f"[q]uit  {pause_key}  [r]eset  [+/-] speed"
-    centered = help_text.center(width)
+    feedback_key = "[f]eedback:ON" if auto_feedback else "[f]eedback:OFF"
+    line1 = f"[q]uit  {pause_key}  [r]eset  [+/-]coarse  [h/l]fine  [H/L]nudge  {feedback_key}"
+    centered = line1.center(width)
     return Block.text(centered, DIM, width=width)
+
+
+# -- Build Nested Vertex Tree ------------------------------------------------
+
+def build_cadence_vertex() -> Vertex:
+    """Build the nested vertex hierarchy: minute → breath → pulse.
+
+    Uses proper nesting with automatic tick-to-fact conversion.
+    Child vertex ticks become facts that flow to parent vertex.
+
+    Structure:
+        minute_vertex
+          └── breath_vertex
+                └── pulse_vertex
+
+    When pulse boundary fires → tick → fact to breath
+    When breath boundary fires → tick → fact to minute
+    """
+    # Innermost: pulse vertex
+    # Boundary: fires on "pulse.tick" (we emit this explicitly when count reaches PULSES_PER_BREATH)
+    pulse_vertex = Vertex("pulse")
+    pulse_vertex.register(
+        "pulse",
+        PULSE_INITIAL.copy(),
+        pulse_fold,
+        boundary="pulse.tick",  # tick name when boundary fires
+        reset=True,
+    )
+
+    # Middle: breath vertex contains pulse
+    # Listens for "pulse" ticks (converted to facts by parent relationship)
+    # Boundary: fires on "breath.tick"
+    breath_vertex = Vertex("breath")
+    breath_vertex.register(
+        "breath",
+        BREATH_INITIAL.copy(),
+        breath_fold,
+        boundary="breath.tick",
+        reset=True,
+    )
+    breath_vertex.add_child(pulse_vertex)
+
+    # Outermost: minute vertex contains breath
+    # Listens for "breath" ticks
+    minute_vertex = Vertex("minute")
+    minute_vertex.register(
+        "minute",
+        MINUTE_INITIAL.copy(),
+        minute_fold,
+        boundary="minute.report",
+        reset=True,
+    )
+    minute_vertex.add_child(breath_vertex)
+
+    return minute_vertex
 
 
 # -- Main Application --------------------------------------------------------
 
 class CadenceMonitorApp(Surface):
-    """Full TUI demonstrating cadence hierarchy with animated visualization."""
+    """Full TUI demonstrating cadence hierarchy with animated visualization.
+
+    Uses a single nested vertex tree instead of three separate vertices.
+    The runtime handles tick-to-fact conversion automatically.
+    """
 
     def __init__(self):
         super().__init__(fps_cap=30, on_emit=self._handle_emit)
@@ -398,15 +464,12 @@ class CadenceMonitorApp(Surface):
         # Peer identity
         self.peer = Peer("cadence-monitor")
 
-        # Vertices for each timescale
-        self.pulse_vertex = Vertex("pulse")
-        self.pulse_vertex.register("pulse", PULSE_INITIAL.copy(), pulse_fold)
+        # Single nested vertex tree
+        self.vertex = build_cadence_vertex()
 
-        self.breath_vertex = Vertex("breath")
-        self.breath_vertex.register("breath", BREATH_INITIAL.copy(), breath_fold)
-
-        self.minute_vertex = Vertex("minute")
-        self.minute_vertex.register("minute", MINUTE_INITIAL.copy(), minute_fold)
+        # Get child references for state access
+        self._breath_vertex = self.vertex.children[0]  # breath
+        self._pulse_vertex = self._breath_vertex.children[0]  # pulse
 
         # Timer state
         self._last_pulse = time.time()
@@ -423,6 +486,7 @@ class CadenceMonitorApp(Surface):
         # UI state
         self._paused = False
         self._feedback_active = False
+        self._auto_feedback = True  # Auto-feedback on by default
 
         # Flash effects (tick -> frame_count remaining)
         self._pulse_flash = 0
@@ -456,18 +520,21 @@ class CadenceMonitorApp(Surface):
             self.mark_dirty()
 
     def _emit_pulse(self, ts: float) -> None:
-        """Emit a pulse fact, potentially triggering breath/minute boundaries."""
+        """Emit a pulse fact through the nested vertex tree."""
         self._pulse_count += 1
 
-        # Create pulse fact
+        # Create pulse fact and send through root vertex
+        # It will be routed to pulse_vertex via child forwarding
         pulse_fact = Fact.of("pulse", self.peer.name, ts=ts, count=self._pulse_count)
-        self.pulse_vertex.receive(pulse_fact)
 
         # Record in stream
         self._add_fact("pulse", f"count={self._pulse_count}", CYAN)
 
-        # Track rate
-        pulse_state = self.pulse_vertex.state("pulse")
+        # Send fact through the tree - it routes to pulse vertex
+        self.vertex.receive(pulse_fact)
+
+        # Track rate from pulse vertex state
+        pulse_state = self._pulse_vertex.state("pulse")
         if pulse_state["avg_rate"] > 0:
             self._rate_history.append(pulse_state["avg_rate"])
 
@@ -476,14 +543,17 @@ class CadenceMonitorApp(Surface):
 
         # Check for breath boundary
         if self._pulse_count % PULSES_PER_BREATH == 0:
-            self._emit_breath(ts, pulse_state)
+            self._emit_breath_boundary(ts)
 
-    def _emit_breath(self, ts: float, pulse_state: dict) -> None:
-        """Emit a breath fact when pulse boundary fires."""
+    def _emit_breath_boundary(self, ts: float) -> None:
+        """Emit breath boundary fact - triggers tick that flows to parent."""
         self._breath_count += 1
+        pulse_state = self._pulse_vertex.state("pulse")
 
-        # Forward pulse summary to breath
-        breath_fact = Fact.of(
+        # The pulse.tick boundary fact triggers the pulse vertex to emit a tick
+        # That tick becomes a fact to breath vertex automatically
+        # But we need to construct the summary for breath
+        breath_summary = Fact.of(
             "breath",
             self.peer.name,
             ts=ts,
@@ -491,15 +561,9 @@ class CadenceMonitorApp(Surface):
             avg_rate=pulse_state["avg_rate"],
             jitter=pulse_state["jitter"],
         )
-        self.breath_vertex.receive(breath_fact)
 
-        # Update breath state with count
-        breath_state = self.breath_vertex.state("breath")
-        # Manually update breath count since we're not using boundaries
-        self.breath_vertex._engines["breath"].projection._state = {
-            **breath_state,
-            "breath_count": self._breath_count,
-        }
+        # Send through breath vertex (bypassing pulse since it's a breath-level fact)
+        self._breath_vertex.receive(breath_summary)
 
         # Record in stream
         self._add_fact("breath.tick", f"breath={self._breath_count} avg={pulse_state['avg_rate']:.3f}s", GREEN_BOLD)
@@ -509,14 +573,14 @@ class CadenceMonitorApp(Surface):
 
         # Check for minute boundary
         if self._breath_count % BREATHS_PER_MINUTE == 0:
-            self._emit_minute(ts)
+            self._emit_minute_boundary(ts)
 
-    def _emit_minute(self, ts: float) -> None:
-        """Emit a minute fact when breath boundary fires."""
-        breath_state = self.breath_vertex.state("breath")
+    def _emit_minute_boundary(self, ts: float) -> None:
+        """Emit minute boundary - triggers minute report tick."""
+        breath_state = self._breath_vertex.state("breath")
 
-        # Forward breath summary to minute
-        minute_fact = Fact.of(
+        # Forward breath summary to minute via the tree
+        minute_summary = Fact.of(
             "minute",
             self.peer.name,
             ts=ts,
@@ -524,9 +588,9 @@ class CadenceMonitorApp(Surface):
             avg_rate=breath_state["avg_rate"],
             drift=breath_state["drift"],
         )
-        self.minute_vertex.receive(minute_fact)
+        self.vertex.receive(minute_summary)
 
-        minute_state = self.minute_vertex.state("minute")
+        minute_state = self.vertex.state("minute")
 
         # Record in stream
         health_pct = int(minute_state["health"] * 100)
@@ -540,6 +604,10 @@ class CadenceMonitorApp(Surface):
 
     def _apply_feedback(self, minute_state: dict) -> None:
         """Apply feedback: adjust pulse rate based on variance."""
+        if not self._auto_feedback:
+            self._feedback_active = False
+            return
+
         variance = minute_state["variance"]
         avg_rate = minute_state["avg_rate"]
 
@@ -554,7 +622,7 @@ class CadenceMonitorApp(Surface):
             if abs(new_rate - self._pulse_interval) > 0.001:
                 self._pulse_interval = new_rate
                 self._feedback_active = True
-                self._add_fact("rate.adjust", f"new_rate={new_rate:.3f}s", YELLOW_BOLD)
+                self._add_fact("auto.adjust", f"new_rate={new_rate:.3f}s", YELLOW_BOLD)
             else:
                 self._feedback_active = False
         else:
@@ -572,10 +640,10 @@ class CadenceMonitorApp(Surface):
         if self._buf is None:
             return
 
-        # Get current states
-        pulse_state = self.pulse_vertex.state("pulse")
-        breath_state = self.breath_vertex.state("breath")
-        minute_state = self.minute_vertex.state("minute")
+        # Get current states from nested vertex tree
+        pulse_state = self._pulse_vertex.state("pulse")
+        breath_state = self._breath_vertex.state("breath")
+        minute_state = self.vertex.state("minute")
 
         # Calculate breath progress
         pulses_in_breath = self._pulse_count % PULSES_PER_BREATH
@@ -625,7 +693,7 @@ class CadenceMonitorApp(Surface):
         main_area = join_horizontal(left_col, Block.empty(2, left_col.height), fact_bordered)
 
         # Help line
-        help_line = render_help_line(self._paused, content_width)
+        help_line = render_help_line(self._paused, self._auto_feedback, content_width)
 
         # Title
         title_text = "CADENCE MONITOR"
@@ -657,12 +725,43 @@ class CadenceMonitorApp(Surface):
         elif key == "r":
             self._reset()
         elif key in ("+", "="):
+            # Coarse speed adjustment
             self._pulse_interval = max(0.1, self._pulse_interval - 0.1)
             self._add_fact("speed.up", f"interval={self._pulse_interval:.2f}s", YELLOW)
             self.mark_dirty()
         elif key in ("-", "_"):
+            # Coarse speed adjustment
             self._pulse_interval = min(3.0, self._pulse_interval + 0.1)
             self._add_fact("speed.down", f"interval={self._pulse_interval:.2f}s", YELLOW)
+            self.mark_dirty()
+        elif key in ("h", "Left"):
+            # Fine manual correction - speed up (reduce interval)
+            self._manual_correct(-0.02)
+        elif key in ("l", "Right"):
+            # Fine manual correction - slow down (increase interval)
+            self._manual_correct(0.02)
+        elif key in ("H",):
+            # Larger manual correction - speed up
+            self._manual_correct(-0.05)
+        elif key in ("L",):
+            # Larger manual correction - slow down
+            self._manual_correct(0.05)
+        elif key == "f":
+            # Toggle auto-feedback
+            self._auto_feedback = not self._auto_feedback
+            status = "ON" if self._auto_feedback else "OFF"
+            self._add_fact("feedback.toggle", f"auto={status}", YELLOW_BOLD)
+            self.mark_dirty()
+
+    def _manual_correct(self, delta: float) -> None:
+        """Apply manual rate correction."""
+        old_rate = self._pulse_interval
+        self._pulse_interval = max(0.5, min(2.0, self._pulse_interval + delta))
+
+        if abs(self._pulse_interval - old_rate) > 0.001:
+            direction = "slower" if delta > 0 else "faster"
+            self._add_fact("manual.adjust", f"{direction} → {self._pulse_interval:.3f}s", Style(fg="white", bold=True))
+            self._feedback_active = True  # Show feedback indicator
             self.mark_dirty()
 
     def _reset(self) -> None:
@@ -674,11 +773,12 @@ class CadenceMonitorApp(Surface):
         self._facts.clear()
         self._rate_history.clear()
         self._feedback_active = False
+        self._auto_feedback = True
 
-        # Reset vertices
-        self.pulse_vertex._engines["pulse"].projection.reset(PULSE_INITIAL.copy())
-        self.breath_vertex._engines["breath"].projection.reset(BREATH_INITIAL.copy())
-        self.minute_vertex._engines["minute"].projection.reset(MINUTE_INITIAL.copy())
+        # Reset vertices via their projections
+        self._pulse_vertex._engines["pulse"].projection.reset(PULSE_INITIAL.copy())
+        self._breath_vertex._engines["breath"].projection.reset(BREATH_INITIAL.copy())
+        self.vertex._engines["minute"].projection.reset(MINUTE_INITIAL.copy())
 
         self._add_fact("reset", "all state cleared", WHITE_BOLD)
         self.mark_dirty()

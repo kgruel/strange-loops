@@ -1,0 +1,6 @@
+# Simulated email counts (echo stands in for real mail API)
+kind: email
+observer: personal
+source: echo '{"inbox": 42, "unread": 7, "flagged": 2}'
+on: minute
+format: json

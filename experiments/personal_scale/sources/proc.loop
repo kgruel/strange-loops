@@ -1,0 +1,11 @@
+# Real process count from ps
+kind: proc
+observer: infra
+source: ps aux | wc -l
+on: minute
+format: lines
+
+parse:
+    split
+    pick 0 -> count
+    count: int

@@ -1,0 +1,15 @@
+# Infrastructure vertex: aggregates disk and process facts
+name: infra
+
+loops:
+    disk:
+        fold:
+            mounts: by mount
+        boundary: when disk.complete
+
+    proc:
+        fold:
+            count: latest
+        boundary: when proc.complete
+
+emit: infra.status

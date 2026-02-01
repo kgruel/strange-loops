@@ -1,0 +1,7 @@
+[
+    {"step": "Create directory structure", "done": true},
+    {"step": "Create .loop files for sources (disk, proc, calendar, email)", "done": true},
+    {"step": "Create .vertex files for hierarchy (infra, personal, root)", "done": true},
+    {"step": "Create main.py TUI visualization", "done": true},
+    {"step": "Test imports and basic execution", "done": true}
+]

@@ -228,7 +228,22 @@ class FoldMin:
     field: str
 
 
-FoldOp = FoldBy | FoldCount | FoldSum | FoldLatest | FoldCollect | FoldMax | FoldMin
+@dataclass(frozen=True)
+class FoldAvg:
+    """Running average of a field."""
+
+    field: str
+
+
+@dataclass(frozen=True)
+class FoldWindow:
+    """Sliding window buffer."""
+
+    field: str
+    size: int
+
+
+FoldOp = FoldBy | FoldCount | FoldSum | FoldLatest | FoldCollect | FoldMax | FoldMin | FoldAvg | FoldWindow
 
 
 @dataclass(frozen=True)

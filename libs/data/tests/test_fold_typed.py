@@ -1,8 +1,9 @@
-"""Tests for typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max."""
+"""Tests for typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max, Avg, Window."""
 
 import pytest
 
 from data import (
+    Avg,
     Collect,
     Count,
     Facet,
@@ -13,6 +14,7 @@ from data import (
     Sum,
     TopN,
     Upsert,
+    Window,
 )
 
 
@@ -75,6 +77,21 @@ class TestTypedFoldDataclasses:
         f = Max(target="highest", field="temp")
         assert f.target == "highest"
         assert f.field == "temp"
+
+    def test_avg_frozen(self):
+        f = Avg(target="rate", field="latency")
+        assert f.target == "rate"
+        assert f.field == "latency"
+        with pytest.raises(AttributeError):
+            f.target = "other"
+
+    def test_window_frozen(self):
+        f = Window(target="intervals", field="interval", size=10)
+        assert f.target == "intervals"
+        assert f.field == "interval"
+        assert f.size == 10
+        with pytest.raises(AttributeError):
+            f.size = 20
 
 
 class TestTypedFoldApply:
@@ -355,3 +372,115 @@ class TestImmutability:
         result = s.apply(original, {"id": "b", "score": 20})
         assert "b" in result["items"]
         assert "b" not in original["items"], "original dict was mutated"
+
+
+class TestAvg:
+    """Tests for Avg fold: incremental running average."""
+
+    def test_avg_single_value(self):
+        s = Shape(
+            name="tracker",
+            folds=(Avg(target="rate", field="latency"),),
+        )
+        state = {"rate": None}
+        result = s.apply(state, {"latency": 10})
+        assert result["rate"] == 10.0
+
+    def test_avg_running_average(self):
+        s = Shape(
+            name="tracker",
+            folds=(Avg(target="rate", field="latency"),),
+        )
+        state = {"rate": None}
+        state = s.apply(state, {"latency": 10})
+        assert state["rate"] == 10.0
+
+        state = s.apply(state, {"latency": 20})
+        assert state["rate"] == 15.0
+
+        state = s.apply(state, {"latency": 30})
+        assert state["rate"] == 20.0
+
+    def test_avg_ignores_missing_field(self):
+        s = Shape(
+            name="tracker",
+            folds=(Avg(target="rate", field="latency"),),
+        )
+        state = {"rate": None}
+        result = s.apply(state, {"other": 10})
+        assert result["rate"] is None
+
+    def test_avg_maintains_hidden_state(self):
+        """Avg uses hidden _sum and _count fields for incremental computation."""
+        s = Shape(
+            name="tracker",
+            folds=(Avg(target="rate", field="latency"),),
+        )
+        state = {"rate": None}
+        state = s.apply(state, {"latency": 10})
+        state = s.apply(state, {"latency": 20})
+
+        # Hidden state should exist
+        assert state["rate_sum"] == 30.0
+        assert state["rate_count"] == 2
+        assert state["rate"] == 15.0
+
+
+class TestWindow:
+    """Tests for Window fold: sliding FIFO buffer."""
+
+    def test_window_appends_values(self):
+        s = Shape(
+            name="tracker",
+            folds=(Window(target="intervals", field="interval", size=5),),
+        )
+        state = {"intervals": []}
+        state = s.apply(state, {"interval": 1})
+        state = s.apply(state, {"interval": 2})
+        state = s.apply(state, {"interval": 3})
+
+        assert state["intervals"] == [1, 2, 3]
+
+    def test_window_drops_oldest(self):
+        s = Shape(
+            name="tracker",
+            folds=(Window(target="intervals", field="interval", size=3),),
+        )
+        state = {"intervals": []}
+        for i in [1, 2, 3, 4, 5]:
+            state = s.apply(state, {"interval": i})
+
+        # Window of size 3 should keep last 3
+        assert state["intervals"] == [3, 4, 5]
+
+    def test_window_ignores_missing_field(self):
+        s = Shape(
+            name="tracker",
+            folds=(Window(target="intervals", field="interval", size=3),),
+        )
+        state = {"intervals": [1, 2]}
+        result = s.apply(state, {"other": 10})
+        assert result["intervals"] == [1, 2]
+
+    def test_window_single_item(self):
+        s = Shape(
+            name="tracker",
+            folds=(Window(target="vals", field="val", size=1),),
+        )
+        state = {"vals": []}
+        state = s.apply(state, {"val": "a"})
+        assert state["vals"] == ["a"]
+
+        state = s.apply(state, {"val": "b"})
+        assert state["vals"] == ["b"]
+
+    def test_window_does_not_mutate_original(self):
+        s = Shape(
+            name="tracker",
+            folds=(Window(target="vals", field="val", size=3),),
+        )
+        original = {"vals": [1, 2]}
+        result = s.apply(original, {"val": 3})
+
+        assert result["vals"] == [1, 2, 3]
+        assert original["vals"] == [1, 2], "original list was mutated"

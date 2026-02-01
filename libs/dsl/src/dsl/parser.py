@@ -13,6 +13,7 @@ from .ast import (
     BoundaryWhen,
     Coerce,
     Duration,
+    FoldAvg,
     FoldBy,
     FoldCollect,
     FoldCount,
@@ -22,6 +23,7 @@ from .ast import (
     FoldMin,
     FoldOp,
     FoldSum,
+    FoldWindow,
     LoopDef,
     LoopFile,
     LStrip,
@@ -317,6 +319,19 @@ class Parser:
             self.advance()
             field_token = self.expect(TokenType.IDENTIFIER, "for min field")
             return FoldMin(field_token.value)
+
+        # avg <field>
+        if token.type == TokenType.AVG:
+            self.advance()
+            field_token = self.expect(TokenType.IDENTIFIER, "for avg field")
+            return FoldAvg(field_token.value)
+
+        # window <size> <field>
+        if token.type == TokenType.WINDOW:
+            self.advance()
+            size_token = self.expect(TokenType.NUMBER, "for window size")
+            field_token = self.expect(TokenType.IDENTIFIER, "for window field")
+            return FoldWindow(field_token.value, int(size_token.value))
 
         raise ParseError(f"Unknown fold operation: {token.value}", token.location)
 

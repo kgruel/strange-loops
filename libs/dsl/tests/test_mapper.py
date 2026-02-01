@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from data import Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert
+from data import Avg, Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert, Window
 from data import Coerce as RuntimeCoerce
 from data import Pick as RuntimePick
 from data import Rename as RuntimeRename
@@ -27,6 +27,7 @@ from dsl.mapper import (
 )
 from dsl.ast import (
     Coerce,
+    FoldAvg,
     FoldBy,
     FoldCollect,
     FoldCount,
@@ -34,6 +35,7 @@ from dsl.ast import (
     FoldMax,
     FoldMin,
     FoldSum,
+    FoldWindow,
     Pick,
     Skip,
     Split,
@@ -172,6 +174,21 @@ class TestFoldOpMapping:
         assert isinstance(result, Min)
         assert result.target == "coldest"
         assert result.field == "temp"
+
+    def test_fold_avg(self):
+        """FoldAvg maps to Avg."""
+        result = map_fold_op("rate", FoldAvg(field="latency"))
+        assert isinstance(result, Avg)
+        assert result.target == "rate"
+        assert result.field == "latency"
+
+    def test_fold_window(self):
+        """FoldWindow maps to Window."""
+        result = map_fold_op("intervals", FoldWindow(field="interval", size=10))
+        assert isinstance(result, Window)
+        assert result.target == "intervals"
+        assert result.field == "interval"
+        assert result.size == 10
 
 
 class TestCompileLoop:

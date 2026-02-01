@@ -49,6 +49,8 @@ class TokenType(Enum):
     COLLECT = auto()  # collect keyword
     MAX = auto()  # max keyword
     MIN = auto()  # min keyword
+    AVG = auto()  # avg keyword
+    WINDOW = auto()  # window keyword
 
     # Boundary
     WHEN = auto()  # when keyword
@@ -82,6 +84,8 @@ KEYWORDS = {
     "collect": TokenType.COLLECT,
     "max": TokenType.MAX,
     "min": TokenType.MIN,
+    "avg": TokenType.AVG,
+    "window": TokenType.WINDOW,
     "when": TokenType.WHEN,
     "strip": TokenType.STRIP,
     "lstrip": TokenType.LSTRIP,

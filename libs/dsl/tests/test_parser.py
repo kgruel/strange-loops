@@ -8,10 +8,12 @@ from dsl import (
     BoundaryWhen,
     Coerce,
     Duration,
+    FoldAvg,
     FoldBy,
     FoldCount,
     FoldLatest,
     FoldMax,
+    FoldWindow,
     ParseError,
     Pick,
     Skip,
@@ -401,3 +403,103 @@ loops:
         """Vertex without vertices: has None."""
         vertex = parse_vertex_file(FIXTURES / "minimal.vertex")
         assert vertex.vertices is None
+
+
+class TestParseAvgFold:
+    """Tests for avg fold syntax."""
+
+    def test_avg_fold(self):
+        """Parse avg <field> syntax."""
+        text = """\
+name: metrics
+loops:
+  latency:
+    fold:
+      rate: avg interval
+"""
+        vertex = parse_vertex(text)
+        fold = vertex.loops["latency"].folds[0]
+        assert fold.target == "rate"
+        assert isinstance(fold.op, FoldAvg)
+        assert fold.op.field == "interval"
+
+    def test_avg_fold_with_other_folds(self):
+        """Avg fold combined with other folds."""
+        text = """\
+name: metrics
+loops:
+  pulse:
+    fold:
+      count: +1
+      rate: avg interval
+      peak: max interval
+"""
+        vertex = parse_vertex(text)
+        folds = vertex.loops["pulse"].folds
+
+        assert folds[0].target == "count"
+        assert isinstance(folds[0].op, FoldCount)
+
+        assert folds[1].target == "rate"
+        assert isinstance(folds[1].op, FoldAvg)
+        assert folds[1].op.field == "interval"
+
+        assert folds[2].target == "peak"
+        assert isinstance(folds[2].op, FoldMax)
+
+
+class TestParseWindowFold:
+    """Tests for window fold syntax."""
+
+    def test_window_fold(self):
+        """Parse window <size> <field> syntax."""
+        text = """\
+name: metrics
+loops:
+  pulse:
+    fold:
+      intervals: window 10 interval
+"""
+        vertex = parse_vertex(text)
+        fold = vertex.loops["pulse"].folds[0]
+        assert fold.target == "intervals"
+        assert isinstance(fold.op, FoldWindow)
+        assert fold.op.size == 10
+        assert fold.op.field == "interval"
+
+    def test_window_fold_size_one(self):
+        """Window of size 1."""
+        text = """\
+name: metrics
+loops:
+  recent:
+    fold:
+      last: window 1 value
+"""
+        vertex = parse_vertex(text)
+        fold = vertex.loops["recent"].folds[0]
+        assert isinstance(fold.op, FoldWindow)
+        assert fold.op.size == 1
+        assert fold.op.field == "value"
+
+    def test_window_and_avg_together(self):
+        """Window and avg folds in same loop (common pattern)."""
+        text = """\
+name: cadence
+loops:
+  pulse:
+    fold:
+      intervals: window 10 interval
+      avg_rate: avg interval
+    boundary: when pulse.tick
+"""
+        vertex = parse_vertex(text)
+        folds = vertex.loops["pulse"].folds
+
+        assert folds[0].target == "intervals"
+        assert isinstance(folds[0].op, FoldWindow)
+        assert folds[0].op.size == 10
+
+        assert folds[1].target == "avg_rate"
+        assert isinstance(folds[1].op, FoldAvg)
+        assert folds[1].op.field == "interval"

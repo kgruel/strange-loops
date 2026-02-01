@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .ast import (
     BoundaryWhen,
+    FoldAvg,
     FoldBy,
     FoldCollect,
     FoldCount,
@@ -23,6 +24,7 @@ from .ast import (
     FoldMax,
     FoldMin,
     FoldSum,
+    FoldWindow,
     LoopFile,
     Pick,
     Skip,
@@ -179,7 +181,7 @@ def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
 
 def map_fold_op(target: str, op: DslFoldOp) -> RuntimeFoldOp:
     """Map DSL FoldOp to runtime FoldOp."""
-    from data import Collect, Count, Latest, Max, Min, Sum, Upsert
+    from data import Avg, Collect, Count, Latest, Max, Min, Sum, Upsert, Window
 
     if isinstance(op, FoldBy):
         return Upsert(target=target, key=op.key_field)
@@ -195,6 +197,10 @@ def map_fold_op(target: str, op: DslFoldOp) -> RuntimeFoldOp:
         return Max(target=target, field=op.field)
     elif isinstance(op, FoldMin):
         return Min(target=target, field=op.field)
+    elif isinstance(op, FoldAvg):
+        return Avg(target=target, field=op.field)
+    elif isinstance(op, FoldWindow):
+        return Window(target=target, field=op.field, size=op.size)
     else:
         raise ValueError(f"Unknown fold op type: {type(op)}")
 
@@ -218,6 +224,10 @@ def infer_field_type(target: str, op: DslFoldOp) -> str:
         return "list"
     elif isinstance(op, (FoldMax, FoldMin)):
         return "float"  # Numeric comparison
+    elif isinstance(op, FoldAvg):
+        return "float"  # Running average
+    elif isinstance(op, FoldWindow):
+        return "list"  # Sliding buffer
     else:
         return "str"
 

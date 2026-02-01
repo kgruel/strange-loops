@@ -4,7 +4,7 @@ Each fold op becomes a closure (state: dict, payload: dict) -> None
 that mutates state in place. Spec.apply() uses these to produce new
 state from old state + payload.
 
-Typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max
+Typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max, Avg, Window
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import time
 from typing import Callable
 
 from .fold import (
+    Avg,
     Collect,
     Count,
     FoldOp,
@@ -22,6 +23,7 @@ from .fold import (
     Sum,
     TopN,
     Upsert,
+    Window,
 )
 
 
@@ -129,6 +131,40 @@ def _make_max(target: str, value_field: str) -> Callable[[dict, dict], None]:
     return fold
 
 
+def _make_avg(target: str, value_field: str) -> Callable[[dict, dict], None]:
+    """Incremental running average of payload[value_field].
+
+    Maintains hidden state: {target}_sum and {target}_count.
+    """
+    sum_key = f"{target}_sum"
+    count_key = f"{target}_count"
+
+    def fold(state: dict, payload: dict) -> None:
+        value = payload.get(value_field)
+        if value is None:
+            return
+        state[sum_key] = state.get(sum_key, 0.0) + value
+        state[count_key] = state.get(count_key, 0) + 1
+        state[target] = state[sum_key] / state[count_key]
+
+    return fold
+
+
+def _make_window(target: str, value_field: str, size: int) -> Callable[[dict, dict], None]:
+    """Sliding window: append field value and drop oldest when full."""
+    def fold(state: dict, payload: dict) -> None:
+        value = payload.get(value_field)
+        if value is None:
+            return
+        items = state.get(target, [])
+        items.append(value)
+        if len(items) > size:
+            items = items[-size:]
+        state[target] = items
+
+    return fold
+
+
 # =============================================================================
 # Build functions
 # =============================================================================
@@ -156,6 +192,10 @@ def build_fold_fn(fold: FoldOp) -> Callable[[dict, dict], None]:
         return _make_min(fold.target, fold.field)
     elif isinstance(fold, Max):
         return _make_max(fold.target, fold.field)
+    elif isinstance(fold, Avg):
+        return _make_avg(fold.target, fold.field)
+    elif isinstance(fold, Window):
+        return _make_window(fold.target, fold.field, fold.size)
 
     else:
         raise ValueError(f"Unknown fold type: {type(fold)}")

@@ -186,8 +186,60 @@ class Max:
     field: str
 
 
+@dataclass(frozen=True)
+class Avg:
+    """Running average of a field.
+
+    Maintains sum and count internally for incremental computation.
+    Hidden state: {target}_sum and {target}_count managed by engine.
+
+    Attributes:
+        target: State field for the average value.
+        field: Payload field to average.
+
+    Example:
+        Avg(target="rate", field="latency")
+        # {"latency": 10} → state["rate"] = running average
+
+    Use cases:
+        - Average latency over time
+        - Mean rate calculation
+        - Any incremental average without storing all values
+    """
+
+    target: str
+    field: str
+
+
+@dataclass(frozen=True)
+class Window:
+    """Sliding window buffer (FIFO).
+
+    Unlike Collect, drops oldest when full (true sliding window).
+    Essential for rate/jitter calculations where you need recent values only.
+
+    Attributes:
+        target: State field (list).
+        field: Payload field to collect.
+        size: Maximum window size.
+
+    Example:
+        Window(target="intervals", field="interval", size=10)
+        # Keeps last 10 interval values, drops oldest
+
+    Difference from Collect:
+        - Collect appends entire payload, Window appends single field value
+        - Collect keeps last N payloads, Window keeps last N field values
+        - Window is optimized for numeric series (rates, timings)
+    """
+
+    target: str
+    field: str
+    size: int
+
+
 # =============================================================================
 # Type alias for any fold operation
 # =============================================================================
 
-FoldOp = Latest | Count | Sum | Collect | Upsert | TopN | Min | Max
+FoldOp = Latest | Count | Sum | Collect | Upsert | TopN | Min | Max | Avg | Window

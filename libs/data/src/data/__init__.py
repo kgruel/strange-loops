@@ -23,7 +23,7 @@ from data.boundary import Boundary
 from data.types import ValidationError
 
 # Fold vocabulary
-from data.fold import Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert
+from data.fold import Avg, Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert, Window
 
 # Parse vocabulary
 from data.parse import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
@@ -44,6 +44,7 @@ __all__ = [
     "Boundary",
     "ValidationError",
     # Fold vocabulary
+    "Avg",
     "Collect",
     "Count",
     "FoldOp",
@@ -53,6 +54,7 @@ __all__ = [
     "Sum",
     "TopN",
     "Upsert",
+    "Window",
     # Parse vocabulary
     "Coerce",
     "Pick",

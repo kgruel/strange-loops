@@ -2,6 +2,8 @@
 
 from .ast import (
     Boundary,
+    BoundaryAfter,
+    BoundaryEvery,
     BoundaryWhen,
     Coerce,
     Duration,
@@ -75,6 +77,8 @@ __all__ = [
     "FoldSum",
     "FoldWindow",
     "Boundary",
+    "BoundaryAfter",
+    "BoundaryEvery",
     "BoundaryWhen",
     # Lexer
     "Token",

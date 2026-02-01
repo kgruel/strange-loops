@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .ast import (
+    BoundaryAfter,
+    BoundaryEvery,
     BoundaryWhen,
     FoldAvg,
     FoldBy,
@@ -280,11 +282,18 @@ def map_loop_file(loop: LoopFile) -> Source:
 # -----------------------------------------------------------------------------
 
 
-def map_boundary(boundary: BoundaryWhen) -> Boundary:
+def map_boundary(boundary: BoundaryWhen | BoundaryAfter | BoundaryEvery) -> Boundary:
     """Map DSL boundary to runtime Boundary."""
     from data import Boundary
 
-    return Boundary(kind=boundary.kind, reset=True)
+    if isinstance(boundary, BoundaryWhen):
+        return Boundary(kind=boundary.kind, mode="when", reset=True)
+    elif isinstance(boundary, BoundaryAfter):
+        return Boundary(count=boundary.count, mode="after", reset=True)
+    elif isinstance(boundary, BoundaryEvery):
+        return Boundary(count=boundary.count, mode="every", reset=True)
+    else:
+        raise ValueError(f"Unknown boundary type: {type(boundary)}")
 
 
 def map_loop_def_to_spec(name: str, loop_def) -> Spec:

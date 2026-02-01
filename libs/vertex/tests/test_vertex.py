@@ -545,3 +545,84 @@ class TestVertexToFact:
         f = v.to_fact(tick)
 
         assert f.ts == NOW.timestamp()
+
+
+class TestCountBasedBoundaryIntegration:
+    """Vertex integration with count-based Loop boundaries."""
+
+    def test_vertex_fires_tick_on_count_boundary(self):
+        """Loop with boundary_count fires tick through Vertex."""
+        from vertex import Loop, Projection
+
+        v = Vertex("batch-processor")
+        loop = Loop(
+            name="events",
+            projection=Projection(0, fold=count_fold),
+            boundary_count=3,
+            boundary_mode="every",
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # First two facts — no tick
+        tick1 = v.receive(fact("events", value=1))
+        tick2 = v.receive(fact("events", value=2))
+        assert tick1 is None
+        assert tick2 is None
+
+        # Third fact — tick fires
+        tick3 = v.receive(fact("events", value=3))
+        assert tick3 is not None
+        assert tick3.name == "events"
+        assert tick3.payload == 3  # count of 3
+        assert tick3.origin == "batch-processor"
+
+    def test_vertex_count_boundary_repeats_with_every(self):
+        """boundary_mode='every' fires tick repeatedly."""
+        from vertex import Loop, Projection
+
+        v = Vertex("windowed")
+        loop = Loop(
+            name="metrics",
+            projection=Projection(0, fold=sum_fold),
+            boundary_count=2,
+            boundary_mode="every",
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # First batch
+        v.receive(fact("metrics", value=10))
+        tick1 = v.receive(fact("metrics", value=20))
+        assert tick1 is not None
+        assert tick1.payload == 30
+
+        # Second batch
+        v.receive(fact("metrics", value=100))
+        tick2 = v.receive(fact("metrics", value=200))
+        assert tick2 is not None
+        assert tick2.payload == 300
+
+    def test_vertex_count_boundary_exhausted_with_after(self):
+        """boundary_mode='after' fires once then stops."""
+        from vertex import Loop, Projection
+
+        v = Vertex("oneshot")
+        loop = Loop(
+            name="warmup",
+            projection=Projection([], fold=collect_fold),
+            boundary_count=2,
+            boundary_mode="after",
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # First batch fires
+        v.receive(fact("warmup", x=1))
+        tick1 = v.receive(fact("warmup", x=2))
+        assert tick1 is not None
+
+        # Subsequent facts don't fire (exhausted)
+        v.receive(fact("warmup", x=3))
+        tick2 = v.receive(fact("warmup", x=4))
+        assert tick2 is None

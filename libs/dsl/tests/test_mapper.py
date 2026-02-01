@@ -290,6 +290,39 @@ loops:
         assert spec.boundary is not None
         assert isinstance(spec.boundary, Boundary)
         assert spec.boundary.kind == "batch.complete"
+        assert spec.boundary.mode == "when"
+
+    def test_vertex_with_boundary_after(self):
+        """Vertex with count-based boundary (after N)."""
+        vertex = parse_vertex("""\
+name: test
+loops:
+  batch:
+    fold:
+      count: +1
+    boundary: after 10
+""")
+        specs = compile_vertex(vertex)
+        spec = specs["batch"]
+        assert spec.boundary is not None
+        assert spec.boundary.count == 10
+        assert spec.boundary.mode == "after"
+
+    def test_vertex_with_boundary_every(self):
+        """Vertex with count-based boundary (every N)."""
+        vertex = parse_vertex("""\
+name: test
+loops:
+  windowed:
+    fold:
+      total: + amount
+    boundary: every 100
+""")
+        specs = compile_vertex(vertex)
+        spec = specs["windowed"]
+        assert spec.boundary is not None
+        assert spec.boundary.count == 100
+        assert spec.boundary.mode == "every"
 
     def test_vertex_state_fields(self):
         """Vertex compiles with inferred state fields."""

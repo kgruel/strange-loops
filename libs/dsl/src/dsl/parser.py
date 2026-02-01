@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from .ast import (
     Boundary,
+    BoundaryAfter,
+    BoundaryEvery,
     BoundaryWhen,
     Coerce,
     Duration,
@@ -367,7 +369,22 @@ class Parser:
             kind_token = self.expect(TokenType.IDENTIFIER, "for boundary kind")
             return BoundaryWhen(kind_token.value)
 
-        raise ParseError("Expected 'when <kind>' for boundary", self.peek().location)
+        # after <N> or every <N> (as identifiers to avoid conflict with top-level keys)
+        if self.at(TokenType.IDENTIFIER):
+            keyword = self.peek().value
+            if keyword == "after":
+                self.advance()
+                count_token = self.expect(TokenType.NUMBER, "for count")
+                return BoundaryAfter(int(count_token.value))
+            elif keyword == "every":
+                self.advance()
+                count_token = self.expect(TokenType.NUMBER, "for count")
+                return BoundaryEvery(int(count_token.value))
+
+        raise ParseError(
+            "Expected 'when <kind>', 'after <N>', or 'every <N>' for boundary",
+            self.peek().location,
+        )
 
     # -------------------------------------------------------------------------
     # Loop definition parsing (.vertex files)

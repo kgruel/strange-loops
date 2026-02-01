@@ -187,3 +187,91 @@ class TestLoopBasics:
         assert loop.version == 1
         loop.receive({"value": 5})
         assert loop.version == 2
+
+
+class TestCountBasedBoundaries:
+    """Count-based boundary semantics (after N, every N)."""
+
+    def test_boundary_after_fires_once(self):
+        """boundary_mode='after' fires once after N facts, then never again."""
+        loop = Loop(
+            name="batch",
+            projection=Projection(0, fold=sum_fold),
+            boundary_count=3,
+            boundary_mode="after",
+            reset=True,
+        )
+
+        # First two facts don't trigger
+        assert loop.receive({"value": 1}, ts=EARLIER) is False
+        assert loop.receive({"value": 2}, ts=NOW) is False
+
+        # Third fact triggers
+        assert loop.receive({"value": 3}, ts=LATER) is True
+
+        # Fire the boundary
+        tick = loop.fire(LATER, origin="test")
+        assert tick.payload == 6  # 1+2+3
+        assert loop.state == 0  # reset
+
+        # After firing, subsequent facts never trigger again (exhausted)
+        assert loop.receive({"value": 4}) is False
+        assert loop.receive({"value": 5}) is False
+        assert loop.receive({"value": 6}) is False
+
+    def test_boundary_every_fires_repeatedly(self):
+        """boundary_mode='every' fires every N facts, repeating."""
+        loop = Loop(
+            name="windowed",
+            projection=Projection(0, fold=sum_fold),
+            boundary_count=2,
+            boundary_mode="every",
+            reset=True,
+        )
+
+        # First batch
+        assert loop.receive({"value": 10}) is False
+        assert loop.receive({"value": 20}) is True
+        tick1 = loop.fire(NOW, origin="test")
+        assert tick1.payload == 30
+
+        # Second batch (resets and fires again)
+        assert loop.receive({"value": 100}) is False
+        assert loop.receive({"value": 200}) is True
+        tick2 = loop.fire(LATER, origin="test")
+        assert tick2.payload == 300
+
+    def test_boundary_count_with_reset_false(self):
+        """Count-based boundary with reset=False preserves state."""
+        loop = Loop(
+            name="accumulator",
+            projection=Projection(0, fold=sum_fold),
+            boundary_count=2,
+            boundary_mode="every",
+            reset=False,
+        )
+
+        loop.receive({"value": 10})
+        loop.receive({"value": 20})  # triggers
+        tick1 = loop.fire(NOW, origin="test")
+        assert tick1.payload == 30
+
+        # State preserved, count resets for "every"
+        loop.receive({"value": 5})
+        loop.receive({"value": 5})  # triggers
+        tick2 = loop.fire(LATER, origin="test")
+        assert tick2.payload == 40  # 30 + 5 + 5
+
+    def test_receive_returns_false_for_kind_based_boundary(self):
+        """Kind-based boundaries don't use count tracking."""
+        loop = Loop(
+            name="events",
+            projection=Projection(0, fold=sum_fold),
+            boundary_kind="events.done",  # kind-based
+            boundary_mode="when",
+        )
+
+        # receive() always returns False for kind-based boundaries
+        assert loop.receive({"value": 1}) is False
+        assert loop.receive({"value": 2}) is False
+        assert loop.receive({"value": 3}) is False

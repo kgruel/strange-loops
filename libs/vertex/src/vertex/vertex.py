@@ -223,9 +223,11 @@ class Vertex:
             engine.projection.fold_one(payload)
 
         # Route to Loop (Loop tracks its own period_start internally)
+        # Loop.receive() returns True if a count-based boundary should fire
         loop = self._loops.get(kind)
+        count_boundary_fire = False
         if loop is not None:
-            loop.receive(payload, ts=fact_ts)
+            count_boundary_fire = loop.receive(payload, ts=fact_ts)
 
         # Forward to children that accept this kind
         # Skip the child that produced this fact (prevents loopback)
@@ -239,17 +241,21 @@ class Vertex:
                     child_fact = self._tick_to_fact(child_tick, child.name)
                     self.receive(child_fact, grant, _from_child=child.name)
 
-        # Check boundary trigger
+        # Check count-based boundary trigger (Loop returned True)
+        if count_boundary_fire and loop is not None:
+            return loop.fire(fact_ts, origin=self._name)
+
+        # Check kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
             return None
 
         # Fire from Loop if registered there
         if fold_kind in self._loops:
-            loop = self._loops[fold_kind]
+            target_loop = self._loops[fold_kind]
             # Loop.fire() handles reset internally
             # Use boundary fact's timestamp for consistency with fact-based time tracking
-            return loop.fire(fact_ts, origin=self._name)
+            return target_loop.fire(fact_ts, origin=self._name)
 
         # Fire from _FoldEngine (legacy path - no fidelity tracking, since=None)
         engine = self._engines[fold_kind]

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from dsl import (
+    BoundaryAfter,
+    BoundaryEvery,
     BoundaryWhen,
     Coerce,
     Duration,
@@ -178,6 +180,51 @@ class TestParseVertexFull:
     def test_routes(self):
         vertex = parse_vertex_file(FIXTURES / "system.vertex")
         assert vertex.routes == {"disk": "disk", "memory": "memory"}
+
+
+class TestCountBasedBoundaries:
+    """Count-based boundary parsing (after N, every N)."""
+
+    def test_boundary_after(self):
+        """Parse boundary: after 10 syntax."""
+        text = """\
+name: batch
+loops:
+  events:
+    fold:
+      count: +1
+    boundary: after 10
+"""
+        vertex = parse_vertex(text)
+        loop = vertex.loops["events"]
+        assert isinstance(loop.boundary, BoundaryAfter)
+        assert loop.boundary.count == 10
+
+    def test_boundary_every(self):
+        """Parse boundary: every 50 syntax."""
+        text = """\
+name: windowed
+loops:
+  metrics:
+    fold:
+      total: + value
+    boundary: every 50
+"""
+        vertex = parse_vertex(text)
+        loop = vertex.loops["metrics"]
+        assert isinstance(loop.boundary, BoundaryEvery)
+        assert loop.boundary.count == 50
+
+    def test_every_as_loop_key_still_works(self):
+        """every: key in .loop files should still work."""
+        text = """\
+source: echo test
+every: 5s
+kind: test
+observer: test
+"""
+        loop = parse_loop(text)
+        assert loop.every.seconds() == 5.0
 
 
 class TestParseErrors:

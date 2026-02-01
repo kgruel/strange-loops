@@ -266,7 +266,21 @@ class BoundaryWhen:
     kind: str
 
 
-Boundary = BoundaryWhen  # v1: only kind-based
+@dataclass(frozen=True)
+class BoundaryAfter:
+    """Count-based boundary: fire after N facts (one-shot)."""
+
+    count: int
+
+
+@dataclass(frozen=True)
+class BoundaryEvery:
+    """Count-based boundary: fire every N facts (repeating)."""
+
+    count: int
+
+
+Boundary = BoundaryWhen | BoundaryAfter | BoundaryEvery
 
 
 # -----------------------------------------------------------------------------

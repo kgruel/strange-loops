@@ -17,7 +17,7 @@ Ephemeral fold:  state lives in memory, dies with the process
 Durable fold:    state persists to a Store, reconstructed on restart
 ```
 
-This is configuration, not architecture. The same Vertex, same Shape,
+This is configuration, not architecture. The same Vertex, same Spec,
 same fold function. The only difference is whether a Store is attached.
 
 ```python
@@ -54,7 +54,7 @@ The invariant: **fold state is never serialized directly.** If you can
 replay the facts through the shape, you can reconstruct the state. This
 means:
 
-- Shape changes are safe — replay with the new shape, get updated state
+- Spec changes are safe — replay with the new shape, get updated state
 - Corruption is detectable — replay should produce deterministic results
 - Storage is simple — just append facts, never update
 
@@ -167,7 +167,7 @@ No special infrastructure. Facts go in, confirmation facts come out.
 
 ## Store Implementations
 
-The ticks library provides two Store implementations:
+The vertex library provides two Store implementations:
 
 ### EventStore
 
@@ -218,7 +218,7 @@ Vertex accepts any Store. Swap implementations without changing fold logic.
 Persistence needs no new atoms:
 
 - **Fact** is the unit of persistence — immutable, timestamped, storable
-- **Shape** describes how facts fold — replay uses the same apply()
+- **Spec** describes how facts fold — replay uses the same apply()
 - **Vertex** optionally attaches a Store — configuration, not type
 - **Tick** is the output — can be stored for audit, but isn't required
 
@@ -268,14 +268,14 @@ vertex persists the Ticks.
 
 ### Replay with schema evolution
 
-Shape changes are safe because state is derived.
+Spec changes are safe because state is derived.
 
 ```python
 # Old shape
-old_shape = Shape("metric", folds=[Fold("sum", "total")])
+old_spec = Spec("metric", folds=[Fold("sum", "total")])
 
 # New shape adds a count
-new_shape = Shape("metric", folds=[
+new_spec = Spec("metric", folds=[
     Fold("sum", "total"),
     Fold("count", "n")
 ])

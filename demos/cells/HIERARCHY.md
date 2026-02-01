@@ -68,7 +68,7 @@ COMPONENTS (stateful widgets)
   table           columnar data
 ```
 
-## The Full Pipeline (with ticks)
+## The Full Pipeline (with vertex)
 
 ```
 ═══════════════════════════════════════════════════════════════════
@@ -78,9 +78,9 @@ COMPONENTS (stateful widgets)
   Events ──→ Projection ──→ State ──→ Lens ──→ Block
                  ↑                      ↑
              fold ops               zoom level
-              (ticks)                (cells)
+              (vertex)                (cells)
 
-  ticks owns DATA transformation:
+  vertex owns DATA transformation:
     Projection[S, E]: fold events into derived state
     Stateful, incremental, O(new events)
 
@@ -93,10 +93,10 @@ COMPONENTS (stateful widgets)
 
 | Layer | Primitive | Signature | Nature |
 |-------|-----------|-----------|--------|
-| ticks | Projection | `(State, Event) -> State` | Fold (stateful) |
+| vertex | Projection | `(State, Event) -> State` | Fold (stateful) |
 | cells | Lens | `(State, zoom) -> Block` | Map (stateless) |
 
-They're **peers across domains**. Projection is ticks vocabulary. Lens is cells vocabulary.
+They're **peers across domains**. Projection is vertex vocabulary. Lens is cells vocabulary.
 
 ## Zoom Levels
 

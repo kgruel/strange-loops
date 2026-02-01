@@ -98,7 +98,7 @@ one thing to compose.
 | Vertex as sole integration point | External timer, user keypress, infrastructure event — all `receive()` |
 | Fold origin-blindness | Health fold doesn't know if the fact came from a timer or a test |
 | Peer constrains the loop | potential gates emission, horizon gates rendering — two fields |
-| Shape drives wiring | Composition reads shape.name, shape.initial_state() — no interpretation |
+| Spec drives wiring | Composition reads spec.name, spec.initial_state() — no interpretation |
 | Infrastructure vs domain = wiring, not type | Same `receive()`, different call sites |
 
 ### Prior experiments (context)

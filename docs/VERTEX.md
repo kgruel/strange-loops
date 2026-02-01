@@ -19,7 +19,7 @@ vertices are where cycles meet. An intersection is a *place*, not a pipe.
 A Vertex does three things:
 
 1. **Routes** — dispatches facts by kind to registered fold engines
-2. **Folds** — accumulates state via `Shape.apply` or custom fold functions
+2. **Folds** — accumulates state via `Spec.apply` or custom fold functions
 3. **Ticks** — produces frozen snapshots at temporal boundaries
 
 The `Stream` class still exists as runtime infrastructure. But when you
@@ -87,7 +87,7 @@ vertex.register("health", initial={}, fold=health_fold)
 vertex.register("deploy", initial={}, fold=deploy_fold)
 ```
 
-Shape convention: name your Shape after the primary Fact kind it folds. A Shape
+Spec convention: name your Spec after the primary Fact kind it folds. A Spec
 called `"health"` folds Facts with `kind="health"`. This is legibility, not
 dispatch — routing remains explicit in your wiring code.
 
@@ -103,8 +103,8 @@ you name it.
 Each registered kind gets a fold engine — a Projection that accumulates state.
 
 ```python
-# Shape.apply as fold (when declarative folds fit)
-vertex.register("audit", audit_shape.initial_state(), audit_shape.apply)
+# Spec.apply as fold (when declarative folds fit)
+vertex.register("audit", audit_spec.initial_state(), audit_spec.apply)
 
 # Hand-written fold (when you need custom logic)
 def health_fold(state: dict, payload: dict) -> dict:
@@ -282,17 +282,17 @@ vertex doesn't care that it came from another vertex. Loops nest.
 
 ---
 
-## Relationship to ticks Library
+## Relationship to vertex Library
 
-The `ticks` library provides the concrete implementation:
+The `vertex` library provides the concrete implementation:
 
 | Concept | Implementation |
 |---------|----------------|
-| Vertex | `ticks.Vertex` class |
-| Fold engine | `ticks.Projection` (internal to Vertex) |
-| Tick output | `ticks.Tick[T]` frozen dataclass |
-| Persistence | `ticks.Store` protocol (EventStore, FileStore) |
-| Fan-out | `ticks.Stream` + `ticks.Tap` |
+| Vertex | `vertex.Vertex` class |
+| Fold engine | `vertex.Projection` (internal to Vertex) |
+| Tick output | `vertex.Tick[T]` frozen dataclass |
+| Persistence | `vertex.Store` protocol (EventStore, FileStore) |
+| Fan-out | `vertex.Stream` + `vertex.Tap` |
 
 Vertex is sync by design. The async bridge lives at the composition point:
 

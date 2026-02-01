@@ -43,20 +43,20 @@ No timers. No polling intervals. The data carries its own punctuation.
 
 ## How Boundaries Fire
 
-A Shape declares a boundary. The composition layer reads it and wires the Vertex:
+A Spec declares a boundary. The composition layer reads it and wires the Vertex:
 
 ```python
-# Shape declares the contract
-health_shape = Shape(
+# Spec declares the contract
+health_spec = Spec(
     name="health",
     boundary=Boundary("health.close", reset=True),
     ...
 )
 
-# Composition layer wires the Vertex from the Shape
+# Composition layer wires the Vertex from the Spec
 vertex.register(
     "health",                      # kind to fold
-    health_shape.initial_state(),  # starting state
+    health_spec.initial_state(),  # starting state
     health_fold,                   # fold function
     boundary="health.close",       # kind that triggers boundary
     reset=True,                    # reset after tick
@@ -98,7 +98,7 @@ Tick[T]
 
 A Tick is a **frozen snapshot at a semantic moment**. It's not "state at time T" — it's "state when this cycle completed."
 
-The payload is whatever the fold produced. Health might be `{count: 12, last: "redis", status: "running"}`. Deploy might be `{target: "api-v2.3", stage: "done", step: 5}`. The Shape determines the structure.
+The payload is whatever the fold produced. Health might be `{count: 12, last: "redis", status: "running"}`. Deploy might be `{target: "api-v2.3", stage: "done", step: 5}`. The Spec determines the structure.
 
 ---
 
@@ -223,8 +223,8 @@ Boundaries let the domain define coherence. The infrastructure doesn't impose ar
 
 ## The Pattern
 
-1. **Shape declares boundary** — which kind completes a cycle, whether to reset
-2. **Composition wires Vertex** — reads Shape, configures fold engine
+1. **Spec declares boundary** — which kind completes a cycle, whether to reset
+2. **Composition wires Vertex** — reads Spec, configures fold engine
 3. **Facts accumulate** — fold builds state
 4. **Boundary arrives** — tick fires, state optionally resets
 5. **Tick routes forward** — enters the next Vertex as input

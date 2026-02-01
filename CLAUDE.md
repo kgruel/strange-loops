@@ -15,13 +15,12 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 
 | Atom | Structure | Question |
 |------|-----------|----------|
-| Fact | kind + ts + payload | *what happened* |
-| Peer | name + horizon + potential | *who observed* |
-| Tick | name + ts + payload + origin | *when a cycle completed* |
+| Fact | kind + ts + payload + observer | *what happened* |
 | Spec | fields + folds + boundary | *how state accumulates* |
-| Vertex | routes + folds + ticks | *where loops meet* |
+| Tick | name + ts + payload + origin | *when a cycle completed* |
 
-Cell is a surface primitive (terminal), not a loop atom.
+Three atoms. Peer dissolved to `observer` field on Fact + `Grant` policy at Vertex.
+Vertex is runtime infrastructure, not an atom. Cell is a surface primitive.
 
 ## Build & Test
 
@@ -92,4 +91,4 @@ Domain facts stay bare (`"health"`, `"deploy"`).
 | `docs/VERTEX.md` | Intersection point — routing, folding, branching |
 | `docs/TEMPORAL.md` | Boundaries and nesting — how loops mark time |
 | `docs/PERSISTENCE.md` | Durable state — how loops remember |
-| `docs/PEERS.md` | Identity — who observes |
+| `docs/IDENTITY.md` | Observer and gating — who sees, who emits |

@@ -63,6 +63,10 @@ class Vertex:
     Grant-aware: receive() takes a Fact (with observer) and optional Grant.
     The Vertex gates facts against the grant's potential (if provided) and
     enforces observer-state kind ownership based on fact.observer.
+
+    Nesting: a Vertex can contain child vertices. After local routing,
+    facts are forwarded to children that accept the kind. Child ticks
+    become facts that re-enter the parent.
     """
 
     def __init__(self, name: str = "", *, store: Store | None = None) -> None:
@@ -71,11 +75,38 @@ class Vertex:
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._store = store
+        self._children: list[Vertex] = []
 
     @property
     def name(self) -> str:
         """Vertex name — stamped as origin on produced Ticks."""
         return self._name
+
+    @property
+    def children(self) -> list[Vertex]:
+        """Child vertices, in registration order."""
+        return list(self._children)
+
+    def add_child(self, child: Vertex) -> None:
+        """Add a child vertex.
+
+        Facts received by this vertex will be forwarded to children that
+        accept the kind. Ticks produced by children become facts that
+        re-enter this vertex.
+        """
+        self._children.append(child)
+
+    def accepts(self, kind: str) -> bool:
+        """Check if this vertex handles a kind.
+
+        Returns True if the kind is registered as a route (fold engine),
+        loop name, or boundary kind — or if any child accepts it.
+        Used by parent vertices to determine whether to forward facts
+        to this child.
+        """
+        if kind in self._engines or kind in self._loops or kind in self._boundary_map:
+            return True
+        return any(child.accepts(kind) for child in self._children)
 
     def register(
         self,
@@ -131,7 +162,13 @@ class Vertex:
             self._boundary_map[loop.boundary_kind] = kind
         self._loops[kind] = loop
 
-    def receive(self, fact: Fact, grant: Grant | None = None) -> Tick | None:
+    def receive(
+        self,
+        fact: Fact,
+        grant: Grant | None = None,
+        *,
+        _from_child: str | None = None,
+    ) -> Tick | None:
         """Route a fact to the appropriate fold engine, gated by optional grant.
 
         Gating rules:
@@ -143,11 +180,20 @@ class Vertex:
         Unregistered kinds are silently ignored — they pass through to the
         store but don't fold.
 
+        After local routing, forwards to children that accept the kind.
+        Child ticks become facts that re-enter this vertex (but not back
+        to the originating child, to prevent recursion).
+
         After folding, checks if the incoming kind triggers a boundary.
         If so, snapshots the triggered engine's state into a Tick and
         optionally resets the engine. Returns the Tick, or None.
 
         Returns None on rejection (fact not permitted by grant).
+
+        Args:
+            fact: The Fact to receive
+            grant: Optional Grant for potential gating
+            _from_child: Internal - name of child that produced this fact (prevents loopback)
         """
         kind = fact.kind
         payload = fact.payload
@@ -180,6 +226,18 @@ class Vertex:
         loop = self._loops.get(kind)
         if loop is not None:
             loop.receive(payload, ts=fact_ts)
+
+        # Forward to children that accept this kind
+        # Skip the child that produced this fact (prevents loopback)
+        for child in self._children:
+            if child.name == _from_child:
+                continue
+            if child.accepts(kind):
+                child_tick = child.receive(fact, grant)
+                if child_tick is not None:
+                    # Child produced a tick — convert to fact and re-enter parent
+                    child_fact = self._tick_to_fact(child_tick, child.name)
+                    self.receive(child_fact, grant, _from_child=child.name)
 
         # Check boundary trigger
         fold_kind = self._boundary_map.get(kind)
@@ -253,6 +311,23 @@ class Vertex:
             ts=tick.ts.timestamp(),
             payload=tick.payload,
             observer=self._name,
+        )
+
+    def _tick_to_fact(self, tick: Tick, child_name: str) -> Fact:
+        """Convert a child's Tick to a Fact for re-entry.
+
+        The tick's name becomes the fact kind (emit name → kind).
+        The child vertex name becomes the observer.
+        Payload is spread into the fact.
+        """
+        from data import Fact
+
+        payload = tick.payload if isinstance(tick.payload, dict) else {"value": tick.payload}
+        return Fact(
+            kind=tick.name,
+            ts=tick.ts.timestamp(),
+            payload=payload,
+            observer=child_name,
         )
 
     def ingest(

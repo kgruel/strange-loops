@@ -183,7 +183,7 @@ class Lexer:
     def read_identifier_or_keyword(self) -> tuple[TokenType, str]:
         """Read an identifier or keyword."""
         start = self.pos
-        while self.peek() and (self.peek().isalnum() or self.peek() in "_-."):
+        while self.peek() and (self.peek().isalnum() or self.peek() in "_-.@"):
             self.advance()
         value = self.text[start : self.pos]
         token_type = KEYWORDS.get(value, TokenType.IDENTIFIER)

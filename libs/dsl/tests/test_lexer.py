@@ -73,6 +73,35 @@ class TestTokenize:
         assert len(lbrackets) == 1
         assert len(rbrackets) == 1
 
+    def test_at_symbol_in_identifier(self):
+        """Test @ symbol is allowed in identifiers (e.g., SSH user@host)."""
+        tokens = tokenize("source: ssh deploy@192.168.1.30 cmd")
+        identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
+        values = [t.value for t in identifiers]
+        assert "deploy@192.168.1.30" in values
+
+    def test_at_symbol_with_port(self):
+        """Test @ with colon for port numbers."""
+        tokens = tokenize("source: curl user@host:8080")
+        identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
+        # user@host gets tokenized, then : becomes COLON, then 8080 is NUMBER
+        values = [t.value for t in identifiers]
+        assert "user@host" in values
+
+    def test_at_symbol_multiple(self):
+        """Test multiple @ symbols in one identifier."""
+        tokens = tokenize("source: echo a@b@c")
+        identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
+        values = [t.value for t in identifiers]
+        assert "a@b@c" in values
+
+    def test_at_symbol_email(self):
+        """Test email-like patterns."""
+        tokens = tokenize("source: echo user@domain.com")
+        identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
+        values = [t.value for t in identifiers]
+        assert "user@domain.com" in values
+
 
 class TestIndentation:
     """Indentation handling tests."""

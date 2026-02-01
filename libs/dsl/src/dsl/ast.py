@@ -149,6 +149,32 @@ ParseStep = Skip | Split | Pick | Transform
 
 
 # -----------------------------------------------------------------------------
+# Trigger (for .loop files - Cadence/Source split)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Trigger:
+    """Event trigger for a loop.
+
+    Single kind or list of kinds (OR semantics).
+    Specifies when a loop should execute.
+    """
+
+    kinds: tuple[str, ...]
+
+    @classmethod
+    def single(cls, kind: str) -> "Trigger":
+        """Create trigger for single kind."""
+        return cls((kind,))
+
+    @classmethod
+    def multi(cls, kinds: list[str]) -> "Trigger":
+        """Create trigger for multiple kinds (OR semantics)."""
+        return cls(tuple(kinds))
+
+
+# -----------------------------------------------------------------------------
 # Fold Operations (for .vertex files)
 # -----------------------------------------------------------------------------
 
@@ -250,10 +276,11 @@ class LoopDef:
 class LoopFile:
     """AST for a .loop file."""
 
-    source: str
     kind: str
     observer: str
+    source: str | None = None  # Optional for pure timer loops
     every: Duration | None = None
+    on: Trigger | None = None  # Event trigger (mutually exclusive with every)
     format: Literal["lines", "json", "blob"] = "lines"
     timeout: Duration = Duration(60000)  # 60s default
     env: dict[str, str] | None = None

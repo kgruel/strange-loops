@@ -256,3 +256,48 @@ loops:
 """)
         result = validate(vertex)
         assert result is None  # Vertex validation returns None
+
+
+class TestTriggerValidation:
+    """Validation for on:/every: trigger syntax."""
+
+    def test_on_and_every_mutually_exclusive(self):
+        """on: and every: cannot be used together."""
+        loop = parse_loop("""\
+source: df -h
+on: minute
+every: 60s
+kind: disk
+observer: monitor
+""")
+        with pytest.raises(ValidationError, match="on: and every: are mutually exclusive"):
+            validate_loop(loop)
+
+    def test_pure_timer_valid(self):
+        """Pure timer loop (every: without source:) is valid."""
+        loop = parse_loop("""\
+every: 60s
+kind: minute
+observer: clock
+""")
+        validate_loop(loop)  # Should not raise
+
+    def test_triggered_source_valid(self):
+        """Triggered source (on: with source:) is valid."""
+        loop = parse_loop("""\
+source: df -h
+on: minute
+kind: disk
+observer: monitor
+""")
+        validate_loop(loop)  # Should not raise
+
+    def test_traditional_loop_valid(self):
+        """Traditional loop (every: with source:) is valid."""
+        loop = parse_loop("""\
+source: df -h
+every: 60s
+kind: disk
+observer: monitor
+""")
+        validate_loop(loop)  # Should not raise

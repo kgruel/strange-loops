@@ -18,6 +18,7 @@ from dsl import (
     Split,
     Strip,
     Transform,
+    Trigger,
     parse_loop,
     parse_loop_file,
     parse_vertex,
@@ -268,3 +269,76 @@ parse:
 """
         loop = parse_loop(text)
         assert len(loop.parse) == 2
+
+
+class TestTriggerSyntax:
+    """Tests for on: trigger syntax (Cadence/Source split)."""
+
+    def test_single_trigger(self):
+        """Parse on: with single kind."""
+        text = """\
+source: df -h
+on: minute
+kind: disk
+observer: disk-monitor
+"""
+        loop = parse_loop(text)
+        assert loop.source == "df -h"
+        assert loop.on is not None
+        assert loop.on.kinds == ("minute",)
+        assert loop.kind == "disk"
+        assert loop.every is None
+
+    def test_multi_trigger(self):
+        """Parse on: with multiple kinds (OR semantics)."""
+        text = """\
+source: ./checks.sh
+on: [minute, deploy.complete]
+kind: checks
+observer: monitor
+"""
+        loop = parse_loop(text)
+        assert loop.source == "./checks.sh"
+        assert loop.on is not None
+        assert loop.on.kinds == ("minute", "deploy.complete")
+        assert loop.kind == "checks"
+
+    def test_pure_timer_loop(self):
+        """Parse pure timer loop (no source)."""
+        text = """\
+every: 60s
+kind: minute
+observer: clock
+"""
+        loop = parse_loop(text)
+        assert loop.source is None
+        assert loop.every == Duration(60000)
+        assert loop.kind == "minute"
+        assert loop.observer == "clock"
+        assert loop.on is None
+
+    def test_triggered_source_with_parse(self):
+        """Triggered source can have parse pipeline."""
+        text = """\
+source: df -h
+on: minute
+kind: disk
+observer: monitor
+parse:
+  skip ^Filesystem
+  split
+"""
+        loop = parse_loop(text)
+        assert loop.on is not None
+        assert loop.on.kinds == ("minute",)
+        assert len(loop.parse) == 2
+
+    def test_trigger_class_single(self):
+        """Trigger.single() creates single-kind trigger."""
+        trigger = Trigger.single("minute")
+        assert trigger.kinds == ("minute",)
+
+    def test_trigger_class_multi(self):
+        """Trigger.multi() creates multi-kind trigger."""
+        trigger = Trigger.multi(["minute", "hour"])
+        assert trigger.kinds == ("minute", "hour")

@@ -34,6 +34,7 @@ from .ast import (
     Strip,
     Transform,
     TransformOp,
+    Trigger,
     VertexFile,
 )
 from .errors import Location, ParseError
@@ -112,6 +113,28 @@ class Parser:
         if token.type == TokenType.IDENTIFIER:
             return token.value
         raise ParseError(f"Expected string, got {token.type.name}", token.location)
+
+    def parse_trigger(self) -> Trigger:
+        """Parse a trigger value: single kind or [kind1, kind2, ...] list."""
+        if self.at(TokenType.LBRACKET):
+            # List of kinds: [minute, hour]
+            self.advance()  # consume [
+            kinds = []
+            while not self.at(TokenType.RBRACKET, TokenType.NEWLINE, TokenType.EOF):
+                kind_token = self.expect(TokenType.IDENTIFIER, "for trigger kind")
+                kinds.append(kind_token.value)
+                if self.at(TokenType.COMMA):
+                    self.advance()
+                elif not self.at(TokenType.RBRACKET):
+                    break
+            self.expect(TokenType.RBRACKET, "to close trigger list")
+            if not kinds:
+                raise ParseError("Empty trigger list", self.peek().location)
+            return Trigger.multi(kinds)
+        else:
+            # Single kind: minute
+            kind_token = self.expect(TokenType.IDENTIFIER, "for trigger kind")
+            return Trigger.single(kind_token.value)
 
     # -------------------------------------------------------------------------
     # Parse section parsing (.loop files)
@@ -442,6 +465,7 @@ class Parser:
         kind: str | None = None
         observer: str | None = None
         every: Duration | None = None
+        on: Trigger | None = None
         format_: Literal["lines", "json", "blob"] = "lines"
         timeout = Duration(60000)
         env: dict[str, str] | None = None
@@ -477,6 +501,8 @@ class Parser:
                 observer = self.parse_string(obs_token)
             elif key == "every":
                 every = self.parse_duration(self.advance())
+            elif key == "on":
+                on = self.parse_trigger()
             elif key == "format":
                 fmt_token = self.advance()
                 fmt_value = self.parse_string(fmt_token)
@@ -500,18 +526,23 @@ class Parser:
             self.skip_newlines()
 
         # Validate required fields
-        if source is None:
-            raise ParseError("Missing required field: source", Location(self.path, 1))
         if kind is None:
             raise ParseError("Missing required field: kind", Location(self.path, 1))
         if observer is None:
             raise ParseError("Missing required field: observer", Location(self.path, 1))
+        # source is required unless every: is present (pure timer loop)
+        if source is None and every is None:
+            raise ParseError(
+                "Missing required field: source (or use every: for pure timer loop)",
+                Location(self.path, 1),
+            )
 
         return LoopFile(
-            source=source,
             kind=kind,
             observer=observer,
+            source=source,
             every=every,
+            on=on,
             format=format_,
             timeout=timeout,
             env=env,

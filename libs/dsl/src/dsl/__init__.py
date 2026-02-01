@@ -26,6 +26,7 @@ from .ast import (
     Strip,
     Transform,
     TransformOp,
+    Trigger,
     VertexFile,
 )
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
@@ -49,6 +50,7 @@ __all__ = [
     "RStrip",
     "Replace",
     "Coerce",
+    "Trigger",
     # AST types - Vertex file
     "VertexFile",
     "LoopDef",

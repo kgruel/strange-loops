@@ -186,7 +186,19 @@ def validate_loop_file(loop: LoopFile) -> tuple[Shape | None, list[ValidationErr
     """
     ctx = ValidationContext(path=str(loop.path) if loop.path else None)
 
-    # Required fields already checked by parser
+    # Validate on/every mutual exclusivity
+    if loop.on is not None and loop.every is not None:
+        ctx.error(
+            "on: and every: are mutually exclusive",
+            hint="Use on: to trigger from events, or every: for interval timing",
+        )
+
+    # Validate source requirement
+    if loop.source is None and loop.every is None:
+        ctx.error(
+            "source: is required unless every: is present (pure timer loop)",
+            hint="Add source: for the command to run, or every: for a timer-only loop",
+        )
 
     # Validate parse pipeline
     output_shape = None

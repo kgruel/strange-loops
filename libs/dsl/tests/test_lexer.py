@@ -65,6 +65,14 @@ class TestTokenize:
         assert len(globs) == 1
         assert globs[0].value == "./**/*.loop"
 
+    def test_brackets(self):
+        """Test bracket tokens for list syntax."""
+        tokens = tokenize("on: [minute, hour]")
+        lbrackets = [t for t in tokens if t.type == TokenType.LBRACKET]
+        rbrackets = [t for t in tokens if t.type == TokenType.RBRACKET]
+        assert len(lbrackets) == 1
+        assert len(rbrackets) == 1
+
 
 class TestIndentation:
     """Indentation handling tests."""

@@ -68,6 +68,8 @@ class TokenType(Enum):
     PIPE = auto()  # |
     COMMA = auto()  # ,
     DASH = auto()  # - (for list items)
+    LBRACKET = auto()  # [
+    RBRACKET = auto()  # ]
 
 
 # Keywords that get special token types
@@ -252,6 +254,16 @@ class Lexer:
             if self.peek() == "|":
                 self.advance()
                 yield Token(TokenType.PIPE, "|", loc)
+                continue
+
+            if self.peek() == "[":
+                self.advance()
+                yield Token(TokenType.LBRACKET, "[", loc)
+                continue
+
+            if self.peek() == "]":
+                self.advance()
+                yield Token(TokenType.RBRACKET, "]", loc)
                 continue
 
             if self.peek() == "+" and self.peek(1).isdigit():

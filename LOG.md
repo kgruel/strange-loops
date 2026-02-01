@@ -5,6 +5,53 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-01-31 — Cadence/Source split + doc cleanup
+
+**The insight.** Source has two concerns: **what** to observe (command, API,
+nothing) and **when** to observe (interval, event trigger). These should be
+separate concepts.
+
+**Cadence** = when. Can be:
+- `every 10s` — simple interval
+- `on: minute` — triggered by fact
+- Complex loop with its own boundaries
+
+**Source** = what. Can be:
+- Shell command, API, stream
+- Nothing (pure timer)
+
+**Timer as fact.** A timer is a loop with cadence but no source — emits
+time-shaped facts. Other loops trigger `on:` those facts. The clock is just
+another data source. Runtime simplifies to uniform receive → route → fold.
+
+**Backpressure discussion.** Started unpacking what happens when triggers fire
+faster than sources execute. Leaning toward: no special mechanism — a busy
+source emits `trigger.skipped` facts. Observable, composable, consistent with
+"failures are just more facts."
+
+**cadence_viz experiment.** Animated TUI showing the pattern:
+- Pulse (1s) → Breath (5 pulses) → Minute (12 breaths)
+- Feedback loop: minute variance → rate adjustment → pulse interval
+- Visual: pulse dots, breath circles, health gauge, fact stream, sparkline
+- Proves: timer cascade works, ticks compose, feedback is just more facts
+
+**Doc audit.** Aggressive cleanup:
+- 6 files archived (5-atom model docs, strata-specific)
+- 2 files removed (stale README, PLAN)
+- 8 files revised (Shape→Spec, 5→3 atoms)
+- PEERS.md → IDENTITY.md (observer field + Grant model)
+- New accurate root README.md
+
+**Open questions captured:**
+1. Sugar vs explicit — should `every: 10s` auto-create timer?
+2. Multiple triggers — `on: [a, b]` = OR or AND?
+3. Feedback loops — A → B → A allowed? (yes, detection is tooling)
+4. Backpressure — source emits status facts, no special mechanism
+
+See `docs/CADENCE.md` for the design, `experiments/cadence_viz.py` for proof.
+
+---
+
 ## 2026-01-31 — Fidelity-aware Lens
 
 **The experiment.** Zoom level maps to fidelity depth. Build pipeline domain

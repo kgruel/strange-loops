@@ -95,8 +95,7 @@ same mechanism.
 
 ### In Flight
 
-- **chore/doc-audit** — Inventorying all docs for aggressive cleanup
-- **exp/cadence-viz** — Animated TUI showing timer cascade at max fidelity
+None — both doc-audit and cadence-viz merged.
 
 ## Next Steps
 
@@ -116,6 +115,13 @@ same mechanism.
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
 ## Resolved
+
+51. ~~Doc audit~~ — 6 archived, 2 removed, 8 revised. Shape→Spec, 5→3 atoms.
+    PEERS.md rewritten as IDENTITY.md. New accurate root README.
+
+50. ~~Cadence visualization~~ — Animated TUI proving Cadence/Source split.
+    Pulse→Breath→Minute hierarchy with feedback loop. Two-column layout.
+    `experiments/cadence_viz.py`.
 
 49. ~~Fidelity-aware Lens~~ — Zoom maps to fidelity. Build pipeline domain with
     nested phase ticks. zoom=0 minimal, zoom=1 summary, zoom=2+ expands nested

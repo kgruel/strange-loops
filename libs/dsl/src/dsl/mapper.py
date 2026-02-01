@@ -5,10 +5,13 @@ Maps:
 - VertexFile loops → Spec instances
 - DSL parse steps → runtime ParseOp
 - DSL fold ops → runtime FoldOp
+- VertexFile vertices → recursive child compilation
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .ast import (
@@ -25,6 +28,7 @@ from .ast import (
     Skip,
     Split,
     Transform,
+    Trigger,
     VertexFile,
 )
 from .ast import Coerce as DslCoerce
@@ -226,23 +230,35 @@ def map_loop_file(loop: LoopFile) -> Source:
     """Map LoopFile AST to runtime Source.
 
     Returns a Source configured with:
-    - command: the shell command
+    - command: the shell command (None for pure timer)
     - kind: fact kind
     - observer: who observed
     - every: repeat interval (seconds)
+    - trigger: kinds that trigger this source (for on: syntax)
     - format: output interpretation
     - parse: compiled parse pipeline
+
+    Timing modes:
+    - loop.every + no on: → polling source
+    - loop.on + no every: → triggered source
+    - loop.every + no source: → pure timer (emits ticks)
     """
     from data import Source
 
     # Compile parse pipeline
     parse_ops = map_parse_steps(loop.parse) if loop.parse else None
 
+    # Map trigger if present
+    trigger = None
+    if loop.on is not None:
+        trigger = loop.on.kinds
+
     return Source(
         command=loop.source,
         kind=loop.kind,
         observer=loop.observer,
         every=loop.every.seconds() if loop.every else None,
+        trigger=trigger,
         format=loop.format,
         parse=parse_ops,
     )
@@ -309,6 +325,99 @@ def map_vertex_file(vertex: VertexFile) -> dict[str, Spec]:
 
 
 # -----------------------------------------------------------------------------
+# Compiled Vertex Tree
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class CompiledVertex:
+    """A compiled vertex with specs and nested children.
+
+    Represents the result of recursively compiling a .vertex file
+    and all its child vertices.
+    """
+
+    name: str
+    specs: dict[str, Spec]
+    children: dict[str, "CompiledVertex"]
+    path: Path | None = None
+
+
+class CircularVertexError(Exception):
+    """Raised when vertex composition creates a cycle."""
+
+    def __init__(self, path: Path, chain: list[Path]) -> None:
+        chain_str = " → ".join(str(p) for p in chain)
+        super().__init__(f"Circular vertex reference: {chain_str} → {path}")
+        self.path = path
+        self.chain = chain
+
+
+def compile_vertex_recursive(
+    vertex: VertexFile,
+    *,
+    _visited: set[Path] | None = None,
+    _chain: list[Path] | None = None,
+) -> CompiledVertex:
+    """Recursively compile a .vertex file and all child vertices.
+
+    Args:
+        vertex: The parsed VertexFile AST
+        _visited: Internal - tracks visited paths for cycle detection
+        _chain: Internal - tracks current path for error messages
+
+    Returns:
+        CompiledVertex with specs and nested children
+
+    Raises:
+        CircularVertexError: If vertex composition creates a cycle
+    """
+    from .parser import parse_vertex_file
+
+    # Initialize tracking on first call
+    if _visited is None:
+        _visited = set()
+    if _chain is None:
+        _chain = []
+
+    # Check for cycles
+    if vertex.path is not None:
+        resolved = vertex.path.resolve()
+        if resolved in _visited:
+            raise CircularVertexError(resolved, _chain.copy())
+        _visited.add(resolved)
+        _chain.append(resolved)
+
+    # Compile this vertex's specs
+    specs = map_vertex_file(vertex)
+
+    # Recursively compile children
+    children: dict[str, CompiledVertex] = {}
+    if vertex.vertices:
+        base_dir = vertex.path.parent if vertex.path else Path.cwd()
+        for child_path in vertex.vertices:
+            # Resolve relative paths against parent vertex's directory
+            if not child_path.is_absolute():
+                child_path = base_dir / child_path
+
+            # Parse and compile child
+            child_ast = parse_vertex_file(child_path)
+            child_compiled = compile_vertex_recursive(
+                child_ast,
+                _visited=_visited,
+                _chain=_chain.copy(),
+            )
+            children[child_compiled.name] = child_compiled
+
+    return CompiledVertex(
+        name=vertex.name,
+        specs=specs,
+        children=children,
+        path=vertex.path,
+    )
+
+
+# -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
 
@@ -319,5 +428,9 @@ def compile_loop(loop: LoopFile) -> Source:
 
 
 def compile_vertex(vertex: VertexFile) -> dict[str, Spec]:
-    """Compile a .vertex file to runtime Spec instances."""
+    """Compile a .vertex file to runtime Spec instances.
+
+    For simple cases without child vertices. Use compile_vertex_recursive
+    for vertices with nested children.
+    """
     return map_vertex_file(vertex)

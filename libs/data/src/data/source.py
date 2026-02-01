@@ -33,19 +33,26 @@ class Source:
     Errors are emitted as facts with kind="source.error" rather than raised.
     This allows the runner to continue processing other sources.
 
+    Timing modes:
+    - every + no trigger: polling source (runs on interval)
+    - trigger + no every: triggered source (runs when trigger kinds arrive)
+    - no every + no trigger: run once
+
     Attributes:
-        command: Shell command to execute
+        command: Shell command to execute (None for pure timer)
         kind: Fact kind for output
         observer: Identity for produced facts
-        every: Seconds between runs (None = run once)
+        every: Seconds between runs (None = run once or triggered)
+        trigger: Kind(s) that trigger this source (None = polling/run-once)
         format: How to interpret stdout (lines, json, blob)
         parse: Optional parse pipeline to transform output into structured data
     """
 
-    command: str
+    command: str | None
     kind: str
     observer: str
     every: float | None = None
+    trigger: tuple[str, ...] | None = None
     format: Literal["lines", "json", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
 
@@ -103,52 +110,65 @@ class Source:
                 yield Fact.of(self.kind, self.observer, text=text)
 
     async def stream(self) -> AsyncIterator[Fact]:
-        """Yield facts from command output. Re-runs if every is set."""
+        """Yield facts from command output. Re-runs if every is set.
+
+        For pure timer sources (command=None), emits time-shaped tick facts.
+        """
         while True:
-            try:
-                proc = await asyncio.create_subprocess_shell(
-                    self.command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+            if self.command is None:
+                # Pure timer: emit tick fact with timestamp
+                from datetime import datetime, timezone
+
+                yield Fact.of(
+                    self.kind,
+                    self.observer,
+                    tick=datetime.now(timezone.utc).isoformat(),
                 )
+            else:
+                try:
+                    proc = await asyncio.create_subprocess_shell(
+                        self.command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
 
-                if self.format == "lines":
-                    async for fact in self._emit_lines(proc):
-                        yield fact
-                elif self.format == "json":
-                    async for fact in self._emit_json(proc):
-                        yield fact
-                elif self.format == "blob":
-                    async for fact in self._emit_blob(proc):
-                        yield fact
+                    if self.format == "lines":
+                        async for fact in self._emit_lines(proc):
+                            yield fact
+                    elif self.format == "json":
+                        async for fact in self._emit_json(proc):
+                            yield fact
+                    elif self.format == "blob":
+                        async for fact in self._emit_blob(proc):
+                            yield fact
 
-                await proc.wait()
+                    await proc.wait()
 
-                if proc.returncode != 0 and proc.stderr is not None:
-                    stderr = await proc.stderr.read()
+                    if proc.returncode != 0 and proc.stderr is not None:
+                        stderr = await proc.stderr.read()
+                        yield Fact.of(
+                            "source.error",
+                            self.observer,
+                            command=self.command,
+                            returncode=proc.returncode,
+                            stderr=stderr.decode(),
+                        )
+                    else:
+                        # Emit completion signal for boundary triggering
+                        yield Fact.of(
+                            f"{self.kind}.complete",
+                            self.observer,
+                            command=self.command,
+                        )
+
+                except Exception as e:
                     yield Fact.of(
                         "source.error",
                         self.observer,
                         command=self.command,
-                        returncode=proc.returncode,
-                        stderr=stderr.decode(),
+                        error=str(e),
+                        error_type=type(e).__name__,
                     )
-                else:
-                    # Emit completion signal for boundary triggering
-                    yield Fact.of(
-                        f"{self.kind}.complete",
-                        self.observer,
-                        command=self.command,
-                    )
-
-            except Exception as e:
-                yield Fact.of(
-                    "source.error",
-                    self.observer,
-                    command=self.command,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
 
             if self.every is None:
                 break

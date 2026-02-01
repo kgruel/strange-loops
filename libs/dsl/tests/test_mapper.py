@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from data import Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert
 from data import Coerce as RuntimeCoerce
 from data import Pick as RuntimePick
@@ -12,8 +13,11 @@ from data import Transform as RuntimeTransform
 
 from dsl import parse_loop, parse_vertex
 from dsl.mapper import (
+    CircularVertexError,
+    CompiledVertex,
     compile_loop,
     compile_vertex,
+    compile_vertex_recursive,
     map_fold_op,
     map_parse_steps,
     map_pick,
@@ -35,6 +39,7 @@ from dsl.ast import (
     Split,
     Strip,
     Transform,
+    Trigger,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -367,3 +372,198 @@ loops:
         state = spec.apply(state, {"value": 20, "_ts": 1234567891})
         assert state["count"] == 2
         assert state["total"] == 30
+
+
+class TestTriggeredSource:
+    """Triggered source compilation (on: syntax)."""
+
+    def test_single_trigger(self):
+        """Loop with single on: trigger compiles to Source with trigger."""
+        loop = parse_loop("""\
+source: process-batch
+kind: processed
+observer: worker
+on: batch.ready
+""")
+        source = compile_loop(loop)
+        assert isinstance(source, Source)
+        assert source.command == "process-batch"
+        assert source.trigger == ("batch.ready",)
+        assert source.every is None
+
+    def test_multiple_triggers(self):
+        """Loop with multiple on: triggers compiles to Source with trigger tuple."""
+        loop = parse_loop("""\
+source: aggregate
+kind: aggregated
+observer: collector
+on: [minute, hour, day]
+""")
+        source = compile_loop(loop)
+        assert source.trigger == ("minute", "hour", "day")
+        assert source.every is None
+
+    def test_polling_source_no_trigger(self):
+        """Loop with every: but no on: has no trigger."""
+        loop = parse_loop("""\
+source: check-health
+kind: health
+observer: monitor
+every: 30s
+""")
+        source = compile_loop(loop)
+        assert source.trigger is None
+        assert source.every == 30.0
+
+
+class TestPureTimerSource:
+    """Pure timer source compilation (every: without source:)."""
+
+    def test_pure_timer(self):
+        """Loop with every: but no source: compiles to pure timer Source."""
+        loop = parse_loop("""\
+kind: tick
+observer: timer
+every: 1m
+""")
+        source = compile_loop(loop)
+        assert isinstance(source, Source)
+        assert source.command is None
+        assert source.every == 60.0
+        assert source.kind == "tick"
+
+    def test_pure_timer_with_trigger(self):
+        """Loop with every: and on: compiles to triggered timer."""
+        # Note: on: requires every: in pure timer case to define cadence
+        loop = parse_loop("""\
+kind: batch.tick
+observer: scheduler
+every: 1m
+on: minute
+""")
+        source = compile_loop(loop)
+        assert source.command is None
+        assert source.trigger == ("minute",)
+        assert source.every == 60.0
+
+
+class TestNestedVertexCompilation:
+    """Recursive vertex compilation."""
+
+    def test_simple_vertex_recursive(self):
+        """Simple vertex without children compiles recursively."""
+        vertex = parse_vertex("""\
+name: simple
+loops:
+  counter:
+    fold:
+      count: +1
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert isinstance(compiled, CompiledVertex)
+        assert compiled.name == "simple"
+        assert "counter" in compiled.specs
+        assert compiled.children == {}
+
+    def test_vertex_with_children(self, tmp_path):
+        """Vertex with vertices: compiles children recursively."""
+        # Create child vertex file
+        child_content = """\
+name: child
+loops:
+  events:
+    fold:
+      count: +1
+"""
+        child_path = tmp_path / "child.vertex"
+        child_path.write_text(child_content)
+
+        # Create parent vertex file
+        parent_content = f"""\
+name: parent
+vertices:
+  - {child_path}
+loops:
+  aggregate:
+    fold:
+      total: +1
+"""
+        parent_path = tmp_path / "parent.vertex"
+        parent_path.write_text(parent_content)
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        assert compiled.name == "parent"
+        assert "aggregate" in compiled.specs
+        assert "child" in compiled.children
+        assert compiled.children["child"].name == "child"
+        assert "events" in compiled.children["child"].specs
+
+    def test_circular_vertex_detection(self, tmp_path):
+        """Circular vertex references raise CircularVertexError."""
+        # Create two vertices that reference each other
+        a_path = tmp_path / "a.vertex"
+        b_path = tmp_path / "b.vertex"
+
+        a_content = f"""\
+name: a
+vertices:
+  - {b_path}
+loops:
+  x:
+    fold:
+      count: +1
+"""
+        b_content = f"""\
+name: b
+vertices:
+  - {a_path}
+loops:
+  y:
+    fold:
+      count: +1
+"""
+        a_path.write_text(a_content)
+        b_path.write_text(b_content)
+
+        from dsl import parse_vertex_file
+
+        a_ast = parse_vertex_file(a_path)
+        with pytest.raises(CircularVertexError):
+            compile_vertex_recursive(a_ast)
+
+    def test_relative_path_resolution(self, tmp_path):
+        """Child paths are resolved relative to parent vertex file."""
+        # Create subdir with child
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        child_path = subdir / "child.vertex"
+        child_path.write_text(
+            "name: child\n"
+            "loops:\n"
+            "  events:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        # Parent references child with relative path (must start with ./)
+        parent_path = tmp_path / "parent.vertex"
+        parent_path.write_text(
+            "name: parent\n"
+            "vertices:\n"
+            "  - ./sub/child.vertex\n"
+            "loops:\n"
+            "  main:\n"
+            "    fold:\n"
+            "      count: +1\n"
+        )
+
+        from dsl import parse_vertex_file
+
+        parent_ast = parse_vertex_file(parent_path)
+        compiled = compile_vertex_recursive(parent_ast)
+
+        assert "child" in compiled.children

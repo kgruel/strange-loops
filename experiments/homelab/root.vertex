@@ -30,4 +30,10 @@ loops:
       updated: latest
     boundary: when alert.status
 
+  source.error:
+    fold:
+      errors: collect 10
+      count: +1
+    boundary: when source.error
+
 emit: homelab.status

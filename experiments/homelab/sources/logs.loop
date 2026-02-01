@@ -8,7 +8,7 @@
 # Real command would be:
 #   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
 
-source: echo "prometheus | level=info msg=scrape_complete"
+source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
 every: 10s
 kind: log.line
 observer: log-monitor

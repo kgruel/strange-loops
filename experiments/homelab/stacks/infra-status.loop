@@ -8,7 +8,7 @@
 # Real command would be:
 #   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
 
-source: echo '{"Name":"prometheus","Service":"prometheus","State":"running","Health":"healthy"}'
+source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
 every: 30s
 kind: container.status
 observer: infra-monitor

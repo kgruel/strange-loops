@@ -53,7 +53,9 @@ apps/hlab/
 ├── dev.loop          # kind: dev
 ├── minecraft.loop    # kind: minecraft
 ├── status.vertex     # 4 loops (infra, media, dev, minecraft), boundary on {kind}.complete
-├── main.py           # Main app: TUI + CLI modes
+├── folds.py          # Fold overrides: health_fold computes healthy/total
+├── stack_lens.py     # Zoom-level rendering for stacks
+├── main.py           # Main app: TUI + CLI modes (orchestration only)
 └── demos/
     └── status.py     # Legacy demo (uses old structure)
 ```
@@ -81,23 +83,56 @@ Load DSL, materialize runtime, stream ticks, render with cells.
 | Runner | data | Orchestrates sources → vertex. Yields ticks as async iterator |
 | Surface | cells | Renders state, emits input as facts |
 
+## Fold → Lens Pattern
+
+**Fold computes, lens presents.**
+
+- `folds.py`: Domain logic at fold-time. `health_fold` computes healthy/total as state accumulates.
+- `stack_lens.py`: Presentation logic. Takes computed payload, renders at zoom level.
+
+Data flow:
+```
+Source emits container facts
+  → health_fold accumulates + computes metrics
+    → Tick payload = {containers, healthy, total}
+      → stack_lens renders at zoom level
+```
+
+This separation keeps main.py as pure orchestration — no domain logic in render.
+
+Wiring fold_overrides:
+```python
+from hlab.folds import HEALTH_INITIAL, health_fold
+
+fold_overrides = {
+    kind: (HEALTH_INITIAL, health_fold)
+    for kind in ("infra", "media", "dev", "minecraft")
+}
+vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
+```
+
 ## Gotchas
 
 **tick.name IS the stack name:**
 ```python
 # tick.name = "infra", "media", "dev", or "minecraft"
-# tick.payload = {"containers": [...]}
+# tick.payload = {"containers": [...], "healthy": N, "total": M}
 async for tick in runner.run():
-    self._stacks[tick.name] = tick.payload.get("containers", [])
+    self._stacks[tick.name] = tick.payload
 ```
 
-**Tick payload is raw state, not nested:**
+**Tick payload has pre-computed metrics:**
 ```python
-# Wrong
-containers = tick.payload.get("infra", {}).get("containers", [])
+# Payload structure after health_fold
+payload = {
+    "containers": [...],  # list of container dicts
+    "healthy": 12,        # computed by fold
+    "total": 15,          # computed by fold
+}
 
-# Right
-containers = tick.payload.get("containers", [])
+# Access directly, no need to recompute
+healthy = payload.get("healthy", 0)
+total = payload.get("total", 0)
 ```
 
 **One tick per stack, not one aggregated tick:**

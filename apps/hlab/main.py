@@ -19,7 +19,9 @@ from cells.tui import Surface
 
 from dsl import parse_vertex_file, parse_loop_file, compile_vertex_recursive, compile_loop, materialize_vertex
 from data import Runner
-from vertex import Tick
+
+from hlab.folds import HEALTH_INITIAL, health_fold
+from hlab.stack_lens import stack_lens
 
 
 HERE = Path(__file__).parent
@@ -42,7 +44,13 @@ def load():
     """Load vertex and sources from DSL files."""
     ast = parse_vertex_file(VERTEX_FILE)
     compiled = compile_vertex_recursive(ast)
-    vertex = materialize_vertex(compiled)
+
+    # Override all stack folds with health computation
+    fold_overrides = {
+        kind: (HEALTH_INITIAL, health_fold)
+        for kind in ("infra", "media", "dev", "minecraft")
+    }
+    vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
 
     sources = []
     for source_path in ast.sources:
@@ -53,59 +61,10 @@ def load():
     return vertex, sources
 
 
-# -- Data helpers ------------------------------------------------------------
-
-def stack_health(containers: list[dict]) -> tuple[int, int]:
-    """Returns (healthy, total) for a stack."""
-    total = len(containers)
-    healthy = sum(
-        1 for c in containers
-        if c.get("State") == "running" and c.get("Health") in ("healthy", "")
-    )
-    return healthy, total
-
-
 # -- Render ------------------------------------------------------------------
 
-def render_stack(name: str, containers: list[dict], zoom: int, width: int) -> Block:
-    """Render a single stack at given zoom level."""
-    h, t = stack_health(containers)
-    all_healthy = h == t
-    icon = "✓" if all_healthy else "✗"
-    header_style = Style(fg="green", bold=True) if all_healthy else Style(fg="red", bold=True)
-
-    header = Block.text(f"{icon} {name}: {h}/{t}", header_style, width=width)
-
-    if zoom == 0:
-        return header
-
-    rows = [header]
-    for c in containers:
-        cname = c.get("Name", "?")
-        state = c.get("State", "?")
-        health = c.get("Health", "")
-        uptime = c.get("RunningFor", "")
-
-        if state == "running" and health == "healthy":
-            style = GREEN
-            status = "healthy"
-        elif state == "running":
-            style = Style(fg="blue")
-            status = health or "running"
-        else:
-            style = RED
-            status = state
-
-        line = f"  {cname}: {status}"
-        if zoom >= 2 and uptime:
-            line += f" ({uptime})"
-        rows.append(Block.text(line, style, width=width))
-
-    return join_vertical(*rows)
-
-
-def render_all(stacks: dict[str, list[dict]], zoom: int, width: int) -> Block:
-    """Render all stacks. stacks = {name: [containers]}."""
+def render_all(stacks: dict[str, dict], zoom: int, width: int) -> Block:
+    """Render all stacks. stacks = {name: payload}."""
     if not stacks:
         return Block.text("No data", DIM, width=width)
 
@@ -113,7 +72,7 @@ def render_all(stacks: dict[str, list[dict]], zoom: int, width: int) -> Block:
     panels = []
 
     for name in sorted(stacks.keys()):
-        panel = render_stack(name, stacks[name], zoom, panel_width - 4)
+        panel = stack_lens(name, stacks[name], zoom, panel_width - 4)
         panels.append(border(panel, title=name, style=CYAN))
 
     # Arrange in 2-column grid
@@ -136,8 +95,8 @@ class HlabApp(Surface):
 
     def __init__(self):
         super().__init__(fps_cap=30, on_start=self._on_start)
-        # State: {stack_name: [containers]}
-        self._stacks: dict[str, list[dict]] = {}
+        # State: {stack_name: payload} where payload has containers, healthy, total
+        self._stacks: dict[str, dict] = {}
         self._zoom = 1
         self._loading = True
         self._error: str | None = None
@@ -160,9 +119,8 @@ class HlabApp(Surface):
 
             async for tick in runner.run():
                 # tick.name IS the stack name (infra, media, dev, minecraft)
-                # tick.payload = {containers: [...]}
-                containers = tick.payload.get("containers", [])
-                self._stacks[tick.name] = containers
+                # tick.payload = {containers, healthy, total}
+                self._stacks[tick.name] = tick.payload
                 self._loading = False
                 self.mark_dirty()
         except Exception as e:
@@ -188,8 +146,8 @@ class HlabApp(Surface):
         now = datetime.now().strftime("%H:%M:%S")
 
         # Header
-        total_healthy = sum(stack_health(c)[0] for c in self._stacks.values())
-        total_containers = sum(len(c) for c in self._stacks.values())
+        total_healthy = sum(p.get("healthy", 0) for p in self._stacks.values())
+        total_containers = sum(p.get("total", 0) for p in self._stacks.values())
         status = f"{len(self._stacks)} stacks, {total_healthy}/{total_containers} healthy"
 
         header = Block.text(
@@ -227,8 +185,8 @@ class HlabApp(Surface):
 
 # -- CLI ---------------------------------------------------------------------
 
-async def fetch_stacks() -> dict[str, list[dict]]:
-    """Fetch once and return {stack_name: [containers]}."""
+async def fetch_stacks() -> dict[str, dict]:
+    """Fetch once and return {stack_name: payload}."""
     vertex, sources = load()
     runner = Runner(vertex)
     for s in sources:
@@ -236,7 +194,7 @@ async def fetch_stacks() -> dict[str, list[dict]]:
 
     stacks = {}
     async for tick in runner.run():
-        stacks[tick.name] = tick.payload.get("containers", [])
+        stacks[tick.name] = tick.payload
     return stacks
 
 
@@ -254,8 +212,9 @@ async def main_async() -> int:
 
     if "--once" in args:
         stacks = await fetch_stacks()
-        for name, containers in sorted(stacks.items()):
-            h, t = stack_health(containers)
+        for name, payload in sorted(stacks.items()):
+            h = payload.get("healthy", 0)
+            t = payload.get("total", 0)
             icon = "✓" if h == t else "✗"
             print(f"{icon} {name}: {h}/{t}")
         return 0

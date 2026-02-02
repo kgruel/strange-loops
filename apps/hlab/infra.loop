@@ -1,0 +1,10 @@
+# Infra stack container status
+# SSH to infra VM, get docker compose ps output
+
+source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
+kind: infra
+observer: hlab
+format: ndjson
+
+parse:
+  select Name, Service, State, Health, Status, ExitCode, Image, Ports, Project, CreatedAt, RunningFor

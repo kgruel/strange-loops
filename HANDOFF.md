@@ -88,14 +88,27 @@ uv run python experiments/fidelity_lens.py    # zoom-to-fidelity lens
 uv run python experiments/personal_scale/main.py  # heterogeneous domains
 ```
 
-### Homelab Monitoring
+### hlab App (First Real App)
 
 ```bash
+# Interactive TUI with fidelity zoom (+/- to zoom, q to quit)
+uv run python apps/hlab/demos/status.py
+
+# DSL-based CLI output
+cd apps/hlab && uv run loop start status.vertex
+```
+
+Real SSH-based docker compose status. Tree view with 4 fidelity levels.
+Uses cells for rendering, Source with ndjson format for parsing.
+
+### Homelab Experiment (Archived)
+
+```bash
+# CLI output (raw ticks)
 uv run loop start experiments/homelab/root.vertex
 ```
 
-Real SSH-based monitoring (needs SSH key auth to targets). Shows nested vertices,
-source errors collected and displayed via `source.error` loop.
+Predecessor experiment — informed apps/hlab design. Do not develop here.
 
 ## Experiments
 
@@ -124,53 +137,64 @@ prove a specific aspect of the model.
 | `personal_scale/main.py` | Heterogeneous domains — disk,proc,email,calendar through root |
 | `homelab/` | Real homelab monitoring — SSH sources, nested vertices, error handling |
 
-## Current Focus: Vertex Nesting + Composition
+## Current Focus: apps/hlab — First Real App
 
-Vertices nest. Child ticks become facts to parent. No broker — hierarchy is composition.
+**Active iteration target.** All homelab monitoring work happens here until further notice.
+`experiments/homelab/` is archived predecessor — don't develop there.
 
-```
-┌─ root.vertex ─────────────────────────────────────────────────┐
-│   discover: ./infra/*.vertex                                  │
-│   discover: ./personal/*.vertex                               │
-│                                                               │
-│   ┌─ infra.vertex ──┐     ┌─ personal.vertex ─┐              │
-│   │  disk ─┐        │     │  email ─┐         │              │
-│   │  proc ─┴► tick  │     │  cal ───┴► tick   │              │
-│   └────────┬────────┘     └─────────┬─────────┘              │
-│            │                        │                         │
-│            └────────► root loop ◄───┘                        │
-│                           │                                   │
-│                      emit: root.tick ─────────────────────┐  │
-└───────────────────────────────────────────────────────────│──┘
-                                          (loop closes) ◄───┘
+### Run It
+
+```bash
+# Interactive TUI with fidelity zoom (+/- to zoom, q to quit)
+uv run python apps/hlab/demos/status.py
+
+# CLI modes
+uv run python apps/hlab/demos/status.py -q     # one line summary
+uv run python apps/hlab/demos/status.py        # tree with counts
+uv run python apps/hlab/demos/status.py -f     # tree with containers
+uv run python apps/hlab/demos/status.py -ff    # interactive TUI
 ```
 
-**Two mechanisms:**
-- `discover:` — file hierarchy, natural grouping by domain
-- `vertices:` — explicit list, cross-cutting concerns
+### Structure
 
-### Decisions Made (Cadence/Source)
+```
+apps/hlab/
+├── infra.loop        # SSH → 192.168.1.30, kind: infra
+├── media.loop        # SSH → 192.168.1.40, kind: media
+├── dev.loop          # SSH → 192.168.1.41, kind: dev
+├── minecraft.loop    # SSH → 192.168.1.42, kind: minecraft
+├── status.vertex     # 4 loops (one per stack), boundary on {kind}.complete
+├── main.py           # Main app: TUI + CLI modes
+├── CLAUDE.md         # App-specific guidance
+└── demos/
+    └── status.py     # Legacy demo
+```
 
-| Topic | Decision |
-|-------|----------|
-| `on:` single trigger | `on: minute` — pure signal, no payload access |
-| `on:` multiple triggers | `on: [a, b]` — OR semantics |
-| `on:` AND triggers | No — use fold + boundary instead |
-| `on:` filtering | No — use intermediate loop to narrow fact kind |
-| `on:` debounce/throttle | Defer — needs temporal boundary design |
-| Tick naming | `emit:` is verbatim fact kind, user controls namespace |
-| Tick lineage | `origin` field + fidelity traversal, not in name |
-| Vertex wiring | Implicit by kind via nesting — no broker |
+### What Works
+
+- **Per-stack kinds** — Each .loop emits its own kind (infra, media, dev, minecraft)
+- **tick.name IS the stack** — No re-grouping in render, state is `{stack: containers}`
+- **format: ndjson** — Source format for JSON lines from docker compose ps
+- **select** parse op — Extract specific fields from JSON objects
+- **Fidelity rendering** — Zoom 0-3 controls detail level
+- **cells TUI** — Surface subclass with async Runner, keyboard zoom
 
 ### In Flight
 
-(none)
+**Subtask: impl/hlab-lens** — Worker planning fold_overrides + stack_lens implementation.
+Review plan next session: `subtask show impl/hlab-lens`
+
+Goals:
+1. `fold_overrides` for health computation (healthy/total in tick payload)
+2. `stack_lens` for normalized rendering at zoom levels
+3. Simplify main.py (remove domain logic from render)
+4. Detail view unpacking (show all container info at high zoom)
 
 ## Next Steps
 
-1. **Wire routes: to runtime** — DSL parses `routes:` but mapper doesn't use it. Facts route by kind→loop name match only.
-2. **Homelab SSH auth** — experiment ready but needs SSH key setup to connect to real hosts
-3. **DSL-driven experiments** — migrate viz experiments to `.vertex` files where sensible
+1. **Review impl/hlab-lens plan** — `subtask show impl/hlab-lens`, approve or iterate
+2. **Polling** — Add `every: 30s` for live updates
+3. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
 
@@ -182,9 +206,34 @@ Vertices nest. Child ticks become facts to parent. No broker — hierarchy is co
 
 - **Store policy** — ephemeral, sliding window, sampling. Use case will clarify.
 
+- **Boundary reset** — DSL hardcodes `reset=True`. Consider `reset: false` syntax.
+
+- **DSL computed folds** — `count where Field=value` syntax. Using `fold_overrides`
+  Python escape hatch for now; DSL syntax if patterns emerge.
+
 ## Resolved
 
-67. ~~Homelab error handling~~ — `source.error` loop collects SSH failures. Discovered that
+71. ~~apps/hlab first app~~ — Created `apps/hlab/` as the first real app. Added `format: ndjson`
+    to Source for JSON lines. Added `select` parse op for field extraction from JSON. Built
+    proof.py, infra.loop, status.vertex. Cells-based TUI with fidelity zoom (0-3). Explored
+    ancestor codebases (gruel.network, zsh config, hlab) for patterns.
+
+70. ~~Homelab TUI with shape_lens~~ — `experiments/homelab/viz.py` renders tick payloads using
+    `shape_lens` at configurable zoom levels. Workaround for boundary reset: capture payloads
+    directly from ticks instead of reading vertex state.
+
+69. ~~Cells usage guide~~ — `experiments/CELLS_USAGE.md` documents Surface subclassing, Block
+    composition, async task patterns, and common gotchas. Reference for future TUI work.
+
+68. ~~DSL: Wire routes: to runtime~~ — `routes:` config now compiles to Vertex pattern-based
+    routing. Supports fnmatch globs. Facts route by pattern match, not just exact kind match.
+    +224 lines across mapper.py, vertex.py, tests.
+
+67. ~~DSL: Preserve quotes in source commands~~ — Parser now preserves quotes around STRING
+    tokens in `source:` lines. Fixes SSH commands like `ssh user@host "cd /foo && cmd"`.
+    +71 lines across lexer.py, parser.py, tests.
+
+66. ~~Homelab error handling~~ — `source.error` loop collects SSH failures. Discovered that
     `routes:` config isn't wired to runtime; workaround is naming loops to match fact kinds.
 
 66. ~~Fix CLI discover/sources confusion~~ — `cmd_start` was using `discover:` (for vertices)

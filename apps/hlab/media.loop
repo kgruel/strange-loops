@@ -1,0 +1,10 @@
+# Media stack container status
+# SSH to media VM, get docker compose ps output
+
+source: ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json"
+kind: media
+observer: hlab
+format: ndjson
+
+parse:
+  select Name, Service, State, Health, Status, ExitCode, Image, Ports, Project, CreatedAt, RunningFor

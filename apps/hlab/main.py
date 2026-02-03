@@ -20,8 +20,8 @@ from cells.tui import Surface
 from dsl import parse_vertex_file, parse_loop_file, compile_vertex_recursive, compile_loop, materialize_vertex
 from data import Runner
 
-from hlab.folds import HEALTH_INITIAL, health_fold
-from hlab.stack_lens import stack_lens
+from folds import HEALTH_INITIAL, health_fold
+from stack_lens import stack_lens
 
 
 HERE = Path(__file__).parent

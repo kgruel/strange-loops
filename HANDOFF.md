@@ -164,7 +164,9 @@ apps/hlab/
 ├── dev.loop          # SSH → 192.168.1.41, kind: dev
 ├── minecraft.loop    # SSH → 192.168.1.42, kind: minecraft
 ├── status.vertex     # 4 loops (one per stack), boundary on {kind}.complete
-├── main.py           # Main app: TUI + CLI modes
+├── folds.py          # Fold overrides: health_fold computes healthy/total
+├── stack_lens.py     # Zoom-level rendering for stacks
+├── main.py           # Main app: TUI + CLI modes (orchestration only)
 ├── CLAUDE.md         # App-specific guidance
 └── demos/
     └── status.py     # Legacy demo
@@ -173,28 +175,17 @@ apps/hlab/
 ### What Works
 
 - **Per-stack kinds** — Each .loop emits its own kind (infra, media, dev, minecraft)
-- **tick.name IS the stack** — No re-grouping in render, state is `{stack: containers}`
+- **tick.name IS the stack** — No re-grouping in render, state is `{stack: payload}`
 - **format: ndjson** — Source format for JSON lines from docker compose ps
 - **select** parse op — Extract specific fields from JSON objects
 - **Fidelity rendering** — Zoom 0-3 controls detail level
 - **cells TUI** — Surface subclass with async Runner, keyboard zoom
-
-### In Flight
-
-**Subtask: impl/hlab-lens** — Worker planning fold_overrides + stack_lens implementation.
-Review plan next session: `subtask show impl/hlab-lens`
-
-Goals:
-1. `fold_overrides` for health computation (healthy/total in tick payload)
-2. `stack_lens` for normalized rendering at zoom levels
-3. Simplify main.py (remove domain logic from render)
-4. Detail view unpacking (show all container info at high zoom)
+- **Fold→Lens pattern** — `health_fold` computes at fold-time, `stack_lens` renders at zoom level
 
 ## Next Steps
 
-1. **Review impl/hlab-lens plan** — `subtask show impl/hlab-lens`, approve or iterate
-2. **Polling** — Add `every: 30s` for live updates
-3. **Actions** — keypress → fact → automation loop (restart container)
+1. **Polling** — Add `every: 30s` for live updates
+2. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
 
@@ -212,6 +203,10 @@ Goals:
   Python escape hatch for now; DSL syntax if patterns emerge.
 
 ## Resolved
+
+72. ~~hlab fold→lens~~ — `fold_overrides` for health computation (healthy/total in tick payload),
+    `stack_lens` for zoom-level rendering. main.py is now pure orchestration — domain logic in
+    fold, presentation in lens. -75 lines net in main.py.
 
 71. ~~apps/hlab first app~~ — Created `apps/hlab/` as the first real app. Added `format: ndjson`
     to Source for JSON lines. Added `select` parse op for field extraction from JSON. Built

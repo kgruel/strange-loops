@@ -552,6 +552,102 @@ loops:
         assert folds[1].op.field == "interval"
 
 
+class TestTemplateSource:
+    """Tests for template source parsing."""
+
+    def test_template_source_basic(self):
+        """Parse basic template source with params."""
+        text = """\
+name: status
+sources:
+  - template: stacks/status.loop
+    with:
+      - kind: infra
+        host: 192.168.1.30
+      - kind: media
+        host: 192.168.1.40
+loops:
+  infra:
+    fold:
+      count: +1
+  media:
+    fold:
+      count: +1
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 1
+
+        from dsl import TemplateSource
+
+        source = vertex.sources[0]
+        assert isinstance(source, TemplateSource)
+        assert source.template == Path("stacks/status.loop")
+        assert len(source.params) == 2
+        assert source.params[0].values == {"kind": "infra", "host": "192.168.1.30"}
+        assert source.params[1].values == {"kind": "media", "host": "192.168.1.40"}
+        assert source.loop is None
+
+    def test_template_source_with_loop_spec(self):
+        """Parse template source with loop: block."""
+        text = """\
+name: status
+sources:
+  - template: stacks/status.loop
+    with:
+      - kind: infra
+        host: 192.168.1.30
+    loop:
+      fold:
+        containers: collect 50
+      boundary: when infra.complete
+loops:
+  infra:
+    fold:
+      count: +1
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 1
+
+        from dsl import BoundaryWhen, FoldCollect, TemplateSource
+
+        source = vertex.sources[0]
+        assert isinstance(source, TemplateSource)
+        assert source.loop is not None
+        assert len(source.loop.folds) == 1
+        assert source.loop.folds[0].target == "containers"
+        assert isinstance(source.loop.folds[0].op, FoldCollect)
+        assert source.loop.folds[0].op.max_items == 50
+        assert isinstance(source.loop.boundary, BoundaryWhen)
+        assert source.loop.boundary.kind == "infra.complete"
+
+    def test_mixed_sources_and_templates(self):
+        """Parse sources with both paths and templates."""
+        text = """\
+name: test
+sources:
+  - ./simple.loop
+  - template: stacks/status.loop
+    with:
+      - kind: test
+loops:
+  test:
+    fold:
+      count: +1
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 2
+
+        from dsl import TemplateSource
+
+        assert isinstance(vertex.sources[0], Path)
+        assert vertex.sources[0] == Path("./simple.loop")
+        assert isinstance(vertex.sources[1], TemplateSource)
+        assert vertex.sources[1].template == Path("stacks/status.loop")
+
+
 class TestSourceQuotePreservation:
     """Tests for preserving quotes in source: command strings."""
 

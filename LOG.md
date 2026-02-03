@@ -5,6 +5,65 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-03 — DSL source templates
+
+**The feature.** Parameterized source templates. A vertex declares a parameter
+table; a loop file becomes a template with `${var}` placeholders. The loop spec
+(fold + boundary) is also defined once alongside the template.
+
+**Before (4 files, 35 lines in vertex):**
+```
+├── stacks/infra.loop       # source: ssh deploy@192.168.1.30 "cd /opt/infra..."
+├── stacks/media.loop       # source: ssh deploy@192.168.1.40 "cd /opt/media..."
+├── stacks/dev.loop         # source: ssh deploy@192.168.1.41 "cd /opt/dev..."
+├── stacks/minecraft.loop   # source: ssh deploy@192.168.1.42 "cd /opt/minecraft..."
+└── status.vertex           # 4 sources + 4 identical loop definitions
+```
+
+**After (2 files, 25 lines in vertex):**
+```
+├── stacks/status.loop      # source: ssh deploy@${host} "cd /opt/${kind}..."
+└── status.vertex           # 1 template source with parameter table + 1 loop spec
+```
+
+**Syntax:**
+```yaml
+sources:
+  - template: stacks/status.loop
+    with:
+      - kind: infra
+        host: 192.168.1.30
+      - kind: media
+        host: 192.168.1.40
+    loop:
+      fold:
+        containers: collect 50
+      boundary: when ${kind}.complete
+```
+
+**Implementation:**
+
+1. **AST** — `SourceParams`, `TemplateSource` types. `VertexFile.sources` now
+   `tuple[Path | TemplateSource, ...]`.
+
+2. **Lexer** — `TEMPLATE`, `WITH`, `LOOP` tokens. Extended identifier parsing
+   to handle `${var}` inline (e.g., `deploy@${host}`). Added standalone `${}`
+   handling for `${kind}.complete`.
+
+3. **Parser** — `parse_sources_block()` handles both paths and templates.
+   `parse_with_block()` for parameter tables. `loops:` now optional when
+   template sources provide loop specs.
+
+4. **Mapper** — `substitute_vars()` replaces `${var}` with values.
+   `instantiate_template()` creates LoopFile with substituted variables.
+   `compile_sources()` returns `(sources, specs)` — sources for the runner,
+   specs generated from template loop blocks.
+
+**Result:** 180 DSL tests pass. hlab produces identical output. Next session:
+iterate on render UI.
+
+---
+
 ## 2026-01-31 — Vertex nesting + DSL completion
 
 **Cadence/Source decisions finalized:**

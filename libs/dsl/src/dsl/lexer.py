@@ -41,6 +41,7 @@ class TokenType(Enum):
     SKIP = auto()  # skip keyword
     SPLIT = auto()  # split keyword
     PICK = auto()  # pick keyword
+    SELECT = auto()  # select keyword (for ndjson)
 
     # Fold operations
     BY = auto()  # by keyword
@@ -54,6 +55,11 @@ class TokenType(Enum):
 
     # Boundary
     WHEN = auto()  # when keyword
+
+    # Template sources
+    TEMPLATE = auto()  # template keyword
+    WITH = auto()  # with keyword
+    LOOP = auto()  # loop keyword (for template source loop spec)
 
     # Transform operations
     STRIP = auto()  # strip keyword
@@ -79,6 +85,7 @@ KEYWORDS = {
     "skip": TokenType.SKIP,
     "split": TokenType.SPLIT,
     "pick": TokenType.PICK,
+    "select": TokenType.SELECT,
     "by": TokenType.BY,
     "latest": TokenType.LATEST,
     "collect": TokenType.COLLECT,
@@ -95,6 +102,9 @@ KEYWORDS = {
     "float": TokenType.FLOAT,
     "bool": TokenType.BOOL,
     "str": TokenType.STR,
+    "template": TokenType.TEMPLATE,
+    "with": TokenType.WITH,
+    "loop": TokenType.LOOP,
 }
 
 
@@ -182,12 +192,31 @@ class Lexer:
         return "".join(result), quote
 
     def read_identifier_or_keyword(self) -> tuple[TokenType, str]:
-        """Read an identifier or keyword."""
+        """Read an identifier or keyword.
+
+        Identifiers can include template variables like ${var}.
+        """
         start = self.pos
-        while self.peek() and (self.peek().isalnum() or self.peek() in "_-.@"):
-            self.advance()
+        while self.peek():
+            c = self.peek()
+            if c.isalnum() or c in "_-.@":
+                self.advance()
+            elif c == "$" and self.peek(1) == "{":
+                # Include template variable ${...} as part of identifier
+                self.advance()  # $
+                self.advance()  # {
+                while self.peek() and self.peek() != "}":
+                    self.advance()
+                if self.peek() == "}":
+                    self.advance()
+            else:
+                break
         value = self.text[start : self.pos]
-        token_type = KEYWORDS.get(value, TokenType.IDENTIFIER)
+        # Only look up keyword if it's a simple identifier (no template vars)
+        if "${" not in value:
+            token_type = KEYWORDS.get(value, TokenType.IDENTIFIER)
+        else:
+            token_type = TokenType.IDENTIFIER
         return token_type, value
 
     def read_number(self) -> tuple[TokenType, str]:
@@ -327,6 +356,22 @@ class Lexer:
                 # Read until whitespace or newline
                 start = self.pos
                 while self.peek() and self.peek() not in " \t\n#":
+                    self.advance()
+                value = self.text[start : self.pos]
+                yield Token(TokenType.IDENTIFIER, value, loc)
+                continue
+
+            # Template variables like ${kind} or ${kind}.complete
+            if self.peek() == "$" and self.peek(1) == "{":
+                start = self.pos
+                self.advance()  # consume $
+                self.advance()  # consume {
+                while self.peek() and self.peek() != "}":
+                    self.advance()
+                if self.peek() == "}":
+                    self.advance()  # consume }
+                # Continue reading if there's a dot suffix like .complete
+                while self.peek() and self.peek() not in " \t\n#:,[]":
                     self.advance()
                 value = self.text[start : self.pos]
                 yield Token(TokenType.IDENTIFIER, value, loc)

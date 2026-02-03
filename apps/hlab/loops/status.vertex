@@ -1,0 +1,25 @@
+# Status vertex
+# Aggregates container status from all stacks
+#
+# Uses template source to avoid repetition. One template, four instances.
+# tick.name = stack name. No re-grouping needed in render.
+
+name: status
+
+sources:
+  - template: stacks/status.loop
+    with:
+      - kind: infra
+        host: 192.168.1.30
+      - kind: media
+        host: 192.168.1.40
+      - kind: dev
+        host: 192.168.1.41
+      - kind: minecraft
+        host: 192.168.1.42
+    loop:
+      fold:
+        containers: collect 50
+      boundary: when ${kind}.complete
+
+emit: status

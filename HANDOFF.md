@@ -145,36 +145,36 @@ prove a specific aspect of the model.
 ### Run It
 
 ```bash
-# Interactive TUI with fidelity zoom (+/- to zoom, q to quit)
-uv run python apps/hlab/demos/status.py
-
-# CLI modes
-uv run python apps/hlab/demos/status.py -q     # one line summary
-uv run python apps/hlab/demos/status.py        # tree with counts
-uv run python apps/hlab/demos/status.py -f     # tree with containers
-uv run python apps/hlab/demos/status.py -ff    # interactive TUI
+# Main app with fidelity levels
+uv run python -m apps.hlab.main           # styled tree output
+uv run python -m apps.hlab.main -q        # one line summary
+uv run python -m apps.hlab.main -f        # visual with borders
+uv run python -m apps.hlab.main -ff       # interactive TUI
+uv run python -m apps.hlab.main --json    # JSON output
 ```
 
 ### Structure
 
 ```
 apps/hlab/
-├── infra.loop        # SSH → 192.168.1.30, kind: infra
-├── media.loop        # SSH → 192.168.1.40, kind: media
-├── dev.loop          # SSH → 192.168.1.41, kind: dev
-├── minecraft.loop    # SSH → 192.168.1.42, kind: minecraft
-├── status.vertex     # 4 loops (one per stack), boundary on {kind}.complete
-├── folds.py          # Fold overrides: health_fold computes healthy/total
-├── stack_lens.py     # Zoom-level rendering for stacks
-├── main.py           # Main app: TUI + CLI modes (orchestration only)
-├── CLAUDE.md         # App-specific guidance
+├── loops/
+│   ├── status.vertex         # Template-based: 4 stacks from 1 template
+│   └── stacks/
+│       └── status.loop       # Template: ${kind}, ${host} placeholders
+├── commands/
+│   └── status.py             # Data fetch logic
+├── folds.py                  # Fold overrides: health_fold
+├── lenses.py                 # Zoom-level rendering
+├── harness.py                # CLI harness for commands
+├── main.py                   # Entry point
 └── demos/
-    └── status.py     # Legacy demo
+    └── status.py             # Legacy demo
 ```
 
 ### What Works
 
-- **Per-stack kinds** — Each .loop emits its own kind (infra, media, dev, minecraft)
+- **Template sources** — One .loop template instantiated with parameter table
+- **Per-stack kinds** — Template expands to 4 sources with ${kind} substitution
 - **tick.name IS the stack** — No re-grouping in render, state is `{stack: payload}`
 - **format: ndjson** — Source format for JSON lines from docker compose ps
 - **select** parse op — Extract specific fields from JSON objects
@@ -184,8 +184,9 @@ apps/hlab/
 
 ## Next Steps
 
-1. **Polling** — Add `every: 30s` for live updates
-2. **Actions** — keypress → fact → automation loop (restart container)
+1. **Render UI iteration** — Improve visual presentation, layout, styling
+2. **Polling** — Add `every: 30s` for live updates
+3. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
 
@@ -203,6 +204,14 @@ apps/hlab/
   Python escape hatch for now; DSL syntax if patterns emerge.
 
 ## Resolved
+
+73. ~~DSL source templates~~ — Parameterized source templates with `${var}` placeholders. Vertex
+    declares `template:` + `with:` parameter table + optional `loop:` spec. Template instantiated
+    per-row, variables substituted in source command, kind, and boundary condition. Collapsed
+    4 nearly-identical .loop files → 1 template, 4 identical loop defs → 1 spec with ${kind}.
+    Added `SourceParams`, `TemplateSource` AST types. Lexer handles ${} in identifiers. Parser
+    handles `template:`/`with:`/`loop:` blocks. Mapper has `substitute_vars()`, `compile_sources()`.
+    180 DSL tests. hlab produces identical output with cleaner config.
 
 72. ~~hlab fold→lens~~ — `fold_overrides` for health computation (healthy/total in tick payload),
     `stack_lens` for zoom-level rendering. main.py is now pure orchestration — domain logic in

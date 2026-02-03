@@ -23,14 +23,14 @@ from pathlib import Path
 from cells import Block, Style, join_vertical, border, print_block, ROUNDED
 from cells.tui import Surface
 
-from dsl import parse_vertex_file, parse_loop_file, compile_vertex_recursive, compile_loop, materialize_vertex
+from dsl import parse_vertex_file, compile_vertex_recursive, compile_sources, materialize_vertex
 from data import Runner
 from vertex import Tick
 
 
 # Resolve paths relative to this file
 HERE = Path(__file__).parent.parent
-VERTEX_FILE = HERE / "status.vertex"
+VERTEX_FILE = HERE / "loops/status.vertex"
 
 
 # ============================================================================
@@ -74,17 +74,19 @@ def container_style(c: dict) -> tuple[str, Style]:
 def load_vertex():
     """Parse and materialize the vertex, return (vertex, sources, source_names)."""
     ast = parse_vertex_file(VERTEX_FILE)
+
+    # Compile sources from vertex file (handles templates and simple paths)
+    sources, template_specs = compile_sources(ast, VERTEX_FILE.parent)
+
+    # Compile the vertex tree
     compiled = compile_vertex_recursive(ast)
+
+    # Merge template specs into compiled vertex specs
+    compiled.specs.update(template_specs)
+
     vertex = materialize_vertex(compiled)
 
-    sources = []
-    source_names = []  # observer names for ordering
-    for source_path in ast.sources:
-        full_path = VERTEX_FILE.parent / source_path
-        loop_ast = parse_loop_file(full_path)
-        source = compile_loop(loop_ast)
-        sources.append(source)
-        source_names.append(source.observer)
+    source_names = [s.observer for s in sources]  # observer names for ordering
 
     return vertex, sources, source_names
 

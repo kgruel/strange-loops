@@ -33,9 +33,13 @@ from .ast import (
     Pick,
     Replace,
     RStrip,
+    Select,
     Skip,
+    SourceEntry,
+    SourceParams,
     Split,
     Strip,
+    TemplateSource,
     Transform,
     TransformOp,
     Trigger,
@@ -244,6 +248,20 @@ class Parser:
                     )
 
             return Pick(tuple(indices), tuple(names) if names else None)
+
+        # select Field1, Field2, Field3 (for ndjson format)
+        if token.type == TokenType.SELECT:
+            self.advance()
+            fields = []
+            while self.at(TokenType.IDENTIFIER, TokenType.STRING):
+                fields.append(self.parse_string(self.advance()))
+                if self.at(TokenType.COMMA):
+                    self.advance()
+                else:
+                    break
+            if not fields:
+                raise ParseError("select requires at least one field name", token.location)
+            return Select(tuple(fields))
 
         # field: transform chain
         if token.type == TokenType.IDENTIFIER:
@@ -466,7 +484,7 @@ class Parser:
     # -------------------------------------------------------------------------
 
     def parse_path_list(self) -> tuple[Path, ...]:
-        """Parse a list of paths (used for sources: and vertices:).
+        """Parse a list of paths (used for vertices:).
 
         Handles paths like:
           - ./foo.vertex           (single token)
@@ -500,6 +518,175 @@ class Parser:
         return tuple(paths)
 
     # -------------------------------------------------------------------------
+    # Sources list parsing (.vertex files) - handles both paths and templates
+    # -------------------------------------------------------------------------
+
+    def parse_sources_block(self) -> tuple[SourceEntry, ...]:
+        """Parse a sources: block with paths and/or template sources.
+
+        Handles:
+          - ./foo.loop                          (simple path)
+          - template: stacks/status.loop        (template source)
+              with:
+                - kind: infra
+                  host: 192.168.1.30
+              loop:
+                fold:
+                  containers: collect 50
+                boundary: when ${kind}.complete
+        """
+        sources: list[SourceEntry] = []
+        self.expect(TokenType.INDENT)
+        while not self.at(TokenType.DEDENT, TokenType.EOF):
+            self.skip_newlines()
+            if self.at(TokenType.DEDENT, TokenType.EOF):
+                break
+
+            # - path or - template:
+            self.expect(TokenType.DASH)
+
+            if self.at(TokenType.TEMPLATE):
+                # Template source
+                self.advance()  # consume 'template'
+                self.expect(TokenType.COLON)
+
+                # Collect path tokens
+                path_parts = []
+                while self.at(TokenType.GLOB, TokenType.IDENTIFIER, TokenType.STRING):
+                    path_parts.append(self.advance().value)
+                if not path_parts:
+                    raise ParseError("Expected template path", self.peek().location)
+                template_path = Path("".join(path_parts))
+
+                self.skip_newlines()
+
+                # Parse with: and optional loop: blocks
+                params: list[SourceParams] = []
+                loop_def: LoopDef | None = None
+
+                if self.at(TokenType.INDENT):
+                    self.advance()  # consume INDENT
+                    while not self.at(TokenType.DEDENT, TokenType.EOF):
+                        self.skip_newlines()
+                        if self.at(TokenType.DEDENT, TokenType.EOF):
+                            break
+
+                        # Handle 'with' and 'loop' keywords (they're lexed as keywords, not identifiers)
+                        if self.at(TokenType.WITH):
+                            self.advance()  # consume 'with'
+                            self.expect(TokenType.COLON)
+                            self.skip_newlines()
+                            params = self.parse_with_block()
+                        elif self.at(TokenType.LOOP):
+                            self.advance()  # consume 'loop'
+                            self.expect(TokenType.COLON)
+                            self.skip_newlines()
+                            loop_def = self.parse_loop_def()
+                        else:
+                            raise ParseError(
+                                f"Unknown template block (expected 'with' or 'loop'), got {self.peek().type.name}",
+                                self.peek().location,
+                            )
+
+                    if self.at(TokenType.DEDENT):
+                        self.advance()
+
+                if not params:
+                    raise ParseError("Template source requires 'with:' block", self.peek().location)
+
+                sources.append(
+                    TemplateSource(
+                        template=template_path,
+                        params=tuple(params),
+                        loop=loop_def,
+                    )
+                )
+            else:
+                # Simple path
+                path_parts = []
+                while self.at(TokenType.GLOB, TokenType.IDENTIFIER, TokenType.STRING):
+                    path_parts.append(self.advance().value)
+
+                if not path_parts:
+                    raise ParseError(f"Expected path, got {self.peek().type.name}", self.peek().location)
+
+                sources.append(Path("".join(path_parts)))
+                self.skip_newlines()
+
+        if self.at(TokenType.DEDENT):
+            self.advance()
+        return tuple(sources)
+
+    def parse_param_value(self) -> str:
+        """Parse a parameter value (can be string, identifier, number, or IP-like)."""
+        # Collect all tokens until newline, treating them as a single value
+        # This handles IP addresses like 192.168.1.30 which are lexed as multiple tokens
+        parts = []
+        while not self.at(TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+            token = self.advance()
+            if token.type == TokenType.STRING:
+                parts.append(token.value)
+            elif token.type == TokenType.IDENTIFIER:
+                parts.append(token.value)
+            elif token.type == TokenType.NUMBER:
+                parts.append(token.value)
+            elif token.type == TokenType.GLOB:
+                parts.append(token.value)
+            else:
+                # Put the unexpected token back and stop
+                self.pos -= 1
+                break
+        return "".join(parts)
+
+    def parse_with_block(self) -> list[SourceParams]:
+        """Parse a with: block containing parameter rows.
+
+        with:
+          - kind: infra
+            host: 192.168.1.30
+          - kind: media
+            host: 192.168.1.40
+        """
+        params: list[SourceParams] = []
+        self.expect(TokenType.INDENT)
+        while not self.at(TokenType.DEDENT, TokenType.EOF):
+            self.skip_newlines()
+            if self.at(TokenType.DEDENT, TokenType.EOF):
+                break
+
+            # - key: value pairs
+            self.expect(TokenType.DASH)
+
+            # First key: value on same line as dash
+            row: dict[str, str] = {}
+            key_token = self.expect(TokenType.IDENTIFIER, "for parameter key")
+            self.expect(TokenType.COLON)
+            row[key_token.value] = self.parse_param_value()
+            self.skip_newlines()
+
+            # Additional key: value pairs at same indentation (within this item)
+            if self.at(TokenType.INDENT):
+                self.advance()
+                while not self.at(TokenType.DEDENT, TokenType.EOF):
+                    self.skip_newlines()
+                    if self.at(TokenType.DEDENT, TokenType.EOF):
+                        break
+
+                    key_token = self.expect(TokenType.IDENTIFIER, "for parameter key")
+                    self.expect(TokenType.COLON)
+                    row[key_token.value] = self.parse_param_value()
+                    self.skip_newlines()
+
+                if self.at(TokenType.DEDENT):
+                    self.advance()
+
+            params.append(SourceParams(values=row))
+
+        if self.at(TokenType.DEDENT):
+            self.advance()
+        return params
+
+    # -------------------------------------------------------------------------
     # Top-level file parsing
     # -------------------------------------------------------------------------
 
@@ -510,7 +697,7 @@ class Parser:
         observer: str | None = None
         every: Duration | None = None
         on: Trigger | None = None
-        format_: Literal["lines", "json", "blob"] = "lines"
+        format_: Literal["lines", "json", "ndjson", "blob"] = "lines"
         timeout = Duration(60000)
         env: dict[str, str] | None = None
         parse_steps: tuple[ParseStep, ...] = ()
@@ -554,9 +741,9 @@ class Parser:
             elif key == "format":
                 fmt_token = self.advance()
                 fmt_value = self.parse_string(fmt_token)
-                if fmt_value not in ("lines", "json", "blob"):
+                if fmt_value not in ("lines", "json", "ndjson", "blob"):
                     raise ParseError(
-                        f"format must be 'lines', 'json', or 'blob', got {fmt_value!r}",
+                        f"format must be 'lines', 'json', 'ndjson', or 'blob', got {fmt_value!r}",
                         fmt_token.location,
                     )
                 format_ = fmt_value  # type: ignore
@@ -603,7 +790,7 @@ class Parser:
         name: str | None = None
         store: Path | None = None
         discover: str | None = None
-        sources: tuple[Path, ...] | None = None
+        sources: tuple[SourceEntry, ...] | None = None
         vertices: tuple[Path, ...] | None = None
         loops: dict[str, LoopDef] = {}
         routes: dict[str, str] | None = None
@@ -629,7 +816,7 @@ class Parser:
                 discover = glob_token.value
             elif key == "sources":
                 self.skip_newlines()
-                sources = self.parse_path_list()
+                sources = self.parse_sources_block()
             elif key == "vertices":
                 self.skip_newlines()
                 vertices = self.parse_path_list()
@@ -650,7 +837,12 @@ class Parser:
         # Validate required fields
         if name is None:
             raise ParseError("Missing required field: name", Location(self.path, 1))
-        if not loops:
+
+        # loops: is required unless template sources with loop: blocks provide specs
+        has_template_loop_specs = sources and any(
+            isinstance(s, TemplateSource) and s.loop is not None for s in sources
+        )
+        if not loops and not has_template_loop_specs:
             raise ParseError("Missing required field: loops", Location(self.path, 1))
 
         return VertexFile(

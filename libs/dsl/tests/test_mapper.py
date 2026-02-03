@@ -16,14 +16,17 @@ from dsl.mapper import (
     CircularVertexError,
     CompiledVertex,
     compile_loop,
+    compile_sources,
     compile_vertex,
     compile_vertex_recursive,
+    instantiate_template,
     map_fold_op,
     map_parse_steps,
     map_pick,
     map_skip,
     map_split,
     map_transform,
+    substitute_vars,
 )
 from dsl.ast import (
     Coerce,
@@ -1053,6 +1056,169 @@ loops:
         # Child state accumulated
         child = runtime.children[0]
         assert child.state("pulse") == {"count": 3}
+
+
+class TestTemplateInstantiation:
+    """Template variable substitution and instantiation."""
+
+    def test_substitute_vars_basic(self):
+        """Basic variable substitution."""
+        result = substitute_vars("Hello ${name}!", {"name": "World"})
+        assert result == "Hello World!"
+
+    def test_substitute_vars_multiple(self):
+        """Multiple variables in same string."""
+        result = substitute_vars(
+            "ssh deploy@${host} 'cd /opt/${kind} && docker compose ps'",
+            {"host": "192.168.1.30", "kind": "infra"},
+        )
+        assert result == "ssh deploy@192.168.1.30 'cd /opt/infra && docker compose ps'"
+
+    def test_substitute_vars_unmatched(self):
+        """Unmatched variables are preserved."""
+        result = substitute_vars("${foo} and ${bar}", {"foo": "replaced"})
+        assert result == "replaced and ${bar}"
+
+    def test_substitute_vars_no_vars(self):
+        """String without variables passes through."""
+        result = substitute_vars("no variables here", {"foo": "bar"})
+        assert result == "no variables here"
+
+    def test_instantiate_template(self):
+        """Instantiate a LoopFile with variable substitution."""
+        from dsl.ast import LoopFile
+
+        template = LoopFile(
+            kind="${kind}",
+            observer="hlab",
+            source='ssh deploy@${host} "cd /opt/${kind} && docker compose ps"',
+            format="ndjson",
+        )
+        params = {"kind": "infra", "host": "192.168.1.30"}
+
+        result = instantiate_template(template, params)
+
+        assert result.kind == "infra"
+        assert result.observer == "hlab"  # unchanged
+        assert result.source == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
+        assert result.format == "ndjson"  # unchanged
+
+    def test_compile_sources_simple_paths(self, tmp_path):
+        """compile_sources handles simple path entries."""
+        # Create loop file
+        loop_path = tmp_path / "test.loop"
+        loop_path.write_text("""\
+source: echo hello
+kind: test
+observer: shell
+""")
+        # Create vertex referencing it
+        from dsl import parse_vertex
+
+        vertex = parse_vertex(f"""\
+name: test
+sources:
+  - {loop_path}
+loops:
+  test:
+    fold:
+      count: +1
+""")
+        sources, specs = compile_sources(vertex, tmp_path)
+
+        assert len(sources) == 1
+        assert sources[0].command == "echo hello"
+        assert sources[0].kind == "test"
+        assert specs == {}
+
+    def test_compile_sources_template(self, tmp_path):
+        """compile_sources handles template entries."""
+        # Create template file
+        template_path = tmp_path / "status.loop"
+        template_path.write_text("""\
+source: ssh deploy@${host} "cd /opt/${kind} && docker compose ps"
+kind: ${kind}
+observer: hlab
+format: ndjson
+""")
+        # Create vertex with template source
+        from dsl import parse_vertex
+
+        vertex = parse_vertex(f"""\
+name: status
+sources:
+  - template: {template_path}
+    with:
+      - kind: infra
+        host: 192.168.1.30
+      - kind: media
+        host: 192.168.1.40
+loops:
+  infra:
+    fold:
+      count: +1
+  media:
+    fold:
+      count: +1
+""")
+        sources, specs = compile_sources(vertex, tmp_path)
+
+        assert len(sources) == 2
+        assert sources[0].kind == "infra"
+        assert sources[0].command == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
+        assert sources[1].kind == "media"
+        assert sources[1].command == 'ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps"'
+        # No loop: block, so no specs generated
+        assert specs == {}
+
+    def test_compile_sources_template_with_loop_spec(self, tmp_path):
+        """compile_sources generates specs from template loop: block."""
+        # Create template file
+        template_path = tmp_path / "status.loop"
+        template_path.write_text("""\
+source: ssh deploy@${host} "cd /opt/${kind} && docker compose ps"
+kind: ${kind}
+observer: hlab
+format: ndjson
+""")
+        # Create vertex with template source + loop spec
+        from dsl import parse_vertex
+
+        vertex = parse_vertex(f"""\
+name: status
+sources:
+  - template: {template_path}
+    with:
+      - kind: infra
+        host: 192.168.1.30
+      - kind: media
+        host: 192.168.1.40
+    loop:
+      fold:
+        containers: collect 50
+      boundary: when ${{kind}}.complete
+loops:
+  test:
+    fold:
+      count: +1
+""")
+        sources, specs = compile_sources(vertex, tmp_path)
+
+        assert len(sources) == 2
+        # Specs generated for each kind
+        assert "infra" in specs
+        assert "media" in specs
+
+        # Check spec fields
+        infra_spec = specs["infra"]
+        assert infra_spec.name == "infra"
+        assert len(infra_spec.folds) == 1
+        assert infra_spec.boundary is not None
+        assert infra_spec.boundary.kind == "infra.complete"
+
+        media_spec = specs["media"]
+        assert media_spec.name == "media"
+        assert media_spec.boundary.kind == "media.complete"
 
 
 class TestRouteWiring:

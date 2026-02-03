@@ -27,10 +27,14 @@ from .ast import (
     FoldMin,
     FoldSum,
     FoldWindow,
+    LoopDef,
     LoopFile,
     Pick,
+    Select,
     Skip,
+    SourceParams,
     Split,
+    TemplateSource,
     Transform,
     Trigger,
     VertexFile,
@@ -50,6 +54,7 @@ if TYPE_CHECKING:
     from data import ParseOp as RuntimeParseOp
     from data import Pick as RuntimePick
     from data import Rename as RuntimeRename
+    from data import Select as RuntimeSelect
     from data import Skip as RuntimeSkip
     from data import Split as RuntimeSplit
     from data import Transform as RuntimeTransform
@@ -156,6 +161,13 @@ def map_transform(step: Transform) -> list[RuntimeTransform | RuntimeCoerce]:
     return result
 
 
+def map_select(step: Select) -> RuntimeSelect:
+    """Map DSL Select to runtime Select."""
+    from data import Select as RuntimeSelect
+
+    return RuntimeSelect(*step.fields)
+
+
 def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
     """Map DSL parse steps to runtime parse ops."""
     result: list[RuntimeParseOp] = []
@@ -170,6 +182,8 @@ def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
             result.append(pick)
             if rename:
                 result.append(rename)
+        elif isinstance(step, Select):
+            result.append(map_select(step))
         elif isinstance(step, Transform):
             result.extend(map_transform(step))
 
@@ -275,6 +289,100 @@ def map_loop_file(loop: LoopFile) -> Source:
         format=loop.format,
         parse=parse_ops,
     )
+
+
+# -----------------------------------------------------------------------------
+# Template Instantiation
+# -----------------------------------------------------------------------------
+
+
+def substitute_vars(text: str, params: dict[str, str]) -> str:
+    """Replace ${var} with values from params."""
+    import re
+
+    def replacer(match: re.Match) -> str:
+        key = match.group(1)
+        if key in params:
+            return params[key]
+        # Leave unmatched variables as-is
+        return match.group(0)
+
+    return re.sub(r"\$\{(\w+)\}", replacer, text)
+
+
+def instantiate_template(loop_ast: LoopFile, params: dict[str, str]) -> LoopFile:
+    """Create a new LoopFile with variables substituted."""
+    return LoopFile(
+        kind=substitute_vars(loop_ast.kind, params),
+        observer=loop_ast.observer,
+        source=substitute_vars(loop_ast.source, params) if loop_ast.source else None,
+        every=loop_ast.every,
+        on=loop_ast.on,
+        format=loop_ast.format,
+        timeout=loop_ast.timeout,
+        env=loop_ast.env,
+        parse=loop_ast.parse,
+        path=loop_ast.path,
+    )
+
+
+def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
+    """Create a new LoopDef with boundary kind substituted."""
+    from .ast import BoundaryWhen
+
+    boundary = loop_def.boundary
+    if boundary and isinstance(boundary, BoundaryWhen):
+        # Substitute vars in the boundary kind
+        new_kind = substitute_vars(boundary.kind, params)
+        boundary = BoundaryWhen(kind=new_kind)
+
+    return LoopDef(folds=loop_def.folds, boundary=boundary)
+
+
+def compile_sources(
+    vertex: VertexFile,
+    base_dir: Path,
+) -> tuple[list["Source"], dict[str, "Spec"]]:
+    """Compile sources from a vertex, handling both paths and templates.
+
+    Returns:
+        (sources, specs) where specs contains any loop specs from templates
+    """
+    from .parser import parse_loop_file
+
+    sources: list["Source"] = []
+    specs: dict[str, "Spec"] = {}
+
+    for source_entry in vertex.sources or []:
+        if isinstance(source_entry, TemplateSource):
+            # Load template
+            template_path = source_entry.template
+            if not template_path.is_absolute():
+                template_path = base_dir / template_path
+            loop_ast = parse_loop_file(template_path)
+
+            # Instantiate for each param row
+            for param_row in source_entry.params:
+                instantiated = instantiate_template(loop_ast, param_row.values)
+                sources.append(compile_loop(instantiated))
+
+                # If template has a loop spec, create spec for this instance
+                if source_entry.loop:
+                    kind = param_row.values.get("kind")
+                    if kind:
+                        substituted_loop_def = substitute_loop_def(
+                            source_entry.loop, param_row.values
+                        )
+                        specs[kind] = map_loop_def_to_spec(kind, substituted_loop_def)
+        else:
+            # Simple path
+            loop_path = source_entry
+            if not loop_path.is_absolute():
+                loop_path = base_dir / loop_path
+            loop_ast = parse_loop_file(loop_path)
+            sources.append(compile_loop(loop_ast))
+
+    return sources, specs
 
 
 # -----------------------------------------------------------------------------

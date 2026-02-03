@@ -26,8 +26,11 @@ from .ast import (
     Replace,
     RStrip,
     Skip,
+    SourceEntry,
+    SourceParams,
     Split,
     Strip,
+    TemplateSource,
     Transform,
     TransformOp,
     Trigger,
@@ -41,9 +44,12 @@ from .mapper import (
     CircularVertexError,
     CompiledVertex,
     compile_loop,
+    compile_sources,
     compile_vertex,
     compile_vertex_recursive,
+    instantiate_template,
     materialize_vertex,
+    substitute_vars,
 )
 
 __all__ = [
@@ -80,6 +86,10 @@ __all__ = [
     "BoundaryAfter",
     "BoundaryEvery",
     "BoundaryWhen",
+    # AST types - Template sources
+    "SourceEntry",
+    "SourceParams",
+    "TemplateSource",
     # Lexer
     "Token",
     "TokenType",
@@ -101,9 +111,12 @@ __all__ = [
     "validate_vertex",
     # Mapper
     "compile_loop",
+    "compile_sources",
     "compile_vertex",
     "compile_vertex_recursive",
+    "instantiate_template",
     "materialize_vertex",
+    "substitute_vars",
     "CompiledVertex",
     "CircularVertexError",
 ]

@@ -100,6 +100,13 @@ class Pick:
 
 
 @dataclass(frozen=True)
+class Select:
+    """Select specific fields from a dict (for ndjson format)."""
+
+    fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Transform:
     """Apply transformations to a named field."""
 
@@ -145,7 +152,7 @@ class Coerce:
 
 
 TransformOp = Strip | LStrip | RStrip | Replace | Coerce
-ParseStep = Skip | Split | Pick | Transform
+ParseStep = Skip | Split | Pick | Select | Transform
 
 
 # -----------------------------------------------------------------------------
@@ -297,6 +304,36 @@ class LoopDef:
 
 
 # -----------------------------------------------------------------------------
+# Source Templates (for parameterized sources)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SourceParams:
+    """One row of template parameters."""
+
+    values: dict[str, str]
+
+
+@dataclass(frozen=True)
+class TemplateSource:
+    """A source template with instantiation parameters and loop spec.
+
+    template: Path to the .loop template file
+    params: Tuple of parameter rows, each row instantiates the template once
+    loop: Optional LoopDef (fold + boundary) applied to all instances
+    """
+
+    template: Path
+    params: tuple[SourceParams, ...]
+    loop: "LoopDef | None" = None
+
+
+# Union type for sources: entries
+SourceEntry = Path | TemplateSource
+
+
+# -----------------------------------------------------------------------------
 # Top-level File ASTs
 # -----------------------------------------------------------------------------
 
@@ -310,7 +347,7 @@ class LoopFile:
     source: str | None = None  # Optional for pure timer loops
     every: Duration | None = None
     on: Trigger | None = None  # Event trigger (mutually exclusive with every)
-    format: Literal["lines", "json", "blob"] = "lines"
+    format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     timeout: Duration = Duration(60000)  # 60s default
     env: dict[str, str] | None = None
     parse: tuple[ParseStep, ...] = ()
@@ -327,7 +364,7 @@ class VertexFile:
     loops: dict[str, LoopDef]
     store: Path | None = None
     discover: str | None = None
-    sources: tuple[Path, ...] | None = None
+    sources: tuple[SourceEntry, ...] | None = None
     vertices: tuple[Path, ...] | None = None
     routes: dict[str, str] | None = None
     emit: str | None = None

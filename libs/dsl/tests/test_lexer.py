@@ -91,14 +91,14 @@ class TestTokenize:
 
     def test_at_symbol_in_identifier(self):
         """Test @ symbol is allowed in identifiers (e.g., SSH user@host)."""
-        tokens = tokenize("source: ssh deploy@192.168.1.30 cmd")
+        tokens = tokenize("observer: deploy@192.168.1.30")
         identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
         values = [t.value for t in identifiers]
         assert "deploy@192.168.1.30" in values
 
     def test_at_symbol_with_port(self):
         """Test @ with colon for port numbers."""
-        tokens = tokenize("source: curl user@host:8080")
+        tokens = tokenize("observer: user@host:8080")
         identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
         # user@host gets tokenized, then : becomes COLON, then 8080 is NUMBER
         values = [t.value for t in identifiers]
@@ -106,17 +106,24 @@ class TestTokenize:
 
     def test_at_symbol_multiple(self):
         """Test multiple @ symbols in one identifier."""
-        tokens = tokenize("source: echo a@b@c")
+        tokens = tokenize("observer: a@b@c")
         identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
         values = [t.value for t in identifiers]
         assert "a@b@c" in values
 
     def test_at_symbol_email(self):
         """Test email-like patterns."""
-        tokens = tokenize("source: echo user@domain.com")
+        tokens = tokenize("observer: user@domain.com")
         identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER]
         values = [t.value for t in identifiers]
         assert "user@domain.com" in values
+
+    def test_source_raw_allows_url_chars(self):
+        """source: captures the rest of the line as a RAW token."""
+        tokens = tokenize("source: curl -s https://example/api?x=1&y=2")
+        raws = [t for t in tokens if t.type == TokenType.RAW]
+        assert len(raws) == 1
+        assert raws[0].value == "curl -s https://example/api?x=1&y=2"
 
 
 class TestIndentation:

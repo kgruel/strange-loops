@@ -247,7 +247,7 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
     # Check each loop definition
     for loop_name, loop_def in vertex.loops.items():
         # Validate fold declarations
-        if not loop_def.folds:
+        if not loop_def.folds and loop_def.boundary is None:
             ctx.error(f"loop '{loop_name}' has no fold declarations")
 
         # Check for duplicate fold targets

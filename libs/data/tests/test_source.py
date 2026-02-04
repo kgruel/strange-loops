@@ -354,7 +354,7 @@ class TestSourceFormat:
         assert data_facts[0].payload == {"name": "alice", "score": 42}
 
     async def test_format_json_with_array(self):
-        """format=json with arrays produces error (payload must be dict)."""
+        """format=json wraps top-level arrays/scalars into a dict payload."""
         source = Source(
             command='echo \'[1, 2, 3]\'',
             kind="data",
@@ -366,11 +366,46 @@ class TestSourceFormat:
         async for fact in source.stream():
             facts.append(fact)
 
-        # Arrays can't be unpacked as **payload in Fact.of(), so error is emitted
-        # This documents current behavior - we may want to wrap arrays in future
-        assert len(facts) == 1
-        assert facts[0].kind == "source.error"
-        assert "must be a mapping" in facts[0].payload["error"]
+        data_facts = [f for f in facts if f.kind == "data"]
+        assert len(data_facts) == 1
+        assert data_facts[0].payload == {"_json": [1, 2, 3]}
+
+        complete_facts = [f for f in facts if f.kind == "data.complete"]
+        assert len(complete_facts) == 1
+
+    async def test_format_json_with_scalar(self):
+        """format=json wraps top-level scalars into a dict payload."""
+        source = Source(
+            command="echo 42",
+            kind="data",
+            observer="json-scalar-source",
+            format="json",
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        data_facts = [f for f in facts if f.kind == "data"]
+        assert len(data_facts) == 1
+        assert data_facts[0].payload == {"_json": 42}
+
+    async def test_format_ndjson_with_arrays(self):
+        """format=ndjson wraps non-object records into a dict payload."""
+        source = Source(
+            command='printf \'[1, 2]\\n[3, 4]\\n\'',
+            kind="data",
+            observer="ndjson-array-source",
+            format="ndjson",
+        )
+
+        facts = []
+        async for fact in source.stream():
+            facts.append(fact)
+
+        data_facts = [f for f in facts if f.kind == "data"]
+        assert len(data_facts) == 2
+        assert [f.payload for f in data_facts] == [{"_json": [1, 2]}, {"_json": [3, 4]}]
 
     async def test_format_json_invalid_emits_error(self):
         """format=json with invalid JSON emits error fact plus completion."""

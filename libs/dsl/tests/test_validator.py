@@ -204,6 +204,24 @@ loops:
 """)
         validate_vertex(vertex)  # Should not raise
 
+    def test_loop_with_boundary_but_no_fold_is_allowed(self):
+        """Override placeholder loops can omit fold when boundary is present."""
+        vertex = parse_vertex("""\
+name: test
+loops:
+  events:
+    boundary: when events.complete
+""")
+        validate_vertex(vertex)  # Should not raise
+
+    def test_loop_with_no_fold_and_no_boundary_fails(self):
+        """Loops must have a fold unless a boundary is present."""
+        from dsl.ast import LoopDef, VertexFile
+
+        vertex = VertexFile(name="test", loops={"events": LoopDef(folds=(), boundary=None)})
+        with pytest.raises(ValidationError, match="has no fold declarations"):
+            validate_vertex(vertex)
+
     def test_route_to_undefined_loop_fails(self):
         """Routes must reference defined loops."""
         vertex = parse_vertex("""\

@@ -57,16 +57,23 @@ class Source:
     format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
 
-    def _parse_data(self, data: dict[str, Any] | str) -> dict[str, Any] | None:
+    def _parse_data(self, data: Any) -> dict[str, Any] | None:
         """Parse data through the pipeline, returning payload or None to skip.
 
         For lines format: data is a string (the line text)
-        For json format: data is the parsed JSON dict
+        For json/ndjson format: data is the parsed JSON value (non-objects are wrapped)
         """
+        # JSON can be a top-level array/scalar; normalize to dict payloads.
+        if not isinstance(data, (str, dict)):
+            data = {"_json": data}
+
         if self.parse is None:
             if isinstance(data, str):
                 return {"line": data}
-            return data
+            if isinstance(data, dict):
+                return data
+            # Defensive: normalize anything else
+            return {"_json": data}
 
         # Import here to avoid circular dependency at module load
         from data.parse import run_parse

@@ -78,6 +78,15 @@ observer: shell
         assert loop.format == "lines"
         assert loop.parse == ()
 
+    def test_source_allows_url_chars(self):
+        text = """\
+source: curl -s https://example/api?x=1&y=2
+kind: api
+observer: http
+"""
+        loop = parse_loop(text)
+        assert loop.source == "curl -s https://example/api?x=1&y=2"
+
     def test_from_file(self):
         loop = parse_loop_file(FIXTURES / "minimal.loop")
         assert loop.source == "whoami"
@@ -305,6 +314,15 @@ observer: test
 """
         loop = parse_loop(text)
         assert loop.source == "echo"
+
+    def test_hash_inside_quotes_not_a_comment(self):
+        text = """\
+source: echo "a#b"  # inline comment
+kind: test
+observer: test
+"""
+        loop = parse_loop(text)
+        assert loop.source == 'echo "a#b"'
 
     def test_comment_in_block(self):
         text = """\

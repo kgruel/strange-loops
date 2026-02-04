@@ -79,6 +79,9 @@ class TokenType(Enum):
     LBRACKET = auto()  # [
     RBRACKET = auto()  # ]
 
+    # Raw values
+    RAW = auto()  # raw rest-of-line (used for source: commands)
+
 
 # Keywords that get special token types
 KEYWORDS = {
@@ -255,6 +258,14 @@ class Lexer:
             self.skip_comment()
             return
 
+        # Special-case: source: lines should treat the rest of the line as raw text.
+        # Shell commands and URLs often contain characters the lexer doesn't otherwise
+        # recognize (&, ?, =, etc.). We still preserve inline comment behavior: `#`
+        # starts a comment only when not inside quotes.
+        if self._is_source_key_at_line_start():
+            yield from self._tokenize_source_line()
+            return
+
         while self.peek() and self.peek() != "\n":
             loc = self.location()
 
@@ -378,6 +389,78 @@ class Lexer:
                 continue
 
             raise LexError(f"Unexpected character: {self.peek()!r}", loc)
+
+    def _is_source_key_at_line_start(self) -> bool:
+        """Check if the current line begins with a `source:` key."""
+        if not self.text.startswith("source", self.pos):
+            return False
+
+        after = self.pos + len("source")
+        if after < len(self.text):
+            # Avoid matching e.g. sourceX:
+            nxt = self.text[after]
+            if nxt.isalnum() or nxt in "_-.@":
+                return False
+
+        i = after
+        while i < len(self.text) and self.text[i] in " \t":
+            i += 1
+        return i < len(self.text) and self.text[i] == ":"
+
+    def _tokenize_source_line(self) -> Iterator[Token]:
+        """Tokenize `source: <raw...>` as IDENTIFIER, COLON, RAW."""
+        # Emit IDENTIFIER("source")
+        loc = self.location()
+        for _ in "source":
+            self.advance()
+        yield Token(TokenType.IDENTIFIER, "source", loc)
+
+        # Optional whitespace before colon
+        self.skip_whitespace_on_line()
+
+        # Emit COLON
+        colon_loc = self.location()
+        if self.peek() != ":":
+            raise LexError("Expected ':' after source", colon_loc)
+        self.advance()
+        yield Token(TokenType.COLON, ":", colon_loc)
+
+        # Optional whitespace after colon
+        self.skip_whitespace_on_line()
+
+        # Read raw rest-of-line until newline or comment (outside quotes)
+        raw_loc = self.location()
+        start = self.pos
+        quote: str | None = None
+
+        while self.peek() and self.peek() != "\n":
+            c = self.peek()
+
+            if quote is None:
+                if c == "#":
+                    break
+                if c in "\"'":
+                    quote = c
+                    self.advance()
+                    continue
+                self.advance()
+                continue
+
+            # Inside quote
+            self.advance()
+            if c == "\\" and self.peek() and self.peek() != "\n":
+                # Include escaped char
+                self.advance()
+                continue
+            if c == quote:
+                quote = None
+
+        raw = self.text[start : self.pos].rstrip()
+        yield Token(TokenType.RAW, raw, raw_loc)
+
+        # Consume any trailing comment
+        if self.peek() == "#":
+            self.skip_comment()
 
     def tokenize(self) -> Iterator[Token]:
         """Tokenize the entire input."""

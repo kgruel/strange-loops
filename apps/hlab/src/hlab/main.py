@@ -1,7 +1,7 @@
 """hlab — homelab monitoring.
 
 Usage:
-    uv run hlab                        # default (status)
+    uv run hlab                        # show help
     uv run hlab status                 # stack container status
     uv run hlab alerts                 # Prometheus alert status
     uv run hlab logs <stack>           # stream docker compose logs
@@ -129,10 +129,9 @@ def main(argv: list[str] | None = None) -> int:
     # Parse args
     args = parser.parse_args(argv)
 
-    # Handle default command (status)
     if args.command is None:
-        argv_with_default = ["status"] + argv
-        args = parser.parse_args(argv_with_default)
+        parser.print_help()
+        return 0
 
     # Route to appropriate command
     try:

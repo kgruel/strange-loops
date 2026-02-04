@@ -21,7 +21,7 @@ Tick    what a period became    name + ts + payload + origin
 ## Run
 
 ```bash
-uv run hlab                        # default (status)
+uv run hlab                        # show help
 uv run hlab status                 # stack container status
 uv run hlab alerts                 # Prometheus alert status
 uv run hlab logs <stack>           # stream docker compose logs

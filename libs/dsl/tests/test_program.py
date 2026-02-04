@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from pathlib import Path
+from typing import AsyncIterator
+
+import pytest
 
 from data import Fact
-from dsl import load_vertex_program
+from dsl import VertexProgram, load_vertex_program
+from vertex import Vertex
 
 
 def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path) -> None:
@@ -85,3 +91,92 @@ def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
     assert tick_a is not None
     assert tick_a.name == "a"
     assert tick_a.payload["seen"] == 10
+
+
+# ---------------------------------------------------------------------------
+# VertexProgram.run() and .collect()
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MockSource:
+    """Source that yields predetermined facts."""
+
+    observer: str
+    facts: list[Fact]
+
+    async def stream(self) -> AsyncIterator[Fact]:
+        for fact in self.facts:
+            yield fact
+
+
+def _make_program(sources: list[_MockSource]) -> VertexProgram:
+    """Build a VertexProgram with two loops (a, b) using mock sources."""
+    vertex = Vertex("test")
+    vertex.register(
+        "a", 0, lambda s, p: s + p.get("v", 0), boundary="a.complete", reset=True
+    )
+    vertex.register(
+        "b", 0, lambda s, p: s + p.get("v", 0), boundary="b.complete", reset=True
+    )
+    return VertexProgram(vertex=vertex, sources=sources, expected_ticks=["a", "b"])
+
+
+class TestVertexProgramRun:
+    """Tests for VertexProgram.run() async iterator."""
+
+    def test_run_yields_ticks(self) -> None:
+        source = _MockSource(
+            observer="mock",
+            facts=[
+                Fact.of("a", "mock", v=3),
+                Fact.of("a.complete", "mock"),
+                Fact.of("b", "mock", v=7),
+                Fact.of("b.complete", "mock"),
+            ],
+        )
+        program = _make_program([source])
+
+        async def _run():
+            ticks = {}
+            async for tick in program.run():
+                ticks[tick.name] = tick.payload
+            return ticks
+
+        assert asyncio.run(_run()) == {"a": 3, "b": 7}
+
+    def test_run_with_no_sources(self) -> None:
+        program = _make_program([])
+
+        async def _run():
+            ticks = []
+            async for tick in program.run():
+                ticks.append(tick)
+            return ticks
+
+        assert asyncio.run(_run()) == []
+
+
+class TestVertexProgramCollect:
+    """Tests for VertexProgram.collect() sync convenience."""
+
+    def test_collect_returns_dict(self) -> None:
+        source = _MockSource(
+            observer="mock",
+            facts=[
+                Fact.of("a", "mock", v=5),
+                Fact.of("a.complete", "mock"),
+                Fact.of("b", "mock", v=10),
+                Fact.of("b.complete", "mock"),
+            ],
+        )
+        program = _make_program([source])
+
+        result = program.collect()
+        assert result == {"a": 5, "b": 10}
+
+    def test_collect_empty_sources(self) -> None:
+        program = _make_program([])
+
+        result = program.collect()
+        assert result == {}

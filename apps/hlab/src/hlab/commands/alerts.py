@@ -6,15 +6,13 @@ Same pipeline as status: .loop → .vertex → fold → tick → lens → render
 
 from __future__ import annotations
 
-import asyncio
 from argparse import ArgumentParser
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from dsl import load_vertex_program
-from data import Runner
+from dsl import VertexProgram, load_vertex_program
 
 from ..folds import ALERTS_INITIAL, alerts_fold, rules_fold, targets_fold
 from ..lenses.alerts import AlertsData, FiringAlert, AlertRule, TargetHealth
@@ -24,12 +22,8 @@ HERE = Path(__file__).parent.parent
 VERTEX_FILE = HERE / "loops/alerts.vertex"
 
 
-def load(show_targets: bool = False):
-    """Load vertex and sources from DSL files.
-
-    Returns:
-        tuple of (vertex, sources)
-    """
+def _load_program(show_targets: bool = False) -> VertexProgram:
+    """Load vertex program, optionally excluding targets sources."""
     fold_overrides = {
         "alerts": (ALERTS_INITIAL, alerts_fold),
         "rules": (ALERTS_INITIAL, rules_fold),
@@ -38,11 +32,23 @@ def load(show_targets: bool = False):
         fold_overrides["targets"] = (ALERTS_INITIAL, targets_fold)
 
     program = load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
-    sources = program.sources
     if not show_targets:
-        sources = [s for s in sources if s.kind != "targets"]
+        program = VertexProgram(
+            vertex=program.vertex,
+            sources=[s for s in program.sources if s.kind != "targets"],
+            expected_ticks=program.expected_ticks,
+        )
+    return program
 
-    return program.vertex, sources
+
+def load(show_targets: bool = False):
+    """Load vertex and sources from DSL files.
+
+    Returns:
+        tuple of (vertex, sources)
+    """
+    program = _load_program(show_targets)
+    return program.vertex, program.sources
 
 
 def add_args(parser: ArgumentParser) -> None:
@@ -59,37 +65,21 @@ def make_fetcher(args) -> Callable[[], AlertsData]:
     show_targets = getattr(args, "targets", False)
 
     def fetch() -> AlertsData:
-        return asyncio.run(_fetch_alerts(show_targets=show_targets))
+        program = _load_program(show_targets=show_targets)
+        results = program.collect()
+
+        firing_alerts = [FiringAlert(**a) for a in results.get("alerts", {}).get("firing_alerts", [])]
+        alert_rules = [AlertRule(**r) for r in results.get("rules", {}).get("alert_rules", [])]
+        targets = [TargetHealth(**t) for t in results.get("targets", {}).get("targets", [])]
+
+        return AlertsData(
+            firing_alerts=firing_alerts,
+            alert_rules=alert_rules,
+            targets=targets,
+            show_targets=show_targets,
+        )
 
     return fetch
-
-
-async def _fetch_alerts(*, show_targets: bool = False) -> AlertsData:
-    """Fetch alert data from Prometheus via DSL pipeline."""
-    vertex, sources = load(show_targets=show_targets)
-    runner = Runner(vertex)
-    for s in sources:
-        runner.add(s)
-
-    firing_alerts: list[FiringAlert] = []
-    alert_rules: list[AlertRule] = []
-    targets: list[TargetHealth] = []
-
-    async for tick in runner.run():
-        payload = tick.payload
-        if tick.name == "alerts":
-            firing_alerts = [FiringAlert(**a) for a in payload.get("firing_alerts", [])]
-        elif tick.name == "rules":
-            alert_rules = [AlertRule(**r) for r in payload.get("alert_rules", [])]
-        elif tick.name == "targets":
-            targets = [TargetHealth(**t) for t in payload.get("targets", [])]
-
-    return AlertsData(
-        firing_alerts=firing_alerts,
-        alert_rules=alert_rules,
-        targets=targets,
-        show_targets=show_targets,
-    )
 
 
 def to_json(data: AlertsData) -> dict[str, Any]:

@@ -161,6 +161,19 @@ def _load_parse_block(node: ckdl.Node, path: Path | None) -> tuple[ParseStep, ..
 # ---------------------------------------------------------------------------
 
 
+_FOLD_OP_SPECS: dict[str, tuple[type, list[tuple[str, type]]]] = {
+    "inc":     (FoldCount,   []),
+    "latest":  (FoldLatest,  []),
+    "by":      (FoldBy,      [("key_field", str)]),
+    "sum":     (FoldSum,     [("field", str)]),
+    "max":     (FoldMax,     [("field", str)]),
+    "min":     (FoldMin,     [("field", str)]),
+    "avg":     (FoldAvg,     [("field", str)]),
+    "collect": (FoldCollect, [("max_items", int)]),
+    "window":  (FoldWindow,  [("size", int), ("field", str)]),
+}
+
+
 def _load_fold_op(node: ckdl.Node, path: Path | None) -> tuple[str, FoldOp]:
     """Load a fold declaration node. Node name is the target field, args define the op."""
     target = node.name
@@ -168,46 +181,17 @@ def _load_fold_op(node: ckdl.Node, path: Path | None) -> tuple[str, FoldOp]:
         raise _error(f"fold target {target!r}: missing operation", path)
 
     op_name = str(node.args[0])
+    spec = _FOLD_OP_SPECS.get(op_name)
+    if spec is None:
+        raise _error(f"Unknown fold operation: {op_name}", path)
 
-    if op_name == "by":
-        field = str(node.args[1]) if len(node.args) > 1 else None
-        if not field:
-            raise _error(f"fold {target}: 'by' requires a key field", path)
-        return target, FoldBy(key_field=field)
-    if op_name == "inc":
-        return target, FoldCount()
-    if op_name == "sum":
-        field = str(node.args[1]) if len(node.args) > 1 else None
-        if not field:
-            raise _error(f"fold {target}: 'sum' requires a field name", path)
-        return target, FoldSum(field=field)
-    if op_name == "latest":
-        return target, FoldLatest()
-    if op_name == "collect":
-        if len(node.args) < 2:
-            raise _error(f"fold {target}: 'collect' requires a max count", path)
-        return target, FoldCollect(max_items=int(node.args[1]))
-    if op_name == "max":
-        field = str(node.args[1]) if len(node.args) > 1 else None
-        if not field:
-            raise _error(f"fold {target}: 'max' requires a field name", path)
-        return target, FoldMax(field=field)
-    if op_name == "min":
-        field = str(node.args[1]) if len(node.args) > 1 else None
-        if not field:
-            raise _error(f"fold {target}: 'min' requires a field name", path)
-        return target, FoldMin(field=field)
-    if op_name == "avg":
-        field = str(node.args[1]) if len(node.args) > 1 else None
-        if not field:
-            raise _error(f"fold {target}: 'avg' requires a field name", path)
-        return target, FoldAvg(field=field)
-    if op_name == "window":
-        if len(node.args) < 3:
-            raise _error(f"fold {target}: 'window' requires size and field", path)
-        return target, FoldWindow(field=str(node.args[2]), size=int(node.args[1]))
-
-    raise _error(f"Unknown fold operation: {op_name}", path)
+    cls, arg_spec = spec
+    kwargs: dict[str, object] = {}
+    for i, (param_name, param_type) in enumerate(arg_spec, start=1):
+        if i >= len(node.args):
+            raise _error(f"fold {target}: '{op_name}' requires {param_name}", path)
+        kwargs[param_name] = param_type(node.args[i])
+    return target, cls(**kwargs)
 
 
 def _load_fold_block(node: ckdl.Node, path: Path | None) -> tuple[FoldDecl, ...]:

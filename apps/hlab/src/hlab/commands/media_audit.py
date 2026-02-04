@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from dsl import load_vertex_program
-from data import Runner
 
 from ..folds import MEDIA_AUDIT_INITIAL, movies_fold, quality_fold
 from ..infra import HostConfig, run_ssh, ssh_base_args
@@ -33,17 +32,22 @@ MEDIA_HOST_STACK = "media"
 FFMPEG_PATH = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
 
 
+def _load_program():
+    """Load vertex program from DSL files."""
+    fold_overrides = {
+        "movies": (MEDIA_AUDIT_INITIAL, movies_fold),
+        "quality": (MEDIA_AUDIT_INITIAL, quality_fold),
+    }
+    return load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
+
+
 def load():
     """Load vertex and sources from DSL files.
 
     Returns:
         tuple of (vertex, sources)
     """
-    fold_overrides = {
-        "movies": (MEDIA_AUDIT_INITIAL, movies_fold),
-        "quality": (MEDIA_AUDIT_INITIAL, quality_fold),
-    }
-    program = load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
+    program = _load_program()
     return program.vertex, program.sources
 
 
@@ -210,20 +214,13 @@ async def _fetch_audit(
     connect_timeout: float = 5.0,
 ) -> AuditData:
     """Fetch and audit all movies via DSL pipeline."""
-    vertex, sources = load()
-    runner = Runner(vertex)
-    for s in sources:
-        runner.add(s)
+    program = _load_program()
+    tick_data: dict[str, dict] = {}
+    async for tick in program.run():
+        tick_data[tick.name] = tick.payload
 
-    raw_movies: list[dict] = []
-    raw_quality: list[dict] = []
-
-    async for tick in runner.run():
-        payload = tick.payload
-        if tick.name == "movies":
-            raw_movies = payload.get("movies", [])
-        elif tick.name == "quality":
-            raw_quality = payload.get("quality_defs", [])
+    raw_movies = tick_data.get("movies", {}).get("movies", [])
+    raw_quality = tick_data.get("quality", {}).get("quality_defs", [])
 
     movies = parse_movies(raw_movies)
     quality_defs = parse_quality_definitions(raw_quality)

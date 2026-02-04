@@ -6,9 +6,10 @@ and vertices together.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .mapper import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
 from .loader import parse_vertex_file
@@ -16,7 +17,7 @@ from .validator import validate
 
 if TYPE_CHECKING:
     from data import Source
-    from vertex import Vertex
+    from vertex import Tick, Vertex
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,28 @@ class VertexProgram:
     vertex: Vertex
     sources: list[Source]
     expected_ticks: list[str]
+
+    async def run(self, grant: Any = None) -> AsyncIterator[Tick]:
+        """Run all sources and yield ticks as boundaries fire."""
+        from data import Runner
+
+        runner = Runner(self.vertex)
+        for source in self.sources:
+            runner.add(source)
+        async for tick in runner.run(grant):
+            yield tick
+
+    def collect(self, grant: Any = None) -> dict[str, Any]:
+        """Run all sources synchronously, return {tick_name: payload}."""
+        import asyncio
+
+        async def _run() -> dict[str, Any]:
+            results: dict[str, Any] = {}
+            async for tick in self.run(grant):
+                results[tick.name] = tick.payload
+            return results
+
+        return asyncio.run(_run())
 
 
 def load_vertex_program(

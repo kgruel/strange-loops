@@ -195,30 +195,36 @@ def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
 # -----------------------------------------------------------------------------
 
 
-def map_fold_op(target: str, op: DslFoldOp) -> RuntimeFoldOp:
-    """Map DSL FoldOp to runtime FoldOp."""
+_FOLD_MAP: dict[type, tuple[Callable, str]] | None = None
+
+
+def _get_fold_map() -> dict[type, tuple[Callable, str]]:
+    """Lazy-build the DSL→runtime fold dispatch table."""
+    global _FOLD_MAP  # noqa: PLW0603
+    if _FOLD_MAP is not None:
+        return _FOLD_MAP
     from data import Avg, Collect, Count, Latest, Max, Min, Sum, Upsert, Window
 
-    if isinstance(op, FoldBy):
-        return Upsert(target=target, key=op.key_field)
-    elif isinstance(op, FoldCount):
-        return Count(target=target)
-    elif isinstance(op, FoldSum):
-        return Sum(target=target, field=op.field)
-    elif isinstance(op, FoldLatest):
-        return Latest(target=target)
-    elif isinstance(op, FoldCollect):
-        return Collect(target=target, max=op.max_items)
-    elif isinstance(op, FoldMax):
-        return Max(target=target, field=op.field)
-    elif isinstance(op, FoldMin):
-        return Min(target=target, field=op.field)
-    elif isinstance(op, FoldAvg):
-        return Avg(target=target, field=op.field)
-    elif isinstance(op, FoldWindow):
-        return Window(target=target, field=op.field, size=op.size)
-    else:
+    _FOLD_MAP = {
+        FoldBy:      (lambda t, op: Upsert(target=t, key=op.key_field), "dict"),
+        FoldCount:   (lambda t, op: Count(target=t),                     "int"),
+        FoldSum:     (lambda t, op: Sum(target=t, field=op.field),       "float"),
+        FoldLatest:  (lambda t, op: Latest(target=t),                    "datetime"),
+        FoldCollect: (lambda t, op: Collect(target=t, max=op.max_items), "list"),
+        FoldMax:     (lambda t, op: Max(target=t, field=op.field),       "float"),
+        FoldMin:     (lambda t, op: Min(target=t, field=op.field),       "float"),
+        FoldAvg:     (lambda t, op: Avg(target=t, field=op.field),       "float"),
+        FoldWindow:  (lambda t, op: Window(target=t, field=op.field, size=op.size), "list"),
+    }
+    return _FOLD_MAP
+
+
+def map_fold_op(target: str, op: DslFoldOp) -> RuntimeFoldOp:
+    """Map DSL FoldOp to runtime FoldOp."""
+    entry = _get_fold_map().get(type(op))
+    if entry is None:
         raise ValueError(f"Unknown fold op type: {type(op)}")
+    return entry[0](target, op)
 
 
 # -----------------------------------------------------------------------------
@@ -228,24 +234,8 @@ def map_fold_op(target: str, op: DslFoldOp) -> RuntimeFoldOp:
 
 def infer_field_type(target: str, op: DslFoldOp) -> str:
     """Infer the state field type from a fold op."""
-    if isinstance(op, FoldBy):
-        return "dict"
-    elif isinstance(op, FoldCount):
-        return "int"
-    elif isinstance(op, FoldSum):
-        return "float"  # Could be int, but float is safer
-    elif isinstance(op, FoldLatest):
-        return "datetime"
-    elif isinstance(op, FoldCollect):
-        return "list"
-    elif isinstance(op, (FoldMax, FoldMin)):
-        return "float"  # Numeric comparison
-    elif isinstance(op, FoldAvg):
-        return "float"  # Running average
-    elif isinstance(op, FoldWindow):
-        return "list"  # Sliding buffer
-    else:
-        return "str"
+    entry = _get_fold_map().get(type(op))
+    return entry[1] if entry else "str"
 
 
 # -----------------------------------------------------------------------------

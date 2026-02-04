@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from data import Fact
+from dsl import load_vertex_program
+
+
+def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path) -> None:
+    loop = tmp_path / "template.loop"
+    loop.write_text(
+        "\n".join(
+            [
+                "source: echo '{\"v\": 1}'",
+                "kind: ${kind}",
+                "observer: test",
+                "format: json",
+                "",
+            ]
+        )
+    )
+
+    vertex = tmp_path / "prog.vertex"
+    vertex.write_text(
+        "\n".join(
+            [
+                "name: prog",
+                "sources:",
+                "  - template: template.loop",
+                "    with:",
+                "      - kind: foo",
+                "    loop:",
+                "      fold:",
+                "        acc: + v",
+                "      boundary: when ${kind}.complete",
+                "emit: prog",
+                "",
+            ]
+        )
+    )
+
+    def fold(state: dict, payload: dict) -> dict:
+        return {"acc": state.get("acc", 0) + payload.get("v", 0)}
+
+    program = load_vertex_program(vertex, default_fold_override=({"acc": 0}, fold))
+    assert program.expected_ticks == ["foo"]
+
+    # Ensure override is actually applied by folding and firing the boundary.
+    tick = program.vertex.receive(Fact.of("foo", "test", v=2))
+    assert tick is None
+    tick = program.vertex.receive(Fact.of("foo.complete", "test"))
+    assert tick is not None
+    assert tick.name == "foo"
+    assert tick.payload["acc"] == 2
+
+
+def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
+    loop = tmp_path / "template.loop"
+    loop.write_text(
+        "\n".join(
+            [
+                "source: echo '{\"v\": 1}'",
+                "kind: ${kind}",
+                "observer: test",
+                "format: json",
+                "",
+            ]
+        )
+    )
+
+    vertex = tmp_path / "prog.vertex"
+    vertex.write_text(
+        "\n".join(
+            [
+                "name: prog",
+                "sources:",
+                "  - template: template.loop",
+                "    with:",
+                "      - kind: a",
+                "      - kind: b",
+                "    loop:",
+                "      fold:",
+                "        seen: +1",
+                "      boundary: when ${kind}.complete",
+                "emit: prog",
+                "",
+            ]
+        )
+    )
+
+    def fold_a(state: dict, payload: dict) -> dict:
+        return {"seen": state.get("seen", 0) + 10}
+
+    program = load_vertex_program(vertex, fold_overrides={"a": ({"seen": 0}, fold_a)})
+    assert program.expected_ticks == ["a", "b"]
+
+    program.vertex.receive(Fact.of("a", "test"))
+    tick_a = program.vertex.receive(Fact.of("a.complete", "test"))
+    assert tick_a is not None
+    assert tick_a.name == "a"
+    assert tick_a.payload["seen"] == 10

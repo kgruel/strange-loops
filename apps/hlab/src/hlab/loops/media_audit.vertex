@@ -1,0 +1,30 @@
+# Media audit vertex
+# Aggregates Radarr movie and quality data for corruption scanning.
+# Each source returns a JSON array wrapped as {"text": ...};
+# fold overrides parse into raw lists for later domain parsing.
+
+name: media_audit
+
+sources:
+  - template: radarr/movies.loop
+    with:
+      - kind: movies
+        host: 192.168.1.40:7878
+        apikey: 38f9f156c694487baf2bfb9f4355a02d
+    loop:
+      fold:
+        data: latest
+      boundary: when ${kind}.complete
+
+  - template: radarr/quality.loop
+    with:
+      - kind: quality
+        host: 192.168.1.40:7878
+        apikey: 38f9f156c694487baf2bfb9f4355a02d
+    loop:
+      fold:
+        data: latest
+      boundary: when ${kind}.complete
+
+emit: media_audit
+

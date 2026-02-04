@@ -1,0 +1,8 @@
+# Prometheus alert rules
+# Variables: ${host}
+
+source: ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:9090/api/v1/rules?type=alert'"
+kind: rules
+observer: hlab
+format: json
+

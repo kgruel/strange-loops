@@ -51,6 +51,7 @@ from .mapper import (
     materialize_vertex,
     substitute_vars,
 )
+from .program import VertexProgram, load_vertex_program
 
 __all__ = [
     # AST types - Loop file
@@ -119,4 +120,7 @@ __all__ = [
     "substitute_vars",
     "CompiledVertex",
     "CircularVertexError",
+    # Program helpers
+    "VertexProgram",
+    "load_vertex_program",
 ]

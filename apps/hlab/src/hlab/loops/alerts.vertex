@@ -1,0 +1,36 @@
+# Alerts vertex
+# Aggregates Prometheus alert data from three endpoints.
+# Each source returns a full JSON response; fold overrides extract domain data.
+
+name: alerts
+
+sources:
+  - template: prometheus/alerts.loop
+    with:
+      - kind: alerts
+        host: 192.168.1.30
+    loop:
+      fold:
+        data: latest
+      boundary: when ${kind}.complete
+
+  - template: prometheus/rules.loop
+    with:
+      - kind: rules
+        host: 192.168.1.30
+    loop:
+      fold:
+        data: latest
+      boundary: when ${kind}.complete
+
+  - template: prometheus/targets.loop
+    with:
+      - kind: targets
+        host: 192.168.1.30
+    loop:
+      fold:
+        data: latest
+      boundary: when ${kind}.complete
+
+emit: alerts
+

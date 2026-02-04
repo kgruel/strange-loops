@@ -1,0 +1,8 @@
+# Prometheus scrape targets
+# Variables: ${host}
+
+source: ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:9090/api/v1/targets'"
+kind: targets
+observer: hlab
+format: json
+

@@ -101,7 +101,7 @@ Commands using this: `logs`, `media fix`, `sync uptime-kuma`, and `status -i` (T
 
 ## DSL Scope
 
-**Only `status` uses the DSL.** The `.vertex` file defines sources (SSH → docker compose ps → ndjson) and fold boundaries. All other commands are direct Python — they fetch data from APIs or run shell commands without the DSL pipeline.
+**`status`, `alerts`, and `media audit` use the DSL.** Each `.vertex` file defines sources (SSH/curl → JSON/ndjson/blob) and fold boundaries. Other commands are direct Python — they fetch data from APIs or run shell commands without the DSL pipeline.
 
 ## Data Flow (status)
 

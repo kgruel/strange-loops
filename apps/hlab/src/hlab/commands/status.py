@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
-from dsl import parse_vertex_file, compile_vertex_recursive, compile_sources, materialize_vertex
+from dsl import load_vertex_program
 from data import Runner
 
 from ..folds import HEALTH_INITIAL, health_fold
@@ -25,25 +25,11 @@ def load():
     Returns:
         tuple of (vertex, sources)
     """
-    ast = parse_vertex_file(VERTEX_FILE)
-
-    # Compile sources from the vertex file (handles templates and simple paths)
-    sources, template_specs = compile_sources(ast, VERTEX_FILE.parent)
-
-    # Compile the vertex tree
-    compiled = compile_vertex_recursive(ast)
-
-    # Merge template specs into compiled vertex specs
-    compiled.specs.update(template_specs)
-
-    # Override all stack folds with health computation
-    fold_overrides = {
-        kind: (HEALTH_INITIAL, health_fold)
-        for kind in template_specs.keys()
-    }
-    vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
-
-    return vertex, sources
+    program = load_vertex_program(
+        VERTEX_FILE,
+        default_fold_override=(HEALTH_INITIAL, health_fold),
+    )
+    return program.vertex, program.sources
 
 
 def load_with_expected():
@@ -53,21 +39,11 @@ def load_with_expected():
         tuple of (vertex, sources, expected_stack_names)
         Used by streaming mode for spinner display.
     """
-    ast = parse_vertex_file(VERTEX_FILE)
-    sources, template_specs = compile_sources(ast, VERTEX_FILE.parent)
-    compiled = compile_vertex_recursive(ast)
-    compiled.specs.update(template_specs)
-
-    # Get expected stack names from template specs
-    expected = list(template_specs.keys())
-
-    fold_overrides = {
-        kind: (HEALTH_INITIAL, health_fold)
-        for kind in expected
-    }
-    vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
-
-    return vertex, sources, expected
+    program = load_vertex_program(
+        VERTEX_FILE,
+        default_fold_override=(HEALTH_INITIAL, health_fold),
+    )
+    return program.vertex, program.sources, program.expected_ticks
 
 
 def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:

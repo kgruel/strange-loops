@@ -1,7 +1,7 @@
-"""Media audit command — scan media library for corrupt files.
+"""Media audit command — scan media library for corrupt files via DSL pipeline.
 
 Detects files where the size doesn't match expected bitrate for quality/runtime.
-Uses Radarr API for movie metadata and optionally ffprobe via SSH for deep scans.
+Uses DSL pipeline for Radarr API data, optionally ffprobe via SSH for deep scans.
 """
 
 from __future__ import annotations
@@ -15,16 +15,36 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from dsl import load_vertex_program
+from data import Runner
+
+from ..folds import MEDIA_AUDIT_INITIAL, movies_fold, quality_fold
 from ..infra import HostConfig, run_ssh, ssh_base_args
 from ..inventory import load_inventory, host_config_from_inventory, ANSIBLE_INVENTORY_CACHE
-from ..radarr import RadarrClient, RadarrError, Movie, QualityDefinition, parse_runtime
-from ..lenses.media import AuditData, AuditResult, DeepScanResult, media_audit_view
-from ..theme import DEFAULT_THEME
+from ..radarr import Movie, QualityDefinition, parse_movies, parse_quality_definitions, parse_runtime
+from ..lenses.media import AuditData, AuditResult, DeepScanResult
 
+
+HERE = Path(__file__).parent.parent
+VERTEX_FILE = HERE / "loops/media_audit.vertex"
 
 # SSH config for media host
 MEDIA_HOST_STACK = "media"
 FFMPEG_PATH = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
+
+
+def load():
+    """Load vertex and sources from DSL files.
+
+    Returns:
+        tuple of (vertex, sources)
+    """
+    fold_overrides = {
+        "movies": (MEDIA_AUDIT_INITIAL, movies_fold),
+        "quality": (MEDIA_AUDIT_INITIAL, quality_fold),
+    }
+    program = load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
+    return program.vertex, program.sources
 
 
 def add_args(parser: ArgumentParser) -> None:
@@ -106,8 +126,6 @@ async def _deep_scan_file(
 
     Decode test: Can we decode frames at 25%, 50%, 75%, 90%?
     """
-    result = DeepScanResult()
-
     # Map from Radarr path (/movies/...) to Jellyfin container path (/media/movies/...)
     container_path = file_path.replace("/movies/", "/media/movies/", 1)
     escaped_path = shlex.quote(container_path)
@@ -129,7 +147,6 @@ async def _deep_scan_file(
     # Try to decode frames at various checkpoints
     checkpoints = [0.25, 0.50, 0.75, 0.90]
     last_decodable_pct = 0.0
-    decode_test_passed = True
 
     ssh_args = ssh_base_args(host, connect_timeout_s=connect_timeout)
 
@@ -150,7 +167,6 @@ async def _deep_scan_file(
         if rc == 0 and not has_error(output):
             last_decodable_pct = pct
         else:
-            decode_test_passed = False
             return DeepScanResult(
                 decode_test_passed=False,
                 last_decodable_pct=last_decodable_pct,
@@ -172,13 +188,15 @@ def make_fetcher(args) -> Callable[[], AuditData]:
     connect_timeout = getattr(args, "connect_timeout", 5.0)
 
     def fetch() -> AuditData:
-        return asyncio.run(_fetch_audit(
-            show_all=show_all,
-            quality=quality,
-            deep=deep,
-            inventory_path=inventory,
-            connect_timeout=connect_timeout,
-        ))
+        return asyncio.run(
+            _fetch_audit(
+                show_all=show_all,
+                quality=quality,
+                deep=deep,
+                inventory_path=inventory,
+                connect_timeout=connect_timeout,
+            )
+        )
 
     return fetch
 
@@ -191,20 +209,26 @@ async def _fetch_audit(
     inventory_path: Path | None = None,
     connect_timeout: float = 5.0,
 ) -> AuditData:
-    """Fetch and audit all movies from Radarr."""
-    client = RadarrClient()
+    """Fetch and audit all movies via DSL pipeline."""
+    vertex, sources = load()
+    runner = Runner(vertex)
+    for s in sources:
+        runner.add(s)
 
-    try:
-        movies, quality_defs = await asyncio.gather(
-            client.get_movies(),
-            client.get_quality_definitions(),
-        )
-    except RadarrError as e:
-        print(f"Error: {e.message}", file=sys.stderr)
-        return AuditData(results=[])
+    raw_movies: list[dict] = []
+    raw_quality: list[dict] = []
+
+    async for tick in runner.run():
+        payload = tick.payload
+        if tick.name == "movies":
+            raw_movies = payload.get("movies", [])
+        elif tick.name == "quality":
+            raw_quality = payload.get("quality_defs", [])
+
+    movies = parse_movies(raw_movies)
+    quality_defs = parse_quality_definitions(raw_quality)
 
     results: list[AuditResult] = []
-
     for movie in movies:
         result = _audit_movie(movie, quality_defs)
         if result:
@@ -276,3 +300,4 @@ def to_json(data: AuditData) -> dict[str, Any]:
             "unknown": sum(1 for r in data.results if r.status == "unknown"),
         },
     }
+

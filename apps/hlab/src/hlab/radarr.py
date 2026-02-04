@@ -60,6 +60,65 @@ class Movie:
     path: str | None = None
 
 
+def parse_movie(raw: dict[str, Any]) -> Movie:
+    """Parse a raw Radarr movie dict into a Movie object."""
+    movie_file: MovieFile | None = None
+    if mf := raw.get("movieFile"):
+        quality_name = mf.get("quality", {}).get("quality", {}).get("name", "Unknown")
+        media_info = mf.get("mediaInfo", {})
+        movie_file = MovieFile(
+            id=mf.get("id", 0),
+            movie_id=raw.get("id", 0),
+            path=mf.get("path", ""),
+            size=mf.get("size", 0),
+            quality_name=quality_name,
+            runtime_str=media_info.get("runTime"),
+            media_info=media_info,
+        )
+
+    return Movie(
+        id=raw.get("id", 0),
+        title=raw.get("title", "Unknown"),
+        year=raw.get("year"),
+        has_file=raw.get("hasFile", False),
+        movie_file=movie_file,
+        path=raw.get("path"),
+    )
+
+
+def parse_movies(raw_movies: list[dict[str, Any]]) -> list[Movie]:
+    """Parse raw Radarr movie dicts into Movie objects."""
+    return [parse_movie(m) for m in raw_movies]
+
+
+def parse_quality_definitions(raw_defs: list[dict[str, Any]]) -> dict[str, QualityDefinition]:
+    """Parse raw Radarr quality definition dicts into a title→definition map."""
+    result: dict[str, QualityDefinition] = {}
+
+    for d in raw_defs:
+        title = d.get("title", "")
+        min_size = d.get("minSize", 0) or 0
+        max_size = d.get("maxSize")
+        preferred_size = d.get("preferredSize")
+
+        # If Radarr has defaults (minSize=0), use our fallbacks
+        if min_size == 0 and title in FALLBACK_QUALITY_SIZES:
+            fallback_min, fallback_max = FALLBACK_QUALITY_SIZES[title]
+            min_size = fallback_min
+            if max_size is None:
+                max_size = fallback_max
+
+        result[title] = QualityDefinition(
+            quality_id=d.get("id", 0),
+            title=title,
+            min_size=min_size,
+            max_size=max_size,
+            preferred_size=preferred_size,
+        )
+
+    return result
+
+
 # Fallback size limits (MB per minute) when Radarr definitions are at defaults
 # Based on TRaSH Guides recommendations
 FALLBACK_QUALITY_SIZES: dict[str, tuple[float, float | None]] = {
@@ -147,61 +206,12 @@ class RadarrClient:
     async def get_movies(self) -> list[Movie]:
         """Fetch all movies from Radarr."""
         data = await self._get("movie")
-        movies: list[Movie] = []
-
-        for m in data:
-            movie_file: MovieFile | None = None
-            if mf := m.get("movieFile"):
-                quality_name = mf.get("quality", {}).get("quality", {}).get("name", "Unknown")
-                media_info = mf.get("mediaInfo", {})
-                movie_file = MovieFile(
-                    id=mf.get("id", 0),
-                    movie_id=m.get("id", 0),
-                    path=mf.get("path", ""),
-                    size=mf.get("size", 0),
-                    quality_name=quality_name,
-                    runtime_str=media_info.get("runTime"),
-                    media_info=media_info,
-                )
-
-            movies.append(Movie(
-                id=m.get("id", 0),
-                title=m.get("title", "Unknown"),
-                year=m.get("year"),
-                has_file=m.get("hasFile", False),
-                movie_file=movie_file,
-                path=m.get("path"),
-            ))
-
-        return movies
+        return parse_movies(data)
 
     async def get_quality_definitions(self) -> dict[str, QualityDefinition]:
         """Fetch quality definitions from Radarr API."""
         data = await self._get("qualitydefinition")
-        result: dict[str, QualityDefinition] = {}
-
-        for d in data:
-            title = d.get("title", "")
-            min_size = d.get("minSize", 0) or 0
-            max_size = d.get("maxSize")
-            preferred_size = d.get("preferredSize")
-
-            # If Radarr has defaults (minSize=0), use our fallbacks
-            if min_size == 0 and title in FALLBACK_QUALITY_SIZES:
-                fallback_min, fallback_max = FALLBACK_QUALITY_SIZES[title]
-                min_size = fallback_min
-                if max_size is None:
-                    max_size = fallback_max
-
-            result[title] = QualityDefinition(
-                quality_id=d.get("id", 0),
-                title=title,
-                min_size=min_size,
-                max_size=max_size,
-                preferred_size=preferred_size,
-            )
-
-        return result
+        return parse_quality_definitions(data)
 
     async def delete_movie_file(self, movie_file_id: int) -> None:
         """Delete a movie file by ID."""
@@ -220,29 +230,7 @@ class RadarrClient:
             m = await self._get(f"movie/{movie_id}")
         except RadarrError:
             return None
-
-        movie_file: MovieFile | None = None
-        if mf := m.get("movieFile"):
-            quality_name = mf.get("quality", {}).get("quality", {}).get("name", "Unknown")
-            media_info = mf.get("mediaInfo", {})
-            movie_file = MovieFile(
-                id=mf.get("id", 0),
-                movie_id=m.get("id", 0),
-                path=mf.get("path", ""),
-                size=mf.get("size", 0),
-                quality_name=quality_name,
-                runtime_str=media_info.get("runTime"),
-                media_info=media_info,
-            )
-
-        return Movie(
-            id=m.get("id", 0),
-            title=m.get("title", "Unknown"),
-            year=m.get("year"),
-            has_file=m.get("hasFile", False),
-            movie_file=movie_file,
-            path=m.get("path"),
-        )
+        return parse_movie(m)
 
 
 def parse_runtime(runtime_str: str | None) -> int | None:

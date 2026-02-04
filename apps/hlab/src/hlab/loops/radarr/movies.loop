@@ -1,0 +1,9 @@
+# Radarr movies list
+# Variables: ${host}, ${apikey}
+# Uses blob format — Radarr returns a JSON array, fold override parses it.
+
+source: curl -sf "http://${host}/api/v3/movie?apikey=${apikey}"
+kind: movies
+observer: hlab
+format: blob
+

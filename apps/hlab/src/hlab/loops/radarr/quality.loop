@@ -1,0 +1,9 @@
+# Radarr quality definitions
+# Variables: ${host}, ${apikey}
+# Uses blob format — Radarr returns a JSON array, fold override parses it.
+
+source: curl -sf "http://${host}/api/v3/qualitydefinition?apikey=${apikey}"
+kind: quality
+observer: hlab
+format: blob
+

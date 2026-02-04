@@ -23,6 +23,7 @@ class Source:
     Format controls how stdout is interpreted:
     - lines: each stdout line becomes a Fact (default)
     - json: parse stdout as JSON, emit single Fact with parsed payload
+    - ndjson: each stdout line parsed as JSON, emit Fact per line
     - blob: entire stdout as single Fact with {"text": ...} payload
 
     When parse is provided:
@@ -53,7 +54,7 @@ class Source:
     observer: str
     every: float | None = None
     trigger: tuple[str, ...] | None = None
-    format: Literal["lines", "json", "blob"] = "lines"
+    format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
 
     def _parse_data(self, data: dict[str, Any] | str) -> dict[str, Any] | None:
@@ -101,6 +102,28 @@ class Source:
                         error_type="JSONDecodeError",
                     )
 
+    async def _emit_ndjson(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
+        """Parse each stdout line as JSON, emit one fact per line."""
+        if proc.stdout is not None:
+            async for line in proc.stdout:
+                text = line.decode().rstrip("\n")
+                if not text:
+                    continue
+                try:
+                    data = json.loads(text)
+                    payload = self._parse_data(data)
+                    if payload is not None:
+                        yield Fact.of(self.kind, self.observer, **payload)
+                except json.JSONDecodeError as e:
+                    yield Fact.of(
+                        "source.error",
+                        self.observer,
+                        command=self.command,
+                        error=f"JSON decode error on line: {e}",
+                        error_type="JSONDecodeError",
+                        line=text[:100],  # Include truncated line for debugging
+                    )
+
     async def _emit_blob(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
         """Emit entire stdout as single fact with text payload."""
         if proc.stdout is not None:
@@ -137,6 +160,9 @@ class Source:
                             yield fact
                     elif self.format == "json":
                         async for fact in self._emit_json(proc):
+                            yield fact
+                    elif self.format == "ndjson":
+                        async for fact in self._emit_ndjson(proc):
                             yield fact
                     elif self.format == "blob":
                         async for fact in self._emit_blob(proc):

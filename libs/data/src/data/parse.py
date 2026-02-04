@@ -148,8 +148,27 @@ class Coerce:
         object.__setattr__(self, "types", MappingProxyType(dict(self.types)))
 
 
+@dataclass(frozen=True)
+class Select:
+    """Select specific fields from a dict.
+
+    Use with ndjson format to extract only the fields you need.
+
+    Attributes:
+        fields: Field names to keep.
+
+    Examples:
+        Select("Name", "State", "Health")  # {"Name": "x", "State": "running", "Other": "..."} → {"Name": "x", "State": "running"}
+    """
+
+    fields: tuple[str, ...]
+
+    def __init__(self, *fields: str) -> None:
+        object.__setattr__(self, "fields", tuple(fields))
+
+
 # Type alias for parse operations
-ParseOp = Skip | Split | Pick | Rename | Transform | Coerce
+ParseOp = Skip | Split | Pick | Rename | Transform | Coerce | Select
 
 
 def _apply_skip(value: str | dict[str, Any], op: Skip) -> str | dict[str, Any] | None:
@@ -306,11 +325,27 @@ def _apply_coerce(value: dict[str, Any], op: Coerce) -> dict[str, Any] | None:
     return result
 
 
-def run_parse(line: str, pipeline: list[ParseOp]) -> dict[str, Any] | None:
-    """Execute a parse pipeline on a line of text.
+def _apply_select(value: dict[str, Any], op: Select) -> dict[str, Any] | None:
+    """Apply Select operation to pick fields from a dict."""
+    if not isinstance(value, dict):
+        return None
+
+    result = {}
+    for field_name in op.fields:
+        if field_name in value:
+            result[field_name] = value[field_name]
+        # Missing fields are silently omitted (not an error)
+
+    return result if result else None
+
+
+def run_parse(
+    data: str | dict[str, Any], pipeline: list[ParseOp]
+) -> dict[str, Any] | None:
+    """Execute a parse pipeline on input data.
 
     Args:
-        line: The input string to parse.
+        data: The input to parse — string (from lines format) or dict (from json/ndjson).
         pipeline: List of parse operations to apply in order.
 
     Returns:
@@ -321,14 +356,17 @@ def run_parse(line: str, pipeline: list[ParseOp]) -> dict[str, Any] | None:
         >>> run_parse("hello world", pipeline)
         {'a': 'hello', 'b': 'world'}
 
-        >>> pipeline = [Split(), Pick(0, 99)]  # Index out of range
-        >>> run_parse("hello world", pipeline)
-        None
+        >>> pipeline = [Select("Name", "State")]
+        >>> run_parse({"Name": "x", "State": "running", "Other": "y"}, pipeline)
+        {'Name': 'x', 'State': 'running'}
     """
     if not pipeline:
+        # No pipeline — return dict as-is, or wrap string in {"line": ...}
+        if isinstance(data, dict):
+            return data
         return None
 
-    value: Any = line
+    value: Any = data
 
     for op in pipeline:
         if isinstance(op, Skip):
@@ -343,6 +381,8 @@ def run_parse(line: str, pipeline: list[ParseOp]) -> dict[str, Any] | None:
             value = _apply_transform(value, op)
         elif isinstance(op, Coerce):
             value = _apply_coerce(value, op)
+        elif isinstance(op, Select):
+            value = _apply_select(value, op)
         else:
             return None
 

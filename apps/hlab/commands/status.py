@@ -18,7 +18,11 @@ VERTEX_FILE = HERE / "loops/status.vertex"
 
 
 def load():
-    """Load vertex and sources from DSL files."""
+    """Load vertex and sources from DSL files.
+
+    Returns:
+        tuple of (vertex, sources)
+    """
     ast = parse_vertex_file(VERTEX_FILE)
 
     # Compile sources from the vertex file (handles templates and simple paths)
@@ -38,6 +42,30 @@ def load():
     vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
 
     return vertex, sources
+
+
+def load_with_expected():
+    """Load vertex and sources with expected stack names.
+
+    Returns:
+        tuple of (vertex, sources, expected_stack_names)
+        Used by streaming mode for spinner display.
+    """
+    ast = parse_vertex_file(VERTEX_FILE)
+    sources, template_specs = compile_sources(ast, VERTEX_FILE.parent)
+    compiled = compile_vertex_recursive(ast)
+    compiled.specs.update(template_specs)
+
+    # Get expected stack names from template specs
+    expected = list(template_specs.keys())
+
+    fold_overrides = {
+        kind: (HEALTH_INITIAL, health_fold)
+        for kind in expected
+    }
+    vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
+
+    return vertex, sources, expected
 
 
 async def fetch_stacks() -> dict[str, dict]:

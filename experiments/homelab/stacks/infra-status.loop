@@ -10,7 +10,7 @@
 
 source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
 every: 30s
-kind: container.status
+kind: infra.container
 observer: infra-monitor
 format: json
 timeout: 60s

@@ -8,6 +8,6 @@ loops:
     fold:
       services: by Service
       updated: latest
-    boundary: when container.status
+    boundary: when media.container
 
 emit: media.health

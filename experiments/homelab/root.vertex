@@ -4,31 +4,36 @@
 # Demonstrates:
 # - discover: for auto-finding nested .vertex files
 # - sources: for direct .loop file inclusion
-# - Multi-level aggregation (stacks -> root)
+# - routes: for mapping fact kinds to loops
 
 name: homelab
 
 # Auto-discover stack vertices
 discover: ./stacks/*.vertex
 
-# Direct source inclusion for alerting
+# Direct source inclusion
 sources:
   - sources/*.loop
+  - stacks/*.loop
 
-# Aggregate health from child vertices
+# Route incoming facts to loops
+routes:
+  log.line: health
+  alert: alerts
+
+# Aggregate facts from sources
 loops:
   health:
     fold:
-      stacks: collect 10
-      events: collect 100
+      lines: collect 100
       updated: latest
-    boundary: when infra.health
+    boundary: when log.line
 
   alerts:
     fold:
       recent: collect 20
       updated: latest
-    boundary: when alert.status
+    boundary: when alert
 
   source.error:
     fold:

@@ -1,10 +1,11 @@
-# Docker Compose status template
-# Variables: ${kind}, ${host}
+// Docker Compose status template
+// Variables: ${kind}, ${host}
 
-source: ssh deploy@${host} "cd /opt/${kind} && docker compose ps --format json"
-kind: ${kind}
-observer: hlab
-format: ndjson
+source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps --format json""#
+kind "${kind}"
+observer "hlab"
+format "ndjson"
 
-parse:
-  select Name, Service, State, Health, Status, ExitCode, Image, Ports, Project, CreatedAt, RunningFor
+parse {
+  select "Name" "Service" "State" "Health" "Status" "ExitCode" "Image" "Ports" "Project" "CreatedAt" "RunningFor"
+}

@@ -1,6 +1,6 @@
-# Simulated calendar events (echo stands in for real calendar API)
-kind: calendar
-observer: personal
-source: echo '{"events": [{"title": "standup", "time": "09:00"}, {"title": "lunch", "time": "12:00"}], "count": 2}'
-on: minute
-format: json
+// Simulated calendar events (echo stands in for real calendar API)
+kind "calendar"
+observer "personal"
+source #"echo '{"events": [{"title": "standup", "time": "09:00"}, {"title": "lunch", "time": "12:00"}], "count": 2}'"#
+on "minute"
+format "json"

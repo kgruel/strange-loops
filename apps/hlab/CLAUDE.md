@@ -49,9 +49,9 @@ apps/hlab/src/hlab/
 ├── __main__.py          # python -m hlab support
 ├── commands/
 │   ├── status.py        # DSL load + fetch (make_fetcher, load, load_with_expected)
-│   ├── alerts.py        # Prometheus alert fetch
+│   ├── alerts.py        # DSL load + fetch for Prometheus alerts
 │   ├── logs.py          # Docker compose log streaming
-│   ├── media_audit.py   # Media corruption scan
+│   ├── media_audit.py   # DSL load + fetch for media corruption scan
 │   ├── media_fix.py     # Media corruption fix
 │   └── sync_uptime_kuma.py  # Uptime Kuma monitor sync
 ├── lenses/
@@ -59,14 +59,25 @@ apps/hlab/src/hlab/
 │   ├── alerts.py        # Alert rendering
 │   ├── media.py         # Media audit rendering
 │   └── logs.py          # Log rendering
-├── folds.py             # Fold overrides: health_fold computes healthy/total at fold time
+├── folds.py             # Fold overrides: health, alerts, rules, targets, movies, quality
 ├── theme.py             # Icons, colors, Theme dataclass
 ├── tui.py               # Interactive Surface (HlabApp, two-panel layout)
 ├── infra.py             # Infrastructure helpers
 ├── inventory.py         # Host/stack inventory
-├── radarr.py            # Radarr API client
+├── radarr.py            # Radarr API client + parsing (parse_movies, parse_quality_definitions)
 └── loops/
-    └── status.vertex    # DSL: defines sources + vertex for status command
+    ├── status.vertex    # DSL: sources + vertex for status command
+    ├── alerts.vertex    # DSL: sources + vertex for alerts command
+    ├── media_audit.vertex  # DSL: sources + vertex for media audit command
+    ├── stacks/
+    │   └── status.loop  # Template: docker compose ps per host
+    ├── prometheus/
+    │   ├── alerts.loop  # Template: Prometheus /api/v1/alerts
+    │   ├── rules.loop   # Template: Prometheus /api/v1/rules
+    │   └── targets.loop # Template: Prometheus /api/v1/targets
+    └── radarr/
+        ├── movies.loop  # Template: Radarr /api/v3/movie
+        └── quality.loop # Template: Radarr /api/v3/qualitydefinition
 ```
 
 ## Two Command Patterns
@@ -101,24 +112,24 @@ Commands using this: `logs`, `media fix`, `sync uptime-kuma`, and `status -i` (T
 
 ## DSL Scope
 
-**`status`, `alerts`, and `media audit` use the DSL.** Each `.vertex` file defines sources (SSH/curl → JSON/ndjson/blob) and fold boundaries. Other commands are direct Python — they fetch data from APIs or run shell commands without the DSL pipeline.
+**`status`, `alerts`, and `media audit` use the DSL.** Each `.vertex` file defines sources (SSH/curl → JSON/ndjson) and fold boundaries. Other commands are direct Python — they fetch data from APIs or run shell commands without the DSL pipeline.
 
-## Data Flow (status)
+All three use `load_vertex_program()` from `libs/dsl` to compile and materialize the vertex. This replaces the manual parse → compile → merge → materialize ceremony.
+
+## Data Flow (DSL commands)
 
 ```
-status.vertex (DSL)
-  → compile_sources() → Source[]
-  → compile_vertex_recursive() → CompiledVertex
-  → materialize_vertex(compiled, fold_overrides) → Vertex
+.vertex file
+  → load_vertex_program(path, fold_overrides) → VertexProgram(vertex, sources, expected_ticks)
 
 Runner(vertex) + runner.add(source)
   → async for tick in runner.run():
-      stacks[tick.name] = tick.payload
+      result[tick.name] = tick.payload
 
-status_view(stacks, zoom, width, theme) → Block
+view_fn(result, zoom, width, theme) → Block
 ```
 
-Each source emits facts with its own kind, then `{kind}.complete`. The `.complete` fact triggers that stack's boundary. Four sources = four loops = four ticks.
+Each source emits facts with its own kind, then `{kind}.complete`. The `.complete` fact triggers that source's boundary. N sources = N loops = N ticks.
 
 ## Fold → Lens
 
@@ -134,13 +145,16 @@ Source emits container facts
       → status_view renders at zoom level
 ```
 
-Fold overrides are wired in `commands/status.py`:
+Fold overrides are wired via `load_vertex_program`:
 ```python
-fold_overrides = {
-    kind: (HEALTH_INITIAL, health_fold)
-    for kind in template_specs.keys()
-}
-vertex = materialize_vertex(compiled, fold_overrides=fold_overrides)
+# status: same fold for all kinds
+program = load_vertex_program(VERTEX_FILE, default_fold_override=(HEALTH_INITIAL, health_fold))
+
+# alerts: different fold per kind
+program = load_vertex_program(VERTEX_FILE, fold_overrides={
+    "alerts": (ALERTS_INITIAL, alerts_fold),
+    "rules": (ALERTS_INITIAL, rules_fold),
+})
 ```
 
 ## Fidelity

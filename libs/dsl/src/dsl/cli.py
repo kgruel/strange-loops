@@ -20,7 +20,7 @@ from typing import TextIO
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a .loop or .vertex file."""
-    from .parser import parse_loop_file, parse_vertex_file
+    from .loader import parse_loop_file, parse_vertex_file
     from .validator import validate
 
     path = Path(args.file)
@@ -51,7 +51,7 @@ def cmd_test(args: argparse.Namespace) -> int:
     from data import run_parse
 
     from .mapper import compile_loop
-    from .parser import parse_loop_file
+    from .loader import parse_loop_file
     from .validator import validate_loop
 
     path = Path(args.file)
@@ -114,7 +114,7 @@ def cmd_test(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute a .loop file and print facts."""
     from .mapper import compile_loop
-    from .parser import parse_loop_file
+    from .loader import parse_loop_file
     from .validator import validate_loop
 
     path = Path(args.file)
@@ -156,7 +156,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_compile(args: argparse.Namespace) -> int:
     """Show compiled structure of a .loop or .vertex file."""
     from .mapper import compile_loop, compile_vertex
-    from .parser import parse_loop_file, parse_vertex_file
+    from .loader import parse_loop_file, parse_vertex_file
     from .validator import validate
 
     path = Path(args.file)
@@ -223,7 +223,7 @@ def cmd_compile(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
     from .mapper import compile_loop, compile_vertex_recursive, materialize_vertex
-    from .parser import parse_loop_file, parse_vertex_file
+    from .loader import parse_loop_file, parse_vertex_file
     from .validator import validate
 
     path = Path(args.file)

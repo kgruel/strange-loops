@@ -1,25 +1,31 @@
-# Root vertex: top-level aggregation
-# Demonstrates discover: for auto-discovering nested .vertex files
-name: root
+// Root vertex: top-level aggregation
+// Demonstrates discover: for auto-discovering nested .vertex files
+name "root"
 
-sources:
-    - timers/second.loop
-    - sources/*.loop
+sources {
+  path "timers/second.loop"
+  path "sources/*.loop"
+}
 
-# discover: auto-finds all .vertex files in the infra/ subdirectory
-discover: ./infra/*.vertex
+// discover: auto-finds all .vertex files in the infra/ subdirectory
+discover "./infra/*.vertex"
 
-loops:
-    # Count seconds, emit minute tick every 10 seconds (accelerated for demo)
-    # Named 'second' to match the kind from second.loop
-    second:
-        fold:
-            count: +1
-        boundary: every 10
+loops {
+  // Count seconds, emit minute tick every 10 seconds (accelerated for demo)
+  // Named 'second' to match the kind from second.loop
+  second {
+    fold {
+      count "inc"
+    }
+    boundary every=10
+  }
 
-    health:
-        fold:
-            events: collect 100
-        boundary: when infra.health
+  health {
+    fold {
+      events "collect" 100
+    }
+    boundary when="infra.health"
+  }
+}
 
-emit: system.report
+emit "system.report"

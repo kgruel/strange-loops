@@ -1,13 +1,13 @@
-# Media stack container status
-# Simulates: SSH to media VM, run docker compose ps
-#
-# Gap: DSL lexer doesn't support @ in source commands.
-# Real command would be:
-#   ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json"
+// Media stack container status
+// Simulates: SSH to media VM, run docker compose ps
+//
+// Gap: DSL lexer doesn't support @ in source commands.
+// Real command would be:
+//   ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json"
 
-source: ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json"
-every: 30s
-kind: media.container
-observer: media-monitor
-format: json
-timeout: 60s
+source #"ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps --format json""#
+every "30s"
+kind "media.container"
+observer "media-monitor"
+format "json"
+timeout "60s"

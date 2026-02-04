@@ -1,18 +1,20 @@
-# Root vertex: top-level aggregation of all domains
-name: root
+// Root vertex: top-level aggregation of all domains
+name "root"
 
-sources:
-    - ./timers/second.loop
-    - ./timers/minute.loop
+sources {
+  path "./timers/second.loop"
+  path "./timers/minute.loop"
+}
 
-vertices:
-    - ./infra.vertex
-    - ./personal.vertex
+vertices "./infra.vertex" "./personal.vertex"
 
-loops:
-    overview:
-        fold:
-            reports: collect 100
-        boundary: when infra.status
+loops {
+  overview {
+    fold {
+      reports "collect" 100
+    }
+    boundary when="infra.status"
+  }
+}
 
-emit: system.snapshot
+emit "system.snapshot"

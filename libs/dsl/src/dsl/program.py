@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .mapper import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
-from .parser import parse_vertex_file
+from .loader import parse_vertex_file
 from .validator import validate
 
 if TYPE_CHECKING:

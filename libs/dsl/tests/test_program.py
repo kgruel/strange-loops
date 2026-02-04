@@ -9,34 +9,27 @@ from dsl import load_vertex_program
 def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path) -> None:
     loop = tmp_path / "template.loop"
     loop.write_text(
-        "\n".join(
-            [
-                "source: echo '{\"v\": 1}'",
-                "kind: ${kind}",
-                "observer: test",
-                "format: json",
-                "",
-            ]
-        )
+        'source #"echo \'{"v": 1}\'"#\n'
+        'kind "${kind}"\n'
+        'observer "test"\n'
+        'format "json"\n'
     )
 
     vertex = tmp_path / "prog.vertex"
     vertex.write_text(
-        "\n".join(
-            [
-                "name: prog",
-                "sources:",
-                "  - template: template.loop",
-                "    with:",
-                "      - kind: foo",
-                "    loop:",
-                "      fold:",
-                "        acc: + v",
-                "      boundary: when ${kind}.complete",
-                "emit: prog",
-                "",
-            ]
-        )
+        'name "prog"\n'
+        "sources {\n"
+        '  template "template.loop" {\n'
+        '    with kind="foo"\n'
+        "    loop {\n"
+        "      fold {\n"
+        '        acc "sum" "v"\n'
+        "      }\n"
+        '      boundary when="${kind}.complete"\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'emit "prog"\n'
     )
 
     def fold(state: dict, payload: dict) -> dict:
@@ -57,35 +50,28 @@ def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path)
 def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
     loop = tmp_path / "template.loop"
     loop.write_text(
-        "\n".join(
-            [
-                "source: echo '{\"v\": 1}'",
-                "kind: ${kind}",
-                "observer: test",
-                "format: json",
-                "",
-            ]
-        )
+        'source #"echo \'{"v": 1}\'"#\n'
+        'kind "${kind}"\n'
+        'observer "test"\n'
+        'format "json"\n'
     )
 
     vertex = tmp_path / "prog.vertex"
     vertex.write_text(
-        "\n".join(
-            [
-                "name: prog",
-                "sources:",
-                "  - template: template.loop",
-                "    with:",
-                "      - kind: a",
-                "      - kind: b",
-                "    loop:",
-                "      fold:",
-                "        seen: +1",
-                "      boundary: when ${kind}.complete",
-                "emit: prog",
-                "",
-            ]
-        )
+        'name "prog"\n'
+        "sources {\n"
+        '  template "template.loop" {\n'
+        '    with kind="a"\n'
+        '    with kind="b"\n'
+        "    loop {\n"
+        "      fold {\n"
+        '        seen "inc"\n'
+        "      }\n"
+        '      boundary when="${kind}.complete"\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'emit "prog"\n'
     )
 
     def fold_a(state: dict, payload: dict) -> dict:

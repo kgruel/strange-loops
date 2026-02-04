@@ -1,8 +1,7 @@
-# Prometheus firing alerts
-# Variables: ${host}
+// Prometheus firing alerts
+// Variables: ${host}
 
-source: ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:9090/api/v1/alerts'"
-kind: alerts
-observer: hlab
-format: json
-
+source #"ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:9090/api/v1/alerts'""#
+kind "alerts"
+observer "hlab"
+format "json"

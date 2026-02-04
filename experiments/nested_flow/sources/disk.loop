@@ -1,12 +1,13 @@
-# Disk usage source: polls every 10 seconds
-kind: disk
-observer: infra
-source: df -h
-every: 10s
-format: lines
+// Disk usage source: polls every 10 seconds
+kind "disk"
+observer "infra"
+source "df -h"
+every "10s"
+format "lines"
 
-parse:
-    skip "^Filesystem"
-    split
-    pick 0, 4, 5 -> fs, pct, mount
-    pct: strip "%" | int
+parse {
+  skip "^Filesystem"
+  split
+  pick 0 4 5 { names "fs" "pct" "mount" }
+  transform "pct" { strip "%" coerce "int" }
+}

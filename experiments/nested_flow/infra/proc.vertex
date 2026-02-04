@@ -1,10 +1,13 @@
-# Process monitoring vertex
-name: proc
+// Process monitoring vertex
+name "proc"
 
-loops:
-    count:
-        fold:
-            total: latest
-        boundary: when proc
+loops {
+  count {
+    fold {
+      total "latest"
+    }
+    boundary when="proc"
+  }
+}
 
-emit: proc.count
+emit "proc.count"

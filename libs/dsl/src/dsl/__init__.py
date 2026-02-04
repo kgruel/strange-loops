@@ -1,4 +1,4 @@
-"""DSL parser for .loop and .vertex files."""
+"""KDL-based loader for .loop and .vertex files."""
 
 from .ast import (
     Boundary,
@@ -37,8 +37,7 @@ from .ast import (
     VertexFile,
 )
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
-from .lexer import Token, TokenType, tokenize
-from .parser import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
+from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
 from .validator import validate, validate_loop, validate_vertex
 from .mapper import (
     CircularVertexError,
@@ -91,11 +90,7 @@ __all__ = [
     "SourceEntry",
     "SourceParams",
     "TemplateSource",
-    # Lexer
-    "Token",
-    "TokenType",
-    "tokenize",
-    # Parser
+    # Parser (KDL loader)
     "parse_loop",
     "parse_loop_file",
     "parse_vertex",

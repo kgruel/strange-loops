@@ -1,18 +1,23 @@
-# Personal vertex: aggregates calendar and email facts
-name: personal
+// Personal vertex: aggregates calendar and email facts
+name "personal"
 
-loops:
-    calendar:
-        fold:
-            events: latest
-            count: latest
-        boundary: when calendar.complete
+loops {
+  calendar {
+    fold {
+      events "latest"
+      count "latest"
+    }
+    boundary when="calendar.complete"
+  }
 
-    email:
-        fold:
-            inbox: latest
-            unread: latest
-            flagged: latest
-        boundary: when email.complete
+  email {
+    fold {
+      inbox "latest"
+      unread "latest"
+      flagged "latest"
+    }
+    boundary when="email.complete"
+  }
+}
 
-emit: personal.status
+emit "personal.status"

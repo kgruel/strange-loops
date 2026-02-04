@@ -1,14 +1,12 @@
 """Fold overrides for hlab — domain computation at fold time.
 
 Each fold override receives (state, payload) where payload is the Fact's
-payload dict from the DSL source. For `format: json` sources, the entire
-JSON response becomes the payload. For `format: blob` sources, payload
-is {"text": "..."}.
+payload dict from the DSL source. For `format: json` sources, dict responses
+become the payload directly; array responses are wrapped as {"_json": [...]}.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -149,24 +147,14 @@ MEDIA_AUDIT_INITIAL: dict[str, Any] = {
 def movies_fold(state: dict, payload: dict) -> dict:
     """Store raw movie array from Radarr /api/v3/movie response.
 
-    Payload arrives as blob: {"text": "[{movie}, ...]"}
-    Radarr returns a JSON array directly, so we parse the text.
+    Radarr returns a JSON array. format: json wraps it as {"_json": [...]}.
     """
-    try:
-        movies = json.loads(payload.get("text", "[]"))
-    except json.JSONDecodeError:
-        return state
-    return {**state, "movies": movies}
+    return {**state, "movies": payload.get("_json", [])}
 
 
 def quality_fold(state: dict, payload: dict) -> dict:
     """Store raw quality definitions from Radarr /api/v3/qualitydefinition.
 
-    Payload arrives as blob: {"text": "[{def}, ...]"}
-    Radarr returns a JSON array directly, so we parse the text.
+    Radarr returns a JSON array. format: json wraps it as {"_json": [...]}.
     """
-    try:
-        defs = json.loads(payload.get("text", "[]"))
-    except json.JSONDecodeError:
-        return state
-    return {**state, "quality_defs": defs}
+    return {**state, "quality_defs": payload.get("_json", [])}

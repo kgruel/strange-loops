@@ -1,20 +1,21 @@
-# Log lines from infrastructure stack
-# Simulates: SSH to infra VM, tail recent docker compose logs
-#
-# Gaps:
-# 1. DSL lexer doesn't support @ in source commands
-# 2. Only snapshots, not continuous streaming (no --follow)
-#
-# Real command would be:
-#   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
+// Log lines from infrastructure stack
+// Simulates: SSH to infra VM, tail recent docker compose logs
+//
+// Gaps:
+// 1. DSL lexer doesn't support @ in source commands
+// 2. Only snapshots, not continuous streaming (no --follow)
+//
+// Real command would be:
+//   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
 
-source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50"
-every: 10s
-kind: log.line
-observer: log-monitor
-format: lines
+source #"ssh deploy@192.168.1.30 "cd /opt/infra && docker compose logs --tail 50""#
+every "10s"
+kind "log.line"
+observer "log-monitor"
+format "lines"
 
-parse:
-  skip ^$
+parse {
+  skip "^$"
   split " | "
-  pick 0, 1 -> source, message
+  pick 0 1 { names "source" "message" }
+}

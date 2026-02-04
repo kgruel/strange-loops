@@ -1,13 +1,16 @@
-# Infrastructure stack aggregation
-# Folds container status facts into stack health
+// Infrastructure stack aggregation
+// Folds container status facts into stack health
 
-name: infra
+name "infra"
 
-loops:
-  containers:
-    fold:
-      services: by Service
-      updated: latest
-    boundary: when infra.container
+loops {
+  containers {
+    fold {
+      services "by" "Service"
+      updated "latest"
+    }
+    boundary when="infra.container"
+  }
+}
 
-emit: infra.health
+emit "infra.health"

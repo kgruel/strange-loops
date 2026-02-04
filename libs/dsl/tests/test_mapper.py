@@ -200,9 +200,9 @@ class TestCompileLoop:
     def test_minimal_loop(self):
         """Minimal loop compiles to Source."""
         loop = parse_loop("""\
-source: whoami
-kind: identity
-observer: shell
+source "whoami"
+kind "identity"
+observer "shell"
 """)
         source = compile_loop(loop)
         assert isinstance(source, Source)
@@ -216,10 +216,10 @@ observer: shell
     def test_loop_with_every(self):
         """Loop with every compiles to Source with interval."""
         loop = parse_loop("""\
-source: date
-kind: heartbeat
-observer: timer
-every: 5s
+source "date"
+kind "heartbeat"
+observer "timer"
+every "5s"
 """)
         source = compile_loop(loop)
         assert source.every == 5.0
@@ -227,14 +227,20 @@ every: 5s
     def test_loop_with_parse(self):
         """Loop with parse pipeline compiles to Source with parse ops."""
         loop = parse_loop("""\
-source: df -h
-kind: disk
-observer: test
-parse:
-  skip ^Filesystem
+source "df -h"
+kind "disk"
+observer "test"
+parse {
+  skip "^Filesystem"
   split
-  pick 0, 4 -> fs, pct
-  pct: strip "%" | int
+  pick 0 4 {
+    names "fs" "pct"
+  }
+  transform "pct" {
+    strip "%"
+    coerce "int"
+  }
+}
 """)
         source = compile_loop(loop)
         assert source.parse is not None
@@ -264,11 +270,14 @@ class TestCompileVertex:
     def test_minimal_vertex(self):
         """Minimal vertex compiles to Spec dict."""
         vertex = parse_vertex("""\
-name: simple
-loops:
-  counter:
-    fold:
-      count: +1
+name "simple"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         specs = compile_vertex(vertex)
         assert "counter" in specs
@@ -281,12 +290,15 @@ loops:
     def test_vertex_with_boundary(self):
         """Vertex with boundary compiles to Spec with Boundary."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  events:
-    fold:
-      count: +1
-    boundary: when batch.complete
+name "test"
+loops {
+  events {
+    fold {
+      count "inc"
+    }
+    boundary when="batch.complete"
+  }
+}
 """)
         specs = compile_vertex(vertex)
         spec = specs["events"]
@@ -298,12 +310,15 @@ loops:
     def test_vertex_with_boundary_after(self):
         """Vertex with count-based boundary (after N)."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  batch:
-    fold:
-      count: +1
-    boundary: after 10
+name "test"
+loops {
+  batch {
+    fold {
+      count "inc"
+    }
+    boundary after=10
+  }
+}
 """)
         specs = compile_vertex(vertex)
         spec = specs["batch"]
@@ -314,12 +329,15 @@ loops:
     def test_vertex_with_boundary_every(self):
         """Vertex with count-based boundary (every N)."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  windowed:
-    fold:
-      total: + amount
-    boundary: every 100
+name "test"
+loops {
+  windowed {
+    fold {
+      total "sum" "amount"
+    }
+    boundary every=100
+  }
+}
 """)
         specs = compile_vertex(vertex)
         spec = specs["windowed"]
@@ -330,17 +348,20 @@ loops:
     def test_vertex_state_fields(self):
         """Vertex compiles with inferred state fields."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  metrics:
-    fold:
-      mounts: by mount
-      count: +1
-      total: + amount
-      updated: latest
-      history: collect 100
-      peak: max memory
-      coldest: min temp
+name "test"
+loops {
+  metrics {
+    fold {
+      mounts "by" "mount"
+      count "inc"
+      total "sum" "amount"
+      updated "latest"
+      history "collect" 100
+      peak "max" "memory"
+      coldest "min" "temp"
+    }
+  }
+}
 """)
         specs = compile_vertex(vertex)
         spec = specs["metrics"]
@@ -378,14 +399,20 @@ class TestIntegration:
         from data import run_parse
 
         loop = parse_loop("""\
-source: df -h
-kind: disk
-observer: test
-parse:
-  skip ^Filesystem
+source "df -h"
+kind "disk"
+observer "test"
+parse {
+  skip "^Filesystem"
   split
-  pick 0, 1 -> fs, pct
-  pct: strip "%" | int
+  pick 0 1 {
+    names "fs" "pct"
+  }
+  transform "pct" {
+    strip "%"
+    coerce "int"
+  }
+}
 """)
         source = compile_loop(loop)
 
@@ -402,12 +429,15 @@ parse:
     def test_spec_apply(self):
         """Compiled Spec.apply executes correctly."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  counter:
-    fold:
-      count: +1
-      total: + value
+name "test"
+loops {
+  counter {
+    fold {
+      count "inc"
+      total "sum" "value"
+    }
+  }
+}
 """)
         specs = compile_vertex(vertex)
         spec = specs["counter"]
@@ -433,10 +463,10 @@ class TestTriggeredSource:
     def test_single_trigger(self):
         """Loop with single on: trigger compiles to Source with trigger."""
         loop = parse_loop("""\
-source: process-batch
-kind: processed
-observer: worker
-on: batch.ready
+source "process-batch"
+kind "processed"
+observer "worker"
+on "batch.ready"
 """)
         source = compile_loop(loop)
         assert isinstance(source, Source)
@@ -447,10 +477,10 @@ on: batch.ready
     def test_multiple_triggers(self):
         """Loop with multiple on: triggers compiles to Source with trigger tuple."""
         loop = parse_loop("""\
-source: aggregate
-kind: aggregated
-observer: collector
-on: [minute, hour, day]
+source "aggregate"
+kind "aggregated"
+observer "collector"
+on "minute" "hour" "day"
 """)
         source = compile_loop(loop)
         assert source.trigger == ("minute", "hour", "day")
@@ -459,10 +489,10 @@ on: [minute, hour, day]
     def test_polling_source_no_trigger(self):
         """Loop with every: but no on: has no trigger."""
         loop = parse_loop("""\
-source: check-health
-kind: health
-observer: monitor
-every: 30s
+source "check-health"
+kind "health"
+observer "monitor"
+every "30s"
 """)
         source = compile_loop(loop)
         assert source.trigger is None
@@ -475,9 +505,9 @@ class TestPureTimerSource:
     def test_pure_timer(self):
         """Loop with every: but no source: compiles to pure timer Source."""
         loop = parse_loop("""\
-kind: tick
-observer: timer
-every: 1m
+kind "tick"
+observer "timer"
+every "1m"
 """)
         source = compile_loop(loop)
         assert isinstance(source, Source)
@@ -487,12 +517,11 @@ every: 1m
 
     def test_pure_timer_with_trigger(self):
         """Loop with every: and on: compiles to triggered timer."""
-        # Note: on: requires every: in pure timer case to define cadence
         loop = parse_loop("""\
-kind: batch.tick
-observer: scheduler
-every: 1m
-on: minute
+kind "batch.tick"
+observer "scheduler"
+every "1m"
+on "minute"
 """)
         source = compile_loop(loop)
         assert source.command is None
@@ -506,11 +535,14 @@ class TestNestedVertexCompilation:
     def test_simple_vertex_recursive(self):
         """Simple vertex without children compiles recursively."""
         vertex = parse_vertex("""\
-name: simple
-loops:
-  counter:
-    fold:
-      count: +1
+name "simple"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         assert isinstance(compiled, CompiledVertex)
@@ -521,28 +553,31 @@ loops:
     def test_vertex_with_children(self, tmp_path):
         """Vertex with vertices: compiles children recursively."""
         # Create child vertex file
-        child_content = """\
-name: child
-loops:
-  events:
-    fold:
-      count: +1
-"""
         child_path = tmp_path / "child.vertex"
-        child_path.write_text(child_content)
+        child_path.write_text("""\
+name "child"
+loops {
+  events {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
 
         # Create parent vertex file
-        parent_content = f"""\
-name: parent
-vertices:
-  - {child_path}
-loops:
-  aggregate:
-    fold:
-      total: +1
-"""
         parent_path = tmp_path / "parent.vertex"
-        parent_path.write_text(parent_content)
+        parent_path.write_text(f"""\
+name "parent"
+vertices "{child_path}"
+loops {{
+  aggregate {{
+    fold {{
+      total "inc"
+    }}
+  }}
+}}
+""")
 
         from dsl import parse_vertex_file
 
@@ -557,30 +592,31 @@ loops:
 
     def test_circular_vertex_detection(self, tmp_path):
         """Circular vertex references raise CircularVertexError."""
-        # Create two vertices that reference each other
         a_path = tmp_path / "a.vertex"
         b_path = tmp_path / "b.vertex"
 
-        a_content = f"""\
-name: a
-vertices:
-  - {b_path}
-loops:
-  x:
-    fold:
-      count: +1
-"""
-        b_content = f"""\
-name: b
-vertices:
-  - {a_path}
-loops:
-  y:
-    fold:
-      count: +1
-"""
-        a_path.write_text(a_content)
-        b_path.write_text(b_content)
+        a_path.write_text(f"""\
+name "a"
+vertices "{b_path}"
+loops {{
+  x {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
+""")
+        b_path.write_text(f"""\
+name "b"
+vertices "{a_path}"
+loops {{
+  y {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
+""")
 
         from dsl import parse_vertex_file
 
@@ -590,28 +626,31 @@ loops:
 
     def test_relative_path_resolution(self, tmp_path):
         """Child paths are resolved relative to parent vertex file."""
-        # Create subdir with child
         subdir = tmp_path / "sub"
         subdir.mkdir()
         child_path = subdir / "child.vertex"
         child_path.write_text(
-            "name: child\n"
-            "loops:\n"
-            "  events:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "child"\n'
+            "loops {\n"
+            "  events {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Parent references child with relative path (must start with ./)
         parent_path = tmp_path / "parent.vertex"
         parent_path.write_text(
-            "name: parent\n"
-            "vertices:\n"
-            "  - ./sub/child.vertex\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "parent"\n'
+            'vertices "./sub/child.vertex"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -627,33 +666,40 @@ class TestDiscoverVertices:
 
     def test_discover_vertices_simple(self, tmp_path):
         """discover: pattern finds .vertex files."""
-        # Create child vertices
         infra = tmp_path / "infra"
         infra.mkdir()
         (infra / "disk.vertex").write_text(
-            "name: disk\n"
-            "loops:\n"
-            "  usage:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "disk"\n'
+            "loops {\n"
+            "  usage {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
         (infra / "proc.vertex").write_text(
-            "name: proc\n"
-            "loops:\n"
-            "  count:\n"
-            "    fold:\n"
-            "      total: +1\n"
+            'name "proc"\n'
+            "loops {\n"
+            "  count {\n"
+            "    fold {\n"
+            '      total "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Parent with discover pattern
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./infra/*.vertex\n"
-            "loops:\n"
-            "  system:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./infra/*.vertex"\n'
+            "loops {\n"
+            "  system {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -667,36 +713,43 @@ class TestDiscoverVertices:
 
     def test_discover_vertices_recursive(self, tmp_path):
         """Recursive glob **/*.vertex finds nested vertices."""
-        # Create nested structure
         level1 = tmp_path / "level1"
         level1.mkdir()
         level2 = level1 / "level2"
         level2.mkdir()
 
         (level1 / "a.vertex").write_text(
-            "name: a\n"
-            "loops:\n"
-            "  x:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "a"\n'
+            "loops {\n"
+            "  x {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
         (level2 / "b.vertex").write_text(
-            "name: b\n"
-            "loops:\n"
-            "  y:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "b"\n'
+            "loops {\n"
+            "  y {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Parent with recursive discover
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./**/*.vertex\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./**/*.vertex"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -709,15 +762,17 @@ class TestDiscoverVertices:
 
     def test_discover_skips_self(self, tmp_path):
         """discover: pattern does not include the vertex file itself."""
-        # Root vertex with pattern that would match itself
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./*.vertex\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./*.vertex"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -725,44 +780,48 @@ class TestDiscoverVertices:
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
 
-        # Should not include itself as a child
         assert "root" not in compiled.children
         assert compiled.children == {}
 
     def test_discover_combined_with_vertices(self, tmp_path):
         """discover: and vertices: can be used together."""
-        # Create discovered vertex
         infra = tmp_path / "infra"
         infra.mkdir()
         (infra / "disk.vertex").write_text(
-            "name: disk\n"
-            "loops:\n"
-            "  usage:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "disk"\n'
+            "loops {\n"
+            "  usage {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Create explicit vertex
         explicit = tmp_path / "explicit.vertex"
         explicit.write_text(
-            "name: explicit\n"
-            "loops:\n"
-            "  events:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "explicit"\n'
+            "loops {\n"
+            "  events {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Parent with both
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./infra/*.vertex\n"
-            "vertices:\n"
-            "  - ./explicit.vertex\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./infra/*.vertex"\n'
+            f'vertices "{explicit}"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -775,26 +834,29 @@ class TestDiscoverVertices:
 
     def test_discover_avoids_duplicates(self, tmp_path):
         """If same vertex is in vertices: and discover:, only included once."""
-        # Create vertex that will be both explicit and discovered
         (tmp_path / "child.vertex").write_text(
-            "name: child\n"
-            "loops:\n"
-            "  events:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "child"\n'
+            "loops {\n"
+            "  events {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
-        # Parent lists child explicitly and via discover
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./*.vertex\n"
-            "vertices:\n"
-            "  - ./child.vertex\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./*.vertex"\n'
+            f'vertices "{tmp_path / "child.vertex"}"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -802,13 +864,11 @@ class TestDiscoverVertices:
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
 
-        # Should have exactly one child
         assert len(compiled.children) == 1
         assert "child" in compiled.children
 
     def test_discover_circular_detection(self, tmp_path):
         """Circular references via discover: still detected."""
-        # Create two vertices that would discover each other
         a_dir = tmp_path / "a_dir"
         b_dir = tmp_path / "b_dir"
         a_dir.mkdir()
@@ -817,22 +877,27 @@ class TestDiscoverVertices:
         a_path = a_dir / "a.vertex"
         b_path = b_dir / "b.vertex"
 
-        # a discovers from b's directory, b from a's directory
         a_path.write_text(
-            f"name: a\n"
-            f"discover: {b_dir}/*.vertex\n"
-            "loops:\n"
-            "  x:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "a"\n'
+            f'discover "{b_dir}/*.vertex"\n'
+            "loops {\n"
+            "  x {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
         b_path.write_text(
-            f"name: b\n"
-            f"discover: {a_dir}/*.vertex\n"
-            "loops:\n"
-            "  y:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "b"\n'
+            f'discover "{a_dir}/*.vertex"\n'
+            "loops {\n"
+            "  y {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -843,29 +908,33 @@ class TestDiscoverVertices:
 
     def test_discover_only_vertex_files(self, tmp_path):
         """discover: pattern only includes .vertex files, not .loop files."""
-        # Create both .vertex and .loop files
         (tmp_path / "child.vertex").write_text(
-            "name: child\n"
-            "loops:\n"
-            "  events:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "child"\n'
+            "loops {\n"
+            "  events {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
         (tmp_path / "source.loop").write_text(
-            "source: echo test\n"
-            "kind: test\n"
-            "observer: shell\n"
+            'source "echo test"\n'
+            'kind "test"\n'
+            'observer "shell"\n'
         )
 
-        # Parent with pattern that would match both
         parent_path = tmp_path / "root.vertex"
         parent_path.write_text(
-            "name: root\n"
-            "discover: ./*\n"
-            "loops:\n"
-            "  main:\n"
-            "    fold:\n"
-            "      count: +1\n"
+            'name "root"\n'
+            'discover "./*"\n'
+            "loops {\n"
+            "  main {\n"
+            "    fold {\n"
+            '      count "inc"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
         )
 
         from dsl import parse_vertex_file
@@ -873,7 +942,6 @@ class TestDiscoverVertices:
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
 
-        # Should only include .vertex, not .loop
         assert "child" in compiled.children
         assert len(compiled.children) == 1
 
@@ -886,11 +954,14 @@ class TestMaterializeVertex:
         from dsl.mapper import materialize_vertex
 
         vertex = parse_vertex("""\
-name: counter
-loops:
-  events:
-    fold:
-      count: +1
+name "counter"
+loops {
+  events {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
@@ -911,12 +982,15 @@ loops:
         from dsl.mapper import materialize_vertex
 
         vertex = parse_vertex("""\
-name: batcher
-loops:
-  batch:
-    fold:
-      count: +1
-    boundary: when batch.done
+name "batcher"
+loops {
+  batch {
+    fold {
+      count "inc"
+    }
+    boundary when="batch.done"
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
@@ -942,15 +1016,17 @@ loops:
         from dsl.mapper import materialize_vertex
 
         vertex = parse_vertex("""\
-name: custom
-loops:
-  counter:
-    fold:
-      count: +1
+name "custom"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
 
-        # Custom fold that doubles instead of counting
         def custom_fold(state, payload):
             return {"count": state["count"] + payload.get("value", 1) * 2}
 
@@ -971,31 +1047,32 @@ loops:
         from dsl.mapper import materialize_vertex
         from dsl import parse_vertex_file
 
-        # Create child vertex
-        child_content = """\
-name: child
-loops:
-  events:
-    fold:
-      count: +1
-    boundary: when events.done
-emit: child.tick
-"""
         child_path = tmp_path / "child.vertex"
-        child_path.write_text(child_content)
+        child_path.write_text("""\
+name "child"
+loops {
+  events {
+    fold {
+      count "inc"
+    }
+    boundary when="events.done"
+  }
+}
+emit "child.tick"
+""")
 
-        # Create parent vertex
-        parent_content = f"""\
-name: parent
-vertices:
-  - {child_path}
-loops:
-  aggregate:
-    fold:
-      total: +1
-"""
         parent_path = tmp_path / "parent.vertex"
-        parent_path.write_text(parent_content)
+        parent_path.write_text(f"""\
+name "parent"
+vertices "{child_path}"
+loops {{
+  aggregate {{
+    fold {{
+      total "inc"
+    }}
+  }}
+}}
+""")
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -1010,35 +1087,35 @@ loops:
         from dsl.mapper import materialize_vertex
         from dsl import parse_vertex_file
 
-        # Create child vertex that emits tick
-        child_content = """\
-name: pulse
-loops:
-  pulse:
-    fold:
-      count: +1
-    boundary: when pulse.done
-"""
         child_path = tmp_path / "pulse.vertex"
-        child_path.write_text(child_content)
+        child_path.write_text("""\
+name "pulse"
+loops {
+  pulse {
+    fold {
+      count "inc"
+    }
+    boundary when="pulse.done"
+  }
+}
+""")
 
-        # Parent aggregates child ticks
-        parent_content = f"""\
-name: breath
-vertices:
-  - {child_path}
-loops:
-  breath:
-    fold:
-      pulses: +1
-"""
         parent_path = tmp_path / "breath.vertex"
-        parent_path.write_text(parent_content)
+        parent_path.write_text(f"""\
+name "breath"
+vertices "{child_path}"
+loops {{
+  breath {{
+    fold {{
+      pulses "inc"
+    }}
+  }}
+}}
+""")
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
 
-        # Custom fold for child since emit name needs to match
         def pulse_fold(state, payload):
             return {"count": state["count"] + 1}
 
@@ -1048,12 +1125,10 @@ loops:
 
         from data import Fact
 
-        # Send pulse facts through parent
         runtime.receive(Fact.of("pulse", "test"))
         runtime.receive(Fact.of("pulse", "test"))
         runtime.receive(Fact.of("pulse", "test"))
 
-        # Child state accumulated
         child = runtime.children[0]
         assert child.state("pulse") == {"count": 3}
 
@@ -1105,24 +1180,26 @@ class TestTemplateInstantiation:
 
     def test_compile_sources_simple_paths(self, tmp_path):
         """compile_sources handles simple path entries."""
-        # Create loop file
         loop_path = tmp_path / "test.loop"
         loop_path.write_text("""\
-source: echo hello
-kind: test
-observer: shell
+source "echo hello"
+kind "test"
+observer "shell"
 """)
-        # Create vertex referencing it
         from dsl import parse_vertex
 
         vertex = parse_vertex(f"""\
-name: test
-sources:
-  - {loop_path}
-loops:
-  test:
-    fold:
-      count: +1
+name "test"
+sources {{
+  path "{loop_path}"
+}}
+loops {{
+  test {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
 """)
         sources, specs = compile_sources(vertex, tmp_path)
 
@@ -1133,33 +1210,35 @@ loops:
 
     def test_compile_sources_template(self, tmp_path):
         """compile_sources handles template entries."""
-        # Create template file
         template_path = tmp_path / "status.loop"
         template_path.write_text("""\
-source: ssh deploy@${host} "cd /opt/${kind} && docker compose ps"
-kind: ${kind}
-observer: hlab
-format: ndjson
+source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps""#
+kind "${kind}"
+observer "hlab"
+format "ndjson"
 """)
-        # Create vertex with template source
         from dsl import parse_vertex
 
         vertex = parse_vertex(f"""\
-name: status
-sources:
-  - template: {template_path}
-    with:
-      - kind: infra
-        host: 192.168.1.30
-      - kind: media
-        host: 192.168.1.40
-loops:
-  infra:
-    fold:
-      count: +1
-  media:
-    fold:
-      count: +1
+name "status"
+sources {{
+  template "{template_path}" {{
+    with kind="infra" host="192.168.1.30"
+    with kind="media" host="192.168.1.40"
+  }}
+}}
+loops {{
+  infra {{
+    fold {{
+      count "inc"
+    }}
+  }}
+  media {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
 """)
         sources, specs = compile_sources(vertex, tmp_path)
 
@@ -1168,48 +1247,47 @@ loops:
         assert sources[0].command == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
         assert sources[1].kind == "media"
         assert sources[1].command == 'ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps"'
-        # No loop: block, so no specs generated
         assert specs == {}
 
     def test_compile_sources_template_with_loop_spec(self, tmp_path):
         """compile_sources generates specs from template loop: block."""
-        # Create template file
         template_path = tmp_path / "status.loop"
         template_path.write_text("""\
-source: ssh deploy@${host} "cd /opt/${kind} && docker compose ps"
-kind: ${kind}
-observer: hlab
-format: ndjson
+source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps""#
+kind "${kind}"
+observer "hlab"
+format "ndjson"
 """)
-        # Create vertex with template source + loop spec
         from dsl import parse_vertex
 
         vertex = parse_vertex(f"""\
-name: status
-sources:
-  - template: {template_path}
-    with:
-      - kind: infra
-        host: 192.168.1.30
-      - kind: media
-        host: 192.168.1.40
-    loop:
-      fold:
-        containers: collect 50
-      boundary: when ${{kind}}.complete
-loops:
-  test:
-    fold:
-      count: +1
+name "status"
+sources {{
+  template "{template_path}" {{
+    with kind="infra" host="192.168.1.30"
+    with kind="media" host="192.168.1.40"
+    loop {{
+      fold {{
+        containers "collect" 50
+      }}
+      boundary when="${{kind}}.complete"
+    }}
+  }}
+}}
+loops {{
+  test {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
 """)
         sources, specs = compile_sources(vertex, tmp_path)
 
         assert len(sources) == 2
-        # Specs generated for each kind
         assert "infra" in specs
         assert "media" in specs
 
-        # Check spec fields
         infra_spec = specs["infra"]
         assert infra_spec.name == "infra"
         assert len(infra_spec.folds) == 1
@@ -1227,17 +1305,23 @@ class TestRouteWiring:
     def test_routes_in_compiled_vertex(self):
         """Routes are preserved in CompiledVertex."""
         vertex = parse_vertex("""\
-name: system
-routes:
-  disk: disk
-  proc: proc
-loops:
-  disk:
-    fold:
-      count: +1
-  proc:
-    fold:
-      count: +1
+name "system"
+routes {
+  disk "disk"
+  proc "proc"
+}
+loops {
+  disk {
+    fold {
+      count "inc"
+    }
+  }
+  proc {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         assert compiled.routes is not None
@@ -1249,22 +1333,27 @@ loops:
         from dsl.mapper import materialize_vertex
 
         vertex = parse_vertex("""\
-name: system
-routes:
-  disk: disk
-  proc: proc
-loops:
-  disk:
-    fold:
-      count: +1
-  proc:
-    fold:
-      count: +1
+name "system"
+routes {
+  disk "disk"
+  proc "proc"
+}
+loops {
+  disk {
+    fold {
+      count "inc"
+    }
+  }
+  proc {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
 
-        # Routes should be set on the vertex
         assert runtime._routes == {"disk": "disk", "proc": "proc"}
 
     def test_exact_match_routes(self):
@@ -1273,22 +1362,24 @@ loops:
         from data import Fact
 
         vertex = parse_vertex("""\
-name: test
-routes:
-  events: counter
-loops:
-  counter:
-    fold:
-      count: +1
+name "test"
+routes {
+  events "counter"
+}
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
 
-        # Fact kind "events" should route to "counter" loop
         runtime.receive(Fact.of("events", "test"))
         assert runtime.state("counter") == {"count": 1}
 
-        # Another fact
         runtime.receive(Fact.of("events", "test"))
         assert runtime.state("counter") == {"count": 2}
 
@@ -1298,27 +1389,29 @@ loops:
         from data import Fact
 
         vertex = parse_vertex("""\
-name: test
-routes:
-  disk: storage
-loops:
-  storage:
-    fold:
-      count: +1
+name "test"
+routes {
+  disk "storage"
+}
+loops {
+  storage {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         # Manually set glob pattern routes (parser uses exact match syntax)
         compiled.routes = {"disk.*": "storage"}
         runtime = materialize_vertex(compiled)
 
-        # Facts matching disk.* should route to storage
         runtime.receive(Fact.of("disk.usage", "test"))
         assert runtime.state("storage") == {"count": 1}
 
         runtime.receive(Fact.of("disk.io", "test"))
         assert runtime.state("storage") == {"count": 2}
 
-        # Exact "disk" does NOT match "disk.*" pattern
         runtime.receive(Fact.of("disk", "test"))
         assert runtime.state("storage") == {"count": 2}  # unchanged
 
@@ -1328,21 +1421,26 @@ loops:
         from data import Fact
 
         vertex = parse_vertex("""\
-name: test
-routes:
-  counter: other
-loops:
-  counter:
-    fold:
-      count: +1
-  other:
-    fold:
-      count: +1
+name "test"
+routes {
+  counter "other"
+}
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+  other {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
 
-        # "counter" kind matches "counter" loop directly, route not used
         runtime.receive(Fact.of("counter", "test"))
         assert runtime.state("counter") == {"count": 1}
         assert runtime.state("other") == {"count": 0}
@@ -1352,37 +1450,39 @@ loops:
         from dsl.mapper import materialize_vertex
 
         vertex = parse_vertex("""\
-name: test
-routes:
-  events: counter
-loops:
-  counter:
-    fold:
-      count: +1
+name "test"
+routes {
+  events "counter"
+}
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         # Set glob pattern
         compiled.routes = {"event.*": "counter"}
         runtime = materialize_vertex(compiled)
 
-        # Direct kind match
         assert runtime.accepts("counter")
-
-        # Pattern match
         assert runtime.accepts("event.click")
         assert runtime.accepts("event.scroll")
-
-        # No match
         assert not runtime.accepts("other.thing")
 
     def test_no_routes_null(self):
         """Vertex without routes: has routes=None in compiled."""
         vertex = parse_vertex("""\
-name: test
-loops:
-  counter:
-    fold:
-      count: +1
+name "test"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
 """)
         compiled = compile_vertex_recursive(vertex)
         assert compiled.routes is None

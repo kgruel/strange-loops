@@ -1,13 +1,16 @@
-# Media stack aggregation
-# Folds container status facts into stack health
+// Media stack aggregation
+// Folds container status facts into stack health
 
-name: media
+name "media"
 
-loops:
-  containers:
-    fold:
-      services: by Service
-      updated: latest
-    boundary: when media.container
+loops {
+  containers {
+    fold {
+      services "by" "Service"
+      updated "latest"
+    }
+    boundary when="media.container"
+  }
+}
 
-emit: media.health
+emit "media.health"

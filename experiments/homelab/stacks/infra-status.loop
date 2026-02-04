@@ -1,16 +1,16 @@
-# Infrastructure stack container status
-# Simulates: SSH to infra VM, run docker compose ps
-#
-# Gap: DSL lexer doesn't support @ in source commands.
-# In production, this would call a wrapper script that handles SSH.
-# For local testing, we simulate with a mock command.
-#
-# Real command would be:
-#   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
+// Infrastructure stack container status
+// Simulates: SSH to infra VM, run docker compose ps
+//
+// Gap: DSL lexer doesn't support @ in source commands.
+// In production, this would call a wrapper script that handles SSH.
+// For local testing, we simulate with a mock command.
+//
+// Real command would be:
+//   ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
 
-source: ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json"
-every: 30s
-kind: infra.container
-observer: infra-monitor
-format: json
-timeout: 60s
+source #"ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps --format json""#
+every "30s"
+kind "infra.container"
+observer "infra-monitor"
+format "json"
+timeout "60s"

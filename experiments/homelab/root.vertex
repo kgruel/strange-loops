@@ -1,44 +1,53 @@
-# Homelab root vertex
-# Top-level aggregation of all monitoring sources
-#
-# Demonstrates:
-# - discover: for auto-finding nested .vertex files
-# - sources: for direct .loop file inclusion
-# - routes: for mapping fact kinds to loops
+// Homelab root vertex
+// Top-level aggregation of all monitoring sources
+//
+// Demonstrates:
+// - discover: for auto-finding nested .vertex files
+// - sources: for direct .loop file inclusion
+// - routes: for mapping fact kinds to loops
 
-name: homelab
+name "homelab"
 
-# Auto-discover stack vertices
-discover: ./stacks/*.vertex
+// Auto-discover stack vertices
+discover "./stacks/*.vertex"
 
-# Direct source inclusion
-sources:
-  - sources/*.loop
-  - stacks/*.loop
+// Direct source inclusion
+sources {
+  path "sources/*.loop"
+  path "stacks/*.loop"
+}
 
-# Route incoming facts to loops
-routes:
-  log.line: health
-  alert: alerts
+// Route incoming facts to loops
+routes {
+  log.line "health"
+  alert "alerts"
+}
 
-# Aggregate facts from sources
-loops:
-  health:
-    fold:
-      lines: collect 100
-      updated: latest
-    boundary: when log.line
+// Aggregate facts from sources
+loops {
+  health {
+    fold {
+      lines "collect" 100
+      updated "latest"
+    }
+    boundary when="log.line"
+  }
 
-  alerts:
-    fold:
-      recent: collect 20
-      updated: latest
-    boundary: when alert
+  alerts {
+    fold {
+      recent "collect" 20
+      updated "latest"
+    }
+    boundary when="alert"
+  }
 
-  source.error:
-    fold:
-      errors: collect 10
-      count: +1
-    boundary: when source.error
+  source.error {
+    fold {
+      errors "collect" 10
+      count "inc"
+    }
+    boundary when="source.error"
+  }
+}
 
-emit: homelab.status
+emit "homelab.status"

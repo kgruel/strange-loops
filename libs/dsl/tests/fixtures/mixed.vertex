@@ -1,12 +1,14 @@
-# Vertex with both sources and vertices
-name: root
-sources:
-  - ./monitor.loop
-vertices:
-  - ./infra/infra.vertex
-  - ./personal/personal.vertex
+// Vertex with both sources and vertices
+name "root"
+sources {
+  path "./monitor.loop"
+}
+vertices "./infra/infra.vertex" "./personal/personal.vertex"
 
-loops:
-  top:
-    fold:
-      count: +1
+loops {
+  top {
+    fold {
+      count "inc"
+    }
+  }
+}

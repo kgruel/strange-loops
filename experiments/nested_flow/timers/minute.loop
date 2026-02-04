@@ -1,4 +1,4 @@
-# Minute timer: triggers on second, counts to 60, emits minute tick
-kind: minute
-observer: timer
-on: second
+// Minute timer: triggers on second, counts to 60, emits minute tick
+kind "minute"
+observer "timer"
+on "second"

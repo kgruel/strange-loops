@@ -348,7 +348,7 @@ def compile_sources(
     Returns:
         (sources, specs) where specs contains any loop specs from templates
     """
-    from .parser import parse_loop_file
+    from .loader import parse_loop_file
 
     sources: list["Source"] = []
     specs: dict[str, "Spec"] = {}
@@ -507,7 +507,7 @@ def compile_vertex_recursive(
     """
     from glob import glob as globfn
 
-    from .parser import parse_vertex_file
+    from .loader import parse_vertex_file
 
     # Initialize tracking on first call
     if _visited is None:

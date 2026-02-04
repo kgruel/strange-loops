@@ -110,13 +110,16 @@ class TestTestCommand:
         # Create a simple loop file
         loop_file = tmp_path / "test.loop"
         loop_file.write_text("""\
-source: df -h
-kind: disk
-observer: test
-parse:
-  skip ^Filesystem
+source "df -h"
+kind "disk"
+observer "test"
+parse {
+  skip "^Filesystem"
   split
-  pick 0, 1 -> fs, pct
+  pick 0 1 {
+    names "fs" "pct"
+  }
+}
 """)
 
         result = main(["test", str(loop_file), "--input", str(input_file)])
@@ -131,12 +134,15 @@ parse:
 
         loop_file = tmp_path / "test.loop"
         loop_file.write_text("""\
-source: df -h
-kind: disk
-observer: test
-parse:
+source "df -h"
+kind "disk"
+observer "test"
+parse {
   split
-  pick 0, 1 -> fs, pct
+  pick 0 1 {
+    names "fs" "pct"
+  }
+}
 """)
 
         result = main(["test", str(loop_file), "--input", str(input_file), "--json"])
@@ -147,9 +153,9 @@ parse:
     def test_test_no_parse_pipeline(self, tmp_path, capsys):
         loop_file = tmp_path / "test.loop"
         loop_file.write_text("""\
-source: echo hello
-kind: test
-observer: test
+source "echo hello"
+kind "test"
+observer "test"
 """)
 
         result = main(["test", str(loop_file), "--input", "/dev/null"])

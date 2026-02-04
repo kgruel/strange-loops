@@ -1,10 +1,13 @@
-# Disk monitoring vertex
-name: disk
+// Disk monitoring vertex
+name "disk"
 
-loops:
-    usage:
-        fold:
-            mounts: by mount
-        boundary: when disk
+loops {
+  usage {
+    fold {
+      mounts "by" "mount"
+    }
+    boundary when="disk"
+  }
+}
 
-emit: disk.usage
+emit "disk.usage"

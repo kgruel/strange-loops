@@ -187,36 +187,49 @@ class Writer:
         self._stream.flush()
 
 
-def print_block(block: "Block", stream: TextIO = sys.stdout) -> None:
-    """Print a Block to a stream with ANSI styling, without TUI.
+def print_block(
+    block: "Block",
+    stream: TextIO = sys.stdout,
+    *,
+    use_ansi: bool = True,
+) -> None:
+    """Print a Block to a stream, optionally with ANSI styling.
 
-    Renders the block line-by-line with ANSI escape codes for styling.
-    Each row is followed by a style reset and newline.
+    Renders the block line-by-line. When use_ansi is True, includes ANSI
+    escape codes for styling. When False, outputs plain text only.
 
     Args:
         block: The Block to print.
         stream: Output stream (defaults to stdout).
+        use_ansi: Whether to include ANSI escape codes (default True).
     """
-    writer = Writer(stream)
+    if use_ansi:
+        writer = Writer(stream)
 
-    for row_idx in range(block.height):
-        parts: list[str] = []
-        last_style: Style | None = None
+        for row_idx in range(block.height):
+            parts: list[str] = []
+            last_style: Style | None = None
 
-        for cell in block.row(row_idx):
-            if cell.style != last_style:
-                # Reset and apply new style
-                parts.append(writer.reset_style())
-                sgr = writer.apply_style(cell.style)
-                if sgr:
-                    parts.append(sgr)
-                last_style = cell.style
-            parts.append(cell.char)
+            for cell in block.row(row_idx):
+                if cell.style != last_style:
+                    # Reset and apply new style
+                    parts.append(writer.reset_style())
+                    sgr = writer.apply_style(cell.style)
+                    if sgr:
+                        parts.append(sgr)
+                    last_style = cell.style
+                parts.append(cell.char)
 
-        # Reset at end of line and add newline
-        parts.append(writer.reset_style())
-        parts.append("\n")
+            # Reset at end of line and add newline
+            parts.append(writer.reset_style())
+            parts.append("\n")
 
-        stream.write("".join(parts))
+            stream.write("".join(parts))
+    else:
+        # Plain text: just characters, no styling
+        for row_idx in range(block.height):
+            for cell in block.row(row_idx):
+                stream.write(cell.char)
+            stream.write("\n")
 
     stream.flush()

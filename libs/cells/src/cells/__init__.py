@@ -35,12 +35,27 @@ from .writer import Writer, ColorDepth, print_block
 
 # Fidelity (CLI harness)
 from .fidelity import (
+    # New API
+    Zoom,
+    OutputMode,
+    Format,
+    CliContext,
+    CliRunner,
+    run_cli,
+    add_cli_args,
+    parse_zoom,
+    parse_mode,
+    parse_format,
+    resolve_mode,
+    resolve_format,
+    detect_context,
+    # Deprecated API
     Fidelity,
     HarnessContext,
     detect_fidelity,
-    detect_context,
     add_fidelity_args,
     run_with_fidelity,
+    fidelity_to_zoom,
 )
 
 # In-place rendering
@@ -111,13 +126,27 @@ __all__ = [
     "Writer",
     "ColorDepth",
     "print_block",
-    # Fidelity
+    # Fidelity (new API)
+    "Zoom",
+    "OutputMode",
+    "Format",
+    "CliContext",
+    "CliRunner",
+    "run_cli",
+    "add_cli_args",
+    "parse_zoom",
+    "parse_mode",
+    "parse_format",
+    "resolve_mode",
+    "resolve_format",
+    "detect_context",
+    # Fidelity (deprecated)
     "Fidelity",
     "HarnessContext",
     "detect_fidelity",
-    "detect_context",
     "add_fidelity_args",
     "run_with_fidelity",
+    "fidelity_to_zoom",
     # In-place rendering
     "InPlaceRenderer",
     "render_inplace",

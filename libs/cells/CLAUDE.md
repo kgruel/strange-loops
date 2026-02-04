@@ -108,12 +108,67 @@ Three emission strata:
   Domain       (manual) (any)    {item: "deploy-prod"}
 ```
 
+## CLI Harness (fidelity)
+
+Three orthogonal dimensions for CLI output control:
+
+```
+ZOOM (what to show)              OUTPUT MODE (how to deliver)
+├─ 0: MINIMAL (-q/--quiet)       ├─ STATIC: print and scroll
+├─ 1: SUMMARY (default)          ├─ LIVE: cursor-controlled updates
+├─ 2: DETAILED (-v)              └─ INTERACTIVE: alt screen + keyboard
+└─ 3: FULL (-vv)
+
+FORMAT (serialization)
+├─ ANSI: styled terminal (TTY default)
+├─ PLAIN: no styles (pipe default)
+└─ JSON: machine-readable (--json)
+```
+
+### Usage
+
+```python
+from cells.fidelity import run_cli, CliContext, Zoom, OutputMode
+
+def render(ctx: CliContext, data: dict) -> Block:
+    return status_view(data, zoom=ctx.zoom, width=ctx.width)
+
+def fetch() -> dict:
+    return {"status": "ok"}
+
+# Simple case: auto-detects mode from TTY
+run_cli(sys.argv[1:], render=render, fetch=fetch)
+
+# With custom TUI handler
+run_cli(
+    sys.argv[1:],
+    render=render,
+    fetch=fetch,
+    handlers={OutputMode.INTERACTIVE: lambda ctx: MyApp().run()},
+)
+```
+
+### CLI Flags
+
+```bash
+myapp              # zoom=1 (SUMMARY), mode=AUTO
+myapp -q           # zoom=0 (MINIMAL)
+myapp -v           # zoom=2 (DETAILED)
+myapp -vv          # zoom=3 (FULL)
+myapp -i           # mode=INTERACTIVE (TUI)
+myapp --static     # mode=STATIC (no animation)
+myapp --live       # mode=LIVE (in-place updates)
+myapp --json       # format=JSON (implies static)
+myapp --plain      # format=PLAIN (no ANSI codes)
+```
+
 ## Package Structure
 
 Layered submodules — CLI core at top level, TUI features in subpackages:
 
 ```python
 from cells import Style, Cell, Span, Line, Block, print_block  # CLI core
+from cells import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
 from cells.tui import Surface, Layer, Focus, Search             # Interactive apps
 from cells.lens import shape_lens, tree_lens, chart_lens        # Data rendering
 from cells.widgets import spinner, list_view, progress_bar      # Components
@@ -145,6 +200,8 @@ src/cells/
   compose.py        # join, pad, border, truncate, Align
   borders.py        # BorderChars presets
   writer.py         # Writer, ColorDepth, print_block
+  fidelity.py       # Zoom, OutputMode, Format, CliContext, run_cli (CLI harness)
+  inplace.py        # InPlaceRenderer (cursor-controlled animation)
   theme.py          # Style constants
   big_text.py       # render_big implementation
   _lens.py          # Lens implementations (internal)

@@ -1,19 +1,19 @@
-"""Lenses — fidelity-based rendering for homelab stacks.
+"""Lenses — zoom-based rendering for homelab stacks.
 
-Fidelity controls progressive enhancement of the same view:
-- 0: one-liner summary
-- 1: tree view with branch characters, problems inline
-- 2: enhanced tree with borders, uptime, summary
-- 3: interactive TUI (handled separately)
+Zoom controls progressive enhancement of the same view:
+- MINIMAL (0): one-liner summary
+- SUMMARY (1): tree view with branch characters, problems inline
+- DETAILED (2): enhanced tree with borders, uptime, summary
+- FULL (3): interactive TUI (handled separately)
 
-Higher fidelity adds detail to the same structure, not a different format.
+Higher zoom adds detail to the same structure, not a different format.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cells import Block, Style, join_vertical, join_horizontal, border, ROUNDED
+from cells import Block, Style, Zoom, join_vertical, join_horizontal, border, ROUNDED
 
 from .theme import Theme, DEFAULT_THEME
 
@@ -52,25 +52,25 @@ def _health_icon_style(payload: dict, theme: Theme) -> tuple[str, Style]:
 
 def status_view(
     stacks: dict[str, dict],
-    fidelity: int,
+    zoom: Zoom,
     width: int,
     theme: Theme = DEFAULT_THEME,
 ) -> Block:
-    """Render stacks at fidelity level.
+    """Render stacks at zoom level.
 
     Args:
         stacks: {stack_name: payload} where payload has containers, healthy, total
-        fidelity: 0=one-liner, 1=tree, 2=bordered tree with uptime
+        zoom: MINIMAL=one-liner, SUMMARY=tree, DETAILED/FULL=bordered tree
         width: Available terminal width
         theme: Theme instance for icons/colors
 
     Returns:
         Block ready for print_block()
 
-    F0: one-liner
+    MINIMAL: one-liner
         + 4 stacks, 44/45 healthy (1 down)
 
-    F1: tree with branch chars
+    SUMMARY: tree with branch chars
         Status
         ├─ + infra: 16/16
         ├─ + media: 22/22
@@ -78,7 +78,7 @@ def status_view(
         │  └─ x neo4j: unhealthy
         └─ + minecraft: 2/2
 
-    F2: bordered tree with uptime and summary
+    DETAILED/FULL: bordered tree with uptime and summary
         ╭── Status ──────────────────────────────╮
         │ ├─ + infra: 16/16                      │
         │ ├─ + media: 22/22                      │
@@ -92,20 +92,20 @@ def status_view(
     if not stacks:
         return Block.text("No data", Style(dim=True), width=width)
 
-    if fidelity == 0:
+    if zoom == Zoom.MINIMAL:
         return _render_oneliner(stacks, width, theme)
 
-    if fidelity == 1:
+    if zoom == Zoom.SUMMARY:
         return _render_tree(stacks, width, theme, show_uptime=False)
 
-    # Fidelity 2+: bordered tree with uptime and summary
+    # DETAILED or FULL: bordered tree with uptime and summary
     return _render_bordered_tree(stacks, width, theme)
 
 
 def status_view_with_pending(
     stacks: dict[str, dict],
     pending: PendingState,
-    fidelity: int,
+    zoom: Zoom,
     width: int,
     theme: Theme = DEFAULT_THEME,
 ) -> Block:
@@ -114,25 +114,25 @@ def status_view_with_pending(
     Args:
         stacks: {stack_name: payload} for received stacks
         pending: PendingState with pending stack names and spinner frame
-        fidelity: 0=one-liner, 1=tree, 2=bordered tree with uptime
+        zoom: MINIMAL=one-liner, SUMMARY=tree, DETAILED/FULL=bordered tree
         width: Available terminal width
         theme: Theme instance for icons/colors
 
     Returns:
         Block ready for print_block()
     """
-    # F0: one-liner doesn't show spinners (too minimal)
-    if fidelity == 0:
+    # MINIMAL: one-liner doesn't show spinners (too minimal)
+    if zoom == Zoom.MINIMAL:
         if pending.pending:
             # Still loading - show spinner
             spinner = theme.icons.spinner[pending.spinner_frame]
             return Block.text(f"{spinner} Loading...", Style(dim=True), width=width)
         return _render_oneliner(stacks, width, theme)
 
-    if fidelity == 1:
+    if zoom == Zoom.SUMMARY:
         return _render_tree_with_pending(stacks, pending, width, theme, show_uptime=False)
 
-    # Fidelity 2+: bordered tree with pending
+    # DETAILED/FULL: bordered tree with pending
     return _render_bordered_tree_with_pending(stacks, pending, width, theme)
 
 
@@ -410,22 +410,22 @@ def render_plain(stacks: dict[str, dict], theme: Theme = DEFAULT_THEME) -> str:
     return "\n".join(lines)
 
 
-# Keep stack_lens for TUI (fidelity 3) backward compatibility
+# Keep stack_lens for TUI (FULL zoom) backward compatibility
 def stack_lens(
     name: str,
     payload: dict,
-    fidelity: int,
+    zoom: Zoom,
     width: int,
     theme: Theme = DEFAULT_THEME,
 ) -> Block:
-    """Render a stack at the given fidelity level.
+    """Render a stack at the given zoom level.
 
-    Used by TUI (fidelity 3) for detailed container rendering.
+    Used by TUI (FULL zoom) for detailed container rendering.
 
     Args:
         name: Stack name (infra, media, etc.)
         payload: Tick payload with containers, healthy, total
-        fidelity: 0=minimal, 1=containers, 2=+uptime, 3=+all fields
+        zoom: MINIMAL=header only, SUMMARY=+containers, DETAILED=+uptime, FULL=+all fields
         width: Available width
         theme: Theme instance
 
@@ -444,21 +444,21 @@ def stack_lens(
         else Style(fg=theme.colors.error, bold=True)
     )
 
-    # Fidelity 0: just header
+    # MINIMAL: just header
     header = Block.text(f"{icon} {name}: {healthy}/{total}", header_style, width=width)
-    if fidelity == 0:
+    if zoom == Zoom.MINIMAL:
         return header
 
-    # Fidelity 1+: add containers
+    # SUMMARY+: add containers
     rows = [header]
     for c in containers:
-        rows.append(_render_container(c, fidelity, width, theme))
+        rows.append(_render_container(c, zoom, width, theme))
 
     return join_vertical(*rows)
 
 
-def _render_container(c: dict, fidelity: int, width: int, theme: Theme) -> Block:
-    """Render a single container at fidelity level."""
+def _render_container(c: dict, zoom: Zoom, width: int, theme: Theme) -> Block:
+    """Render a single container at zoom level."""
     cname = c.get("Name", "?")
     state = c.get("State", "?")
     health = c.get("Health", "")
@@ -474,15 +474,15 @@ def _render_container(c: dict, fidelity: int, width: int, theme: Theme) -> Block
         style = Style(fg=theme.colors.error)
         status = state
 
-    # Build line based on fidelity
+    # Build line based on zoom
     line = f"  {cname}: {status}"
 
-    if fidelity >= 2:
+    if zoom >= Zoom.DETAILED:
         uptime = c.get("RunningFor", "")
         if uptime:
             line += f" ({uptime})"
 
-    if fidelity >= 3:
+    if zoom >= Zoom.FULL:
         # Full detail: show all fields
         extras = []
         for key in ("Image", "Ports", "Networks"):

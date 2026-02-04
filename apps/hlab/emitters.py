@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any, TYPE_CHECKING
 
-from cells import Block, Style, print_block
+from cells import Block, Style, Zoom, print_block
 
 from .lenses import status_view, status_view_with_pending, render_plain, PendingState
 from .theme import DEFAULT_THEME, Theme
@@ -42,10 +42,10 @@ def _terminal_width() -> int:
 class CliEmitter:
     """CLI emitter: render stacks with cells, print to stderr.
 
-    Fidelity maps to visual treatment:
-    - 0: one-liner summary
-    - 1: tree view (default)
-    - 2: bordered tree with uptime and summary
+    Zoom maps to visual treatment:
+    - MINIMAL: one-liner summary
+    - SUMMARY: tree view (default)
+    - DETAILED/FULL: bordered tree with uptime and summary
 
     Non-TTY output uses plain text fallback.
     """
@@ -53,11 +53,11 @@ class CliEmitter:
     def __init__(
         self,
         *,
-        fidelity: int = 1,
+        zoom: Zoom = Zoom.SUMMARY,
         width: int | None = None,
         theme: Theme = DEFAULT_THEME,
     ) -> None:
-        self._fidelity = fidelity
+        self._zoom = zoom
         self._width = width or _terminal_width()
         self._theme = theme
 
@@ -69,7 +69,7 @@ class CliEmitter:
             sys.stderr.write(text + "\n")
             return
 
-        block = render_stacks(stacks, self._fidelity, self._width, self._theme)
+        block = render_stacks(stacks, self._zoom, self._width, self._theme)
         print_block(block, stream=sys.stderr)
 
 
@@ -84,15 +84,15 @@ class JsonEmitter:
 
 def render_stacks(
     stacks: dict[str, dict],
-    fidelity: int,
+    zoom: Zoom,
     width: int,
     theme: Theme = DEFAULT_THEME,
 ) -> Block:
-    """Render all stacks at the given fidelity level.
+    """Render all stacks at the given zoom level.
 
     Args:
         stacks: {stack_name: payload} where payload has containers, healthy, total
-        fidelity: 0=one-liner, 1=tree, 2=bordered tree
+        zoom: MINIMAL=one-liner, SUMMARY=tree, DETAILED/FULL=bordered tree
         width: Available terminal width
         theme: Theme instance
 
@@ -102,7 +102,7 @@ def render_stacks(
     if not stacks:
         return Block.text("No data", Style(dim=True), width=width)
 
-    return status_view(stacks, fidelity, width, theme)
+    return status_view(stacks, zoom, width, theme)
 
 
 class LiveCliEmitter:
@@ -114,13 +114,13 @@ class LiveCliEmitter:
 
     def __init__(
         self,
-        fidelity: int,
+        zoom: Zoom,
         expected_stacks: list[str],
         *,
         width: int | None = None,
         theme: Theme = DEFAULT_THEME,
     ) -> None:
-        self._fidelity = fidelity
+        self._zoom = zoom
         self._expected = frozenset(expected_stacks)
         self._received: dict[str, dict] = {}
         self._pending = PendingState(pending=self._expected)
@@ -182,7 +182,7 @@ class LiveCliEmitter:
         block = status_view_with_pending(
             self._received,
             self._pending,
-            self._fidelity,
+            self._zoom,
             self._width,
             self._theme,
         )

@@ -1,6 +1,6 @@
 """TUI module — interactive Surface for hlab.
 
-Fidelity 3+ launches this full TUI mode with two-panel layout:
+Interactive mode (-i) launches this full TUI with two-panel layout:
 - Left panel: stack list with selection
 - Right panel: containers for selected stack
 """
@@ -95,7 +95,7 @@ class TuiState:
 
 
 class HlabApp(Surface):
-    """Main TUI for hlab (fidelity 3+).
+    """Main TUI for hlab (interactive mode).
 
     Two-panel layout:
     - Left: stack list with j/k navigation

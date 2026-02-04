@@ -3,9 +3,11 @@
 Usage:
     uv run python -m apps.hlab.main              # Styled output (default)
     uv run python -m apps.hlab.main -q           # Minimal one-liner
-    uv run python -m apps.hlab.main -f           # Visual with borders
-    uv run python -m apps.hlab.main -ff          # Interactive TUI (q to quit)
+    uv run python -m apps.hlab.main -v           # Detailed with borders
+    uv run python -m apps.hlab.main -vv          # Full detail
+    uv run python -m apps.hlab.main -i           # Interactive TUI (q to quit)
     uv run python -m apps.hlab.main --json       # JSON output
+    uv run python -m apps.hlab.main --plain      # No ANSI codes
 """
 
 from __future__ import annotations

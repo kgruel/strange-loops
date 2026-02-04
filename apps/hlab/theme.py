@@ -1,6 +1,6 @@
 """Theme — centralized styling for hlab CLI display.
 
-Fidelity adds detail to the same view structure. Higher fidelity = more
+Zoom adds detail to the same view structure. Higher zoom = more
 information visible, not a different presentation mode.
 """
 

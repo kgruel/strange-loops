@@ -11,6 +11,13 @@ For interactive TUI apps, import from submodules:
 
 For runtime theming:
     from cells.themes import current_theme, use_theme, list_themes
+
+For CLI harness and in-place rendering:
+    from cells.fidelity import Fidelity, run_with_fidelity
+    from cells.inplace import InPlaceRenderer
+
+For component theming:
+    from cells.component_theme import Icons, ComponentTheme, component_theme
 """
 
 # Primitives
@@ -26,7 +33,32 @@ from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 # Output
 from .writer import Writer, ColorDepth, print_block
 
-# Theme
+# Fidelity (CLI harness)
+from .fidelity import (
+    Fidelity,
+    HarnessContext,
+    detect_fidelity,
+    detect_context,
+    add_fidelity_args,
+    run_with_fidelity,
+)
+
+# In-place rendering
+from .inplace import InPlaceRenderer, render_inplace
+
+# Component theming
+from .component_theme import (
+    Icons,
+    ASCII_ICONS,
+    ComponentTheme,
+    DEFAULT_COMPONENT_THEME,
+    ASCII_COMPONENT_THEME,
+    component_theme,
+    use_component_theme,
+    reset_component_theme,
+)
+
+# Theme (legacy style constants)
 from .theme import (
     HEADER_BG,
     SELECTION_BG,
@@ -79,7 +111,26 @@ __all__ = [
     "Writer",
     "ColorDepth",
     "print_block",
-    # Theme
+    # Fidelity
+    "Fidelity",
+    "HarnessContext",
+    "detect_fidelity",
+    "detect_context",
+    "add_fidelity_args",
+    "run_with_fidelity",
+    # In-place rendering
+    "InPlaceRenderer",
+    "render_inplace",
+    # Component theming
+    "Icons",
+    "ASCII_ICONS",
+    "ComponentTheme",
+    "DEFAULT_COMPONENT_THEME",
+    "ASCII_COMPONENT_THEME",
+    "component_theme",
+    "use_component_theme",
+    "reset_component_theme",
+    # Theme (legacy)
     "HEADER_BG",
     "SELECTION_BG",
     "DEBUG_BG",

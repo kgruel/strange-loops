@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar, TYPE_CHECKING
 
 from .block import Block
 from .cell import Style
 from .compose import join_vertical, join_horizontal
 from .span import Line, Span
 
+if TYPE_CHECKING:
+    from .component_theme import ComponentTheme
+
 T = TypeVar("T")
+
+# Type alias for node renderer callback
+NodeRenderer = Callable[[str, Any, int], Block]
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,14 +286,24 @@ SHAPE_LENS: Lens[Any] = Lens(render=shape_lens, max_zoom=2)
 # Tree Lens — hierarchical data with branch characters
 # ---------------------------------------------------------------------------
 
-# Tree branch characters (box-drawing)
-_TREE_BRANCH = "├─ "
-_TREE_LAST = "└─ "
-_TREE_PIPE = "│  "
-_TREE_SPACE = "   "
+
+def _get_tree_icons(theme: "ComponentTheme | None") -> tuple[str, str, str, str]:
+    """Get tree branch characters from theme or defaults."""
+    if theme is not None:
+        icons = theme.icons
+        return icons.tree_branch, icons.tree_last, icons.tree_pipe, icons.tree_space
+    # Default box-drawing characters
+    return "├─ ", "└─ ", "│  ", "   "
 
 
-def tree_lens(data: Any, zoom: int, width: int) -> Block:
+def tree_lens(
+    data: Any,
+    zoom: int,
+    width: int,
+    *,
+    node_renderer: NodeRenderer | None = None,
+    theme: "ComponentTheme | None" = None,
+) -> Block:
     """Render hierarchical data as an indented tree with branch characters.
 
     Supports:
@@ -299,11 +315,23 @@ def tree_lens(data: Any, zoom: int, width: int) -> Block:
     - 0: Root label + child count
     - 1: Root + immediate children (single line each)
     - 2+: Full tree, depth expands with zoom
+
+    Args:
+        data: Tree data in supported format.
+        zoom: Zoom level (0-4).
+        width: Available width in characters.
+        node_renderer: Optional (key, value, depth) -> Block for custom node formatting.
+            Branch characters are added automatically; return content only.
+        theme: Optional ComponentTheme for icons.
+
+    Returns:
+        Block with rendered tree.
     """
     if width <= 0:
         return Block.empty(0, 1)
 
     label, children = _tree_extract(data)
+    tree_branch, tree_last, tree_pipe, tree_space = _get_tree_icons(theme)
 
     if zoom <= 0:
         # Root label + count only
@@ -313,10 +341,32 @@ def tree_lens(data: Any, zoom: int, width: int) -> Block:
 
     # Build tree rows
     rows: list[Block] = []
-    rows.append(_tree_truncate(label, width))
+
+    # Root node
+    if node_renderer is not None:
+        root_block = node_renderer(label, data, 0)
+        # Truncate if needed
+        if root_block.width > width:
+            root_block = Block.text(_truncate_ellipsis(label, width), Style(), width=width)
+        rows.append(root_block)
+    else:
+        rows.append(_tree_truncate(label, width))
 
     if children:
-        _tree_render_children(children, zoom - 1, width, "", rows)
+        _tree_render_children_themed(
+            children,
+            zoom - 1,
+            width,
+            "",
+            rows,
+            1,  # depth
+            tree_branch,
+            tree_last,
+            tree_pipe,
+            tree_space,
+            node_renderer,
+            theme,
+        )
 
     return join_vertical(*rows) if rows else Block.empty(width, 1)
 
@@ -352,18 +402,25 @@ def _tree_extract(data: Any) -> tuple[str, list[tuple[str, Any]] | None]:
     return str(data), None
 
 
-def _tree_render_children(
+def _tree_render_children_themed(
     children: list[tuple[str, Any]],
     remaining_zoom: int,
     width: int,
     prefix: str,
     rows: list[Block],
+    depth: int,
+    tree_branch: str,
+    tree_last: str,
+    tree_pipe: str,
+    tree_space: str,
+    node_renderer: NodeRenderer | None,
+    theme: "ComponentTheme | None",
 ) -> None:
-    """Recursively render children with branch characters."""
+    """Recursively render children with themed branch characters."""
     for i, (key, value) in enumerate(children):
         is_last = i == len(children) - 1
-        branch = _TREE_LAST if is_last else _TREE_BRANCH
-        continuation = _TREE_SPACE if is_last else _TREE_PIPE
+        branch = tree_last if is_last else tree_branch
+        continuation = tree_space if is_last else tree_pipe
 
         _, grandchildren = _tree_extract(value)
 
@@ -375,27 +432,52 @@ def _tree_render_children(
             continue
 
         if remaining_zoom <= 0 or grandchildren is None:
-            # Leaf or zoom exhausted: show label (and count if has children)
-            if grandchildren:
-                text = f"{key} [{len(grandchildren)}]"
+            # Leaf or zoom exhausted
+            if node_renderer is not None:
+                content_block = node_renderer(key, value, depth)
+                # Prefix with branch chars
+                row_cells = list(Block.text(branch_prefix, Style(), width=len(branch_prefix)).row(0))
+                # Add content (truncated if needed)
+                for cell in content_block.row(0)[:content_width]:
+                    row_cells.append(cell)
+                rows.append(Block([row_cells], width))
             else:
-                # Show value for leaf nodes
-                if value is None or isinstance(value, (str, int, float, bool)):
-                    text = f"{key}: {value}"
+                # Default formatting
+                if grandchildren:
+                    text = f"{key} [{len(grandchildren)}]"
                 else:
-                    text = key
-            row_text = branch_prefix + _truncate_ellipsis(text, content_width)
-            rows.append(Block.text(row_text, Style(), width=width))
+                    # Show value for leaf nodes
+                    if value is None or isinstance(value, (str, int, float, bool)):
+                        text = f"{key}: {value}"
+                    else:
+                        text = key
+                row_text = branch_prefix + _truncate_ellipsis(text, content_width)
+                rows.append(Block.text(row_text, Style(), width=width))
         else:
             # Expand this branch
-            row_text = branch_prefix + _truncate_ellipsis(key, content_width)
-            rows.append(Block.text(row_text, Style(), width=width))
-            _tree_render_children(
+            if node_renderer is not None:
+                content_block = node_renderer(key, value, depth)
+                row_cells = list(Block.text(branch_prefix, Style(), width=len(branch_prefix)).row(0))
+                for cell in content_block.row(0)[:content_width]:
+                    row_cells.append(cell)
+                rows.append(Block([row_cells], width))
+            else:
+                row_text = branch_prefix + _truncate_ellipsis(key, content_width)
+                rows.append(Block.text(row_text, Style(), width=width))
+
+            _tree_render_children_themed(
                 grandchildren,
                 remaining_zoom - 1,
                 width,
                 prefix + continuation,
                 rows,
+                depth + 1,
+                tree_branch,
+                tree_last,
+                tree_pipe,
+                tree_space,
+                node_renderer,
+                theme,
             )
 
 
@@ -423,15 +505,23 @@ TREE_LENS: Lens[Any] = Lens(render=tree_lens, max_zoom=4)
 # Chart Lens — text-based visualizations for numeric data
 # ---------------------------------------------------------------------------
 
-# Sparkline characters (8 levels)
-_SPARK_CHARS = "▁▂▃▄▅▆▇█"
 
-# Bar characters
-_BAR_FILLED = "█"
-_BAR_EMPTY = "░"
+def _get_chart_icons(theme: "ComponentTheme | None") -> tuple[str, str, str]:
+    """Get chart characters from theme or defaults."""
+    if theme is not None:
+        icons = theme.icons
+        return icons.sparkline, icons.bar_filled, icons.bar_empty
+    # Default characters
+    return "▁▂▃▄▅▆▇█", "█", "░"
 
 
-def chart_lens(data: Any, zoom: int, width: int) -> Block:
+def chart_lens(
+    data: Any,
+    zoom: int,
+    width: int,
+    *,
+    theme: "ComponentTheme | None" = None,
+) -> Block:
     """Render numeric data as text-based charts.
 
     Supports:
@@ -443,11 +533,21 @@ def chart_lens(data: Any, zoom: int, width: int) -> Block:
     - 0: Summary stats (count, range)
     - 1: Inline sparkline
     - 2: Vertical bars with labels
+
+    Args:
+        data: Numeric data in supported format.
+        zoom: Zoom level (0-2).
+        width: Available width in characters.
+        theme: Optional ComponentTheme for icons.
+
+    Returns:
+        Block with rendered chart.
     """
     if width <= 0:
         return Block.empty(0, 1)
 
     values, labels = _chart_extract(data)
+    spark_chars, bar_filled, bar_empty = _get_chart_icons(theme)
 
     if not values:
         return Block.text("(no data)", Style(), width=width)
@@ -458,10 +558,10 @@ def chart_lens(data: Any, zoom: int, width: int) -> Block:
 
     if zoom == 1:
         # Sparkline
-        return _chart_sparkline(values, width)
+        return _chart_sparkline_themed(values, width, spark_chars)
 
     # zoom >= 2: labeled bars
-    return _chart_bars(values, labels, width)
+    return _chart_bars_themed(values, labels, width, bar_filled, bar_empty)
 
 
 def _chart_extract(data: Any) -> tuple[list[float], list[str] | None]:
@@ -505,8 +605,8 @@ def _chart_stats(values: list[float], width: int) -> Block:
     return Block.text(_truncate_ellipsis(text, width), Style(), width=width)
 
 
-def _chart_sparkline(values: list[float], width: int) -> Block:
-    """Render an inline sparkline."""
+def _chart_sparkline_themed(values: list[float], width: int, spark_chars: str) -> Block:
+    """Render an inline sparkline with themed characters."""
     if not values:
         return Block.empty(width, 1)
 
@@ -522,18 +622,25 @@ def _chart_sparkline(values: list[float], width: int) -> Block:
     span = hi - lo if hi > lo else 1.0
 
     chars = []
+    num_levels = len(spark_chars)
     for v in sampled:
-        # Map value to 0-7 index
-        idx = int((v - lo) / span * 7)
-        idx = max(0, min(7, idx))
-        chars.append(_SPARK_CHARS[idx])
+        # Map value to character index
+        idx = int((v - lo) / span * (num_levels - 1))
+        idx = max(0, min(num_levels - 1, idx))
+        chars.append(spark_chars[idx])
 
     text = "".join(chars)
     return Block.text(text, Style(), width=width)
 
 
-def _chart_bars(values: list[float], labels: list[str] | None, width: int) -> Block:
-    """Render horizontal bars with optional labels."""
+def _chart_bars_themed(
+    values: list[float],
+    labels: list[str] | None,
+    width: int,
+    bar_filled: str,
+    bar_empty: str,
+) -> Block:
+    """Render horizontal bars with themed characters."""
     if not values:
         return Block.empty(width, 1)
 
@@ -576,7 +683,7 @@ def _chart_bars(values: list[float], labels: list[str] | None, width: int) -> Bl
             ratio = 1.0
         filled_count = int(ratio * bar_width)
         filled_count = max(0, min(bar_width, filled_count))
-        bar = _BAR_FILLED * filled_count + _BAR_EMPTY * (bar_width - filled_count)
+        bar = bar_filled * filled_count + bar_empty * (bar_width - filled_count)
 
         # Value suffix
         if is_percent:

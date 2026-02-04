@@ -19,6 +19,8 @@ from ..components import (
     Column,
     TableState,
     table,
+    sparkline,
+    sparkline_with_range,
 )
 
 __all__ = [
@@ -42,4 +44,7 @@ __all__ = [
     "Column",
     "TableState",
     "table",
+    # Sparkline
+    "sparkline",
+    "sparkline_with_range",
 ]

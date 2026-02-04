@@ -5,6 +5,7 @@ from .progress import ProgressState, progress_bar
 from .list_view import ListState, list_view
 from .text_input import TextInputState, text_input
 from .table import Column, TableState, table
+from .sparkline import sparkline, sparkline_with_range
 
 __all__ = [
     "SpinnerState",
@@ -22,4 +23,6 @@ __all__ = [
     "Column",
     "TableState",
     "table",
+    "sparkline",
+    "sparkline_with_range",
 ]

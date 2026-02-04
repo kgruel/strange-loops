@@ -5,6 +5,8 @@ Pure data fetch, no rendering knowledge.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from dsl import parse_vertex_file, compile_vertex_recursive, compile_sources, materialize_vertex
@@ -68,7 +70,14 @@ def load_with_expected():
     return vertex, sources, expected
 
 
-async def fetch_stacks() -> dict[str, dict]:
+def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:
+    """Create a zero-arg fetcher for status data."""
+    def fetch() -> dict[str, dict]:
+        return asyncio.run(_fetch_stacks())
+    return fetch
+
+
+async def _fetch_stacks() -> dict[str, dict]:
     """Fetch all stacks and return {stack_name: payload}.
 
     This is pure data fetch with no rendering knowledge.
@@ -81,7 +90,5 @@ async def fetch_stacks() -> dict[str, dict]:
 
     stacks = {}
     async for tick in runner.run():
-        # tick.name IS the stack name (infra, media, dev, minecraft)
-        # tick.payload = {containers, healthy, total}
         stacks[tick.name] = tick.payload
     return stacks

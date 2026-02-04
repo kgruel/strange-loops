@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from cells import Block, Style, Zoom, join_vertical, join_horizontal, border, ROUNDED
 
-from .theme import Theme, DEFAULT_THEME
+from ..theme import Theme, DEFAULT_THEME
 
 
 @dataclass(frozen=True)

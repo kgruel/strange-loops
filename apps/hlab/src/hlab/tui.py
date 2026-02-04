@@ -16,7 +16,7 @@ from cells.tui import Surface
 
 from data import Runner
 
-from .lenses import render_stack_list, render_container_detail, PendingState
+from .lenses.status import render_stack_list, render_container_detail, PendingState
 from .theme import DEFAULT_THEME
 
 

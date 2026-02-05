@@ -222,6 +222,20 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
+    from cells import (
+        Zoom,
+        Format,
+        detect_context,
+        parse_zoom,
+        parse_mode,
+        parse_format,
+        Block,
+        Style,
+        print_block,
+        join_vertical,
+    )
+    from cells.lens import shape_lens
+
     from .program import load_vertex_program
 
     path = Path(args.file)
@@ -240,24 +254,42 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Warning: no sources discovered or configured", file=sys.stderr)
             return 0
 
+        # Parse fidelity
+        zoom = parse_zoom(args)
+        mode = parse_mode(args)
+        fmt = parse_format(args)
+        ctx = detect_context(zoom, mode, fmt)
+
         print(
             f"Starting {program.vertex.name} with {len(program.sources)} source(s)...",
             file=sys.stderr,
         )
 
-        async def run():
+        # Collect all ticks
+        async def _run():
+            results = {}
             async for tick in program.run():
-                if args.json:
-                    print(
-                        json.dumps(
-                            {"name": tick.name, "payload": tick.payload}, default=str
-                        ),
-                        flush=True,
-                    )
-                else:
-                    print(f"[{tick.name}] {tick.payload}", flush=True)
+                results[tick.name] = tick.payload
+            return results
 
-        asyncio.run(run())
+        results = asyncio.run(_run())
+
+        # Render based on format
+        if ctx.format == Format.JSON:
+            print(json.dumps(results, indent=2, default=str))
+        elif ctx.zoom == Zoom.MINIMAL:
+            print(f"{program.vertex.name}: {len(results)} ticks")
+        else:
+            blocks = []
+            for name, payload in results.items():
+                header = Block.text(f"[{name}]", Style(bold=True), width=ctx.width)
+                body = shape_lens(payload, zoom=ctx.zoom.value, width=ctx.width - 2)
+                blocks.extend([header, body, Block.empty(ctx.width, 1)])
+            if blocks:
+                blocks.pop()  # Remove trailing empty block
+                use_ansi = ctx.format != Format.PLAIN
+                print_block(join_vertical(*blocks), use_ansi=use_ansi)
+
         return 0
 
     except KeyboardInterrupt:
@@ -265,10 +297,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 130
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        if args.verbose:
-            import traceback
-
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
         return 1
 
 
@@ -277,9 +307,6 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="loop",
         description="DSL for .loop and .vertex files",
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Verbose output"
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -325,12 +352,10 @@ def create_parser() -> argparse.ArgumentParser:
         "start", help="Run a .vertex file"
     )
     start_parser.add_argument("file", help=".vertex file to start")
-    start_parser.add_argument(
-        "--json", "-j", action="store_true", help="Output as JSON"
-    )
-    start_parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Verbose output"
-    )
+
+    # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
+    from cells import add_cli_args
+    add_cli_args(start_parser)
 
     return parser
 

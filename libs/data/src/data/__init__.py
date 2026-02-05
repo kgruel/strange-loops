@@ -26,7 +26,22 @@ from data.types import ValidationError
 from data.fold import Avg, Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert, Window
 
 # Parse vocabulary
-from data.parse import Coerce, Pick, Rename, Select, Skip, Split, Transform, run_parse
+from data.parse import (
+    Coerce,
+    Explode,
+    Pick,
+    Project,
+    Rename,
+    Select,
+    Skip,
+    Split,
+    Transform,
+    Where,
+    has_explode,
+    resolve_path,
+    run_parse,
+    run_parse_many,
+)
 
 # Ingress
 from data.source import CommandSource, Source
@@ -57,13 +72,19 @@ __all__ = [
     "Window",
     # Parse vocabulary
     "Coerce",
+    "Explode",
     "Pick",
+    "Project",
     "Rename",
     "Select",
     "Skip",
     "Split",
     "Transform",
+    "Where",
+    "has_explode",
+    "resolve_path",
     "run_parse",
+    "run_parse_many",
     # Ingress
     "Source",
     "CommandSource",

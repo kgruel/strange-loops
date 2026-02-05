@@ -5,6 +5,44 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-04 — Spec-first: parse extensions + fold override deletion
+
+**The arc.** Multi-session plan to make the DSL expressive enough to replace
+Python fold overrides. 5 of 6 hlab fold overrides were JSON extraction pretending
+to be computation. Replaced them with declarative parse pipelines.
+
+**Steps completed across sessions:**
+
+1. **Runner unification** — `VertexProgram.run()`/`collect()` + `load_vertex_program()`
+   wired into DSL CLI. One code path, not two. (`bbbca14`)
+2. **Store wiring** — `.vertex store` threads through compilation to runtime. (`bbbca14`)
+3. **KDL migration** (unplanned) — Replaced hand-rolled lexer/parser with ckdl.
+   Orthogonal to the plan but landed mid-stream. (`b171570`)
+4. **Parse extensions** — `Explode` (array fan-out with carry), `Project` (field
+   mapping with nested JSON paths), `Where` (record filtering). `run_parse_many()`
+   for one-to-many parse pipelines. `resolve_path()` for dot-separated JSON
+   traversal. Source detects multi-fact pipelines and emits N facts per record.
+5. **Loop file rewrite** — All 5 Prometheus/Radarr `.loop` files now declare full
+   extraction pipelines. You can read a `.loop` file and know exactly what the
+   tick payload will contain — no Python required.
+6. **Fold override deletion** — Deleted `alerts_fold`, `rules_fold`, `targets_fold`,
+   `movies_fold`, `quality_fold` + `ALERTS_INITIAL`, `MEDIA_AUDIT_INITIAL` (~120 lines).
+   Only `health_fold` remains (computes derived metrics).
+7. **Command rewiring** — `alerts.py` and `media_audit.py` no longer pass fold
+   overrides. `_load_program()` is now a one-liner in both.
+
+**The `alerts_count` edge case.** `rules.loop` projects `alerts` (a list from the
+API), but `AlertRule` expects `alerts_count: int`. Bridge in consumption code:
+`len(r.pop("alerts", []))`. Parse extracts structure; domain computes derived values.
+
+**The line.** If it's "extract field X from path Y" → parse. If it's "compute Z
+from accumulated state" → fold. `health_fold` is the latter. The other 5 were the
+former.
+
+**Result:** 286 data tests, 182 DSL tests. +1052/-205 across 23 files.
+
+---
+
 ## 2026-02-03 — DSL source templates
 
 **The feature.** Parameterized source templates. A vertex declares a parameter

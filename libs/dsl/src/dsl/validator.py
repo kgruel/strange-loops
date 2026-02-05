@@ -15,13 +15,16 @@ from typing import TYPE_CHECKING
 
 from .ast import (
     Coerce,
+    Explode,
     LoopFile,
     ParseStep,
     Pick,
+    Project,
     Skip,
     Split,
     Transform,
     VertexFile,
+    Where,
 )
 from .errors import Location, ValidationError
 
@@ -112,7 +115,12 @@ class ValidationContext:
 # -----------------------------------------------------------------------------
 
 
-def validate_parse_flow(steps: tuple[ParseStep, ...], ctx: ValidationContext) -> Shape:
+def validate_parse_flow(
+    steps: tuple[ParseStep, ...],
+    ctx: ValidationContext,
+    *,
+    initial_shape: Shape | None = None,
+) -> Shape:
     """Validate parse step ordering and infer output shape.
 
     Rules:
@@ -120,8 +128,9 @@ def validate_parse_flow(steps: tuple[ParseStep, ...], ctx: ValidationContext) ->
     - split only valid on STRING, produces LIST
     - pick only valid on LIST, produces LIST or DICT (if names given)
     - transform only valid on DICT, requires field to exist
+    - where, explode, project only valid on DICT
     """
-    shape = Shape.string()
+    shape = initial_shape if initial_shape is not None else Shape.string()
 
     for i, step in enumerate(steps):
         step_num = i + 1  # 1-indexed for error messages
@@ -171,6 +180,32 @@ def validate_parse_flow(steps: tuple[ParseStep, ...], ctx: ValidationContext) ->
                         result_type = op.type
                 shape = shape.with_field_type(step.field, result_type)
 
+        elif isinstance(step, Where):
+            if shape.kind != ShapeKind.DICT:
+                ctx.error(
+                    f"where (step {step_num}) requires dict input",
+                    hint="where operates on JSON/dict data",
+                )
+            # Where doesn't change shape
+
+        elif isinstance(step, Explode):
+            if shape.kind != ShapeKind.DICT:
+                ctx.error(
+                    f"explode (step {step_num}) requires dict input",
+                    hint="explode operates on JSON/dict data",
+                )
+            # Explode produces dict output (element from the exploded list)
+            shape = Shape(ShapeKind.DICT)
+
+        elif isinstance(step, Project):
+            if shape.kind != ShapeKind.DICT:
+                ctx.error(
+                    f"project (step {step_num}) requires dict input",
+                    hint="project operates on JSON/dict data",
+                )
+            fields = tuple(step.fields.keys())
+            shape = Shape.dict_shape(fields)
+
     return shape
 
 
@@ -203,7 +238,12 @@ def validate_loop_file(loop: LoopFile) -> tuple[Shape | None, list[ValidationErr
     # Validate parse pipeline
     output_shape = None
     if loop.parse:
-        output_shape = validate_parse_flow(loop.parse, ctx)
+        # JSON/ndjson formats start as dict, not string
+        if loop.format in ("json", "ndjson"):
+            initial = Shape(ShapeKind.DICT)
+        else:
+            initial = None  # default: string
+        output_shape = validate_parse_flow(loop.parse, ctx, initial_shape=initial)
 
     # Validate format-specific constraints
     if loop.format == "json" and loop.parse:

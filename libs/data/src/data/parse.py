@@ -167,8 +167,60 @@ class Select:
         object.__setattr__(self, "fields", tuple(fields))
 
 
+@dataclass(frozen=True)
+class Explode:
+    """Fan-out: evaluate a path on a dict, produce N records (one per list element).
+
+    Attributes:
+        path: Dot-separated path to a list value (e.g. "data.alerts").
+        carry: Optional dict mapping parent field → child field name.
+               Copies parent fields into each exploded child.
+
+    Examples:
+        Explode(path="data.alerts")
+        Explode(path="data.groups", carry={"name": "group_name"})
+    """
+
+    path: str
+    carry: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Project:
+    """Field mapping with nested JSON paths. Produces a dict with exactly the declared fields.
+
+    Attributes:
+        fields: Dict mapping output field name → dot-separated source path.
+
+    Examples:
+        Project(fields={"alertname": "labels.alertname", "state": "state"})
+    """
+
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Where:
+    """Record filter by field value comparison.
+
+    Attributes:
+        path: Dot-separated path to the value to check.
+        op: Comparison operation (equals, not_equals, exists).
+        value: Value to compare against (ignored for exists).
+
+    Examples:
+        Where(path="status", op="equals", value="success")
+        Where(path="type", op="not_equals", value="recording")
+        Where(path="labels", op="exists")
+    """
+
+    path: str
+    op: str = "equals"
+    value: str | None = None
+
+
 # Type alias for parse operations
-ParseOp = Skip | Split | Pick | Rename | Transform | Coerce | Select
+ParseOp = Skip | Split | Pick | Rename | Transform | Coerce | Select | Explode | Project | Where
 
 
 def _apply_skip(value: str | dict[str, Any], op: Skip) -> str | dict[str, Any] | None:
@@ -339,6 +391,130 @@ def _apply_select(value: dict[str, Any], op: Select) -> dict[str, Any] | None:
     return result if result else None
 
 
+def resolve_path(data: dict[str, Any], path: str) -> Any:
+    """Resolve a dot-separated path against a dict.
+
+    Examples:
+        resolve_path({"a": {"b": 1}}, "a.b") → 1
+        resolve_path({"a": 1}, "a.b") → None
+    """
+    current: Any = data
+    for key in path.split("."):
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return None
+    return current
+
+
+def _apply_where(value: dict[str, Any], op: Where) -> dict[str, Any] | None:
+    """Apply Where filter. Returns value if it passes, None if filtered out."""
+    if not isinstance(value, dict):
+        return None
+
+    resolved = resolve_path(value, op.path)
+
+    if op.op == "exists":
+        return value if resolved is not None else None
+    elif op.op == "equals":
+        return value if str(resolved) == op.value else None
+    elif op.op == "not_equals":
+        return value if str(resolved) != op.value else None
+    else:
+        return None
+
+
+def _apply_explode(value: dict[str, Any], op: Explode) -> list[dict[str, Any]]:
+    """Apply Explode: fan-out a list field into multiple records."""
+    resolved = resolve_path(value, op.path)
+    if not isinstance(resolved, list):
+        return [value]  # Not a list — pass through as single record
+
+    results = []
+    for item in resolved:
+        if isinstance(item, dict):
+            record = dict(item)
+        else:
+            record = {"_value": item}
+
+        if op.carry:
+            for src_field, dst_field in op.carry.items():
+                parent_val = resolve_path(value, src_field)
+                if parent_val is not None:
+                    record[dst_field] = parent_val
+
+        results.append(record)
+
+    return results
+
+
+def _apply_project(value: dict[str, Any], op: Project) -> dict[str, Any]:
+    """Apply Project: extract fields by path into a new dict."""
+    result = {}
+    for out_name, src_path in op.fields.items():
+        result[out_name] = resolve_path(value, src_path)
+    return result
+
+
+def run_parse_many(
+    data: dict[str, Any], pipeline: list[ParseOp]
+) -> list[dict[str, Any]]:
+    """Execute a parse pipeline in stream mode, returning multiple records.
+
+    Each step transforms list[record] → list[record].
+    Explode fans out (1 → N), Where filters (N → ≤N), Project reshapes (1:1).
+    """
+    records: list[dict[str, Any]] = [data]
+
+    for op in pipeline:
+        next_records: list[dict[str, Any]] = []
+        for record in records:
+            if isinstance(op, Where):
+                result = _apply_where(record, op)
+                if result is not None:
+                    next_records.append(result)
+            elif isinstance(op, Explode):
+                next_records.extend(_apply_explode(record, op))
+            elif isinstance(op, Project):
+                next_records.append(_apply_project(record, op))
+            elif isinstance(op, Select):
+                result = _apply_select(record, op)
+                if result is not None:
+                    next_records.append(result)
+            else:
+                # Delegate to single-record ops
+                result = _apply_single_op(record, op)
+                if result is not None:
+                    next_records.append(result)
+        records = next_records
+
+    return records
+
+
+def _apply_single_op(value: Any, op: ParseOp) -> Any:
+    """Apply a single-record parse op (non-stream ops)."""
+    if isinstance(op, Skip):
+        return _apply_skip(value, op)
+    elif isinstance(op, Split):
+        return _apply_split(value, op)
+    elif isinstance(op, Pick):
+        return _apply_pick(value, op)
+    elif isinstance(op, Rename):
+        return _apply_rename(value, op)
+    elif isinstance(op, Transform):
+        return _apply_transform(value, op)
+    elif isinstance(op, Coerce):
+        return _apply_coerce(value, op)
+    elif isinstance(op, Select):
+        return _apply_select(value, op)
+    return None
+
+
+def has_explode(pipeline: list[ParseOp]) -> bool:
+    """Check if a pipeline contains any Explode ops."""
+    return any(isinstance(op, Explode) for op in pipeline)
+
+
 def run_parse(
     data: str | dict[str, Any], pipeline: list[ParseOp]
 ) -> dict[str, Any] | None:
@@ -383,6 +559,20 @@ def run_parse(
             value = _apply_coerce(value, op)
         elif isinstance(op, Select):
             value = _apply_select(value, op)
+        elif isinstance(op, Where):
+            value = _apply_where(value, op)
+        elif isinstance(op, Project):
+            if isinstance(value, dict):
+                value = _apply_project(value, op)
+            else:
+                return None
+        elif isinstance(op, Explode):
+            # In single-record mode, explode returns first element only
+            if isinstance(value, dict):
+                results = _apply_explode(value, op)
+                value = results[0] if results else None
+            else:
+                return None
         else:
             return None
 

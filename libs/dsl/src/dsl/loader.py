@@ -16,6 +16,7 @@ from .ast import (
     BoundaryWhen,
     Coerce,
     Duration,
+    Explode,
     FoldAvg,
     FoldBy,
     FoldCollect,
@@ -30,6 +31,7 @@ from .ast import (
     LoopFile,
     LStrip,
     Pick,
+    Project,
     Replace,
     RStrip,
     Select,
@@ -41,6 +43,7 @@ from .ast import (
     Transform,
     Trigger,
     VertexFile,
+    Where,
 )
 from .errors import Location, ParseError
 
@@ -137,12 +140,63 @@ def _load_transform(node: ckdl.Node, path: Path | None) -> Transform:
     return Transform(field=field, operations=ops)
 
 
+def _load_explode(node: ckdl.Node, path: Path | None) -> Explode:
+    props = node.properties
+    explode_path = props.get("path")
+    if explode_path is None:
+        # Also accept as first argument
+        explode_path = node.args[0] if node.args else None
+    if explode_path is None:
+        raise _error("explode requires path= property or argument", path)
+    carry = None
+    carry_str = props.get("carry")
+    if carry_str is not None:
+        # Parse carry="name:group_name" or carry="name:group_name,other:alias"
+        carry = {}
+        for pair in str(carry_str).split(","):
+            parts = pair.strip().split(":")
+            if len(parts) == 2:
+                carry[parts[0].strip()] = parts[1].strip()
+    return Explode(path=str(explode_path), carry=carry)
+
+
+def _load_project(node: ckdl.Node, path: Path | None) -> Project:
+    fields = {}
+    for child in node.children:
+        field_name = child.name
+        field_path = child.properties.get("path")
+        if field_path is None:
+            raise _error(f"project field '{field_name}' requires path= property", path)
+        fields[field_name] = str(field_path)
+    if not fields:
+        raise _error("project requires at least one field", path)
+    return Project(fields=fields)
+
+
+def _load_where(node: ckdl.Node, path: Path | None) -> Where:
+    props = node.properties
+    where_path = props.get("path")
+    if where_path is None:
+        raise _error("where requires path= property", path)
+    if "equals" in props:
+        return Where(path=str(where_path), op="equals", value=str(props["equals"]))
+    if "not_equals" in props:
+        return Where(path=str(where_path), op="not_equals", value=str(props["not_equals"]))
+    if "exists" in props:
+        return Where(path=str(where_path), op="exists")
+    # Default: exists check
+    return Where(path=str(where_path), op="exists")
+
+
 _PARSE_STEP_LOADERS = {
     "skip": _load_skip,
     "split": _load_split,
     "pick": _load_pick,
     "select": _load_select,
     "transform": _load_transform,
+    "explode": _load_explode,
+    "project": _load_project,
+    "where": _load_where,
 }
 
 

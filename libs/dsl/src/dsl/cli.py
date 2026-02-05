@@ -222,9 +222,7 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
-    from .mapper import compile_loop, compile_vertex_recursive, materialize_vertex
-    from .loader import parse_loop_file, parse_vertex_file
-    from .validator import validate
+    from .program import load_vertex_program
 
     path = Path(args.file)
     if not path.exists():
@@ -236,52 +234,26 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        from glob import glob
+        program = load_vertex_program(path)
 
-        from data import Runner
-
-        ast = parse_vertex_file(path)
-        validate(ast)
-
-        # Compile vertex tree (handles vertices: and discover: for .vertex files)
-        compiled = compile_vertex_recursive(ast)
-        vertex = materialize_vertex(compiled)
-
-        # Report nested vertices
-        if compiled.children:
-            child_names = list(compiled.children.keys())
-            print(f"Nested vertices: {', '.join(child_names)}", file=sys.stderr)
-
-        # Compile sources from sources: config
-        # Note: discover: is for nested .vertex files (handled by compile_vertex_recursive)
-        #       sources: is for .loop files (supports glob patterns)
-        sources = []
-        if ast.sources:
-            for source_pattern in ast.sources:
-                pattern = str(path.parent / source_pattern)
-                matched = glob(pattern, recursive=True)
-                if not matched:
-                    print(f"Warning: no files match {source_pattern}", file=sys.stderr)
-                for loop_path in matched:
-                    loop_ast = parse_loop_file(Path(loop_path))
-                    validate(loop_ast)
-                    sources.append(compile_loop(loop_ast))
-
-        if not sources:
+        if not program.sources:
             print("Warning: no sources discovered or configured", file=sys.stderr)
             return 0
 
-        # Create runner and run
-        runner = Runner(vertex)
-        for source in sources:
-            runner.add(source)
-
-        print(f"Starting {ast.name} with {len(sources)} source(s)...", file=sys.stderr)
+        print(
+            f"Starting {program.vertex.name} with {len(program.sources)} source(s)...",
+            file=sys.stderr,
+        )
 
         async def run():
-            async for tick in runner.run():
+            async for tick in program.run():
                 if args.json:
-                    print(json.dumps({"name": tick.name, "payload": tick.payload}, default=str), flush=True)
+                    print(
+                        json.dumps(
+                            {"name": tick.name, "payload": tick.payload}, default=str
+                        ),
+                        flush=True,
+                    )
                 else:
                     print(f"[{tick.name}] {tick.payload}", flush=True)
 

@@ -1,7 +1,7 @@
 // Media audit vertex
 // Aggregates Radarr movie and quality data for corruption scanning.
-// Each source returns a JSON array wrapped as {"text": ...};
-// fold overrides parse into raw lists for later domain parsing.
+// Parse blocks in .loop files extract structured records from API responses;
+// collect folds accumulate them for later domain parsing.
 
 name "media_audit"
 
@@ -10,7 +10,7 @@ sources {
     with kind="movies" host="192.168.1.40:7878" apikey="38f9f156c694487baf2bfb9f4355a02d"
     loop {
       fold {
-        data "latest"
+        movies "collect" 10000
       }
       boundary when="${kind}.complete"
     }
@@ -20,7 +20,7 @@ sources {
     with kind="quality" host="192.168.1.40:7878" apikey="38f9f156c694487baf2bfb9f4355a02d"
     loop {
       fold {
-        data "latest"
+        quality_defs "collect" 500
       }
       boundary when="${kind}.complete"
     }

@@ -7,6 +7,7 @@ from .ast import (
     BoundaryWhen,
     Coerce,
     Duration,
+    Explode,
     FoldAvg,
     FoldBy,
     FoldCollect,
@@ -23,6 +24,7 @@ from .ast import (
     LStrip,
     ParseStep,
     Pick,
+    Project,
     Replace,
     RStrip,
     Skip,
@@ -35,6 +37,7 @@ from .ast import (
     TransformOp,
     Trigger,
     VertexFile,
+    Where,
 )
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
 from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
@@ -68,6 +71,9 @@ __all__ = [
     "Replace",
     "Coerce",
     "Trigger",
+    "Explode",
+    "Project",
+    "Where",
     # AST types - Vertex file
     "VertexFile",
     "LoopDef",

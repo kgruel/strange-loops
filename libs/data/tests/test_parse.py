@@ -1,8 +1,9 @@
-"""Tests for parse vocabulary: Skip, Split, Pick, Rename, Transform, Coerce, run_parse."""
+"""Tests for parse vocabulary: Skip, Split, Pick, Rename, Transform, Coerce, Explode, Project, Where, run_parse."""
 
 import pytest
 
-from data import Coerce, Pick, Rename, Skip, Split, Transform, run_parse
+from data import Coerce, Explode, Pick, Project, Rename, Skip, Split, Transform, Where, run_parse
+from data.parse import resolve_path, run_parse_many, has_explode
 
 
 class TestSkip:
@@ -524,3 +525,220 @@ class TestEdgeCases:
         pipeline = [Split(delim=":"), Rename({0: "a", 1: "b", 2: "c"})]
         result = run_parse("a::c", pipeline)
         assert result == {"a": "a", "b": "", "c": "c"}
+
+
+class TestResolvePath:
+    """Tests for resolve_path utility."""
+
+    def test_simple_key(self):
+        assert resolve_path({"status": "ok"}, "status") == "ok"
+
+    def test_nested_path(self):
+        data = {"data": {"alerts": [1, 2, 3]}}
+        assert resolve_path(data, "data.alerts") == [1, 2, 3]
+
+    def test_deep_nested(self):
+        data = {"a": {"b": {"c": 42}}}
+        assert resolve_path(data, "a.b.c") == 42
+
+    def test_missing_key(self):
+        assert resolve_path({"a": 1}, "b") is None
+
+    def test_missing_nested(self):
+        assert resolve_path({"a": {"b": 1}}, "a.c") is None
+
+    def test_non_dict_intermediate(self):
+        assert resolve_path({"a": "string"}, "a.b") is None
+
+
+class TestWhere:
+    """Tests for Where parse op."""
+
+    def test_equals_passes(self):
+        data = {"status": "success", "data": [1]}
+        pipeline = [Where(path="status", op="equals", value="success")]
+        assert run_parse(data, pipeline) == data
+
+    def test_equals_filters(self):
+        data = {"status": "error", "data": []}
+        pipeline = [Where(path="status", op="equals", value="success")]
+        assert run_parse(data, pipeline) is None
+
+    def test_not_equals(self):
+        data = {"type": "alerting"}
+        pipeline = [Where(path="type", op="not_equals", value="recording")]
+        assert run_parse(data, pipeline) == data
+
+    def test_not_equals_filters(self):
+        data = {"type": "recording"}
+        pipeline = [Where(path="type", op="not_equals", value="recording")]
+        assert run_parse(data, pipeline) is None
+
+    def test_exists_passes(self):
+        data = {"labels": {"severity": "critical"}}
+        pipeline = [Where(path="labels", op="exists")]
+        assert run_parse(data, pipeline) == data
+
+    def test_exists_filters(self):
+        data = {"name": "test"}
+        pipeline = [Where(path="labels", op="exists")]
+        assert run_parse(data, pipeline) is None
+
+    def test_nested_path(self):
+        data = {"labels": {"severity": "critical"}}
+        pipeline = [Where(path="labels.severity", op="equals", value="critical")]
+        assert run_parse(data, pipeline) == data
+
+
+class TestExplode:
+    """Tests for Explode parse op."""
+
+    def test_basic_explode(self):
+        data = {"data": {"alerts": [{"name": "a"}, {"name": "b"}]}}
+        pipeline = [Explode(path="data.alerts")]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 2
+        assert results[0] == {"name": "a"}
+        assert results[1] == {"name": "b"}
+
+    def test_explode_with_carry(self):
+        data = {"name": "group1", "rules": [{"rule": "r1"}, {"rule": "r2"}]}
+        pipeline = [Explode(path="rules", carry={"name": "group_name"})]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 2
+        assert results[0] == {"rule": "r1", "group_name": "group1"}
+        assert results[1] == {"rule": "r2", "group_name": "group1"}
+
+    def test_explode_non_list_passthrough(self):
+        data = {"data": "not a list"}
+        pipeline = [Explode(path="data")]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 1
+        assert results[0] == data
+
+    def test_explode_missing_path(self):
+        data = {"other": [1, 2]}
+        pipeline = [Explode(path="data.alerts")]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 1  # passthrough
+
+    def test_explode_scalar_items(self):
+        data = {"items": [1, 2, 3]}
+        pipeline = [Explode(path="items")]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 3
+        assert results[0] == {"_value": 1}
+
+
+class TestProject:
+    """Tests for Project parse op."""
+
+    def test_basic_project(self):
+        data = {"labels": {"alertname": "HighCPU", "severity": "critical"}, "state": "firing"}
+        pipeline = [Project(fields={"name": "labels.alertname", "state": "state", "sev": "labels.severity"})]
+        result = run_parse(data, pipeline)
+        assert result == {"name": "HighCPU", "state": "firing", "sev": "critical"}
+
+    def test_project_missing_path(self):
+        data = {"state": "firing"}
+        pipeline = [Project(fields={"name": "labels.alertname", "state": "state"})]
+        result = run_parse(data, pipeline)
+        assert result == {"name": None, "state": "firing"}
+
+    def test_project_top_level(self):
+        data = {"name": "test", "value": 42}
+        pipeline = [Project(fields={"n": "name", "v": "value"})]
+        result = run_parse(data, pipeline)
+        assert result == {"n": "test", "v": 42}
+
+
+class TestRunParseMany:
+    """Tests for run_parse_many stream executor."""
+
+    def test_where_then_explode_then_project(self):
+        """Full pipeline: filter → fan-out → reshape."""
+        data = {
+            "status": "success",
+            "data": {
+                "alerts": [
+                    {"labels": {"alertname": "HighCPU"}, "state": "firing"},
+                    {"labels": {"alertname": "DiskFull"}, "state": "pending"},
+                ]
+            },
+        }
+        pipeline = [
+            Where(path="status", op="equals", value="success"),
+            Explode(path="data.alerts"),
+            Project(fields={"alertname": "labels.alertname", "state": "state"}),
+        ]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 2
+        assert results[0] == {"alertname": "HighCPU", "state": "firing"}
+        assert results[1] == {"alertname": "DiskFull", "state": "pending"}
+
+    def test_where_filters_before_explode(self):
+        """Where filters the whole record before explode."""
+        data = {"status": "error", "data": {"alerts": [{"name": "a"}]}}
+        pipeline = [
+            Where(path="status", op="equals", value="success"),
+            Explode(path="data.alerts"),
+        ]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 0
+
+    def test_double_explode(self):
+        """Nested explode: groups → rules."""
+        data = {
+            "data": {
+                "groups": [
+                    {"name": "g1", "rules": [{"rule": "r1"}, {"rule": "r2"}]},
+                    {"name": "g2", "rules": [{"rule": "r3"}]},
+                ]
+            }
+        }
+        pipeline = [
+            Explode(path="data.groups"),
+            Explode(path="rules", carry={"name": "group_name"}),
+        ]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 3
+        assert results[0] == {"rule": "r1", "group_name": "g1"}
+        assert results[1] == {"rule": "r2", "group_name": "g1"}
+        assert results[2] == {"rule": "r3", "group_name": "g2"}
+
+    def test_where_after_explode(self):
+        """Where filters individual records after explode."""
+        data = {
+            "data": {
+                "items": [
+                    {"type": "alerting", "name": "a"},
+                    {"type": "recording", "name": "b"},
+                    {"type": "alerting", "name": "c"},
+                ]
+            }
+        }
+        pipeline = [
+            Explode(path="data.items"),
+            Where(path="type", op="equals", value="alerting"),
+        ]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 2
+        assert results[0]["name"] == "a"
+        assert results[1]["name"] == "c"
+
+    def test_has_explode_true(self):
+        pipeline = [Where(path="x"), Explode(path="y")]
+        assert has_explode(pipeline) is True
+
+    def test_has_explode_false(self):
+        pipeline = [Where(path="x"), Project(fields={"a": "b"})]
+        assert has_explode(pipeline) is False
+
+    def test_json_array_explode(self):
+        """Explode on _json for Radarr-style JSON array responses."""
+        data = {"_json": [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}]}
+        pipeline = [Explode(path="_json")]
+        results = run_parse_many(data, pipeline)
+        assert len(results) == 2
+        assert results[0] == {"id": 1, "title": "A"}
+        assert results[1] == {"id": 2, "title": "B"}

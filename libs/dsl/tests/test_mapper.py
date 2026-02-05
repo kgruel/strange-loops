@@ -46,6 +46,9 @@ from dsl.ast import (
     Transform,
     Trigger,
 )
+from dsl.ast import Explode as DslExplode
+from dsl.ast import Project as DslProject
+from dsl.ast import Where as DslWhere
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1131,6 +1134,123 @@ loops {{
 
         child = runtime.children[0]
         assert child.state("pulse") == {"count": 3}
+
+
+class TestNewParseStepMapping:
+    """Mapping for Explode, Project, Where DSL steps to runtime ops."""
+
+    def test_explode_mapping(self):
+        from dsl.mapper import map_explode
+        from data import Explode as RuntimeExplode
+
+        step = DslExplode(path="data.alerts", carry={"name": "group_name"})
+        result = map_explode(step)
+        assert isinstance(result, RuntimeExplode)
+        assert result.path == "data.alerts"
+        assert result.carry == {"name": "group_name"}
+
+    def test_project_mapping(self):
+        from dsl.mapper import map_project
+        from data import Project as RuntimeProject
+
+        step = DslProject(fields={"alertname": "labels.alertname", "state": "state"})
+        result = map_project(step)
+        assert isinstance(result, RuntimeProject)
+        assert result.fields == {"alertname": "labels.alertname", "state": "state"}
+
+    def test_where_mapping(self):
+        from dsl.mapper import map_where
+        from data import Where as RuntimeWhere
+
+        step = DslWhere(path="status", op="equals", value="success")
+        result = map_where(step)
+        assert isinstance(result, RuntimeWhere)
+        assert result.path == "status"
+        assert result.op == "equals"
+        assert result.value == "success"
+
+    def test_map_parse_steps_with_new_ops(self):
+        """map_parse_steps handles mixed pipeline with new ops."""
+        from data import Explode as RuntimeExplode
+        from data import Project as RuntimeProject
+        from data import Where as RuntimeWhere
+
+        steps = (
+            DslWhere(path="status", op="equals", value="success"),
+            DslExplode(path="data.alerts"),
+            DslProject(fields={"name": "labels.alertname"}),
+        )
+        result = map_parse_steps(steps)
+        assert len(result) == 3
+        assert isinstance(result[0], RuntimeWhere)
+        assert isinstance(result[1], RuntimeExplode)
+        assert isinstance(result[2], RuntimeProject)
+
+
+class TestStoreWiring:
+    """Store path flows through compilation to materialized Vertex."""
+
+    def test_compiled_vertex_preserves_store(self):
+        """CompiledVertex carries store path from AST."""
+        vertex = parse_vertex("""\
+name "test"
+store "./data/test.jsonl"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert compiled.store == Path("./data/test.jsonl")
+
+    def test_compiled_vertex_no_store(self):
+        """CompiledVertex store is None when not specified."""
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert compiled.store is None
+
+    def test_materialize_with_store(self, tmp_path):
+        """materialize_vertex creates Vertex with EventStore when store is set."""
+        from dsl.mapper import materialize_vertex
+
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  counter {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        compiled.store = tmp_path / "test.jsonl"
+
+        runtime = materialize_vertex(compiled)
+        assert runtime._store is not None
+
+        # Verify store works by receiving a fact
+        from data import Fact
+
+        runtime.receive(Fact.of("counter", "test", value=1))
+        assert runtime.state("counter") == {"count": 1}
+
+        # Verify JSONL file was written
+        assert compiled.store.exists()
+        lines = compiled.store.read_text().strip().split("\n")
+        assert len(lines) == 1
 
 
 class TestTemplateInstantiation:

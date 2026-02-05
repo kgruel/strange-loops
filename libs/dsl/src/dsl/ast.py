@@ -152,7 +152,33 @@ class Coerce:
 
 
 TransformOp = Strip | LStrip | RStrip | Replace | Coerce
-ParseStep = Skip | Split | Pick | Select | Transform
+
+
+@dataclass(frozen=True)
+class Explode:
+    """Fan-out: evaluate path on record, produce N output records."""
+
+    path: str
+    carry: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Project:
+    """Field mapping with nested JSON paths."""
+
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Where:
+    """Record filter by field value comparison."""
+
+    path: str
+    op: str = "equals"
+    value: str | None = None
+
+
+ParseStep = Skip | Split | Pick | Select | Transform | Explode | Project | Where
 
 
 # -----------------------------------------------------------------------------

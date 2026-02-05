@@ -198,7 +198,7 @@ class TestJsonFormatValidation:
     """Validation specific to JSON format."""
 
     def test_json_with_split_fails(self):
-        """JSON format doesn't allow split."""
+        """JSON format doesn't allow split (dict input, not string)."""
         loop = parse_loop("""\
 source "curl -s http://api.example.com"
 format "json"
@@ -208,11 +208,11 @@ parse {
   split
 }
 """)
-        with pytest.raises(ValidationError, match="split is not valid with format: json"):
+        with pytest.raises(ValidationError, match="split.*requires string input"):
             validate_loop(loop)
 
     def test_json_with_skip_fails(self):
-        """JSON format doesn't allow skip."""
+        """JSON format doesn't allow skip (dict input, not string)."""
         loop = parse_loop("""\
 source "curl -s http://api.example.com"
 format "json"
@@ -222,8 +222,79 @@ parse {
   skip "^foo"
 }
 """)
-        with pytest.raises(ValidationError, match="skip is not valid with format: json"):
+        with pytest.raises(ValidationError, match="skip.*requires string input"):
             validate_loop(loop)
+
+
+class TestNewParseStepValidation:
+    """Validation for Explode, Project, Where parse steps."""
+
+    def test_where_on_json_valid(self):
+        """Where is valid with JSON format."""
+        loop = parse_loop("""\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  where path="status" equals="success"
+}
+""")
+        shape = validate_loop(loop)
+        assert shape.kind == ShapeKind.DICT
+
+    def test_explode_on_json_valid(self):
+        """Explode is valid with JSON format."""
+        loop = parse_loop("""\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  explode path="data.alerts"
+}
+""")
+        shape = validate_loop(loop)
+        assert shape.kind == ShapeKind.DICT
+
+    def test_project_produces_named_dict(self):
+        """Project produces dict shape with declared fields."""
+        loop = parse_loop("""\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  explode path="data.alerts"
+  project {
+    name path="labels.alertname"
+    state path="state"
+  }
+}
+""")
+        shape = validate_loop(loop)
+        assert shape.kind == ShapeKind.DICT
+        assert shape.fields == ("name", "state")
+
+    def test_full_pipeline_valid(self):
+        """Full where → explode → project pipeline is valid."""
+        loop = parse_loop("""\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  where path="status" equals="success"
+  explode path="data.alerts"
+  project {
+    alertname path="labels.alertname"
+    state path="state"
+  }
+}
+""")
+        shape = validate_loop(loop)
+        assert shape.kind == ShapeKind.DICT
+        assert "alertname" in shape.fields
 
 
 class TestVertexValidation:

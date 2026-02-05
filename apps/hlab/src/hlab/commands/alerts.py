@@ -1,6 +1,6 @@
 """Alerts command — fetch Prometheus alert status via DSL pipeline.
 
-Uses .loop files for SSH transport and fold overrides for domain parsing.
+Uses .loop files for SSH transport and DSL-native parse/fold for domain parsing.
 Same pipeline as status: .loop → .vertex → fold → tick → lens → render.
 """
 
@@ -14,7 +14,6 @@ from typing import Any
 
 from dsl import VertexProgram, load_vertex_program
 
-from ..folds import ALERTS_INITIAL, alerts_fold, rules_fold, targets_fold
 from ..lenses.alerts import AlertsData, FiringAlert, AlertRule, TargetHealth
 
 
@@ -24,14 +23,7 @@ VERTEX_FILE = HERE / "loops/alerts.vertex"
 
 def _load_program(show_targets: bool = False) -> VertexProgram:
     """Load vertex program, optionally excluding targets sources."""
-    fold_overrides = {
-        "alerts": (ALERTS_INITIAL, alerts_fold),
-        "rules": (ALERTS_INITIAL, rules_fold),
-    }
-    if show_targets:
-        fold_overrides["targets"] = (ALERTS_INITIAL, targets_fold)
-
-    program = load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
+    program = load_vertex_program(VERTEX_FILE)
     if not show_targets:
         program = VertexProgram(
             vertex=program.vertex,
@@ -69,7 +61,11 @@ def make_fetcher(args) -> Callable[[], AlertsData]:
         results = program.collect()
 
         firing_alerts = [FiringAlert(**a) for a in results.get("alerts", {}).get("firing_alerts", [])]
-        alert_rules = [AlertRule(**r) for r in results.get("rules", {}).get("alert_rules", [])]
+        raw_rules = results.get("rules", {}).get("alert_rules", [])
+        alert_rules = [
+            AlertRule(**{**r, "alerts_count": len(r.pop("alerts", []))})
+            for r in raw_rules
+        ]
         targets = [TargetHealth(**t) for t in results.get("targets", {}).get("targets", [])]
 
         return AlertsData(

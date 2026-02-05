@@ -39,6 +39,9 @@ from .ast import (
     Trigger,
     VertexFile,
 )
+from .ast import Explode as DslExplode
+from .ast import Project as DslProject
+from .ast import Where as DslWhere
 from .ast import Coerce as DslCoerce
 from .ast import FoldOp as DslFoldOp
 from .ast import LStrip as DslLStrip
@@ -168,6 +171,27 @@ def map_select(step: Select) -> RuntimeSelect:
     return RuntimeSelect(*step.fields)
 
 
+def map_explode(step: DslExplode) -> "RuntimeParseOp":
+    """Map DSL Explode to runtime Explode."""
+    from data import Explode as RuntimeExplode
+
+    return RuntimeExplode(path=step.path, carry=step.carry)
+
+
+def map_project(step: DslProject) -> "RuntimeParseOp":
+    """Map DSL Project to runtime Project."""
+    from data import Project as RuntimeProject
+
+    return RuntimeProject(fields=step.fields)
+
+
+def map_where(step: DslWhere) -> "RuntimeParseOp":
+    """Map DSL Where to runtime Where."""
+    from data import Where as RuntimeWhere
+
+    return RuntimeWhere(path=step.path, op=step.op, value=step.value)
+
+
 def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
     """Map DSL parse steps to runtime parse ops."""
     result: list[RuntimeParseOp] = []
@@ -186,6 +210,12 @@ def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
             result.append(map_select(step))
         elif isinstance(step, Transform):
             result.extend(map_transform(step))
+        elif isinstance(step, DslExplode):
+            result.append(map_explode(step))
+        elif isinstance(step, DslProject):
+            result.append(map_project(step))
+        elif isinstance(step, DslWhere):
+            result.append(map_where(step))
 
     return result
 
@@ -459,6 +489,7 @@ class CompiledVertex:
     specs: dict[str, Spec]
     children: dict[str, "CompiledVertex"]
     routes: dict[str, str] | None = None
+    store: Path | None = None
     path: Path | None = None
 
 
@@ -558,6 +589,7 @@ def compile_vertex_recursive(
         specs=specs,
         children=children,
         routes=vertex.routes,
+        store=vertex.store,
         path=vertex.path,
     )
 
@@ -621,7 +653,18 @@ def materialize_vertex(
     """
     from vertex import Loop, Projection, Vertex
 
-    vertex = Vertex(compiled.name)
+    store = None
+    if compiled.store is not None:
+        from data import Fact
+        from vertex import EventStore
+
+        store = EventStore(
+            path=compiled.store,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+
+    vertex = Vertex(compiled.name, store=store)
     overrides = fold_overrides or {}
 
     # Set pattern-based routes if specified

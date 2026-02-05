@@ -1,6 +1,6 @@
 // Alerts vertex
 // Aggregates Prometheus alert data from three endpoints.
-// Each source returns a full JSON response; fold overrides extract domain data.
+// Each source returns individual records via parse pipeline (explode + project).
 
 name "alerts"
 
@@ -9,7 +9,7 @@ sources {
     with kind="alerts" host="192.168.1.30"
     loop {
       fold {
-        data "latest"
+        firing_alerts "collect" 200
       }
       boundary when="${kind}.complete"
     }
@@ -19,7 +19,7 @@ sources {
     with kind="rules" host="192.168.1.30"
     loop {
       fold {
-        data "latest"
+        alert_rules "collect" 200
       }
       boundary when="${kind}.complete"
     }
@@ -29,7 +29,7 @@ sources {
     with kind="targets" host="192.168.1.30"
     loop {
       fold {
-        data "latest"
+        targets "collect" 200
       }
       boundary when="${kind}.complete"
     }

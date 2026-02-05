@@ -5,3 +5,18 @@ source #"ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:
 kind "rules"
 observer "hlab"
 format "json"
+
+parse {
+  where path="status" equals="success"
+  explode path="data.groups" carry="name:group_name"
+  explode path="rules"
+  where path="type" equals="alerting"
+  project {
+    name path="name"
+    state path="state"
+    group path="group_name"
+    health path="health"
+    alerts path="alerts"
+    labels path="labels"
+  }
+}

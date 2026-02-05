@@ -57,6 +57,14 @@ class Source:
     format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
 
+    def _has_explode(self) -> bool:
+        """Check if the parse pipeline contains explode ops."""
+        if self.parse is None:
+            return False
+        from data.parse import has_explode
+
+        return has_explode(self.parse)
+
     def _parse_data(self, data: Any) -> dict[str, Any] | None:
         """Parse data through the pipeline, returning payload or None to skip.
 
@@ -80,6 +88,23 @@ class Source:
 
         return run_parse(data, self.parse)
 
+    def _parse_data_many(self, data: Any) -> list[dict[str, Any]]:
+        """Parse data through stream pipeline, returning multiple payloads.
+
+        Used when the pipeline contains Explode ops that fan out records.
+        """
+        if not isinstance(data, (str, dict)):
+            data = {"_json": data}
+
+        if self.parse is None:
+            if isinstance(data, dict):
+                return [data]
+            return []
+
+        from data.parse import run_parse_many
+
+        return run_parse_many(data, self.parse)
+
     async def _emit_lines(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
         """Emit one fact per stdout line."""
         if proc.stdout is not None:
@@ -90,16 +115,20 @@ class Source:
                     yield Fact.of(self.kind, self.observer, **payload)
 
     async def _emit_json(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
-        """Parse stdout as JSON, emit single fact."""
+        """Parse stdout as JSON, emit fact(s)."""
         if proc.stdout is not None:
             raw = await proc.stdout.read()
             text = raw.decode().strip()
             if text:
                 try:
                     data = json.loads(text)
-                    payload = self._parse_data(data)
-                    if payload is not None:
-                        yield Fact.of(self.kind, self.observer, **payload)
+                    if self._has_explode():
+                        for payload in self._parse_data_many(data):
+                            yield Fact.of(self.kind, self.observer, **payload)
+                    else:
+                        payload = self._parse_data(data)
+                        if payload is not None:
+                            yield Fact.of(self.kind, self.observer, **payload)
                 except json.JSONDecodeError as e:
                     yield Fact.of(
                         "source.error",

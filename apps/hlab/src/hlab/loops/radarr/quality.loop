@@ -6,3 +6,7 @@ source #"curl -sf "http://${host}/api/v3/qualitydefinition?apikey=${apikey}""#
 kind "quality"
 observer "hlab"
 format "json"
+
+parse {
+  explode path="_json"
+}

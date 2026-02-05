@@ -59,7 +59,7 @@ apps/hlab/src/hlab/
 │   ├── alerts.py        # Alert rendering
 │   ├── media.py         # Media audit rendering
 │   └── logs.py          # Log rendering
-├── folds.py             # Fold overrides: health, alerts, rules, targets, movies, quality
+├── folds.py             # Fold overrides: health_fold only (others replaced by DSL parse/fold)
 ├── theme.py             # Icons, colors, Theme dataclass
 ├── tui.py               # Interactive Surface (HlabApp, two-panel layout)
 ├── infra.py             # Infrastructure helpers
@@ -120,10 +120,10 @@ All three use `load_vertex_program()` from `libs/dsl` to compile and materialize
 
 ```
 .vertex file
-  → load_vertex_program(path, fold_overrides) → VertexProgram(vertex, sources, expected_ticks)
+  → load_vertex_program(path) → VertexProgram(vertex, sources, expected_ticks)
 
-Runner(vertex) + runner.add(source)
-  → async for tick in runner.run():
+VertexProgram.run()  or  VertexProgram.collect()
+  → async for tick in program.run():
       result[tick.name] = tick.payload
 
 view_fn(result, zoom, width, theme) → Block
@@ -131,30 +131,30 @@ view_fn(result, zoom, width, theme) → Block
 
 Each source emits facts with its own kind, then `{kind}.complete`. The `.complete` fact triggers that source's boundary. N sources = N loops = N ticks.
 
-## Fold → Lens
+## Parse → Fold → Lens
 
-**Fold computes, lens presents.**
+**Parse extracts, fold accumulates, lens presents.**
 
-- `folds.py`: `health_fold` accumulates containers, computes healthy/total as state builds. `HEALTH_INITIAL` seeds the state.
-- `lenses/status.py`: `status_view` takes computed `{stack_name: payload}` and renders at zoom level. `render_plain` for non-TTY. `stack_lens` and TUI panel renderers for interactive mode.
+Most commands use DSL-native parse pipelines and fold declarations — no Python overrides needed.
+The `.loop` file's `parse` block declares the full extraction pipeline (`where`, `explode`, `project`),
+and the `.vertex` file's `fold` block declares how facts accumulate (`collect`, `latest`, etc.).
 
-```
-Source emits container facts
-  → health_fold accumulates + computes metrics
-    → Tick payload = {containers, healthy, total}
-      → status_view renders at zoom level
-```
+**Only `status` uses a Python fold override.** `health_fold` computes derived metrics (healthy/total)
+that aren't expressible as a single fold op:
 
-Fold overrides are wired via `load_vertex_program`:
 ```python
-# status: same fold for all kinds
+# status: Python fold override for derived computation
 program = load_vertex_program(VERTEX_FILE, default_fold_override=(HEALTH_INITIAL, health_fold))
 
-# alerts: different fold per kind
-program = load_vertex_program(VERTEX_FILE, fold_overrides={
-    "alerts": (ALERTS_INITIAL, alerts_fold),
-    "rules": (ALERTS_INITIAL, rules_fold),
-})
+# alerts, media_audit: DSL-native parse + fold, no Python overrides
+program = load_vertex_program(VERTEX_FILE)
+```
+
+```
+Source emits structured facts (via parse pipeline)
+  → DSL fold accumulates (collect/latest)  OR  Python fold computes derived state
+    → Tick payload = accumulated state
+      → Lens renders at zoom level
 ```
 
 ## Fidelity
@@ -184,9 +184,11 @@ In hlab: each source emits facts with its own kind (`infra`, `media`, `dev`, `mi
 ## Gotchas
 
 - **tick.name IS the stack name.** No re-grouping needed in render — state is already per-stack.
-- **Tick payload has pre-computed metrics.** `payload = {containers: [...], healthy: N, total: M}`. Access directly, don't recompute.
+- **Tick payload has pre-computed metrics** (status only). `payload = {containers: [...], healthy: N, total: M}`. Access directly, don't recompute.
 - **One tick per stack, not one aggregated tick.** Each source fires its own boundary.
 - **Boundaries are semantic.** They fire when data says so, not on timers.
+- **Parse extracts, fold accumulates.** `.loop` parse blocks define the full extraction pipeline. Only `health_fold` remains as a Python override — everything else is DSL-native.
+- **alerts_count bridge.** `rules.loop` projects `alerts` (a list), but `AlertRule` expects `alerts_count: int`. The conversion happens in `commands/alerts.py` consumption code.
 
 ## Working Here
 

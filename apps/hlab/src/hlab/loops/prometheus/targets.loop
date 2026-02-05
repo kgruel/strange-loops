@@ -5,3 +5,16 @@ source #"ssh deploy@${host} "docker exec prometheus wget -qO- 'http://localhost:
 kind "targets"
 observer "hlab"
 format "json"
+
+parse {
+  where path="status" equals="success"
+  explode path="data.activeTargets"
+  project {
+    job path="labels.job"
+    instance path="labels.instance"
+    health path="health"
+    scrape_url path="scrapeUrl"
+    last_error path="lastError"
+    last_scrape path="lastScrape"
+  }
+}

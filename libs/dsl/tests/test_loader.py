@@ -691,6 +691,138 @@ loops {
         assert vertex.sources[1].template == Path("stacks/status.loop")
 
 
+class TestExplodeStep:
+    """Tests for explode parse step."""
+
+    def test_explode_with_path(self):
+        text = """\
+source "curl -s http://api/alerts"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  explode path="data.alerts"
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Explode
+
+        assert len(loop.parse) == 1
+        assert isinstance(loop.parse[0], Explode)
+        assert loop.parse[0].path == "data.alerts"
+        assert loop.parse[0].carry is None
+
+    def test_explode_with_carry(self):
+        text = """\
+source "curl -s http://api/rules"
+kind "rules"
+observer "test"
+format "json"
+parse {
+  explode path="data.groups" carry="name:group_name"
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Explode
+
+        assert isinstance(loop.parse[0], Explode)
+        assert loop.parse[0].path == "data.groups"
+        assert loop.parse[0].carry == {"name": "group_name"}
+
+
+class TestProjectStep:
+    """Tests for project parse step."""
+
+    def test_project_fields(self):
+        text = """\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  project {
+    alertname path="labels.alertname"
+    state path="state"
+    severity path="labels.severity"
+  }
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Project
+
+        assert len(loop.parse) == 1
+        assert isinstance(loop.parse[0], Project)
+        assert loop.parse[0].fields == {
+            "alertname": "labels.alertname",
+            "state": "state",
+            "severity": "labels.severity",
+        }
+
+
+class TestWhereStep:
+    """Tests for where parse step."""
+
+    def test_where_equals(self):
+        text = """\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  where path="status" equals="success"
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Where
+
+        assert len(loop.parse) == 1
+        assert isinstance(loop.parse[0], Where)
+        assert loop.parse[0].path == "status"
+        assert loop.parse[0].op == "equals"
+        assert loop.parse[0].value == "success"
+
+    def test_where_not_equals(self):
+        text = """\
+source "curl -s http://api"
+kind "rules"
+observer "test"
+format "json"
+parse {
+  where path="type" not_equals="recording"
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Where
+
+        assert isinstance(loop.parse[0], Where)
+        assert loop.parse[0].op == "not_equals"
+        assert loop.parse[0].value == "recording"
+
+    def test_full_pipeline(self):
+        """Full pipeline with where, explode, project."""
+        text = """\
+source "curl -s http://api"
+kind "alerts"
+observer "test"
+format "json"
+parse {
+  where path="status" equals="success"
+  explode path="data.alerts"
+  project {
+    alertname path="labels.alertname"
+    state path="state"
+  }
+}
+"""
+        loop = parse_loop(text)
+        from dsl.ast import Explode, Project, Where
+
+        assert len(loop.parse) == 3
+        assert isinstance(loop.parse[0], Where)
+        assert isinstance(loop.parse[1], Explode)
+        assert isinstance(loop.parse[2], Project)
+
+
 class TestEnvBlock:
     """Tests for env block (KDL properties)."""
 

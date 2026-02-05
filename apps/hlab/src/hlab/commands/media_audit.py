@@ -17,7 +17,6 @@ from typing import Any
 
 from dsl import load_vertex_program
 
-from ..folds import MEDIA_AUDIT_INITIAL, movies_fold, quality_fold
 from ..infra import HostConfig, run_ssh, ssh_base_args
 from ..inventory import load_inventory, host_config_from_inventory, ANSIBLE_INVENTORY_CACHE
 from ..radarr import Movie, QualityDefinition, parse_movies, parse_quality_definitions, parse_runtime
@@ -34,11 +33,7 @@ FFMPEG_PATH = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
 
 def _load_program():
     """Load vertex program from DSL files."""
-    fold_overrides = {
-        "movies": (MEDIA_AUDIT_INITIAL, movies_fold),
-        "quality": (MEDIA_AUDIT_INITIAL, quality_fold),
-    }
-    return load_vertex_program(VERTEX_FILE, fold_overrides=fold_overrides)
+    return load_vertex_program(VERTEX_FILE)
 
 
 def load():

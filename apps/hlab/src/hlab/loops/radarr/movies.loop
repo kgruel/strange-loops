@@ -6,3 +6,7 @@ source #"curl -sf "http://${host}/api/v3/movie?apikey=${apikey}""#
 kind "movies"
 observer "hlab"
 format "json"
+
+parse {
+  explode path="_json"
+}

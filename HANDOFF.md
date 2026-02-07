@@ -11,19 +11,36 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 
 **Two libraries:**
 - **data** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
-- **vertex** — how it runs, when boundaries fire (Vertex, Loop, Store, Grant)
+- **vertex** — how it runs, when boundaries fire, compiles DSL to runtime (Vertex, Loop, Store, Grant, Compiler, Program)
 
-**One DSL:** dsl — `.loop` and `.vertex` file parser, compiles to data/vertex types
+**One DSL:** dsl — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
+
+**Two apps:**
+- **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start`)
+- **hlab** — Homelab monitoring CLI (`uv run hlab status/alerts/media audit`)
 
 **One surface:** cells — terminal UI, separate concern
+
+## Architecture
+
+```
+dsl → ckdl                          (pure grammar)
+vertex → data, dsl                  (runtime + compiler)
+apps/loops → dsl, data, vertex, cells  (CLI app)
+apps/hlab → data, vertex, cells     (no direct dsl dep)
+```
+
+Key separation: `dsl` is portable (only depends on `ckdl`). The compiler
+backend (`vertex.compiler`) and program orchestration (`vertex.program`)
+live in vertex where the target runtime types are defined.
 
 ## Libraries
 
 | Library | Focus |
 |---------|-------|
 | **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
-| **vertex** | Runtime + Identity: Tick, Vertex, Loop, Store, Peer, Grant |
-| **dsl** | DSL parser: .loop/.vertex files → AST → runtime types |
+| **vertex** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, Peer, Grant, compile_loop, load_vertex_program |
+| **dsl** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
 | **cells** | Terminal UI: Cell, Block, Buffer, Surface |
 
 ## Documentation
@@ -41,43 +58,33 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 
 ## Run Guide
 
-Quick start for recent features.
-
-### Live Source→Vertex Pipeline
-
-Real shell commands (`df`, `ps`) flowing through the full pipeline:
+### Loops CLI
 
 ```bash
-uv run python experiments/source_vertex/viz.py
+uv run loops validate disk.loop          # syntax check
+uv run loops test disk.loop -i sample    # test parse pipeline
+uv run loops run disk.loop               # execute, print facts
+uv run loops compile system.vertex       # show compiled structure
+uv run loops start system.vertex         # run vertex (one round, rendered)
 ```
 
-Watch facts stream in, folds accumulate, ticks fire on boundaries.
+### hlab App
+
+```bash
+uv run hlab status              # stack container status
+uv run hlab status -q           # one-liner
+uv run hlab status -v           # detailed
+uv run hlab status --json       # JSON output
+uv run hlab alerts              # Prometheus alerts
+uv run hlab media audit         # media corruption scan
+```
 
 ### Nested Vertex Discovery
 
 The DSL supports `discover:` for auto-finding child vertices:
 
-```
-# root.vertex
-discover: ./infra/*.vertex
-discover: ./personal/*.vertex
-```
-
-Try the nested flow example:
-
 ```bash
-uv run loop compile experiments/nested_flow/root.vertex
-```
-
-Shows the full vertex tree: root discovers `infra/disk.vertex` and `infra/proc.vertex`.
-
-### DSL CLI
-
-```bash
-uv run loop validate disk.loop      # syntax check
-uv run loop run disk.loop           # execute, print facts
-uv run loop compile system.vertex   # show compiled structure
-uv run loop start system.vertex     # run the vertex (blocks)
+uv run loops compile experiments/nested_flow/root.vertex
 ```
 
 ### TUI Experiments
@@ -85,73 +92,24 @@ uv run loop start system.vertex     # run the vertex (blocks)
 ```bash
 uv run python experiments/cadence_viz.py      # nested temporal cascade
 uv run python experiments/fidelity_lens.py    # zoom-to-fidelity lens
-uv run python experiments/personal_scale/main.py  # heterogeneous domains
+uv run python experiments/nested_flow/viz.py  # sibling fan-out
 ```
 
-### hlab App (First Real App)
+## Import Guide
 
-```bash
-# Interactive TUI with fidelity zoom (+/- to zoom, q to quit)
-uv run python apps/hlab/demos/status.py
+```python
+# Grammar (dsl — pure, no runtime deps)
+from dsl import parse_loop_file, parse_vertex_file, validate
 
-# DSL-based CLI output
-cd apps/hlab && uv run loop start status.vertex
+# Compiler + runtime (vertex)
+from vertex import compile_loop, compile_vertex, load_vertex_program
+from vertex import VertexProgram, materialize_vertex, Vertex, Tick
 ```
-
-Real SSH-based docker compose status. Tree view with 4 fidelity levels.
-Uses cells for rendering, Source with ndjson format for parsing.
-
-### Homelab Experiment (Archived)
-
-```bash
-# CLI output (raw ticks)
-uv run loop start experiments/homelab/root.vertex
-```
-
-Predecessor experiment — informed apps/hlab design. Do not develop here.
-
-## Experiments
-
-Integration layer (`experiments/`). Each wires the libraries together to
-prove a specific aspect of the model.
-
-| Experiment | Proves |
-|---|---|
-| `fleet.py` | Temporal nesting — Facts fold, Ticks cascade |
-| `boundary.py` | Data-driven boundaries — data fires boundary, not clock |
-| `observe.py` | Feedback loop closes — user interactions are Facts |
-| `review.py` | Persistence — facts/ticks to JSONL, replay on startup |
-| `summary.py` | Tick-as-input — ticks become facts to next loop |
-| `cascade.py` | Live composition — Stream connects vertices |
-| `sources/heartbeat.py` | Source → Vertex → Fold → liveness query |
-| `sources/system_health.py` | Real machine data — df + ps through loop |
-| `sources/system_health_spec.py` | Declarative Specs with folds |
-| `sources/system_health_parse.py` | Parse vocabulary in Source |
-| `sources/alert_automation.py` | Full pipeline with Store persistence |
-| `cells_vertex.py` | Cells-Vertex integration — full feedback loop closes |
-| `temporal/tick_since.py` | Fidelity traversal — Tick.since + Store.between() |
-| `fidelity_lens.py` | Zoom-to-fidelity — Lens renders ticks at varying depth |
-| `cadence_viz.py` | Nested cascade — pulse→breath→minute with feedback loop |
-| `nested_flow/viz.py` | Sibling fan-out — root→{timers,sources,infra} |
-| `source_vertex/viz.py` | Live Source→Vertex wiring — real commands through Runner |
-| `personal_scale/main.py` | Heterogeneous domains — disk,proc,email,calendar through root |
-| `homelab/` | Real homelab monitoring — SSH sources, nested vertices, error handling |
 
 ## Current Focus: apps/hlab — First Real App
 
 **Active iteration target.** All homelab monitoring work happens here until further notice.
 `experiments/homelab/` is archived predecessor — don't develop there.
-
-### Run It
-
-```bash
-# Main app with fidelity levels
-uv run python -m apps.hlab.main           # styled tree output
-uv run python -m apps.hlab.main -q        # one line summary
-uv run python -m apps.hlab.main -f        # visual with borders
-uv run python -m apps.hlab.main -ff       # interactive TUI
-uv run python -m apps.hlab.main --json    # JSON output
-```
 
 ### Structure
 
@@ -159,33 +117,31 @@ uv run python -m apps.hlab.main --json    # JSON output
 apps/hlab/
 ├── loops/
 │   ├── status.vertex         # Template-based: 4 stacks from 1 template
+│   ├── alerts.vertex         # Prometheus alerts pipeline
+│   ├── media_audit.vertex    # Radarr media audit pipeline
 │   └── stacks/
 │       └── status.loop       # Template: ${kind}, ${host} placeholders
 ├── commands/
-│   └── status.py             # Data fetch logic
-├── folds.py                  # Fold overrides: health_fold
-├── lenses.py                 # Zoom-level rendering
-├── harness.py                # CLI harness for commands
-├── main.py                   # Entry point
-└── demos/
-    └── status.py             # Legacy demo
+│   ├── status.py             # from vertex import load_vertex_program
+│   ├── alerts.py             # from vertex import VertexProgram, load_vertex_program
+│   └── media_audit.py        # from vertex import load_vertex_program
+├── folds.py                  # Fold overrides: health_fold only
+├── lenses/                   # Zoom-level rendering
+└── main.py                   # Entry point
 ```
 
 ### What Works
 
 - **Template sources** — One .loop template instantiated with parameter table
-- **Per-stack kinds** — Template expands to 4 sources with ${kind} substitution
-- **tick.name IS the stack** — No re-grouping in render, state is `{stack: payload}`
-- **format: ndjson** — Source format for JSON lines from docker compose ps
-- **select** parse op — Extract specific fields from JSON objects
-- **Fidelity rendering** — Zoom 0-3 controls detail level
-- **cells TUI** — Surface subclass with async Runner, keyboard zoom
-- **Fold→Lens pattern** — `health_fold` computes at fold-time, `stack_lens` renders at zoom level
+- **Per-stack kinds** — Template expands to N sources with ${kind} substitution
+- **tick.name IS the stack** — No re-grouping in render
+- **Fidelity rendering** — Zoom 0-3 controls detail level via cells
+- **Polling** — `every "30s"` for live updates
 
 ## Next Steps
 
-1. **Polling** — Add `every: 30s` for live updates
-2. **Actions** — keypress → fact → automation loop (restart container)
+1. **Actions** — keypress → fact → automation loop (restart container)
+2. **Persistence** — SqliteStore for tick history, replay on startup
 
 ## Open Threads (Deferred)
 
@@ -205,6 +161,14 @@ apps/hlab/
   emerges.
 
 ## Resolved
+
+75. ~~Decouple DSL from runtime~~ — `dsl` is now pure grammar (ast/loader/validator,
+    depends only on ckdl). Compiler backend (`mapper.py` → `vertex/compiler.py`) and
+    program orchestration (`program.py` → `vertex/program.py`) moved to vertex. CLI
+    (`cli.py` → `apps/loops/main.py`) moved to new `apps/loops` workspace member.
+    hlab drops direct dsl dependency. Vertex gains `register()` → Loop unification
+    (deleted `_FoldEngine`), `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence.
+    435 tests across dsl (84), vertex (332), loops (19).
 
 74. ~~Spec-first: full 4-step plan complete~~ — Multi-session plan. Steps 1-3: Added
     `Explode`, `Project`, `Where` parse ops to data + dsl. `run_parse_many()` for
@@ -232,135 +196,5 @@ apps/hlab/
     to Source for JSON lines. Added `select` parse op for field extraction from JSON. Built
     proof.py, infra.loop, status.vertex. Cells-based TUI with fidelity zoom (0-3). Explored
     ancestor codebases (gruel.network, zsh config, hlab) for patterns.
-
-70. ~~Homelab TUI with shape_lens~~ — `experiments/homelab/viz.py` renders tick payloads using
-    `shape_lens` at configurable zoom levels. Workaround for boundary reset: capture payloads
-    directly from ticks instead of reading vertex state.
-
-69. ~~Cells usage guide~~ — `experiments/CELLS_USAGE.md` documents Surface subclassing, Block
-    composition, async task patterns, and common gotchas. Reference for future TUI work.
-
-68. ~~DSL: Wire routes: to runtime~~ — `routes:` config now compiles to Vertex pattern-based
-    routing. Supports fnmatch globs. Facts route by pattern match, not just exact kind match.
-    +224 lines across mapper.py, vertex.py, tests.
-
-67. ~~DSL: Preserve quotes in source commands~~ — Parser now preserves quotes around STRING
-    tokens in `source:` lines. Fixes SSH commands like `ssh user@host "cd /foo && cmd"`.
-    +71 lines across lexer.py, parser.py, tests.
-
-66. ~~Homelab error handling~~ — `source.error` loop collects SSH failures. Discovered that
-    `routes:` config isn't wired to runtime; workaround is naming loops to match fact kinds.
-
-66. ~~Fix CLI discover/sources confusion~~ — `cmd_start` was using `discover:` (for vertices)
-    to glob sources, then parsing `.vertex` files as `.loop` files. Fixed: `discover:` handled
-    by `compile_vertex_recursive`, `sources:` handled separately with glob expansion.
-
-65. ~~DSL: Allow @ in source strings~~ — Lexer now accepts `@` in identifiers. Enables
-    `ssh user@host` syntax. Shell-safe: `@` only special with `$` prefix.
-
-64. ~~DSL: Count-based boundaries~~ — `boundary: after 10` (one-shot), `boundary: every 50`
-    (repeating). Parsed as identifier values to avoid conflict with `every:` config key.
-    Full implementation across AST, parser, mapper, Loop, Vertex. +362 lines.
-
-63. ~~DSL: Avg and Window folds~~ — `avg field` for running average, `window N field` for
-    sliding buffer. Hidden state (sum/count) managed internally. +399 lines, 12 new tests.
-
-62. ~~Experiment: Homelab monitoring~~ — `experiments/homelab/` with 12 DSL files. Local
-    monitoring works, SSH sources need auth. Discovered gaps: no JSONPath, routes not wired.
-
-61. ~~DSL: discover: for nested vertices~~ — `discover:` glob patterns for `.vertex` files.
-    Filters properly, handles self-reference, deduplicates with explicit `vertices:`.
-    Updated nested_flow experiment to demonstrate. 7 new tests.
-
-60. ~~Experiment: Source→Vertex wiring~~ — `experiments/source_vertex/viz.py` shows full
-    pipeline: real commands (df, ps) → parse → Fact → Runner → Vertex → Tick. Live TUI.
-
-59. ~~Experiment: Personal scale~~ — `experiments/personal_scale/` with heterogeneous
-    domains (disk, proc, email, calendar) through infra/personal vertices to root. TUI.
-
-58. ~~Fold expressiveness research~~ — Analyzed 37 custom folds. 35% already expressible,
-    14% need primitives (`Avg`, `Window`), 51% genuinely need Python. Recommendation:
-    add `Avg` + `Window`, keep Python escape hatch for complex cases.
-
-57. ~~CLI refactor: materialize_vertex~~ — `loop start` now uses `compile_vertex_recursive` +
-    `materialize_vertex`. Supports nested vertices via `vertices:` and `discover:`. Reports
-    nested vertices on startup. 134 DSL tests pass.
-
-56. ~~DSL Mapper: materialize_vertex~~ — `materialize_vertex(compiled, fold_overrides=...)`
-    instantiates runtime Vertex tree from CompiledVertex. Supports custom fold functions
-    for domain logic the declarative folds can't express. Refactored cadence_viz.py to
-    use nested vertex tree (`minute → breath → pulse`). 134 DSL tests, 213 vertex tests.
-
-55. ~~Runtime: Vertex nesting~~ — Vertex.add_child(), accepts(kind), tick-to-fact
-    conversion. Child ticks become facts to parent. Loopback prevention. 213 tests.
-
-54. ~~DSL Mapper: on:, timers, vertices:~~ — Source.trigger field for on: kinds.
-    Pure timer sources (command=None). CompiledVertex with recursive children.
-    CircularVertexError for cycle detection. 129 DSL + 245 data tests.
-
-53. ~~DSL: vertices: syntax~~ — Add `vertices:` to VertexFile for explicit child
-    vertex paths. `discover:` handles both `.loop` and `.vertex` by extension.
-    Renamed `parse_sources_list` → `parse_path_list`. 120 tests.
-
-52. ~~DSL: on: trigger syntax~~ — Add `on:` for triggered sources. Single trigger
-    `on: minute`, OR triggers `on: [a, b]`. Pure timer loops (no source, just
-    `every:`). Mutual exclusivity validation. `Trigger` type in AST. 115 tests.
-
-51. ~~Doc audit~~ — 6 archived, 2 removed, 8 revised. Shape→Spec, 5→3 atoms.
-    PEERS.md rewritten as IDENTITY.md. New accurate root README.
-
-50. ~~Cadence visualization~~ — Animated TUI proving Cadence/Source split.
-    Pulse→Breath→Minute hierarchy with feedback loop. Two-column layout.
-    `experiments/cadence_viz.py`.
-
-49. ~~Fidelity-aware Lens~~ — Zoom maps to fidelity. Build pipeline domain with
-    nested phase ticks. zoom=0 minimal, zoom=1 summary, zoom=2+ expands nested
-    ticks, zoom=4 fetches contributing facts via Store.between(). Interactive
-    mode with +/- navigation. `experiments/fidelity_lens.py`.
-
-48. ~~Cells-Vertex integration~~ — Counter with undo experiment. Keypresses become
-    Facts, Vertex folds, Ticks render to Blocks. Full feedback loop closes.
-    `experiments/cells_vertex.py`.
-
-47. ~~Tick.since fidelity traversal~~ — Tick now has `since: datetime | None` for
-    period start. Store has `between(start, end)` for time-range queries. Loop
-    tracks period start, produces ticks with `since`. Given a tick, retrieve the
-    facts that produced it via `store.between(tick.since, tick.ts)`. 26 new tests.
-    `experiments/temporal/tick_since.py` proves re-fold verification.
-
-46. ~~DSL experiment~~ — End-to-end test of .loop/.vertex workflow. Created
-    `experiments/monitors/` with disk.loop, proc.loop, system.vertex. Fixed Source
-    to emit `{kind}.complete` facts for boundary triggering. Fixed fold engines
-    (Collect, Upsert) to convert MappingProxyType payloads to dict. CLI `loop start`
-    works: discovers sources, streams facts through folds, emits ticks on boundaries.
-
-45. ~~DSL implementation~~ — Custom syntax (not YAML). `.loop` for sources with parse
-    pipelines, `.vertex` for wiring with folds and boundaries. Lexer, parser,
-    validator (shape inference), mapper (AST → runtime types), CLI (`loop validate`,
-    `test`, `run`, `compile`, `start`). 104 tests. `libs/dsl/`.
-
-43. ~~DSL design research~~ — Custom syntax over YAML for expressiveness. Parse pipeline
-    notation (`skip`, `split`, `pick -> names`), fold combinators (`by`, `+1`, `latest`).
-    Design at `.subtask/tasks/impl--loop-dsl/PLAN.md`
-
-38. ~~Sources refactor~~ — CommandSource → Source. Added format (lines|json|blob).
-    interval → every. Shell as universal adapter.
-
-39. ~~Model consolidation~~ — 5 atoms → 3 (Fact, Spec, Tick). 6 libs → 2 + cells.
-    Peer dissolved to observer field + Grant policy. Vertex is runtime not atom.
-
-40. ~~Concept vs type~~ — observer, kind, origin, boundary, fidelity are concepts
-    (strings/fields). Fact, Spec, Tick are atoms (types). Distinction in VOCABULARY.md.
-
-41. ~~Tick as period handle~~ — Tick isn't just a summary, it's a handle to a
-    semantic period. Fidelity = traversal depth. Hierarchy emerges from
-    ticks-as-facts flowing into other loops.
-
-42. ~~One-way flow truth~~ — Added fourth truth: "Everything flows one direction."
-    Failures, conditionals, nested spans are all just more facts.
-
-44. ~~Library consolidation~~ — 6 libs → 3: `data` (facts + specs + sources),
-    `vertex` (ticks + peers), `cells` (unchanged). Clean break, no deprecation
-    aliases. All imports updated to new paths.
 
 See `LOG.md` for older resolved items and full session history.

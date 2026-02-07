@@ -5,6 +5,27 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-07 — Decouple DSL from runtime
+
+**The change.** `dsl` becomes pure grammar (zero deps beyond ckdl). The compiler
+backend and CLI move out to where they belong.
+
+- `dsl/mapper.py` → `vertex/compiler.py` (DSL AST → runtime types)
+- `dsl/program.py` → `vertex/program.py` (VertexProgram, load_vertex_program)
+- `dsl/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
+- `dsl` deps: `[data, vertex, cells]` → `[ckdl]`
+- `hlab` drops direct dsl dependency, imports compiler symbols from vertex
+- Experiments split imports: grammar from dsl, compilation from vertex
+- Vertex internals: `register()` unified onto Loop (deleted `_FoldEngine`),
+  `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence, `_store_tick()`
+
+Dependency graph: `dsl→ckdl`, `vertex→data,dsl`, `apps/loops→dsl,data,vertex,cells`,
+`hlab→data,vertex,cells`. 435 tests (dsl 84, vertex 332, loops 19).
+
+(`03d6bda`, `e000bf1`, `96361c2`)
+
+---
+
 ## 2026-02-05 — Default rendering in DSL CLI (Step 4)
 
 **The change.** Wired cells fidelity system into `loop start`, completing the

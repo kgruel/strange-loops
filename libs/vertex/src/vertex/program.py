@@ -11,13 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from .mapper import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
-from .loader import parse_vertex_file
-from .validator import validate
+from .compiler import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
+from dsl import parse_vertex_file
+from dsl import validate
 
 if TYPE_CHECKING:
     from data import Source
-    from vertex import Tick, Vertex
+    from .tick import Tick
+    from .vertex import Vertex
 
 
 @dataclass(frozen=True)
@@ -28,27 +29,62 @@ class VertexProgram:
     sources: list[Source]
     expected_ticks: list[str]
 
-    async def run(self, grant: Any = None) -> AsyncIterator[Tick]:
+    @property
+    def has_polling(self) -> bool:
+        """True if any source uses interval-based polling."""
+        return any(s.every is not None for s in self.sources)
+
+    async def run(
+        self, grant: Any = None, *, on_error: Callable | None = None,
+    ) -> AsyncIterator[Tick]:
         """Run all sources and yield ticks as boundaries fire."""
         from data import Runner
 
-        runner = Runner(self.vertex)
+        runner = Runner(self.vertex, on_error=on_error)
         for source in self.sources:
             runner.add(source)
         async for tick in runner.run(grant):
             yield tick
 
-    def collect(self, grant: Any = None) -> dict[str, Any]:
-        """Run all sources synchronously, return {tick_name: payload}."""
-        import asyncio
+    async def collect_async(
+        self, *, rounds: int | None = None, grant: Any = None
+    ) -> dict[str, Any]:
+        """Run all sources, return {tick_name: payload}.
 
-        async def _run() -> dict[str, Any]:
-            results: dict[str, Any] = {}
+        Args:
+            rounds: Number of complete rounds to collect. A round completes
+                when every name in expected_ticks has fired at least once.
+                None (default) = run until all sources exhaust.
+            grant: Optional grant for identity gating.
+        """
+        results: dict[str, Any] = {}
+        if rounds is None:
             async for tick in self.run(grant):
                 results[tick.name] = tick.payload
             return results
 
-        return asyncio.run(_run())
+        seen_this_round: set[str] = set()
+        expected = set(self.expected_ticks)
+        completed_rounds = 0
+
+        async for tick in self.run(grant):
+            results[tick.name] = tick.payload
+            seen_this_round.add(tick.name)
+            if seen_this_round >= expected:
+                completed_rounds += 1
+                if completed_rounds >= rounds:
+                    break
+                seen_this_round = set()
+
+        return results
+
+    def collect(
+        self, *, rounds: int | None = None, grant: Any = None
+    ) -> dict[str, Any]:
+        """Run all sources synchronously, return {tick_name: payload}."""
+        import asyncio
+
+        return asyncio.run(self.collect_async(rounds=rounds, grant=grant))
 
 
 def load_vertex_program(
@@ -89,6 +125,8 @@ def load_vertex_program(
         overrides.update(fold_overrides)
 
     vertex = materialize_vertex(compiled, fold_overrides=overrides or None)
-    expected_ticks = sorted(compiled.specs.keys())
+    # Only specs with boundaries produce ticks (boundary-less = memory pattern)
+    expected_ticks = sorted(
+        name for name, spec in compiled.specs.items() if spec.boundary is not None
+    )
     return VertexProgram(vertex=vertex, sources=sources, expected_ticks=expected_ticks)
-

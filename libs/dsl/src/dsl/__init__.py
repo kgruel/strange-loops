@@ -42,18 +42,6 @@ from .ast import (
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
 from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
 from .validator import validate, validate_loop, validate_vertex
-from .mapper import (
-    CircularVertexError,
-    CompiledVertex,
-    compile_loop,
-    compile_sources,
-    compile_vertex,
-    compile_vertex_recursive,
-    instantiate_template,
-    materialize_vertex,
-    substitute_vars,
-)
-from .program import VertexProgram, load_vertex_program
 
 __all__ = [
     # AST types - Loop file
@@ -111,17 +99,4 @@ __all__ = [
     "validate",
     "validate_loop",
     "validate_vertex",
-    # Mapper
-    "compile_loop",
-    "compile_sources",
-    "compile_vertex",
-    "compile_vertex_recursive",
-    "instantiate_template",
-    "materialize_vertex",
-    "substitute_vars",
-    "CompiledVertex",
-    "CircularVertexError",
-    # Program helpers
-    "VertexProgram",
-    "load_vertex_program",
 ]

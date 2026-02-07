@@ -1,0 +1,18 @@
+// Full .loop file with parse pipeline
+source "df -h"
+every "5s"
+kind "disk"
+observer "disk-monitor"
+timeout "30s"
+
+parse {
+  skip "^Filesystem"
+  split
+  pick 0 4 5 {
+    names "fs" "pct" "mount"
+  }
+  transform "pct" {
+    strip "%"
+    coerce "int"
+  }
+}

@@ -1,11 +1,11 @@
-"""CLI for the loop DSL.
+"""CLI for the loops runtime.
 
 Commands:
-    loop validate <file>           Validate syntax and flow
-    loop test <file> --input <f>   Run parse pipeline against sample input
-    loop run <file>                Execute a .loop file and print facts
-    loop compile <file>            Show compiled structure
-    loop start <file>              Run a .vertex file
+    loops validate <file>           Validate syntax and flow
+    loops test <file> --input <f>   Run parse pipeline against sample input
+    loops run <file>                Execute a .loop or .vertex file
+    loops compile <file>            Show compiled structure
+    loops start <file>              Run a .vertex file (one round, rendered)
 """
 
 from __future__ import annotations
@@ -13,15 +13,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TextIO
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a .loop or .vertex file."""
-    from .loader import parse_loop_file, parse_vertex_file
-    from .validator import validate
+    from dsl import parse_loop_file, parse_vertex_file, validate
 
     path = Path(args.file)
     if not path.exists():
@@ -38,7 +39,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             return 1
 
         validate(ast)
-        print(f"✓ {path} is valid")
+        print(f"\u2713 {path} is valid")
         return 0
 
     except Exception as e:
@@ -49,10 +50,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_test(args: argparse.Namespace) -> int:
     """Test a .loop file's parse pipeline against sample input."""
     from data import run_parse
-
-    from .mapper import compile_loop
-    from .loader import parse_loop_file
-    from .validator import validate_loop
+    from dsl import parse_loop_file, validate_loop
+    from vertex import compile_loop
 
     path = Path(args.file)
     if not path.exists():
@@ -112,19 +111,25 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Execute a .loop file and print facts."""
-    from .mapper import compile_loop
-    from .loader import parse_loop_file
-    from .validator import validate_loop
-
-    path = Path(args.file)
+    """Execute a .loop or .vertex file."""
+    path = Path(args.file).resolve()
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
-    if path.suffix != ".loop":
-        print(f"Error: run command only works with .loop files", file=sys.stderr)
+    if path.suffix == ".vertex":
+        return _run_vertex(path, args)
+    elif path.suffix == ".loop":
+        return _run_loop(path, args)
+    else:
+        print(f"Error: run expects a .loop or .vertex file, got {path.suffix}", file=sys.stderr)
         return 1
+
+
+def _run_loop(path: Path, args: argparse.Namespace) -> int:
+    """Execute a .loop file and print facts."""
+    from dsl import parse_loop_file, validate_loop
+    from vertex import compile_loop
 
     try:
         ast = parse_loop_file(path)
@@ -153,11 +158,83 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_vertex(path: Path, args: argparse.Namespace) -> int:
+    """Run a .vertex file as a long-lived daemon."""
+    from vertex import load_vertex_program
+
+    try:
+        program = load_vertex_program(path)
+
+        if not program.sources:
+            print("Error: no sources configured", file=sys.stderr)
+            return 1
+
+        rounds = getattr(args, "rounds", None)
+        use_json = getattr(args, "json", False)
+
+        def log_error(fact):
+            payload = dict(fact.payload) if hasattr(fact.payload, 'items') else fact.payload
+            print(
+                f"[ERROR] {fact.observer}: {payload}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        async def run():
+            stop = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, stop.set)
+
+            print(
+                f"Started {program.vertex.name}: {len(program.sources)} sources",
+                file=sys.stderr,
+                flush=True,
+            )
+
+            completed_rounds = 0
+            if rounds is not None:
+                seen: set[str] = set()
+                expected = set(program.expected_ticks)
+
+            async for tick in program.run(on_error=log_error):
+                if stop.is_set():
+                    break
+
+                if use_json:
+                    print(json.dumps({
+                        "name": tick.name,
+                        "ts": tick.ts,
+                        "payload": tick.payload,
+                    }, default=str), flush=True)
+                else:
+                    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    print(f"[{ts}] tick: {tick.name} ({len(tick.payload)} keys)", flush=True)
+
+                if rounds is not None:
+                    seen.add(tick.name)
+                    if seen >= expected:
+                        completed_rounds += 1
+                        if completed_rounds >= rounds:
+                            break
+                        seen = set()
+
+            print("Stopped", file=sys.stderr, flush=True)
+
+        asyncio.run(run())
+        return 0
+
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_compile(args: argparse.Namespace) -> int:
     """Show compiled structure of a .loop or .vertex file."""
-    from .mapper import compile_loop, compile_vertex
-    from .loader import parse_loop_file, parse_vertex_file
-    from .validator import validate
+    from dsl import parse_loop_file, parse_vertex_file, validate
+    from vertex import compile_loop, compile_vertex
 
     path = Path(args.file)
     if not path.exists():
@@ -235,8 +312,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         join_vertical,
     )
     from cells.lens import shape_lens
-
-    from .program import load_vertex_program
+    from vertex import load_vertex_program
 
     path = Path(args.file)
     if not path.exists():
@@ -266,13 +342,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
 
         # Collect all ticks
-        async def _run():
-            results = {}
-            async for tick in program.run():
-                results[tick.name] = tick.payload
-            return results
-
-        results = asyncio.run(_run())
+        results = program.collect(rounds=1)
 
         # Render based on format
         if ctx.format == Format.JSON:
@@ -305,8 +375,8 @@ def cmd_start(args: argparse.Namespace) -> int:
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="loop",
-        description="DSL for .loop and .vertex files",
+        prog="loops",
+        description="Runtime for .loop and .vertex files",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -331,14 +401,17 @@ def create_parser() -> argparse.ArgumentParser:
 
     # run
     run_parser = subparsers.add_parser(
-        "run", help="Execute a .loop file and print facts"
+        "run", help="Execute a .loop or .vertex file"
     )
-    run_parser.add_argument("file", help=".loop file to run")
+    run_parser.add_argument("file", help=".loop or .vertex file to run")
     run_parser.add_argument(
         "--json", "-j", action="store_true", help="Output as JSON"
     )
     run_parser.add_argument(
-        "--limit", "-n", type=int, help="Limit number of facts"
+        "--limit", "-n", type=int, help="Limit number of facts (.loop only)"
+    )
+    run_parser.add_argument(
+        "--rounds", "-r", type=int, help="Number of complete rounds (.vertex only)"
     )
 
     # compile

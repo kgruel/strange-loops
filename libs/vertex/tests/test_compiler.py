@@ -1,4 +1,4 @@
-"""Tests for DSL mapper."""
+"""Tests for vertex compiler (DSL → runtime)."""
 
 from pathlib import Path
 
@@ -12,7 +12,7 @@ from data import Split as RuntimeSplit
 from data import Transform as RuntimeTransform
 
 from dsl import parse_loop, parse_vertex
-from dsl.mapper import (
+from vertex.compiler import (
     CircularVertexError,
     CompiledVertex,
     compile_loop,
@@ -954,7 +954,7 @@ class TestMaterializeVertex:
 
     def test_materialize_simple(self):
         """Simple vertex materializes to runtime Vertex."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "counter"
@@ -982,7 +982,7 @@ loops {
 
     def test_materialize_with_boundary(self):
         """Vertex with boundary emits tick on boundary fact."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "batcher"
@@ -1017,7 +1017,7 @@ loops {
 
     def test_materialize_with_fold_override(self):
         """Custom fold functions override Spec.apply."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "custom"
@@ -1048,7 +1048,7 @@ loops {
 
     def test_materialize_nested(self, tmp_path):
         """Nested vertices materialize with add_child."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
         from dsl import parse_vertex_file
 
         child_path = tmp_path / "child.vertex"
@@ -1088,7 +1088,7 @@ loops {{
 
     def test_materialize_nested_tick_flow(self, tmp_path):
         """Child ticks become facts to parent via automatic wiring."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
         from dsl import parse_vertex_file
 
         child_path = tmp_path / "pulse.vertex"
@@ -1141,7 +1141,7 @@ class TestNewParseStepMapping:
     """Mapping for Explode, Project, Where DSL steps to runtime ops."""
 
     def test_explode_mapping(self):
-        from dsl.mapper import map_explode
+        from vertex.compiler import map_explode
         from data import Explode as RuntimeExplode
 
         step = DslExplode(path="data.alerts", carry={"name": "group_name"})
@@ -1151,7 +1151,7 @@ class TestNewParseStepMapping:
         assert result.carry == {"name": "group_name"}
 
     def test_project_mapping(self):
-        from dsl.mapper import map_project
+        from vertex.compiler import map_project
         from data import Project as RuntimeProject
 
         step = DslProject(fields={"alertname": "labels.alertname", "state": "state"})
@@ -1160,7 +1160,7 @@ class TestNewParseStepMapping:
         assert result.fields == {"alertname": "labels.alertname", "state": "state"}
 
     def test_where_mapping(self):
-        from dsl.mapper import map_where
+        from vertex.compiler import map_where
         from data import Where as RuntimeWhere
 
         step = DslWhere(path="status", op="equals", value="success")
@@ -1224,7 +1224,7 @@ loops {
 
     def test_materialize_with_store(self, tmp_path):
         """materialize_vertex creates Vertex with EventStore when store is set."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "test"
@@ -1451,7 +1451,7 @@ loops {
 
     def test_routes_wired_to_runtime(self):
         """Routes are set on materialized Vertex."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "system"
@@ -1479,7 +1479,7 @@ loops {
 
     def test_exact_match_routes(self):
         """Exact match routes work (backwards compatible)."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
         from data import Fact
 
         vertex = parse_vertex("""\
@@ -1506,7 +1506,7 @@ loops {
 
     def test_pattern_routes_glob(self):
         """Glob pattern routes (* wildcard) work."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
         from data import Fact
 
         vertex = parse_vertex("""\
@@ -1538,7 +1538,7 @@ loops {
 
     def test_direct_kind_match_takes_priority(self):
         """Direct kind registration takes priority over routes."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
         from data import Fact
 
         vertex = parse_vertex("""\
@@ -1568,7 +1568,7 @@ loops {
 
     def test_accepts_with_routes(self):
         """Vertex.accepts() checks pattern routes."""
-        from dsl.mapper import materialize_vertex
+        from vertex.compiler import materialize_vertex
 
         vertex = parse_vertex("""\
 name "test"

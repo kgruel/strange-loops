@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from dsl import load_vertex_program
+from vertex import load_vertex_program
 
 from ..folds import HEALTH_INITIAL, health_fold
 
@@ -49,5 +49,5 @@ def load_with_expected():
 def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:
     """Create a zero-arg fetcher for status data."""
     def fetch() -> dict[str, dict]:
-        return _load_program().collect()
+        return _load_program().collect(rounds=1)
     return fetch

@@ -8,7 +8,7 @@ from typing import AsyncIterator
 import pytest
 
 from data import Fact
-from dsl import VertexProgram, load_vertex_program
+from vertex import VertexProgram, load_vertex_program
 from vertex import Vertex
 
 
@@ -104,6 +104,7 @@ class _MockSource:
 
     observer: str
     facts: list[Fact]
+    every: float | None = None
 
     async def stream(self) -> AsyncIterator[Fact]:
         for fact in self.facts:
@@ -180,3 +181,99 @@ class TestVertexProgramCollect:
 
         result = program.collect()
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Round-based collection (has_polling, collect with rounds=)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _PollingMockSource:
+    """Source that yields multiple rounds of facts (simulates polling)."""
+
+    observer: str
+    rounds: list[list[Fact]]
+    every: float = 1.0  # marks this as a polling source
+
+    async def stream(self) -> AsyncIterator[Fact]:
+        for round_facts in self.rounds:
+            for fact in round_facts:
+                yield fact
+
+
+class TestHasPolling:
+    def test_has_polling_true(self) -> None:
+        source = _PollingMockSource(observer="mock", rounds=[], every=30.0)
+        program = _make_program([source])
+        assert program.has_polling is True
+
+    def test_has_polling_false(self) -> None:
+        source = _MockSource(observer="mock", facts=[])
+        program = _make_program([source])
+        assert program.has_polling is False
+
+
+class TestCollectRounds:
+    def test_collect_rounds_one(self) -> None:
+        """Two rounds available, collect(rounds=1) returns after first."""
+        source = _PollingMockSource(
+            observer="mock",
+            rounds=[
+                [
+                    Fact.of("a", "mock", v=1),
+                    Fact.of("a.complete", "mock"),
+                    Fact.of("b", "mock", v=2),
+                    Fact.of("b.complete", "mock"),
+                ],
+                [
+                    Fact.of("a", "mock", v=10),
+                    Fact.of("a.complete", "mock"),
+                    Fact.of("b", "mock", v=20),
+                    Fact.of("b.complete", "mock"),
+                ],
+            ],
+        )
+        program = _make_program([source])
+        result = program.collect(rounds=1)
+        # Should get first round values only
+        assert result == {"a": 1, "b": 2}
+
+    def test_collect_rounds_default_unchanged(self) -> None:
+        """Without rounds=, collect() runs until sources exhaust."""
+        source = _MockSource(
+            observer="mock",
+            facts=[
+                Fact.of("a", "mock", v=5),
+                Fact.of("a.complete", "mock"),
+                Fact.of("b", "mock", v=10),
+                Fact.of("b.complete", "mock"),
+            ],
+        )
+        program = _make_program([source])
+        result = program.collect()
+        assert result == {"a": 5, "b": 10}
+
+    def test_collect_async_rounds(self) -> None:
+        """Async variant with rounds=1."""
+        source = _PollingMockSource(
+            observer="mock",
+            rounds=[
+                [
+                    Fact.of("a", "mock", v=3),
+                    Fact.of("a.complete", "mock"),
+                    Fact.of("b", "mock", v=7),
+                    Fact.of("b.complete", "mock"),
+                ],
+                [
+                    Fact.of("a", "mock", v=30),
+                    Fact.of("a.complete", "mock"),
+                    Fact.of("b", "mock", v=70),
+                    Fact.of("b.complete", "mock"),
+                ],
+            ],
+        )
+        program = _make_program([source])
+
+        result = asyncio.run(program.collect_async(rounds=1))
+        assert result == {"a": 3, "b": 7}

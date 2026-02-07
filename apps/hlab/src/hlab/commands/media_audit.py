@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from dsl import load_vertex_program
+from vertex import load_vertex_program
 
 from ..infra import HostConfig, run_ssh, ssh_base_args
 from ..inventory import load_inventory, host_config_from_inventory, ANSIBLE_INVENTORY_CACHE
@@ -210,9 +210,7 @@ async def _fetch_audit(
 ) -> AuditData:
     """Fetch and audit all movies via DSL pipeline."""
     program = _load_program()
-    tick_data: dict[str, dict] = {}
-    async for tick in program.run():
-        tick_data[tick.name] = tick.payload
+    tick_data = await program.collect_async(rounds=1)
 
     raw_movies = tick_data.get("movies", {}).get("movies", [])
     raw_quality = tick_data.get("quality", {}).get("quality_defs", [])

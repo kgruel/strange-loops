@@ -1,4 +1,4 @@
-"""Tests for DSL CLI."""
+"""Tests for loops CLI."""
 
 from pathlib import Path
 from io import StringIO
@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from dsl.cli import main, create_parser
+from loops.main import main, create_parser
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -172,7 +172,7 @@ class TestHelp:
             main(["--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "DSL for .loop and .vertex files" in captured.out
+        assert "Runtime for .loop and .vertex files" in captured.out
 
     def test_validate_help(self, capsys):
         with pytest.raises(SystemExit) as exc_info:

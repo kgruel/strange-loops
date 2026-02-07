@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from dsl import VertexProgram, load_vertex_program
+from vertex import VertexProgram, load_vertex_program
 
 from ..lenses.alerts import AlertsData, FiringAlert, AlertRule, TargetHealth
 
@@ -58,7 +58,7 @@ def make_fetcher(args) -> Callable[[], AlertsData]:
 
     def fetch() -> AlertsData:
         program = _load_program(show_targets=show_targets)
-        results = program.collect()
+        results = program.collect(rounds=1)
 
         firing_alerts = [FiringAlert(**a) for a in results.get("alerts", {}).get("firing_alerts", [])]
         raw_rules = results.get("rules", {}).get("alert_rules", [])

@@ -25,6 +25,7 @@ from vertex.projection import Projection
 
 # Persistence
 from vertex.store import EventStore, Store
+from vertex.sqlite_store import SqliteStore
 from vertex.file_store import FileStore
 from vertex.file_writer import FileWriter
 from vertex.tailer import Tailer
@@ -48,6 +49,21 @@ from vertex.peer import (
     restrict_grant,
 )
 
+# Compiler (DSL → runtime)
+from vertex.compiler import (
+    CircularVertexError,
+    CompiledVertex,
+    FoldOverride,
+    compile_loop,
+    compile_sources,
+    compile_vertex,
+    compile_vertex_recursive,
+    instantiate_template,
+    materialize_vertex,
+    substitute_vars,
+)
+from vertex.program import VertexProgram, load_vertex_program
+
 __all__ = [
     # Atoms
     "Tick",
@@ -61,6 +77,7 @@ __all__ = [
     # Persistence
     "Store",
     "EventStore",
+    "SqliteStore",
     "FileStore",
     "FileWriter",
     "Tailer",
@@ -79,4 +96,18 @@ __all__ = [
     "grant_of",
     "expand_grant",
     "restrict_grant",
+    # Compiler (DSL → runtime)
+    "CircularVertexError",
+    "CompiledVertex",
+    "FoldOverride",
+    "compile_loop",
+    "compile_sources",
+    "compile_vertex",
+    "compile_vertex_recursive",
+    "instantiate_template",
+    "materialize_vertex",
+    "substitute_vars",
+    # Program helpers
+    "VertexProgram",
+    "load_vertex_program",
 ]

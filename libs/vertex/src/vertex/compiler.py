@@ -1,4 +1,4 @@
-"""Mapper: compile DSL AST to runtime types.
+"""Compiler: compile DSL AST to runtime types.
 
 Maps:
 - LoopFile → Source + parse pipeline
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .ast import (
+from dsl.ast import (
     BoundaryAfter,
     BoundaryEvery,
     BoundaryWhen,
@@ -39,16 +39,16 @@ from .ast import (
     Trigger,
     VertexFile,
 )
-from .ast import Explode as DslExplode
-from .ast import Project as DslProject
-from .ast import Where as DslWhere
-from .ast import Coerce as DslCoerce
-from .ast import FoldOp as DslFoldOp
-from .ast import LStrip as DslLStrip
-from .ast import ParseStep as DslParseStep
-from .ast import Replace as DslReplace
-from .ast import RStrip as DslRStrip
-from .ast import Strip as DslStrip
+from dsl.ast import Explode as DslExplode
+from dsl.ast import Project as DslProject
+from dsl.ast import Where as DslWhere
+from dsl.ast import Coerce as DslCoerce
+from dsl.ast import FoldOp as DslFoldOp
+from dsl.ast import LStrip as DslLStrip
+from dsl.ast import ParseStep as DslParseStep
+from dsl.ast import Replace as DslReplace
+from dsl.ast import RStrip as DslRStrip
+from dsl.ast import Strip as DslStrip
 
 if TYPE_CHECKING:
     from data import Boundary, Field, Source, Spec
@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from data import Skip as RuntimeSkip
     from data import Split as RuntimeSplit
     from data import Transform as RuntimeTransform
-    from vertex import Vertex
+    from .vertex import Vertex
 
 
 # -----------------------------------------------------------------------------
@@ -348,7 +348,7 @@ def instantiate_template(loop_ast: LoopFile, params: dict[str, str]) -> LoopFile
 
 def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
     """Create a new LoopDef with boundary kind substituted."""
-    from .ast import BoundaryWhen
+    from dsl.ast import BoundaryWhen
 
     boundary = loop_def.boundary
     if boundary and isinstance(boundary, BoundaryWhen):
@@ -368,7 +368,7 @@ def compile_sources(
     Returns:
         (sources, specs) where specs contains any loop specs from templates
     """
-    from .loader import parse_loop_file
+    from dsl import parse_loop_file
 
     sources: list["Source"] = []
     specs: dict[str, "Spec"] = {}
@@ -528,7 +528,7 @@ def compile_vertex_recursive(
     """
     from glob import glob as globfn
 
-    from .loader import parse_vertex_file
+    from dsl import parse_vertex_file
 
     # Initialize tracking on first call
     if _visited is None:
@@ -651,18 +651,34 @@ def materialize_vertex(
             "pulse": (PULSE_INITIAL, pulse_fold),
         })
     """
-    from vertex import Loop, Projection, Vertex
+    from .loop import Loop
+    from .projection import Projection
+    from .vertex import Vertex
 
     store = None
     if compiled.store is not None:
         from data import Fact
-        from vertex import EventStore
 
-        store = EventStore(
-            path=compiled.store,
-            serialize=Fact.to_dict,
-            deserialize=Fact.from_dict,
-        )
+        store_path = compiled.store
+        if not store_path.is_absolute() and compiled.path is not None:
+            store_path = compiled.path.parent / store_path
+
+        if store_path.suffix in ('.db', '.sqlite'):
+            from .sqlite_store import SqliteStore
+
+            store = SqliteStore(
+                path=store_path,
+                serialize=Fact.to_dict,
+                deserialize=Fact.from_dict,
+            )
+        else:
+            from .store import EventStore
+
+            store = EventStore(
+                path=store_path,
+                serialize=Fact.to_dict,
+                deserialize=Fact.from_dict,
+            )
 
     vertex = Vertex(compiled.name, store=store)
     overrides = fold_overrides or {}

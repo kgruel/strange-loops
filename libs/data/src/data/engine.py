@@ -91,7 +91,8 @@ def _make_top_n(
             return
 
         items = state[target]
-        items[key_value] = payload
+        # Convert to dict in case payload is MappingProxyType
+        items[key_value] = dict(payload)
 
         # Sort and trim to N items
         if len(items) > n:

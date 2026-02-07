@@ -108,7 +108,9 @@ class Loop:
         """
         state = self.projection.state
         if boundary_payload is not None and isinstance(state, dict):
-            state = {**state, "_boundary": boundary_payload}
+            from types import MappingProxyType
+            bp = dict(boundary_payload) if isinstance(boundary_payload, MappingProxyType) else boundary_payload
+            state = {**state, "_boundary": bp}
         tick = Tick(
             name=self.name,
             ts=ts,

@@ -16,7 +16,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 **One DSL:** dsl — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
 
 **Two apps:**
-- **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start`)
+- **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store`)
 - **hlab** — Homelab monitoring CLI (`uv run hlab status/alerts/media audit`)
 
 **One surface:** cells — terminal UI, separate concern
@@ -39,7 +39,7 @@ live in vertex where the target runtime types are defined.
 | Library | Focus |
 |---------|-------|
 | **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
-| **vertex** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, Peer, Grant, compile_loop, load_vertex_program |
+| **vertex** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, StoreReader, Peer, Grant, compile_loop, load_vertex_program |
 | **dsl** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
 | **cells** | Terminal UI: Cell, Block, Buffer, Surface |
 
@@ -66,6 +66,8 @@ uv run loops test disk.loop -i sample    # test parse pipeline
 uv run loops run disk.loop               # execute, print facts
 uv run loops compile system.vertex       # show compiled structure
 uv run loops start system.vertex         # run vertex (one round, rendered)
+uv run loops store system.vertex         # inspect persisted store contents
+uv run loops store data/store.db         # inspect .db directly
 ```
 
 ### hlab App
@@ -104,6 +106,9 @@ from dsl import parse_loop_file, parse_vertex_file, validate
 # Compiler + runtime (vertex)
 from vertex import compile_loop, compile_vertex, load_vertex_program
 from vertex import VertexProgram, materialize_vertex, Vertex, Tick
+
+# Read-only store inspection (vertex)
+from vertex import StoreReader
 ```
 
 ## Current Focus: apps/hlab — First Real App
@@ -161,6 +166,13 @@ apps/hlab/
   emerges.
 
 ## Resolved
+
+76. ~~Store viewer: `loops store`~~ — Read-only store inspection via `StoreReader` (vertex)
+    + `commands/store.py` (data fetch) + `lenses/store.py` (zoom-aware render). StoreReader
+    takes only a `Path`, uses `PRAGMA query_only=ON`, provides `summary()`, `recent_ticks()`,
+    `recent_facts()`. Follows hlab's three-layer pattern: command (fetch) / lens (render) /
+    main (routing). Zoom-aware enrichment at fetch layer (aggregates at low zoom, payloads at
+    high zoom). 10 StoreReader tests, 20 SqliteStore tests unchanged.
 
 75. ~~Decouple DSL from runtime~~ — `dsl` is now pure grammar (ast/loader/validator,
     depends only on ckdl). Compiler backend (`mapper.py` → `vertex/compiler.py`) and

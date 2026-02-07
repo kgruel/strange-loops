@@ -5,6 +5,33 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-07 — Store viewer: `loops store`
+
+**The change.** Read-only store inspection, properly layered.
+
+- `vertex/store_reader.py` — `StoreReader(path)`, read-only SQLite inspector.
+  `PRAGMA query_only=ON`. No serialize/deserialize — pure SQL over raw columns.
+  Provides `summary()`, `fact_kind_stats()`, `tick_name_stats()`, `recent_ticks()`,
+  `recent_facts()`. The "Tailer" side of the Store/Tailer split.
+- `loops/commands/store.py` — Data fetch layer. `resolve_store_path()` handles
+  .vertex → AST → store path resolution. `make_fetcher(path, zoom)` returns
+  zoom-aware fetch: aggregates at zoom 0-1, tick payloads at 2, fact payloads at 3.
+- `loops/lenses/store.py` — Render layer. `store_view(data, zoom, width)` →
+  Block. MINIMAL = one-liner, otherwise shape_lens.
+- `loops/main.py` — Thin `cmd_store` wiring fetch → render. `store` subcommand
+  with full cells fidelity args (-q/-v/--json/--plain).
+- Follows hlab's three-layer pattern: command (fetch) / lens (render) / main (routing).
+
+Architectural insight from team research: Store's verbs are append, query, replay.
+The store viewer exercises the **query** verb at variable fidelity. Fidelity is
+traversal depth — zoom maps to how deep you go into a tick's period. The Store IS
+the fidelity mechanism. `StoreReader` is the query path; `SqliteStore` is the
+append path. Different concerns, different objects.
+
+10 new StoreReader tests. 20 existing SqliteStore tests unchanged.
+
+---
+
 ## 2026-02-07 — Decouple DSL from runtime
 
 **The change.** `dsl` becomes pure grammar (zero deps beyond ckdl). The compiler

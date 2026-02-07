@@ -26,6 +26,7 @@ from vertex.projection import Projection
 # Persistence
 from vertex.store import EventStore, Store
 from vertex.sqlite_store import SqliteStore
+from vertex.store_reader import StoreReader
 from vertex.file_store import FileStore
 from vertex.file_writer import FileWriter
 from vertex.tailer import Tailer
@@ -78,6 +79,7 @@ __all__ = [
     "Store",
     "EventStore",
     "SqliteStore",
+    "StoreReader",
     "FileStore",
     "FileWriter",
     "Tailer",

@@ -297,6 +297,47 @@ def cmd_compile(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_store(args: argparse.Namespace) -> int:
+    """Inspect store contents."""
+    from cells import (
+        Format,
+        detect_context,
+        parse_format,
+        parse_mode,
+        parse_zoom,
+        print_block,
+    )
+
+    from .commands.store import make_fetcher
+    from .lenses.store import store_view
+
+    path = Path(args.file).resolve()
+    if not path.exists():
+        print(f"Error: {path} does not exist", file=sys.stderr)
+        return 1
+
+    try:
+        zoom = parse_zoom(args)
+        mode = parse_mode(args)
+        fmt = parse_format(args)
+        ctx = detect_context(zoom, mode, fmt)
+
+        fetch = make_fetcher(path, zoom=ctx.zoom.value)
+        data = fetch()
+
+        if ctx.format == Format.JSON:
+            print(json.dumps(data, indent=2, default=str))
+        else:
+            block = store_view(data, ctx.zoom, ctx.width)
+            print_block(block, use_ansi=ctx.format != Format.PLAIN)
+
+        return 0
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
     from cells import (
@@ -426,9 +467,16 @@ def create_parser() -> argparse.ArgumentParser:
     )
     start_parser.add_argument("file", help=".vertex file to start")
 
+    # store
+    store_parser = subparsers.add_parser(
+        "store", help="Inspect store contents"
+    )
+    store_parser.add_argument("file", help=".vertex or .db file")
+
     # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
     from cells import add_cli_args
     add_cli_args(start_parser)
+    add_cli_args(store_parser)
 
     return parser
 
@@ -448,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compile(args)
     elif args.command == "start":
         return cmd_start(args)
+    elif args.command == "store":
+        return cmd_store(args)
     else:
         parser.print_help()
         return 1

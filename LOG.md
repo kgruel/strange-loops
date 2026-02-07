@@ -5,6 +5,20 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-05 — Default rendering in DSL CLI (Step 4)
+
+**The change.** Wired cells fidelity system into `loop start`, completing the
+4-step spec-first plan.
+
+- `add_cli_args(start_parser)` adds `-q`/`-v`/`-vv`/`--json`/`--plain`/`--static`/`--live`/`-i`
+- `detect_context()` resolves zoom/mode/format from TTY state + terminal size
+- `shape_lens` renders tick payloads as structured blocks at zoom level
+- JSON → `json.dumps`, MINIMAL → one-liner, default → styled blocks per tick
+
+All 4 steps of the spec-first plan now shipped. (`93cac43`)
+
+---
+
 ## 2026-02-04 — Spec-first: parse extensions + fold override deletion
 
 **The arc.** Multi-session plan to make the DSL expressive enough to replace

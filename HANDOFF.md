@@ -184,12 +184,8 @@ apps/hlab/
 
 ## Next Steps
 
-1. **Default rendering in DSL CLI** — Step 4 of the spec-first plan. Wire cells
-   fidelity (`Zoom`, `add_cli_args`, `detect_context`) into `loop start`. Use
-   `shape_lens` for tick payloads. `--json`, `--plain`, `-q`/`-v` flags.
-   Plan: `/Users/kaygee/.config/claude/plans/jazzy-napping-popcorn.md` (Step 4).
-2. **Polling** — Add `every: 30s` for live updates
-3. **Actions** — keypress → fact → automation loop (restart container)
+1. **Polling** — Add `every: 30s` for live updates
+2. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
 
@@ -210,14 +206,15 @@ apps/hlab/
 
 ## Resolved
 
-74. ~~Spec-first: parse extensions + fold override deletion~~ — Multi-session plan.
-    Added `Explode`, `Project`, `Where` parse ops to data + dsl. `run_parse_many()` for
+74. ~~Spec-first: full 4-step plan complete~~ — Multi-session plan. Steps 1-3: Added
+    `Explode`, `Project`, `Where` parse ops to data + dsl. `run_parse_many()` for
     one-to-many pipelines. Rewrote all 5 Prometheus/Radarr `.loop` files with declarative
     parse blocks. Deleted 5 fold overrides (~120 lines) from `folds.py`. Rewired `alerts.py`
     and `media_audit.py` to use DSL-native folds. Only `health_fold` remains (genuine
     computation). Also: `VertexProgram.run()`/`collect()`, `load_vertex_program()` in CLI,
-    store wiring, KDL migration. 286 data tests, 182 DSL tests. Steps 1-3 of plan complete;
-    Step 4 (default rendering) deferred.
+    store wiring, KDL migration. Step 4: Wired cells fidelity into `loop start` —
+    `add_cli_args` for `-q`/`-v`/`--json`/`--plain` flags, `detect_context` for TTY-aware
+    rendering, `shape_lens` for structured tick payload display. 286 data tests, 182 DSL tests.
 
 73. ~~DSL source templates~~ — Parameterized source templates with `${var}` placeholders. Vertex
     declares `template:` + `with:` parameter table + optional `loop:` spec. Template instantiated

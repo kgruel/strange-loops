@@ -301,6 +301,7 @@ def cmd_store(args: argparse.Namespace) -> int:
     """Inspect store contents."""
     from cells import (
         Format,
+        OutputMode,
         detect_context,
         parse_format,
         parse_mode,
@@ -321,6 +322,13 @@ def cmd_store(args: argparse.Namespace) -> int:
         mode = parse_mode(args)
         fmt = parse_format(args)
         ctx = detect_context(zoom, mode, fmt)
+
+        if ctx.mode == OutputMode.INTERACTIVE:
+            from .tui import StoreExplorerApp
+
+            app = StoreExplorerApp(path)
+            asyncio.run(app.run())
+            return 0
 
         fetch = make_fetcher(path, zoom=ctx.zoom.value)
         data = fetch()

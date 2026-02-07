@@ -36,14 +36,39 @@ def make_fetcher(path: Path, zoom: int):
         store_path = resolve_store_path(path)
         with StoreReader(store_path) as reader:
             data = reader.summary()
+            data["freshness"] = reader.freshness
+            if zoom >= 1:
+                # Add a single recent fact payload per kind for SUMMARY gist
+                for kind, info in data["facts"]["kinds"].items():
+                    recent = reader.recent_facts(kind, 1)
+                    if recent:
+                        info["sample_payload"] = recent[0]["payload"]
             if zoom >= 2:
                 for name, info in data["ticks"]["names"].items():
                     recent = reader.recent_ticks(name, 3)
                     if recent:
                         info["latest_payload"] = recent[0].payload
+                        info["latest_since"] = recent[0].since.timestamp() if recent[0].since else None
+                        info["latest_ts"] = recent[0].ts.timestamp()
             if zoom >= 3:
                 for kind, info in data["facts"]["kinds"].items():
                     recent = reader.recent_facts(kind, 5)
                     info["recent"] = [f["payload"] for f in recent]
             return data
+    return fetch
+
+
+def make_fidelity_fetcher(path: Path):
+    """Create a fetcher for fidelity drill data.
+
+    Returns a callable (since_ts, until_ts, kind?) -> list[dict].
+    Each call opens and closes its own StoreReader — the TUI calls this
+    on-demand when the user presses 'f', not on every frame.
+    """
+    def fetch(since_ts: float, until_ts: float, kind: str | None = None) -> list[dict]:
+        from vertex.store_reader import StoreReader
+
+        store_path = resolve_store_path(path)
+        with StoreReader(store_path) as reader:
+            return reader.facts_between(since_ts, until_ts, kind=kind)
     return fetch

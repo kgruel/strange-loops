@@ -6,6 +6,7 @@ from .list_view import ListState, list_view
 from .text_input import TextInputState, text_input
 from .table import Column, TableState, table
 from .sparkline import sparkline, sparkline_with_range
+from .data_explorer import DataExplorerState, DataNode, data_explorer, flatten
 
 __all__ = [
     "SpinnerState",
@@ -25,4 +26,8 @@ __all__ = [
     "table",
     "sparkline",
     "sparkline_with_range",
+    "DataExplorerState",
+    "DataNode",
+    "data_explorer",
+    "flatten",
 ]

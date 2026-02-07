@@ -15,6 +15,11 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+# Sampling limits for large data at zoom >= 2
+_MAX_DICT_ITEMS = 20
+_MAX_LIST_ITEMS = 20
+_MAX_STR_DISPLAY = 200
+
 # Type alias for node renderer callback
 NodeRenderer = Callable[[str, Any, int], Block]
 
@@ -88,8 +93,10 @@ def _render_scalar(value: Any, zoom: int, width: int) -> Block:
                 text = text[:width]
         return Block.text(text, style, width=width)
 
-    # zoom >= 2: full value
+    # zoom >= 2: full value (with length indicator for long strings)
     text = _format_value(value)
+    if isinstance(value, str) and len(text) > _MAX_STR_DISPLAY:
+        text = text[:_MAX_STR_DISPLAY] + f"... [{len(text)} chars]"
     if len(text) > width:
         if width > 1:
             text = text[: width - 1] + "\u2026"
@@ -140,12 +147,18 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
     key_style = Style(bold=True)
     val_style = Style()
 
+    # Sample items if too many
+    items = list(d.items())
+    truncated = len(items) - _MAX_DICT_ITEMS if len(items) > _MAX_DICT_ITEMS else 0
+    if truncated:
+        items = items[:_MAX_DICT_ITEMS]
+
     # Calculate key column width (max key length + 2 for ": ")
-    max_key_len = max((len(str(k)) for k in d.keys()), default=0)
+    max_key_len = max((len(str(k)) for k, _ in items), default=0)
     key_col_width = min(max_key_len + 2, width // 2)
     val_col_width = max(1, width - key_col_width)
 
-    for key, value in d.items():
+    for key, value in items:
         key_text = str(key) + ":"
         if len(key_text) > key_col_width:
             key_text = key_text[: key_col_width - 1] + "\u2026" if key_col_width > 1 else key_text[:key_col_width]
@@ -157,6 +170,10 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
 
         row = join_horizontal(key_block, val_block)
         rows.append(row)
+
+    if truncated:
+        footer = Block.text(f"... +{truncated} more", Style(dim=True), width=width)
+        rows.append(footer)
 
     if not rows:
         return Block.text("{}", style, width=width)
@@ -196,11 +213,15 @@ def _render_list(lst: list, zoom: int, width: int) -> Block:
     if not lst:
         return Block.text("[]", style, width=width)
 
+    # Sample items if too many
+    truncated = len(lst) - _MAX_LIST_ITEMS if len(lst) > _MAX_LIST_ITEMS else 0
+    visible = lst[:_MAX_LIST_ITEMS] if truncated else lst
+
     rows: list[Block] = []
     prefix_width = 2  # "- "
     item_width = max(1, width - prefix_width)
 
-    for item in lst:
+    for item in visible:
         # Render item recursively with reduced zoom
         nested_zoom = max(0, zoom - 1)
         item_block = shape_lens(item, nested_zoom, item_width)
@@ -224,6 +245,10 @@ def _render_list(lst: list, zoom: int, width: int) -> Block:
                 indent_cells = [Cell(" ", Style()), Cell(" ", Style())]
                 indent_cells.extend(item_block.row(row_idx))
                 rows.append(Block([indent_cells], len(indent_cells)))
+
+    if truncated:
+        footer = Block.text(f"... +{truncated} more", Style(dim=True), width=width)
+        rows.append(footer)
 
     return join_vertical(*rows)
 

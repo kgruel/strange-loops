@@ -267,6 +267,59 @@ class TestShapeLensWidthConstraints:
         assert len(text.strip()) > 0
 
 
+class TestShapeLensSampling:
+    """Tests for shape_lens large collection and long string sampling."""
+
+    def test_large_dict_truncated_at_zoom_2(self):
+        """Large dict (100 keys) at zoom 2 shows '+80 more' footer."""
+        d = {f"key_{i}": i for i in range(100)}
+        block = shape_lens(d, 2, 60)
+        text = _block_to_text(block)
+        assert "+80 more" in text
+        assert block.height <= 25
+
+    def test_large_list_truncated_at_zoom_2(self):
+        """Large list (50 items) at zoom 2 shows '+30 more' footer."""
+        lst = list(range(50))
+        block = shape_lens(lst, 2, 40)
+        text = _block_to_text(block)
+        assert "+30 more" in text
+
+    def test_small_dict_no_truncation(self):
+        """Small dict (5 keys) at zoom 2 has no 'more' text."""
+        d = {f"key_{i}": i for i in range(5)}
+        block = shape_lens(d, 2, 60)
+        text = _block_to_text(block)
+        assert "more" not in text
+
+    def test_long_string_shows_length(self):
+        """Long string (5000 chars) at zoom 2 shows length indicator."""
+        s = "x" * 5000
+        block = shape_lens(s, 2, 300)
+        text = _block_to_text(block)
+        assert "5000 chars" in text
+
+    def test_short_string_no_length(self):
+        """Short string at zoom 2 shows no length indicator."""
+        block = shape_lens("hello", 2, 40)
+        text = _block_to_text(block)
+        assert "chars" not in text
+
+    def test_exactly_20_dict_items_no_truncation(self):
+        """Dict with exactly 20 items is not truncated."""
+        d = {f"key_{i}": i for i in range(20)}
+        block = shape_lens(d, 2, 60)
+        text = _block_to_text(block)
+        assert "more" not in text
+
+    def test_21_dict_items_truncated(self):
+        """Dict with 21 items shows '+1 more'."""
+        d = {f"key_{i}": i for i in range(21)}
+        block = shape_lens(d, 2, 60)
+        text = _block_to_text(block)
+        assert "+1 more" in text
+
+
 class TestShapeLensNestedStructures:
     """Tests for shape_lens with nested structures."""
 

@@ -21,6 +21,10 @@ from ..components import (
     table,
     sparkline,
     sparkline_with_range,
+    DataExplorerState,
+    DataNode,
+    data_explorer,
+    flatten,
 )
 
 __all__ = [
@@ -47,4 +51,9 @@ __all__ = [
     # Sparkline
     "sparkline",
     "sparkline_with_range",
+    # Data explorer
+    "DataExplorerState",
+    "DataNode",
+    "data_explorer",
+    "flatten",
 ]

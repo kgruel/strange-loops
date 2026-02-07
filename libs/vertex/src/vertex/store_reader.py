@@ -93,6 +93,43 @@ class StoreReader:
             for r in rows
         ]
 
+    @property
+    def freshness(self) -> datetime | None:
+        """Timestamp of the most recent fact, or None if store is empty."""
+        row = self._conn.execute("SELECT MAX(ts) FROM facts").fetchone()
+        if row[0] is None:
+            return None
+        return datetime.fromtimestamp(row[0], tz=timezone.utc)
+
+    def facts_between(
+        self,
+        since_ts: float,
+        until_ts: float,
+        kind: str | None = None,
+    ) -> list[dict]:
+        """Facts within a time range, optionally filtered by kind."""
+        if kind is not None:
+            rows = self._conn.execute(
+                "SELECT kind, ts, observer, payload FROM facts "
+                "WHERE ts >= ? AND ts <= ? AND kind = ? ORDER BY ts",
+                (since_ts, until_ts, kind),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT kind, ts, observer, payload FROM facts "
+                "WHERE ts >= ? AND ts <= ? ORDER BY ts",
+                (since_ts, until_ts),
+            ).fetchall()
+        return [
+            {
+                "kind": r[0],
+                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
+                "observer": r[2],
+                "payload": json.loads(r[3]),
+            }
+            for r in rows
+        ]
+
     def recent_facts(self, kind: str, n: int) -> list[dict]:
         """Last N facts for a given kind, newest first. Returns raw dicts."""
         rows = self._conn.execute(

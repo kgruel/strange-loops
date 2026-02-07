@@ -2,6 +2,7 @@
 // Variables: ${kind}, ${host}
 
 source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps --format json""#
+every "30s"
 kind "${kind}"
 observer "hlab"
 format "ndjson"

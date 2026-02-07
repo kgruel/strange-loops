@@ -83,7 +83,12 @@ class Loop:
                 return True
         return False
 
-    def fire(self, ts: datetime, origin: str = "") -> Tick:
+    def fire(
+        self,
+        ts: datetime,
+        origin: str = "",
+        boundary_payload: dict | None = None,
+    ) -> Tick:
         """Snapshot current state into a Tick.
 
         If reset=True, the projection resets to its initial state after
@@ -96,11 +101,18 @@ class Loop:
 
         The Tick includes `since` for fidelity traversal — use
         Store.between(tick.since, tick.ts) to retrieve contributing facts.
+
+        If boundary_payload is provided, it is merged into the Tick payload
+        under the `_boundary` key — carrying provenance from the triggering
+        fact (e.g. status="ok" or status="error").
         """
+        state = self.projection.state
+        if boundary_payload is not None and isinstance(state, dict):
+            state = {**state, "_boundary": boundary_payload}
         tick = Tick(
             name=self.name,
             ts=ts,
-            payload=self.projection.state,
+            payload=state,
             origin=origin,
             since=self._period_start,
         )

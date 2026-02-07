@@ -301,14 +301,18 @@ class Vertex:
             target_loop = self._loops[fold_kind]
             # Loop.fire() handles reset internally
             # Use boundary fact's timestamp for consistency with fact-based time tracking
-            return target_loop.fire(fact_ts, origin=self._name)
+            return target_loop.fire(fact_ts, origin=self._name,
+                                    boundary_payload=payload)
 
         # Fire from _FoldEngine (legacy path - no fidelity tracking, since=None)
         engine = self._engines[fold_kind]
+        engine_state = engine.projection.state
+        if isinstance(engine_state, dict):
+            engine_state = {**engine_state, "_boundary": payload}
         tick = Tick(
             name=fold_kind,
             ts=fact_ts,
-            payload=engine.projection.state,
+            payload=engine_state,
             origin=self._name,
         )
         if engine.reset:

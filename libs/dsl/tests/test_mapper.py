@@ -1005,11 +1005,12 @@ loops {
         runtime.receive(Fact.of("batch", "test", value=2))
         assert runtime.state("batch") == {"count": 2}
 
-        # Boundary fact triggers tick
+        # Boundary fact triggers tick (payload threads through as _boundary)
         tick = runtime.receive(Fact.of("batch.done", "test"))
         assert tick is not None
         assert tick.name == "batch"
-        assert tick.payload == {"count": 2}
+        assert tick.payload["count"] == 2
+        assert "_boundary" in tick.payload
 
         # State was reset
         assert runtime.state("batch") == {"count": 0}

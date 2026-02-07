@@ -70,10 +70,13 @@ class TestSource:
         async for fact in source.stream():
             facts.append(fact)
 
-        assert len(facts) == 1
+        assert len(facts) == 2
         assert facts[0].kind == "source.error"
         assert facts[0].payload["returncode"] == 1
         assert facts[0].observer == "fail-source"
+        # Source always closes its own boundary
+        assert facts[1].kind == "output.complete"
+        assert facts[1].payload["status"] == "error"
 
     async def test_command_with_stderr(self):
         """Stderr captured in error fact."""

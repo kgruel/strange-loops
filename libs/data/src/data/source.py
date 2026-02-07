@@ -189,6 +189,7 @@ class Source:
                         self.command,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
+                        limit=1024 * 1024,  # 1MB line buffer (default 64KB)
                     )
 
                     if self.format == "lines":
@@ -206,21 +207,29 @@ class Source:
 
                     await proc.wait()
 
-                    if proc.returncode != 0 and proc.stderr is not None:
-                        stderr = await proc.stderr.read()
+                    if proc.returncode != 0:
+                        stderr_text = ""
+                        if proc.stderr is not None:
+                            stderr_text = (await proc.stderr.read()).decode()
                         yield Fact.of(
                             "source.error",
                             self.observer,
                             command=self.command,
                             returncode=proc.returncode,
-                            stderr=stderr.decode(),
+                            stderr=stderr_text,
                         )
-                    else:
-                        # Emit completion signal for boundary triggering
                         yield Fact.of(
                             f"{self.kind}.complete",
                             self.observer,
                             command=self.command,
+                            status="error",
+                        )
+                    else:
+                        yield Fact.of(
+                            f"{self.kind}.complete",
+                            self.observer,
+                            command=self.command,
+                            status="ok",
                         )
 
                 except Exception as e:
@@ -228,6 +237,14 @@ class Source:
                         "source.error",
                         self.observer,
                         command=self.command,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    yield Fact.of(
+                        f"{self.kind}.complete",
+                        self.observer,
+                        command=self.command,
+                        status="error",
                         error=str(e),
                         error_type=type(e).__name__,
                     )

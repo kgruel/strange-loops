@@ -10,7 +10,10 @@ uv.lock
 .coverage
 .pytest_cache/
 .subtask/
+.tadpole/
+.claude/
 .obsidian/
 .DS_Store
+data/
 *.gif
 *.tape

@@ -626,3 +626,80 @@ class TestCountBasedBoundaryIntegration:
         v.receive(fact("warmup", x=3))
         tick2 = v.receive(fact("warmup", x=4))
         assert tick2 is None
+
+
+class TestReceiveStoresTick:
+    """Verify that Vertex persists ticks to SqliteStore on boundary fire."""
+
+    def test_kind_boundary_stores_tick(self, tmp_path):
+        from vertex.sqlite_store import SqliteStore
+        from data import Fact
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "payload": dict(f.payload)},
+            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], payload=d["payload"]),
+        )
+        v = Vertex("v1", store=store)
+        v.register("metric", 0, sum_fold, boundary="flush")
+
+        v.receive(fact("metric", value=10))
+        tick = v.receive(fact("flush"))
+
+        assert tick is not None
+        ticks = store.ticks_since(0)
+        assert len(ticks) == 1
+        assert ticks[0].name == "metric"
+        assert ticks[0].origin == "v1"
+        store.close()
+
+    def test_count_boundary_stores_tick(self, tmp_path):
+        from vertex import Loop, Projection
+        from vertex.sqlite_store import SqliteStore
+        from data import Fact
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "payload": dict(f.payload)},
+            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], payload=d["payload"]),
+        )
+        v = Vertex("v1", store=store)
+        loop = Loop(
+            name="events",
+            projection=Projection(0, fold=count_fold),
+            boundary_count=2,
+            boundary_mode="every",
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        v.receive(fact("events", value=1))
+        tick = v.receive(fact("events", value=2))
+
+        assert tick is not None
+        ticks = store.ticks_since(0)
+        assert len(ticks) == 1
+        assert ticks[0].name == "events"
+        store.close()
+
+
+class TestRegisterCreatesLoop:
+    """Verify that register() populates _loops (no _engines)."""
+
+    def test_register_populates_loops(self):
+        v = Vertex()
+        v.register("metric", 0, sum_fold, boundary="flush")
+
+        assert "metric" in v._loops
+        assert not hasattr(v, '_engines')
+
+    def test_register_boundary_ticks_have_since(self):
+        """Ticks from register()-created loops now have since set."""
+        v = Vertex()
+        v.register("metric", 0, sum_fold, boundary="flush")
+
+        v.receive(fact("metric", value=10))
+        tick = v.receive(fact("flush"))
+
+        assert tick is not None
+        assert tick.since is not None

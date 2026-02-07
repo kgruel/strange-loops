@@ -246,3 +246,40 @@ class TestProjectionFoldCallable:
         proj = SumProjection(0)
         await proj.consume(7)
         assert proj.state == 7
+
+
+# -- Serialization (to_dict / from_dict) --
+
+
+class TestTickSerialization:
+    def test_to_dict_round_trip(self):
+        tick = Tick(name="my-loop", ts=NOW, payload={"count": 5}, origin="v1")
+        d = tick.to_dict()
+        restored = Tick.from_dict(d)
+        assert restored.name == tick.name
+        assert restored.ts == tick.ts
+        assert restored.payload == tick.payload
+        assert restored.origin == tick.origin
+        assert restored.since is None
+
+    def test_to_dict_with_since(self):
+        tick = Tick(name="loop", ts=NOW, payload=42, origin="v1", since=EARLIER)
+        d = tick.to_dict()
+        assert isinstance(d["ts"], float)
+        assert isinstance(d["since"], float)
+
+        restored = Tick.from_dict(d)
+        assert restored.since == EARLIER
+        assert restored.ts == NOW
+
+    def test_to_dict_since_none_stays_none(self):
+        tick = Tick(name="loop", ts=NOW, payload="x")
+        d = tick.to_dict()
+        assert d["since"] is None
+        restored = Tick.from_dict(d)
+        assert restored.since is None
+
+    def test_from_dict_missing_origin_defaults_empty(self):
+        d = {"name": "test", "ts": NOW.timestamp(), "payload": 1, "since": None}
+        restored = Tick.from_dict(d)
+        assert restored.origin == ""

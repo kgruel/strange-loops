@@ -21,10 +21,8 @@ selection.{observer}) must match the fact's observer.
 
 from __future__ import annotations
 
-import copy
 import fnmatch
 import re
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -40,16 +38,6 @@ if TYPE_CHECKING:
 
 # Observer-state kind pattern: kind.{observer_name}
 _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
-
-
-@dataclass
-class _FoldEngine:
-    """Internal: projection + boundary config."""
-
-    projection: Projection
-    boundary: str | None
-    reset: bool
-    initial: Any
 
 
 class Vertex:
@@ -72,7 +60,6 @@ class Vertex:
 
     def __init__(self, name: str = "", *, store: Store | None = None) -> None:
         self._name = name
-        self._engines: dict[str, _FoldEngine] = {}
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._store = store
@@ -139,7 +126,7 @@ class Vertex:
         child accepts it. Used by parent vertices to determine whether
         to forward facts to this child.
         """
-        if kind in self._engines or kind in self._loops or kind in self._boundary_map:
+        if kind in self._loops or kind in self._boundary_map:
             return True
         # Check pattern-based routes
         if self._resolve_route(kind) is not None:
@@ -155,32 +142,21 @@ class Vertex:
         boundary: str | None = None,
         reset: bool = True,
     ) -> None:
-        """Register a fold engine for a fact kind.
+        """Convenience: create a Loop from args and register it.
 
-        Creates an internal Projection with the given initial state and
-        fold function. Facts received with this kind will be routed to
-        this fold engine.
-
-        If boundary is provided, receiving a fact with that boundary kind
-        will snapshot this engine's state into a Tick and optionally reset
-        the engine (if reset=True). The boundary kind must be unique across
-        all registered engines.
+        Preserves the original API — all existing callers keep working.
+        Internally everything routes through _loops via register_loop().
 
         Raises ValueError if the kind is already registered or the boundary
         kind is already claimed by another engine.
         """
-        if kind in self._engines:
-            raise ValueError(f"Kind already registered: {kind}")
-        if boundary is not None and boundary in self._boundary_map:
-            raise ValueError(f"Boundary kind already registered: {boundary}")
-        if boundary is not None:
-            self._boundary_map[boundary] = kind
-        self._engines[kind] = _FoldEngine(
+        loop = Loop(
+            name=kind,
             projection=Projection(initial, fold=fold),
-            boundary=boundary,
+            boundary_kind=boundary,
             reset=reset,
-            initial=copy.deepcopy(initial),
         )
+        self.register_loop(loop)
 
     def register_loop(self, loop: Loop) -> None:
         """Register an explicit Loop object.
@@ -192,7 +168,7 @@ class Vertex:
         boundary kind is already claimed.
         """
         kind = loop.name
-        if kind in self._loops or kind in self._engines:
+        if kind in self._loops:
             raise ValueError(f"Kind already registered: {kind}")
         if loop.boundary_kind is not None:
             if loop.boundary_kind in self._boundary_map:
@@ -257,18 +233,13 @@ class Vertex:
 
         # Resolve routing: exact match first, then pattern-based routes
         routed_kind = kind  # Default: route to same name as fact kind
-        if kind not in self._engines and kind not in self._loops:
+        if kind not in self._loops:
             # No exact match — try pattern-based routes
             resolved = self._resolve_route(kind)
             if resolved is not None:
                 routed_kind = resolved
 
-        # Route to _FoldEngine (legacy path - no fidelity tracking)
-        engine = self._engines.get(routed_kind)
-        if engine is not None:
-            engine.projection.fold_one(payload)
-
-        # Route to Loop (Loop tracks its own period_start internally)
+        # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire
         loop = self._loops.get(routed_kind)
         count_boundary_fire = False
@@ -289,69 +260,50 @@ class Vertex:
 
         # Check count-based boundary trigger (Loop returned True)
         if count_boundary_fire and loop is not None:
-            return loop.fire(fact_ts, origin=self._name)
+            tick = loop.fire(fact_ts, origin=self._name)
+            self._store_tick(tick)
+            return tick
 
         # Check kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
             return None
 
-        # Fire from Loop if registered there
-        if fold_kind in self._loops:
-            target_loop = self._loops[fold_kind]
-            # Loop.fire() handles reset internally
-            # Use boundary fact's timestamp for consistency with fact-based time tracking
-            return target_loop.fire(fact_ts, origin=self._name,
-                                    boundary_payload=payload)
-
-        # Fire from _FoldEngine (legacy path - no fidelity tracking, since=None)
-        engine = self._engines[fold_kind]
-        engine_state = engine.projection.state
-        if isinstance(engine_state, dict):
-            engine_state = {**engine_state, "_boundary": payload}
-        tick = Tick(
-            name=fold_kind,
-            ts=fact_ts,
-            payload=engine_state,
-            origin=self._name,
-        )
-        if engine.reset:
-            engine.projection.reset(copy.deepcopy(engine.initial))
+        # Fire from the target loop
+        target_loop = self._loops[fold_kind]
+        tick = target_loop.fire(fact_ts, origin=self._name,
+                                boundary_payload=payload)
+        self._store_tick(tick)
         return tick
 
     def tick(self, name: str, ts: datetime) -> Tick[dict[str, Any]]:
         """Fire a temporal boundary.
 
-        Snapshots all fold engine and Loop states into a dict keyed by kind,
+        Snapshots all Loop states into a dict keyed by kind,
         wraps in a Tick with the given name and timestamp.
         Origin is stamped from the vertex name.
         """
-        state = {kind: eng.projection.state for kind, eng in self._engines.items()}
-        state.update({kind: loop.state for kind, loop in self._loops.items()})
+        state = {kind: loop.state for kind, loop in self._loops.items()}
         return Tick(name=name, ts=ts, payload=state, origin=self._name)
 
     @property
     def kinds(self) -> list[str]:
         """Registered kinds, in registration order."""
-        return list(self._engines.keys()) + list(self._loops.keys())
+        return list(self._loops.keys())
 
     def state(self, kind: str) -> Any:
         """Current fold state for a registered kind.
 
         Raises KeyError if kind is not registered.
         """
-        if kind in self._loops:
-            return self._loops[kind].state
-        return self._engines[kind].projection.state
+        return self._loops[kind].state
 
     def version(self, kind: str) -> int:
         """Current fold version for a registered kind.
 
         Raises KeyError if kind is not registered.
         """
-        if kind in self._loops:
-            return self._loops[kind].version
-        return self._engines[kind].projection.version
+        return self._loops[kind].version
 
     def to_fact(self, tick: Tick) -> Fact:
         """Convert a Tick to a Fact with this vertex as observer.
@@ -368,6 +320,11 @@ class Vertex:
             payload=tick.payload,
             observer=self._name,
         )
+
+    def _store_tick(self, tick: Tick) -> None:
+        """Persist tick to store if it supports tick persistence."""
+        if self._store is not None and hasattr(self._store, 'append_tick'):
+            self._store.append_tick(tick)
 
     def _tick_to_fact(self, tick: Tick, child_name: str) -> Fact:
         """Convert a child's Tick to a Fact for re-entry.

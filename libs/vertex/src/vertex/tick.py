@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Generic, TypeVar
+from datetime import datetime, timezone
+from typing import Any, Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -35,3 +35,22 @@ class Tick(Generic[T]):
     payload: T
     origin: str = ""
     since: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "ts": self.ts.timestamp(),
+            "payload": self.payload,
+            "origin": self.origin,
+            "since": self.since.timestamp() if self.since else None,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Tick:
+        return cls(
+            name=d["name"],
+            ts=datetime.fromtimestamp(d["ts"], tz=timezone.utc),
+            payload=d["payload"],
+            origin=d.get("origin", ""),
+            since=datetime.fromtimestamp(d["since"], tz=timezone.utc) if d.get("since") else None,
+        )

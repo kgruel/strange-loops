@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from .compiler import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
-from dsl import parse_vertex_file
-from dsl import validate
+from lang import parse_vertex_file
+from lang import validate
 
 if TYPE_CHECKING:
     from atoms import Source

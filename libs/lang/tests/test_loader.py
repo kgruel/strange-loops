@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl import (
+from lang import (
     BoundaryAfter,
     BoundaryEvery,
     BoundaryWhen,
@@ -614,7 +614,7 @@ loops {
         assert vertex.sources is not None
         assert len(vertex.sources) == 1
 
-        from dsl import TemplateSource
+        from lang import TemplateSource
 
         source = vertex.sources[0]
         assert isinstance(source, TemplateSource)
@@ -650,7 +650,7 @@ loops {
         assert vertex.sources is not None
         assert len(vertex.sources) == 1
 
-        from dsl import BoundaryWhen, FoldCollect, TemplateSource
+        from lang import BoundaryWhen, FoldCollect, TemplateSource
 
         source = vertex.sources[0]
         assert isinstance(source, TemplateSource)
@@ -683,7 +683,7 @@ loops {
         assert vertex.sources is not None
         assert len(vertex.sources) == 2
 
-        from dsl import TemplateSource
+        from lang import TemplateSource
 
         assert isinstance(vertex.sources[0], Path)
         assert vertex.sources[0] == Path("./simple.loop")
@@ -705,7 +705,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Explode
+        from lang.ast import Explode
 
         assert len(loop.parse) == 1
         assert isinstance(loop.parse[0], Explode)
@@ -723,7 +723,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Explode
+        from lang.ast import Explode
 
         assert isinstance(loop.parse[0], Explode)
         assert loop.parse[0].path == "data.groups"
@@ -748,7 +748,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Project
+        from lang.ast import Project
 
         assert len(loop.parse) == 1
         assert isinstance(loop.parse[0], Project)
@@ -773,7 +773,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Where
+        from lang.ast import Where
 
         assert len(loop.parse) == 1
         assert isinstance(loop.parse[0], Where)
@@ -792,7 +792,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Where
+        from lang.ast import Where
 
         assert isinstance(loop.parse[0], Where)
         assert loop.parse[0].op == "not_equals"
@@ -815,7 +815,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Explode, Project, Where
+        from lang.ast import Explode, Project, Where
 
         assert len(loop.parse) == 3
         assert isinstance(loop.parse[0], Where)
@@ -851,7 +851,7 @@ parse {
 }
 """
         loop = parse_loop(text)
-        from dsl.ast import Select
+        from lang.ast import Select
 
         assert len(loop.parse) == 1
         assert isinstance(loop.parse[0], Select)

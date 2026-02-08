@@ -114,7 +114,7 @@ Commands using this: `logs`, `media fix`, `sync uptime-kuma`, and `status -i` (T
 
 **`status`, `alerts`, and `media audit` use the DSL.** Each `.vertex` file defines sources (SSH/curl → JSON/ndjson) and fold boundaries. Other commands are direct Python — they fetch data from APIs or run shell commands without the DSL pipeline.
 
-All three use `load_vertex_program()` from `libs/dsl` to compile and materialize the vertex. This replaces the manual parse → compile → merge → materialize ceremony.
+All three use `load_vertex_program()` from `libs/lang` to compile and materialize the vertex. This replaces the manual parse → compile → merge → materialize ceremony.
 
 ## Data Flow (DSL commands)
 

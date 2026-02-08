@@ -2,8 +2,8 @@
 
 import pytest
 
-from dsl import ValidationError, parse_loop, parse_vertex
-from dsl.validator import Shape, ShapeKind, validate, validate_loop, validate_vertex
+from lang import ValidationError, parse_loop, parse_vertex
+from lang.validator import Shape, ShapeKind, validate, validate_loop, validate_vertex
 
 
 class TestShapeInference:
@@ -328,7 +328,7 @@ loops {
 
     def test_loop_with_no_fold_and_no_boundary_fails(self):
         """Loops must have a fold unless a boundary is present."""
-        from dsl.ast import LoopDef, VertexFile
+        from lang.ast import LoopDef, VertexFile
 
         vertex = VertexFile(name="test", loops={"events": LoopDef(folds=(), boundary=None)})
         with pytest.raises(ValidationError, match="has no fold declarations"):

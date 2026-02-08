@@ -1,11 +1,11 @@
-# dsl
+# lang
 
 KDL-based loader for `.loop` and `.vertex` files. Parses [KDL](https://kdl.dev/) documents into AST dataclasses, then validates and compiles to runtime types.
 
 ## Usage
 
 ```python
-from dsl import parse_loop_file, parse_vertex_file
+from lang import parse_loop_file, parse_vertex_file
 
 # Parse a .loop file
 loop = parse_loop_file(Path("disk.loop"))

@@ -13,7 +13,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 - **atoms** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
 - **vertex** — how it runs, when boundaries fire, compiles DSL to runtime (Vertex, Loop, Store, Grant, Compiler, Program)
 
-**One DSL:** dsl — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
+**One DSL:** lang — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
 
 **Two apps:**
 - **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store`)
@@ -24,13 +24,13 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 ## Architecture
 
 ```
-dsl → ckdl                          (pure grammar)
-vertex → atoms, dsl                 (runtime + compiler)
-apps/loops → dsl, atoms, vertex, cells  (CLI app)
-apps/hlab → atoms, vertex, cells    (no direct dsl dep)
+lang → ckdl                            (pure grammar)
+vertex → atoms, lang                   (runtime + compiler)
+apps/loops → lang, atoms, vertex, cells  (CLI app)
+apps/hlab → atoms, vertex, cells       (no direct lang dep)
 ```
 
-Key separation: `dsl` is portable (only depends on `ckdl`). The compiler
+Key separation: `lang` is portable (only depends on `ckdl`). The compiler
 backend (`vertex.compiler`) and program orchestration (`vertex.program`)
 live in vertex where the target runtime types are defined.
 
@@ -40,7 +40,7 @@ live in vertex where the target runtime types are defined.
 |---------|-------|
 | **atoms** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
 | **vertex** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, StoreReader, Peer, Grant, compile_loop, load_vertex_program |
-| **dsl** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
+| **lang** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
 | **cells** | Terminal UI: Cell, Block, Buffer, Surface |
 
 ## Documentation
@@ -67,7 +67,7 @@ uv run loops run disk.loop               # execute, print facts
 uv run loops compile system.vertex       # show compiled structure
 uv run loops start system.vertex         # run vertex (one round, rendered)
 uv run loops store system.vertex         # inspect persisted store contents
-uv run loops store data/store.db         # inspect .db directly
+uv run loops store path/to/store.db      # inspect .db directly
 ```
 
 ### hlab App
@@ -100,8 +100,8 @@ uv run python experiments/nested_flow/viz.py  # sibling fan-out
 ## Import Guide
 
 ```python
-# Grammar (dsl — pure, no runtime deps)
-from dsl import parse_loop_file, parse_vertex_file, validate
+# Grammar (lang — pure, no runtime deps)
+from lang import parse_loop_file, parse_vertex_file, validate
 
 # Compiler + runtime (vertex)
 from vertex import compile_loop, compile_vertex, load_vertex_program
@@ -174,23 +174,23 @@ apps/hlab/
     main (routing). Zoom-aware enrichment at fetch layer (aggregates at low zoom, payloads at
     high zoom). 10 StoreReader tests, 20 SqliteStore tests unchanged.
 
-75. ~~Decouple DSL from runtime~~ — `dsl` is now pure grammar (ast/loader/validator,
+75. ~~Decouple DSL from runtime~~ — `lang` is now pure grammar (ast/loader/validator,
     depends only on ckdl). Compiler backend (`mapper.py` → `vertex/compiler.py`) and
     program orchestration (`program.py` → `vertex/program.py`) moved to vertex. CLI
     (`cli.py` → `apps/loops/main.py`) moved to new `apps/loops` workspace member.
-    hlab drops direct dsl dependency. Vertex gains `register()` → Loop unification
+    hlab drops direct lang dependency. Vertex gains `register()` → Loop unification
     (deleted `_FoldEngine`), `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence.
-    435 tests across dsl (84), vertex (332), loops (19).
+    435 tests across lang (84), vertex (332), loops (19).
 
 74. ~~Spec-first: full 4-step plan complete~~ — Multi-session plan. Steps 1-3: Added
-    `Explode`, `Project`, `Where` parse ops to data + dsl. `run_parse_many()` for
+    `Explode`, `Project`, `Where` parse ops to atoms + lang. `run_parse_many()` for
     one-to-many pipelines. Rewrote all 5 Prometheus/Radarr `.loop` files with declarative
     parse blocks. Deleted 5 fold overrides (~120 lines) from `folds.py`. Rewired `alerts.py`
     and `media_audit.py` to use DSL-native folds. Only `health_fold` remains (genuine
     computation). Also: `VertexProgram.run()`/`collect()`, `load_vertex_program()` in CLI,
     store wiring, KDL migration. Step 4: Wired cells fidelity into `loop start` —
     `add_cli_args` for `-q`/`-v`/`--json`/`--plain` flags, `detect_context` for TTY-aware
-    rendering, `shape_lens` for structured tick payload display. 286 data tests, 182 DSL tests.
+    rendering, `shape_lens` for structured tick payload display. 286 atoms tests, 182 lang tests.
 
 73. ~~DSL source templates~~ — Parameterized source templates with `${var}` placeholders. Vertex
     declares `template:` + `with:` parameter table + optional `loop:` spec. Template instantiated
@@ -198,7 +198,7 @@ apps/hlab/
     4 nearly-identical .loop files → 1 template, 4 identical loop defs → 1 spec with ${kind}.
     Added `SourceParams`, `TemplateSource` AST types. Lexer handles ${} in identifiers. Parser
     handles `template:`/`with:`/`loop:` blocks. Mapper has `substitute_vars()`, `compile_sources()`.
-    180 DSL tests. hlab produces identical output with cleaner config.
+    180 lang tests. hlab produces identical output with cleaner config.
 
 72. ~~hlab fold→lens~~ — `fold_overrides` for health computation (healthy/total in tick payload),
     `stack_lens` for zoom-level rendering. main.py is now pure orchestration — domain logic in

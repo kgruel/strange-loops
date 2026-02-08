@@ -5,11 +5,11 @@ description = "Temporal infrastructure and identity — Tick, Vertex, Peer, Gran
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["atoms", "dsl"]
+dependencies = ["atoms", "lang"]
 
 [tool.uv.sources]
 atoms = { workspace = true }
-dsl = { workspace = true }
+lang = { workspace = true }
 
 [dependency-groups]
 dev = [

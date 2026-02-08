@@ -11,7 +11,7 @@ from atoms import Skip as RuntimeSkip
 from atoms import Split as RuntimeSplit
 from atoms import Transform as RuntimeTransform
 
-from dsl import parse_loop, parse_vertex
+from lang import parse_loop, parse_vertex
 from vertex.compiler import (
     CircularVertexError,
     CompiledVertex,
@@ -28,7 +28,7 @@ from vertex.compiler import (
     map_transform,
     substitute_vars,
 )
-from dsl.ast import (
+from lang.ast import (
     Coerce,
     FoldAvg,
     FoldBy,
@@ -46,9 +46,9 @@ from dsl.ast import (
     Transform,
     Trigger,
 )
-from dsl.ast import Explode as DslExplode
-from dsl.ast import Project as DslProject
-from dsl.ast import Where as DslWhere
+from lang.ast import Explode as DslExplode
+from lang.ast import Project as DslProject
+from lang.ast import Where as DslWhere
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -258,7 +258,7 @@ parse {
 
     def test_loop_from_fixture(self):
         """Full fixture loop compiles correctly."""
-        from dsl import parse_loop_file
+        from lang import parse_loop_file
 
         loop = parse_loop_file(FIXTURES / "disk.loop")
         source = compile_loop(loop)
@@ -381,7 +381,7 @@ loops {
 
     def test_vertex_from_fixture(self):
         """Full fixture vertex compiles correctly."""
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         vertex = parse_vertex_file(FIXTURES / "system.vertex")
         specs = compile_vertex(vertex)
@@ -582,7 +582,7 @@ loops {{
 }}
 """)
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -621,7 +621,7 @@ loops {{
 }}
 """)
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         a_ast = parse_vertex_file(a_path)
         with pytest.raises(CircularVertexError):
@@ -656,7 +656,7 @@ loops {{
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -705,7 +705,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -755,7 +755,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -778,7 +778,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -827,7 +827,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -862,7 +862,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -903,7 +903,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         a_ast = parse_vertex_file(a_path)
         with pytest.raises(CircularVertexError):
@@ -940,7 +940,7 @@ class TestDiscoverVertices:
             "}\n"
         )
 
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         parent_ast = parse_vertex_file(parent_path)
         compiled = compile_vertex_recursive(parent_ast)
@@ -1049,7 +1049,7 @@ loops {
     def test_materialize_nested(self, tmp_path):
         """Nested vertices materialize with add_child."""
         from vertex.compiler import materialize_vertex
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         child_path = tmp_path / "child.vertex"
         child_path.write_text("""\
@@ -1089,7 +1089,7 @@ loops {{
     def test_materialize_nested_tick_flow(self, tmp_path):
         """Child ticks become facts to parent via automatic wiring."""
         from vertex.compiler import materialize_vertex
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         child_path = tmp_path / "pulse.vertex"
         child_path.write_text("""\
@@ -1282,7 +1282,7 @@ class TestTemplateInstantiation:
 
     def test_instantiate_template(self):
         """Instantiate a LoopFile with variable substitution."""
-        from dsl.ast import LoopFile
+        from lang.ast import LoopFile
 
         template = LoopFile(
             kind="${kind}",
@@ -1307,7 +1307,7 @@ source "echo hello"
 kind "test"
 observer "shell"
 """)
-        from dsl import parse_vertex
+        from lang import parse_vertex
 
         vertex = parse_vertex(f"""\
 name "test"
@@ -1338,7 +1338,7 @@ kind "${kind}"
 observer "hlab"
 format "ndjson"
 """)
-        from dsl import parse_vertex
+        from lang import parse_vertex
 
         vertex = parse_vertex(f"""\
 name "status"
@@ -1379,7 +1379,7 @@ kind "${kind}"
 observer "hlab"
 format "ndjson"
 """)
-        from dsl import parse_vertex
+        from lang import parse_vertex
 
         vertex = parse_vertex(f"""\
 name "status"

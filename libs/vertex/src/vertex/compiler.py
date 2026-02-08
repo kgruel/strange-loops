@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from dsl.ast import (
+from lang.ast import (
     BoundaryAfter,
     BoundaryEvery,
     BoundaryWhen,
@@ -39,16 +39,16 @@ from dsl.ast import (
     Trigger,
     VertexFile,
 )
-from dsl.ast import Explode as DslExplode
-from dsl.ast import Project as DslProject
-from dsl.ast import Where as DslWhere
-from dsl.ast import Coerce as DslCoerce
-from dsl.ast import FoldOp as DslFoldOp
-from dsl.ast import LStrip as DslLStrip
-from dsl.ast import ParseStep as DslParseStep
-from dsl.ast import Replace as DslReplace
-from dsl.ast import RStrip as DslRStrip
-from dsl.ast import Strip as DslStrip
+from lang.ast import Explode as DslExplode
+from lang.ast import Project as DslProject
+from lang.ast import Where as DslWhere
+from lang.ast import Coerce as DslCoerce
+from lang.ast import FoldOp as DslFoldOp
+from lang.ast import LStrip as DslLStrip
+from lang.ast import ParseStep as DslParseStep
+from lang.ast import Replace as DslReplace
+from lang.ast import RStrip as DslRStrip
+from lang.ast import Strip as DslStrip
 
 if TYPE_CHECKING:
     from atoms import Boundary, Field, Source, Spec
@@ -348,7 +348,7 @@ def instantiate_template(loop_ast: LoopFile, params: dict[str, str]) -> LoopFile
 
 def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
     """Create a new LoopDef with boundary kind substituted."""
-    from dsl.ast import BoundaryWhen
+    from lang.ast import BoundaryWhen
 
     boundary = loop_def.boundary
     if boundary and isinstance(boundary, BoundaryWhen):
@@ -368,7 +368,7 @@ def compile_sources(
     Returns:
         (sources, specs) where specs contains any loop specs from templates
     """
-    from dsl import parse_loop_file
+    from lang import parse_loop_file
 
     sources: list["Source"] = []
     specs: dict[str, "Spec"] = {}
@@ -528,7 +528,7 @@ def compile_vertex_recursive(
     """
     from glob import glob as globfn
 
-    from dsl import parse_vertex_file
+    from lang import parse_vertex_file
 
     # Initialize tracking on first call
     if _visited is None:

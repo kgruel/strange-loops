@@ -10,7 +10,7 @@ from pathlib import Path
 def resolve_store_path(file_path: Path) -> Path:
     """Resolve a .vertex or .db file to the actual store .db path."""
     if file_path.suffix == ".vertex":
-        from dsl import parse_vertex_file
+        from lang import parse_vertex_file
 
         ast = parse_vertex_file(file_path)
         if ast.store is None:

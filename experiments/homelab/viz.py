@@ -14,7 +14,7 @@ from glob import glob as globfn
 from pathlib import Path
 
 from atoms import Runner, Source
-from dsl import parse_loop_file, parse_vertex_file, validate
+from lang import parse_loop_file, parse_vertex_file, validate
 from vertex import compile_loop, compile_vertex_recursive, materialize_vertex
 from vertex import Vertex
 from cells import Block, Style, join_vertical, join_horizontal, pad, border

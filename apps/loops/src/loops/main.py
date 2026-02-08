@@ -22,7 +22,7 @@ from typing import TextIO
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a .loop or .vertex file."""
-    from dsl import parse_loop_file, parse_vertex_file, validate
+    from lang import parse_loop_file, parse_vertex_file, validate
 
     path = Path(args.file)
     if not path.exists():
@@ -50,7 +50,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_test(args: argparse.Namespace) -> int:
     """Test a .loop file's parse pipeline against sample input."""
     from atoms import run_parse
-    from dsl import parse_loop_file, validate_loop
+    from lang import parse_loop_file, validate_loop
     from vertex import compile_loop
 
     path = Path(args.file)
@@ -128,7 +128,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def _run_loop(path: Path, args: argparse.Namespace) -> int:
     """Execute a .loop file and print facts."""
-    from dsl import parse_loop_file, validate_loop
+    from lang import parse_loop_file, validate_loop
     from vertex import compile_loop
 
     try:
@@ -233,7 +233,7 @@ def _run_vertex(path: Path, args: argparse.Namespace) -> int:
 
 def cmd_compile(args: argparse.Namespace) -> int:
     """Show compiled structure of a .loop or .vertex file."""
-    from dsl import parse_loop_file, parse_vertex_file, validate
+    from lang import parse_loop_file, parse_vertex_file, validate
     from vertex import compile_loop, compile_vertex
 
     path = Path(args.file)

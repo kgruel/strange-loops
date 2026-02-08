@@ -1,5 +1,5 @@
 [project]
-name = "dsl"
+name = "lang"
 version = "0.1.0"
 description = "DSL parser for .loop and .vertex files"
 readme = "README.md"
@@ -20,13 +20,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dsl"]
+packages = ["src/lang"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["src/dsl"]
+source = ["src/lang"]
 branch = true
 
 [tool.coverage.report]

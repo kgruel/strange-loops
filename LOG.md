@@ -34,20 +34,20 @@ append path. Different concerns, different objects.
 
 ## 2026-02-07 — Decouple DSL from runtime
 
-**The change.** `dsl` becomes pure grammar (zero deps beyond ckdl). The compiler
+**The change.** `lang` becomes pure grammar (zero deps beyond ckdl). The compiler
 backend and CLI move out to where they belong.
 
-- `dsl/mapper.py` → `vertex/compiler.py` (DSL AST → runtime types)
-- `dsl/program.py` → `vertex/program.py` (VertexProgram, load_vertex_program)
-- `dsl/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
-- `dsl` deps: `[data, vertex, cells]` → `[ckdl]`
-- `hlab` drops direct dsl dependency, imports compiler symbols from vertex
-- Experiments split imports: grammar from dsl, compilation from vertex
+- `lang/mapper.py` → `vertex/compiler.py` (DSL AST → runtime types)
+- `lang/program.py` → `vertex/program.py` (VertexProgram, load_vertex_program)
+- `lang/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
+- `lang` deps: `[atoms, vertex, cells]` → `[ckdl]`
+- `hlab` drops direct lang dependency, imports compiler symbols from vertex
+- Experiments split imports: grammar from lang, compilation from vertex
 - Vertex internals: `register()` unified onto Loop (deleted `_FoldEngine`),
   `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence, `_store_tick()`
 
-Dependency graph: `dsl→ckdl`, `vertex→data,dsl`, `apps/loops→dsl,data,vertex,cells`,
-`hlab→data,vertex,cells`. 435 tests (dsl 84, vertex 332, loops 19).
+Dependency graph: `lang→ckdl`, `vertex→atoms,lang`, `apps/loops→lang,atoms,vertex,cells`,
+`hlab→atoms,vertex,cells`. 435 tests (lang 84, vertex 332, loops 19).
 
 (`03d6bda`, `e000bf1`, `96361c2`)
 
@@ -101,7 +101,7 @@ API), but `AlertRule` expects `alerts_count: int`. Bridge in consumption code:
 from accumulated state" → fold. `health_fold` is the latter. The other 5 were the
 former.
 
-**Result:** 286 data tests, 182 DSL tests. +1052/-205 across 23 files.
+**Result:** 286 atoms tests, 182 lang tests. +1052/-205 across 23 files.
 
 ---
 
@@ -159,7 +159,7 @@ sources:
    `compile_sources()` returns `(sources, specs)` — sources for the runner,
    specs generated from template loop blocks.
 
-**Result:** 180 DSL tests pass. hlab produces identical output. Next session:
+**Result:** 180 lang tests pass. hlab produces identical output. Next session:
 iterate on render UI.
 
 ---
@@ -197,7 +197,7 @@ iterate on render UI.
 
 **In flight:**
 - runtime/vertex-nesting — Vertex children, tick-to-fact
-- dsl/mapper-updates — Compile new DSL features
+- lang/mapper-updates — Compile new DSL features
 - experiment/nested-flow-viz — Animated visualization (deferred)
 
 ---
@@ -335,7 +335,7 @@ Starting system with 2 source(s)...
 Facts flow through parse pipelines → fold into state → trigger ticks on boundaries.
 The declarative DSL compiles to runtime types and executes correctly.
 
-514 tests passing (data: 245, vertex: 165, dsl: 104).
+514 tests passing (atoms: 245, vertex: 165, lang: 104).
 
 ---
 

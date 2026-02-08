@@ -5,6 +5,92 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-08 — Vocabulary revision + library renames
+
+**The session.** Four-agent team (siftd + muser + cold-reader + lead) for
+vocabulary alignment. Started with stale VOCABULARY.md entries, ended with a
+full restructure and three library renames.
+
+**Key outcomes:**
+
+1. **New one-liner:** "The cycle is the unit of computation." Replaced the
+   mechanism-first description ("Facts flow into Vertices...") with the
+   system's bet about the world. Cold reader (zero-context Opus agent)
+   produced this — asked "what bet does loops make?" and the mechanism
+   descriptions stopped mattering.
+
+2. **Document restructured as zoom progression:** Bet → Frame → Atoms → Rules
+   → Libraries → Examples → Dissolutions. Mirrors the system's own zoom levels
+   (MINIMAL/SUMMARY/DETAILED). The document eats its own dogfood.
+
+3. **"loop" elevated to first-class concept.** The system was named after
+   something its vocabulary didn't define. A loop is one complete cycle:
+   observe, accumulate, conclude. The composition of Fact + Spec + Tick.
+
+4. **Atoms now carry enforcements.** Each atom states what it IS, what it
+   PREVENTS, and why it's separate. The Tick→Fact merge was confirmed as
+   resolved (Jan 27 decision, not an open question).
+
+5. **Self-feeding risk named (Rule #7).** When conclusions feed back as
+   observations, the system can amplify its own output. "Meditation vs
+   hallucination." Cold reader identified this independently with zero
+   context, validating it as a fundamental concern.
+
+6. **Library renames merged:**
+   - `libs/data` → `libs/atoms` (+186 -186, 82 files)
+   - `libs/dsl` → `libs/lang` (+98 -98, 30 files)
+   - `libs/vertex` → `libs/engine` (+197 -197, 101 files)
+
+7. **Type-level amnesia, metadata-level memory.** Named the tick→fact
+   conversion design choice: the type system forgets (a Tick becomes a Fact),
+   but provenance is preserved (origin→observer).
+
+**Agent team pattern validated:** cold reader (zero context, pattern
+recognition) + muser (questions only) + siftd (historical search) +
+lead (synthesis). The cold reader was the session's biggest catalyst —
+produced "the cycle is the unit of computation" and identified the
+self-feeding risk, both from two sentences of input.
+
+**Post-rename audit** subtask drafted and in progress for full repo coherence sweep.
+
+---
+
+## 2026-02-07 — Ticks-first store explorer refactor
+
+**The change.** Reoriented the store viewer around ticks (conclusions) instead
+of presenting facts and ticks as peers. Facts are reachable through fidelity
+drill, not listed alongside ticks.
+
+- `store_reader.py` — Added `tick_timestamps(name, limit)` for sparkline data.
+  Raw SQL, no payload parsing.
+- `commands/store.py` — Added `_bucket_timestamps()` and `_sparkline_str()`
+  sparkline helpers. Fetcher restructured: zoom >= 1 computes sparkline +
+  payload_keys per tick name.
+- `tui/store_app.py` — `StoreExplorerState` simplified: removed `kinds` field,
+  `selected_is_tick()`, `selected_tick_name()`. Everything is a tick. Left panel
+  renders rich multi-Span Lines (name + sparkline + count + freshness). `f` key
+  always works. Panel width wider. Adaptive chrome: drops gaps then header as
+  terminal shrinks.
+- `lenses/store.py` — MINIMAL: `"3 boundaries, 36 ticks, 200 facts"` (ticks
+  before facts). SUMMARY: tick table with sparkline + count + freshness +
+  payload keys, facts as footer line. New `_tick_table()` renderer. FULL: fact
+  payloads at zoom 2 (actual values, not repeated key names).
+- Tests updated: sparkline tests, ticks-first state tests, removed stale
+  kind-list tests. 48 tests pass.
+
+**Dissolutions surfaced:**
+- **Fidelity → lens + zoom.** The UX concept of progressive commitment
+  (pipe to jq / scan terminal / interact) is already what lenses do with a
+  zoom parameter. Same signature: `(data, zoom, width) -> Block`. No new atom.
+- **Live vs stored → refresh loop.** SQLite concurrent readers mean the store
+  IS the abstraction boundary. A viewer that polls the store is already a live
+  viewer. No separate live mode needed.
+
+**Loops app identity clarified:** The general-purpose CLI for the prism system,
+not just DSL tooling. Libs stand alone; loops composes them.
+
+---
+
 ## 2026-02-07 — Store viewer: `loops store`
 
 **The change.** Read-only store inspection, properly layered.

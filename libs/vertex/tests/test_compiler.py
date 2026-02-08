@@ -3,13 +3,13 @@
 from pathlib import Path
 
 import pytest
-from data import Avg, Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert, Window
-from data import Coerce as RuntimeCoerce
-from data import Pick as RuntimePick
-from data import Rename as RuntimeRename
-from data import Skip as RuntimeSkip
-from data import Split as RuntimeSplit
-from data import Transform as RuntimeTransform
+from atoms import Avg, Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert, Window
+from atoms import Coerce as RuntimeCoerce
+from atoms import Pick as RuntimePick
+from atoms import Rename as RuntimeRename
+from atoms import Skip as RuntimeSkip
+from atoms import Split as RuntimeSplit
+from atoms import Transform as RuntimeTransform
 
 from dsl import parse_loop, parse_vertex
 from vertex.compiler import (
@@ -399,7 +399,7 @@ class TestIntegration:
 
     def test_parse_pipeline_execution(self):
         """Compiled parse pipeline executes correctly."""
-        from data import run_parse
+        from atoms import run_parse
 
         loop = parse_loop("""\
 source "df -h"
@@ -974,7 +974,7 @@ loops {
         assert runtime.state("events") == {"count": 0}
 
         # Fold a fact
-        from data import Fact
+        from atoms import Fact
 
         fact = Fact.of("events", "test", value=1)
         runtime.receive(fact)
@@ -998,7 +998,7 @@ loops {
         compiled = compile_vertex_recursive(vertex)
         runtime = materialize_vertex(compiled)
 
-        from data import Fact
+        from atoms import Fact
 
         # Regular facts fold
         runtime.receive(Fact.of("batch", "test", value=1))
@@ -1038,7 +1038,7 @@ loops {
             "counter": ({"count": 0}, custom_fold),
         })
 
-        from data import Fact
+        from atoms import Fact
 
         runtime.receive(Fact.of("counter", "test", value=5))
         assert runtime.state("counter") == {"count": 10}
@@ -1127,7 +1127,7 @@ loops {{
             "pulse": ({"count": 0}, pulse_fold),
         })
 
-        from data import Fact
+        from atoms import Fact
 
         runtime.receive(Fact.of("pulse", "test"))
         runtime.receive(Fact.of("pulse", "test"))
@@ -1142,7 +1142,7 @@ class TestNewParseStepMapping:
 
     def test_explode_mapping(self):
         from vertex.compiler import map_explode
-        from data import Explode as RuntimeExplode
+        from atoms import Explode as RuntimeExplode
 
         step = DslExplode(path="data.alerts", carry={"name": "group_name"})
         result = map_explode(step)
@@ -1152,7 +1152,7 @@ class TestNewParseStepMapping:
 
     def test_project_mapping(self):
         from vertex.compiler import map_project
-        from data import Project as RuntimeProject
+        from atoms import Project as RuntimeProject
 
         step = DslProject(fields={"alertname": "labels.alertname", "state": "state"})
         result = map_project(step)
@@ -1161,7 +1161,7 @@ class TestNewParseStepMapping:
 
     def test_where_mapping(self):
         from vertex.compiler import map_where
-        from data import Where as RuntimeWhere
+        from atoms import Where as RuntimeWhere
 
         step = DslWhere(path="status", op="equals", value="success")
         result = map_where(step)
@@ -1172,9 +1172,9 @@ class TestNewParseStepMapping:
 
     def test_map_parse_steps_with_new_ops(self):
         """map_parse_steps handles mixed pipeline with new ops."""
-        from data import Explode as RuntimeExplode
-        from data import Project as RuntimeProject
-        from data import Where as RuntimeWhere
+        from atoms import Explode as RuntimeExplode
+        from atoms import Project as RuntimeProject
+        from atoms import Where as RuntimeWhere
 
         steps = (
             DslWhere(path="status", op="equals", value="success"),
@@ -1243,7 +1243,7 @@ loops {
         assert runtime._store is not None
 
         # Verify store works by receiving a fact
-        from data import Fact
+        from atoms import Fact
 
         runtime.receive(Fact.of("counter", "test", value=1))
         assert runtime.state("counter") == {"count": 1}
@@ -1480,7 +1480,7 @@ loops {
     def test_exact_match_routes(self):
         """Exact match routes work (backwards compatible)."""
         from vertex.compiler import materialize_vertex
-        from data import Fact
+        from atoms import Fact
 
         vertex = parse_vertex("""\
 name "test"
@@ -1507,7 +1507,7 @@ loops {
     def test_pattern_routes_glob(self):
         """Glob pattern routes (* wildcard) work."""
         from vertex.compiler import materialize_vertex
-        from data import Fact
+        from atoms import Fact
 
         vertex = parse_vertex("""\
 name "test"
@@ -1539,7 +1539,7 @@ loops {
     def test_direct_kind_match_takes_priority(self):
         """Direct kind registration takes priority over routes."""
         from vertex.compiler import materialize_vertex
-        from data import Fact
+        from atoms import Fact
 
         vertex = parse_vertex("""\
 name "test"

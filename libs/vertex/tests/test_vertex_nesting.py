@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from data import Fact
+from atoms import Fact
 from vertex import Tick, Vertex, Loop
 from vertex.projection import Projection
 

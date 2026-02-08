@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Vertex, Tick
 from cells import Block, Style, Cell, join_vertical, join_horizontal, border, pad, ROUNDED
 from cells.tui import Surface

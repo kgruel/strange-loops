@@ -49,7 +49,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_test(args: argparse.Namespace) -> int:
     """Test a .loop file's parse pipeline against sample input."""
-    from data import run_parse
+    from atoms import run_parse
     from dsl import parse_loop_file, validate_loop
     from vertex import compile_loop
 

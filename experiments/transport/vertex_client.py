@@ -14,7 +14,7 @@ import argparse
 import asyncio
 import signal
 
-from data import Fact
+from atoms import Fact
 
 from .protocol import FactClient
 

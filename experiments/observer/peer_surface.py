@@ -22,7 +22,7 @@ import asyncio
 import random
 from collections import deque
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Grant, delegate, grant_of
 from vertex import Lens, Tick, Vertex
 from cells import Block, Style, join_vertical, join_horizontal, border

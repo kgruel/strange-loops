@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
-from data import Fact
-from data import Runner
+from atoms import Fact
+from atoms import Runner
 from vertex import Tick, Vertex
 
 

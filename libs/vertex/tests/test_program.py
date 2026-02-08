@@ -7,7 +7,7 @@ from typing import AsyncIterator
 
 import pytest
 
-from data import Fact
+from atoms import Fact
 from vertex import VertexProgram, load_vertex_program
 from vertex import Vertex
 

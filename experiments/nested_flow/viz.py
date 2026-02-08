@@ -22,7 +22,7 @@ from datetime import datetime
 from glob import glob as globfn
 from pathlib import Path
 
-from data import Fact, Source, Runner
+from atoms import Fact, Source, Runner
 from dsl import parse_loop_file, parse_vertex_file, validate
 from vertex import compile_loop, compile_vertex_recursive, materialize_vertex
 from vertex import Tick, Vertex

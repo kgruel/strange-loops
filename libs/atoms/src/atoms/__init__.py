@@ -1,4 +1,4 @@
-"""data — Observation atoms, contracts, and ingress.
+"""atoms — Observation atoms, contracts, and ingress.
 
 Consolidates:
 - facts: Fact (the observation atom)
@@ -6,7 +6,7 @@ Consolidates:
 - sources: Source, Runner (ingress adapters)
 
 Example:
-    from data import Fact, Spec, Source
+    from atoms import Fact, Spec, Source
 
     f = Fact.of("heartbeat", "alice", service="api", latency=42)
     spec = Spec(name="health", about="Service health", ...)
@@ -14,19 +14,19 @@ Example:
 """
 
 # Atoms
-from data.fact import Fact
+from atoms.fact import Fact
 
 # Contract
-from data.spec import Shape, Spec
-from data.facet import Facet, Field
-from data.boundary import Boundary
-from data.types import ValidationError
+from atoms.spec import Shape, Spec
+from atoms.facet import Facet, Field
+from atoms.boundary import Boundary
+from atoms.types import ValidationError
 
 # Fold vocabulary
-from data.fold import Avg, Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert, Window
+from atoms.fold import Avg, Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert, Window
 
 # Parse vocabulary
-from data.parse import (
+from atoms.parse import (
     Coerce,
     Explode,
     Pick,
@@ -44,9 +44,9 @@ from data.parse import (
 )
 
 # Ingress
-from data.source import CommandSource, Source
-from data.runner import Runner
-from data.protocol import SourceProtocol
+from atoms.source import CommandSource, Source
+from atoms.runner import Runner
+from atoms.protocol import SourceProtocol
 
 __all__ = [
     # Atoms

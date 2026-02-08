@@ -3,11 +3,11 @@ name = "loops"
 version = "0.1.0"
 description = "CLI for .loop and .vertex files"
 requires-python = ">=3.11"
-dependencies = ["dsl", "data", "vertex", "cells"]
+dependencies = ["dsl", "atoms", "vertex", "cells"]
 
 [tool.uv.sources]
 dsl = { workspace = true }
-data = { workspace = true }
+atoms = { workspace = true }
 vertex = { workspace = true }
 cells = { workspace = true }
 

@@ -6,8 +6,8 @@ from typing import AsyncIterator
 
 import pytest
 
-from data import Fact
-from data import Runner, Source
+from atoms import Fact
+from atoms import Runner, Source
 from vertex import Vertex
 
 
@@ -182,7 +182,7 @@ class TestRunnerWithCommandSource:
 
     async def test_command_source_integration(self):
         """CommandSource works with Runner and Vertex."""
-        from data import CommandSource
+        from atoms import CommandSource
 
         vertex = Vertex("test-vertex")
         vertex.register("greeting", {"count": 0}, lambda s, p: {"count": s["count"] + 1})
@@ -203,7 +203,7 @@ class TestRunnerWithCommandSource:
 
     async def test_success_criteria_example(self):
         """The exact example from the task description works."""
-        from data import CommandSource
+        from atoms import CommandSource
 
         source = CommandSource(
             command='echo "hello"',

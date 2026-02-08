@@ -46,7 +46,7 @@ from typing import Callable, Any
 from enum import Enum
 
 from vertex import Tick, Vertex
-from data import Shape, Facet, Boundary
+from atoms import Shape, Facet, Boundary
 
 
 # -- Serialization (from network_boundary.py) --------------------------------

@@ -28,10 +28,10 @@ import asyncio
 import random
 from collections import deque
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Grant, delegate, grant_of
 from vertex import Vertex
-from data import Shape, Facet
+from atoms import Shape, Facet
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
 

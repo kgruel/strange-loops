@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from data import Fact, Source
+from atoms import Fact, Source
 from vertex import Vertex, Loop, Tick
 from vertex.projection import Projection
 from cells import Block, Style, join_vertical, join_horizontal, border, pad
@@ -129,7 +129,7 @@ def root_overview_fold(state: dict, payload: dict) -> dict:
 
 def make_disk_source() -> Source:
     """Real disk usage from df -h."""
-    from data.parse import Skip, Split, Pick, Rename, Transform, Coerce
+    from atoms.parse import Skip, Split, Pick, Rename, Transform, Coerce
     return Source(
         command="df -h",
         kind="disk",

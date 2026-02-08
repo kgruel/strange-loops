@@ -20,7 +20,7 @@ Run:
 
 from __future__ import annotations
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, delegate
 from vertex import Lens, Tick, Vertex
 

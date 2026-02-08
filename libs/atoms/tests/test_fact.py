@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 import pytest
 
-from data import Fact
+from atoms import Fact
 
 
 # --- Construction ---

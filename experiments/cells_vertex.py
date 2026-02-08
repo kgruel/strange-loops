@@ -15,7 +15,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Vertex
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface

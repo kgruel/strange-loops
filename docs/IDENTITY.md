@@ -24,7 +24,7 @@ The observer is part of the fact's meaning. A deployment observed by `"kyle"`
 (automated). The identity encodes the stance.
 
 ```python
-from data import Fact
+from atoms import Fact
 
 # Create with observer attribution
 fact = Fact.of("deploy", "kyle", target="api", version="2.3")

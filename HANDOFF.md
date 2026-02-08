@@ -10,7 +10,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 **Three atoms:** Fact, Spec, Tick
 
 **Two libraries:**
-- **data** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
+- **atoms** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
 - **vertex** — how it runs, when boundaries fire, compiles DSL to runtime (Vertex, Loop, Store, Grant, Compiler, Program)
 
 **One DSL:** dsl — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
@@ -25,9 +25,9 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 
 ```
 dsl → ckdl                          (pure grammar)
-vertex → data, dsl                  (runtime + compiler)
-apps/loops → dsl, data, vertex, cells  (CLI app)
-apps/hlab → data, vertex, cells     (no direct dsl dep)
+vertex → atoms, dsl                 (runtime + compiler)
+apps/loops → dsl, atoms, vertex, cells  (CLI app)
+apps/hlab → atoms, vertex, cells    (no direct dsl dep)
 ```
 
 Key separation: `dsl` is portable (only depends on `ckdl`). The compiler
@@ -38,7 +38,7 @@ live in vertex where the target runtime types are defined.
 
 | Library | Focus |
 |---------|-------|
-| **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
+| **atoms** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
 | **vertex** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, StoreReader, Peer, Grant, compile_loop, load_vertex_program |
 | **dsl** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
 | **cells** | Terminal UI: Cell, Block, Buffer, Surface |

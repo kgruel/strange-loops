@@ -638,7 +638,7 @@ def _payload_one_liner(payload: Any, max_width: int) -> str:
 def generate_demo_store(path: Path) -> None:
     """Create a SqliteStore with synthetic homelab-like data."""
     from vertex.sqlite_store import SqliteStore
-    from data import Fact
+    from atoms import Fact
 
     store = SqliteStore(
         path=path,

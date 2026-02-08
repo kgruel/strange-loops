@@ -24,10 +24,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from data import Fact
-from data.source import Source
-from data.runner import Runner
-from data.parse import Split, Pick, Rename, Transform, Coerce, Skip
+from atoms import Fact
+from atoms.source import Source
+from atoms.runner import Runner
+from atoms.parse import Split, Pick, Rename, Transform, Coerce, Skip
 from vertex import Vertex, Tick, Loop
 from vertex.projection import Projection
 from cells import Block, Style, join_vertical, join_horizontal, border, pad

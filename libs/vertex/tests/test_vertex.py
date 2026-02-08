@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from data import Fact
+from atoms import Fact
 from vertex import Grant
 from vertex import EventStore, Tick, Vertex
 
@@ -633,7 +633,7 @@ class TestReceiveStoresTick:
 
     def test_kind_boundary_stores_tick(self, tmp_path):
         from vertex.sqlite_store import SqliteStore
-        from data import Fact
+        from atoms import Fact
 
         store = SqliteStore(
             path=tmp_path / "test.db",
@@ -656,7 +656,7 @@ class TestReceiveStoresTick:
     def test_count_boundary_stores_tick(self, tmp_path):
         from vertex import Loop, Projection
         from vertex.sqlite_store import SqliteStore
-        from data import Fact
+        from atoms import Fact
 
         store = SqliteStore(
             path=tmp_path / "test.db",

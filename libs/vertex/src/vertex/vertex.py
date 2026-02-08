@@ -32,7 +32,7 @@ from .store import Store
 from .tick import Tick
 
 if TYPE_CHECKING:
-    from data import Fact
+    from atoms import Fact
     from vertex.peer import Grant
 
 
@@ -312,7 +312,7 @@ class Vertex:
         The tick becomes a fact with kind="tick.{tick.name}" and
         the vertex name as observer.
         """
-        from data import Fact
+        from atoms import Fact
 
         return Fact(
             kind=f"tick.{tick.name}",
@@ -333,7 +333,7 @@ class Vertex:
         The child vertex name becomes the observer.
         Payload is spread into the fact.
         """
-        from data import Fact
+        from atoms import Fact
 
         payload = tick.payload if isinstance(tick.payload, dict) else {"value": tick.payload}
         return Fact(
@@ -364,7 +364,7 @@ class Vertex:
         Returns:
             Tick if a boundary fired, None otherwise.
         """
-        from data import Fact
+        from atoms import Fact
 
         fact = Fact.of(kind, observer, **payload)
         return self.receive(fact, grant)

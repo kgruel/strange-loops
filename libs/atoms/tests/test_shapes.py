@@ -2,7 +2,7 @@
 
 import pytest
 
-from data import (
+from atoms import (
     Boundary,
     Collect,
     Count,
@@ -15,7 +15,7 @@ from data import (
     Upsert,
     ValidationError,
 )
-from data.types import coerce_value, initial_value, type_matches
+from atoms.types import coerce_value, initial_value, type_matches
 
 
 class TestField:

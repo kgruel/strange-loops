@@ -2,8 +2,8 @@
 
 import pytest
 
-from data import Coerce, Explode, Pick, Project, Rename, Skip, Split, Transform, Where, run_parse
-from data.parse import resolve_path, run_parse_many, has_explode
+from atoms import Coerce, Explode, Pick, Project, Rename, Skip, Split, Transform, Where, run_parse
+from atoms.parse import resolve_path, run_parse_many, has_explode
 
 
 class TestSkip:

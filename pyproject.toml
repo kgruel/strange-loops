@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["libs/data", "libs/vertex", "libs/cells", "libs/dsl", "apps/hlab", "apps/loops"]
+members = ["libs/atoms", "libs/vertex", "libs/cells", "libs/dsl", "apps/hlab", "apps/loops"]

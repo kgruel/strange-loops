@@ -76,10 +76,10 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer
 from vertex import Tick, Vertex
-from data import Shape, Facet
+from atoms import Shape, Facet
 
 # System peer — unrestricted, used for all fact emissions in this experiment.
 SYSTEM = Peer("system")

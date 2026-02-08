@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import asyncio
 
-from data import Fact
-from data import CommandSource, Runner
+from atoms import Fact
+from atoms import CommandSource, Runner
 from vertex import Tick, Vertex
 
 

@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
-from data import Fact
+from atoms import Fact
 
 
 # =============================================================================

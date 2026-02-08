@@ -16,7 +16,7 @@ from dsl import parse_vertex_file
 from dsl import validate
 
 if TYPE_CHECKING:
-    from data import Source
+    from atoms import Source
     from .tick import Tick
     from .vertex import Vertex
 
@@ -38,7 +38,7 @@ class VertexProgram:
         self, grant: Any = None, *, on_error: Callable | None = None,
     ) -> AsyncIterator[Tick]:
         """Run all sources and yield ticks as boundaries fire."""
-        from data import Runner
+        from atoms import Runner
 
         runner = Runner(self.vertex, on_error=on_error)
         for source in self.sources:

@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Tick, Vertex, Loop
 from vertex.projection import Projection
 from vertex.store import EventStore

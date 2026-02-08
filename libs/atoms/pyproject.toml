@@ -1,5 +1,5 @@
 [project]
-name = "data"
+name = "atoms"
 version = "0.1.0"
 description = "Observation atoms, contracts, and ingress — Fact, Spec, Source"
 readme = "README.md"
@@ -22,14 +22,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/data"]
+packages = ["src/atoms"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-source = ["src/data"]
+source = ["src/atoms"]
 branch = true
 
 [tool.coverage.report]

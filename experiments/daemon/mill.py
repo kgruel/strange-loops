@@ -28,8 +28,8 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from data import Fact
-from data import Collect, Count, Facet, Latest, Shape, Sum, Upsert
+from atoms import Fact
+from atoms import Collect, Count, Facet, Latest, Shape, Sum, Upsert
 from vertex import Tick
 
 

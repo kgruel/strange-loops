@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from data import Fact
+from atoms import Fact
 from vertex import Vertex
 
 

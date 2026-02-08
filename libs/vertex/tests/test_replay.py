@@ -1,7 +1,7 @@
 """Tests for replay: recovering vertex state from stored facts."""
 
 import pytest
-from data import Fact
+from atoms import Fact
 from vertex import Vertex, EventStore, replay
 
 

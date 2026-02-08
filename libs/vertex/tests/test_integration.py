@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from data import Fact
+from atoms import Fact
 from vertex import EventStore, FileWriter, Forward, Projection, Stream, Tailer, Tick, Vertex
 
 from tests.helpers import (
@@ -440,7 +440,7 @@ class TestShapeBoundaryToVertex:
     """
 
     def test_shape_boundary_wires_to_vertex(self):
-        from data import Boundary, Count, Facet, Shape
+        from atoms import Boundary, Count, Facet, Shape
 
         shape = Shape(
             name="container-health",
@@ -476,7 +476,7 @@ class TestShapeBoundaryToVertex:
         assert v.state("container-health") == 0
 
     def test_shape_boundary_no_reset(self):
-        from data import Boundary, Count, Facet, Shape
+        from atoms import Boundary, Count, Facet, Shape
 
         shape = Shape(
             name="deploy-count",
@@ -505,7 +505,7 @@ class TestShapeBoundaryToVertex:
         assert v.state("deploy") == 3
 
     def test_shape_without_boundary(self):
-        from data import Count, Facet, Shape
+        from atoms import Count, Facet, Shape
 
         shape = Shape(
             name="simple-counter",

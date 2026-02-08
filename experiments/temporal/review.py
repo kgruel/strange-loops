@@ -28,10 +28,10 @@ import json
 import time
 from pathlib import Path
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, delegate
 from vertex import Tick, Vertex
-from data import Shape, Facet, Boundary
+from atoms import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
 

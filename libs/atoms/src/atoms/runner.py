@@ -6,7 +6,7 @@ import asyncio
 import sys
 from typing import TYPE_CHECKING, AsyncIterator, Callable
 
-from data.fact import Fact
+from atoms.fact import Fact
 
 from .protocol import SourceProtocol
 

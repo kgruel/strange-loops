@@ -14,7 +14,7 @@ from datetime import datetime
 from cells import Block, Style, join_vertical, join_horizontal, border, pad, ROUNDED
 from cells.tui import Surface
 
-from data import Runner
+from atoms import Runner
 
 from .lenses.status import render_stack_list, render_container_detail, PendingState
 from .theme import DEFAULT_THEME

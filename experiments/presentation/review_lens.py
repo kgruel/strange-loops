@@ -34,7 +34,7 @@ import json
 import time
 from pathlib import Path
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, delegate
 from vertex import Tick, Vertex
 from shapes import Shape, Facet, Boundary

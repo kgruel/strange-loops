@@ -7,10 +7,10 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
 
-from data.fact import Fact
+from atoms.fact import Fact
 
 if TYPE_CHECKING:
-    from data.parse import ParseOp
+    from atoms.parse import ParseOp
 
 
 @dataclass
@@ -61,7 +61,7 @@ class Source:
         """Check if the parse pipeline contains explode ops."""
         if self.parse is None:
             return False
-        from data.parse import has_explode
+        from atoms.parse import has_explode
 
         return has_explode(self.parse)
 
@@ -84,7 +84,7 @@ class Source:
             return {"_json": data}
 
         # Import here to avoid circular dependency at module load
-        from data.parse import run_parse
+        from atoms.parse import run_parse
 
         return run_parse(data, self.parse)
 
@@ -101,7 +101,7 @@ class Source:
                 return [data]
             return []
 
-        from data.parse import run_parse_many
+        from atoms.parse import run_parse_many
 
         return run_parse_many(data, self.parse)
 

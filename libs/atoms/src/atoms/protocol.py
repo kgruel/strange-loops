@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, AsyncIterator, Protocol
 
 if TYPE_CHECKING:
-    from data.fact import Fact
+    from atoms.fact import Fact
 
 
 class SourceProtocol(Protocol):

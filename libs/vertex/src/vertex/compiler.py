@@ -51,16 +51,16 @@ from dsl.ast import RStrip as DslRStrip
 from dsl.ast import Strip as DslStrip
 
 if TYPE_CHECKING:
-    from data import Boundary, Field, Source, Spec
-    from data import Coerce as RuntimeCoerce
-    from data import FoldOp as RuntimeFoldOp
-    from data import ParseOp as RuntimeParseOp
-    from data import Pick as RuntimePick
-    from data import Rename as RuntimeRename
-    from data import Select as RuntimeSelect
-    from data import Skip as RuntimeSkip
-    from data import Split as RuntimeSplit
-    from data import Transform as RuntimeTransform
+    from atoms import Boundary, Field, Source, Spec
+    from atoms import Coerce as RuntimeCoerce
+    from atoms import FoldOp as RuntimeFoldOp
+    from atoms import ParseOp as RuntimeParseOp
+    from atoms import Pick as RuntimePick
+    from atoms import Rename as RuntimeRename
+    from atoms import Select as RuntimeSelect
+    from atoms import Skip as RuntimeSkip
+    from atoms import Split as RuntimeSplit
+    from atoms import Transform as RuntimeTransform
     from .vertex import Vertex
 
 
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
 def map_skip(step: Skip) -> RuntimeSkip:
     """Map DSL Skip to runtime Skip."""
-    from data import Skip as RuntimeSkip
+    from atoms import Skip as RuntimeSkip
 
     # DSL skip uses regex pattern
     # Runtime skip has startswith, contains, equals
@@ -88,7 +88,7 @@ def map_skip(step: Skip) -> RuntimeSkip:
 
 def map_split(step: Split) -> RuntimeSplit:
     """Map DSL Split to runtime Split."""
-    from data import Split as RuntimeSplit
+    from atoms import Split as RuntimeSplit
 
     return RuntimeSplit(delim=step.delimiter)
 
@@ -99,8 +99,8 @@ def map_pick(step: Pick) -> tuple[RuntimePick, RuntimeRename | None]:
     DSL: pick 0, 4, 5 -> fs, pct, mount
     Runtime: Pick(0, 4, 5) + Rename({0: "fs", 1: "pct", 2: "mount"})
     """
-    from data import Pick as RuntimePick
-    from data import Rename as RuntimeRename
+    from atoms import Pick as RuntimePick
+    from atoms import Rename as RuntimeRename
 
     pick = RuntimePick(*step.indices)
 
@@ -119,8 +119,8 @@ def map_transform(step: Transform) -> list[RuntimeTransform | RuntimeCoerce]:
     DSL: pct: strip "%" | int
     Runtime: Transform("pct", strip="%"), Coerce({"pct": int})
     """
-    from data import Coerce as RuntimeCoerce
-    from data import Transform as RuntimeTransform
+    from atoms import Coerce as RuntimeCoerce
+    from atoms import Transform as RuntimeTransform
 
     result: list[RuntimeTransform | RuntimeCoerce] = []
 
@@ -166,28 +166,28 @@ def map_transform(step: Transform) -> list[RuntimeTransform | RuntimeCoerce]:
 
 def map_select(step: Select) -> RuntimeSelect:
     """Map DSL Select to runtime Select."""
-    from data import Select as RuntimeSelect
+    from atoms import Select as RuntimeSelect
 
     return RuntimeSelect(*step.fields)
 
 
 def map_explode(step: DslExplode) -> "RuntimeParseOp":
     """Map DSL Explode to runtime Explode."""
-    from data import Explode as RuntimeExplode
+    from atoms import Explode as RuntimeExplode
 
     return RuntimeExplode(path=step.path, carry=step.carry)
 
 
 def map_project(step: DslProject) -> "RuntimeParseOp":
     """Map DSL Project to runtime Project."""
-    from data import Project as RuntimeProject
+    from atoms import Project as RuntimeProject
 
     return RuntimeProject(fields=step.fields)
 
 
 def map_where(step: DslWhere) -> "RuntimeParseOp":
     """Map DSL Where to runtime Where."""
-    from data import Where as RuntimeWhere
+    from atoms import Where as RuntimeWhere
 
     return RuntimeWhere(path=step.path, op=step.op, value=step.value)
 
@@ -233,7 +233,7 @@ def _get_fold_map() -> dict[type, tuple[Callable, str]]:
     global _FOLD_MAP  # noqa: PLW0603
     if _FOLD_MAP is not None:
         return _FOLD_MAP
-    from data import Avg, Collect, Count, Latest, Max, Min, Sum, Upsert, Window
+    from atoms import Avg, Collect, Count, Latest, Max, Min, Sum, Upsert, Window
 
     _FOLD_MAP = {
         FoldBy:      (lambda t, op: Upsert(target=t, key=op.key_field), "dict"),
@@ -290,7 +290,7 @@ def map_loop_file(loop: LoopFile) -> Source:
     - loop.on + no every: → triggered source
     - loop.every + no source: → pure timer (emits ticks)
     """
-    from data import Source
+    from atoms import Source
 
     # Compile parse pipeline
     parse_ops = map_parse_steps(loop.parse) if loop.parse else None
@@ -412,7 +412,7 @@ def compile_sources(
 
 def map_boundary(boundary: BoundaryWhen | BoundaryAfter | BoundaryEvery) -> Boundary:
     """Map DSL boundary to runtime Boundary."""
-    from data import Boundary
+    from atoms import Boundary
 
     if isinstance(boundary, BoundaryWhen):
         return Boundary(kind=boundary.kind, mode="when", reset=True)
@@ -433,7 +433,7 @@ def map_loop_def_to_spec(name: str, loop_def) -> Spec:
     - folds: compiled fold ops
     - boundary: optional boundary trigger
     """
-    from data import Field, Spec
+    from atoms import Field, Spec
 
     # Build state fields from fold declarations
     state_fields = []
@@ -657,7 +657,7 @@ def materialize_vertex(
 
     store = None
     if compiled.store is not None:
-        from data import Fact
+        from atoms import Fact
 
         store_path = compiled.store
         if not store_path.is_absolute() and compiled.path is not None:

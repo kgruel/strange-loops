@@ -1,4 +1,4 @@
-# data
+# atoms
 
 Observation atoms, contracts, and ingress.
 
@@ -10,7 +10,7 @@ Consolidates:
 ## Usage
 
 ```python
-from data import Fact, Spec, Source
+from atoms import Fact, Spec, Source
 
 # Create an observation
 f = Fact.of("heartbeat", "alice", service="api", latency=42)

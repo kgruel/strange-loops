@@ -6,7 +6,7 @@ Research into the gap between declarative folds and custom Python folds.
 
 ## Current Declarative Folds
 
-The DSL provides 8 fold primitives in `libs/data/src/data/fold.py`:
+The DSL provides 8 fold primitives in `libs/atoms/src/atoms/fold.py`:
 
 | Fold | Target Type | Operation | DSL Syntax |
 |------|-------------|-----------|------------|

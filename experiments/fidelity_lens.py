@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, Tick
 from vertex.store import EventStore
 from cells import Block, Style, join_vertical, join_horizontal, border

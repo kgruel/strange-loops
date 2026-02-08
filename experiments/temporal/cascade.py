@@ -23,10 +23,10 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
-from data import Fact
+from atoms import Fact
 from vertex import Peer, delegate
 from vertex import Tick, Vertex, Stream
-from data import Shape, Facet, Boundary
+from atoms import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
 

@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from data import Fact
+from atoms import Fact
 from vertex import Tick, Vertex
 from vertex import Grant
 

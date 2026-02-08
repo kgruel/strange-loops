@@ -2,7 +2,7 @@
 
 import pytest
 
-from data import (
+from atoms import (
     Avg,
     Collect,
     Count,

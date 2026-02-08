@@ -13,7 +13,7 @@ Run: python experiments/persistence.py
 import tempfile
 from pathlib import Path
 
-from data import Fact
+from atoms import Fact
 from vertex import Vertex, FileStore, replay
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vertex import EventStore, FileWriter, Projection, Stream, Tailer
+from engine import EventStore, FileWriter, Projection, Stream, Tailer
 
 from tests.helpers import (
     Event,

@@ -1,4 +1,4 @@
-# vertex
+# engine
 
 Temporal infrastructure and identity.
 
@@ -9,7 +9,7 @@ Consolidates:
 ## Usage
 
 ```python
-from vertex import Tick, Vertex, Peer, Grant
+from engine import Tick, Vertex, Peer, Grant
 
 # Create a vertex
 v = Vertex("main")

@@ -11,8 +11,8 @@ from atoms.fact import Fact
 from .protocol import SourceProtocol
 
 if TYPE_CHECKING:
-    from vertex import Tick, Vertex
-    from vertex import Grant
+    from engine import Tick, Vertex
+    from engine import Grant
 
 
 class Runner:

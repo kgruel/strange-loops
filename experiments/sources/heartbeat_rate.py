@@ -15,7 +15,7 @@ from typing import AsyncIterator
 
 from atoms import Fact
 from atoms import Runner
-from vertex import Tick, Vertex
+from engine import Tick, Vertex
 
 
 class HeartbeatSource:

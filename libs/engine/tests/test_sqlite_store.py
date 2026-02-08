@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from vertex import Store
-from vertex.sqlite_store import SqliteStore
+from engine import Store
+from engine.sqlite_store import SqliteStore
 
 from tests.helpers import (
     TimestampedEvent,
@@ -174,7 +174,7 @@ class TestConsume:
 
 # --- Tick Persistence ---
 
-from vertex import Tick
+from engine import Tick
 
 
 NOW_DT = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)

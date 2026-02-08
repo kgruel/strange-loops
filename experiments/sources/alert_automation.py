@@ -37,7 +37,7 @@ from pathlib import Path
 from atoms import Fact
 from atoms import CommandSource
 from atoms import Coerce, Pick, Rename, Skip, Split, Transform
-from vertex import EventStore, Vertex
+from engine import EventStore, Vertex
 
 
 # -- Constants ---------------------------------------------------------------

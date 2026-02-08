@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 import pytest
 
 from atoms import Fact
-from vertex import Grant
-from vertex import EventStore, Tick, Vertex
+from engine import Grant
+from engine import EventStore, Tick, Vertex
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -552,7 +552,7 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_fires_tick_on_count_boundary(self):
         """Loop with boundary_count fires tick through Vertex."""
-        from vertex import Loop, Projection
+        from engine import Loop, Projection
 
         v = Vertex("batch-processor")
         loop = Loop(
@@ -579,7 +579,7 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_count_boundary_repeats_with_every(self):
         """boundary_mode='every' fires tick repeatedly."""
-        from vertex import Loop, Projection
+        from engine import Loop, Projection
 
         v = Vertex("windowed")
         loop = Loop(
@@ -605,7 +605,7 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_count_boundary_exhausted_with_after(self):
         """boundary_mode='after' fires once then stops."""
-        from vertex import Loop, Projection
+        from engine import Loop, Projection
 
         v = Vertex("oneshot")
         loop = Loop(
@@ -632,7 +632,7 @@ class TestReceiveStoresTick:
     """Verify that Vertex persists ticks to SqliteStore on boundary fire."""
 
     def test_kind_boundary_stores_tick(self, tmp_path):
-        from vertex.sqlite_store import SqliteStore
+        from engine.sqlite_store import SqliteStore
         from atoms import Fact
 
         store = SqliteStore(
@@ -654,8 +654,8 @@ class TestReceiveStoresTick:
         store.close()
 
     def test_count_boundary_stores_tick(self, tmp_path):
-        from vertex import Loop, Projection
-        from vertex.sqlite_store import SqliteStore
+        from engine import Loop, Projection
+        from engine.sqlite_store import SqliteStore
         from atoms import Fact
 
         store = SqliteStore(

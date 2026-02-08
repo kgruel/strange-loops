@@ -36,7 +36,7 @@ fact = Fact.of("deploy", "kyle", target="api", version="2.3")
 Gating policy attaches at the Vertex level via `Grant`:
 
 ```python
-from vertex import Grant
+from engine import Grant
 
 # Define what an observer can do
 grant = Grant(
@@ -65,7 +65,7 @@ The dissolution:
 - `Peer.name` → `Fact.observer` (string field)
 - `Peer.horizon` + `Peer.potential` → `Grant` (Vertex-attached policy)
 
-The helper `Peer` type may still exist in the vertex library for convenience,
+The helper `Peer` type may still exist in the engine library for convenience,
 but it's not a loop atom. The atoms are: Fact, Spec, Tick.
 
 ---
@@ -189,7 +189,7 @@ kyle = Peer("kyle")
 monitor = delegate(kyle, "kyle/monitor", potential={"focus"})
 
 # New pattern
-from vertex import Grant
+from engine import Grant
 # Observer is just a string
 observer = "kyle/monitor"
 # Policy is a Grant

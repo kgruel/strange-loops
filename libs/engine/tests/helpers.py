@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from vertex import Projection
+from engine import Projection
 
 
 # --- Sample event types ---

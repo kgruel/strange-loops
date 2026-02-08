@@ -28,8 +28,8 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from atoms import Fact
-from vertex import Peer, Tick
-from vertex.store import EventStore
+from engine import Peer, Tick
+from engine.store import EventStore
 from cells import Block, Style, join_vertical, join_horizontal, border
 
 

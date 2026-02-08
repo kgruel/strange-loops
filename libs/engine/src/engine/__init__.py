@@ -1,4 +1,4 @@
-"""vertex — Temporal infrastructure and identity.
+"""engine — Temporal infrastructure and identity.
 
 Consolidates:
 - ticks: Tick, Vertex, Store, Stream, Projection (temporal primitives)
@@ -7,7 +7,7 @@ Consolidates:
 The respiratory system: Tick atom + Vertex + Store + fold engine.
 
 Example:
-    from vertex import Tick, Vertex, Peer, Grant
+    from engine import Tick, Vertex, Peer, Grant
 
     v = Vertex("main")
     v.register("count", 0, lambda s, p: s + 1)
@@ -15,31 +15,31 @@ Example:
 """
 
 # Atoms
-from vertex.tick import Tick
+from .tick import Tick
 
 # Core
-from vertex.vertex import Vertex
-from vertex.loop import Loop
-from vertex.stream import Consumer, Stream, Tap
-from vertex.projection import Projection
+from .loop import Loop
+from .projection import Projection
+from .stream import Consumer, Stream, Tap
+from .vertex import Vertex
 
 # Persistence
-from vertex.store import EventStore, Store
-from vertex.sqlite_store import SqliteStore
-from vertex.store_reader import StoreReader
-from vertex.file_store import FileStore
-from vertex.file_writer import FileWriter
-from vertex.tailer import Tailer
-from vertex.replay import replay
+from .file_store import FileStore
+from .file_writer import FileWriter
+from .replay import replay
+from .sqlite_store import SqliteStore
+from .store import EventStore, Store
+from .store_reader import StoreReader
+from .tailer import Tailer
 
 # Utilities
-from vertex.forward import Forward
-from vertex.lens import Lens
-from vertex.source_protocol import ClosableSource
-from vertex.source_protocol import Source as VertexSource
+from .forward import Forward
+from .lens import Lens
+from .source_protocol import ClosableSource
+from .source_protocol import Source as VertexSource
 
 # Identity & Policy
-from vertex.peer import (
+from .peer import (
     Grant,
     Peer,
     delegate,
@@ -51,7 +51,7 @@ from vertex.peer import (
 )
 
 # Compiler (DSL → runtime)
-from vertex.compiler import (
+from .compiler import (
     CircularVertexError,
     CompiledVertex,
     FoldOverride,
@@ -63,7 +63,7 @@ from vertex.compiler import (
     materialize_vertex,
     substitute_vars,
 )
-from vertex.program import VertexProgram, load_vertex_program
+from .program import VertexProgram, load_vertex_program
 
 __all__ = [
     # Atoms

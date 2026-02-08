@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from vertex import load_vertex_program
+from engine import load_vertex_program
 
 from ..infra import HostConfig, run_ssh, ssh_base_args
 from ..inventory import load_inventory, host_config_from_inventory, ANSIBLE_INVENTORY_CACHE

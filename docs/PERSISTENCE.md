@@ -167,7 +167,7 @@ No special infrastructure. Facts go in, confirmation facts come out.
 
 ## Store Implementations
 
-The vertex library provides two Store implementations:
+The engine library provides two Store implementations:
 
 ### EventStore
 

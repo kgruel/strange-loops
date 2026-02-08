@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 from atoms import Fact
 from atoms import Collect, Count, Facet, Latest, Shape, Sum, Upsert
-from vertex import Tick
+from engine import Tick
 
 
 # --- Shape loading ---

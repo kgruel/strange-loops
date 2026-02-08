@@ -25,8 +25,8 @@ import random
 from collections import deque
 
 from atoms import Fact
-from vertex import Peer
-from vertex import Tick, Vertex
+from engine import Peer
+from engine import Tick, Vertex
 from atoms import Shape, Facet, Fold, Boundary
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface

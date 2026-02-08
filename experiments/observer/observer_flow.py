@@ -16,8 +16,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from atoms import Fact
-from vertex import Grant
-from vertex import Tick, Vertex
+from engine import Grant
+from engine import Tick, Vertex
 
 
 def count_fold(state: int, payload: dict) -> int:

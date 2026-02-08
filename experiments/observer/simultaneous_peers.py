@@ -77,8 +77,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from atoms import Fact
-from vertex import Peer
-from vertex import Tick, Vertex
+from engine import Peer
+from engine import Tick, Vertex
 from atoms import Shape, Facet
 
 # System peer — unrestricted, used for all fact emissions in this experiment.

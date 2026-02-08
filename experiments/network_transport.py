@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from atoms import Fact
-from vertex import Vertex
+from engine import Vertex
 
 
 # =============================================================================

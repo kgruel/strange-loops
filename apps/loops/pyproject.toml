@@ -3,12 +3,12 @@ name = "loops"
 version = "0.1.0"
 description = "CLI for .loop and .vertex files"
 requires-python = ">=3.11"
-dependencies = ["lang", "atoms", "vertex", "cells"]
+dependencies = ["lang", "atoms", "engine", "cells"]
 
 [tool.uv.sources]
 lang = { workspace = true }
 atoms = { workspace = true }
-vertex = { workspace = true }
+engine = { workspace = true }
 cells = { workspace = true }
 
 [project.scripts]

@@ -29,8 +29,8 @@ import time
 from pathlib import Path
 
 from atoms import Fact
-from vertex import Peer, delegate
-from vertex import Tick, Vertex
+from engine import Peer, delegate
+from engine import Tick, Vertex
 from atoms import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface

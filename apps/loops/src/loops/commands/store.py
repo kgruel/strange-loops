@@ -31,7 +31,7 @@ def make_fetcher(path: Path, zoom: int):
       3:   + recent fact payloads
     """
     def fetch() -> dict:
-        from vertex.store_reader import StoreReader
+        from engine.store_reader import StoreReader
 
         store_path = resolve_store_path(path)
         with StoreReader(store_path) as reader:
@@ -66,7 +66,7 @@ def make_fidelity_fetcher(path: Path):
     on-demand when the user presses 'f', not on every frame.
     """
     def fetch(since_ts: float, until_ts: float, kind: str | None = None) -> list[dict]:
-        from vertex.store_reader import StoreReader
+        from engine.store_reader import StoreReader
 
         store_path = resolve_store_path(path)
         with StoreReader(store_path) as reader:

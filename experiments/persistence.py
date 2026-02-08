@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from atoms import Fact
-from vertex import Vertex, FileStore, replay
+from engine import Vertex, FileStore, replay
 
 
 def main():

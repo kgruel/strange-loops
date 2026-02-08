@@ -28,8 +28,8 @@ from atoms import Fact
 from atoms.source import Source
 from atoms.runner import Runner
 from atoms.parse import Split, Pick, Rename, Transform, Coerce, Skip
-from vertex import Vertex, Tick, Loop
-from vertex.projection import Projection
+from engine import Vertex, Tick, Loop
+from engine.projection import Projection
 from cells import Block, Style, join_vertical, join_horizontal, border, pad
 from cells.tui import Surface
 from cells.widgets import progress_bar, ProgressState

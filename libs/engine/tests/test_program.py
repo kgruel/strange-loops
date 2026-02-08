@@ -8,8 +8,8 @@ from typing import AsyncIterator
 import pytest
 
 from atoms import Fact
-from vertex import VertexProgram, load_vertex_program
-from vertex import Vertex
+from engine import VertexProgram, load_vertex_program
+from engine import Vertex
 
 
 def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path) -> None:

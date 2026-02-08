@@ -64,8 +64,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from atoms import Fact
-from vertex import Peer
-from vertex import Tick, Vertex, Stream
+from engine import Peer
+from engine import Tick, Vertex, Stream
 from atoms import Shape, Facet, Boundary
 
 # System peer — unrestricted, used for all fact emissions in this experiment.

@@ -33,7 +33,7 @@ from .tick import Tick
 
 if TYPE_CHECKING:
     from atoms import Fact
-    from vertex.peer import Grant
+    from .peer import Grant
 
 
 # Observer-state kind pattern: kind.{observer_name}

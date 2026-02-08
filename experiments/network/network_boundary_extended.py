@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from typing import Callable, Any
 from enum import Enum
 
-from vertex import Tick, Vertex
+from engine import Tick, Vertex
 from atoms import Shape, Facet, Boundary
 
 

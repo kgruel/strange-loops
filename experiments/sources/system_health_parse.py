@@ -22,7 +22,7 @@ import sys
 
 from atoms import CommandSource, Runner
 from atoms import Coerce, Pick, Rename, Skip, Split, Transform
-from vertex import Vertex
+from engine import Vertex
 
 
 # Parse pipelines — declarative transformation from raw text to structured dict

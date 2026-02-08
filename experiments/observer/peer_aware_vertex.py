@@ -21,8 +21,8 @@ Run:
 from __future__ import annotations
 
 from atoms import Fact
-from vertex import Peer, delegate
-from vertex import Lens, Tick, Vertex
+from engine import Peer, delegate
+from engine import Lens, Tick, Vertex
 
 
 # -- Folds -------------------------------------------------------------------

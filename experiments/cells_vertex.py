@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 
 from atoms import Fact
-from vertex import Peer, Vertex
+from engine import Peer, Vertex
 from cells import Block, Style, join_vertical, border
 from cells.tui import Surface
 

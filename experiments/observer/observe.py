@@ -29,8 +29,8 @@ import random
 from collections import deque
 
 from atoms import Fact
-from vertex import Peer, Grant, delegate, grant_of
-from vertex import Vertex
+from engine import Peer, Grant, delegate, grant_of
+from engine import Vertex
 from atoms import Shape, Facet
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface

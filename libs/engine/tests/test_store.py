@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from vertex import EventStore, FileStore, Store
+from engine import EventStore, FileStore, Store
 
 from tests.helpers import (
     Event,

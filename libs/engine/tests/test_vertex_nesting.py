@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 import pytest
 
 from atoms import Fact
-from vertex import Tick, Vertex, Loop
-from vertex.projection import Projection
+from engine import Tick, Vertex, Loop
+from engine.projection import Projection
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)

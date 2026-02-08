@@ -3,7 +3,7 @@
 from dataclasses import FrozenInstanceError, dataclass
 from datetime import datetime, timezone
 
-from vertex import Tick
+from engine import Tick
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -186,7 +186,7 @@ def test_repr():
 # -- Projection fold callable --
 
 import pytest
-from vertex import Projection, EventStore
+from engine import Projection, EventStore
 
 
 class TestProjectionFoldCallable:

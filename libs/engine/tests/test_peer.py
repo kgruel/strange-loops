@@ -1,6 +1,6 @@
 """Tests for peers primitives."""
 
-from vertex import Peer, Grant, grant, restrict, delegate, grant_of, expand_grant, restrict_grant
+from engine import Peer, Grant, grant, restrict, delegate, grant_of, expand_grant, restrict_grant
 
 
 class TestPeer:

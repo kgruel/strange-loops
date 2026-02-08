@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from atoms import Fact
-from vertex import Peer, Tick, Vertex, Loop
-from vertex.projection import Projection
-from vertex.store import EventStore
+from engine import Peer, Tick, Vertex, Loop
+from engine.projection import Projection
+from engine.store import EventStore
 
 
 # -- Domain Types ------------------------------------------------------------

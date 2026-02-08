@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from vertex import Loop, Projection
+from engine import Loop, Projection
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)

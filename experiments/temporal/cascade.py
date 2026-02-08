@@ -24,8 +24,8 @@ from collections import deque
 from dataclasses import dataclass
 
 from atoms import Fact
-from vertex import Peer, delegate
-from vertex import Tick, Vertex, Stream
+from engine import Peer, delegate
+from engine import Tick, Vertex, Stream
 from atoms import Shape, Facet, Boundary
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface

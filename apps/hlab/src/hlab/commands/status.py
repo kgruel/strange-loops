@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from vertex import load_vertex_program
+from engine import load_vertex_program
 
 from ..folds import HEALTH_INITIAL, health_fold
 

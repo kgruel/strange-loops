@@ -20,7 +20,7 @@ import asyncio
 
 from atoms import Fact
 from atoms import CommandSource, Runner
-from vertex import Tick, Vertex
+from engine import Tick, Vertex
 
 
 # -- Folds -------------------------------------------------------------------

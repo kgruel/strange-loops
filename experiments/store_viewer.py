@@ -56,8 +56,8 @@ from cells import Block, Style, join_vertical, join_horizontal, border, pad, ROU
 from cells.tui import Surface
 from cells.lens import shape_lens
 
-from vertex.store_reader import StoreReader
-from vertex.tick import Tick
+from engine.store_reader import StoreReader
+from engine.tick import Tick
 
 
 # ── Styles ──────────────────────────────────────────────────────────
@@ -637,7 +637,7 @@ def _payload_one_liner(payload: Any, max_width: int) -> str:
 
 def generate_demo_store(path: Path) -> None:
     """Create a SqliteStore with synthetic homelab-like data."""
-    from vertex.sqlite_store import SqliteStore
+    from engine.sqlite_store import SqliteStore
     from atoms import Fact
 
     store = SqliteStore(

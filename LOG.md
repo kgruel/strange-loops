@@ -9,7 +9,7 @@ live in `experiments/LOG.md`.
 
 **The change.** Read-only store inspection, properly layered.
 
-- `vertex/store_reader.py` — `StoreReader(path)`, read-only SQLite inspector.
+- `engine/store_reader.py` — `StoreReader(path)`, read-only SQLite inspector.
   `PRAGMA query_only=ON`. No serialize/deserialize — pure SQL over raw columns.
   Provides `summary()`, `fact_kind_stats()`, `tick_name_stats()`, `recent_ticks()`,
   `recent_facts()`. The "Tailer" side of the Store/Tailer split.
@@ -37,17 +37,17 @@ append path. Different concerns, different objects.
 **The change.** `lang` becomes pure grammar (zero deps beyond ckdl). The compiler
 backend and CLI move out to where they belong.
 
-- `lang/mapper.py` → `vertex/compiler.py` (DSL AST → runtime types)
-- `lang/program.py` → `vertex/program.py` (VertexProgram, load_vertex_program)
-- `lang/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
-- `lang` deps: `[atoms, vertex, cells]` → `[ckdl]`
-- `hlab` drops direct lang dependency, imports compiler symbols from vertex
-- Experiments split imports: grammar from lang, compilation from vertex
+- `dsl/mapper.py` → `engine/compiler.py` (DSL AST → runtime types)
+- `dsl/program.py` → `engine/program.py` (VertexProgram, load_vertex_program)
+- `dsl/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
+- `lang` deps: `[data, engine, cells]` → `[ckdl]`
+- `hlab` drops direct dsl dependency, imports compiler symbols from engine
+- Experiments split imports: grammar from dsl, compilation from engine
 - Vertex internals: `register()` unified onto Loop (deleted `_FoldEngine`),
   `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence, `_store_tick()`
 
-Dependency graph: `lang→ckdl`, `vertex→atoms,lang`, `apps/loops→lang,atoms,vertex,cells`,
-`hlab→atoms,vertex,cells`. 435 tests (lang 84, vertex 332, loops 19).
+Dependency graph: `dsl→ckdl`, `engine→data,dsl`, `apps/loops→dsl,data,engine,cells`,
+`hlab→data,engine,cells`. 435 tests (dsl 84, engine 332, loops 19).
 
 (`03d6bda`, `e000bf1`, `96361c2`)
 
@@ -101,7 +101,7 @@ API), but `AlertRule` expects `alerts_count: int`. Bridge in consumption code:
 from accumulated state" → fold. `health_fold` is the latter. The other 5 were the
 former.
 
-**Result:** 286 atoms tests, 182 lang tests. +1052/-205 across 23 files.
+**Result:** 286 data tests, 182 DSL tests. +1052/-205 across 23 files.
 
 ---
 
@@ -159,7 +159,7 @@ sources:
    `compile_sources()` returns `(sources, specs)` — sources for the runner,
    specs generated from template loop blocks.
 
-**Result:** 180 lang tests pass. hlab produces identical output. Next session:
+**Result:** 180 DSL tests pass. hlab produces identical output. Next session:
 iterate on render UI.
 
 ---
@@ -197,7 +197,7 @@ iterate on render UI.
 
 **In flight:**
 - runtime/vertex-nesting — Vertex children, tick-to-fact
-- lang/mapper-updates — Compile new DSL features
+- dsl/mapper-updates — Compile new DSL features
 - experiment/nested-flow-viz — Animated visualization (deferred)
 
 ---
@@ -335,7 +335,7 @@ Starting system with 2 source(s)...
 Facts flow through parse pipelines → fold into state → trigger ticks on boundaries.
 The declarative DSL compiles to runtime types and executes correctly.
 
-514 tests passing (atoms: 245, vertex: 165, lang: 104).
+514 tests passing (data: 245, vertex: 165, dsl: 104).
 
 ---
 

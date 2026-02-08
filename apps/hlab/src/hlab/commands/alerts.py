@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from vertex import VertexProgram, load_vertex_program
+from engine import VertexProgram, load_vertex_program
 
 from ..lenses.alerts import AlertsData, FiringAlert, AlertRule, TargetHealth
 

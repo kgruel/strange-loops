@@ -49,8 +49,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from atoms import Fact
-from vertex import Tick, Vertex
-from vertex import Grant
+from engine import Tick, Vertex
+from engine import Grant
 
 
 # -- Wire format: Fact serialization ------------------------------------------

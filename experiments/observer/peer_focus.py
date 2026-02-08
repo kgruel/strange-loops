@@ -32,8 +32,8 @@ from collections import deque
 from dataclasses import dataclass
 
 from atoms import Fact
-from vertex import Peer, delegate
-from vertex import Tick, Vertex
+from engine import Peer, delegate
+from engine import Tick, Vertex
 from atoms import Shape, Facet
 
 # System peer — unrestricted, used for all fact emissions in this experiment.

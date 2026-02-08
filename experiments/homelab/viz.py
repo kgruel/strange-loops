@@ -15,8 +15,8 @@ from pathlib import Path
 
 from atoms import Runner, Source
 from lang import parse_loop_file, parse_vertex_file, validate
-from vertex import compile_loop, compile_vertex_recursive, materialize_vertex
-from vertex import Vertex
+from engine import compile_loop, compile_vertex_recursive, materialize_vertex
+from engine import Vertex
 from cells import Block, Style, join_vertical, join_horizontal, pad, border
 from cells.tui import Surface
 from cells.lens import shape_lens

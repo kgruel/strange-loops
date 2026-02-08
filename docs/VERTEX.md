@@ -282,17 +282,17 @@ vertex doesn't care that it came from another vertex. Loops nest.
 
 ---
 
-## Relationship to vertex Library
+## Relationship to engine Library
 
-The `vertex` library provides the concrete implementation:
+The `engine` library provides the concrete implementation:
 
 | Concept | Implementation |
 |---------|----------------|
-| Vertex | `vertex.Vertex` class |
-| Fold engine | `vertex.Projection` (internal to Vertex) |
-| Tick output | `vertex.Tick[T]` frozen dataclass |
-| Persistence | `vertex.Store` protocol (EventStore, FileStore) |
-| Fan-out | `vertex.Stream` + `vertex.Tap` |
+| Vertex | `engine.Vertex` class |
+| Fold engine | `engine.Projection` (internal to Vertex) |
+| Tick output | `engine.Tick[T]` frozen dataclass |
+| Persistence | `engine.Store` protocol (EventStore, FileStore) |
+| Fan-out | `engine.Stream` + `engine.Tap` |
 
 Vertex is sync by design. The async bridge lives at the composition point:
 

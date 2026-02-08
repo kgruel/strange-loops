@@ -28,8 +28,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from atoms import Fact, Source
-from vertex import Vertex, Loop, Tick
-from vertex.projection import Projection
+from engine import Vertex, Loop, Tick
+from engine.projection import Projection
 from cells import Block, Style, join_vertical, join_horizontal, border, pad
 from cells.tui import Surface
 

@@ -49,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Generic, TypeVar
 
-from vertex import Projection
+from engine import Projection
 
 
 # ============================================================================

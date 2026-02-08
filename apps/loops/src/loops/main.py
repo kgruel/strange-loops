@@ -51,7 +51,7 @@ def cmd_test(args: argparse.Namespace) -> int:
     """Test a .loop file's parse pipeline against sample input."""
     from atoms import run_parse
     from lang import parse_loop_file, validate_loop
-    from vertex import compile_loop
+    from engine import compile_loop
 
     path = Path(args.file)
     if not path.exists():
@@ -129,7 +129,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def _run_loop(path: Path, args: argparse.Namespace) -> int:
     """Execute a .loop file and print facts."""
     from lang import parse_loop_file, validate_loop
-    from vertex import compile_loop
+    from engine import compile_loop
 
     try:
         ast = parse_loop_file(path)
@@ -160,7 +160,7 @@ def _run_loop(path: Path, args: argparse.Namespace) -> int:
 
 def _run_vertex(path: Path, args: argparse.Namespace) -> int:
     """Run a .vertex file as a long-lived daemon."""
-    from vertex import load_vertex_program
+    from engine import load_vertex_program
 
     try:
         program = load_vertex_program(path)
@@ -234,7 +234,7 @@ def _run_vertex(path: Path, args: argparse.Namespace) -> int:
 def cmd_compile(args: argparse.Namespace) -> int:
     """Show compiled structure of a .loop or .vertex file."""
     from lang import parse_loop_file, parse_vertex_file, validate
-    from vertex import compile_loop, compile_vertex
+    from engine import compile_loop, compile_vertex
 
     path = Path(args.file)
     if not path.exists():
@@ -361,7 +361,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         join_vertical,
     )
     from cells.lens import shape_lens
-    from vertex import load_vertex_program
+    from engine import load_vertex_program
 
     path = Path(args.file)
     if not path.exists():

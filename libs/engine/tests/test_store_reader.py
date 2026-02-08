@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from vertex import Tick
-from vertex.store_reader import StoreReader
+from engine import Tick
+from engine.store_reader import StoreReader
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS facts (

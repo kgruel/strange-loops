@@ -4,7 +4,7 @@ Self-contained: inlines shape definition and helpers.
 """
 
 from atoms import Fact
-from vertex import Peer, grant, delegate
+from engine import Peer, grant, delegate
 from atoms import Facet, Fold, Shape
 
 

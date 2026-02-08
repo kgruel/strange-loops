@@ -18,7 +18,7 @@ import platform
 import sys
 
 from atoms import CommandSource, Runner
-from vertex import Vertex
+from engine import Vertex
 
 
 def heartbeat_fold(state: dict, payload: dict) -> dict:

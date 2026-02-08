@@ -26,8 +26,8 @@ Vertex is runtime infrastructure, not an atom. Cell is a surface primitive.
 
 ```bash
 uv sync                                                    # install all
-uv run --package atoms pytest libs/atoms/tests             # test one lib
-uv run --package vertex pytest libs/vertex/tests           # test another
+uv run --package atoms pytest libs/atoms/tests               # test one lib
+uv run --package engine pytest libs/engine/tests           # test another
 uv run --package cells pytest libs/cells/tests/test_span.py  # single file
 ```
 
@@ -35,8 +35,8 @@ uv run --package cells pytest libs/cells/tests/test_span.py  # single file
 
 ```
 libs/
-  atoms/    Observation + Contract + Ingress: Fact, Spec, Source
-  vertex/   Temporal + Identity: Tick, Vertex, Peer, Grant
+  data/     Observation + Contract + Ingress: Fact, Spec, Source
+  engine/   Temporal + Identity: Tick, Vertex, Peer, Grant
   cells/    Surface: Cell, Block, Buffer, Lens, Surface
 
 experiments/   Integration layer — wires libs together
@@ -67,8 +67,8 @@ Same primitive at every level. Loops nest.
 
 ## Key Patterns
 
-- Two libraries: `atoms` (atoms + contracts), `vertex` (runtime + identity). `cells` is surface.
-- `vertex` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
+- Two libraries: `atoms` (atoms + contracts), `engine` (runtime + identity). `cells` is surface.
+- `engine` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
 - Immutable by default — frozen dataclasses, pure functions
 - Spec is the contract — describes structure and fold operations
 - `Projection(initial, fold=spec.apply)` — no bridge class needed

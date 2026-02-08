@@ -8,7 +8,7 @@ import pytest
 
 from atoms import Fact
 from atoms import Runner, Source
-from vertex import Vertex
+from engine import Vertex
 
 
 @dataclass
@@ -266,7 +266,7 @@ class TestVertexIngest:
 
     def test_ingest_with_grant(self):
         """ingest() respects grant potential."""
-        from vertex import Peer, grant_of
+        from engine import Peer, grant_of
 
         peer = Peer("user", potential=frozenset({"allowed"}))
         grant = grant_of(peer)

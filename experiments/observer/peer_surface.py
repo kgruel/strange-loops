@@ -23,8 +23,8 @@ import random
 from collections import deque
 
 from atoms import Fact
-from vertex import Peer, Grant, delegate, grant_of
-from vertex import Lens, Tick, Vertex
+from engine import Peer, Grant, delegate, grant_of
+from engine import Lens, Tick, Vertex
 from cells import Block, Style, join_vertical, join_horizontal, border
 from cells.tui import Surface
 

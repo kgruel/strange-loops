@@ -2,7 +2,7 @@
 
 import pytest
 from atoms import Fact
-from vertex import Vertex, EventStore, replay
+from engine import Vertex, EventStore, replay
 
 
 class TestReplay:

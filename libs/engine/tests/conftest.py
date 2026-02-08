@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from vertex import EventStore, FileWriter, Stream, Tailer
+from engine import EventStore, FileWriter, Stream, Tailer
 
 from tests.helpers import (
     CountProjection,

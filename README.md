@@ -18,9 +18,9 @@ See [LOOPS.md](LOOPS.md) for the fundamental model.
 
 | Library | Purpose |
 |---------|---------|
-| **data** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
+| **atoms** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
 | **engine** | Runtime + Identity: Tick, Vertex, Loop, Store, Grant |
-| **dsl** | DSL parser: `.loop`/`.vertex` files → runtime types |
+| **lang** | DSL loader: `.loop`/`.vertex` files → AST + validation |
 | **cells** | Terminal surface: Cell, Block, Buffer, Lens, Surface |
 
 ## Setup
@@ -53,9 +53,9 @@ uv run --package cells pytest libs/cells/tests
 
 ```
 libs/
-  data/       Fact, Spec, Source, Parse ops, Fold ops
+  atoms/      Fact, Spec, Source, Parse ops, Fold ops
   engine/     Tick, Vertex, Store, Grant
-  dsl/        .loop/.vertex parser and CLI
+  lang/       .loop/.vertex loader + validator (AST)
   cells/      Terminal UI framework
 
 experiments/ Integration layer — wires libs together

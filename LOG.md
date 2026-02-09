@@ -123,17 +123,17 @@ append path. Different concerns, different objects.
 **The change.** `lang` becomes pure grammar (zero deps beyond ckdl). The compiler
 backend and CLI move out to where they belong.
 
-- `dsl/mapper.py` → `engine/compiler.py` (DSL AST → runtime types)
-- `dsl/program.py` → `engine/program.py` (VertexProgram, load_vertex_program)
-- `dsl/cli.py` → `apps/loops/main.py` (new workspace member, entry point `loops`)
-- `lang` deps: `[data, engine, cells]` → `[ckdl]`
-- `hlab` drops direct dsl dependency, imports compiler symbols from engine
-- Experiments split imports: grammar from dsl, compilation from engine
+- Compiler backend → `engine/compiler.py` (DSL AST → runtime types)
+- Program orchestration → `engine/program.py` (VertexProgram, load_vertex_program)
+- CLI → `apps/loops/main.py` (new workspace member, entry point `loops`)
+- `lang` deps: `[atoms, engine, cells]` → `[ckdl]`
+- `hlab` drops direct lang dependency, imports compiler symbols from engine
+- Experiments split imports: grammar from lang, compilation from engine
 - Vertex internals: `register()` unified onto Loop (deleted `_FoldEngine`),
   `Tick.to_dict/from_dict`, `SqliteStore` for tick persistence, `_store_tick()`
 
-Dependency graph: `dsl→ckdl`, `engine→data,dsl`, `apps/loops→dsl,data,engine,cells`,
-`hlab→data,engine,cells`. 435 tests (dsl 84, engine 332, loops 19).
+Dependency graph: `lang→ckdl`, `engine→atoms,lang`, `apps/loops→lang,atoms,engine,cells`,
+`hlab→atoms,engine,cells`. 435 tests (lang 84, engine 332, loops 19).
 
 (`03d6bda`, `e000bf1`, `96361c2`)
 
@@ -187,7 +187,7 @@ API), but `AlertRule` expects `alerts_count: int`. Bridge in consumption code:
 from accumulated state" → fold. `health_fold` is the latter. The other 5 were the
 former.
 
-**Result:** 286 data tests, 182 DSL tests. +1052/-205 across 23 files.
+**Result:** 286 atoms tests, 182 lang tests. +1052/-205 across 23 files.
 
 ---
 
@@ -283,7 +283,7 @@ iterate on render UI.
 
 **In flight:**
 - runtime/vertex-nesting — Vertex children, tick-to-fact
-- dsl/mapper-updates — Compile new DSL features
+- lang/mapper-updates — Compile new DSL features
 - experiment/nested-flow-viz — Animated visualization (deferred)
 
 ---
@@ -377,7 +377,7 @@ tick-as-fact composition is the next frontier.
 - Legacy `_FoldEngine` gets no fidelity tracking (`since=None`)
 - Loop encapsulates its own period tracking
 
-191 vertex tests (was 165, +26 new).
+191 engine tests (was 165, +26 new).
 
 ---
 
@@ -421,7 +421,7 @@ Starting system with 2 source(s)...
 Facts flow through parse pipelines → fold into state → trigger ticks on boundaries.
 The declarative DSL compiles to runtime types and executes correctly.
 
-514 tests passing (data: 245, vertex: 165, dsl: 104).
+514 tests passing (atoms: 245, engine: 165, lang: 104).
 
 ---
 

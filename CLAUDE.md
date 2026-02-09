@@ -35,7 +35,8 @@ uv run --package cells pytest libs/cells/tests/test_span.py  # single file
 
 ```
 libs/
-  data/     Observation + Contract + Ingress: Fact, Spec, Source
+  atoms/    Observation + Contract + Ingress: Fact, Spec, Source
+  lang/     KDL loader + validator for .loop/.vertex files
   engine/   Temporal + Identity: Tick, Vertex, Peer, Grant
   cells/    Surface: Cell, Block, Buffer, Lens, Surface
 

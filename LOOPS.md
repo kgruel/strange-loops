@@ -44,7 +44,7 @@ ticks-as-facts flowing into other loops.
 
 ## Two Libraries
 
-### data
+### atoms
 
 Everything about the data itself.
 
@@ -59,7 +59,7 @@ Validation  static shape checking (parse output vs spec input_fields)
 
 One concern: **what data looks like, how to get it, how to shape it.**
 
-### vertex
+### engine
 
 Everything about execution.
 
@@ -167,7 +167,7 @@ During model development, these concepts were introduced and then dissolved:
 | Concept | Dissolved into | Why |
 |---------|---------------|-----|
 | Peer (as atom) | observer field + Grant policy | Identity is a string on Fact, policy is runtime |
-| Vertex (as atom) | Runtime library | Vertex is execution, not data |
+| Vertex (as atom) | `engine` (runtime library) | Vertex is execution, not data |
 | Sink | Fold state | Loops have no terminals |
 | Store (as atom) | Vertex capability | Persistence is a runtime property |
 | Witness | Observer + Vertex | A witness is just an observer whose job is to emit |

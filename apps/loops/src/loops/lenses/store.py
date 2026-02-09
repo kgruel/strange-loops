@@ -11,8 +11,8 @@ def store_view(data: dict, zoom: Zoom, width: int) -> Block:
     """Render store summary at the given zoom level.
 
     Zoom levels:
-    - MINIMAL: one-line summary
-    - SUMMARY: per-kind table with counts and freshness
+    - MINIMAL: ticks-first one-liner
+    - SUMMARY: tick table with sparkline + count + freshness + payload keys
     - DETAILED: per-tick section with latest payload at zoom 1
     - FULL: tick payloads at zoom 2 + recent fact payloads
     """
@@ -26,7 +26,7 @@ def store_view(data: dict, zoom: Zoom, width: int) -> Block:
 
 
 def _render_minimal(data: dict, width: int) -> Block:
-    """One-line: '5 kinds, 6.4k facts, 15 ticks | fresh 2h ago'."""
+    """One-line: '3 boundaries, 36 ticks, 200 facts | fresh 5m ago'."""
     facts_total = data["facts"]["total"]
     ticks_total = data["ticks"]["total"]
     kinds = len(data["facts"].get("kinds", {}))
@@ -37,7 +37,7 @@ def _render_minimal(data: dict, width: int) -> Block:
     else:
         facts_str = str(facts_total)
 
-    parts = [f"{kinds} kinds, {facts_str} facts, {ticks_total} ticks"]
+    parts = [f"{kinds} boundaries, {ticks_total} ticks, {facts_str} facts"]
 
     freshness = data.get("freshness")
     if freshness is not None:
@@ -48,23 +48,28 @@ def _render_minimal(data: dict, width: int) -> Block:
 
 
 def _render_summary(data: dict, width: int) -> Block:
-    """Per-kind table grouped into Facts + Ticks sections."""
+    """Ticks-first table with sparkline + count + freshness + payload keys."""
     rows: list[Block] = []
     header_style = Style(bold=True)
     dim_style = Style(dim=True)
 
-    # Facts section
-    fact_kinds = data["facts"].get("kinds", {})
-    if fact_kinds:
-        rows.append(Block.text("Facts", header_style, width=width))
-        rows.append(_kind_table(fact_kinds, width, show_sample=True))
-        rows.append(Block.empty(width, 1))
-
-    # Ticks section
+    # Ticks section — primary
     tick_names = data["ticks"].get("names", {})
     if tick_names:
         rows.append(Block.text("Ticks", header_style, width=width))
-        rows.append(_kind_table(tick_names, width, show_sample=False))
+        rows.append(_tick_table(tick_names, width))
+        rows.append(Block.empty(width, 1))
+
+    # Facts footer — secondary
+    fact_kinds = data["facts"].get("kinds", {})
+    facts_total = data["facts"]["total"]
+    kind_count = len(fact_kinds)
+    if kind_count > 0:
+        kind_list = ", ".join(list(fact_kinds.keys())[:5])
+        if kind_count > 5:
+            kind_list += f" (+{kind_count - 5})"
+        footer = f"{facts_total} facts across {kind_count} kinds: {kind_list}"
+        rows.append(Block.text(footer, dim_style, width=width))
 
     if not rows:
         return Block.text("(empty store)", dim_style, width=width)
@@ -149,7 +154,7 @@ def _render_full(data: dict, width: int) -> Block:
         recent = info.get("recent", [])
         if recent:
             for payload in recent[:3]:
-                body = shape_lens(payload, zoom=1, width=width - 2)
+                body = shape_lens(payload, zoom=2, width=width - 2)
                 rows.append(body)
         rows.append(Block.empty(width, 1))
 
@@ -163,6 +168,45 @@ def _render_full(data: dict, width: int) -> Block:
             rows.pop()
         else:
             break
+
+    return join_vertical(*rows)
+
+
+def _tick_table(ticks: dict, width: int) -> Block:
+    """Render a tick name -> sparkline + count + freshness + payload keys table."""
+    if not ticks:
+        return Block.empty(width, 1)
+
+    rows: list[Block] = []
+    dim_style = Style(dim=True)
+
+    max_name = max(len(str(k)) for k in ticks)
+    name_col = min(max_name + 2, width // 3)
+
+    for name, info in ticks.items():
+        count = info["count"]
+        fresh = _relative_time(info["latest"]) if "latest" in info else ""
+        sparkline = info.get("sparkline", "")
+        payload_keys = info.get("payload_keys", [])
+
+        name_text = str(name).ljust(name_col)[:name_col]
+        stats = f" {sparkline}  {count:>4}  {fresh:>8}"
+
+        line = name_text + stats
+
+        # Append payload key names if available
+        if payload_keys:
+            remaining = width - len(line) - 2
+            if remaining > 10:
+                keys_str = ", ".join(payload_keys[:4])
+                if len(payload_keys) > 4:
+                    keys_str += ", \u2026"
+                if len(keys_str) > remaining:
+                    keys_str = keys_str[:remaining - 1] + "\u2026"
+                line += "  " + keys_str
+
+        line = line[:width]
+        rows.append(Block.text(line, dim_style, width=width))
 
     return join_vertical(*rows)
 

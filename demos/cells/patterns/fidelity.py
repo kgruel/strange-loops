@@ -84,7 +84,7 @@ class BuildData:
 
 # Sample build data
 SAMPLE_BUILD = BuildData(
-    name="prism",
+    name="loops",
     tasks=(
         TaskData("lint", TaskStatus.SUCCESS, 234),
         TaskData("typecheck", TaskStatus.SUCCESS, 1892),

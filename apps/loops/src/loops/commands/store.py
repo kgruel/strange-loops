@@ -6,6 +6,45 @@ from __future__ import annotations
 
 from pathlib import Path
 
+_SPARK_CHARS = " ▁▂▃▄▅▆▇█"
+
+
+def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
+    """Bucket timestamps into equal-width time bins, return counts per bin.
+
+    *timestamps* should be sorted newest-first (as returned by
+    ``StoreReader.tick_timestamps``).  Returns *width* floats — one
+    count per bin, ordered oldest→newest so the visual reads left-to-right.
+    """
+    if not timestamps or width <= 0:
+        return []
+    lo, hi = min(timestamps), max(timestamps)
+    if lo == hi:
+        # All ticks at same instant — single spike in the middle
+        buckets = [0.0] * width
+        buckets[width // 2] = float(len(timestamps))
+        return buckets
+    span = hi - lo
+    buckets = [0.0] * width
+    for ts in timestamps:
+        idx = int((ts - lo) / span * (width - 1))
+        idx = max(0, min(idx, width - 1))
+        buckets[idx] += 1.0
+    return buckets
+
+
+def _sparkline_str(values: list[float]) -> str:
+    """Map bucket counts to sparkline characters."""
+    if not values:
+        return ""
+    mx = max(values)
+    if mx == 0:
+        return " " * len(values)
+    return "".join(
+        _SPARK_CHARS[int(v / mx * (len(_SPARK_CHARS) - 1))]
+        for v in values
+    )
+
 
 def resolve_store_path(file_path: Path) -> Path:
     """Resolve a .vertex or .db file to the actual store .db path."""
@@ -26,7 +65,8 @@ def make_fetcher(path: Path, zoom: int):
     """Create a zero-arg fetcher for store data.
 
     zoom controls enrichment depth:
-      0-1: summary only (counts + stats)
+      0:   summary only (counts + stats)
+      1:   + sparkline + payload_keys per tick
       2:   + latest tick payloads
       3:   + recent fact payloads
     """
@@ -38,7 +78,18 @@ def make_fetcher(path: Path, zoom: int):
             data = reader.summary()
             data["freshness"] = reader.freshness
             if zoom >= 1:
-                # Add a single recent fact payload per kind for SUMMARY gist
+                # Sparkline + payload keys per tick name
+                for name, info in data["ticks"]["names"].items():
+                    ts_list = reader.tick_timestamps(name, 50)
+                    buckets = _bucket_timestamps(ts_list, 8)
+                    info["sparkline"] = _sparkline_str(buckets)
+                    # Extract payload key names from latest tick
+                    recent = reader.recent_ticks(name, 1)
+                    if recent and isinstance(recent[0].payload, dict):
+                        info["payload_keys"] = list(recent[0].payload.keys())
+                    else:
+                        info["payload_keys"] = []
+                # Keep sample payload per fact kind for SUMMARY gist
                 for kind, info in data["facts"]["kinds"].items():
                     recent = reader.recent_facts(kind, 1)
                     if recent:

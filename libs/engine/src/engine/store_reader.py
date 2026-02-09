@@ -79,6 +79,15 @@ class StoreReader:
             },
         }
 
+    def tick_timestamps(self, name: str, limit: int | None = None) -> list[float]:
+        """Raw timestamps for a tick name, newest first. No payload parsing."""
+        query = "SELECT ts FROM ticks WHERE name = ? ORDER BY ts DESC"
+        params: list = [name]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        return [r[0] for r in self._conn.execute(query, params).fetchall()]
+
     def recent_ticks(self, name: str, n: int) -> list[Tick]:
         """Last N ticks for a given name, newest first."""
         rows = self._conn.execute(

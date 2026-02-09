@@ -86,7 +86,7 @@ drill, not listed alongside ticks.
   IS the abstraction boundary. A viewer that polls the store is already a live
   viewer. No separate live mode needed.
 
-**Loops app identity clarified:** The general-purpose CLI for the prism system,
+**Loops app identity clarified:** The general-purpose CLI for the loops system,
 not just DSL tooling. Libs stand alone; loops composes them.
 
 ---

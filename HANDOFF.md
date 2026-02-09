@@ -113,7 +113,7 @@ from engine import StoreReader
 
 ## Current Focus
 
-**apps/loops** is the general-purpose CLI for the prism system (validate, test,
+**apps/loops** is the general-purpose CLI for the loops system (validate, test,
 run, compile, start, store). **apps/hlab** is the first domain app.
 `experiments/homelab/` is archived predecessor — don't develop there.
 

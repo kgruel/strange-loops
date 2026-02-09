@@ -7,6 +7,7 @@ import pytest
 
 from cells import Zoom
 from cells.components.list_view import ListState
+from loops.commands.store import _bucket_timestamps, _sparkline_str
 from loops.lenses.store import store_view, _relative_time
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
 
@@ -47,12 +48,16 @@ def _make_summary(*, freshness=None):
                     "earliest": now - timedelta(days=25),
                     "latest": hour_ago,
                     "latest_payload": {"episode_count": 42, "total_duration": 12345},
+                    "sparkline": "▃▅▇▅▃▅▇▅",
+                    "payload_keys": ["episode_count", "total_duration"],
                 },
                 "hn.top": {
                     "count": 7,
                     "earliest": now - timedelta(days=10),
                     "latest": now - timedelta(minutes=45),
                     "latest_payload": {"story_count": 30, "top_score": 500},
+                    "sparkline": "▁▃▅▇▅▃▁▃",
+                    "payload_keys": ["story_count", "top_score"],
                 },
             },
         },
@@ -75,9 +80,17 @@ class TestMinimal:
         data = _make_summary()
         block = store_view(data, Zoom.MINIMAL, 80)
         text = _block_to_text(block)
-        assert "3 kinds" in text
-        assert "6.5k facts" in text or "6462" in text or "6.4k" in text
+        assert "3 boundaries" in text
         assert "15 ticks" in text
+        assert "6.5k facts" in text or "6462" in text or "6.4k" in text
+
+    def test_ticks_before_facts(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.MINIMAL, 80)
+        text = _block_to_text(block)
+        tick_pos = text.index("ticks")
+        fact_pos = text.index("facts")
+        assert tick_pos < fact_pos
 
     def test_shows_freshness(self):
         data = _make_summary()
@@ -93,24 +106,46 @@ class TestMinimal:
 
 
 class TestSummary:
-    def test_shows_facts_header(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "Facts" in text
-
     def test_shows_ticks_header(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
         assert "Ticks" in text
 
-    def test_shows_kind_names(self):
+    def test_shows_tick_names(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
-        assert "hn.story" in text
-        assert "rss.item" in text
+        assert "podcast.huberman" in text
+        assert "hn.top" in text
+
+    def test_shows_sparkline(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        # Sparkline chars should be present
+        assert "▃" in text or "▅" in text or "▇" in text
+
+    def test_shows_payload_keys(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "episode_count" in text or "story_count" in text
+
+    def test_shows_fact_footer(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "6462 facts" in text
+        assert "3 kinds" in text
+
+    def test_no_facts_section_header(self):
+        """SUMMARY should not have a 'Facts' header — just a footer line."""
+        data = _make_summary()
+        block = store_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        # "Facts" as a standalone header line should not appear
+        assert "Facts\n" not in text.replace(" ", "")
 
     def test_non_empty(self):
         data = _make_summary()
@@ -172,6 +207,62 @@ class TestRelativeTime:
         assert _relative_time("not a datetime") == "?"
 
 
+# ── Sparkline tests ─────────────────────────────────────────
+
+
+class TestSparkline:
+    def test_bucket_empty(self):
+        assert _bucket_timestamps([], 8) == []
+
+    def test_bucket_single_timestamp(self):
+        buckets = _bucket_timestamps([100.0], 8)
+        assert len(buckets) == 8
+        assert sum(buckets) == 1.0
+
+    def test_bucket_identical_timestamps(self):
+        buckets = _bucket_timestamps([100.0, 100.0, 100.0], 8)
+        assert len(buckets) == 8
+        assert sum(buckets) == 3.0
+        # All in the middle bucket
+        assert buckets[4] == 3.0
+
+    def test_bucket_spread(self):
+        # Timestamps at extremes should land in first and last buckets
+        buckets = _bucket_timestamps([0.0, 100.0], 4)
+        assert len(buckets) == 4
+        assert buckets[0] >= 1.0
+        assert buckets[-1] >= 1.0
+
+    def test_bucket_zero_width(self):
+        assert _bucket_timestamps([1.0, 2.0], 0) == []
+
+    def test_sparkline_empty(self):
+        assert _sparkline_str([]) == ""
+
+    def test_sparkline_all_zero(self):
+        result = _sparkline_str([0.0, 0.0, 0.0])
+        assert len(result) == 3
+        assert all(c == " " for c in result)
+
+    def test_sparkline_uniform(self):
+        result = _sparkline_str([5.0, 5.0, 5.0])
+        assert len(result) == 3
+        # All same value -> all max char
+        assert result[0] == result[1] == result[2]
+        assert result[0] == "█"
+
+    def test_sparkline_ascending(self):
+        result = _sparkline_str([0.0, 1.0, 2.0, 3.0])
+        assert len(result) == 4
+        # Should be ascending characters
+        assert result[-1] == "█"
+
+    def test_sparkline_length_matches_input(self):
+        for n in [1, 5, 10, 20]:
+            result = _sparkline_str([float(i) for i in range(n)])
+            assert len(result) == n
+
+
 # ── Fidelity drill tests ─────────────────────────────────────────
 
 
@@ -198,6 +289,8 @@ def _make_fidelity_summary():
                     "latest_payload": {"status": "ok"},
                     "latest_since": (now - timedelta(hours=2)).timestamp(),
                     "latest_ts": hour_ago.timestamp(),
+                    "sparkline": "▃▅▇▅▃",
+                    "payload_keys": ["status"],
                 },
             },
         },
@@ -220,6 +313,33 @@ def _make_fake_facts(n: int = 5, kinds: list[str] | None = None) -> list[dict]:
     return facts
 
 
+class TestStoreExplorerState:
+    """Test ticks-first StoreExplorerState."""
+
+    def test_from_summary_tick_names_only(self):
+        state = StoreExplorerState.from_summary(_make_fidelity_summary())
+        assert state.tick_names == ["health.check"]
+        assert state.cursor.item_count == 1
+
+    def test_items_are_tick_names(self):
+        state = StoreExplorerState.from_summary(_make_summary())
+        assert state.items == ["podcast.huberman", "hn.top"]
+
+    def test_selected_name(self):
+        state = StoreExplorerState.from_summary(_make_fidelity_summary())
+        assert state.selected_name() == "health.check"
+
+    def test_selected_data(self):
+        state = StoreExplorerState.from_summary(_make_fidelity_summary())
+        data = state.selected_data()
+        assert data is not None
+        assert data["count"] == 5
+
+    def test_no_kinds_field(self):
+        state = StoreExplorerState.from_summary(_make_fidelity_summary())
+        assert not hasattr(state, "kinds")
+
+
 class TestFidelityState:
     """Test fidelity drill state transitions on StoreExplorerState."""
 
@@ -228,20 +348,13 @@ class TestFidelityState:
         assert state.fidelity is None
         assert state.focus == "list"
 
-    def test_selected_is_tick(self):
+    def test_selection_is_always_tick(self):
         state = StoreExplorerState.from_summary(_make_fidelity_summary())
-        # First items are facts, last is tick
-        assert not state.selected_is_tick()  # cursor starts at 0 = first fact kind
-        # Move cursor past fact kinds to tick
-        tick_idx = len(state.kinds)
-        state = replace(state, cursor=state.cursor.move_to(tick_idx))
-        assert state.selected_is_tick()
-        assert state.selected_tick_name() == "health.check"
+        # First item is a tick (no facts in the list anymore)
+        assert state.selected_name() == "health.check"
 
     def test_drill_into_fidelity(self):
         state = StoreExplorerState.from_summary(_make_fidelity_summary())
-        tick_idx = len(state.kinds)
-        state = replace(state, cursor=state.cursor.move_to(tick_idx))
 
         facts = _make_fake_facts(8)
         tick_info = state.summary["ticks"]["names"]["health.check"]

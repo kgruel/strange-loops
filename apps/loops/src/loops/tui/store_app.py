@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cells import Block, Style, join_horizontal, join_vertical, pad, border, ROUNDED
@@ -28,10 +29,13 @@ class FidelityState:
 
 @dataclass(frozen=True)
 class StoreExplorerState:
-    """Immutable state for the store explorer."""
+    """Immutable state for the store explorer.
+
+    Ticks-first: the left panel lists tick names only.
+    Facts are reachable through fidelity drill.
+    """
 
     summary: dict
-    kinds: list[str]
     tick_names: list[str]
     cursor: ListState
     detail: DataExplorerState | None = None
@@ -41,49 +45,35 @@ class StoreExplorerState:
     @staticmethod
     def from_summary(summary: dict) -> StoreExplorerState:
         """Build initial state from a store summary."""
-        fact_kinds = list(summary.get("facts", {}).get("kinds", {}).keys())
         tick_names = list(summary.get("ticks", {}).get("names", {}).keys())
-        all_items = [f"[fact] {k}" for k in fact_kinds] + [f"[tick] {n}" for n in tick_names]
         return StoreExplorerState(
             summary=summary,
-            kinds=fact_kinds,
             tick_names=tick_names,
-            cursor=ListState(item_count=len(all_items)),
+            cursor=ListState(item_count=len(tick_names)),
         )
 
     @property
     def items(self) -> list[str]:
-        """All navigable items (facts then ticks)."""
-        return [f"[fact] {k}" for k in self.kinds] + [f"[tick] {n}" for n in self.tick_names]
+        """All navigable items (tick names only)."""
+        return list(self.tick_names)
 
     @property
     def selected_label(self) -> str | None:
         """Label of the currently selected item."""
-        items = self.items
-        if not items or self.cursor.selected >= len(items):
+        if not self.tick_names or self.cursor.selected >= len(self.tick_names):
             return None
-        return items[self.cursor.selected]
+        return self.tick_names[self.cursor.selected]
 
-    def selected_is_tick(self) -> bool:
-        """Whether the current selection is a tick item."""
-        return self.cursor.selected >= len(self.kinds)
-
-    def selected_tick_name(self) -> str | None:
-        """Name of the currently selected tick, or None if a fact is selected."""
-        idx = self.cursor.selected - len(self.kinds)
-        if 0 <= idx < len(self.tick_names):
-            return self.tick_names[idx]
+    def selected_name(self) -> str | None:
+        """Name of the currently selected tick."""
+        if 0 <= self.cursor.selected < len(self.tick_names):
+            return self.tick_names[self.cursor.selected]
         return None
 
     def selected_data(self) -> dict | None:
-        """Data for the currently selected item."""
-        idx = self.cursor.selected
-        if idx < len(self.kinds):
-            kind = self.kinds[idx]
-            return self.summary["facts"]["kinds"].get(kind, {})
-        tick_idx = idx - len(self.kinds)
-        if tick_idx < len(self.tick_names):
-            name = self.tick_names[tick_idx]
+        """Data for the currently selected tick."""
+        name = self.selected_name()
+        if name is not None:
             return self.summary["ticks"]["names"].get(name, {})
         return None
 
@@ -148,7 +138,7 @@ class StoreExplorerApp(Surface):
             self.mark_dirty()
             return
 
-        if key == "f" and state.selected_is_tick():
+        if key == "f":
             self._drill_fidelity()
             return
 
@@ -223,7 +213,7 @@ class StoreExplorerApp(Surface):
         if state is None or self._fidelity_fetch is None:
             return
 
-        tick_name = state.selected_tick_name()
+        tick_name = state.selected_name()
         if tick_name is None:
             return
 
@@ -314,8 +304,6 @@ class StoreExplorerApp(Surface):
         self, fid: FidelityState, width: int, height: int,
     ) -> Block:
         """Render the fidelity drill as a bordered panel."""
-        from datetime import datetime, timezone
-
         inner_w = width - 4  # border eats 2 per side
         inner_h = height - 2
 
@@ -388,7 +376,10 @@ class StoreExplorerApp(Surface):
         # Header
         facts_total = state.summary["facts"]["total"]
         ticks_total = state.summary["ticks"]["total"]
-        header_text = f"Store: {facts_total} facts, {ticks_total} ticks"
+        kind_count = len(state.summary["facts"].get("kinds", {}))
+        freshness = state.summary.get("freshness")
+        fresh_str = f" | fresh {_relative_time(freshness)}" if freshness else ""
+        header_text = f"Store: {facts_total} facts across {kind_count} kinds, {ticks_total} ticks{fresh_str}"
         header = Block.text(header_text, Style(bold=True), width=width)
 
         # Footer / help
@@ -396,23 +387,42 @@ class StoreExplorerApp(Surface):
             filter_label = "all" if state.fidelity.filtered else "filter"
             help_text = f"[j/k] navigate  [a] {filter_label}  [bksp] back  [q]uit"
         else:
-            tick_hint = "  [f] fidelity" if state.selected_is_tick() else ""
             focus_hint = "list" if state.focus == "list" else "detail"
-            help_text = f"[j/k] navigate  [tab] switch ({focus_hint}){tick_hint}  [enter] expand  [q]uit"
+            help_text = f"[j/k] navigate  [f] fidelity  [tab] switch ({focus_hint})  [enter] expand  [q]uit"
         footer = Block.text(help_text, Style(dim=True), width=width)
 
-        # Panel dimensions
-        panel_height = max(5, height - 4)  # header + gap + footer + gap
-        left_width = max(20, min(width // 3, 40))
+        # Panel dimensions — adaptive chrome: drop gaps then header as height shrinks
+        # Full chrome: header(1) + gap(1) + panels + gap(1) + footer(1) = panels + 4
+        # Tight:       header(1) + panels + footer(1) = panels + 2
+        # Minimal:     panels only
+        chrome = 4 if height >= 12 else (2 if height >= 7 else 0)
+        panel_height = max(3, height - chrome)
+        left_width = max(30, min(width // 2, 60))
         right_width = max(10, width - left_width - 3)  # 3 for gap
 
-        # Left panel: kind/tick list
-        items = state.items
-        lines = [Line(spans=(Span(item, Style()),)) for item in items]
+        # Left panel: tick list with inline sparkline + count + freshness
+        lines: list[Line] = []
+        max_name_len = max((len(n) for n in state.tick_names), default=0)
+        name_col = min(max_name_len, left_width - 22)  # room for sparkline+count+fresh
+
+        for name in state.tick_names:
+            info = state.summary["ticks"]["names"].get(name, {})
+            sparkline = info.get("sparkline", "")
+            count = info.get("count", 0)
+            fresh = _relative_time(info["latest"]) if "latest" in info else "?"
+
+            name_padded = name[:name_col].ljust(name_col)
+            lines.append(Line(spans=(
+                Span(f" {name_padded} ", Style()),
+                Span(f"{sparkline} ", Style(dim=True)),
+                Span(f"{count:>3}", Style()),
+                Span(f" {fresh:>6}", Style(dim=True)),
+            )))
+
         scroll_state = state.cursor.scroll_into_view(panel_height - 2)
         list_block = list_view(scroll_state, lines, panel_height - 2)
         left_style = Style(bold=True) if state.focus == "list" else Style(dim=True)
-        left_panel = border(list_block, title="Kinds", style=left_style, chars=ROUNDED)
+        left_panel = border(list_block, title="Ticks", style=left_style, chars=ROUNDED)
 
         # Right panel: detail explorer or fidelity drill
         if state.fidelity is not None:
@@ -429,17 +439,16 @@ class StoreExplorerApp(Surface):
             detail_block = Block.text("(no selection)", Style(dim=True), width=right_width - 4)
             right_panel = border(detail_block, title="Detail", style=Style(dim=True), chars=ROUNDED)
 
-        # Compose
+        # Compose — adaptive layout based on available height
         gap = Block.empty(1, panel_height)
         panels = join_horizontal(left_panel, gap, right_panel)
 
-        body = join_vertical(
-            header,
-            Block.empty(width, 1),
-            panels,
-            Block.empty(width, 1),
-            footer,
-        )
+        if chrome >= 4:
+            body = join_vertical(header, Block.empty(width, 1), panels, Block.empty(width, 1), footer)
+        elif chrome >= 2:
+            body = join_vertical(header, panels, footer)
+        else:
+            body = panels
 
         padded = pad(body, left=1, top=0)
 
@@ -447,6 +456,28 @@ class StoreExplorerApp(Surface):
         self._buf.fill(0, 0, width, height, " ", Style())
         region = self._buf.region(0, 0, min(padded.width, width), min(padded.height, height))
         padded.paint(region, 0, 0)
+
+
+def _relative_time(dt: datetime) -> str:
+    """Human-friendly relative timestamp."""
+    if not isinstance(dt, datetime):
+        return "?"
+    now = datetime.now(timezone.utc)
+    delta = now - dt
+    seconds = int(delta.total_seconds())
+
+    if seconds < 0:
+        return "just now"
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
 
 
 def _payload_one_liner(payload, max_width: int) -> str:

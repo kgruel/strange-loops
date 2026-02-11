@@ -20,6 +20,17 @@ from pathlib import Path
 from typing import TextIO
 
 
+def _parse_vars(raw: list[str]) -> dict[str, str]:
+    """Parse ['KEY=VALUE', ...] into {key: value}."""
+    result: dict[str, str] = {}
+    for item in raw:
+        if "=" not in item:
+            raise ValueError(f"Invalid --var format (expected KEY=VALUE): {item!r}")
+        key, _, value = item.partition("=")
+        result[key] = value
+    return result
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a .loop or .vertex file."""
     from lang import parse_loop_file, parse_vertex_file, validate
@@ -163,7 +174,8 @@ def _run_vertex(path: Path, args: argparse.Namespace) -> int:
     from engine import load_vertex_program
 
     try:
-        program = load_vertex_program(path)
+        vars = _parse_vars(getattr(args, "var", []))
+        program = load_vertex_program(path, vars=vars or None)
 
         if not program.sources:
             print("Error: no sources configured", file=sys.stderr)
@@ -373,7 +385,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        program = load_vertex_program(path)
+        vars = _parse_vars(getattr(args, "var", []))
+        program = load_vertex_program(path, vars=vars or None)
 
         if not program.sources:
             print("Warning: no sources discovered or configured", file=sys.stderr)
@@ -462,6 +475,10 @@ def create_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--rounds", "-r", type=int, help="Number of complete rounds (.vertex only)"
     )
+    run_parser.add_argument(
+        "--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Set vertex var (repeatable, e.g. --var hn_username=kg)",
+    )
 
     # compile
     compile_parser = subparsers.add_parser(
@@ -474,6 +491,10 @@ def create_parser() -> argparse.ArgumentParser:
         "start", help="Run a .vertex file"
     )
     start_parser.add_argument("file", help=".vertex file to start")
+    start_parser.add_argument(
+        "--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Set vertex var (repeatable, e.g. --var hn_username=kg)",
+    )
 
     # store
     store_parser = subparsers.add_parser(

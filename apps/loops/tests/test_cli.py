@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from loops.main import main, create_parser
+from loops.main import main, create_parser, _parse_vars
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -49,6 +49,45 @@ class TestParser:
         args = parser.parse_args(["start", "system.vertex"])
         assert args.command == "start"
         assert args.file == "system.vertex"
+
+
+class TestParseVars:
+    """--var KEY=VALUE parsing tests."""
+
+    def test_single_var(self):
+        assert _parse_vars(["hn_username=kg"]) == {"hn_username": "kg"}
+
+    def test_multiple_vars(self):
+        result = _parse_vars(["a=1", "b=2"])
+        assert result == {"a": "1", "b": "2"}
+
+    def test_empty_value(self):
+        assert _parse_vars(["key="]) == {"key": ""}
+
+    def test_value_with_equals(self):
+        assert _parse_vars(["url=http://x.com?a=1"]) == {"url": "http://x.com?a=1"}
+
+    def test_empty_list(self):
+        assert _parse_vars([]) == {}
+
+    def test_invalid_format_raises(self):
+        with pytest.raises(ValueError, match="Invalid --var format"):
+            _parse_vars(["no_equals_sign"])
+
+    def test_run_parser_accepts_var(self):
+        parser = create_parser()
+        args = parser.parse_args(["run", "test.vertex", "--var", "a=1", "--var", "b=2"])
+        assert args.var == ["a=1", "b=2"]
+
+    def test_start_parser_accepts_var(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "test.vertex", "--var", "x=y"])
+        assert args.var == ["x=y"]
+
+    def test_run_parser_default_empty(self):
+        parser = create_parser()
+        args = parser.parse_args(["run", "test.vertex"])
+        assert args.var == []
 
 
 class TestValidateCommand:

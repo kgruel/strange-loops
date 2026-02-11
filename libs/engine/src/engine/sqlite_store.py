@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS facts (
     kind TEXT NOT NULL,
     ts REAL NOT NULL,
     observer TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
@@ -66,13 +67,18 @@ class SqliteStore(Generic[T]):
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
+        # Migrate: add origin column to existing databases
+        try:
+            self._conn.execute("ALTER TABLE facts ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     def append(self, event: T) -> None:
         """Append one event to the store."""
         d = self._serialize(event)
         self._conn.execute(
-            "INSERT INTO facts (kind, ts, observer, payload) VALUES (?, ?, ?, ?)",
-            (d["kind"], d["ts"], d["observer"], json.dumps(d["payload"])),
+            "INSERT INTO facts (kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?)",
+            (d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
         )
         self._conn.commit()
 
@@ -86,12 +92,12 @@ class SqliteStore(Generic[T]):
         cursor=0 returns all events (rowid starts at 1 in SQLite).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY rowid",
             (cursor,),
         ).fetchall()
         return [
             self._deserialize(
-                {"kind": r[0], "ts": r[1], "observer": r[2], "payload": json.loads(r[3])}
+                {"kind": r[0], "ts": r[1], "observer": r[2], "origin": r[3], "payload": json.loads(r[4])}
             )
             for r in rows
         ]
@@ -102,12 +108,12 @@ class SqliteStore(Generic[T]):
         end_ts = end.timestamp() if isinstance(end, datetime) else end
 
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, payload FROM facts WHERE ts >= ? AND ts <= ? ORDER BY rowid",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE ts >= ? AND ts <= ? ORDER BY rowid",
             (start_ts, end_ts),
         ).fetchall()
         return [
             self._deserialize(
-                {"kind": r[0], "ts": r[1], "observer": r[2], "payload": json.loads(r[3])}
+                {"kind": r[0], "ts": r[1], "observer": r[2], "origin": r[3], "payload": json.loads(r[4])}
             )
             for r in rows
         ]

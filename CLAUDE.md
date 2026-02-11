@@ -15,7 +15,7 @@ See `LOOPS.md` for the fundamental model. The system is loops.
 
 | Atom | Structure | Question |
 |------|-----------|----------|
-| Fact | kind + ts + payload + observer | *what happened* |
+| Fact | kind + ts + payload + observer + origin | *what happened, where from* |
 | Spec | fields + folds + boundary | *how state accumulates* |
 | Tick | name + ts + payload + origin | *when a cycle completed* |
 

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS facts (
     kind TEXT NOT NULL,
     ts REAL NOT NULL,
     observer TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);

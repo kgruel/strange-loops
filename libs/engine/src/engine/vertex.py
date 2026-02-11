@@ -310,7 +310,7 @@ class Vertex:
 
         Used when forwarding ticks from one vertex to another.
         The tick becomes a fact with kind="tick.{tick.name}" and
-        the vertex name as observer.
+        the vertex name as observer. Origin is preserved from the tick.
         """
         from atoms import Fact
 
@@ -319,6 +319,7 @@ class Vertex:
             ts=tick.ts.timestamp(),
             payload=tick.payload,
             observer=self._name,
+            origin=tick.origin,
         )
 
     def _store_tick(self, tick: Tick) -> None:
@@ -331,7 +332,7 @@ class Vertex:
 
         The tick's name becomes the fact kind (emit name → kind).
         The child vertex name becomes the observer.
-        Payload is spread into the fact.
+        Payload is spread into the fact. Origin is preserved from the tick.
         """
         from atoms import Fact
 
@@ -341,6 +342,7 @@ class Vertex:
             ts=tick.ts.timestamp(),
             payload=payload,
             observer=child_name,
+            origin=tick.origin,
         )
 
     def ingest(

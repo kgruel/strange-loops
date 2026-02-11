@@ -546,6 +546,30 @@ class TestVertexToFact:
 
         assert f.ts == NOW.timestamp()
 
+    def test_to_fact_preserves_origin(self):
+        v = Vertex("my-vertex")
+        v.register("metric", 0, sum_fold, boundary="flush")
+        v.receive(fact("metric", "alice", value=10))
+        tick = v.receive(fact("flush", "alice"))
+
+        f = v.to_fact(tick)
+
+        assert f.origin == "my-vertex"
+
+    def test_tick_to_fact_preserves_origin(self):
+        """_tick_to_fact (child tick re-entry) preserves tick.origin."""
+        v = Vertex("parent")
+        tick = Tick(name="child-metric", ts=NOW, payload={"x": 1}, origin="child-v")
+
+        f = v._tick_to_fact(tick, "child-v")
+
+        assert f.origin == "child-v"
+
+    def test_external_fact_has_empty_origin(self):
+        """Facts created via Fact.of() have empty origin (external observation)."""
+        f = fact("metric", value=10)
+        assert f.origin == ""
+
 
 class TestCountBasedBoundaryIntegration:
     """Vertex integration with count-based Loop boundaries."""
@@ -637,8 +661,8 @@ class TestReceiveStoresTick:
 
         store = SqliteStore(
             path=tmp_path / "test.db",
-            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "payload": dict(f.payload)},
-            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], payload=d["payload"]),
+            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "origin": f.origin, "payload": dict(f.payload)},
+            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], origin=d.get("origin", ""), payload=d["payload"]),
         )
         v = Vertex("v1", store=store)
         v.register("metric", 0, sum_fold, boundary="flush")
@@ -660,8 +684,8 @@ class TestReceiveStoresTick:
 
         store = SqliteStore(
             path=tmp_path / "test.db",
-            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "payload": dict(f.payload)},
-            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], payload=d["payload"]),
+            serialize=lambda f: {"kind": f.kind, "ts": f.ts, "observer": f.observer, "origin": f.origin, "payload": dict(f.payload)},
+            deserialize=lambda d: Fact(kind=d["kind"], ts=d["ts"], observer=d["observer"], origin=d.get("origin", ""), payload=d["payload"]),
         )
         v = Vertex("v1", store=store)
         loop = Loop(

@@ -146,8 +146,10 @@ apps/hlab/
 
 ## Next Steps
 
-1. **Post-rename audit** — Full repo sweep for any stale data/dsl/vertex
-   references after library renames (atoms/lang/engine). Subtask in progress.
+1. **Self-feeding detection** — `Fact.origin` now distinguishes external
+   observations (`origin=""`) from derived facts. Build a query or fold that
+   computes exhaust ratio: "what fraction of this loop's input is its own
+   output?" Store has the data; the safeguard logic doesn't exist yet.
 2. **`loops store` refresh loop** — Periodic re-fetch for live vertex viewing.
    SQLite concurrent readers make this straightforward. `start` and `store`
    may converge.
@@ -174,10 +176,20 @@ apps/hlab/
   drill show consumed facts, not just time-window facts.
 
 - **Self-feeding risk** — when conclusions feed back as observations, the system
-  can amplify its own output. Named in VOCABULARY.md Rule #7. No architectural
-  safeguards designed yet. Becomes urgent when LLM-as-peer is implemented.
+  can amplify its own output. Named in VOCABULARY.md Rule #7. `Fact.origin`
+  now provides the structural basis for detection (external vs derived), but
+  no safeguard logic exists yet. Becomes urgent when LLM-as-peer is implemented.
 
 ## Resolved
+
+79. ~~Add `origin` to Fact~~ — `origin: str = ""` on Fact, mirroring Tick's existing
+    field. External observations get `""`, derived facts (from tick-to-fact bridging)
+    carry the producing vertex name. `to_fact()` and `_tick_to_fact()` now preserve
+    `tick.origin`. SqliteStore schema updated with idempotent migration for existing
+    DBs. StoreReader queries return origin. VOCABULARY.md updated. 707 tests pass.
+
+78. ~~Post-rename audit~~ — Full repo sweep for stale data/dsl/vertex references.
+    All docs updated to atoms/lang/engine. No stale code imports found. Tests pass.
 
 77. ~~Vocabulary revision~~ — Full restructure of VOCABULARY.md via four-agent
     team session (siftd + muser + cold-reader + lead). New structure: Bet →

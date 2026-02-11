@@ -119,13 +119,13 @@ class StoreReader:
         """Facts within a time range, optionally filtered by kind."""
         if kind is not None:
             rows = self._conn.execute(
-                "SELECT kind, ts, observer, payload FROM facts "
+                "SELECT kind, ts, observer, origin, payload FROM facts "
                 "WHERE ts >= ? AND ts <= ? AND kind = ? ORDER BY ts",
                 (since_ts, until_ts, kind),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT kind, ts, observer, payload FROM facts "
+                "SELECT kind, ts, observer, origin, payload FROM facts "
                 "WHERE ts >= ? AND ts <= ? ORDER BY ts",
                 (since_ts, until_ts),
             ).fetchall()
@@ -134,7 +134,8 @@ class StoreReader:
                 "kind": r[0],
                 "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
                 "observer": r[2],
-                "payload": json.loads(r[3]),
+                "origin": r[3],
+                "payload": json.loads(r[4]),
             }
             for r in rows
         ]
@@ -142,7 +143,7 @@ class StoreReader:
     def recent_facts(self, kind: str, n: int) -> list[dict]:
         """Last N facts for a given kind, newest first. Returns raw dicts."""
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, payload FROM facts "
+            "SELECT kind, ts, observer, origin, payload FROM facts "
             "WHERE kind = ? ORDER BY ts DESC LIMIT ?",
             (kind, n),
         ).fetchall()
@@ -151,7 +152,8 @@ class StoreReader:
                 "kind": r[0],
                 "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
                 "observer": r[2],
-                "payload": json.loads(r[3]),
+                "origin": r[3],
+                "payload": json.loads(r[4]),
             }
             for r in rows
         ]

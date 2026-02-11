@@ -174,6 +174,18 @@ class TestSerialization:
             "ts": FIXED_TS,
             "payload": {"app": "web"},
             "observer": "alice",
+            "origin": "",
+        }
+
+    def test_to_dict_with_origin(self):
+        f = Fact(kind="deploy", ts=FIXED_TS, payload={"app": "web"}, observer="alice", origin="my-vertex")
+        d = f.to_dict()
+        assert d == {
+            "kind": "deploy",
+            "ts": FIXED_TS,
+            "payload": {"app": "web"},
+            "observer": "alice",
+            "origin": "my-vertex",
         }
 
     def test_to_dict_returns_plain_dict_payload(self):
@@ -307,3 +319,47 @@ class TestReplace:
         f2 = dataclasses.replace(f, observer="bob")
         assert f2.observer == "bob"
         assert f.observer == "alice"
+
+
+# --- Origin ---
+
+
+class TestOrigin:
+    def test_default_origin_is_empty(self):
+        f = Fact.of("heartbeat", "alice")
+        assert f.origin == ""
+
+    def test_explicit_origin(self):
+        f = Fact(kind="tick.metric", ts=FIXED_TS, payload={"x": 1}, observer="v1", origin="my-vertex")
+        assert f.origin == "my-vertex"
+
+    def test_of_with_origin(self):
+        f = Fact.of("tick.metric", "v1", origin="my-vertex", x=1)
+        assert f.origin == "my-vertex"
+        assert f.payload["x"] == 1
+
+    def test_tick_with_origin(self):
+        f = Fact.tick("hourly", "v1", origin="my-vertex", count=42)
+        assert f.origin == "my-vertex"
+        assert f.payload["count"] == 42
+
+    def test_round_trip_preserves_origin(self):
+        original = Fact(kind="metric", ts=FIXED_TS, payload={"x": 1}, observer="alice", origin="loop-a")
+        rebuilt = Fact.from_dict(original.to_dict())
+        assert rebuilt.origin == "loop-a"
+
+    def test_round_trip_empty_origin(self):
+        original = Fact.of("heartbeat", "alice")
+        rebuilt = Fact.from_dict(original.to_dict())
+        assert rebuilt.origin == ""
+
+    def test_from_dict_missing_origin_defaults_empty(self):
+        """Backward compat: old dicts without origin still work."""
+        d = {"kind": "deploy", "ts": FIXED_TS, "payload": {"app": "web"}, "observer": "alice"}
+        f = Fact.from_dict(d)
+        assert f.origin == ""
+
+    def test_frozen_origin(self):
+        f = Fact.of("heartbeat", "alice")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            f.origin = "other"  # type: ignore[misc]

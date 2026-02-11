@@ -28,7 +28,7 @@ Three immutable data types. Everything else is composition or runtime.
 
 | Atom | Structure | Question | Enforces |
 |------|-----------|----------|----------|
-| **Fact** | kind + ts + payload + observer | What happened? Who saw it? | Observer is intrinsic. Inputs are accepted as-is — the system metabolizes, it doesn't doubt. |
+| **Fact** | kind + ts + payload + observer + origin | What happened? Who saw it? Where from? | Observer is intrinsic. Origin traces derivation provenance — empty for external observations, non-empty for derived facts from tick-to-fact bridging. |
 | **Spec** | fields + folds + boundary | How does state accumulate? | Contract is frozen at declaration. Folds, boundaries, and schedule are fixed before observations arrive. |
 | **Tick** | name + ts + payload + origin | What did a period become? | Output only through fold→boundary→emit. You cannot fabricate a conclusion without accumulation. A Tick is a loop's exhale. |
 
@@ -42,8 +42,10 @@ Jan 27, reversed it — the distinction is the architectural differentiator.)
 **Type-level amnesia, metadata-level memory.** When a Tick crosses to another
 loop, it becomes a Fact. The type system forgets it was ever a conclusion —
 it's just another observation now. But provenance is preserved: the Tick's
-`origin` becomes the Fact's `observer`. The system treats all inputs
-uniformly while keeping traceability.
+`origin` carries through to `Fact.origin`, and the producing vertex becomes
+the `observer`. The system treats all inputs uniformly while keeping
+traceability. External observations have `origin=""`. Derived facts carry
+the producing vertex/loop name — enabling self-feeding detection (Rule #7).
 
 ### Concepts (lowercase, no dedicated type)
 
@@ -52,7 +54,7 @@ uniformly while keeping traceability.
 | **loop** | the system's core pattern | One complete cycle: observe, accumulate, conclude. The composition of Fact + Spec + Tick. The thing the system is named after. |
 | **observer** | `Fact.observer` | Who produced this observation. A string. |
 | **kind** | `Fact.kind` | Routing key. What type of observation. A string. |
-| **origin** | `Tick.origin` | Which loop produced this conclusion. A string. |
+| **origin** | `Tick.origin`, `Fact.origin` | Which loop produced this conclusion/derived fact. A string. Empty on external observations. |
 | **boundary** | `Spec.boundary` | When a cycle completes. A kind that triggers emission. |
 
 ---

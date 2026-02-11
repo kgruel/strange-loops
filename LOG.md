@@ -5,6 +5,36 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-09 — Add `origin` to Fact
+
+**The change.** Fact gains `origin: str = ""`, mirroring Tick's existing field.
+The tick-to-fact bridge stops being lossy — derived facts now carry provenance.
+
+**Why it matters.** VOCABULARY.md Rule #2 claims "type-level amnesia,
+metadata-level memory," but `_tick_to_fact()` was dropping `tick.origin`. Every
+fact looked the same — no way to distinguish external observations from derived
+conclusions. Rule #7 (self-feeding risk) requires knowing what fraction of a
+loop's input is its own exhaust. Without `origin` on Fact, that query is
+impossible.
+
+**What changed:**
+
+1. **Fact atom** — `origin: str = ""` field. `of()`, `tick()`, `to_dict()`,
+   `from_dict()` all carry it through. Default empty = backward compatible.
+2. **Vertex bridge** — `to_fact()` and `_tick_to_fact()` pass `origin=tick.origin`.
+3. **SqliteStore** — Schema adds `origin TEXT NOT NULL DEFAULT ''`. Idempotent
+   `ALTER TABLE` migration for existing DBs. INSERT/SELECT updated.
+4. **StoreReader** — `recent_facts()` and `facts_between()` return `origin`.
+5. **VOCABULARY.md** — Fact structure updated, type-level amnesia paragraph
+   revised, origin concept row expanded.
+
+**Tests:** 8 new origin tests on Fact (round-trip, backward compat, frozen,
+factory methods). 3 new vertex tests (to_fact preserves origin, _tick_to_fact
+preserves origin, external fact has empty origin). Store reader schema fixture
+updated. 707 tests pass across atoms (295), engine (345), loops (67).
+
+---
+
 ## 2026-02-08 — Vocabulary revision + library renames
 
 **The session.** Four-agent team (siftd + muser + cold-reader + lead) for

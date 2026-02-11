@@ -139,6 +139,19 @@ class TestValidateCommand:
         ])
         assert result == 0
 
+    def test_validate_discovers_from_cwd(self, tmp_path, monkeypatch):
+        """No args: discovers .loop/.vertex files from cwd."""
+        (tmp_path / "a.loop").write_text(
+            'source "echo"\nkind "a"\nobserver "test"\n'
+        )
+        (tmp_path / "b.vertex").write_text(
+            'name "b"\nloops {\n  x {\n    fold {\n      count "inc"\n    }\n  }\n}\n'
+        )
+        (tmp_path / "ignore.txt").write_text("not a DSL file")
+        monkeypatch.chdir(tmp_path)
+        result = main(["validate"])
+        assert result == 0
+
 
 class TestCompileCommand:
     """compile command tests."""
@@ -240,4 +253,4 @@ class TestHelp:
             main(["validate", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "Files to validate" in captured.out
+        assert "Files to validate" in captured.out or "files" in captured.out

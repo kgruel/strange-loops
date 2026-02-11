@@ -38,7 +38,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
     errors = 0
     checked = 0
 
-    for file in args.files:
+    files = args.files
+    if not files:
+        # No args: discover .loop/.vertex files from cwd downward
+        cwd = Path.cwd()
+        files = sorted(
+            str(p) for p in cwd.rglob("*") if p.suffix in (".loop", ".vertex")
+        )
+
+    for file in files:
         path = Path(file)
         if path.suffix not in (".loop", ".vertex"):
             continue  # skip non-DSL files from globs
@@ -459,7 +467,7 @@ def create_parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser(
         "validate", help="Validate .loop or .vertex files"
     )
-    validate_parser.add_argument("files", nargs="+", help="Files to validate")
+    validate_parser.add_argument("files", nargs="*", help="Files to validate (default: discover from cwd)")
 
     # test
     test_parser = subparsers.add_parser(

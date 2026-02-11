@@ -7,7 +7,7 @@ name "media_audit"
 
 sources {
   template "radarr/movies.loop" {
-    with kind="movies" host="192.168.1.40:7878" apikey="38f9f156c694487baf2bfb9f4355a02d"
+    with kind="movies" host="${radarr_host}" apikey="${radarr_apikey}"
     loop {
       fold {
         movies "collect" 10000
@@ -17,7 +17,7 @@ sources {
   }
 
   template "radarr/quality.loop" {
-    with kind="quality" host="192.168.1.40:7878" apikey="38f9f156c694487baf2bfb9f4355a02d"
+    with kind="quality" host="${radarr_host}" apikey="${radarr_apikey}"
     loop {
       fold {
         quality_defs "collect" 500

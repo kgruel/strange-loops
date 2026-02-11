@@ -17,6 +17,7 @@ from typing import Any
 
 from engine import load_vertex_program
 
+from ..config import resolve_vars
 from ..infra import HostConfig, run_ssh, ssh_base_args
 from ..inventory import load_inventory, host_config_from_inventory, ANSIBLE_INVENTORY_CACHE
 from ..radarr import Movie, QualityDefinition, parse_movies, parse_quality_definitions, parse_runtime
@@ -33,7 +34,7 @@ FFMPEG_PATH = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
 
 def _load_program():
     """Load vertex program from DSL files."""
-    return load_vertex_program(VERTEX_FILE)
+    return load_vertex_program(VERTEX_FILE, vars=resolve_vars())
 
 
 def load():

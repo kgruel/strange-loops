@@ -6,7 +6,7 @@ name "alerts"
 
 sources {
   template "prometheus/alerts.loop" {
-    with kind="alerts" host="192.168.1.30"
+    with kind="alerts" host="${infra_host}"
     loop {
       fold {
         firing_alerts "collect" 200
@@ -16,7 +16,7 @@ sources {
   }
 
   template "prometheus/rules.loop" {
-    with kind="rules" host="192.168.1.30"
+    with kind="rules" host="${infra_host}"
     loop {
       fold {
         alert_rules "collect" 200
@@ -26,7 +26,7 @@ sources {
   }
 
   template "prometheus/targets.loop" {
-    with kind="targets" host="192.168.1.30"
+    with kind="targets" host="${infra_host}"
     loop {
       fold {
         targets "collect" 200

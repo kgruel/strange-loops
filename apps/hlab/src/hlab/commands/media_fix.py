@@ -16,6 +16,7 @@ from pathlib import Path
 
 from cells.fidelity import CliContext
 
+from ..config import resolve_vars
 from ..radarr import RadarrClient, RadarrError, format_size
 from ..lenses.media import AuditResult
 from ..theme import DEFAULT_THEME
@@ -187,7 +188,11 @@ async def _run_fix_async(ctx: CliContext, args) -> int:
 
         to_fix = corrupt
 
-    client = RadarrClient()
+    vars = resolve_vars()
+    client = RadarrClient(
+        host=vars.get("radarr_host", ""),
+        api_key=vars.get("radarr_apikey", ""),
+    )
     fixed = 0
     failed = 0
 

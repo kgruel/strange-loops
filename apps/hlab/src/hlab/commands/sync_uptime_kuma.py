@@ -17,6 +17,7 @@ from pathlib import Path
 
 from cells.fidelity import CliContext
 
+from ..config import resolve_vars
 from ..inventory import GRUEL_NETWORK_ROOT
 from ..theme import DEFAULT_THEME
 
@@ -151,7 +152,9 @@ def run_sync(ctx: CliContext, args) -> int:
         return 0
 
     # Get credentials
-    url = getattr(args, "url", None) or os.environ.get("UPTIME_KUMA_URL", "http://192.168.1.30:3001")
+    vars = resolve_vars()
+    infra_host = vars.get("infra_host", "192.168.1.30")
+    url = getattr(args, "url", None) or os.environ.get("UPTIME_KUMA_URL", f"http://{infra_host}:3001")
     username = os.environ.get("UPTIME_KUMA_USERNAME")
     password = os.environ.get("UPTIME_KUMA_PASSWORD")
 

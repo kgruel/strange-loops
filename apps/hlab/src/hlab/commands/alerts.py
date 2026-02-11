@@ -14,6 +14,7 @@ from typing import Any
 
 from engine import VertexProgram, load_vertex_program
 
+from ..config import resolve_vars
 from ..lenses.alerts import AlertsData, FiringAlert, AlertRule, TargetHealth
 
 
@@ -23,7 +24,7 @@ VERTEX_FILE = HERE / "loops/alerts.vertex"
 
 def _load_program(show_targets: bool = False) -> VertexProgram:
     """Load vertex program, optionally excluding targets sources."""
-    program = load_vertex_program(VERTEX_FILE)
+    program = load_vertex_program(VERTEX_FILE, vars=resolve_vars())
     if not show_targets:
         program = VertexProgram(
             vertex=program.vertex,

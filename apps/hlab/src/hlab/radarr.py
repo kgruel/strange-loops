@@ -10,10 +10,6 @@ from typing import Any
 
 import httpx
 
-# Default Radarr configuration (media host)
-DEFAULT_RADARR_HOST = "192.168.1.40:7878"
-DEFAULT_RADARR_API_KEY = "38f9f156c694487baf2bfb9f4355a02d"
-
 
 class RadarrError(Exception):
     """Error communicating with Radarr API."""
@@ -144,8 +140,8 @@ FALLBACK_QUALITY_SIZES: dict[str, tuple[float, float | None]] = {
 class RadarrClient:
     """Async client for Radarr API."""
 
-    host: str = DEFAULT_RADARR_HOST
-    api_key: str = DEFAULT_RADARR_API_KEY
+    host: str = ""
+    api_key: str = ""
     timeout: float = 60.0
 
     @property

@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from .compiler import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex
+from .compiler import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex, substitute_vars
 from lang import parse_vertex_file
 from lang import validate
+from lang.ast import SourceParams, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
     from atoms import Source
@@ -87,9 +88,52 @@ class VertexProgram:
         return asyncio.run(self.collect_async(rounds=rounds, grant=grant))
 
 
+def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile:
+    """Resolve ${var} references in template source param values.
+
+    Walks ast.sources, and for each TemplateSource, substitutes vars in
+    each SourceParams.values dict's values. Returns a new VertexFile with
+    resolved params. Non-template sources are passed through unchanged.
+    """
+    if not ast.sources:
+        return ast
+
+    new_sources: list = []
+    for entry in ast.sources:
+        if isinstance(entry, TemplateSource):
+            new_params = tuple(
+                SourceParams(
+                    values={k: substitute_vars(v, vars) for k, v in row.values.items()}
+                )
+                for row in entry.params
+            )
+            new_sources.append(
+                TemplateSource(
+                    template=entry.template,
+                    params=new_params,
+                    loop=entry.loop,
+                )
+            )
+        else:
+            new_sources.append(entry)
+
+    return VertexFile(
+        name=ast.name,
+        loops=ast.loops,
+        store=ast.store,
+        discover=ast.discover,
+        sources=tuple(new_sources),
+        vertices=ast.vertices,
+        routes=ast.routes,
+        emit=ast.emit,
+        path=ast.path,
+    )
+
+
 def load_vertex_program(
     vertex_path: Path,
     *,
+    vars: dict[str, str] | None = None,
     fold_overrides: dict[str, FoldOverride] | None = None,
     default_fold_override: FoldOverride | None = None,
     validate_ast: bool = True,
@@ -101,6 +145,8 @@ def load_vertex_program(
 
     Args:
         vertex_path: Path to the .vertex file.
+        vars: Optional dict of variables to substitute in template source
+            param values before compilation. Resolves ${var} references.
         fold_overrides: Optional per-kind fold overrides.
         default_fold_override: Optional override applied to all compiled kinds
             (unless overridden by fold_overrides).
@@ -111,6 +157,8 @@ def load_vertex_program(
         expected tick names (sorted compiled spec keys).
     """
     ast = parse_vertex_file(vertex_path)
+    if vars:
+        ast = _substitute_vertex_vars(ast, vars)
     if validate_ast:
         validate(ast)
 

@@ -8,10 +8,10 @@ name "status"
 
 sources {
   template "stacks/status.loop" {
-    with kind="infra" host="192.168.1.30"
-    with kind="media" host="192.168.1.40"
-    with kind="dev" host="192.168.1.41"
-    with kind="minecraft" host="192.168.1.42"
+    with kind="infra" host="${infra_host}"
+    with kind="media" host="${media_host}"
+    with kind="dev" host="${dev_host}"
+    with kind="minecraft" host="${minecraft_host}"
     loop {
       fold {
         containers "collect" 50

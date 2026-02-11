@@ -8,8 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from engine import load_vertex_program
+from engine import VertexProgram, load_vertex_program
 
+from ..config import resolve_vars
 from ..folds import HEALTH_INITIAL, health_fold
 
 
@@ -21,6 +22,7 @@ def _load_program():
     """Load vertex program from DSL files."""
     return load_vertex_program(
         VERTEX_FILE,
+        vars=resolve_vars(),
         default_fold_override=(HEALTH_INITIAL, health_fold),
     )
 
@@ -48,6 +50,23 @@ def load_with_expected():
 
 def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:
     """Create a zero-arg fetcher for status data."""
+    stack = getattr(args, "stack", None)
+    want_stats = getattr(args, "stats", False)
+    want_logs = getattr(args, "logs", False)
+
     def fetch() -> dict[str, dict]:
-        return _load_program().collect(rounds=1)
+        program = _load_program()
+        if stack:
+            program = VertexProgram(
+                vertex=program.vertex,
+                sources=[s for s in program.sources if s.kind == stack],
+                expected_ticks=[stack],
+            )
+        results = program.collect(rounds=1)
+
+        if want_stats or want_logs:
+            from .enrichment import enrich_all
+            results = enrich_all(results, stats=want_stats, logs=want_logs)
+
+        return results
     return fetch

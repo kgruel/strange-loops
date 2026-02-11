@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Status command (default)
     status_parser = subparsers.add_parser("status", help="Stack container status")
+    status_parser.add_argument("stack", nargs="?", default=None, help="Filter to a single stack (e.g., media, infra)")
+    status_parser.add_argument("--stats", "-s", action="store_true", help="Include container CPU/memory stats")
+    status_parser.add_argument("--logs", "-l", action="store_true", help="Include recent logs for unhealthy containers")
     add_cli_args(status_parser)
 
     # Alerts command

@@ -402,7 +402,26 @@ def render_plain(stacks: dict[str, dict], theme: Theme = DEFAULT_THEME) -> str:
         for c in unhealthy:
             cname = c.get("Name", "?")
             health = c.get("Health", "") or c.get("State", "unhealthy")
-            lines.append(f"  - {cname}: {health}")
+            detail = f"  - {cname}: {health}"
+            exit_code = c.get("exit_code")
+            if exit_code is not None and exit_code != 0:
+                detail += f" (exit={exit_code})"
+            if c.get("restart_count"):
+                detail += f" (restarts={c['restart_count']})"
+            lines.append(detail)
+
+        # Stats for all containers when present
+        for c in containers:
+            cpu = c.get("cpu_percent")
+            mem_mb = c.get("memory_mb")
+            if cpu is not None or mem_mb is not None:
+                cname = c.get("Name", "?")
+                parts = []
+                if cpu is not None:
+                    parts.append(f"{cpu:.1f}%cpu")
+                if mem_mb is not None:
+                    parts.append(f"{mem_mb:.0f}MB")
+                lines.append(f"  {cname}: {', '.join(parts)}")
 
     lines.append("")
     lines.append(f"Total: {total_healthy}/{total_containers} healthy")
@@ -477,10 +496,34 @@ def _render_container(c: dict, zoom: Zoom, width: int, theme: Theme) -> Block:
     # Build line based on zoom
     line = f"  {cname}: {status}"
 
+    # Stats (CPU/memory) — shown when enrichment data is present
+    cpu = c.get("cpu_percent")
+    mem_mb = c.get("memory_mb")
+    if cpu is not None or mem_mb is not None:
+        stats_parts = []
+        if cpu is not None:
+            stats_parts.append(f"{cpu:.1f}%cpu")
+        if mem_mb is not None:
+            stats_parts.append(f"{mem_mb:.0f}MB")
+        line += f" [{', '.join(stats_parts)}]"
+
     if zoom >= Zoom.DETAILED:
         uptime = c.get("RunningFor", "")
         if uptime:
             line += f" ({uptime})"
+
+        # Inspect details for unhealthy containers
+        exit_code = c.get("exit_code")
+        restart_count = c.get("restart_count")
+        error = c.get("error")
+        if exit_code is not None and exit_code != 0:
+            line += f" exit={exit_code}"
+        if restart_count:
+            line += f" restarts={restart_count}"
+        if error:
+            line += f" err={error[:60]}"
+        if c.get("oom_killed"):
+            line += " OOM"
 
     if zoom >= Zoom.FULL:
         # Full detail: show all fields
@@ -491,7 +534,18 @@ def _render_container(c: dict, zoom: Zoom, width: int, theme: Theme) -> Block:
         if extras:
             line += f" [{', '.join(extras)}]"
 
-    return Block.text(line, style, width=width)
+    rows = [Block.text(line, style, width=width)]
+
+    # Recent logs at FULL zoom
+    if zoom >= Zoom.FULL:
+        logs = c.get("recent_logs")
+        if logs:
+            for log_line in logs.splitlines()[:5]:
+                rows.append(Block.text(f"    | {log_line[:width - 6]}", Style(dim=True), width=width))
+
+    if len(rows) == 1:
+        return rows[0]
+    return join_vertical(*rows)
 
 
 # === TUI Two-Panel Rendering (F3) ===
@@ -611,11 +665,31 @@ def render_container_detail(
                 style = Style(fg=theme.colors.error)
                 status = state
 
-            # Format: name status (uptime)
-            # Align columns: name (left), status (center), uptime (right)
+            # Format: name status (uptime) [stats]
             uptime_str = f"({uptime})" if uptime else ""
             line = f"  {cname:<20} {status:<12} {uptime_str}"
+
+            # Add stats if present
+            cpu = c.get("cpu_percent")
+            mem_mb = c.get("memory_mb")
+            if cpu is not None or mem_mb is not None:
+                stats_parts = []
+                if cpu is not None:
+                    stats_parts.append(f"{cpu:.1f}%cpu")
+                if mem_mb is not None:
+                    stats_parts.append(f"{mem_mb:.0f}MB")
+                line += f" [{', '.join(stats_parts)}]"
+
             rows.append(Block.text(line[:width], style, width=width))
+
+            # Inspect details for unhealthy
+            if state != "running" or health == "unhealthy":
+                exit_code = c.get("exit_code")
+                error = c.get("error")
+                if exit_code is not None and exit_code != 0:
+                    rows.append(Block.text(f"    exit={exit_code}", Style(fg=theme.colors.error, dim=True), width=width))
+                if error:
+                    rows.append(Block.text(f"    {error[:width - 4]}", Style(fg=theme.colors.error, dim=True), width=width))
 
     # Pad to fill height
     while len(rows) < height:

@@ -56,6 +56,7 @@ live in engine where the target runtime types are defined.
 | `docs/TEMPORAL.md` | Boundaries and nesting |
 | `docs/PERSISTENCE.md` | Durable state, replay |
 | `docs/CADENCE.md` | Cadence/Source split — when vs what |
+| `apps/hlab/docs/prometheus-alerts-to-loops.md` | Design note: route Prometheus alerts into loops stream, drop Grafana |
 
 ## Run Guide
 
@@ -181,6 +182,12 @@ apps/reader/
 3. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
+
+- **Prometheus alerts → loops stream** — Replace Grafana with loops as the
+  alert surface. Prometheus stays as collection/alerting engine (~160 MB,
+  doing real work). Grafana gets dropped (~175 MB, nobody opens it). Alerts
+  become `infra.alert` Facts via polling `/api/v1/alerts` — hlab already has
+  the `.loop` files for this. Design note: `apps/hlab/docs/prometheus-alerts-to-loops.md`.
 
 - **String structure** — observer, kind, origin namespacing. Pattern hasn't
   emerged yet.

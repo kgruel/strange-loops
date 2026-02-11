@@ -1,0 +1,31 @@
+// Reactions vertex — active attention traces
+// Gathers deliberate actions on content: favorites, likes, saves
+
+name "reactions"
+store "./data/reactions.db"
+
+sources {
+  template "./sources/rss.loop" {
+    with kind="rx.hn.favorite" feed_url="https://hnrss.org/favorites?id=${hn_username}&count=100"
+    loop {
+      fold {
+        items "by" "link"
+        count "inc"
+        updated "latest"
+      }
+      boundary when="${kind}.complete"
+    }
+  }
+}
+
+loops {
+  source.error {
+    fold {
+      errors "collect" 20
+      count "inc"
+      latest_error "latest"
+    }
+  }
+}
+
+emit "reactions.digest"

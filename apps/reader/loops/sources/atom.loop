@@ -1,0 +1,9 @@
+// Atom feed template — curl + yq to ndjson
+// Template vars: ${feed_url}, ${kind}
+// User-Agent header because some feeds (e.g. Reddit) block default curl
+
+source #"curl -sfL -A 'Mozilla/5.0' '${feed_url}' | yq -p xml -o json -I0 '.feed.entry[]'"#
+every "30m"
+kind "${kind}"
+observer "rss"
+format "ndjson"

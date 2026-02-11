@@ -1,8 +1,0 @@
-// RSS 2.0 feed template — curl + yq to ndjson
-// Template vars: ${feed_url}, ${kind}
-
-source #"curl -sfL '${feed_url}' | yq -p xml -o json -I0 '.rss.channel.item[]'"#
-every "30m"
-kind "${kind}"
-observer "rss"
-format "ndjson"

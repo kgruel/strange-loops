@@ -5,6 +5,65 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-10 — `from file` + reader app + `--var` flag
+
+**The feature.** External parameter sources for template sources. The vertex
+file describes shape (template + fold + boundary). An external file describes
+population. Starting with `from file` — a plain text file with a header row.
+
+**Why it matters.** Template sources required inline `with` rows for parameters.
+This works for small, stable sets but breaks down when the population changes
+(feeds, endpoints) without editing KDL. `from file` separates shape from
+population. The type IS the strategy — `FromFile` dataclass, `isinstance`
+dispatch. When `from fold` arrives later, it's another branch.
+
+**What changed:**
+
+1. **reader app** — Second domain app. RSS/Atom feed aggregation (feeds.vertex)
+   and reaction traces (reactions.vertex). Template sources with per-feed
+   parameterization. `uv run reader reactions/feeds`.
+
+2. **`--var` flag** — `loops run` and `start` accept `--var KEY=VALUE` for
+   vertex variable substitution from CLI. `_parse_vars()` helper.
+
+3. **Unified feed.loop** — Merged `rss.loop` and `atom.loop` into one template
+   using yq's `//` operator for RSS vs Atom auto-detection. One template handles
+   both feed formats.
+
+4. **`from file` in lang** — `FromFile` dataclass, `FromSource` union type,
+   `from_` field on `TemplateSource`. Loader parses `from file "path"` nodes.
+   Coexists with inline `with` rows. Error on unknown strategy, multiple `from`
+   nodes, or neither `from` nor `with`.
+
+5. **`from file` in engine** — `_load_params_file()` reads header + data rows,
+   skips comments and blanks, last column gets remainder (URLs with query
+   strings). `compile_sources()` resolves `from_` file before inline params.
+   `_substitute_vertex_vars()` passes `from_` through unchanged.
+
+6. **feeds.list** — External feed population. `reader feeds add/rm` commands
+   for managing feeds without editing KDL.
+
+**Design decisions:**
+
+- **Type IS strategy.** `FromFile` is a dataclass, not a string. The loader
+  creates the right type, the compiler dispatches via `isinstance`. No string
+  matching anywhere. When `from fold` arrives, it's another dataclass in the
+  `FromSource` union.
+
+- **File first, inline after.** `from file` rows come before inline `with`
+  rows in the parameter list. Inline rows can pin specific entries alongside
+  the data-driven population.
+
+- **Last column gets remainder.** `split(None, len(header) - 1)` ensures URLs
+  with query strings aren't split. Simple, no quoting needed.
+
+**Tests:** 5 new loader tests (from file alone, with inline, neither error,
+unknown strategy error, multiple from error). 9 new compiler tests (file
+loading + compile_sources integration). 1 program passthrough test. 89 lang
+tests, 357 engine tests pass.
+
+---
+
 ## 2026-02-09 — Add `origin` to Fact
 
 **The change.** Fact gains `origin: str = ""`, mirroring Tick's existing field.

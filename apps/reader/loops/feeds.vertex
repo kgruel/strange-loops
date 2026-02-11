@@ -1,26 +1,13 @@
 // Feeds vertex — inbound/potential attention
 // RSS and Atom feeds the user subscribes to
-// Add your own feeds as `with` rows below
+// Add feeds via: uv run reader feeds add <kind> <url>
 
 name "feeds"
 store "./data/feeds.db"
 
 sources {
-  template "./sources/rss.loop" {
-    // with kind="hn.story" feed_url="https://hnrss.org/frontpage?count=30"
-    with kind="lobsters.story" feed_url="https://lobste.rs/rss"
-    loop {
-      fold {
-        items "by" "link"
-        count "inc"
-        updated "latest"
-      }
-      boundary when="${kind}.complete"
-    }
-  }
-  template "./sources/atom.loop" {
-    // with kind="substack.acx" feed_url="https://www.astralcodexten.com/feed"
-    with kind="blog.danluu" feed_url="https://danluu.com/atom.xml"
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
     loop {
       fold {
         items "by" "link"

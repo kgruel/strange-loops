@@ -5,7 +5,7 @@ name "reactions"
 store "./data/reactions.db"
 
 sources {
-  template "./sources/rss.loop" {
+  template "./sources/feed.loop" {
     with kind="rx.hn.favorite" feed_url="https://hnrss.org/favorites?id=${hn_username}&count=100"
     loop {
       fold {

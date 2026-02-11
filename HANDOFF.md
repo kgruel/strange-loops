@@ -17,9 +17,10 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 - **lang** — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
 - **cells** — terminal UI, separate concern
 
-**Two apps:**
+**Three apps:**
 - **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store`)
 - **hlab** — Homelab monitoring CLI (`uv run hlab status/alerts/media audit`)
+- **reader** — Personal reading intelligence (`uv run reader reactions/feeds`)
 
 ## Architecture
 
@@ -81,6 +82,15 @@ uv run hlab alerts              # Prometheus alerts
 uv run hlab media audit         # media corruption scan
 ```
 
+### reader App
+
+```bash
+uv run reader reactions              # HN favorites
+uv run reader feeds                  # subscribed feeds
+uv run reader feeds add lobsters https://lobste.rs/rss   # add feed
+uv run reader feeds rm lobsters      # remove feed
+```
+
 ### Nested Vertex Discovery
 
 The lang supports `discover:` for auto-finding child vertices:
@@ -115,6 +125,7 @@ from engine import StoreReader
 
 **apps/loops** is the general-purpose CLI for the loops system (validate, test,
 run, compile, start, store). **apps/hlab** is the first domain app.
+**apps/reader** is the second domain app (personal reading intelligence).
 `experiments/homelab/` is archived predecessor — don't develop there.
 
 ### Structure
@@ -134,12 +145,26 @@ apps/hlab/
 ├── folds.py                  # Fold overrides: health_fold only
 ├── lenses/                   # Zoom-level rendering
 └── main.py                   # Entry point
+
+apps/reader/
+├── loops/
+│   ├── feeds.vertex          # from file — population from feeds.list
+│   ├── reactions.vertex      # HN favorites via template source
+│   ├── feeds.list            # External feed population (kind + URL)
+│   └── sources/
+│       └── feed.loop         # Unified RSS/Atom template (auto-detect)
+└── src/reader/
+    ├── config.py             # resolve_vars() for env-based substitution
+    └── main.py               # reactions, feeds, feeds add/rm
 ```
 
 ### What Works
 
 - **Template sources** — One .loop template instantiated with parameter table
 - **Per-stack kinds** — Template expands to N sources with ${kind} substitution
+- **`from file`** — External parameter source for templates. Population lives
+  outside KDL. `feeds.list` is a header + data rows file.
+- **`--var` flag** — `loops run/start` accept `--var KEY=VALUE` for vertex vars
 - **tick.name IS the stack** — No re-grouping in render
 - **Zoom rendering** — Zoom 0-3 controls detail level via cells
 - **Polling** — `every "30s"` for live updates
@@ -181,6 +206,12 @@ apps/hlab/
   no safeguard logic exists yet. Becomes urgent when LLM-as-peer is implemented.
 
 ## Resolved
+
+80. ~~`from file` + reader app + `--var`~~ — External parameter sources for templates.
+    `FromFile` dataclass in lang AST, `_load_params_file()` in engine compiler.
+    Reader app with feeds/reactions vertices, unified feed.loop (RSS+Atom auto-detect),
+    `feeds add/rm` CLI commands. `--var KEY=VALUE` on loops run/start. 89 lang tests,
+    357 engine tests.
 
 79. ~~Add `origin` to Fact~~ — `origin: str = ""` on Fact, mirroring Tick's existing
     field. External observations get `""`, derived facts (from tick-to-fact bridging)

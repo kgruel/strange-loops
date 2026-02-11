@@ -341,17 +341,34 @@ class SourceParams:
     values: dict[str, str]
 
 
+# -----------------------------------------------------------------------------
+# External parameter sources (for template sources)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FromFile:
+    """Parameters sourced from an external file."""
+
+    path: Path
+
+
+FromSource = FromFile
+
+
 @dataclass(frozen=True)
 class TemplateSource:
     """A source template with instantiation parameters and loop spec.
 
     template: Path to the .loop template file
     params: Tuple of parameter rows, each row instantiates the template once
+    from_: Optional external parameter source (e.g., FromFile)
     loop: Optional LoopDef (fold + boundary) applied to all instances
     """
 
     template: Path
     params: tuple[SourceParams, ...]
+    from_: FromSource | None = None
     loop: "LoopDef | None" = None
 
 

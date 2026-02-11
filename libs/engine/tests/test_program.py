@@ -352,3 +352,35 @@ class TestCollectRounds:
 
         result = asyncio.run(program.collect_async(rounds=1))
         assert result == {"a": 3, "b": 7}
+
+
+# ---------------------------------------------------------------------------
+# _substitute_vertex_vars preserves from_
+# ---------------------------------------------------------------------------
+
+
+def test_substitute_vertex_vars_preserves_from(tmp_path: Path) -> None:
+    """_substitute_vertex_vars passes from_ through unchanged."""
+    from lang.ast import FromFile, SourceParams, TemplateSource, VertexFile
+    from engine.program import _substitute_vertex_vars
+
+    from_source = FromFile(path=Path("./feeds.list"))
+    ast = VertexFile(
+        name="test",
+        loops={},
+        sources=(
+            TemplateSource(
+                template=Path("template.loop"),
+                params=(SourceParams(values={"kind": "${k}"}),),
+                from_=from_source,
+                loop=None,
+            ),
+        ),
+    )
+
+    result = _substitute_vertex_vars(ast, {"k": "resolved"})
+
+    entry = result.sources[0]
+    assert isinstance(entry, TemplateSource)
+    assert entry.from_ is from_source
+    assert entry.params[0].values["kind"] == "resolved"

@@ -27,6 +27,7 @@ from .ast import (
     FoldMin,
     FoldSum,
     FoldWindow,
+    FromFile,
     LoopDef,
     LoopFile,
     LStrip,
@@ -297,20 +298,35 @@ def _load_template_source(node: ckdl.Node, path: Path | None) -> TemplateSource:
     template_path = Path(_require_arg(node, 0, "template path", path))
     params: list[SourceParams] = []
     loop_def: LoopDef | None = None
+    from_source: FromFile | None = None
 
+    from_count = 0
     for child in node.children:
         if child.name == "with":
             # Each 'with' node's properties are one parameter row
             params.append(SourceParams(values={k: str(v) for k, v in child.properties.items()}))
+        elif child.name == "from":
+            from_count += 1
+            if from_count > 1:
+                raise _error("Template source allows at most one 'from' node", path)
+            strategy = _require_arg(child, 0, "strategy (e.g. 'file')", path)
+            if strategy != "file":
+                raise _error(
+                    f"Unknown from strategy: {strategy!r} (expected 'file')", path
+                )
+            from_path = _require_arg(child, 1, "file path", path)
+            from_source = FromFile(path=Path(from_path))
         elif child.name == "loop":
             loop_def = _load_loop_def(child, path)
         else:
             raise _error(f"Unknown template block: {child.name}", path)
 
-    if not params:
-        raise _error("Template source requires at least one 'with' node", path)
+    if not params and from_source is None:
+        raise _error("Template source requires 'with' rows or a 'from' source", path)
 
-    return TemplateSource(template=template_path, params=tuple(params), loop=loop_def)
+    return TemplateSource(
+        template=template_path, params=tuple(params), from_=from_source, loop=loop_def
+    )
 
 
 def _load_sources_block(node: ckdl.Node, path: Path | None) -> tuple[SourceEntry, ...]:

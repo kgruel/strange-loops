@@ -1607,3 +1607,171 @@ loops {
 """)
         compiled = compile_vertex_recursive(vertex)
         assert compiled.routes is None
+
+
+class TestLoadParamsFile:
+    """Tests for _load_params_file()."""
+
+    def test_good_file(self, tmp_path: Path):
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "feeds.list"
+        f.write_text("kind feed_url\nlobsters https://lobste.rs/rss\ndanluu https://danluu.com/atom.xml\n")
+
+        params = _load_params_file(f)
+        assert len(params) == 2
+        assert params[0].values == {"kind": "lobsters", "feed_url": "https://lobste.rs/rss"}
+        assert params[1].values == {"kind": "danluu", "feed_url": "https://danluu.com/atom.xml"}
+
+    def test_empty_file(self, tmp_path: Path):
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "empty.list"
+        f.write_text("")
+
+        params = _load_params_file(f)
+        assert params == []
+
+    def test_header_only(self, tmp_path: Path):
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "header.list"
+        f.write_text("kind feed_url\n")
+
+        params = _load_params_file(f)
+        assert params == []
+
+    def test_comments_and_blanks(self, tmp_path: Path):
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "feeds.list"
+        f.write_text("# My feeds\nkind feed_url\n\nlobsters https://lobste.rs/rss\n# disabled\n")
+
+        params = _load_params_file(f)
+        assert len(params) == 1
+        assert params[0].values["kind"] == "lobsters"
+
+    def test_column_mismatch_raises(self, tmp_path: Path):
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "bad.list"
+        f.write_text("kind feed_url\nlobsters\n")
+
+        with pytest.raises(ValueError, match="expected 2 columns, got 1"):
+            _load_params_file(f)
+
+    def test_last_column_gets_remainder(self, tmp_path: Path):
+        """URLs with query strings aren't split further."""
+        from engine.compiler import _load_params_file
+
+        f = tmp_path / "feeds.list"
+        f.write_text("kind feed_url\nhn https://hnrss.org/frontpage?count=30&q=python\n")
+
+        params = _load_params_file(f)
+        assert params[0].values["feed_url"] == "https://hnrss.org/frontpage?count=30&q=python"
+
+
+class TestCompileSourcesFromFile:
+    """Tests for compile_sources() with from_ file."""
+
+    def test_from_file_only(self, tmp_path: Path):
+        """Template with from file, no inline with rows."""
+        loop = tmp_path / "template.loop"
+        loop.write_text(
+            'source #"echo \'{"v": 1}\'"#\n'
+            'kind "${kind}"\n'
+            'observer "test"\n'
+            'format "json"\n'
+        )
+
+        feeds = tmp_path / "feeds.list"
+        feeds.write_text("kind\nalpha\nbeta\n")
+
+        vertex = parse_vertex(f"""\
+name "test"
+sources {{
+  template "template.loop" {{
+    from file "feeds.list"
+    loop {{
+      fold {{
+        count "inc"
+      }}
+      boundary when="${{kind}}.complete"
+    }}
+  }}
+}}
+""")
+        sources, specs = compile_sources(vertex, tmp_path)
+
+        assert len(sources) == 2
+        assert sources[0].kind == "alpha"
+        assert sources[1].kind == "beta"
+        assert "alpha" in specs
+        assert "beta" in specs
+
+    def test_from_file_plus_inline(self, tmp_path: Path):
+        """from file rows come first, then inline with rows."""
+        loop = tmp_path / "template.loop"
+        loop.write_text(
+            'source #"echo \'{"v": 1}\'"#\n'
+            'kind "${kind}"\n'
+            'observer "test"\n'
+            'format "json"\n'
+        )
+
+        feeds = tmp_path / "feeds.list"
+        feeds.write_text("kind\nfile_kind\n")
+
+        vertex = parse_vertex(f"""\
+name "test"
+sources {{
+  template "template.loop" {{
+    from file "feeds.list"
+    with kind="inline_kind"
+    loop {{
+      fold {{
+        count "inc"
+      }}
+      boundary when="${{kind}}.complete"
+    }}
+  }}
+}}
+""")
+        sources, specs = compile_sources(vertex, tmp_path)
+
+        assert len(sources) == 2
+        assert sources[0].kind == "file_kind"
+        assert sources[1].kind == "inline_kind"
+
+    def test_relative_path_resolution(self, tmp_path: Path):
+        """Relative from file path resolved against vertex base dir."""
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+
+        loop = subdir / "template.loop"
+        loop.write_text(
+            'source "echo test"\n'
+            'kind "${kind}"\n'
+            'observer "test"\n'
+        )
+
+        feeds = subdir / "feeds.list"
+        feeds.write_text("kind\nalpha\n")
+
+        vertex = parse_vertex(f"""\
+name "test"
+sources {{
+  template "template.loop" {{
+    from file "feeds.list"
+    loop {{
+      fold {{
+        count "inc"
+      }}
+      boundary when="${{kind}}.complete"
+    }}
+  }}
+}}
+""")
+        sources, specs = compile_sources(vertex, subdir)
+        assert len(sources) == 1
+        assert sources[0].kind == "alpha"

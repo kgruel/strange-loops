@@ -19,6 +19,8 @@ from .ast import (
     FoldOp,
     FoldSum,
     FoldWindow,
+    FromFile,
+    FromSource,
     LoopDef,
     LoopFile,
     LStrip,
@@ -84,6 +86,8 @@ __all__ = [
     "SourceEntry",
     "SourceParams",
     "TemplateSource",
+    "FromFile",
+    "FromSource",
     # Parser (KDL loader)
     "parse_loop",
     "parse_loop_file",

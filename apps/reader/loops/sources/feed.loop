@@ -1,0 +1,9 @@
+// Unified feed template — auto-detects RSS 2.0 vs Atom
+// Template vars: ${feed_url}, ${kind}
+// yq's // operator: tries .rss.channel.item (RSS), falls back to .feed.entry (Atom)
+
+source #"curl -sfL -A 'Mozilla/5.0' '${feed_url}' | yq -p xml -o json -I0 '(.rss.channel.item // .feed.entry)[]'"#
+every "30m"
+kind "${kind}"
+observer "rss"
+format "ndjson"

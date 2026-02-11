@@ -856,3 +856,117 @@ parse {
         assert len(loop.parse) == 1
         assert isinstance(loop.parse[0], Select)
         assert loop.parse[0].fields == ("Name", "State", "Health")
+
+
+class TestFromFile:
+    """Tests for 'from file' external parameter source."""
+
+    def test_from_file_alone(self):
+        """from file without any with rows."""
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
+    loop {
+      fold {
+        count "inc"
+      }
+      boundary when="${kind}.complete"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 1
+
+        from lang import FromFile, TemplateSource
+
+        source = vertex.sources[0]
+        assert isinstance(source, TemplateSource)
+        assert source.from_ is not None
+        assert isinstance(source.from_, FromFile)
+        assert source.from_.path == Path("./feeds.list")
+        assert len(source.params) == 0
+
+    def test_from_file_with_inline_rows(self):
+        """from file coexists with inline with rows."""
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
+    with kind="pinned" feed_url="https://example.com/rss"
+    loop {
+      fold {
+        count "inc"
+      }
+      boundary when="${kind}.complete"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        from lang import FromFile, TemplateSource
+
+        source = vertex.sources[0]
+        assert isinstance(source, TemplateSource)
+        assert source.from_ is not None
+        assert isinstance(source.from_, FromFile)
+        assert len(source.params) == 1
+        assert source.params[0].values["kind"] == "pinned"
+
+    def test_error_neither_from_nor_with(self):
+        """Error when template has neither from nor with."""
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    loop {
+      fold {
+        count "inc"
+      }
+    }
+  }
+}
+"""
+        with pytest.raises(ParseError, match="requires 'with' rows or a 'from' source"):
+            parse_vertex(text)
+
+    def test_error_unknown_strategy(self):
+        """Error on unknown from strategy."""
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    from fold "some.projection"
+    loop {
+      fold {
+        count "inc"
+      }
+    }
+  }
+}
+"""
+        with pytest.raises(ParseError, match="Unknown from strategy"):
+            parse_vertex(text)
+
+    def test_error_multiple_from_nodes(self):
+        """Error when template has more than one from node."""
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    from file "./a.list"
+    from file "./b.list"
+    loop {
+      fold {
+        count "inc"
+      }
+    }
+  }
+}
+"""
+        with pytest.raises(ParseError, match="at most one 'from' node"):
+            parse_vertex(text)

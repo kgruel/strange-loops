@@ -27,6 +27,7 @@ from lang.ast import (
     FoldMin,
     FoldSum,
     FoldWindow,
+    FromFile,
     LoopDef,
     LoopFile,
     Pick,
@@ -359,6 +360,42 @@ def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
     return LoopDef(folds=loop_def.folds, boundary=boundary)
 
 
+def _load_params_file(file_path: Path) -> list[SourceParams]:
+    """Load parameter rows from an external file.
+
+    File format:
+    - Lines starting with # are comments
+    - Blank lines are skipped
+    - First content line is the header (whitespace-separated column names)
+    - Subsequent lines are data rows
+    - Last column gets remainder (handles URLs with query strings)
+    """
+    text = file_path.read_text()
+    lines = text.splitlines()
+
+    header: list[str] | None = None
+    params: list[SourceParams] = []
+
+    for lineno, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if header is None:
+            header = line.split()
+            continue
+
+        # Data row: split with limit so last column gets remainder
+        parts = line.split(None, len(header) - 1)
+        if len(parts) != len(header):
+            raise ValueError(
+                f"{file_path}:{lineno}: expected {len(header)} columns, got {len(parts)}"
+            )
+        params.append(SourceParams(values=dict(zip(header, parts))))
+
+    return params
+
+
 def compile_sources(
     vertex: VertexFile,
     base_dir: Path,
@@ -381,8 +418,17 @@ def compile_sources(
                 template_path = base_dir / template_path
             loop_ast = parse_loop_file(template_path)
 
+            # Collect all params: from file first, then inline with rows
+            all_params: list[SourceParams] = []
+            if isinstance(source_entry.from_, FromFile):
+                from_path = source_entry.from_.path
+                if not from_path.is_absolute():
+                    from_path = base_dir / from_path
+                all_params.extend(_load_params_file(from_path))
+            all_params.extend(source_entry.params)
+
             # Instantiate for each param row
-            for param_row in source_entry.params:
+            for param_row in all_params:
                 instantiated = instantiate_template(loop_ast, param_row.values)
                 sources.append(compile_loop(instantiated))
 

@@ -111,6 +111,7 @@ def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile
                 TemplateSource(
                     template=entry.template,
                     params=new_params,
+                    from_=entry.from_,
                     loop=entry.loop,
                 )
             )

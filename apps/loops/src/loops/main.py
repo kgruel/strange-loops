@@ -32,30 +32,42 @@ def _parse_vars(raw: list[str]) -> dict[str, str]:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    """Validate a .loop or .vertex file."""
+    """Validate one or more .loop/.vertex files (silently skips other types)."""
     from lang import parse_loop_file, parse_vertex_file, validate
 
-    path = Path(args.file)
-    if not path.exists():
-        print(f"Error: {path} does not exist", file=sys.stderr)
+    errors = 0
+    checked = 0
+
+    for file in args.files:
+        path = Path(file)
+        if path.suffix not in (".loop", ".vertex"):
+            continue  # skip non-DSL files from globs
+
+        if not path.exists():
+            print(f"Error: {path} does not exist", file=sys.stderr)
+            errors += 1
+            continue
+
+        try:
+            if path.suffix == ".loop":
+                ast = parse_loop_file(path)
+            else:
+                ast = parse_vertex_file(path)
+
+            validate(ast)
+            print(f"\u2713 {path} is valid")
+            checked += 1
+
+        except Exception as e:
+            print(f"\u2717 {path}: {e}", file=sys.stderr)
+            errors += 1
+
+    if errors:
         return 1
-
-    try:
-        if path.suffix == ".loop":
-            ast = parse_loop_file(path)
-        elif path.suffix == ".vertex":
-            ast = parse_vertex_file(path)
-        else:
-            print(f"Error: Unknown file type: {path.suffix}", file=sys.stderr)
-            return 1
-
-        validate(ast)
-        print(f"\u2713 {path} is valid")
-        return 0
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+    if checked == 0:
+        print("No .loop or .vertex files found", file=sys.stderr)
         return 1
+    return 0
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -445,9 +457,9 @@ def create_parser() -> argparse.ArgumentParser:
 
     # validate
     validate_parser = subparsers.add_parser(
-        "validate", help="Validate a .loop or .vertex file"
+        "validate", help="Validate .loop or .vertex files"
     )
-    validate_parser.add_argument("file", help="File to validate")
+    validate_parser.add_argument("files", nargs="+", help="Files to validate")
 
     # test
     test_parser = subparsers.add_parser(

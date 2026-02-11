@@ -18,7 +18,12 @@ class TestParser:
         parser = create_parser()
         args = parser.parse_args(["validate", "test.loop"])
         assert args.command == "validate"
-        assert args.file == "test.loop"
+        assert args.files == ["test.loop"]
+
+    def test_validate_multiple_files(self):
+        parser = create_parser()
+        args = parser.parse_args(["validate", "a.loop", "b.vertex", "c.loop"])
+        assert args.files == ["a.loop", "b.vertex", "c.loop"]
 
     def test_test_command(self):
         parser = create_parser()
@@ -116,6 +121,23 @@ class TestValidateCommand:
     def test_validate_unknown_extension(self):
         result = main(["validate", str(FIXTURES / "minimal.loop").replace(".loop", ".txt")])
         assert result == 1
+
+    def test_validate_multiple_files(self):
+        result = main([
+            "validate",
+            str(FIXTURES / "minimal.loop"),
+            str(FIXTURES / "minimal.vertex"),
+        ])
+        assert result == 0
+
+    def test_validate_skips_non_dsl_in_glob(self):
+        """Non-.loop/.vertex files are silently skipped."""
+        result = main([
+            "validate",
+            str(FIXTURES / "minimal.loop"),
+            str(FIXTURES / "sample_input.txt"),  # skipped
+        ])
+        assert result == 0
 
 
 class TestCompileCommand:
@@ -218,4 +240,4 @@ class TestHelp:
             main(["validate", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "File to validate" in captured.out
+        assert "Files to validate" in captured.out

@@ -13,7 +13,6 @@ For runtime theming:
     from fidelis.themes import current_theme, use_theme, list_themes
 
 For CLI harness and in-place rendering:
-    from fidelis.fidelity import Fidelity, run_with_fidelity
     from fidelis.inplace import InPlaceRenderer
 
 For component theming:
@@ -49,13 +48,6 @@ from .fidelity import (
     resolve_mode,
     resolve_format,
     detect_context,
-    # Deprecated API
-    Fidelity,
-    HarnessContext,
-    detect_fidelity,
-    add_fidelity_args,
-    run_with_fidelity,
-    fidelity_to_zoom,
 )
 
 # In-place rendering
@@ -140,13 +132,6 @@ __all__ = [
     "resolve_mode",
     "resolve_format",
     "detect_context",
-    # Fidelity (deprecated)
-    "Fidelity",
-    "HarnessContext",
-    "detect_fidelity",
-    "add_fidelity_args",
-    "run_with_fidelity",
-    "fidelity_to_zoom",
     # In-place rendering
     "InPlaceRenderer",
     "render_inplace",

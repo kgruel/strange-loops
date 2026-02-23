@@ -20,9 +20,6 @@ from fidelis.fidelity import (
     resolve_format,
     detect_context,
     run_cli,
-    # Deprecated API
-    Fidelity,
-    fidelity_to_zoom,
 )
 
 
@@ -362,26 +359,3 @@ class TestCliRunner:
         assert handler_called
         assert received_ctx.mode == OutputMode.INTERACTIVE
         assert result == 42
-
-
-# =============================================================================
-# Backward Compatibility Tests
-# =============================================================================
-
-
-class TestFidelityCompat:
-    """Tests for deprecated Fidelity API."""
-
-    def test_fidelity_values(self):
-        """Fidelity enum still works."""
-        assert Fidelity.QUIET == 0
-        assert Fidelity.NORMAL == 1
-        assert Fidelity.VERBOSE == 2
-        assert Fidelity.FULL == 3
-
-    def test_fidelity_to_zoom(self):
-        """fidelity_to_zoom converts correctly."""
-        assert fidelity_to_zoom(Fidelity.QUIET) == Zoom.MINIMAL
-        assert fidelity_to_zoom(Fidelity.NORMAL) == Zoom.SUMMARY
-        assert fidelity_to_zoom(Fidelity.VERBOSE) == Zoom.DETAILED
-        assert fidelity_to_zoom(Fidelity.FULL) == Zoom.FULL

@@ -1,6 +1,6 @@
 # Fidelity Pattern
 
-This document describes the fidelity pattern implemented in the fidelis demo bench.
+This document describes the fidelity pattern implemented in the fidelis tour.
 
 ## General Pattern
 
@@ -17,7 +17,7 @@ The flags are mutually exclusive: you cannot combine `-q` with `-v`.
 
 ## Navigation Fidelity
 
-The demo bench expresses the general fidelity pattern as "navigation fidelity" - how much content you navigate through by default.
+The tour expresses the general fidelity pattern as "navigation fidelity" - how much content you navigate through by default.
 
 ### Default Mode
 
@@ -39,7 +39,7 @@ intro -> cell -> style -> span -> ...
 Prints all slides inline and exits. No TUI, no interaction.
 
 ```bash
-uv run python -m demos.bench -q
+uv run python -m demos.tour -q
 ```
 
 Use cases:
@@ -66,7 +66,7 @@ This mode is useful when you want to see all content without needing to explore 
 Adds source view showing the code that builds each slide. Press `s` to toggle the source panel.
 
 ```bash
-uv run python -m demos.bench -vv
+uv run python -m demos.tour -vv
 ```
 
 This fulfills the "self-documenting slides" goal - the slides literally show how they're built.
@@ -176,7 +176,7 @@ The fidelity pattern can be expressed differently depending on the application:
 
 | App Type | -q | default | -v | -vv |
 |----------|----|---------|----|-----|
-| Demo bench | Print inline | Interactive | Show all detail | Show source |
+| Tour | Print inline | Interactive | Show all detail | Show source |
 | Log viewer | Errors only | Warnings+ | Info+ | Debug |
 | Build tool | Silent | Summary | Per-file | Commands |
 | API client | Response only | Status + body | Headers | Raw HTTP |
@@ -187,17 +187,17 @@ The key insight: fidelity controls **how much information flows to the user**, b
 
 ```bash
 # Default: interactive slideshow
-uv run python -m demos.bench
+uv run python -m demos.tour
 
 # Minimal: print all slides
-uv run python -m demos.bench -q
+uv run python -m demos.tour -q
 
 # Styled: detail slides in main flow
-uv run python -m demos.bench -v
+uv run python -m demos.tour -v
 
 # Interactive: with source view (s to toggle)
-uv run python -m demos.bench -vv
+uv run python -m demos.tour -vv
 
 # Help
-uv run python -m demos.bench --help
+uv run python -m demos.tour --help
 ```

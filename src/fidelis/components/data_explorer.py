@@ -10,6 +10,7 @@ from ..cell import Style
 from ..compose import join_vertical
 from ..span import Line, Span
 from ..viewport import Viewport
+from .._text_width import display_width, truncate
 
 
 _MAX_CHILDREN = 50
@@ -200,13 +201,15 @@ class DataExplorerState:
 
 def _format_leaf_value(value: Any, max_len: int) -> str:
     """Format a leaf value for inline display."""
+    if max_len <= 0:
+        return ""
     if value is None:
         return "None"
     if isinstance(value, bool):
         return str(value)
     if isinstance(value, str):
-        if len(value) > max_len:
-            return value[:max_len - 3] + "..." if max_len > 3 else value[:max_len]
+        if display_width(value) > max_len:
+            return truncate(value, max_len - 3) + "..." if max_len > 3 else truncate(value, max_len)
         return value
     if isinstance(value, (int, float)):
         return str(value)
@@ -215,8 +218,8 @@ def _format_leaf_value(value: Any, max_len: int) -> str:
     if isinstance(value, list):
         return f"list[{len(value)}]"
     text = str(value)
-    if len(text) > max_len:
-        return text[:max_len - 3] + "..." if max_len > 3 else text[:max_len]
+    if display_width(text) > max_len:
+        return truncate(text, max_len - 3) + "..." if max_len > 3 else truncate(text, max_len)
     return text
 
 
@@ -256,25 +259,22 @@ def data_explorer(
             indicator = "  "
 
         prefix = indent + indicator
-        remaining = width - len(prefix)
+        remaining = width - display_width(prefix)
 
         if remaining <= 0:
-            line_text = prefix[:width]
+            line_text = truncate(prefix, width)
         elif node.expandable and not node.expanded:
             # Show key + summary count
             count = len(node.value) if isinstance(node.value, (dict, list)) else 0
             summary = f"{node.key} [{count}]"
-            line_text = prefix + summary[:remaining]
+            line_text = prefix + summary
         elif not node.expandable and node.value is not None:
             # Leaf: key: value
-            val_text = _format_leaf_value(node.value, max(1, remaining - len(node.key) - 2))
+            val_text = _format_leaf_value(node.value, max(1, remaining - display_width(node.key) - 2))
             leaf = f"{node.key}: {val_text}"
-            line_text = prefix + leaf[:remaining]
+            line_text = prefix + leaf
         else:
-            line_text = prefix + node.key[:remaining]
-
-        # Pad to width
-        line_text = line_text.ljust(width)[:width]
+            line_text = prefix + node.key
 
         row_style = cursor_style if is_cursor else Style()
         rows.append(Block.text(line_text, row_style, width=width))

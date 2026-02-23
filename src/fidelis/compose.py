@@ -7,6 +7,7 @@ from enum import Enum
 from .block import Block
 from .cell import Style, Cell
 from .borders import BorderChars, ROUNDED
+from ._text_width import char_width, display_width
 
 
 class Align(Enum):
@@ -123,17 +124,30 @@ def border(block: Block, chars: BorderChars = ROUNDED,
                + [Cell(chars.top_right, style)])
 
     # Paint title into top row if provided
-    if title and block.width >= len(title) + 2:
+    title_width = display_width(title) if title else 0
+    # Title is painted starting at index 2 (leaving one horizontal cell intact).
+    # Ensure we don't overwrite the top_right corner.
+    if title and block.width >= title_width + 3:
         ts = title_style if title_style is not None else style
         pos = 2  # start after top_left + 1 padding cell
         # Space before title
         top_row[pos] = Cell(" ", ts)
         pos += 1
         for ch in title:
+            w = char_width(ch)
+            if w == 0:
+                continue
+            if pos > block.width:
+                break
+            if w == 2 and pos + 1 > block.width:
+                break
             top_row[pos] = Cell(ch, ts)
-            pos += 1
+            if w == 2:
+                top_row[pos + 1] = Cell(" ", ts)
+            pos += w
         # Space after title
-        top_row[pos] = Cell(" ", ts)
+        if pos <= block.width:
+            top_row[pos] = Cell(" ", ts)
 
     rows.append(top_row)
 

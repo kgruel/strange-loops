@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 from ..cell import Style, Cell
 from ..block import Block
+from .._text_width import char_width, display_width, index_for_col, take_prefix
 
 
 @dataclass(frozen=True)
@@ -61,14 +62,26 @@ class TextInputState:
 
     def _ensure_visible(self, width: int) -> TextInputState:
         """Adjust scroll_offset so cursor is visible within width."""
-        offset = self.scroll_offset
-        if self.cursor < offset:
-            offset = self.cursor
-        elif self.cursor >= offset + width:
-            offset = self.cursor - width + 1
-        # Clamp offset to valid range
-        offset = max(0, offset)
-        return replace(self, scroll_offset=offset)
+        if width <= 0:
+            return replace(self, scroll_offset=0)
+
+        text = self.text
+        cursor_idx = max(0, min(self.cursor, len(text)))
+        offset_idx = max(0, min(self.scroll_offset, len(text)))
+
+        cursor_col = display_width(text[:cursor_idx])
+        offset_col = display_width(text[:offset_idx])
+
+        if cursor_col < offset_col:
+            desired_offset_col = cursor_col
+        elif cursor_col >= offset_col + width:
+            desired_offset_col = max(0, cursor_col - width + 1)
+        else:
+            desired_offset_col = offset_col
+
+        new_offset_idx = index_for_col(text, desired_offset_col)
+        new_offset_idx = max(0, min(new_offset_idx, len(text)))
+        return replace(self, cursor=cursor_idx, scroll_offset=new_offset_idx)
 
 
 def text_input(
@@ -86,28 +99,50 @@ def text_input(
 
     if not state.text and not focused and placeholder:
         # Show placeholder
-        display = placeholder[:width]
+        display, _ = take_prefix(placeholder, width)
         placeholder_style = Style(dim=True)
-        cells = [Cell(ch, placeholder_style) for ch in display]
+        cells: list[Cell] = []
+        used = 0
+        for ch in display:
+            w = char_width(ch)
+            if w == 0:
+                continue
+            if used + w > width:
+                break
+            cells.append(Cell(ch, placeholder_style))
+            if w == 2 and used + 2 <= width:
+                cells.append(Cell(" ", placeholder_style))
+            used += w
         while len(cells) < width:
             cells.append(Cell(" ", style))
         return Block([cells], width)
 
     # Extract visible portion of text
-    visible_text = state.text[state.scroll_offset:state.scroll_offset + width]
+    tail = state.text[state.scroll_offset:]
+    visible_text, _ = take_prefix(tail, width)
 
     cells: list[Cell] = []
+    used_cols = 0
     for i, ch in enumerate(visible_text):
         actual_pos = state.scroll_offset + i
-        if focused and actual_pos == state.cursor:
-            cells.append(Cell(ch, cursor_style))
-        else:
-            cells.append(Cell(ch, style))
+        w = char_width(ch)
+        if w == 0:
+            continue
+        if used_cols + w > width:
+            break
+        st = cursor_style if (focused and actual_pos == state.cursor) else style
+        cells.append(Cell(ch, st))
+        if w == 2 and used_cols + 2 <= width:
+            cells.append(Cell(" ", st))
+        used_cols += w
 
-    # If cursor is at end of visible text, render cursor as space
-    cursor_vis_pos = state.cursor - state.scroll_offset
-    if focused and 0 <= cursor_vis_pos < width and cursor_vis_pos == len(visible_text):
-        cells.append(Cell(" ", cursor_style))
+    # Cursor at end of visible text: render cursor as a space cell
+    if focused:
+        cursor_col = display_width(state.text[:state.cursor])
+        offset_col = display_width(state.text[:state.scroll_offset])
+        cursor_vis_col = cursor_col - offset_col
+        if 0 <= cursor_vis_col < width and cursor_vis_col == used_cols:
+            cells.append(Cell(" ", cursor_style))
 
     # Pad to width
     while len(cells) < width:

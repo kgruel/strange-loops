@@ -9,6 +9,7 @@ from .block import Block
 from .cell import Style
 from .compose import join_vertical, join_horizontal
 from .span import Line, Span
+from ._text_width import display_width, truncate, truncate_ellipsis
 
 if TYPE_CHECKING:
     from .component_theme import ComponentTheme
@@ -86,22 +87,17 @@ def _render_scalar(value: Any, zoom: int, width: int) -> Block:
     if zoom == 1:
         # Truncated value
         text = _format_value(value)
-        if len(text) > width:
-            if width > 1:
-                text = text[: width - 1] + "\u2026"  # ellipsis
-            else:
-                text = text[:width]
+        if display_width(text) > width:
+            text = truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
         return Block.text(text, style, width=width)
 
     # zoom >= 2: full value (with length indicator for long strings)
     text = _format_value(value)
-    if isinstance(value, str) and len(text) > _MAX_STR_DISPLAY:
-        text = text[:_MAX_STR_DISPLAY] + f"... [{len(text)} chars]"
-    if len(text) > width:
-        if width > 1:
-            text = text[: width - 1] + "\u2026"
-        else:
-            text = text[:width]
+    if isinstance(value, str) and display_width(text) > _MAX_STR_DISPLAY:
+        original_chars = len(value)
+        text = truncate(text, _MAX_STR_DISPLAY) + f"... [{original_chars} chars]"
+    if display_width(text) > width:
+        text = truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
     return Block.text(text, style, width=width)
 
 
@@ -131,11 +127,8 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
             text = "{}"
         else:
             keys = ", ".join(str(k) for k in d.keys())
-            if len(keys) > width:
-                if width > 1:
-                    keys = keys[: width - 1] + "\u2026"
-                else:
-                    keys = keys[:width]
+            if display_width(keys) > width:
+                keys = truncate_ellipsis(keys, width) if width > 1 else truncate(keys, width)
             text = keys
         return Block.text(text, style, width=width)
 
@@ -154,15 +147,15 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
         items = items[:_MAX_DICT_ITEMS]
 
     # Calculate key column width (max key length + 2 for ": ")
-    max_key_len = max((len(str(k)) for k, _ in items), default=0)
+    max_key_len = max((display_width(str(k)) for k, _ in items), default=0)
     key_col_width = min(max_key_len + 2, width // 2)
     val_col_width = max(1, width - key_col_width)
 
     for key, value in items:
         key_text = str(key) + ":"
-        if len(key_text) > key_col_width:
-            key_text = key_text[: key_col_width - 1] + "\u2026" if key_col_width > 1 else key_text[:key_col_width]
-        key_block = Block.text(key_text.ljust(key_col_width), key_style)
+        if display_width(key_text) > key_col_width:
+            key_text = truncate_ellipsis(key_text, key_col_width) if key_col_width > 1 else truncate(key_text, key_col_width)
+        key_block = Block.text(key_text, key_style, width=key_col_width)
 
         # Render value recursively with reduced zoom
         nested_zoom = max(0, zoom - 1)
@@ -201,11 +194,12 @@ def _render_list(lst: list, zoom: int, width: int) -> Block:
                 item_str = _summarize_item(item)
                 # Check if adding this item would exceed width
                 sep_len = 2 if items else 0  # ", "
-                if total_len + sep_len + len(item_str) > width - 3:  # reserve for "..."
+                item_w = display_width(item_str)
+                if total_len + sep_len + item_w > width - 3:  # reserve for "..."
                     items.append("...")
                     break
                 items.append(item_str)
-                total_len += sep_len + len(item_str)
+                total_len += sep_len + item_w
             text = ", ".join(items)
         return Block.text(text, style, width=width)
 
@@ -273,10 +267,10 @@ def _render_set(s: set, zoom: int, width: int) -> Block:
     for item in sorted(s, key=str):
         tag = f"[{item}]"
         sep_len = 1 if tags else 0  # space separator
-        if total_len + sep_len + len(tag) > width:
+        if total_len + sep_len + display_width(tag) > width:
             break
         tags.append(tag)
-        total_len += sep_len + len(tag)
+        total_len += sep_len + display_width(tag)
 
     text = " ".join(tags)
     return Block.text(text, style, width=width)
@@ -289,8 +283,8 @@ def _summarize_item(item: Any) -> str:
     if isinstance(item, bool):
         return str(item)
     if isinstance(item, str):
-        if len(item) > 10:
-            return item[:9] + "\u2026"
+        if display_width(item) > 10:
+            return truncate_ellipsis(item, 10) if 10 > 1 else truncate(item, 10)
         return item
     if isinstance(item, (int, float)):
         return str(item)
@@ -451,7 +445,7 @@ def _tree_render_children_themed(
 
         # Calculate available width for content
         branch_prefix = prefix + branch
-        content_width = width - len(branch_prefix)
+        content_width = width - display_width(branch_prefix)
 
         if content_width <= 0:
             continue
@@ -461,7 +455,7 @@ def _tree_render_children_themed(
             if node_renderer is not None:
                 content_block = node_renderer(key, value, depth)
                 # Prefix with branch chars
-                row_cells = list(Block.text(branch_prefix, Style(), width=len(branch_prefix)).row(0))
+                row_cells = list(Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0))
                 # Add content (truncated if needed)
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
@@ -482,7 +476,7 @@ def _tree_render_children_themed(
             # Expand this branch
             if node_renderer is not None:
                 content_block = node_renderer(key, value, depth)
-                row_cells = list(Block.text(branch_prefix, Style(), width=len(branch_prefix)).row(0))
+                row_cells = list(Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0))
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
                 rows.append(Block([row_cells], width))
@@ -508,18 +502,14 @@ def _tree_render_children_themed(
 
 def _tree_truncate(text: str, width: int) -> Block:
     """Create a single-row block, truncating if needed."""
-    if len(text) > width:
-        text = _truncate_ellipsis(text, width)
+    if display_width(text) > width:
+        text = truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
     return Block.text(text, Style(), width=width)
 
 
 def _truncate_ellipsis(text: str, width: int) -> str:
     """Truncate text with ellipsis if it exceeds width."""
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return text[:width]
-    return text[: width - 1] + "…"
+    return truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
 
 
 # Default tree lens

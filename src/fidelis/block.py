@@ -7,6 +7,7 @@ from typing import Sequence
 
 from .cell import Style, Cell, EMPTY_CELL
 from .buffer import Buffer, BufferView
+from ._text_width import char_width, display_width
 
 
 class Wrap(Enum):
@@ -43,43 +44,41 @@ class Block:
     def text(content: str, style: Style, *, width: int | None = None,
              wrap: Wrap = Wrap.NONE) -> Block:
         """Create a block from text content with optional wrapping."""
+        if width is not None and width <= 0:
+            return Block([[]], 0)
+
         if width is None:
-            # No width constraint: single line, width = len(content)
-            cells = [Cell(ch, style) for ch in content]
-            return Block([cells], len(content))
+            cells = _cells_from_text(content, style)
+            return Block([cells], len(cells))
 
         if wrap == Wrap.NONE:
             # Truncate at width, single line
-            line = content[:width]
-            cells = [Cell(ch, style) for ch in line]
+            cells = _cells_from_text(content, style, max_width=width)
             cells = _pad_row(cells, width, style)
             return Block([cells], width)
 
         if wrap == Wrap.ELLIPSIS:
             # Truncate with ellipsis if needed
-            if len(content) > width:
-                line = content[:width - 1] + "…"
+            if display_width(content) > width:
+                if width == 1:
+                    cells = [Cell("…", style)]
+                else:
+                    cells = _cells_from_text(content, style, max_width=width - 1)
+                    cells.append(Cell("…", style))
             else:
-                line = content
-            cells = [Cell(ch, style) for ch in line]
+                cells = _cells_from_text(content, style, max_width=width)
             cells = _pad_row(cells, width, style)
             return Block([cells], width)
 
         if wrap == Wrap.CHAR:
             # Break at any character boundary
-            lines: list[str] = []
-            for i in range(0, len(content), width):
-                lines.append(content[i:i + width])
-            if not lines:
-                lines = [""]
-            rows = [_pad_row([Cell(ch, style) for ch in line], width, style)
-                    for line in lines]
+            rows = _char_wrap(content, width, style)
             return Block(rows, width)
 
         if wrap == Wrap.WORD:
             # Break at word boundaries
             lines = _word_wrap(content, width)
-            rows = [_pad_row([Cell(ch, style) for ch in line], width, style)
+            rows = [_pad_row(_cells_from_text(line, style, max_width=width), width, style)
                     for line in lines]
             return Block(rows, width)
 
@@ -114,8 +113,84 @@ def _pad_row(cells: list[Cell], width: int, style: Style) -> list[Cell]:
     return cells
 
 
+def _cells_from_text(text: str, style: Style, *, max_width: int | None = None) -> list[Cell]:
+    """Convert text to cells, expanding wide chars into 2 columns.
+
+    Uses a space placeholder for the trailing cell of a wide character.
+    """
+    cells: list[Cell] = []
+    used = 0
+
+    for ch in text:
+        w = char_width(ch)
+        if w == 0:
+            # Zero-width (combining) chars aren't representable as separate cells.
+            continue
+
+        if max_width is not None and used + w > max_width:
+            break
+
+        cells.append(Cell(ch, style))
+        if w == 2:
+            if max_width is not None and used + 2 > max_width:
+                # Can't fit the full wide char; drop it.
+                cells.pop()
+                break
+            cells.append(Cell(" ", style))
+
+        used += w
+
+        if max_width is not None and used >= max_width:
+            break
+
+    return cells
+
+
+def _char_wrap(text: str, width: int, style: Style) -> list[list[Cell]]:
+    """Wrap text at any character boundary by display width."""
+    if not text:
+        return [_pad_row([], width, style)]
+
+    rows: list[list[Cell]] = []
+    current: list[Cell] = []
+    used = 0
+
+    for ch in text:
+        w = char_width(ch)
+        if w == 0:
+            continue
+        if w > width:
+            # Can't represent this character at this width.
+            continue
+
+        if used + w > width and current:
+            rows.append(_pad_row(current, width, style))
+            current = []
+            used = 0
+
+        if used + w > width:
+            continue
+
+        current.append(Cell(ch, style))
+        if w == 2:
+            current.append(Cell(" ", style))
+        used += w
+
+        if used == width:
+            rows.append(current)
+            current = []
+            used = 0
+
+    if current or not rows:
+        rows.append(_pad_row(current, width, style))
+
+    return rows
+
+
 def _word_wrap(text: str, width: int) -> list[str]:
     """Break text at word boundaries to fit within width."""
+    if width <= 0:
+        return [""]
     if not text:
         return [""]
 
@@ -126,27 +201,62 @@ def _word_wrap(text: str, width: int) -> list[str]:
     for word in words:
         if not current_line:
             # First word on line — take it even if too long
-            if len(word) <= width:
+            if display_width(word) <= width:
                 current_line = word
             else:
                 # Word itself exceeds width, break it
-                while len(word) > width:
-                    lines.append(word[:width])
-                    word = word[width:]
+                while word and display_width(word) > width:
+                    prefix, consumed = _take_word_prefix(word, width)
+                    if consumed == 0:
+                        # Unrepresentable (e.g., width=1 and next char is wide)
+                        word = word[1:]
+                        continue
+                    lines.append(prefix)
+                    word = word[consumed:]
                 current_line = word
-        elif len(current_line) + 1 + len(word) <= width:
+        elif display_width(current_line) + 1 + display_width(word) <= width:
             current_line += " " + word
         else:
             lines.append(current_line)
-            if len(word) <= width:
+            if display_width(word) <= width:
                 current_line = word
             else:
-                while len(word) > width:
-                    lines.append(word[:width])
-                    word = word[width:]
+                while word and display_width(word) > width:
+                    prefix, consumed = _take_word_prefix(word, width)
+                    if consumed == 0:
+                        word = word[1:]
+                        continue
+                    lines.append(prefix)
+                    word = word[consumed:]
                 current_line = word
 
     if current_line:
         lines.append(current_line)
 
     return lines if lines else [""]
+
+
+def _take_word_prefix(word: str, width: int) -> tuple[str, int]:
+    """Take a word prefix within width columns; returns (prefix, consumed)."""
+    used = 0
+    chars: list[str] = []
+    consumed = 0
+
+    for i, ch in enumerate(word):
+        w = char_width(ch)
+        if w == 0:
+            chars.append(ch)
+            consumed = i + 1
+            continue
+        if w > width:
+            # Can't fit this char at all.
+            break
+        if used + w > width:
+            break
+        chars.append(ch)
+        used += w
+        consumed = i + 1
+        if used == width:
+            break
+
+    return ("".join(chars), consumed)

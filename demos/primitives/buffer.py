@@ -4,7 +4,7 @@
 Buffer is a 2D grid of Cells. You put characters at coordinates,
 and it stores them. Writer converts the buffer to ANSI for display.
 
-Run: uv run python demos/cells/primitives/buffer.py
+Run: uv run python demos/primitives/buffer.py
 """
 
 import sys

@@ -5,7 +5,7 @@ Blocks are immutable, so you combine them with functions:
 join_horizontal, join_vertical, pad, border, truncate.
 Each returns a new Block.
 
-Run: uv run python demos/cells/primitives/compose.py
+Run: uv run python demos/primitives/compose.py
 """
 
 import sys

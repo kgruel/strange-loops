@@ -5,7 +5,7 @@ A Cell is a single character with a Style. That's it.
 Style holds colors (fg/bg) and attributes (bold, italic, etc).
 Both are immutable (frozen dataclasses).
 
-Run: uv run python demos/cells/primitives/cell.py
+Run: uv run python demos/primitives/cell.py
 """
 
 from fidelis import Cell, Style, EMPTY_CELL

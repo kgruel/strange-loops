@@ -4,10 +4,10 @@
 This demo shows how cells enables the CLI→TUI continuum. Run with different
 fidelity flags to see the same task data rendered at each level:
 
-    uv run python demos/cells/patterns/fidelity.py -q     # Level 0: one line
-    uv run python demos/cells/patterns/fidelity.py        # Level 1: standard output
-    uv run python demos/cells/patterns/fidelity.py -v     # Level 2: styled output
-    uv run python demos/cells/patterns/fidelity.py -vv    # Level 3: interactive TUI
+    uv run python demos/patterns/fidelity.py -q     # Level 0: one line
+    uv run python demos/patterns/fidelity.py        # Level 1: standard output
+    uv run python demos/patterns/fidelity.py -v     # Level 2: styled output
+    uv run python demos/patterns/fidelity.py -vv    # Level 3: interactive TUI
 
 The demo simulates a task runner showing build status. The same underlying
 TaskData structure drives all four presentations.

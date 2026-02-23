@@ -7,7 +7,7 @@ Features:
 - Rainbow color cycling
 - Multiple demo modes
 
-Run: uv run python demos/cells/apps/big_text.py
+Run: uv run python demos/apps/big_text.py
 Keys: 1-4 modes, s=size, f=format, q=quit
 """
 

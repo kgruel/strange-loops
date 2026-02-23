@@ -4,7 +4,7 @@
 Lens bundles a render function with zoom metadata for semantic zooming.
 This demo shows a JSON inspector with adjustable zoom levels.
 
-Run: uv run python demos/cells/apps/lens.py
+Run: uv run python demos/apps/lens.py
 Press '+'/'-' to adjust zoom level, 'q' to quit.
 """
 

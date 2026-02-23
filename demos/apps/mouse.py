@@ -9,7 +9,7 @@ Features:
 - 'c' to clear canvas
 - 'q' to quit
 
-Run: uv run python demos/cells/apps/mouse.py
+Run: uv run python demos/apps/mouse.py
 """
 
 import asyncio

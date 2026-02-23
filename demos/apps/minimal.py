@@ -9,7 +9,7 @@ Surface handles:
 
 Subclass and override: layout(), render(), on_key(), update()
 
-Run: uv run python demos/cells/apps/minimal.py
+Run: uv run python demos/apps/minimal.py
 Press 'q' to quit, arrow keys to move, 'c' to cycle colors.
 """
 

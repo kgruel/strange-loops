@@ -6,7 +6,7 @@ Layer bundles input handling and rendering for modal UI:
 - Push overlays (help, settings) on top
 - Pop to dismiss and return to previous layer
 
-Run: uv run python demos/cells/apps/layers.py
+Run: uv run python demos/apps/layers.py
 Press 'h' for help, 's' for settings, 'q' to quit.
 """
 

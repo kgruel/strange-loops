@@ -5,7 +5,7 @@ BufferView wraps a Buffer region with coordinate translation.
 Write at (0,0) in the view, it appears at the view's origin in the buffer.
 Writes outside the view bounds are silently clipped.
 
-Run: uv run python demos/cells/primitives/buffer_view.py
+Run: uv run python demos/primitives/buffer_view.py
 """
 
 import sys

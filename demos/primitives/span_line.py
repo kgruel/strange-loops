@@ -6,7 +6,7 @@ Line: a sequence of Spans that paints to a BufferView.
 
 These are lighter-weight than Block for inline styled text.
 
-Run: uv run python demos/cells/primitives/span_line.py
+Run: uv run python demos/primitives/span_line.py
 """
 
 import sys

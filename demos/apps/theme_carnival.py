@@ -4,7 +4,7 @@
 A fun demo showcasing runtime theme switching. See how the same UI
 looks with different color palettes, all changing instantly.
 
-Run: uv run python demos/cells/apps/theme_carnival.py
+Run: uv run python demos/apps/theme_carnival.py
 Keys: 1-6 jump to theme, ←/→ cycle, ↑/↓ scroll, q quit
 Mouse: scroll wheel to scroll
 """

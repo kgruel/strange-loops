@@ -4,7 +4,7 @@
 Interactive demo showing tree_lens and chart_lens at different zoom levels.
 Switch between data sets and adjust zoom to see how the lenses adapt.
 
-Run: uv run python demos/cells/apps/lenses.py
+Run: uv run python demos/apps/lenses.py
 
 Controls:
   Tab       Toggle between Tree and Chart lens

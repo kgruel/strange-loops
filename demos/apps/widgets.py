@@ -7,7 +7,7 @@ Built-in components with state management:
 - list_view: scrollable selection list
 - text_input: editable text field
 
-Run: uv run python demos/cells/apps/widgets.py
+Run: uv run python demos/apps/widgets.py
 Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 

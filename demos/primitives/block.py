@@ -5,7 +5,7 @@ Block is a rectangle of Cells with known dimensions.
 Unlike Buffer, blocks are immutable — you compose them, not mutate them.
 This is the unit of composition for building UIs.
 
-Run: uv run python demos/cells/primitives/block.py
+Run: uv run python demos/primitives/block.py
 """
 
 import sys

@@ -49,7 +49,20 @@ def _dataclass_frozen_from_decorators(class_def: ast.ClassDef) -> bool | None:
 def test_state_dataclasses_declared_frozen() -> None:
     fidelis_root = Path(__file__).resolve().parents[1] / "src" / "fidelis"
 
-    must_be_frozen = {"Region", "Cell", "Style", "Span", "Line", "BorderChars", "Focus", "Search", "Lens", "Viewport", "CliContext"}
+    must_be_frozen = {
+        "Region",
+        "Cell",
+        "Style",
+        "Span",
+        "Line",
+        "BorderChars",
+        "Focus",
+        "Search",
+        "Lens",
+        "Cursor",
+        "Viewport",
+        "CliContext",
+    }
 
     for py_file in fidelis_root.rglob("*.py"):
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
@@ -81,6 +94,7 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
     from fidelis._components.spinner import SpinnerState
     from fidelis._components.table import TableState
     from fidelis._components.text_input import TextInputState
+    from fidelis.cursor import Cursor
     from fidelis.fidelity import CliContext
     from fidelis.focus import Focus
     from fidelis.region import Region
@@ -99,6 +113,7 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
         Focus,
         Search,
         Lens,
+        Cursor,
         Viewport,
         CliContext,
         SpinnerState,
@@ -110,4 +125,3 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
     ):
         assert is_dataclass(cls)
         assert cls.__dataclass_params__.frozen is True
-

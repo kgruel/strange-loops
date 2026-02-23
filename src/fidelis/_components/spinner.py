@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from ..cell import Style
 from ..block import Block
+from ..cursor import Cursor, CursorMode
 
 if TYPE_CHECKING:
     from ..component_theme import ComponentTheme
@@ -33,7 +34,8 @@ class SpinnerState:
 
     def tick(self) -> SpinnerState:
         """Advance to the next frame, wrapping around."""
-        return replace(self, frame=(self.frame + 1) % len(self.frames.frames))
+        cursor = Cursor(index=self.frame, count=len(self.frames.frames), mode=CursorMode.WRAP).next()
+        return replace(self, frame=cursor.index)
 
 
 def spinner(

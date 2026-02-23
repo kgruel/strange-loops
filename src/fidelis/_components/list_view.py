@@ -7,38 +7,62 @@ from dataclasses import dataclass, replace
 from ..buffer import Buffer
 from ..cell import Style
 from ..block import Block
+from ..cursor import Cursor
 from ..span import Line, Span
+from ..viewport import Viewport
 
 
 @dataclass(frozen=True)
 class ListState:
-    """Immutable list state tracking selection and scroll position."""
+    """Immutable list state tracking selection and scroll position.
 
-    selected: int = 0
-    scroll_offset: int = 0
-    item_count: int = 0
+    Composition:
+    - `cursor`: selection index over `item_count`
+    - `viewport`: scroll offset/visible/content for rendering
+    """
+
+    cursor: Cursor = Cursor()
+    viewport: Viewport = Viewport()
+
+    @property
+    def selected(self) -> int:
+        return self.cursor.index
+
+    @property
+    def item_count(self) -> int:
+        return self.cursor.count
+
+    @property
+    def scroll_offset(self) -> int:
+        return self.viewport.offset
 
     def move_up(self) -> ListState:
         """Move selection up, clamping to 0."""
-        return replace(self, selected=max(0, self.selected - 1))
+        return replace(self, cursor=self.cursor.prev())
 
     def move_down(self) -> ListState:
         """Move selection down, clamping to last item."""
-        return replace(self, selected=min(self.item_count - 1, self.selected + 1))
+        return replace(self, cursor=self.cursor.next())
 
     def move_to(self, index: int) -> ListState:
         """Move selection to a specific index, clamped to valid range."""
-        clamped = max(0, min(self.item_count - 1, index))
-        return replace(self, selected=clamped)
+        return replace(self, cursor=self.cursor.move_to(index))
+
+    def with_count(self, count: int) -> ListState:
+        """Update item_count, clamping selection + scroll offset."""
+        cursor = self.cursor.with_count(count)
+        viewport = self.viewport.with_content(cursor.count)
+        return replace(self, cursor=cursor, viewport=viewport)
+
+    def with_visible(self, height: int) -> ListState:
+        """Update viewport visible height."""
+        return replace(self, viewport=self.viewport.with_visible(height))
 
     def scroll_into_view(self, visible_height: int) -> ListState:
-        """Adjust scroll_offset so selected item is visible."""
-        offset = self.scroll_offset
-        if self.selected < offset:
-            offset = self.selected
-        elif self.selected >= offset + visible_height:
-            offset = self.selected - visible_height + 1
-        return replace(self, scroll_offset=offset)
+        """Adjust viewport so selected item is visible."""
+        vp = self.viewport.with_visible(visible_height).with_content(self.cursor.count)
+        vp = vp.scroll_into_view(self.cursor.index)
+        return replace(self, viewport=vp)
 
 
 def list_view(
@@ -53,8 +77,11 @@ def list_view(
     if not items:
         return Block.empty(1, visible_height)
 
+    vp = state.viewport.with_visible(visible_height).with_content(len(items))
+    cursor = state.cursor.with_count(len(items))
+
     # Determine visible window
-    start = state.scroll_offset
+    start = vp.offset
     end = min(start + visible_height, len(items))
 
     # Find max width across visible items (+ 2 for cursor prefix)
@@ -64,7 +91,7 @@ def list_view(
     buf = Buffer(max_width, visible_height)
 
     for row_idx, i in enumerate(range(start, end)):
-        is_selected = i == state.selected
+        is_selected = i == cursor.index
         prefix_char = cursor_char if is_selected else " "
 
         # Build a Line: cursor prefix + item spans

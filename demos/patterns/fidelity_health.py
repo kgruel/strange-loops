@@ -22,6 +22,7 @@ from enum import Enum
 
 from fidelis import (
     Block,
+    Cursor,
     Style,
     CliContext,
     Zoom,
@@ -242,11 +243,7 @@ class HealthSurface(Surface):
     def __init__(self, data: HealthData):
         super().__init__()
         self._data = data
-        self._list_state = ListState(
-            selected=0,
-            scroll_offset=0,
-            item_count=len(data.services),
-        )
+        self._list_state = ListState(cursor=Cursor(count=len(data.services)))
         self._spinner = SpinnerState(frames=DOTS)
         self._width = 80
         self._height = 24

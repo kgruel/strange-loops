@@ -12,7 +12,7 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 
 import asyncio
-from fidelis import Style, Line, Span, border
+from fidelis import Cursor, Style, Line, Span, border
 from fidelis.tui import Surface, Focus, ring_next
 from fidelis.widgets import (
     SpinnerState, spinner,
@@ -38,7 +38,7 @@ class WidgetsApp(Surface):
             Line.plain("Date", Style(fg="green")),
             Line.plain("Elderberry", Style(fg="cyan")),
         ]
-        self.list_state = ListState(selected=0, item_count=len(self.list_items))
+        self.list_state = ListState(cursor=Cursor(count=len(self.list_items)))
 
         self.text_state = TextInputState(text="Edit me", cursor=7)
 

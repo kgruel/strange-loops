@@ -36,6 +36,7 @@ import time
 
 from fidelis import (
     Block, Style, Span, Line,
+    Cursor,
     join_horizontal, join_vertical, pad, border,
     ROUNDED,
     print_block,
@@ -178,9 +179,9 @@ class BenchState:
     spinner_braille: SpinnerState = field(default_factory=lambda: SpinnerState(frames=BRAILLE))
     spinner_line: SpinnerState = field(default_factory=lambda: SpinnerState(frames=LINE))
     progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
-    list_state: ListState = field(default_factory=lambda: ListState(item_count=5))
+    list_state: ListState = field(default_factory=lambda: ListState(cursor=Cursor(count=5)))
     text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
-    table_state: TableState = field(default_factory=lambda: TableState(row_count=4))
+    table_state: TableState = field(default_factory=lambda: TableState(cursor=Cursor(count=4)))
 
     # Focus demo state
     focus_demo_item: str = "a"
@@ -217,9 +218,9 @@ class LensContext:
     spinner_braille: SpinnerState = field(default_factory=lambda: SpinnerState(frames=BRAILLE))
     spinner_line: SpinnerState = field(default_factory=lambda: SpinnerState(frames=LINE))
     progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
-    list_state: ListState = field(default_factory=lambda: ListState(item_count=5))
+    list_state: ListState = field(default_factory=lambda: ListState(cursor=Cursor(count=5)))
     text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
-    table_state: TableState = field(default_factory=lambda: TableState(row_count=4))
+    table_state: TableState = field(default_factory=lambda: TableState(cursor=Cursor(count=4)))
 
     # Focus demo state
     focus_demo_item: str = "a"
@@ -1626,10 +1627,11 @@ bar = progress_bar(state, width=30)''',
                 Demo(demo_id="list"),
                 Spacer(1),
                 Code(
-                    source='''state = ListState(item_count=5)
+                    source='''state = ListState(cursor=Cursor(count=5))
 state = state.move_down()  # returns new state
 
 items = [Line.plain("Apple"), ...]
+state = state.scroll_into_view(visible_height=5)
 lst = list_view(state, items, visible_height=5)''',
                     title="usage",
                 ),
@@ -1675,7 +1677,7 @@ inp = text_input(state, width=20, focused=True)''',
                 Code(
                     source='''columns = [Column(header=Line.plain("Name"), width=12)]
 rows = [[Line.plain("Cell")], [Line.plain("Block")]]
-state = TableState(row_count=len(rows))
+state = TableState(cursor=Cursor(count=len(rows)))
 
 tbl = table(state, columns, rows, visible_height=3)''',
                     title="usage",

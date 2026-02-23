@@ -26,6 +26,7 @@ from .block import Block, Wrap
 
 # Composition
 from .compose import Align, join_horizontal, join_vertical, join_responsive, pad, border, truncate, vslice
+from .cursor import Cursor, CursorMode
 from .viewport import Viewport
 from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
 
@@ -83,6 +84,8 @@ __all__ = [
     "border",
     "truncate",
     "vslice",
+    "Cursor",
+    "CursorMode",
     "Viewport",
     "BorderChars",
     "ROUNDED",

@@ -8,7 +8,6 @@ from fidelis.widgets import (
     data_explorer,
     flatten,
 )
-from fidelis.viewport import Viewport
 
 
 class TestFlatten:
@@ -102,42 +101,41 @@ class TestDataExplorerState:
     def test_move_down_clamps_at_end(self):
         """Move down past last item clamps to last."""
         data = {"a": 1, "b": 2}
-        state = DataExplorerState(data=data, cursor=1)
+        state = DataExplorerState(data=data).move_down()
         state = state.move_down()
-        assert state.cursor == 1  # stays at last
+        assert state.cursor_index == 1  # stays at last
 
     def test_move_up_clamps_at_zero(self):
         """Move up past first item clamps to 0."""
         data = {"a": 1}
-        state = DataExplorerState(data=data, cursor=0)
+        state = DataExplorerState(data=data)
         state = state.move_up()
-        assert state.cursor == 0
+        assert state.cursor_index == 0
 
     def test_move_down_increments(self):
         """Move down increments cursor."""
         data = {"a": 1, "b": 2, "c": 3}
-        state = DataExplorerState(data=data, cursor=0)
+        state = DataExplorerState(data=data)
         state = state.move_down()
-        assert state.cursor == 1
+        assert state.cursor_index == 1
 
     def test_home_goes_to_zero(self):
         """Home moves cursor to 0."""
         data = {"a": 1, "b": 2, "c": 3}
-        state = DataExplorerState(data=data, cursor=2)
+        state = DataExplorerState(data=data).end()
         state = state.home()
-        assert state.cursor == 0
+        assert state.cursor_index == 0
 
     def test_end_goes_to_last(self):
         """End moves cursor to last item."""
         data = {"a": 1, "b": 2, "c": 3}
-        state = DataExplorerState(data=data, cursor=0)
-        state = state.end()
-        assert state.cursor == 2
+        state = DataExplorerState(data=data).end()
+        assert state.cursor_index == 2
 
     def test_toggle_leaf_is_noop(self):
         """Toggling a non-expandable node is a no-op."""
         data = {"a": 1}
-        state = DataExplorerState(data=data, cursor=0)
+        state = DataExplorerState(data=data)
         new_state = state.toggle_expand()
         assert new_state.expanded == state.expanded
 

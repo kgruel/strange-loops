@@ -8,7 +8,9 @@ from ..buffer import Buffer
 from ..cell import Style
 from ..block import Block
 from ..compose import Align
+from ..cursor import Cursor
 from ..span import Line, Span
+from ..viewport import Viewport
 
 
 @dataclass(frozen=True)
@@ -22,33 +24,55 @@ class Column:
 
 @dataclass(frozen=True)
 class TableState:
-    """Immutable table state tracking row selection and scroll position."""
+    """Immutable table state tracking row selection and scroll position.
 
-    selected_row: int = 0
-    scroll_offset: int = 0
-    row_count: int = 0
+    Composition:
+    - `cursor`: selected row index over `row_count`
+    - `viewport`: scroll offset/visible/content for rendering
+    """
+
+    cursor: Cursor = Cursor()
+    viewport: Viewport = Viewport()
+
+    @property
+    def selected_row(self) -> int:
+        return self.cursor.index
+
+    @property
+    def row_count(self) -> int:
+        return self.cursor.count
+
+    @property
+    def scroll_offset(self) -> int:
+        return self.viewport.offset
 
     def move_up(self) -> TableState:
         """Move selection up, clamping to 0."""
-        return replace(self, selected_row=max(0, self.selected_row - 1))
+        return replace(self, cursor=self.cursor.prev())
 
     def move_down(self) -> TableState:
         """Move selection down, clamping to last row."""
-        return replace(self, selected_row=min(self.row_count - 1, self.selected_row + 1))
+        return replace(self, cursor=self.cursor.next())
 
     def move_to(self, row: int) -> TableState:
         """Move selection to a specific row, clamped to valid range."""
-        clamped = max(0, min(self.row_count - 1, row))
-        return replace(self, selected_row=clamped)
+        return replace(self, cursor=self.cursor.move_to(row))
+
+    def with_count(self, count: int) -> TableState:
+        """Update row_count, clamping selection + scroll offset."""
+        cursor = self.cursor.with_count(count)
+        viewport = self.viewport.with_content(cursor.count)
+        return replace(self, cursor=cursor, viewport=viewport)
+
+    def with_visible(self, height: int) -> TableState:
+        """Update viewport visible height."""
+        return replace(self, viewport=self.viewport.with_visible(height))
 
     def scroll_into_view(self, visible_height: int) -> TableState:
-        """Adjust scroll_offset so selected row is visible."""
-        offset = self.scroll_offset
-        if self.selected_row < offset:
-            offset = self.selected_row
-        elif self.selected_row >= offset + visible_height:
-            offset = self.selected_row - visible_height + 1
-        return replace(self, scroll_offset=offset)
+        """Adjust viewport so selected row is visible."""
+        vp = self.viewport.with_visible(visible_height).with_content(self.cursor.count)
+        vp = vp.scroll_into_view(self.cursor.index)
+        return replace(self, viewport=vp)
 
 
 def _pad_line(line: Line, target_width: int, align: Align, style: Style) -> Line:
@@ -86,6 +110,9 @@ def table(
     if not columns:
         return Block.empty(1, visible_height + 2)
 
+    vp = state.viewport.with_visible(visible_height).with_content(len(rows))
+    cursor = state.cursor.with_count(len(rows))
+
     # Calculate total width: sum of column widths + separators
     sep_width = len(separator)
     total_width = sum(c.width for c in columns) + sep_width * (len(columns) - 1)
@@ -116,12 +143,12 @@ def table(
             col_x += sep_width
 
     # -- Data rows (visible window) --
-    start = state.scroll_offset
+    start = vp.offset
     end = min(start + visible_height, len(rows))
 
     for row_offset, row_idx in enumerate(range(start, end)):
         row_data = rows[row_idx] if row_idx < len(rows) else []
-        is_selected = row_idx == state.selected_row
+        is_selected = row_idx == cursor.index
         row_style = selected_style if is_selected else Style()
         buf_y = 2 + row_offset
 

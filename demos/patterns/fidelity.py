@@ -23,6 +23,7 @@ from enum import Enum
 
 from fidelis import (
     Block,
+    Cursor,
     Style,
     CliContext,
     Zoom,
@@ -220,11 +221,7 @@ class BuildSurface(Surface):
     def __init__(self, data: BuildData):
         super().__init__()
         self._data = data
-        self._list_state = ListState(
-            selected=0,
-            scroll_offset=0,
-            item_count=len(data.tasks),
-        )
+        self._list_state = ListState(cursor=Cursor(count=len(data.tasks)))
         self._spinner = SpinnerState(frames=DOTS)
         self._width = 80
         self._height = 24

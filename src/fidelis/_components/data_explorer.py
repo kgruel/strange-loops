@@ -9,6 +9,7 @@ from ..block import Block
 from ..cell import Style
 from ..compose import join_vertical
 from ..span import Line, Span
+from ..cursor import Cursor
 from ..viewport import Viewport
 from .._text_width import display_width, truncate
 
@@ -130,9 +131,13 @@ class DataExplorerState:
     """Immutable state for data explorer navigation."""
 
     data: Any
-    cursor: int = 0
+    cursor: Cursor = Cursor()
     expanded: frozenset[tuple[str, ...]] = frozenset()
     viewport: Viewport = Viewport()
+
+    @property
+    def cursor_index(self) -> int:
+        return self.cursor.index
 
     @property
     def nodes(self) -> list[DataNode]:
@@ -142,61 +147,86 @@ class DataExplorerState:
     def toggle_expand(self) -> DataExplorerState:
         """Toggle expansion of the node at cursor."""
         nodes = self.nodes
-        if not nodes or self.cursor >= len(nodes):
-            return self
-        node = nodes[self.cursor]
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        if not nodes:
+            return replace(self, cursor=cursor, viewport=viewport)
+
+        node = nodes[cursor.index]
         if not node.expandable:
-            return self
+            return replace(self, cursor=cursor, viewport=viewport)
         if node.expanded:
             new_expanded = self.expanded - {node.path}
         else:
             new_expanded = self.expanded | {node.path}
-        return replace(self, expanded=new_expanded)
+
+        # After expansion change, re-sync cursor + viewport to the new node list.
+        new_state = replace(self, expanded=new_expanded)
+        new_nodes = new_state.nodes
+        new_cursor = cursor.with_count(len(new_nodes))
+        new_viewport = viewport.with_content(len(new_nodes)).scroll_into_view(new_cursor.index)
+        return replace(new_state, cursor=new_cursor, viewport=new_viewport)
 
     def move_up(self) -> DataExplorerState:
         """Move cursor up by one."""
-        new_cursor = max(0, self.cursor - 1)
-        new_vp = self.viewport.scroll_into_view(new_cursor)
+        nodes = self.nodes
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.prev()
+        new_vp = viewport.scroll_into_view(new_cursor.index)
         return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def move_down(self) -> DataExplorerState:
         """Move cursor down by one."""
         nodes = self.nodes
-        new_cursor = min(len(nodes) - 1, self.cursor + 1) if nodes else 0
-        new_vp = self.viewport.scroll_into_view(new_cursor)
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.next()
+        new_vp = viewport.scroll_into_view(new_cursor.index)
         return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def page_up(self) -> DataExplorerState:
         """Move cursor up by one page."""
-        new_cursor = max(0, self.cursor - self.viewport.visible)
-        new_vp = self.viewport.scroll_into_view(new_cursor)
+        nodes = self.nodes
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.move(-viewport.visible)
+        new_vp = viewport.scroll_into_view(new_cursor.index)
         return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def page_down(self) -> DataExplorerState:
         """Move cursor down by one page."""
         nodes = self.nodes
-        max_idx = len(nodes) - 1 if nodes else 0
-        new_cursor = min(max_idx, self.cursor + self.viewport.visible)
-        new_vp = self.viewport.scroll_into_view(new_cursor)
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.move(viewport.visible)
+        new_vp = viewport.scroll_into_view(new_cursor.index)
         return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def home(self) -> DataExplorerState:
         """Move cursor to first item."""
-        new_vp = self.viewport.scroll_into_view(0)
-        return replace(self, cursor=0, viewport=new_vp)
+        nodes = self.nodes
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.home()
+        new_vp = viewport.scroll_into_view(new_cursor.index)
+        return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def end(self) -> DataExplorerState:
         """Move cursor to last item."""
         nodes = self.nodes
-        last = len(nodes) - 1 if nodes else 0
-        new_vp = self.viewport.scroll_into_view(last)
-        return replace(self, cursor=last, viewport=new_vp)
+        cursor = self.cursor.with_count(len(nodes))
+        viewport = self.viewport.with_content(len(nodes))
+        new_cursor = cursor.end()
+        new_vp = viewport.scroll_into_view(new_cursor.index)
+        return replace(self, cursor=new_cursor, viewport=new_vp)
 
     def with_visible(self, height: int) -> DataExplorerState:
         """Update viewport visible height."""
         nodes = self.nodes
+        cursor = self.cursor.with_count(len(nodes))
         new_vp = self.viewport.with_visible(height).with_content(len(nodes))
-        return replace(self, viewport=new_vp)
+        return replace(self, cursor=cursor, viewport=new_vp)
 
 
 def _format_leaf_value(value: Any, max_len: int) -> str:
@@ -249,7 +279,7 @@ def data_explorer(
     rows: list[Block] = []
     for i in range(start, end):
         node = nodes[i]
-        is_cursor = i == state.cursor
+        is_cursor = i == state.cursor_index
 
         # Build line: indent + indicator + key + value
         indent = "  " * node.depth

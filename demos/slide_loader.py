@@ -307,14 +307,14 @@ def load_slides_dir(dir_path: Path | str) -> dict[str, ParsedSlide]:
     return slides
 
 
-# -- Conversion to Bench Types --
+# -- Conversion to Tour Types --
 
-def to_bench_slide(parsed: ParsedSlide):
-    """Convert ParsedSlide to bench.py Slide type.
+def to_tour_slide(parsed: ParsedSlide):
+    """Convert ParsedSlide to tour.py Slide type.
 
-    Import bench types here to avoid circular imports.
+    Import tour types here to avoid circular imports.
     """
-    from demos.bench import Slide, Navigation, Text, Code, Demo, Spacer, SUBTITLE_STYLE, HINT_STYLE
+    from demos.tour import Slide, Navigation, Text, Code, Demo, Spacer, SUBTITLE_STYLE, HINT_STYLE
 
     sections = []
     for sec in parsed.sections:

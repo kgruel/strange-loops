@@ -2,11 +2,11 @@
 
 Findings and recommendations for the fidelis demo structure.
 
-## 1. bench.py Completeness Analysis
+## 1. tour.py Completeness Analysis
 
 ### Current State
 
-bench.py is a ~2880-line interactive teaching platform implementing:
+tour.py is a ~2880-line interactive teaching platform implementing:
 - 2D slide navigation (left/right = topics, up/down = zoom levels)
 - Layer stack (nav, help, search, demo focus)
 - Interactive widget demos (spinner, progress, list, text input, table, focus navigation, search)
@@ -31,9 +31,9 @@ bench.py is a ~2880-line interactive teaching platform implementing:
 
 ### What's Missing
 
-**Not actually missing — bench.py is functionally complete.** The gaps are pedagogical rather than structural:
+**Not actually missing — tour.py is functionally complete.** The gaps are pedagogical rather than structural:
 
-1. **Mouse input**: No slides covering `fidelis.mouse`. The framework supports mouse but bench.py doesn't demonstrate it. Consider adding a "mouse" slide pointing to `demo_mouse.py`.
+1. **Mouse input**: No slides covering `fidelis.mouse`. The framework supports mouse but tour.py doesn't demonstrate it. Consider adding a "mouse" slide pointing to `demo_mouse.py`.
 
 2. **Lens primitives**: No coverage of `fidelis.lens` (shape_lens, tree_lens, chart_lens). These render arbitrary Python data at different zoom levels. Could add a "lens" slide between "buffer" and "app".
 
@@ -43,13 +43,12 @@ bench.py is a ~2880-line interactive teaching platform implementing:
 
 ### Completion Recommendations
 
-To make bench.py a "complete" demo:
+To make tour.py a "complete" demo:
 
 1. **Add mouse slide** after "components" — link to interactive demo
 2. **Add lens slide** after "block" — show shape_lens at zoom 0/1/2
-3. **Consider removing tour.py** — duplicates bench.py's purpose
 
-bench.py already demonstrates the canonical TUI app pattern thoroughly. The missing pieces are additive, not structural.
+tour.py is the primary teaching platform (renamed from bench.py). The missing pieces are additive, not structural.
 
 ---
 
@@ -58,7 +57,7 @@ bench.py already demonstrates the canonical TUI app pattern thoroughly. The miss
 ### Current Structure (20 files)
 
 ```
-demos/fidelis/
+demos/
 ├── demo_01_cell.py       # CLI primitive
 ├── demo_02_buffer.py     # CLI primitive
 ├── demo_03_buffer_view.py # CLI primitive
@@ -77,8 +76,7 @@ demos/fidelis/
 ├── demo_fidelity_health.py  # Variant
 ├── demo_utils.py         # Helper
 ├── slide_loader.py       # Helper
-├── bench.py              # Teaching platform
-└── tour.py               # Alternative teaching platform
+└── tour.py               # Teaching platform
 ```
 
 ### Issues
@@ -90,17 +88,16 @@ demos/fidelis/
 
 2. **Unclear categories**
    - CLI-only demos mixed with TUI demos
-   - Teaching tools (bench, tour) mixed with examples
+   - Teaching tools (tour) mixed with examples
    - Helpers (demo_utils, slide_loader) in same directory
 
 3. **Redundancy**
-   - `tour.py` duplicates bench.py's purpose
    - `demo_10_lens.py` and `demo_lenses.py` overlap
 
 ### Recommended Structure
 
 ```
-demos/fidelis/
+demos/
 ├── README.md                    # Demo index with descriptions
 │
 ├── primitives/                  # CLI-level (run and exit)
@@ -122,13 +119,12 @@ demos/fidelis/
 │   ├── fidelity_disk.py       # Variant: disk monitor
 │   └── fidelity_health.py     # Variant: health checker
 │
-└── bench.py                     # Teaching platform (keep at top level)
+└── tour.py                      # Teaching platform (keep at top level)
 ```
 
 ### Migration Strategy
 
-1. **Keep bench.py at top level** — it's the primary entry point
-2. **Delete tour.py** — superseded by bench.py
+1. **Keep tour.py at top level** — it's the primary entry point
 3. **Rename numbered demos** — use descriptive names
 4. **Group by complexity** — primitives (CLI) vs apps (TUI) vs patterns (real-world)
 5. **Add README.md** — index with run commands and descriptions
@@ -149,7 +145,7 @@ No numbered prefixes — use README for learning path ordering.
 
 ### The Canonical Structure
 
-Based on bench.py, demo_09_layer.py, and demo_lenses.py, the pattern for TUI apps using fidelis submodules:
+Based on tour.py, demo_09_layer.py, and demo_lenses.py, the pattern for TUI apps using fidelis submodules:
 
 ```python
 #!/usr/bin/env python3
@@ -157,7 +153,7 @@ Based on bench.py, demo_09_layer.py, and demo_lenses.py, the pattern for TUI app
 
 Detailed usage and controls.
 
-Run: uv run python demos/fidelis/{name}.py
+Run: uv run python demos/{name}.py
 """
 
 import asyncio
@@ -332,6 +328,6 @@ Use the layer pattern for:
 
 | Question | Answer |
 |----------|--------|
-| Is bench.py complete? | Yes, functionally complete. Could add mouse/lens/effects slides. |
-| How to restructure demos? | Group by CLI/TUI/patterns. Remove tour.py. Add README index. |
+| Is tour.py complete? | Yes, functionally complete. Could add mouse/lens/effects slides. |
+| How to restructure demos? | Group by CLI/TUI/patterns. Add README index. |
 | What's the TUI app pattern? | Frozen state + layer stack + process_key + render_layers |

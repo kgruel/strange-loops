@@ -3,10 +3,11 @@
 
 Demonstrates the fidelity spectrum with service health monitoring:
 
-    uv run python demos/patterns/fidelity_health.py -q     # "5/6 healthy"
-    uv run python demos/patterns/fidelity_health.py        # Service list
-    uv run python demos/patterns/fidelity_health.py -v     # Styled table
-    uv run python demos/patterns/fidelity_health.py -vv    # Live TUI dashboard
+    uv run python demos/patterns/fidelity_health.py -q        # Zoom 0: minimal one line
+    uv run python demos/patterns/fidelity_health.py           # Zoom 1: service list
+    uv run python demos/patterns/fidelity_health.py -v        # Zoom 2: styled table
+    uv run python demos/patterns/fidelity_health.py -vv       # Zoom 3: full detail
+    uv run python demos/patterns/fidelity_health.py -vv -i    # Interactive live TUI dashboard
 
 The TUI mode simulates live updates with changing latencies and status.
 """
@@ -14,7 +15,6 @@ The TUI mode simulates live updates with changing latencies and status.
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import sys
 from dataclasses import dataclass, replace
@@ -23,11 +23,16 @@ from enum import Enum
 from fidelis import (
     Block,
     Style,
+    CliContext,
+    Zoom,
+    OutputMode,
+    Format,
     border,
     join_vertical,
     join_horizontal,
     ROUNDED,
     print_block,
+    run_cli,
 )
 from fidelis.tui import Surface
 from fidelis.widgets import (
@@ -92,13 +97,6 @@ SAMPLE_HEALTH = HealthData(
         ServiceHealth("inventory-service", HealthStatus.UNHEALTHY, None, "10:30:40", "Connection refused"),
     ),
 )
-
-
-def terminal_width() -> int:
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
 
 
 # ============================================================================
@@ -492,49 +490,49 @@ def run_interactive(data: HealthData) -> None:
 # Main entry point
 # ============================================================================
 
-
-def parse_fidelity(args: list[str]) -> int:
-    """Parse fidelity level from args."""
-    if "-q" in args or "--quiet" in args:
-        return 0
-    v_count = 0
-    for arg in args:
-        if arg == "-vv":
-            return 3
-        elif arg == "-v" or arg == "--verbose":
-            v_count += 1
-    return min(v_count + 1, 3)
+def _text_block(text: str, *, width: int) -> Block:
+    lines = text.splitlines() or [""]
+    max_len = max(len(line) for line in lines)
+    target_width = max(1, min(width, max_len)) if width > 0 else max(1, max_len)
+    return join_vertical(*(Block.text(line, Style(), width=target_width) for line in lines))
 
 
-def is_interactive() -> bool:
-    return sys.stdout.isatty()
+def _exit_code(data: HealthData) -> int:
+    return 1 if data.unhealthy > 0 else 0
+
+
+def _fetch() -> HealthData:
+    return SAMPLE_HEALTH
+
+
+def _render(ctx: CliContext, data: HealthData) -> Block:
+    if ctx.zoom == Zoom.MINIMAL:
+        return Block.text(render_minimal(data), Style())
+    if ctx.zoom == Zoom.SUMMARY:
+        return _text_block(render_standard(data), width=ctx.width)
+    # DETAILED/FULL: styled Blocks
+    return render_styled(data, ctx.width)
+
+
+def _handle_interactive(ctx: CliContext) -> int:
+    data = _fetch()
+    if not ctx.is_tty:
+        block = _render(ctx, data)
+        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        return _exit_code(data)
+    run_interactive(data)
+    return _exit_code(data)
 
 
 def main() -> int:
-    args = sys.argv[1:]
-
-    if "-h" in args or "--help" in args:
-        print(__doc__)
-        return 0
-
-    fidelity = parse_fidelity(args)
-    width = terminal_width()
-
-    if fidelity == 0:
-        print(render_minimal(SAMPLE_HEALTH))
-    elif fidelity == 1:
-        print(render_standard(SAMPLE_HEALTH))
-    elif fidelity == 2:
-        block = render_styled(SAMPLE_HEALTH, width)
-        print_block(block)
-    else:
-        if is_interactive():
-            run_interactive(SAMPLE_HEALTH)
-        else:
-            block = render_styled(SAMPLE_HEALTH, width)
-            print_block(block)
-
-    return 1 if SAMPLE_HEALTH.unhealthy > 0 else 0
+    return run_cli(
+        sys.argv[1:],
+        render=_render,
+        fetch=_fetch,
+        handlers={OutputMode.INTERACTIVE: _handle_interactive},
+        description=__doc__,
+        prog="fidelity_health.py",
+    )
 
 
 if __name__ == "__main__":

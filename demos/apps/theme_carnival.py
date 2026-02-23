@@ -19,7 +19,7 @@ from fidelis.themes import (
     list_themes,
 )
 from fidelis.widgets import SpinnerState, spinner, ProgressState, progress_bar
-from fidelis._mouse import MouseEvent
+from fidelis.mouse import MouseEvent
 
 
 class ThemeCarnival(Surface):

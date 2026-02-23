@@ -23,7 +23,12 @@ class ColorDepth(Enum):
 
 
 class Writer:
-    """Converts cell writes to ANSI escape sequences and outputs to terminal."""
+    """Converts cell writes to ANSI escape sequences and outputs to terminal.
+
+    Note: Hex colors (e.g. "#RRGGBB") emit truecolor (24-bit) SGR codes.
+    There is currently no automatic fallback to 256/16-color output — assumes
+    truecolor support for best results.
+    """
 
     def __init__(self, stream: TextIO = sys.stdout):
         self._stream = stream

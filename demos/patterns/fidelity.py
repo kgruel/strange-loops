@@ -4,10 +4,11 @@
 This demo shows how cells enables the CLI→TUI continuum. Run with different
 fidelity flags to see the same task data rendered at each level:
 
-    uv run python demos/patterns/fidelity.py -q     # Level 0: one line
-    uv run python demos/patterns/fidelity.py        # Level 1: standard output
-    uv run python demos/patterns/fidelity.py -v     # Level 2: styled output
-    uv run python demos/patterns/fidelity.py -vv    # Level 3: interactive TUI
+    uv run python demos/patterns/fidelity.py -q        # Zoom 0: minimal one line
+    uv run python demos/patterns/fidelity.py           # Zoom 1: standard output
+    uv run python demos/patterns/fidelity.py -v        # Zoom 2: styled output
+    uv run python demos/patterns/fidelity.py -vv       # Zoom 3: full detail
+    uv run python demos/patterns/fidelity.py -vv -i    # Interactive TUI
 
 The demo simulates a task runner showing build status. The same underlying
 TaskData structure drives all four presentations.
@@ -16,21 +17,24 @@ TaskData structure drives all four presentations.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
-import time
 from dataclasses import dataclass
 from enum import Enum
 
 from fidelis import (
     Block,
     Style,
+    CliContext,
+    Zoom,
+    OutputMode,
+    Format,
     border,
     join_vertical,
     join_horizontal,
     pad,
     ROUNDED,
     print_block,
+    run_cli,
 )
 from fidelis.tui import Surface
 from fidelis.widgets import (
@@ -94,13 +98,6 @@ SAMPLE_BUILD = BuildData(
         TaskData("deploy", TaskStatus.PENDING),
     ),
 )
-
-
-def terminal_width() -> int:
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
 
 
 # ============================================================================
@@ -424,57 +421,49 @@ def run_interactive(data: BuildData) -> None:
 # Main entry point
 # ============================================================================
 
-
-def parse_fidelity(args: list[str]) -> int:
-    """Parse fidelity level from args."""
-    if "-q" in args or "--quiet" in args:
-        return 0
-    v_count = 0
-    for arg in args:
-        if arg == "-vv":
-            return 3
-        elif arg == "-v" or arg == "--verbose":
-            v_count += 1
-    return min(v_count + 1, 3)
+def _text_block(text: str, *, width: int) -> Block:
+    lines = text.splitlines() or [""]
+    max_len = max(len(line) for line in lines)
+    target_width = max(1, min(width, max_len)) if width > 0 else max(1, max_len)
+    return join_vertical(*(Block.text(line, Style(), width=target_width) for line in lines))
 
 
-def is_interactive() -> bool:
-    return sys.stdout.isatty()
+def _exit_code(data: BuildData) -> int:
+    return 1 if data.failed > 0 else 0
+
+
+def _fetch() -> BuildData:
+    return SAMPLE_BUILD
+
+
+def _render(ctx: CliContext, data: BuildData) -> Block:
+    if ctx.zoom == Zoom.MINIMAL:
+        return Block.text(render_minimal(data), Style())
+    if ctx.zoom == Zoom.SUMMARY:
+        return _text_block(render_standard(data), width=ctx.width)
+    # DETAILED/FULL: styled Blocks
+    return render_styled(data, ctx.width)
+
+
+def _handle_interactive(ctx: CliContext) -> int:
+    data = _fetch()
+    if not ctx.is_tty:
+        block = _render(ctx, data)
+        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        return _exit_code(data)
+    run_interactive(data)
+    return _exit_code(data)
 
 
 def main() -> int:
-    args = sys.argv[1:]
-
-    if "-h" in args or "--help" in args:
-        print(__doc__)
-        return 0
-
-    fidelity = parse_fidelity(args)
-    width = terminal_width()
-
-    if fidelity == 0:
-        # Level 0: Minimal
-        print(render_minimal(SAMPLE_BUILD))
-
-    elif fidelity == 1:
-        # Level 1: Standard multi-line
-        print(render_standard(SAMPLE_BUILD))
-
-    elif fidelity == 2:
-        # Level 2: Styled blocks
-        block = render_styled(SAMPLE_BUILD, width)
-        print_block(block)
-
-    else:
-        # Level 3: Interactive TUI
-        if is_interactive():
-            run_interactive(SAMPLE_BUILD)
-        else:
-            # Fall back to styled if not a TTY
-            block = render_styled(SAMPLE_BUILD, width)
-            print_block(block)
-
-    return 1 if SAMPLE_BUILD.failed > 0 else 0
+    return run_cli(
+        sys.argv[1:],
+        render=_render,
+        fetch=_fetch,
+        handlers={OutputMode.INTERACTIVE: _handle_interactive},
+        description=__doc__,
+        prog="fidelity.py",
+    )
 
 
 if __name__ == "__main__":

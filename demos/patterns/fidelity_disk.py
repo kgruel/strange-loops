@@ -3,10 +3,11 @@
 
 Demonstrates the fidelity spectrum with hierarchical data:
 
-    uv run python demos/patterns/fidelity_disk.py -q     # "67% used (134G/200G)"
-    uv run python demos/patterns/fidelity_disk.py        # Top directories list
-    uv run python demos/patterns/fidelity_disk.py -v     # Styled bars per directory
-    uv run python demos/patterns/fidelity_disk.py -vv    # TUI file tree browser
+    uv run python demos/patterns/fidelity_disk.py -q        # Zoom 0: minimal one line
+    uv run python demos/patterns/fidelity_disk.py           # Zoom 1: top directories list
+    uv run python demos/patterns/fidelity_disk.py -v        # Zoom 2: styled bars per directory
+    uv run python demos/patterns/fidelity_disk.py -vv       # Zoom 3: full detail
+    uv run python demos/patterns/fidelity_disk.py -vv -i    # Interactive TUI file tree browser
 
 The TUI mode shows a navigable tree with expandable directories.
 """
@@ -14,18 +15,22 @@ The TUI mode shows a navigable tree with expandable directories.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from dataclasses import dataclass
 
 from fidelis import (
     Block,
     Style,
+    CliContext,
+    Zoom,
+    OutputMode,
+    Format,
     border,
     join_vertical,
     join_horizontal,
     ROUNDED,
     print_block,
+    run_cli,
 )
 from fidelis.tui import Surface
 
@@ -136,13 +141,6 @@ SAMPLE_DISK = DiskData(
         DirEntry(".local", 9 * 1024**3),
     ),
 )
-
-
-def terminal_width() -> int:
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
 
 
 # ============================================================================
@@ -482,49 +480,45 @@ def run_interactive(data: DiskData) -> None:
 # Main entry point
 # ============================================================================
 
+def _text_block(text: str, *, width: int) -> Block:
+    lines = text.splitlines() or [""]
+    max_len = max(len(line) for line in lines)
+    target_width = max(1, min(width, max_len)) if width > 0 else max(1, max_len)
+    return join_vertical(*(Block.text(line, Style(), width=target_width) for line in lines))
 
-def parse_fidelity(args: list[str]) -> int:
-    """Parse fidelity level from args."""
-    if "-q" in args or "--quiet" in args:
+
+def _fetch() -> DiskData:
+    return SAMPLE_DISK
+
+
+def _render(ctx: CliContext, data: DiskData) -> Block:
+    if ctx.zoom == Zoom.MINIMAL:
+        return Block.text(render_minimal(data), Style())
+    if ctx.zoom == Zoom.SUMMARY:
+        return _text_block(render_standard(data), width=ctx.width)
+    # DETAILED/FULL: styled Blocks
+    return render_styled(data, ctx.width)
+
+
+def _handle_interactive(ctx: CliContext) -> int:
+    data = _fetch()
+    if not ctx.is_tty:
+        block = _render(ctx, data)
+        print_block(block, use_ansi=(ctx.format == Format.ANSI))
         return 0
-    v_count = 0
-    for arg in args:
-        if arg == "-vv":
-            return 3
-        elif arg == "-v" or arg == "--verbose":
-            v_count += 1
-    return min(v_count + 1, 3)
-
-
-def is_interactive() -> bool:
-    return sys.stdout.isatty()
+    run_interactive(data)
+    return 0
 
 
 def main() -> int:
-    args = sys.argv[1:]
-
-    if "-h" in args or "--help" in args:
-        print(__doc__)
-        return 0
-
-    fidelity = parse_fidelity(args)
-    width = terminal_width()
-
-    if fidelity == 0:
-        print(render_minimal(SAMPLE_DISK))
-    elif fidelity == 1:
-        print(render_standard(SAMPLE_DISK))
-    elif fidelity == 2:
-        block = render_styled(SAMPLE_DISK, width)
-        print_block(block)
-    else:
-        if is_interactive():
-            run_interactive(SAMPLE_DISK)
-        else:
-            block = render_styled(SAMPLE_DISK, width)
-            print_block(block)
-
-    return 0
+    return run_cli(
+        sys.argv[1:],
+        render=_render,
+        fetch=_fetch,
+        handlers={OutputMode.INTERACTIVE: _handle_interactive},
+        description=__doc__,
+        prog="fidelity_disk.py",
+    )
 
 
 if __name__ == "__main__":

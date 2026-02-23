@@ -45,7 +45,7 @@ vertical axes:
   (implementation detail).
 - **Writer** — ANSI output mechanism. Lives "down" from Surface
   (how output reaches the terminal).
-- **Layer, FocusRing** — modal stacking and focus navigation. Live "up"
+- **Layer, Focus** — modal stacking and focus navigation (ring/linear). Live "up"
   from Surface (interactive concepts).
 
 The test: does this concept **depend on all prior stops** and **enable

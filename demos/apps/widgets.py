@@ -13,7 +13,7 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 
 import asyncio
 from fidelis import Style, Line, Span, border
-from fidelis.tui import Surface, FocusRing
+from fidelis.tui import Surface, Focus, ring_next
 from fidelis.widgets import (
     SpinnerState, spinner,
     ProgressState, progress_bar,
@@ -43,7 +43,8 @@ class WidgetsApp(Surface):
         self.text_state = TextInputState(text="Edit me", cursor=7)
 
         # Focus management
-        self.focus = FocusRing(["progress", "list", "text"])
+        self.focus_ids = ("progress", "list", "text")
+        self.focus = Focus(id=self.focus_ids[0])
         self.frame = 0
 
     def update(self) -> None:
@@ -72,7 +73,7 @@ class WidgetsApp(Surface):
         y += 2
 
         # Progress bar
-        focused = self.focus.focused == "progress"
+        focused = self.focus.id == "progress"
         label = "Progress:" if not focused else "Progress: [←/→]"
         self._buf.put_text(2, y, label, Style(fg="yellow" if focused else None))
         bar = progress_bar(
@@ -87,7 +88,7 @@ class WidgetsApp(Surface):
         y += 3
 
         # List view
-        focused = self.focus.focused == "list"
+        focused = self.focus.id == "list"
         label = "List:" if not focused else "List: [↑/↓]"
         self._buf.put_text(2, y, label, Style(fg="yellow" if focused else None))
 
@@ -105,7 +106,7 @@ class WidgetsApp(Surface):
         y += 6
 
         # Text input
-        focused = self.focus.focused == "text"
+        focused = self.focus.id == "text"
         label = "Input:" if not focused else "Input: [type]"
         self._buf.put_text(2, y, label, Style(fg="yellow" if focused else None))
         txt = text_input(
@@ -128,8 +129,8 @@ class WidgetsApp(Surface):
         if key == "q":
             self.quit()
         elif key == "tab":
-            self.focus.next()
-        elif self.focus.focused == "progress":
+            self.focus = self.focus.focus(ring_next(self.focus_ids, self.focus.id))
+        elif self.focus.id == "progress":
             if key == "right":
                 self.progress_state = self.progress_state.set(
                     self.progress_state.value + 0.05
@@ -138,12 +139,12 @@ class WidgetsApp(Surface):
                 self.progress_state = self.progress_state.set(
                     self.progress_state.value - 0.05
                 )
-        elif self.focus.focused == "list":
+        elif self.focus.id == "list":
             if key == "up":
                 self.list_state = self.list_state.move_up()
             elif key == "down":
                 self.list_state = self.list_state.move_down()
-        elif self.focus.focused == "text":
+        elif self.focus.id == "text":
             if key == "right":
                 self.text_state = self.text_state.move_right()
             elif key == "left":

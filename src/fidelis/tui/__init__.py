@@ -7,7 +7,7 @@ from ..buffer import Buffer, BufferView, CellWrite
 from ..keyboard import KeyboardInput, Input
 from ..app import Surface, Emit, LifecycleHook
 from ..layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
-from ..focus import Focus, FocusRing, ring_next, ring_prev, linear_next, linear_prev
+from ..focus import Focus, ring_next, ring_prev, linear_next, linear_prev
 from ..search import Search, filter_contains, filter_prefix, filter_fuzzy
 from ..region import Region
 
@@ -34,7 +34,6 @@ __all__ = [
     "render_layers",
     # Focus
     "Focus",
-    "FocusRing",
     "ring_next",
     "ring_prev",
     "linear_next",

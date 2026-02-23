@@ -54,7 +54,7 @@ APPLICATION LAYER
 
 STATE/INTERACTION LAYER
 ─────────────────────────────────────────────────────────────────
-  FocusRing       component focus management
+  Focus           component focus management (plus ring navigation)
   Layer           modal stacking
   Search          filtered selection
 

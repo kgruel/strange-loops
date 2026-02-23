@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Teaching Bench: Interactive educational platform for cells.
+"""Tour: Interactive educational platform for fidelis.
 
 A 2D navigable space where:
 - left/right moves between topics (sibling concepts)
 - up/down moves between zoom levels (same concept, more/less detail)
 
-Run: uv run python demos/bench.py
+Run: uv run python demos/tour.py
 
 Zoom levels (per slide via max_zoom):
 - Zoom 0: summary (intro text + minimal code)
@@ -1011,7 +1011,7 @@ def build_slides() -> dict[str, Slide]:
         # Entry point
         "intro": Slide(
             id="intro",
-            title="cells",
+            title="fidelis",
             sections=(
                 Spacer(2),
                 Text("a cell-buffer terminal UI framework", SUBTITLE_STYLE, center=True),
@@ -1057,7 +1057,7 @@ def build_slides() -> dict[str, Slide]:
                             ("immutable", EMPH), " by design"
                         ),
                         # Zoom 2: source
-                        styled("from ", ("cells/cell.py", KEYWORD)),
+                        styled("from ", ("fidelis/cell.py", KEYWORD)),
                     ),
                     center=True,
                 ),
@@ -1693,7 +1693,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
                 Text(
                     Line(spans=(
                         Span("that's ", Style(fg="white", dim=True)),
-                        Span("cells", Style(fg="cyan", bold=True)),
+                        Span("fidelis", Style(fg="cyan", bold=True)),
                         Span(".", Style(fg="white", dim=True)),
                     )),
                     center=True,
@@ -1741,7 +1741,7 @@ tbl = table(state, columns, rows, visible_height=3)''',
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/cell.py", KEYWORD)),
+                    styled("from ", ("fidelis/cell.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1777,7 +1777,7 @@ class Style:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/span.py", KEYWORD)),
+                    styled("from ", ("fidelis/span.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1813,7 +1813,7 @@ class Span:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/span.py", KEYWORD)),
+                    styled("from ", ("fidelis/span.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1846,7 +1846,7 @@ class Line:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/buffer.py", KEYWORD)),
+                    styled("from ", ("fidelis/buffer.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1879,7 +1879,7 @@ class Line:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/block.py", KEYWORD)),
+                    styled("from ", ("fidelis/block.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1917,7 +1917,7 @@ class Block:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/compose.py", KEYWORD)),
+                    styled("from ", ("fidelis/compose.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1951,7 +1951,7 @@ class Block:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/app.py", KEYWORD)),
+                    styled("from ", ("fidelis/app.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -1987,7 +1987,7 @@ class Block:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/focus.py", KEYWORD)),
+                    styled("from ", ("fidelis/focus.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -2020,7 +2020,7 @@ def ring_next(items: Sequence[T], current: T) -> T:
             sections=(
                 Spacer(1),
                 Text(
-                    styled("from ", ("cells/search.py", KEYWORD)),
+                    styled("from ", ("fidelis/search.py", KEYWORD)),
                     center=True,
                 ),
                 Spacer(1),
@@ -2742,7 +2742,7 @@ class BenchApp(Surface):
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Teaching Bench: Interactive educational platform for cells",
+        description="Tour: Interactive educational platform for fidelis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
             Fidelity = starting zoom level:

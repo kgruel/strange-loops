@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Sequence
 
 from .cell import Style, Cell, EMPTY_CELL
 from .buffer import Buffer, BufferView
@@ -18,12 +19,25 @@ class Wrap(Enum):
 class Block:
     """Immutable rectangle of styled cells with known dimensions."""
 
-    __slots__ = ("width", "height", "_rows")
+    __slots__ = ("width", "height", "_rows", "_frozen")
 
-    def __init__(self, rows: list[list[Cell]], width: int):
-        self.width = width
-        self.height = len(rows)
-        self._rows = rows
+    def __init__(self, rows: Sequence[Sequence[Cell]], width: int):
+        frozen_rows: tuple[tuple[Cell, ...], ...] = tuple(tuple(r) for r in rows)
+        if __debug__:
+            for row_idx, row in enumerate(frozen_rows):
+                if len(row) != width:
+                    raise ValueError(
+                        f"Block row {row_idx} width {len(row)} != block width {width}"
+                    )
+        object.__setattr__(self, "width", width)
+        object.__setattr__(self, "height", len(frozen_rows))
+        object.__setattr__(self, "_rows", frozen_rows)
+        object.__setattr__(self, "_frozen", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(f"{type(self).__name__} is immutable")
+        object.__setattr__(self, name, value)
 
     @staticmethod
     def text(content: str, style: Style, *, width: int | None = None,
@@ -87,7 +101,7 @@ class Block:
                 cell = self._rows[row_idx][col_idx]
                 buffer.put(bx, by, cell.char, cell.style)
 
-    def row(self, y: int) -> list[Cell]:
+    def row(self, y: int) -> tuple[Cell, ...]:
         """Access a row by index."""
         return self._rows[y]
 

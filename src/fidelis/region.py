@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .buffer import Buffer, BufferView
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Region:
     """A named rectangular area of the buffer."""
 

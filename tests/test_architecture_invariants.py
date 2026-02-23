@@ -75,12 +75,12 @@ def test_block_rows_private_not_accessed_outside_block() -> None:
 def test_runtime_state_dataclasses_are_frozen() -> None:
     from fidelis.borders import BorderChars
     from fidelis.cell import Cell, Style
-    from fidelis.components.data_explorer import DataExplorerState
-    from fidelis.components.list_view import ListState
-    from fidelis.components.progress import ProgressState
-    from fidelis.components.spinner import SpinnerState
-    from fidelis.components.table import TableState
-    from fidelis.components.text_input import TextInputState
+    from fidelis._components.data_explorer import DataExplorerState
+    from fidelis._components.list_view import ListState
+    from fidelis._components.progress import ProgressState
+    from fidelis._components.spinner import SpinnerState
+    from fidelis._components.table import TableState
+    from fidelis._components.text_input import TextInputState
     from fidelis.fidelity import CliContext
     from fidelis.focus import Focus
     from fidelis.region import Region

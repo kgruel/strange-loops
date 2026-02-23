@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fidelis import Block, Style, Wrap, border
 from fidelis.block import _word_wrap
-from fidelis.components.text_input import TextInputState, text_input
+from fidelis._components.text_input import TextInputState, text_input
 from fidelis._text_width import display_width
 
 

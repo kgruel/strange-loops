@@ -15,8 +15,8 @@ TARGET_MODULES = [
     Path("src/fidelis/block.py"),
     Path("src/fidelis/compose.py"),
     Path("src/fidelis/_lens.py"),
-    Path("src/fidelis/components/text_input.py"),
-    Path("src/fidelis/components/data_explorer.py"),
+    Path("src/fidelis/_components/text_input.py"),
+    Path("src/fidelis/_components/data_explorer.py"),
 ]
 
 # Heuristic: arguments containing these tokens are likely string/text.
@@ -27,14 +27,14 @@ _SUSPICIOUS_ARG_RE = re.compile(
 # Allowlist of len() calls that are intentionally about indices or collection sizes.
 # Keys are (path, lineno, source_snippet).
 ALLOWLIST = {
-    ("src/fidelis/components/text_input.py", 23, "len(ch)"),
-    ("src/fidelis/components/text_input.py", 34, "len(self.text)"),
-    ("src/fidelis/components/text_input.py", 47, "len(self.text)"),
-    ("src/fidelis/components/text_input.py", 57, "len(self.text)"),
-    ("src/fidelis/components/text_input.py", 61, "len(text)"),
-    ("src/fidelis/components/text_input.py", 69, "len(text)"),
-    ("src/fidelis/components/text_input.py", 70, "len(text)"),
-    ("src/fidelis/components/text_input.py", 83, "len(text)"),
+    ("src/fidelis/_components/text_input.py", 23, "len(ch)"),
+    ("src/fidelis/_components/text_input.py", 34, "len(self.text)"),
+    ("src/fidelis/_components/text_input.py", 47, "len(self.text)"),
+    ("src/fidelis/_components/text_input.py", 57, "len(self.text)"),
+    ("src/fidelis/_components/text_input.py", 61, "len(text)"),
+    ("src/fidelis/_components/text_input.py", 69, "len(text)"),
+    ("src/fidelis/_components/text_input.py", 70, "len(text)"),
+    ("src/fidelis/_components/text_input.py", 83, "len(text)"),
 }
 
 

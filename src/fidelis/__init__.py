@@ -51,7 +51,7 @@ from .fidelity import (
 )
 
 # In-place rendering
-from .inplace import InPlaceRenderer, render_inplace
+from .inplace import InPlaceRenderer
 
 # Component theming
 from .component_theme import (
@@ -134,7 +134,6 @@ __all__ = [
     "detect_context",
     # In-place rendering
     "InPlaceRenderer",
-    "render_inplace",
     # Component theming
     "Icons",
     "ASCII_ICONS",

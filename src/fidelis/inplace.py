@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, TextIO
 
-from .writer import Writer
+from .writer import Writer, _write_block_ansi
 
 if TYPE_CHECKING:
     from .block import Block
@@ -48,8 +48,9 @@ class InPlaceRenderer:
 
     def __exit__(self, *args) -> None:
         """Exit context: show cursor."""
-        self._writer.show_cursor()
-        self._active = False
+        if self._active:
+            self._writer.show_cursor()
+            self._active = False
 
     def render(self, block: "Block") -> None:
         """Render block, replacing previous output.
@@ -57,6 +58,8 @@ class InPlaceRenderer:
         First call: just write lines.
         Subsequent calls: move up, clear, rewrite.
         """
+        if not self._active:
+            raise RuntimeError("InPlaceRenderer.render() called outside of a context manager")
         # Move up and clear previous content
         if self._height > 0:
             # Move cursor up N lines
@@ -73,27 +76,13 @@ class InPlaceRenderer:
 
     def _write_block(self, block: "Block") -> None:
         """Write block content line by line with ANSI styling."""
-        for row_idx in range(block.height):
-            parts: list[str] = []
-            last_style = None
-
-            for cell in block.row(row_idx):
-                if cell.style != last_style:
-                    parts.append(self._writer.reset_style())
-                    sgr = self._writer.apply_style(cell.style)
-                    if sgr:
-                        parts.append(sgr)
-                    last_style = cell.style
-                parts.append(cell.char)
-
-            parts.append(self._writer.reset_style())
-            parts.append("\n")
-            self._stream.write("".join(parts))
-
+        _write_block_ansi(block, self._writer, self._stream)
         self._stream.flush()
 
     def clear(self) -> None:
         """Clear the last rendered content."""
+        if not self._active:
+            raise RuntimeError("InPlaceRenderer.clear() called outside of a context manager")
         if self._height > 0:
             # Move up and clear
             self._stream.write(f"\x1b[{self._height}A")
@@ -112,34 +101,6 @@ class InPlaceRenderer:
         if block is not None:
             self.render(block)
 
-        # Show cursor (idempotent if already exited context)
         if self._active:
             self._writer.show_cursor()
             self._active = False
-
-
-def render_inplace(block: "Block", stream: TextIO = sys.stdout) -> None:
-    """One-shot render: write block without animation.
-
-    Convenience for static output with styling.
-    """
-    writer = Writer(stream)
-
-    for row_idx in range(block.height):
-        parts: list[str] = []
-        last_style = None
-
-        for cell in block.row(row_idx):
-            if cell.style != last_style:
-                parts.append(writer.reset_style())
-                sgr = writer.apply_style(cell.style)
-                if sgr:
-                    parts.append(sgr)
-                last_style = cell.style
-            parts.append(cell.char)
-
-        parts.append(writer.reset_style())
-        parts.append("\n")
-        stream.write("".join(parts))
-
-    stream.flush()

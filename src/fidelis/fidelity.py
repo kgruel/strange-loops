@@ -312,6 +312,7 @@ class CliRunner(Generic[T]):
         import asyncio
 
         from .inplace import InPlaceRenderer
+        from .writer import print_block
 
         if self.fetch_stream is not None:
             # Streaming mode: update as data arrives
@@ -327,10 +328,9 @@ class CliRunner(Generic[T]):
             return 0
 
         # No streaming: just fetch and render
-        with InPlaceRenderer() as renderer:
-            state = self.fetch()
-            block = self.render(ctx, state)
-            renderer.finalize(block)
+        state = self.fetch()
+        block = self.render(ctx, state)
+        print_block(block, use_ansi=(ctx.format == Format.ANSI))
         return 0
 
 

@@ -205,26 +205,7 @@ def print_block(
     """
     if use_ansi:
         writer = Writer(stream)
-
-        for row_idx in range(block.height):
-            parts: list[str] = []
-            last_style: Style | None = None
-
-            for cell in block.row(row_idx):
-                if cell.style != last_style:
-                    # Reset and apply new style
-                    parts.append(writer.reset_style())
-                    sgr = writer.apply_style(cell.style)
-                    if sgr:
-                        parts.append(sgr)
-                    last_style = cell.style
-                parts.append(cell.char)
-
-            # Reset at end of line and add newline
-            parts.append(writer.reset_style())
-            parts.append("\n")
-
-            stream.write("".join(parts))
+        _write_block_ansi(block, writer, stream)
     else:
         # Plain text: just characters, no styling
         for row_idx in range(block.height):
@@ -233,3 +214,26 @@ def print_block(
             stream.write("\n")
 
     stream.flush()
+
+
+def _write_block_ansi(block: "Block", writer: Writer, stream: TextIO) -> None:
+    """Write a Block to a stream with ANSI styling, line-by-line.
+
+    Shared by `print_block` and `InPlaceRenderer`.
+    """
+    for row_idx in range(block.height):
+        parts: list[str] = []
+        last_style: Style | None = None
+
+        for cell in block.row(row_idx):
+            if cell.style != last_style:
+                parts.append(writer.reset_style())
+                sgr = writer.apply_style(cell.style)
+                if sgr:
+                    parts.append(sgr)
+                last_style = cell.style
+            parts.append(cell.char)
+
+        parts.append(writer.reset_style())
+        parts.append("\n")
+        stream.write("".join(parts))

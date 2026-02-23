@@ -3,7 +3,7 @@
 State + render function pattern for common TUI elements.
 """
 
-from ..components import (
+from .._components import (
     SpinnerState,
     SpinnerFrames,
     DOTS,

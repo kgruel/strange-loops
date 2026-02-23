@@ -3,7 +3,7 @@
 Renders a list of values as vertical bar characters showing relative magnitude.
 
 Usage:
-    from fidelis.components.sparkline import sparkline
+    from fidelis.widgets import sparkline
     from fidelis import Style
 
     values = [12, 15, 23, 45, 67, 89, 95, 87, 76, 65]

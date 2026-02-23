@@ -65,30 +65,6 @@ from .component_theme import (
     reset_component_theme,
 )
 
-# Theme (legacy style constants)
-from .theme import (
-    HEADER_BG,
-    SELECTION_BG,
-    DEBUG_BG,
-    HEADER_BASE,
-    HEADER_BOLD,
-    HEADER_DIM,
-    HEADER_CONNECTED,
-    HEADER_ERROR,
-    HEADER_SPINNER,
-    HEADER_LEVEL_FILTER,
-    FOOTER_KEY,
-    FOOTER_DIM,
-    FOOTER_ACTIVE_FILTER,
-    FILTER_PROMPT,
-    FILTER_CURSOR,
-    LEVEL_STYLES,
-    SELECTION_CURSOR,
-    SELECTION_HIGHLIGHT,
-    SOURCE_DIM,
-    DEBUG_OVERLAY,
-)
-
 __all__ = [
     # Primitives
     "Style",
@@ -143,25 +119,4 @@ __all__ = [
     "component_theme",
     "use_component_theme",
     "reset_component_theme",
-    # Theme (legacy)
-    "HEADER_BG",
-    "SELECTION_BG",
-    "DEBUG_BG",
-    "HEADER_BASE",
-    "HEADER_BOLD",
-    "HEADER_DIM",
-    "HEADER_CONNECTED",
-    "HEADER_ERROR",
-    "HEADER_SPINNER",
-    "HEADER_LEVEL_FILTER",
-    "FOOTER_KEY",
-    "FOOTER_DIM",
-    "FOOTER_ACTIVE_FILTER",
-    "FILTER_PROMPT",
-    "FILTER_CURSOR",
-    "LEVEL_STYLES",
-    "SELECTION_CURSOR",
-    "SELECTION_HIGHLIGHT",
-    "SOURCE_DIM",
-    "DEBUG_OVERLAY",
 ]

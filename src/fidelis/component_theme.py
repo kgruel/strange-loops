@@ -38,7 +38,6 @@ class Icons:
     # Progress bar
     progress_filled: str = "█"
     progress_empty: str = "░"
-    progress_partial: Sequence[str] = ("▏", "▎", "▍", "▌", "▋", "▊", "▉")
 
     # Tree branches
     tree_branch: str = "├─ "
@@ -66,7 +65,6 @@ ASCII_ICONS = Icons(
     spinner=("-", "\\", "|", "/"),
     progress_filled="#",
     progress_empty="-",
-    progress_partial=(".", ":", "|"),
     tree_branch="+-- ",
     tree_last="`-- ",
     tree_pipe="|   ",

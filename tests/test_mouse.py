@@ -5,8 +5,8 @@ from fidelis.mouse import (
     MouseEvent,
     MouseButton,
     MouseAction,
-    parse_sgr_mouse,
 )
+from fidelis._mouse import parse_sgr_mouse
 
 
 class TestMouseEvent:

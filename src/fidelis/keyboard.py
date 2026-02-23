@@ -145,6 +145,11 @@ class KeyboardInput:
                     return _CSI_FINAL.get(final, "escape")
                 # Strip modifier (e.g. "1;5" → param "1", ignore modifier)
                 first_param = param_str.split(";")[0]
+                # Many terminals encode modifier variants of arrows/home/end as
+                # CSI <param> ; <modifier> <final>. We ignore modifiers and
+                # return the base key when the final byte is a known mapping.
+                if final in _CSI_FINAL:
+                    return _CSI_FINAL.get(final, "escape")
                 return _CSI_PARAM.get((first_param, final), "escape")
             # Parameter or intermediate byte — accumulate
             params.append(b)

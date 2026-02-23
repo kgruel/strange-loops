@@ -1,0 +1,131 @@
+"""Tests for VT-style escape sequences and UTF-8 assembly."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from fidelis.tui import KeyboardInput
+
+
+def _bytes_stream(data: bytes) -> list[bytes]:
+    return [bytes([b]) for b in data]
+
+
+def _get_input_from_stream(stream: list[bytes | None]):
+    kb = KeyboardInput()
+    kb._available = True
+
+    it = iter(stream)
+
+    def _read_byte(_timeout: float = 0):
+        try:
+            return next(it)
+        except StopIteration:
+            return None
+
+    with patch.object(kb, "_read_byte", side_effect=_read_byte):
+        return kb.get_input()
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1b[A", "up"),
+        (b"\x1b[B", "down"),
+        (b"\x1b[C", "right"),
+        (b"\x1b[D", "left"),
+        (b"\x1b[H", "home"),
+        (b"\x1b[F", "end"),
+        (b"\x1b[Z", "shift_tab"),
+    ],
+)
+def test_csi_final_mappings(seq: bytes, expected: str):
+    assert _get_input_from_stream(_bytes_stream(seq)) == expected
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1bOA", "up"),
+        (b"\x1bOB", "down"),
+        (b"\x1bOC", "right"),
+        (b"\x1bOD", "left"),
+        (b"\x1bOH", "home"),
+        (b"\x1bOF", "end"),
+        (b"\x1bOP", "f1"),
+        (b"\x1bOQ", "f2"),
+        (b"\x1bOR", "f3"),
+        (b"\x1bOS", "f4"),
+    ],
+)
+def test_ss3_mappings(seq: bytes, expected: str):
+    assert _get_input_from_stream(_bytes_stream(seq)) == expected
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1b[2~", "insert"),
+        (b"\x1b[3~", "delete"),
+        (b"\x1b[5~", "page_up"),
+        (b"\x1b[6~", "page_down"),
+        (b"\x1b[3;5~", "delete"),  # strip modifier
+    ],
+)
+def test_csi_parameterized_mappings(seq: bytes, expected: str):
+    assert _get_input_from_stream(_bytes_stream(seq)) == expected
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1b[1;5A", "up"),
+        (b"\x1b[1;2B", "down"),
+        (b"\x1b[1;3C", "right"),
+        (b"\x1b[1;4D", "left"),
+        (b"\x1b[1;5H", "home"),
+        (b"\x1b[1;5F", "end"),
+    ],
+)
+def test_csi_modifier_variants_return_base_key(seq: bytes, expected: str):
+    assert _get_input_from_stream(_bytes_stream(seq)) == expected
+
+
+def test_bare_escape_timeout_returns_escape():
+    assert _get_input_from_stream([b"\x1b", None]) == "escape"
+
+
+@pytest.mark.parametrize(
+    ("text",),
+    [
+        ("é",),
+        ("€",),
+        ("😀",),
+    ],
+)
+def test_utf8_multibyte_assembly(text: str):
+    data = text.encode("utf-8")
+    assert _get_input_from_stream(_bytes_stream(data)) == text
+
+
+def test_utf8_incomplete_sequence_degrades_gracefully():
+    # 0xC3 expects one continuation byte; omit it.
+    assert _get_input_from_stream([b"\xC3", None]) == "�"
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        [b"\x1b", b"[", None],
+        [b"\x1b", b"[", b"2", None],
+        [b"\x1b", b"[", b"<", None],
+    ],
+)
+def test_incomplete_escape_sequences_return_escape(stream: list[bytes | None]):
+    assert _get_input_from_stream(stream) == "escape"
+
+
+def test_unknown_csi_final_returns_escape():
+    assert _get_input_from_stream(_bytes_stream(b"\x1b[X")) == "escape"

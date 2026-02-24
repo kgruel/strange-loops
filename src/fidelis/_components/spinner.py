@@ -10,7 +10,7 @@ from ..block import Block
 from ..cursor import Cursor, CursorMode
 
 if TYPE_CHECKING:
-    from ..component_theme import ComponentTheme
+    from ..icon_set import IconSet
 
 
 @dataclass(frozen=True)
@@ -42,32 +42,31 @@ def spinner(
     state: SpinnerState,
     *,
     style: Style | None = None,
-    theme: "ComponentTheme | None" = None,
+    icons: "IconSet | None" = None,
 ) -> Block:
     """Render current spinner frame as a 1x1 block.
 
     Args:
         state: Current spinner state with frame index.
         style: Optional style override.
-        theme: Optional ComponentTheme. If provided and state uses default frames,
-            uses theme.icons.spinner instead.
+        icons: Optional IconSet override (uses ambient if None). If state uses the
+            default DOTS frames and icons is non-default, uses icons.spinner.
 
     Returns:
         1-character Block with the spinner frame.
     """
+    from ..icon_set import IconSet, current_icons
+
+    ic = icons or current_icons()
+
     # Determine frames to use
-    if theme is not None and state.frames is DOTS:
-        # Use theme's spinner icons when using default frames
-        frames = theme.icons.spinner
+    if state.frames is DOTS and ic != IconSet():
+        frames = ic.spinner
     else:
         frames = state.frames.frames
 
-    # Determine style
-    if style is None:
-        if theme is not None:
-            style = theme.accent
-        else:
-            style = Style()
+    # Determine style (caller chooses role)
+    style = style or Style()
 
     char = frames[state.frame % len(frames)]
     return Block.text(char, style)

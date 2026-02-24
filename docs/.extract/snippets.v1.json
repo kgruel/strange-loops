@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-24T00:10:10+00:00",
+  "generated_at": "2026-02-24T05:32:42+00:00",
   "snippets": {
     "py:fidelis.app:Surface#signature": {
       "id": "py:fidelis.app:Surface#signature",
@@ -258,9 +258,9 @@
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 348,
+        "end_line": 363,
         "path": "src/fidelis/fidelity.py",
-        "start_line": 337
+        "start_line": 352
       },
       "source": "def run_cli(\n    args: list[str],\n    render: Callable[[CliContext, T], \"Block\"],\n    fetch: Callable[[], T],\n    *,\n    fetch_stream: Callable[[], \"AsyncIterator[T]\"] | None = None,\n    handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None,\n    default_zoom: Zoom = Zoom.SUMMARY,\n    description: str | None = None,\n    prog: str | None = None,\n    add_args: Callable[[argparse.ArgumentParser], None] | None = None,\n) -> int:\n",
       "title": "run_cli"

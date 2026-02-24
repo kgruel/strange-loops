@@ -47,6 +47,49 @@ The leading design idea: don't choose between Rich's instant env-var approach an
 
 This works because Surface already diff-renders — an upgrade re-render only rewrites affected cells.
 
+### The browser model: baseline + progressive enhancement + feature detection
+
+From the Terminal WG discussion (2019), Timothy Allen and Simon Edwards
+articulated a three-layer compatibility model borrowed from web browsers:
+
+1. **Baseline**: a defined set of behavior all modern terminals share
+   (VT100/ANSI, basic SGR, cursor movement). Safe to assume. The equivalent of
+   "every browser supports `<div>`."
+
+2. **Progressive enhancement**: newer features designed so terminals silently
+   ignore what they don't understand. An application can send the basic sequence
+   then immediately override with the richer one. Example: enable mouse mode
+   1000 (basic), then mode 1006 (SGR) — the terminal gives you the richest it
+   supports. **No detection needed.**
+
+3. **Feature detection**: actively query for things you need to know *before*
+   acting. This is the small set of capabilities where the wrong assumption
+   causes visible harm (not just degraded richness).
+
+This narrows the design problem significantly. Most of what the research doc
+cataloged falls into categories 1 and 2 — baseline assumptions and safe-to-try
+features that don't need detection at all. Category 3, where you genuinely need
+to ask first, is quite small:
+
+- **Color depth** — affects palette mapping (truecolor vs 256 vs 16)
+- **Background mode** (light/dark) — affects readability of color choices
+- **Unicode width behavior** — affects layout correctness
+
+Edwards also proposed coarse-grained capability keywords at the feature-spec
+level (`TERM_CAPABILITIES="sixel hyperlinks truecolor notifications"`), not the
+escape-code level. This is the right granularity for what views need — a view
+doesn't care about CSI sequences, it cares about "can I use truecolor?"
+
+The `LC_TERM_CAPABILITIES` trick (using the `LC_` prefix so OpenSSH forwards it
+by default) addresses the SSH capability degradation problem identified in the
+research doc.
+
+**Implication for fidelis:** We may not be designing a "capability detection
+system." We may be designing how a small number of genuinely-need-to-know
+signals (color depth, background mode, unicode width) reach the rendering
+pipeline, while everything else is either assumed (baseline) or tried
+optimistically (progressive enhancement).
+
 ## Invariants (will not change)
 
 - `Block` is immutable (tuples, frozen)

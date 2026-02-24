@@ -63,6 +63,7 @@ def test_state_dataclasses_declared_frozen() -> None:
         "Viewport",
         "CliContext",
         "Palette",
+        "IconSet",
     }
 
     for py_file in fidelis_root.rglob("*.py"):
@@ -103,6 +104,7 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
     from fidelis.span import Line, Span
     from fidelis.viewport import Viewport
     from fidelis._lens import Lens
+    from fidelis.icon_set import IconSet
     from fidelis.palette import Palette
 
     for cls in (
@@ -119,6 +121,7 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
         Viewport,
         CliContext,
         Palette,
+        IconSet,
         SpinnerState,
         ProgressState,
         ListState,

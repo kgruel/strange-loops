@@ -22,12 +22,86 @@ class ColorDepth(Enum):
     TRUECOLOR = 16_777_216
 
 
+_CUBE_START = 16
+_GRAY_START = 232
+
+_BASIC_RGB: tuple[tuple[int, int, int], ...] = (
+    (0, 0, 0),        # 0: black
+    (128, 0, 0),      # 1: red
+    (0, 128, 0),      # 2: green
+    (128, 128, 0),    # 3: yellow
+    (0, 0, 128),      # 4: blue
+    (128, 0, 128),    # 5: magenta
+    (0, 128, 128),    # 6: cyan
+    (192, 192, 192),  # 7: white
+    (128, 128, 128),  # 8: bright black (gray)
+    (255, 0, 0),      # 9: bright red
+    (0, 255, 0),      # 10: bright green
+    (255, 255, 0),    # 11: bright yellow
+    (0, 0, 255),      # 12: bright blue
+    (255, 0, 255),    # 13: bright magenta
+    (0, 255, 255),    # 14: bright cyan
+    (255, 255, 255),  # 15: bright white
+)
+
+
+def _color_distance_sq(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> int:
+    """Squared Euclidean distance in RGB space."""
+    return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2
+
+
+def _idx_to_rgb(idx: int) -> tuple[int, int, int]:
+    """Convert a 256-color index to approximate RGB."""
+    if idx < 16:
+        return _BASIC_RGB[idx]
+    if idx < _GRAY_START:
+        idx -= _CUBE_START
+        b = (idx % 6) * 51
+        idx //= 6
+        g = (idx % 6) * 51
+        r = (idx // 6) * 51
+        return (r, g, b)
+    gray = 8 + (idx - _GRAY_START) * 10
+    return (gray, gray, gray)
+
+
+def _rgb_to_256(r: int, g: int, b: int) -> int:
+    """Find nearest 256-color index for an RGB value."""
+    best_idx = 16
+    best_dist = _color_distance_sq(r, g, b, *_idx_to_rgb(16))
+    for i in range(17, 256):
+        ir, ig, ib = _idx_to_rgb(i)
+        d = _color_distance_sq(r, g, b, ir, ig, ib)
+        if d < best_dist:
+            best_dist = d
+            best_idx = i
+    return best_idx
+
+
+def _rgb_to_basic(r: int, g: int, b: int) -> int:
+    """Find nearest basic 16-color index for an RGB value."""
+    best_idx = 0
+    best_dist = _color_distance_sq(r, g, b, *_BASIC_RGB[0])
+    for i in range(1, 16):
+        d = _color_distance_sq(r, g, b, *_BASIC_RGB[i])
+        if d < best_dist:
+            best_dist = d
+            best_idx = i
+    return best_idx
+
+
+def _nearest_basic(idx_256: int) -> int:
+    """Convert a 256-color index to the nearest basic 16-color index."""
+    r, g, b = _idx_to_rgb(idx_256)
+    return _rgb_to_basic(r, g, b)
+
+
 class Writer:
     """Converts cell writes to ANSI escape sequences and outputs to terminal.
 
-    Note: Hex colors (e.g. "#RRGGBB") emit truecolor (24-bit) SGR codes.
-    There is currently no automatic fallback to 256/16-color output — assumes
-    truecolor support for best results.
+    Automatically downgrades colors when terminal color depth is limited.
+    Capabilities resolve at this boundary — views express intent (Style),
+    Writer resolves against detected terminal capability.
     """
 
     def __init__(self, stream: TextIO = sys.stdout):
@@ -90,24 +164,35 @@ class Writer:
         return f"\x1b[{';'.join(codes)}m"
 
     def _color_codes(self, color: str | int, foreground: bool) -> list[str]:
-        """Convert a color value to SGR parameter strings."""
+        """Convert a color value to SGR parameter strings.
+
+        Automatically downgrades colors when terminal color depth is limited:
+        - Hex RGB -> truecolor / 256-color / 16-color, as needed
+        - 256-color index -> 16-color, as needed
+        - Named colors always emit as basic SGR (already safe)
+        """
+        depth = self.detect_color_depth()
         base = 30 if foreground else 40
 
         if isinstance(color, int):
-            # 256-color
-            prefix = "38" if foreground else "48"
-            return [prefix, "5", str(color)]
+            if depth.value >= ColorDepth.EIGHT_BIT.value:
+                prefix = "38" if foreground else "48"
+                return [prefix, "5", str(color)]
+            return [str(base + _nearest_basic(color))]
 
         if isinstance(color, str):
             if color.startswith("#") and len(color) == 7:
-                # Hex RGB
                 r = int(color[1:3], 16)
                 g = int(color[3:5], 16)
                 b = int(color[5:7], 16)
-                prefix = "38" if foreground else "48"
-                return [prefix, "2", str(r), str(g), str(b)]
+                if depth == ColorDepth.TRUECOLOR:
+                    prefix = "38" if foreground else "48"
+                    return [prefix, "2", str(r), str(g), str(b)]
+                if depth == ColorDepth.EIGHT_BIT:
+                    prefix = "38" if foreground else "48"
+                    return [prefix, "5", str(_rgb_to_256(r, g, b))]
+                return [str(base + _rgb_to_basic(r, g, b))]
 
-            # Named color
             idx = NAMED_COLORS.get(color.lower())
             if idx is not None:
                 return [str(base + idx)]

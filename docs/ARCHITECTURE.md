@@ -83,6 +83,22 @@ process_key(key, state, ...) ─► Layer stack routing
 new AppState ◄──────────────── apply action (Stay/Pop/Push)
 ```
 
+## Design Principles
+
+**Capabilities resolve at boundaries, not in pipelines.** Views express
+rendering intent via Style objects. The terminal boundary (Writer) resolves
+intent against detected capability — automatically downgrading colors when
+terminal color depth is limited. Don't thread detection results through
+intermediate layers.
+
+The two delivery axes:
+
+| Axis | Mechanism | Examples | Why |
+|------|-----------|----------|-----|
+| Layout parameter | Explicit function arg | width, zoom | Parent allocates to children; varies per call site |
+| Ambient default | ContextVar + kwarg | Palette, IconSet | Set per frame; consistent unless overridden |
+| Terminal capability | Boundary resolution | Color depth | Writer resolves at output; views never branch on it |
+
 ## Layer Stack
 
 Layers handle input routing and render ordering for modal UI.

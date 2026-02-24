@@ -122,3 +122,22 @@ Design doc: `docs/plans/2026-02-24-fidelity-design.md`
 - Council session planned for next session (skill needs reload to activate)
 
 **472 tests passing on main.**
+
+## 2026-02-25 — Capability signal council + color downconversion
+
+**Design council session** (5-agent persistent swarm):
+- Question: how should capability information flow through the rendering pipeline?
+- Outcome: the question dissolved. Capabilities resolve at Writer boundary, not in pipeline.
+- Design doc: `docs/plans/2026-02-25-capability-signal-design.md`
+- Cold reactor perspective: `docs/plans/2026-02-25-council-cold-reactor-perspective.md`
+- Principle established: "Capabilities resolve at boundaries, not in pipelines"
+- Key finding: no view in fidelis constructs fg/bg colors — all color originates from Palette or caller kwargs
+
+**Color downconversion** implemented in Writer:
+- Wired up `detect_color_depth()` (was dead code) to `_color_codes()`
+- Added color arithmetic: hex→256→16 automatic downconversion (~70 LOC)
+- All output paths covered: `write_frame()`, `print_block()`, `InPlaceRenderer`
+- NORD_PALETTE now works correctly on 16-color terminals
+- 25 new tests
+
+**497 tests passing on main.**

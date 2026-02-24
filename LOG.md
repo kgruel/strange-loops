@@ -34,12 +34,91 @@ Extracted `libs/cells/` from the loops monorepo into standalone fidelis repo.
 
 ---
 
-## 2026-02-24 — Fidelity-aware style resolution (Palette + IconSet)
+## 2026-02-22 — Release readiness review + hardening
 
-Implemented the fidelity-aware aesthetic system:
-- Added `Palette` (5 semantic `Style` roles) and `IconSet` (glyph vocabulary), both ambient via `ContextVar`.
-- Updated view components to accept `palette=` and/or `icons=` kwargs (ambient defaults when omitted).
-- Added `fidelity._setup_defaults()` to set `ASCII_ICONS` when `Format.PLAIN` (Palette is never auto-set).
-- Deleted `component_theme.py` and `themes/` (clean break at 0.1.0); updated top-level exports and rewrote the theme demo into a Palette demo.
+Full project audit with 6 parallel exploration agents. Then began hardening.
 
-**Tests:** 472 passing (`uv run --package fidelis pytest tests/ -q`).
+**Merged:**
+- Block true immutability (351 tests)
+- Wide-char consistency (363 tests)
+- KeyboardInput tests + CSI modifier fix (~400 tests)
+- InPlaceRenderer cleanup (422 tests)
+
+**422 tests passing on main.**
+
+---
+
+## 2026-02-23 — API cleanup + architecture review + cursor primitive
+
+**Merged api-cleanup**, architecture review (views as Layer 3), cursor primitive.
+Design conversations settled view layer vocabulary and cursor as compositional
+primitive.
+
+**439 tests passing on main.**
+
+---
+
+## 2026-02-23 — View layer design + module reorg + doc extraction
+
+Settled view layer primitives. Created `fidelis.views` flat namespace. Deleted
+`fidelis.widgets/`, `fidelis.lens/`, `fidelis.effects/`. Landed doc extraction
+pipeline. Sparkline deduped.
+
+**439 tests passing on main.**
+
+---
+
+## 2026-02-23 — Theming research + loops migration + fidelity reframe
+
+Theme analysis complete. `cells` → `fidelis` loops migration in review.
+Critical design reframe: "theming" is the wrong question — the real question
+is fidelity-aware style resolution.
+
+**439 tests passing on main.**
+
+---
+
+## 2026-02-24 — Fidelity design council session
+
+5-agent design council (muser, siftd, web-researcher, ux-reactor, cold-reactor).
+Produced full design doc + 6 perspective docs. Codex independent review caught
+MONO_PALETTE/Format.PLAIN conflict.
+
+Design doc: `docs/plans/2026-02-24-fidelity-design.md`
+
+**439 tests passing on main.**
+
+---
+
+## 2026-02-25 — Fidelity implementation + council skill + capability design
+
+**Merged fidelity-impl** (subtask, 8 commits):
+- `Palette` (5 Style-valued semantic roles) + `IconSet` (glyph vocabulary)
+- Both delivered via ContextVar + kwarg escape hatch
+- `_setup_defaults` bridge in `run_cli` (sets `ASCII_ICONS` for `Format.PLAIN`)
+- Deleted `themes/` (323 LOC) and `component_theme.py` (135 LOC)
+- Updated all views, demos, docs, CLAUDE.md
+- 33 new tests (palette, icon_set, view integration, fidelity defaults)
+- 439 → 472 tests
+
+**Design council skill** written at `~/.claude/skills/superpowers/design-council/`:
+- Reusable 5-role persistent swarm orchestration
+- Templates for constraints doc, design doc, perspective docs
+- Based on retrospective of fidelity council session
+- Key decisions: swarm not dispatch, siftd uses siftd tool, lightweight Phase 0
+
+**Terminal capabilities survey** (background research agent):
+- Classified every detectable terminal capability by reliability tier
+- Key finding: source tracking > confidence scores
+- Key finding: progressive detection (env-var first, queries second) fits
+  fidelis's OutputMode axis naturally
+- Research doc: `docs/plans/2026-02-25-terminal-capabilities-survey.md`
+
+**Capability signal design conversation:**
+- Developed capability vs choice distinction (discovered vs decided)
+- Progressive detection model: render with defaults, upgrade on probe return,
+  Surface diff-render makes upgrades cheap
+- Constraints doc written: `docs/plans/2026-02-25-council-capability-constraints.md`
+- Council session planned for next session (skill needs reload to activate)
+
+**472 tests passing on main.**

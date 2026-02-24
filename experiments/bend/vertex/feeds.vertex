@@ -1,0 +1,32 @@
+// Feeds vertex — inbound/potential attention
+// RSS and Atom feeds the user subscribes to
+// Add feeds via: uv run reader feeds add <kind> <url>
+
+name "feeds"
+store "./data/feeds.db"
+
+sources {
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
+    loop {
+      fold {
+        items "by" "link"
+        count "inc"
+        updated "latest"
+      }
+      boundary when="${kind}.complete"
+    }
+  }
+}
+
+loops {
+  source.error {
+    fold {
+      errors "collect" 20
+      count "inc"
+      latest_error "latest"
+    }
+  }
+}
+
+emit "feeds.digest"

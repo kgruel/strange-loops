@@ -1,0 +1,7 @@
+[
+  { "step": "Inspect existing Bend vertex experiment", "done": true },
+  { "step": "Add Bend persistence workaround (hash list)", "done": true },
+  { "step": "Add Python persistent reference", "done": true },
+  { "step": "Document Map serialization wall", "done": true },
+  { "step": "Run verification commands", "done": true }
+]

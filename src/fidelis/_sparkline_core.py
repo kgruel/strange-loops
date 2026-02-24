@@ -12,7 +12,7 @@ def sparkline_text(
     values: Sequence[float],
     width: int,
     *,
-    chars: str,
+    chars: Sequence[str],
     sampling: SamplingStrategy,
     range_source: RangeSource = "sampled",
     lo: float | None = None,
@@ -62,7 +62,7 @@ def _sample(values: Sequence[float], width: int, sampling: SamplingStrategy) -> 
     raise ValueError(f"Unknown sampling strategy: {sampling}")
 
 
-def _map_to_chars(values: Sequence[float], chars: str, *, lo: float, hi: float, clamp: bool) -> str:
+def _map_to_chars(values: Sequence[float], chars: Sequence[str], *, lo: float, hi: float, clamp: bool) -> str:
     if not values:
         return ""
 
@@ -80,4 +80,3 @@ def _map_to_chars(values: Sequence[float], chars: str, *, lo: float, hi: float, 
         out.append(chars[idx])
 
     return "".join(out)
-

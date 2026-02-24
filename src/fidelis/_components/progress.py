@@ -9,7 +9,8 @@ from ..cell import Style, Cell
 from ..block import Block
 
 if TYPE_CHECKING:
-    from ..component_theme import ComponentTheme
+    from ..icon_set import IconSet
+    from ..palette import Palette
 
 
 @dataclass(frozen=True)
@@ -31,33 +32,34 @@ def progress_bar(
     empty_style: Style | None = None,
     filled_char: str | None = None,
     empty_char: str | None = None,
-    theme: "ComponentTheme | None" = None,
+    palette: "Palette | None" = None,
+    icons: "IconSet | None" = None,
 ) -> Block:
     """Render a horizontal progress bar.
 
     Args:
         state: Current progress state (0.0-1.0).
         width: Width in characters.
-        filled_style: Style for filled portion. Defaults to theme.accent or green.
-        empty_style: Style for empty portion. Defaults to theme.muted or dim.
-        filled_char: Character for filled portion. Defaults to theme icon or "█".
-        empty_char: Character for empty portion. Defaults to theme icon or "░".
-        theme: Optional ComponentTheme for icons and styles.
+        filled_style: Style for filled portion. Defaults to palette.accent + bold.
+        empty_style: Style for empty portion. Defaults to palette.muted.
+        filled_char: Character for filled portion. Defaults to icons.progress_fill.
+        empty_char: Character for empty portion. Defaults to icons.progress_empty.
+        palette: Optional Palette override (uses ambient if None).
+        icons: Optional IconSet override (uses ambient if None).
 
     Returns:
         Block with rendered progress bar.
     """
-    # Resolve characters from theme or defaults
-    if theme is not None:
-        filled_char = filled_char or theme.icons.progress_filled
-        empty_char = empty_char or theme.icons.progress_empty
-        filled_style = filled_style or theme.accent
-        empty_style = empty_style or theme.muted
-    else:
-        filled_char = filled_char or "█"
-        empty_char = empty_char or "░"
-        filled_style = filled_style or Style(fg="green")
-        empty_style = empty_style or Style(dim=True)
+    from ..icon_set import current_icons
+    from ..palette import current_palette
+
+    p = palette or current_palette()
+    ic = icons or current_icons()
+
+    filled_char = filled_char or ic.progress_fill
+    empty_char = empty_char or ic.progress_empty
+    filled_style = filled_style or p.accent.merge(Style(bold=True))
+    empty_style = empty_style or p.muted
 
     filled_count = round(state.value * width)
     empty_count = width - filled_count

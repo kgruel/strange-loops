@@ -5,7 +5,7 @@ Terminal UI framework built on cell buffers. Answers: **where is state displayed
 ## Build & Test
 
 ```bash
-uv run --package fidelis pytest libs/fidelis/tests
+uv run --package fidelis pytest tests/ -q
 ```
 
 ## Atom
@@ -78,6 +78,12 @@ CellWrite[] ──→ Writer.write_frame() ──→ ANSI escape sequences
 | `ListState` / `list_view` | scrollable list with selection |
 | `TextInputState` / `text_input` | single-line input with cursor |
 | `TableState` / `table` | scrollable table with headers |
+
+### Aesthetic
+| Type | Purpose |
+|------|---------|
+| `Palette` | 5 semantic Style roles (success, warning, error, accent, muted), ContextVar |
+| `IconSet` | Named glyph slots (spinner, progress, tree, sparkline), ContextVar |
 
 ### Application
 | Type | Purpose |
@@ -169,6 +175,7 @@ Layered submodules — CLI core at top level, TUI features in subpackages:
 ```python
 from fidelis import Style, Cell, Span, Line, Block, print_block  # CLI core
 from fidelis import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
+from fidelis import Palette, IconSet, current_palette, use_palette # Aesthetic
 from fidelis.tui import Surface, Layer, Focus, Search             # Interactive apps
 from fidelis.views import shape_lens, tree_lens, chart_lens        # Data rendering
 from fidelis.views import spinner, list_view, progress_bar         # Components
@@ -193,7 +200,7 @@ docs/
 
 ```
 src/fidelis/
-  __init__.py       # CLI core exports (Style, Cell, Span, Line, Block, compose, Writer, theme)
+  __init__.py       # CLI core exports + Palette/IconSet
   cell.py           # Cell, Style, EMPTY_CELL
   span.py           # Span, Line
   block.py          # Block, Wrap
@@ -201,8 +208,9 @@ src/fidelis/
   borders.py        # BorderChars presets
   writer.py         # Writer, ColorDepth, print_block
   fidelity.py       # Zoom, OutputMode, Format, CliContext, run_cli (CLI harness)
+  palette.py        # Palette (5 Style roles), ContextVar, presets
+  icon_set.py       # IconSet (glyph vocabulary), ContextVar, ASCII fallback
   inplace.py        # InPlaceRenderer (cursor-controlled animation)
-  theme.py          # Style constants
   big_text.py       # render_big implementation
   _lens.py          # Lens implementations (internal)
   _mouse.py         # Mouse implementations (internal)

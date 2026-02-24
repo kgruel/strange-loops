@@ -127,6 +127,19 @@ def detect_context(
     )
 
 
+def _setup_defaults(ctx: CliContext) -> None:
+    """Set ambient IconSet from resolved runtime context.
+
+    Palette is never auto-set — it's a deliberate aesthetic choice.
+    MONO_PALETTE exists for explicit opt-in (e.g., low-vision, e-ink),
+    not as a Format.PLAIN default.
+    """
+    from .icon_set import ASCII_ICONS, use_icons
+
+    if ctx.format == Format.PLAIN:
+        use_icons(ASCII_ICONS)
+
+
 # =============================================================================
 # Argument Parsing
 # =============================================================================
@@ -274,6 +287,8 @@ class CliRunner(Generic[T]):
 
     def _dispatch(self, ctx: CliContext) -> int:
         """Dispatch to appropriate output mechanism."""
+        _setup_defaults(ctx)
+
         # Check for custom handler
         if self.handlers and ctx.mode in self.handlers:
             result = self.handlers[ctx.mode](ctx)

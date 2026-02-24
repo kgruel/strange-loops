@@ -11,13 +11,14 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-Clean. v0.1.0, 347 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+Clean. v0.1.0, 472 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
 
 Post-extraction cleanup complete:
 - All `cells` → `fidelis` renaming done (imports, docs, demos)
 - Deprecated Fidelity API removed (Zoom/CliContext is the only API)
 - `bench.py` renamed to `tour.py`
 - Stale monorepo paths fixed throughout
+- Fidelity-aware style resolution implemented: `Palette` (semantic Style roles) + `IconSet` (glyph vocabulary)
 
 ## Relationship to Loops
 
@@ -39,9 +40,9 @@ src/fidelis/           # 9,900 LOC
   Widgets:             spinner, progress_bar, list_view, text_input, table, sparkline, data_explorer
   Mouse:               MouseEvent, MouseButton, MouseAction
   Effects:             render_big
-  Themes:              ComponentTheme, Icons
+  Aesthetic:           Palette, IconSet
 
-tests/                 # 347 tests, 14 files
+tests/                 # 472 tests
 demos/                 # 20 Python files + 4 markdown docs
   tour.py              # Interactive teaching platform (2D slide navigation)
   primitives/          # CLI demos (print and exit)
@@ -59,12 +60,8 @@ docs/                  # 7 design docs + plans/
 
 ## Open Threads
 
-- **Theme system** — `themes/` subpackage exists with basic structure but no
-  runtime theme registry yet. `component_theme.py` handles component-level
-  theming. Full theme system deferred until patterns emerge.
-
-- **Test gaps** — KeyboardInput has only 6 tests. Timer, Region, ComponentTheme
-  untested. Low priority but noted.
+- **Test gaps** — KeyboardInput has only 6 tests. Timer, Region untested. Low
+  priority but noted.
 
 - **PyPI publish** — Package metadata is ready. No CI/CD yet. Publish when
   the API stabilizes.

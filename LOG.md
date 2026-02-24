@@ -31,3 +31,15 @@ Extracted `libs/cells/` from the loops monorepo into standalone fidelis repo.
 - 347 tests passing after cleanup (4 deprecated tests removed)
 
 **Pushed to:** `git@git.gruel.network:kaygee/fidelis.git` (8 commits on main)
+
+---
+
+## 2026-02-24 — Fidelity-aware style resolution (Palette + IconSet)
+
+Implemented the fidelity-aware aesthetic system:
+- Added `Palette` (5 semantic `Style` roles) and `IconSet` (glyph vocabulary), both ambient via `ContextVar`.
+- Updated view components to accept `palette=` and/or `icons=` kwargs (ambient defaults when omitted).
+- Added `fidelity._setup_defaults()` to set `ASCII_ICONS` when `Format.PLAIN` (Palette is never auto-set).
+- Deleted `component_theme.py` and `themes/` (clean break at 0.1.0); updated top-level exports and rewrote the theme demo into a Palette demo.
+
+**Tests:** 472 passing (`uv run --package fidelis pytest tests/ -q`).

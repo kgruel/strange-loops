@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING
 
 from ..block import Block
 from ..cell import Style
-from ..component_theme import ComponentTheme, component_theme
 from .._sparkline_core import sparkline_text
 
 if TYPE_CHECKING:
-    pass
+    from ..icon_set import IconSet
+    from ..palette import Palette
 
 
 def sparkline(
@@ -29,7 +29,8 @@ def sparkline(
     *,
     style: Style | None = None,
     empty_char: str = "─",
-    theme: ComponentTheme | None = None,
+    palette: "Palette | None" = None,
+    icons: "IconSet | None" = None,
 ) -> Block:
     """Render values as a sparkline bar.
 
@@ -38,7 +39,8 @@ def sparkline(
         width: Target width in characters.
         style: Style for sparkline characters.
         empty_char: Character for empty/leading space when padding.
-        theme: Optional theme (uses theme.icons.sparkline chars).
+        palette: Optional Palette override (uses ambient if None).
+        icons: Optional IconSet override (uses ambient if None).
 
     Returns:
         Single-row Block with sparkline visualization.
@@ -49,9 +51,13 @@ def sparkline(
     if width <= 0:
         return Block.empty(0, 1)
 
-    t = theme or component_theme()
-    style = style or t.muted
-    chars = t.icons.sparkline
+    from ..icon_set import current_icons
+    from ..palette import current_palette
+
+    p = palette or current_palette()
+    ic = icons or current_icons()
+    style = style or p.muted
+    chars = ic.sparkline
 
     if not values:
         return Block.text(empty_char * width, style, width=width)
@@ -76,7 +82,8 @@ def sparkline_with_range(
     max_val: float | None = None,
     style: Style | None = None,
     empty_char: str = "─",
-    theme: ComponentTheme | None = None,
+    palette: "Palette | None" = None,
+    icons: "IconSet | None" = None,
 ) -> Block:
     """Sparkline with explicit value range.
 
@@ -89,7 +96,8 @@ def sparkline_with_range(
         max_val: Explicit maximum for normalization (default: max of values).
         style: Style for sparkline characters.
         empty_char: Character for empty/leading space.
-        theme: Optional theme.
+        palette: Optional Palette override (uses ambient if None).
+        icons: Optional IconSet override (uses ambient if None).
 
     Returns:
         Single-row Block with sparkline visualization.
@@ -97,9 +105,13 @@ def sparkline_with_range(
     if width <= 0:
         return Block.empty(0, 1)
 
-    t = theme or component_theme()
-    style = style or t.muted
-    chars = t.icons.sparkline
+    from ..icon_set import current_icons
+    from ..palette import current_palette
+
+    p = palette or current_palette()
+    ic = icons or current_icons()
+    style = style or p.muted
+    chars = ic.sparkline
 
     if not values:
         return Block.text(empty_char * width, style, width=width)

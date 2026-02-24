@@ -3,6 +3,18 @@
 This is the single public namespace for Fidelis view-layer APIs.
 """
 
+# Aesthetic
+from fidelis.icon_set import IconSet, ASCII_ICONS, current_icons, use_icons, reset_icons  # noqa: F401
+from fidelis.palette import (  # noqa: F401
+    Palette,
+    DEFAULT_PALETTE,
+    NORD_PALETTE,
+    MONO_PALETTE,
+    current_palette,
+    use_palette,
+    reset_palette,
+)
+
 # Stateless views
 from fidelis._lens import (  # noqa: F401
     Lens,
@@ -38,6 +50,19 @@ from fidelis._components.data_explorer import (  # noqa: F401
 )
 
 __all__ = [
+    # Aesthetic
+    "Palette",
+    "DEFAULT_PALETTE",
+    "NORD_PALETTE",
+    "MONO_PALETTE",
+    "current_palette",
+    "use_palette",
+    "reset_palette",
+    "IconSet",
+    "ASCII_ICONS",
+    "current_icons",
+    "use_icons",
+    "reset_icons",
     # Stateless views
     "Lens",
     "NodeRenderer",
@@ -73,4 +98,3 @@ __all__ = [
     "data_explorer",
     "flatten",
 ]
-

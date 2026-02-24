@@ -266,7 +266,7 @@ PEER_LENS: dict[str, Lens] = {
 ```
 
 This separates:
-- `fidelis.lens.Lens`: render function + capability metadata
+- `fidelis.views.Lens`: render function + capability metadata
 - `experiments.Lens`: zoom + scope (view configuration)
 
 Two different types with the same name. The experiment's Lens is richer — it

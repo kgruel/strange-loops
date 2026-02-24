@@ -38,7 +38,7 @@ from fidelis import (
     run_cli,
 )
 from fidelis.tui import Surface
-from fidelis.widgets import (
+from fidelis.views import (
     ListState,
     SpinnerState,
     DOTS,

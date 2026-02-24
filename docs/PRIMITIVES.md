@@ -208,7 +208,7 @@ class Lens(Generic[T]):
 - Zoom 2: full representation
 
 ```python
-from fidelis.lens import shape_lens, SHAPE_LENS
+from fidelis.views import shape_lens, SHAPE_LENS
 
 block = shape_lens({"a": 1, "b": 2}, zoom=1, width=40)  # "a, b"
 block = shape_lens({"a": 1, "b": 2}, zoom=2, width=40)  # key: value table

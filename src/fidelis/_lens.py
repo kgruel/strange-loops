@@ -10,6 +10,7 @@ from .cell import Style
 from .compose import join_vertical, join_horizontal
 from .span import Line, Span
 from ._text_width import display_width, truncate, truncate_ellipsis
+from ._sparkline_core import sparkline_text
 
 if TYPE_CHECKING:
     from .component_theme import ComponentTheme
@@ -625,26 +626,14 @@ def _chart_sparkline_themed(values: list[float], width: int, spark_chars: str) -
     if not values:
         return Block.empty(width, 1)
 
-    # Sample if more values than width
-    if len(values) > width:
-        step = len(values) / width
-        sampled = [values[int(i * step)] for i in range(width)]
-    else:
-        sampled = values
-
-    lo = min(sampled)
-    hi = max(sampled)
-    span = hi - lo if hi > lo else 1.0
-
-    chars = []
-    num_levels = len(spark_chars)
-    for v in sampled:
-        # Map value to character index
-        idx = int((v - lo) / span * (num_levels - 1))
-        idx = max(0, min(num_levels - 1, idx))
-        chars.append(spark_chars[idx])
-
-    text = "".join(chars)
+    text = sparkline_text(
+        values,
+        width,
+        chars=spark_chars,
+        sampling="uniform",
+        pad_left=False,
+        pad_char=" ",
+    )
     return Block.text(text, Style(), width=width)
 
 

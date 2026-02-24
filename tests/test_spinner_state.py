@@ -1,6 +1,6 @@
 """Tests for SpinnerState tick wrapping."""
 
-from fidelis.widgets import SpinnerFrames, SpinnerState
+from fidelis.views import SpinnerFrames, SpinnerState
 
 
 def test_spinner_tick_wraps() -> None:
@@ -13,4 +13,3 @@ def test_spinner_tick_empty_frames_is_safe() -> None:
     frames = SpinnerFrames(frames=())
     state = SpinnerState(frame=0, frames=frames)
     assert state.tick().frame == 0
-

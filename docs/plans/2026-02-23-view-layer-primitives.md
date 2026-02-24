@@ -29,24 +29,24 @@ All existing view functions fit the cut cleanly once “stateful” is interpret
 
 | View | Current public module | Implementation | Notes |
 |---|---|---|---|
-| `shape_lens`, `SHAPE_LENS`, `Lens`, `NodeRenderer` | `fidelis.lens` | `src/fidelis/_lens.py` | Zoomed “data → Block” renderer; pure. |
-| `tree_lens`, `TREE_LENS` | `fidelis.lens` | `src/fidelis/_lens.py` | Zoomed; optional `node_renderer` hook remains pure. |
-| `chart_lens`, `CHART_LENS` | `fidelis.lens` | `src/fidelis/_lens.py` | Zoomed; duplicates sparkline logic today (§3). |
-| `render_big`, `BIG_GLYPHS`, `BigTextFormat` | `fidelis.effects` | `src/fidelis/big_text.py` | Pure “text → Block”. |
-| `sparkline`, `sparkline_with_range` | `fidelis.widgets` | `src/fidelis/_components/sparkline.py` | Pure “values → Block”; already uses contextvar theme by default. |
-| `progress_bar` (+ `ProgressState`) | `fidelis.widgets` | `src/fidelis/_components/progress.py` | Pure render; “state” is just a value container. |
-| `spinner` (+ `SpinnerState`, frames) | `fidelis.widgets` | `src/fidelis/_components/spinner.py` | Pure render; animation is driven by `SpinnerState.tick()` (time-based). |
+| `shape_lens`, `SHAPE_LENS`, `Lens`, `NodeRenderer` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed “data → Block” renderer; pure. |
+| `tree_lens`, `TREE_LENS` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed; optional `node_renderer` hook remains pure. |
+| `chart_lens`, `CHART_LENS` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed; duplicates sparkline logic today (§3). |
+| `render_big`, `BIG_GLYPHS`, `BigTextFormat` | `fidelis.views` | `src/fidelis/big_text.py` | Pure “text → Block”. |
+| `sparkline`, `sparkline_with_range` | `fidelis.views` | `src/fidelis/_components/sparkline.py` | Pure “values → Block”; already uses contextvar theme by default. |
+| `progress_bar` (+ `ProgressState`) | `fidelis.views` | `src/fidelis/_components/progress.py` | Pure render; “state” is just a value container. |
+| `spinner` (+ `SpinnerState`, frames) | `fidelis.views` | `src/fidelis/_components/spinner.py` | Pure render; animation is driven by `SpinnerState.tick()` (time-based). |
 
 ### Stateful views (interactive components; caller wires events)
 
 | View | Current public module | Implementation | Notes |
 |---|---|---|---|
-| `list_view` (+ `ListState`) | `fidelis.widgets` | `src/fidelis/_components/list_view.py` | Composes `Cursor + Viewport`. Caller maps keys to `move_up/down`, etc. |
-| `table` (+ `TableState`, `Column`) | `fidelis.widgets` | `src/fidelis/_components/table.py` | Same pattern, row selection + scrolling. |
-| `text_input` (+ `TextInputState`) | `fidelis.widgets` | `src/fidelis/_components/text_input.py` | Caller maps keys → insert/delete/move; state tracks cursor + scroll. |
-| `data_explorer` (+ `DataExplorerState`, `DataNode`, `flatten`) | `fidelis.widgets` | `src/fidelis/_components/data_explorer.py` | Caller maps keys → navigation + expand/collapse; composes `Cursor + Viewport`. |
+| `list_view` (+ `ListState`) | `fidelis.views` | `src/fidelis/_components/list_view.py` | Composes `Cursor + Viewport`. Caller maps keys to `move_up/down`, etc. |
+| `table` (+ `TableState`, `Column`) | `fidelis.views` | `src/fidelis/_components/table.py` | Same pattern, row selection + scrolling. |
+| `text_input` (+ `TextInputState`) | `fidelis.views` | `src/fidelis/_components/text_input.py` | Caller maps keys → insert/delete/move; state tracks cursor + scroll. |
+| `data_explorer` (+ `DataExplorerState`, `DataNode`, `flatten`) | `fidelis.views` | `src/fidelis/_components/data_explorer.py` | Caller maps keys → navigation + expand/collapse; composes `Cursor + Viewport`. |
 
-Flag: the “historical accident” is real: today `fidelis.widgets` contains both stateless and stateful views, while `fidelis.lens` and `fidelis.effects` are also view layer packages.
+Flag: the “historical accident” was real: `fidelis.widgets` contained both stateless and stateful views, while `fidelis.lens` and `fidelis.effects` were also view layer packages.
 
 ## 2) Module structure recommendation
 
@@ -89,7 +89,7 @@ What `fidelis.views` should export:
 
 - All view functions listed above.
 - The associated `*State` types and small types that are tightly coupled to those views (`Column`, `SpinnerFrames`, etc.).
-- The lens support types/constants currently exported from `fidelis.lens` (`Lens`, `NodeRenderer`, `*_LENS` constants) so “zoomable data views” remain first-class.
+- The lens support types/constants exported from `fidelis.views` (`Lens`, `NodeRenderer`, `*_LENS` constants) so “zoomable data views” remain first-class.
 
 ### Internal source organization (implementation detail)
 
@@ -203,9 +203,7 @@ Concrete mapping examples:
 
 ```python
 # Old
-from fidelis.widgets import list_view, ListState
-from fidelis.lens import chart_lens
-from fidelis.effects import render_big
+from fidelis.views import list_view, ListState, chart_lens, render_big
 
 # New
 from fidelis.views import list_view, ListState, chart_lens, render_big
@@ -217,4 +215,3 @@ from fidelis.views import list_view, ListState, chart_lens, render_big
 2) Normalize theming to use the contextvar default where applicable.
 3) Deduplicate sparkline implementation (shared helper).
 4) Update loops imports and run its integration tests.
-

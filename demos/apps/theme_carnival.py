@@ -18,7 +18,7 @@ from fidelis.themes import (
     use_theme,
     list_themes,
 )
-from fidelis.widgets import SpinnerState, spinner, ProgressState, progress_bar
+from fidelis.views import SpinnerState, spinner, ProgressState, progress_bar
 from fidelis.mouse import MouseEvent
 
 

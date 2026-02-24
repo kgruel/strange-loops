@@ -2,7 +2,7 @@
 
 import pytest
 
-from fidelis.lens import (
+from fidelis.views import (
     Lens,
     shape_lens,
     SHAPE_LENS,

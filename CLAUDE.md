@@ -170,10 +170,10 @@ Layered submodules — CLI core at top level, TUI features in subpackages:
 from fidelis import Style, Cell, Span, Line, Block, print_block  # CLI core
 from fidelis import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
 from fidelis.tui import Surface, Layer, Focus, Search             # Interactive apps
-from fidelis.lens import shape_lens, tree_lens, chart_lens        # Data rendering
-from fidelis.widgets import spinner, list_view, progress_bar      # Components
+from fidelis.views import shape_lens, tree_lens, chart_lens        # Data rendering
+from fidelis.views import spinner, list_view, progress_bar         # Components
 from fidelis.mouse import MouseEvent, MouseButton                 # Optional mouse
-from fidelis.effects import render_big                            # Visual effects
+from fidelis.views import render_big                               # Visual effects
 ```
 
 ## Documentation

@@ -20,7 +20,7 @@ from fidelis import (
     ROUNDED,
 )
 from fidelis.tui import Surface
-from fidelis.lens import shape_lens, SHAPE_LENS
+from fidelis.views import shape_lens, SHAPE_LENS
 
 
 SAMPLE_DATA = {

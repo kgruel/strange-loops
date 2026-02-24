@@ -1,7 +1,7 @@
 """Tests for ListState cursor/viewport composition."""
 
 from fidelis import Cursor, Viewport
-from fidelis.widgets import ListState
+from fidelis.views import ListState
 
 
 class TestListStateCursor:
@@ -32,4 +32,3 @@ class TestListStateViewport:
 
         expected = Viewport(offset=0, visible=10, content=30).scroll_into_view(15).offset
         assert state2.scroll_offset == expected
-

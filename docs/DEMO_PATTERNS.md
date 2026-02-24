@@ -35,9 +35,9 @@ tour.py is a ~2880-line interactive teaching platform implementing:
 
 1. **Mouse input**: No slides covering `fidelis.mouse`. The framework supports mouse but tour.py doesn't demonstrate it. Consider adding a "mouse" slide pointing to `demo_mouse.py`.
 
-2. **Lens primitives**: No coverage of `fidelis.lens` (shape_lens, tree_lens, chart_lens). These render arbitrary Python data at different zoom levels. Could add a "lens" slide between "buffer" and "app".
+2. **Lens primitives**: No coverage of `fidelis.views` (shape_lens, tree_lens, chart_lens). These render arbitrary Python data at different zoom levels. Could add a "lens" slide between "buffer" and "app".
 
-3. **Effects**: No coverage of `fidelis.effects` (render_big). Low priority — visual flourish rather than core concept.
+3. **Effects**: No coverage of `fidelis.views` (render_big). Low priority — visual flourish rather than core concept.
 
 4. **Theme constants**: No explicit slide for the theme system. The styles are used but not explained.
 
@@ -171,13 +171,13 @@ from fidelis.tui import (
     Search,               # Search state
 )
 
-# Widgets — optional, when needed
-from fidelis.widgets import spinner, progress_bar, list_view
+# Views — optional, when needed
+from fidelis.views import spinner, progress_bar, list_view
 
 # Optional imports based on features
-# from fidelis.lens import shape_lens, tree_lens
+# from fidelis.views import shape_lens, tree_lens
 # from fidelis.mouse import MouseEvent, MouseButton
-# from fidelis.effects import render_big
+# from fidelis.views import render_big
 
 
 # ─── State ───────────────────────────────────────────────────────────
@@ -279,10 +279,10 @@ from fidelis import Block, Style, Span, Line, print_block
 from fidelis.tui import Surface, Layer, Focus, Search
 
 # Tier 3: Optional extensions
-from fidelis.widgets import spinner, list_view, progress_bar
-from fidelis.lens import shape_lens, tree_lens
+from fidelis.views import spinner, list_view, progress_bar
+from fidelis.views import shape_lens, tree_lens
 from fidelis.mouse import MouseEvent, MouseButton
-from fidelis.effects import render_big
+from fidelis.views import render_big
 ```
 
 ### Simpler Pattern (No Layers)

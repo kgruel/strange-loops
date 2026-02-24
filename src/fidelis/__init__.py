@@ -4,10 +4,10 @@ CLI core: styled output primitives for dressing up scripts.
 
 For interactive TUI apps, import from submodules:
     from fidelis.tui import Surface, Layer
-    from fidelis.lens import shape_lens
-    from fidelis.widgets import spinner, list_view
+    from fidelis.views import shape_lens
+    from fidelis.views import spinner, list_view
     from fidelis.mouse import MouseEvent
-    from fidelis.effects import render_big
+    from fidelis.views import render_big
 
 For runtime theming:
     from fidelis.themes import current_theme, use_theme, list_themes

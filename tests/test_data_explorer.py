@@ -2,7 +2,7 @@
 
 import pytest
 
-from fidelis.widgets import (
+from fidelis.views import (
     DataExplorerState,
     DataNode,
     data_explorer,

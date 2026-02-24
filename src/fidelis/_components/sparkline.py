@@ -3,7 +3,7 @@
 Renders a list of values as vertical bar characters showing relative magnitude.
 
 Usage:
-    from fidelis.widgets import sparkline
+    from fidelis.views import sparkline
     from fidelis import Style
 
     values = [12, 15, 23, 45, 67, 89, 95, 87, 76, 65]
@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from ..block import Block
 from ..cell import Style
 from ..component_theme import ComponentTheme, component_theme
+from .._sparkline_core import sparkline_text
 
 if TYPE_CHECKING:
     pass
@@ -55,27 +56,16 @@ def sparkline(
     if not values:
         return Block.text(empty_char * width, style, width=width)
 
-    # Normalize to 0-1 range
-    min_v = min(values)
-    max_v = max(values)
-    rng = max_v - min_v if max_v != min_v else 1.0
-
-    # Sample or truncate to width
-    if len(values) > width:
-        sampled = values[-width:]
-    else:
-        sampled = values
-
-    # Map each value to a character
-    result_chars = []
-    for v in sampled:
-        normalized = (v - min_v) / rng
-        idx = min(int(normalized * (len(chars) - 1)), len(chars) - 1)
-        result_chars.append(chars[idx])
-
-    # Pad left if needed
-    result = "".join(result_chars).rjust(width, empty_char)
-    return Block.text(result, style, width=width)
+    text = sparkline_text(
+        values,
+        width,
+        chars=chars,
+        sampling="tail",
+        range_source="all",
+        pad_left=True,
+        pad_char=empty_char,
+    )
+    return Block.text(text, style, width=width)
 
 
 def sparkline_with_range(
@@ -117,23 +107,16 @@ def sparkline_with_range(
     # Use explicit range or derive from values
     lo = min_val if min_val is not None else min(values)
     hi = max_val if max_val is not None else max(values)
-    rng = hi - lo if hi != lo else 1.0
 
-    # Sample or truncate to width
-    if len(values) > width:
-        sampled = values[-width:]
-    else:
-        sampled = values
-
-    # Map each value to a character, clamping to range
-    result_chars = []
-    for v in sampled:
-        # Clamp value to range
-        v_clamped = max(lo, min(hi, v))
-        normalized = (v_clamped - lo) / rng
-        idx = min(int(normalized * (len(chars) - 1)), len(chars) - 1)
-        result_chars.append(chars[idx])
-
-    # Pad left if needed
-    result = "".join(result_chars).rjust(width, empty_char)
-    return Block.text(result, style, width=width)
+    text = sparkline_text(
+        values,
+        width,
+        chars=chars,
+        sampling="tail",
+        lo=lo,
+        hi=hi,
+        clamp=True,
+        pad_left=True,
+        pad_char=empty_char,
+    )
+    return Block.text(text, style, width=width)

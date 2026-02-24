@@ -26,7 +26,7 @@ from fidelis import (
     ROUNDED,
 )
 from fidelis.tui import Surface
-from fidelis.lens import tree_lens, chart_lens, TREE_LENS, CHART_LENS
+from fidelis.views import tree_lens, chart_lens, TREE_LENS, CHART_LENS
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,7 @@ from fidelis.tui import (
     # Layer
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
 )
-from fidelis.widgets import (
+from fidelis.views import (
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
     ListState, list_view,

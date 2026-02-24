@@ -2,7 +2,7 @@
 
 import pytest
 from fidelis import Style
-from fidelis.effects import render_big, BIG_GLYPHS, BigTextFormat
+from fidelis.views import render_big, BIG_GLYPHS, BigTextFormat
 
 
 class TestRenderBig:

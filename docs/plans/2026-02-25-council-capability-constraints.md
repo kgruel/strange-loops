@@ -90,6 +90,60 @@ signals (color depth, background mode, unicode width) reach the rendering
 pipeline, while everything else is either assumed (baseline) or tried
 optimistically (progressive enhancement).
 
+### Async vs sync detection: the bridge model
+
+Egmont Koblinger (VTE maintainer, Terminal WG, 2020) made the sharpest case
+for sync-first capability detection. His comparison of async (query-response)
+vs sync (env var, kernel call) methods:
+
+| Property | Async (query) | Sync (env var) |
+|----------|--------------|----------------|
+| Availability for apps | 100% | 50-95% (local only without SSH forwarding) |
+| Detection reliability | 99.9% (timeout risk) | 100% |
+| Implementation complexity | Extremely complex | Trivial |
+| Speed | Can be slow (SSH roundtrip) | Fast |
+| Side effects | Yes (typeahead interference) | None |
+| Likelihood apps implement | 1-5% | 99.999% |
+| Heuristic behavior | Yes (works 999/1000) | No (consistent) |
+
+His key insight: **async and sync complement each other, but they serve
+different roles.** Async queries are a *bridge* — they populate sync state
+across boundaries that don't forward it (SSH, su, virsh). The flow is:
+
+1. **Sync state exists** → use it. Fast, reliable, no side effects.
+2. **Sync state missing** (crossed an SSH boundary, etc.) → async query
+   *populates sync state*, then everything reads sync state.
+3. **Everything downstream reads sync state, never queries directly.**
+
+This challenges the progressive re-render model. Koblinger's argument: the
+async query shouldn't run at render time. It should run at shell/session
+startup, populate env vars (or equivalent), and then rendering reads those
+values synchronously. The "bridge" runs once, early, outside the app.
+
+Interactive apps (text editors, TUI) *might* fall back to async if sync state
+is missing. But Koblinger argues they probably shouldn't — it produces
+heuristic behavior, and the better response is pushing the ecosystem toward
+proper sync reporting at session boundaries.
+
+**Implications for fidelis:**
+
+- **STATIC/LIVE mode**: sync detection only. Read env vars, render, done. This
+  is the overwhelmingly common case and should be trivial to implement.
+- **INTERACTIVE mode**: sync detection first. Async bridge *maybe* as fallback
+  if sync state is missing, but the result populates sync state rather than
+  being consumed directly by views.
+- **Progressive re-render** is the fallback path, not the primary model. The
+  primary model is: sync state should be right before you render.
+- **The real long-term solution** is the ecosystem adopting proper sync
+  reporting (Edwards' `TERM_CAPABILITIES` or similar). fidelis should be ready
+  to consume it when it arrives, not build a complex async detection system
+  that replicates terminfo's mistakes in a new form.
+
+This significantly simplifies the design. Views read resolved sync state.
+Period. The question of *how* that state gets resolved (env var, bridge query,
+user override) is a concern of the session boundary, not the rendering
+pipeline.
+
 ## Invariants (will not change)
 
 - `Block` is immutable (tuples, frozen)

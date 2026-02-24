@@ -9,14 +9,12 @@ For interactive TUI apps, import from submodules:
     from fidelis.mouse import MouseEvent
     from fidelis.views import render_big
 
-For runtime theming:
-    from fidelis.themes import current_theme, use_theme, list_themes
+For aesthetic customization:
+    from fidelis import current_palette, use_palette, MONO_PALETTE
+    from fidelis import current_icons, use_icons, ASCII_ICONS
 
 For CLI harness and in-place rendering:
     from fidelis.inplace import InPlaceRenderer
-
-For component theming:
-    from fidelis.component_theme import Icons, ComponentTheme, component_theme
 """
 
 # Primitives
@@ -54,16 +52,22 @@ from .fidelity import (
 # In-place rendering
 from .inplace import InPlaceRenderer
 
-# Component theming
-from .component_theme import (
-    Icons,
+# Aesthetic
+from .palette import (
+    Palette,
+    DEFAULT_PALETTE,
+    NORD_PALETTE,
+    MONO_PALETTE,
+    current_palette,
+    use_palette,
+    reset_palette,
+)
+from .icon_set import (
+    IconSet,
     ASCII_ICONS,
-    ComponentTheme,
-    DEFAULT_COMPONENT_THEME,
-    ASCII_COMPONENT_THEME,
-    component_theme,
-    use_component_theme,
-    reset_component_theme,
+    current_icons,
+    use_icons,
+    reset_icons,
 )
 
 __all__ = [
@@ -113,13 +117,17 @@ __all__ = [
     "detect_context",
     # In-place rendering
     "InPlaceRenderer",
-    # Component theming
-    "Icons",
+    # Aesthetic
+    "Palette",
+    "DEFAULT_PALETTE",
+    "NORD_PALETTE",
+    "MONO_PALETTE",
+    "current_palette",
+    "use_palette",
+    "reset_palette",
+    "IconSet",
     "ASCII_ICONS",
-    "ComponentTheme",
-    "DEFAULT_COMPONENT_THEME",
-    "ASCII_COMPONENT_THEME",
-    "component_theme",
-    "use_component_theme",
-    "reset_component_theme",
+    "current_icons",
+    "use_icons",
+    "reset_icons",
 ]

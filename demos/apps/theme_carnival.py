@@ -1,34 +1,52 @@
 #!/usr/bin/env python3
-"""Theme Carnival — interactive theme explorer with live switching.
+"""Palette Carnival — interactive Palette explorer with live switching.
 
-A fun demo showcasing runtime theme switching. See how the same UI
-looks with different color palettes, all changing instantly.
+A demo showcasing runtime palette switching. `Palette` is a small set of
+semantic Style roles used by view components (progress bar, sparkline, etc.).
 
-Run: uv run python demos/apps/theme_carnival.py
-Keys: 1-6 jump to theme, ←/→ cycle, ↑/↓ scroll, q quit
+Run: `uv run python demos/apps/theme_carnival.py`
+Keys: 1-3 jump to palette, ←/→ cycle, ↑/↓ scroll, q quit
 Mouse: scroll wheel to scroll
 """
 
+from __future__ import annotations
+
 import asyncio
-from fidelis import Style, Block, pad, join_vertical, join_horizontal, join_responsive, Viewport, vslice
-from fidelis.tui import Surface
-from fidelis.themes import (
-    Theme,
-    current_theme,
-    use_theme,
-    list_themes,
+
+from fidelis import (
+    Block,
+    DEFAULT_PALETTE,
+    MONO_PALETTE,
+    NORD_PALETTE,
+    Palette,
+    Style,
+    Viewport,
+    current_palette,
+    join_horizontal,
+    join_responsive,
+    join_vertical,
+    pad,
+    use_palette,
+    vslice,
 )
-from fidelis.views import SpinnerState, spinner, ProgressState, progress_bar
 from fidelis.mouse import MouseEvent
+from fidelis.tui import Surface
+from fidelis.views import ProgressState, SpinnerState, progress_bar, spinner
 
 
-class ThemeCarnival(Surface):
-    """Interactive theme explorer with live preview."""
+class PaletteCarnival(Surface):
+    """Interactive palette explorer with live preview."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(enable_mouse=True)
-        self.theme_names = list_themes()
-        self.theme_index = 0
+        self.palettes: list[tuple[str, Palette]] = [
+            ("default", DEFAULT_PALETTE),
+            ("nord", NORD_PALETTE),
+            ("mono", MONO_PALETTE),
+        ]
+        self.palette_index = 0
+        use_palette(self.palettes[self.palette_index][1])
+
         self.spinner_state = SpinnerState()
         self.progress_value = 0.0
         self.progress_direction = 1
@@ -55,202 +73,171 @@ class ThemeCarnival(Surface):
                 self.progress_direction = 1
             self.mark_dirty()
 
-    def _build_content(self, theme: "Theme", panel_width: int, full_width: int) -> Block:
+    def _build_content(self, palette: Palette, panel_width: int, full_width: int) -> Block:
         """Build the scrollable content area as a Block."""
-        bg = theme.bg_base
         sections: list[Block] = []
 
-        # Current theme display
-        theme_label = f"Current: {theme.name.upper()}"
-        sections.append(Block.text(theme_label, Style(fg=theme.accent, bold=True, bg=bg)))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))  # blank line
+        name, _ = self.palettes[self.palette_index]
 
-        # Status section
-        sections.append(Block.text("Status:", Style(fg=theme.text, dim=True, bg=bg)))
-        connected_block = Block.text("● Connected", Style(fg=theme.success, bg=bg))
-        error_block = Block.text("✕ Error", Style(fg=theme.error, bg=bg))
-        warning_block = Block.text("⚡ Warning", Style(fg=theme.warning, bg=bg))
-        spin_block = spinner(self.spinner_state, style=Style(fg=theme.warning, bg=bg))
+        sections.append(Block.text(f"Current: {name.upper()}", palette.accent.merge(Style(bold=True))))
+        sections.append(Block.empty(panel_width, 1))
+
+        sections.append(Block.text("Status:", palette.muted))
+        connected_block = Block.text("● Connected", palette.success)
+        error_block = Block.text("✕ Error", palette.error)
+        warning_block = Block.text("⚡ Warning", palette.warning)
+        spin_block = spinner(self.spinner_state, style=palette.warning)
         status_row = join_responsive(
-            connected_block, error_block, warning_block, spin_block,
+            connected_block,
+            error_block,
+            warning_block,
+            spin_block,
             available_width=panel_width - 2,
-            gap=2
+            gap=2,
         )
         sections.append(pad(status_row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Log levels section
-        sections.append(Block.text("Log Levels:", Style(fg=theme.text, dim=True, bg=bg)))
+        sections.append(Block.text("Levels:", palette.muted))
         levels = [
-            ("ERROR", "error", "something went wrong"),
-            ("WARN ", "warn", "a warning appeared"),
-            ("INFO ", "info", "normal operation"),
-            ("DEBUG", "debug", "verbose output"),
+            ("ERROR", palette.error.merge(Style(bold=True)), "something went wrong"),
+            ("WARN ", palette.warning, "a warning appeared"),
+            ("INFO ", Style(), "normal operation"),
+            ("DEBUG", palette.muted, "verbose output"),
         ]
-        for label, level, msg in levels:
-            level_style = theme.level_style(level)
-            label_block = Block.text(label, Style(fg=level_style.fg, bold=level_style.bold, dim=level_style.dim, bg=bg))
-            msg_block = Block.text(" " + msg, Style(fg=theme.text, bg=bg))
-            row = join_horizontal(label_block, msg_block)
-            sections.append(pad(row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+        for label, level_style, msg in levels:
+            sections.append(pad(join_horizontal(Block.text(label, level_style), Block.text(" " + msg, Style())), left=2))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Progress bar section
-        sections.append(Block.text("Progress:", Style(fg=theme.text, dim=True, bg=bg)))
+        sections.append(Block.text("Progress:", palette.muted))
         pbar_width = max(10, panel_width - 12)
         pbar = progress_bar(
             ProgressState(value=self.progress_value),
             width=pbar_width,
-            filled_style=Style(fg=theme.success, bg=bg),
-            empty_style=Style(dim=True, bg=bg),
+            filled_style=palette.success.merge(Style(bold=True)),
+            empty_style=palette.muted,
         )
         pct = int(self.progress_value * 100)
-        pct_block = Block.text(f" {pct:3d}%", Style(fg=theme.text, bg=bg))
-        pbar_row = join_horizontal(pbar, pct_block)
-        sections.append(pad(pbar_row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+        sections.append(pad(join_horizontal(pbar, Block.text(f" {pct:3d}%", Style())), left=2))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Buttons section
-        sections.append(Block.text("Actions:", Style(fg=theme.text, dim=True, bg=bg)))
-        btn_accent = Style(fg=theme.primary, bg=theme.bg_emphasis, bold=True)
-        btn_style = Style(fg=theme.text, bg=theme.bg_emphasis)
-        btn_danger = Style(fg=theme.error, bg=theme.bg_emphasis)
-        save_btn = Block.text(" Save ", btn_accent)
-        cancel_btn = Block.text(" Cancel ", btn_style)
-        delete_btn = Block.text(" Delete ", btn_danger)
-        buttons_row = join_responsive(
-            save_btn, cancel_btn, delete_btn,
-            available_width=panel_width - 2,
-            gap=2
+        sections.append(Block.text("Actions:", palette.muted))
+        save_btn = Block.text(" Save ", palette.accent.merge(Style(bold=True)))
+        cancel_btn = Block.text(" Cancel ", Style())
+        delete_btn = Block.text(" Delete ", palette.error)
+        sections.append(
+            pad(
+                join_responsive(
+                    save_btn,
+                    cancel_btn,
+                    delete_btn,
+                    available_width=panel_width - 2,
+                    gap=2,
+                ),
+                left=2,
+            )
         )
-        sections.append(pad(buttons_row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Selection section
-        sections.append(Block.text("Selection:", Style(fg=theme.text, dim=True, bg=bg)))
+        sections.append(Block.text("Selection:", palette.muted))
         items = ["Apple", "Banana", "Cherry"]
         item_width = min(panel_width - 6, 20)
         for i, item in enumerate(items):
-            if i == 1:  # Highlight middle item
-                prefix = Block.text("▸ ", Style(fg=theme.accent, bold=True, bg=bg))
-                # Pad item text to item_width
-                item_text = item.ljust(item_width)
-                item_block = Block.text(item_text, Style(fg=theme.text, bg=theme.bg_emphasis))
-                row = join_horizontal(prefix, item_block)
+            if i == 1:
+                prefix = Block.text("▸ ", palette.accent.merge(Style(bold=True)))
+                item_block = Block.text(item.ljust(item_width), Style())
             else:
-                prefix = Block.text("  ", Style(bg=bg))
-                item_block = Block.text(item, Style(fg=theme.text, bg=bg))
-                row = join_horizontal(prefix, item_block)
-            sections.append(pad(row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+                prefix = Block.text("  ", Style())
+                item_block = Block.text(item, Style())
+            sections.append(pad(join_horizontal(prefix, item_block), left=2))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Palette section
-        sections.append(Block.text("Palette:", Style(fg=theme.text, dim=True, bg=bg)))
+        sections.append(Block.text("Palette:", palette.muted))
         palette_blocks = [
-            Block.text("██", Style(fg=theme.primary, bg=bg)),
-            Block.text("██", Style(fg=theme.accent, bg=bg)),
-            Block.text("██", Style(fg=theme.success, bg=bg)),
-            Block.text("██", Style(fg=theme.warning, bg=bg)),
-            Block.text("██", Style(fg=theme.error, bg=bg)),
+            Block.text(" success ", palette.success),
+            Block.text(" warning ", palette.warning),
+            Block.text(" error ", palette.error),
+            Block.text(" accent ", palette.accent),
+            Block.text(" muted ", palette.muted),
         ]
-        palette_row = join_responsive(
-            *palette_blocks,
-            available_width=panel_width - 2,
-            gap=1
+        sections.append(
+            pad(
+                join_responsive(
+                    *palette_blocks,
+                    available_width=panel_width - 2,
+                    gap=1,
+                ),
+                left=2,
+            )
         )
-        sections.append(pad(palette_row, left=2))
-        sections.append(Block.empty(panel_width, 1, Style(bg=bg)))
+        sections.append(Block.empty(panel_width, 1))
 
-        # Theme selector section
-        sections.append(Block.text("Themes:", Style(fg=theme.text, bold=True, bg=bg)))
-
-        def theme_column(names: list[str], start_num: int) -> Block:
-            lines = []
-            for i, name in enumerate(names):
-                num = start_num + i
-                is_current = name == theme.name
-                prefix = "▸" if is_current else " "
-                style = Style(fg=theme.accent, bold=True, bg=bg) if is_current else Style(fg=theme.text, bg=bg)
-                lines.append(Block.text(f"{prefix} {num}. {name.capitalize()}", style))
-            return join_vertical(*lines) if lines else Block.empty(0, 0, Style(bg=bg))
-
-        col1 = theme_column(self.theme_names[:3], 1)
-        col2 = theme_column(self.theme_names[3:6], 4)
-        theme_cols = join_responsive(
-            col1, col2,
-            available_width=full_width - 12,
-            gap=4
-        )
-        sections.append(pad(theme_cols, left=2))
+        sections.append(Block.text("Palettes:", palette.accent.merge(Style(bold=True))))
+        lines = []
+        for i, (pname, _) in enumerate(self.palettes):
+            prefix = "▸" if i == self.palette_index else " "
+            style = palette.accent.merge(Style(bold=True)) if i == self.palette_index else Style()
+            lines.append(Block.text(f"{prefix} {i + 1}. {pname}", style))
+        sections.append(pad(join_vertical(*lines), left=2))
 
         return join_vertical(*sections)
 
     def render(self) -> None:
-        theme = current_theme()
+        palette = current_palette()
         w, h = self._buf.width, self._buf.height
-        bg = theme.bg_base
 
-        # Clear background
-        self._buf.fill(0, 0, w, h, " ", Style(bg=bg))
+        self._buf.fill(0, 0, w, h, " ", Style())
 
-        # Title bar (fixed, row 0)
-        title = f"  Theme Carnival  "
-        self._buf.fill(0, 0, w, 1, " ", theme.header_base)
-        self._buf.put_text(2, 0, title, Style(fg=theme.primary, bold=True, bg=theme.bg_subtle))
+        title = "  Palette Carnival  "
+        self._buf.fill(0, 0, w, 1, " ", Style())
+        self._buf.put_text(2, 0, title, palette.accent.merge(Style(bold=True)))
 
-        keys_hint = "[1-6] switch  [←/→] cycle  [↑/↓] scroll  [q] quit"
+        keys_hint = "[1-3] switch  [←/→] cycle  [↑/↓] scroll  [q] quit"
         hint_x = max(len(title) + 4, w - len(keys_hint) - 2)
-        self._buf.put_text(hint_x, 0, keys_hint, Style(fg=theme.muted, bg=theme.bg_subtle))
+        self._buf.put_text(hint_x, 0, keys_hint, palette.muted)
 
-        # Footer (fixed, last row)
-        self._buf.fill(0, h - 1, w, 1, " ", theme.header_base)
-        footer = f"Theme {self.theme_index + 1}/{len(self.theme_names)}"
-        self._buf.put_text(2, h - 1, footer, theme.footer_dim.merge(Style(bg=theme.bg_subtle)))
+        self._buf.fill(0, h - 1, w, 1, " ", Style())
+        footer = f"Palette {self.palette_index + 1}/{len(self.palettes)}"
+        self._buf.put_text(2, h - 1, footer, palette.muted)
 
-        # Content area dimensions
-        content_start_y = 2  # After title bar + gap
-        content_height = h - 3  # Between title bar and footer
+        content_start_y = 2
+        content_height = h - 3
         panel_x = 4
         panel_width = max(20, w - 8)
 
-        # Build scrollable content
-        content = self._build_content(theme, panel_width, w)
-
-        # Update viewport dimensions
+        content = self._build_content(palette, panel_width, w)
         self.viewport = self.viewport.with_visible(content_height).with_content(content.height)
-
-        # Slice content for current scroll position
         visible_content = vslice(content, self.viewport.offset, content_height)
-
-        # Paint content to buffer
         visible_content.paint(self._buf, panel_x, content_start_y)
 
-        # Scroll indicator in footer
         if self.viewport.can_scroll:
-            scroll_pct = int(100 * self.viewport.offset / max(1, self.viewport.max_offset)) if self.viewport.max_offset > 0 else 0
+            scroll_pct = (
+                int(100 * self.viewport.offset / max(1, self.viewport.max_offset))
+                if self.viewport.max_offset > 0
+                else 0
+            )
             if self.viewport.is_at_top:
                 indicator = "↓ more"
             elif self.viewport.is_at_bottom:
                 indicator = "↑ more"
             else:
                 indicator = f"↑↓ {scroll_pct}%"
-            self._buf.put_text(w - len(indicator) - 2, h - 1, indicator, Style(fg=theme.muted, bg=theme.bg_subtle))
+            self._buf.put_text(w - len(indicator) - 2, h - 1, indicator, palette.muted)
 
     def on_key(self, key: str) -> None:
         if key == "q":
             self.quit()
-        elif key in "123456":
+        elif key in "123":
             idx = int(key) - 1
-            if idx < len(self.theme_names):
-                self.theme_index = idx
-                use_theme(self.theme_names[idx])
+            if idx < len(self.palettes):
+                self.palette_index = idx
+                use_palette(self.palettes[idx][1])
         elif key == "right":
-            self.theme_index = (self.theme_index + 1) % len(self.theme_names)
-            use_theme(self.theme_names[self.theme_index])
+            self.palette_index = (self.palette_index + 1) % len(self.palettes)
+            use_palette(self.palettes[self.palette_index][1])
         elif key == "left":
-            self.theme_index = (self.theme_index - 1) % len(self.theme_names)
-            use_theme(self.theme_names[self.theme_index])
-        # Scroll navigation
+            self.palette_index = (self.palette_index - 1) % len(self.palettes)
+            use_palette(self.palettes[self.palette_index][1])
         elif key == "up":
             self.viewport = self.viewport.scroll(-1)
         elif key == "down":
@@ -270,4 +257,5 @@ class ThemeCarnival(Surface):
 
 
 if __name__ == "__main__":
-    asyncio.run(ThemeCarnival().run())
+    asyncio.run(PaletteCarnival().run())
+

@@ -10,3 +10,4 @@ htmlcov/
 *.so
 .subtask/
 .worktrees/
+.env

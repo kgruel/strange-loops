@@ -295,6 +295,17 @@ name "test"
         with pytest.raises(ParseError, match="Missing required field: loops"):
             parse_vertex(text)
 
+    def test_discover_only_vertex_no_loops_required(self):
+        """A vertex with discover: but no loops: is valid."""
+        text = """\
+name "root"
+discover "./**/*.vertex"
+"""
+        v = parse_vertex(text)
+        assert v.name == "root"
+        assert v.loops == {}
+        assert v.discover == "./**/*.vertex"
+
     def test_invalid_format(self):
         text = """\
 source "echo"

@@ -457,7 +457,8 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     has_template_loop_specs = sources and any(
         isinstance(s, TemplateSource) and s.loop is not None for s in sources
     )
-    if not loops and not has_template_loop_specs:
+    has_children = discover is not None or vertices is not None
+    if not loops and not has_template_loop_specs and not has_children:
         raise _error("Missing required field: loops", path)
 
     return VertexFile(

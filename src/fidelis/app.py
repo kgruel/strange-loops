@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 from typing import Any, Callable, Awaitable
 
-from .buffer import Buffer
+from .buffer import Buffer, CellWrite
 from .layer import Layer, process_key as _process_key
-from .writer import Writer
+from .writer import Writer, ScrollOp
 from .keyboard import KeyboardInput
 from ._mouse import MouseEvent
 
@@ -29,6 +30,8 @@ class Surface:
         fps_cap: int = 60,
         enable_mouse: bool = False,
         mouse_all_motion: bool = False,
+        scroll_optimization: bool | None = None,
+        scroll_optimization_emit: bool = False,
         on_emit: Emit | None = None,
         on_start: LifecycleHook | None = None,
         on_stop: LifecycleHook | None = None,
@@ -42,6 +45,11 @@ class Surface:
         self._dirty = True
         self._enable_mouse = enable_mouse
         self._mouse_all_motion = mouse_all_motion
+        if scroll_optimization is None:
+            env = os.environ.get("FIDELIS_SCROLL_OPTIM", "").strip().lower()
+            scroll_optimization = env in {"1", "true", "yes", "on"}
+        self._scroll_optimization = bool(scroll_optimization)
+        self._scroll_optimization_emit = scroll_optimization_emit
         self._on_emit = on_emit
         self._on_start = on_start
         self._on_stop = on_stop
@@ -196,8 +204,174 @@ class Surface:
         """Diff current vs previous buffer and write changes to terminal."""
         if self._buf is None or self._prev is None:
             return
+
+        if self._scroll_optimization and self._try_flush_scroll_optimized():
+            self._prev = self._buf.clone()
+            return
+
         writes = self._buf.diff(self._prev)
         if writes:
             self._writer.write_frame(writes)
         # Swap: current becomes previous for next frame
         self._prev = self._buf.clone()
+
+    def _try_flush_scroll_optimized(self) -> bool:
+        if self._buf is None or self._prev is None:
+            return False
+
+        cur = self._buf
+        prev = self._prev
+        if cur.width != prev.width or cur.height != prev.height:
+            return False
+
+        width, height = cur.width, cur.height
+        if height < 3 or width < 1:
+            return False
+
+        max_n = min(3, height - 1)
+        if max_n <= 0:
+            return False
+
+        old_content = prev.line_hashes(include_style=False)
+        new_content = cur.line_hashes(include_style=False)
+        old_full = prev.line_hashes(include_style=True)
+        new_full = cur.line_hashes(include_style=True)
+
+        cand = self._detect_vertical_scroll(old_content, new_content, max_n=max_n)
+        if cand is None:
+            return False
+        top, bottom, n, overlap_start, overlap_end, match_ratio = cand
+
+        region_height = bottom - top + 1
+        if region_height < 6:
+            return False
+
+        repaint_lines: set[int] = set()
+
+        # Inserted lines created by the scroll.
+        if n > 0:
+            for y in range(bottom - n + 1, bottom + 1):
+                repaint_lines.add(y)
+        else:
+            m = -n
+            for y in range(top, top + m):
+                repaint_lines.add(y)
+
+        # Overlap region: if the scrolled-in line differs (including style), repaint.
+        for y in range(overlap_start, overlap_end + 1):
+            if new_full[y] != old_full[y + n]:
+                repaint_lines.add(y)
+
+        # Outside region: repaint changed lines.
+        for y in range(0, top):
+            if new_full[y] != old_full[y]:
+                repaint_lines.add(y)
+        for y in range(bottom + 1, height):
+            if new_full[y] != old_full[y]:
+                repaint_lines.add(y)
+
+        repaint_in_region = sum(1 for y in repaint_lines if top <= y <= bottom)
+        if repaint_in_region >= int(region_height * 0.7):
+            return False
+
+        cell_ops: list[ScrollOp | CellWrite] = [ScrollOp(top=top, bottom=bottom, n=n)]
+        cells = cur._cells
+        for y in sorted(repaint_lines):
+            row_start = y * width
+            for x in range(width):
+                cell_ops.append(CellWrite(x, y, cells[row_start + x]))
+
+        self._writer.write_ops(cell_ops)  # type: ignore[arg-type]
+
+        if self._scroll_optimization_emit:
+            self.emit(
+                "ui.scroll_optim",
+                top=top,
+                bottom=bottom,
+                n=n,
+                overlap_start=overlap_start,
+                overlap_end=overlap_end,
+                match_ratio=match_ratio,
+                repainted_lines=len(repaint_lines),
+            )
+
+        return True
+
+    @staticmethod
+    def _detect_vertical_scroll(
+        old_hashes: list[int],
+        new_hashes: list[int],
+        *,
+        max_n: int,
+        min_overlap: int = 6,
+        min_match_ratio: float = 0.8,
+    ) -> tuple[int, int, int, int, int, float] | None:
+        """Detect a vertical scroll region.
+
+        Returns (top, bottom, n, overlap_start, overlap_end, match_ratio) where
+        n>0 scrolls up and overlap_start..overlap_end are the new-buffer lines
+        that are expected to match old[y+n].
+        """
+        height = len(new_hashes)
+        if height != len(old_hashes):
+            return None
+
+        best: tuple[int, float, int, int, int, int, int, int] | None = None
+        # tuple: (match_count, match_ratio, -mismatch_count, overlap_len, -abs(n), top, bottom, n)
+
+        for step in range(1, max_n + 1):
+            for n in (step, -step):
+                y0 = max(0, -n)
+                y1 = min(height - 1, height - 1 - n)
+                if y1 - y0 + 1 < min_overlap:
+                    continue
+
+                for a in range(y0, y1 + 1):
+                    matches = 0
+                    distinct: set[int] = set()
+                    for b in range(a, y1 + 1):
+                        if new_hashes[b] == old_hashes[b + n]:
+                            matches += 1
+                        distinct.add(new_hashes[b])
+
+                        overlap_len = b - a + 1
+                        if overlap_len < min_overlap:
+                            continue
+
+                        ratio = matches / overlap_len
+                        if ratio < min_match_ratio:
+                            continue
+
+                        if len(distinct) < max(3, overlap_len // 3):
+                            continue
+
+                        if n > 0:
+                            top = a
+                            bottom = b + n
+                            overlap_start = a
+                            overlap_end = b
+                        else:
+                            top = a + n
+                            bottom = b
+                            overlap_start = a
+                            overlap_end = b
+
+                        if top < 0 or bottom >= height or top >= bottom:
+                            continue
+
+                        mismatches = overlap_len - matches
+                        key = (matches, ratio, -mismatches, overlap_len, -abs(n), top, bottom, n)
+                        if best is None or key > best:
+                            best = key
+
+        if best is None:
+            return None
+
+        _, ratio, _, overlap_len, _, top, bottom, n = best
+        abs_n = abs(n)
+        overlap_start = top if n > 0 else top + abs_n
+        overlap_end = bottom - abs_n if n > 0 else bottom
+        if overlap_end - overlap_start + 1 != overlap_len:
+            overlap_start = max(0, overlap_start)
+            overlap_end = min(height - 1, overlap_end)
+        return (top, bottom, n, overlap_start, overlap_end, ratio)

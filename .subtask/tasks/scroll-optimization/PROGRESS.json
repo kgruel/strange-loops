@@ -1,0 +1,9 @@
+[
+  {"step": "Rebase branch onto updated main", "done": true},
+  {"step": "Phase 0: add scroll optimization tests", "done": true},
+  {"step": "Phase 1: Writer supports scroll ops", "done": true},
+  {"step": "Phase 2: Buffer scroll + line hashing helpers", "done": true},
+  {"step": "Phase 3: Surface flush scroll detection", "done": true},
+  {"step": "Phase 4: opt-in flag + observability", "done": true},
+  {"step": "Run tests and commit", "done": true}
+]

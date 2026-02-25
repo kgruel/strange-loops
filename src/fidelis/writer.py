@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import shutil
 import sys
 from enum import Enum
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, TextIO, Union
+
+from wcwidth import wcwidth
 
 from .buffer import CellWrite
 from .cell import Cell, Style, NAMED_COLORS
@@ -209,19 +212,61 @@ class Writer:
         """CSI escape for cursor positioning (1-based)."""
         return f"\x1b[{y + 1};{x + 1}H"
 
-    def write_frame(self, writes: list[CellWrite]) -> None:
-        """Render cell writes to terminal. Batches into a single write call."""
-        if not writes:
+    def set_scroll_region(self, top: int, bottom: int) -> str:
+        """Set scroll region via DECSTBM (top/bottom margins, 0-based inclusive)."""
+        return f"\x1b[{top + 1};{bottom + 1}r"
+
+    def reset_scroll_region(self) -> str:
+        """Reset scroll region to full screen (DECSTBM with no params)."""
+        return "\x1b[r"
+
+    def scroll_up(self, n: int) -> str:
+        """Scroll up (content moves up) by n lines: CSI n S."""
+        return f"\x1b[{n}S"
+
+    def scroll_down(self, n: int) -> str:
+        """Scroll down (content moves down) by n lines: CSI n T."""
+        return f"\x1b[{n}T"
+
+    def write_ops(self, ops: list[RenderOp]) -> None:
+        """Render a mixed stream of operations (scroll + cell writes)."""
+        if not ops:
             return
 
         parts: list[str] = []
-
-        # Synchronized output: begin (Mode 2026)
-        parts.append("\x1b[?2026h")
+        parts.append("\x1b[?2026h")  # synchronized output begin
 
         last_style: Style | None = None
+        covered: set[tuple[int, int]] = set()  # trailing cells of wide chars written this frame
 
-        for w in writes:
+        for op in ops:
+            if isinstance(op, ScrollOp):
+                if op.top > op.bottom or op.n == 0:
+                    continue
+
+                top = max(0, op.top)
+                bottom = max(top, op.bottom)
+                n = op.n
+
+                parts.append(self.reset_style())
+                last_style = None
+
+                parts.append(self.set_scroll_region(top, bottom))
+                if n > 0:
+                    parts.append(self.move_cursor(0, bottom))
+                    parts.append(self.scroll_up(n))
+                else:
+                    parts.append(self.move_cursor(0, top))
+                    parts.append(self.scroll_down(-n))
+                parts.append(self.reset_scroll_region())
+                continue
+
+            # CellWrite
+            w = op
+
+            if (w.x, w.y) in covered:
+                continue
+
             parts.append(self.move_cursor(w.x, w.y))
 
             if w.cell.style != last_style:
@@ -233,13 +278,20 @@ class Writer:
 
             parts.append(w.cell.char)
 
-        parts.append(self.reset_style())
+            width = wcwidth(w.cell.char)
+            if width and width > 1:
+                for dx in range(1, width):
+                    covered.add((w.x + dx, w.y))
 
-        # Synchronized output: end
-        parts.append("\x1b[?2026l")
+        parts.append(self.reset_style())
+        parts.append("\x1b[?2026l")  # synchronized output end
 
         self._stream.write("".join(parts))
         self._stream.flush()
+
+    def write_frame(self, writes: list[CellWrite]) -> None:
+        """Render cell writes to terminal. Batches into a single write call."""
+        self.write_ops(writes)
 
     def enter_alt_screen(self) -> None:
         self._stream.write("\x1b[?1049h")
@@ -329,3 +381,18 @@ def _write_block_ansi(block: "Block", writer: Writer, stream: TextIO) -> None:
         parts.append(writer.reset_style())
         parts.append("\n")
         stream.write("".join(parts))
+
+
+@dataclass(frozen=True)
+class ScrollOp:
+    """Scroll a region vertically by n lines.
+
+    Coordinates are 0-based, inclusive. Positive n scrolls up (content moves up).
+    """
+
+    top: int
+    bottom: int
+    n: int
+
+
+RenderOp = Union[CellWrite, ScrollOp]

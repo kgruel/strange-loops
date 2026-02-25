@@ -120,6 +120,80 @@ class Buffer:
                 writes.append(CellWrite(x, y, self._cells[i]))
         return writes
 
+    def line_hashes(self, *, include_style: bool = True) -> list[int]:
+        """Return a hash for each line.
+
+        This is used for fast line-level comparison (e.g. scroll detection).
+        Hashes are only meaningful within the current process and should not be
+        persisted.
+        """
+        w, h = self.width, self.height
+        out: list[int] = [0] * h
+        idx = 0
+        for y in range(h):
+            v = 0x345678
+            for _ in range(w):
+                c = self._cells[idx]
+                idx += 1
+                if include_style:
+                    hv = hash(c)
+                else:
+                    hv = hash(c.char)
+                v = (v * 1000003) ^ hv
+            out[y] = v
+        return out
+
+    def scroll_region_in_place(
+        self,
+        top: int,
+        bottom: int,
+        n: int,
+        *,
+        fill: Cell = EMPTY_CELL,
+    ) -> None:
+        """Scroll a vertical region in-place by n lines.
+
+        top/bottom are 0-based inclusive. Positive n scrolls up (content moves up),
+        negative n scrolls down. Newly uncovered lines are filled with `fill`.
+        """
+        if n == 0:
+            return
+
+        top = max(0, top)
+        bottom = min(self.height - 1, bottom)
+        if top > bottom:
+            return
+
+        height = bottom - top + 1
+        if abs(n) >= height:
+            # Entire region becomes blank.
+            for y in range(top, bottom + 1):
+                start = y * self.width
+                self._cells[start : start + self.width] = [fill] * self.width
+            return
+
+        w = self.width
+
+        if n > 0:
+            # Scroll up: copy rows downwards in index space.
+            for y in range(top, bottom - n + 1):
+                dst = y * w
+                src = (y + n) * w
+                self._cells[dst : dst + w] = self._cells[src : src + w]
+            for y in range(bottom - n + 1, bottom + 1):
+                start = y * w
+                self._cells[start : start + w] = [fill] * w
+        else:
+            m = -n
+            # Scroll down: copy rows upwards in index space (descending y).
+            for y in range(bottom, top + m - 1, -1):
+                dst = y * w
+                src = (y - m) * w
+                self._cells[dst : dst + w] = self._cells[src : src + w]
+            for y in range(top, top + m):
+                start = y * w
+                self._cells[start : start + w] = [fill] * w
+
     def clone(self) -> Buffer:
         """Deep copy for diff comparison."""
         buf = Buffer(self.width, self.height)

@@ -141,3 +141,35 @@ Design doc: `docs/plans/2026-02-24-fidelity-design.md`
 - 25 new tests
 
 **497 tests passing on main.**
+
+## 2026-02-25 — Tour slide system rebuild
+
+Migrated tour from 34 inline slides in `tour.py` to 17 markdown files loaded
+by a rebuilt `slide_loader.py`. Detail/source sub-slides collapse into zoom
+levels on each topic file.
+
+**What changed:**
+- `demos/slide_loader.py` — rebuilt with zoom parsing (`[zoom:N]` markers),
+  auto-navigation from `group`+`order` frontmatter, `[align:center/left]`
+  support with one-shot override semantics, validation (contiguous zoom,
+  unique group/order, known groups), recursive directory loading
+- `demos/tour.py` — new `Slide` type with `common` + `zooms` dict replacing
+  flat `sections`. Removed `ZoomText`, `ZoomCode`, `styled()`, `KEYWORD`,
+  `EMPH`, and `_build_slides_inline()` (~1300 lines). Section union simplified
+  to `Text | Code | Spacer | Demo`
+- `demos/slides/` — 17 markdown files across 5 subdirectories:
+  `standalone/` (intro, fin), `primitives/` (cell, style, span, line),
+  `composition/` (block, compose, buffer), `application/` (app, focus, search),
+  `components/` (overview, progress, list, text_input, table)
+- `tests/test_slide_loader.py` — 47 tests covering frontmatter, body parsing,
+  zoom markers, styled text, validation, navigation, file loading, integration
+
+**Design decisions:**
+- Alignment: frontmatter `align: center` as slide default + `[align:left]`
+  bracket override (single-section scope, then reverts). Chosen over
+  Remark-style wrapping and HTML comment directives (deferred).
+- Navigation computed from group+order sorting, not manually wired.
+- Conversion logic lives in `tour.py` (not `slide_loader.py`) to avoid
+  Python module identity issues with `match` statement type dispatch.
+
+**544 tests passing on main.**

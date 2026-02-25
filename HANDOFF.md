@@ -11,7 +11,7 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 497 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+v0.1.0, 544 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
 
 Fidelity-aware style resolution **implemented and merged**: `Palette`
 (5 semantic Style roles) + `IconSet` (glyph vocabulary), both ambient via
@@ -53,8 +53,10 @@ docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 497 tests
-demos/                 # 20 Python files + tour.py
+tests/                 # 544 tests
+demos/                 # Python files + tour.py + slides/
+  slides/              # 17 markdown files (tour content)
+  slide_loader.py      # Markdown parser with zoom levels + auto-nav
 ```
 
 ## Completed (This + Prior Sessions)
@@ -85,6 +87,11 @@ demos/                 # 20 Python files + tour.py
 - **Capability signal dissolution** — council concluded the question dissolves.
   Color downconversion in `Writer._color_codes()` (~70 LOC). No new types,
   no pipeline changes. Principle: "Capabilities resolve at boundaries."
+- **Tour slide rebuild** — migrated 34 inline slides to 17 markdown files
+  in `demos/slides/`. Slide loader (`demos/slide_loader.py`) handles zoom
+  levels, auto-navigation from group+order, alignment via frontmatter
+  defaults + bracket overrides. Removed ~1300 lines of inline definitions
+  from `tour.py`. 47 new tests.
 
 ## Capability Signal Design (Resolved)
 
@@ -117,6 +124,8 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 - **PyPI publish** — Package metadata ready. No CI/CD yet.
 - **Guide content** — 4 guides landed with draft-quality narrative. Need
   fleshing out once designs stabilize.
-- **Tour expansion** — research complete, parked until designs stabilize.
+- **Tour docgen integration** — slide markdown files support `<!-- docgen:begin/end -->`
+  markers but none are populated yet. Run `docgen --update --roots demos/slides` to
+  sync source excerpts into zoom-level code blocks.
 - **Stale plan file** — `docs/plans/2026-02-22-project-cleanup.md` is
   untracked and fully executed. Can be deleted or committed as historical.

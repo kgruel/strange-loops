@@ -20,19 +20,41 @@ class Wrap(Enum):
 class Block:
     """Immutable rectangle of styled cells with known dimensions."""
 
-    __slots__ = ("width", "height", "_rows", "_frozen")
+    __slots__ = ("width", "height", "id", "_rows", "_ids", "_frozen")
 
-    def __init__(self, rows: Sequence[Sequence[Cell]], width: int):
+    def __init__(
+        self,
+        rows: Sequence[Sequence[Cell]],
+        width: int,
+        *,
+        id: str | None = None,
+        ids: Sequence[Sequence[str | None]] | None = None,
+    ):
         frozen_rows: tuple[tuple[Cell, ...], ...] = tuple(tuple(r) for r in rows)
+        frozen_ids: tuple[tuple[str | None, ...], ...] | None = (
+            tuple(tuple(r) for r in ids) if ids is not None else None
+        )
         if __debug__:
             for row_idx, row in enumerate(frozen_rows):
                 if len(row) != width:
                     raise ValueError(
                         f"Block row {row_idx} width {len(row)} != block width {width}"
                     )
+            if frozen_ids is not None:
+                if len(frozen_ids) != len(frozen_rows):
+                    raise ValueError(
+                        f"Block ids height {len(frozen_ids)} != block height {len(frozen_rows)}"
+                    )
+                for row_idx, row in enumerate(frozen_ids):
+                    if len(row) != width:
+                        raise ValueError(
+                            f"Block ids row {row_idx} width {len(row)} != block width {width}"
+                        )
         object.__setattr__(self, "width", width)
         object.__setattr__(self, "height", len(frozen_rows))
+        object.__setattr__(self, "id", id)
         object.__setattr__(self, "_rows", frozen_rows)
+        object.__setattr__(self, "_ids", frozen_ids)
         object.__setattr__(self, "_frozen", True)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -42,20 +64,20 @@ class Block:
 
     @staticmethod
     def text(content: str, style: Style, *, width: int | None = None,
-             wrap: Wrap = Wrap.NONE) -> Block:
+             wrap: Wrap = Wrap.NONE, id: str | None = None) -> Block:
         """Create a block from text content with optional wrapping."""
         if width is not None and width <= 0:
-            return Block([[]], 0)
+            return Block([[]], 0, id=id)
 
         if width is None:
             cells = _cells_from_text(content, style)
-            return Block([cells], len(cells))
+            return Block([cells], len(cells), id=id)
 
         if wrap == Wrap.NONE:
             # Truncate at width, single line
             cells = _cells_from_text(content, style, max_width=width)
             cells = _pad_row(cells, width, style)
-            return Block([cells], width)
+            return Block([cells], width, id=id)
 
         if wrap == Wrap.ELLIPSIS:
             # Truncate with ellipsis if needed
@@ -68,41 +90,69 @@ class Block:
             else:
                 cells = _cells_from_text(content, style, max_width=width)
             cells = _pad_row(cells, width, style)
-            return Block([cells], width)
+            return Block([cells], width, id=id)
 
         if wrap == Wrap.CHAR:
             # Break at any character boundary
             rows = _char_wrap(content, width, style)
-            return Block(rows, width)
+            return Block(rows, width, id=id)
 
         if wrap == Wrap.WORD:
             # Break at word boundaries
             lines = _word_wrap(content, width)
             rows = [_pad_row(_cells_from_text(line, style, max_width=width), width, style)
                     for line in lines]
-            return Block(rows, width)
+            return Block(rows, width, id=id)
 
         raise ValueError(f"Unknown wrap mode: {wrap}")
 
     @staticmethod
-    def empty(width: int, height: int, style: Style = Style()) -> Block:
+    def empty(width: int, height: int, style: Style = Style(), *, id: str | None = None) -> Block:
         """Create a block filled with space cells."""
         space = Cell(" ", style)
         rows = [[space] * width for _ in range(height)]
-        return Block(rows, width)
+        return Block(rows, width, id=id)
 
     def paint(self, buffer: Buffer | BufferView, x: int = 0, y: int = 0) -> None:
         """Transfer cells into a buffer region. Clips to buffer bounds."""
+        if self._ids is None:
+            if self.id is None:
+                for row_idx in range(self.height):
+                    for col_idx in range(self.width):
+                        bx = x + col_idx
+                        by = y + row_idx
+                        cell = self._rows[row_idx][col_idx]
+                        buffer.put(bx, by, cell.char, cell.style)
+                return
+
+            for row_idx in range(self.height):
+                for col_idx in range(self.width):
+                    bx = x + col_idx
+                    by = y + row_idx
+                    cell = self._rows[row_idx][col_idx]
+                    buffer.put_id(bx, by, cell.char, cell.style, self.id)
+            return
+
         for row_idx in range(self.height):
             for col_idx in range(self.width):
                 bx = x + col_idx
                 by = y + row_idx
                 cell = self._rows[row_idx][col_idx]
-                buffer.put(bx, by, cell.char, cell.style)
+                cid = self._ids[row_idx][col_idx]
+                if cid is None:
+                    buffer.put(bx, by, cell.char, cell.style)
+                else:
+                    buffer.put_id(bx, by, cell.char, cell.style, cid)
 
     def row(self, y: int) -> tuple[Cell, ...]:
         """Access a row by index."""
         return self._rows[y]
+
+    def cell_id(self, x: int, y: int) -> str | None:
+        """Return the semantic id at a local coordinate (or None)."""
+        if self._ids is not None:
+            return self._ids[y][x]
+        return self.id
 
 
 def _pad_row(cells: list[Cell], width: int, style: Style) -> list[Cell]:

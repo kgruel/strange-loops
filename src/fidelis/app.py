@@ -135,6 +135,15 @@ class Surface:
     def on_mouse(self, event: MouseEvent) -> None:
         """Called on mouse event. Override to handle clicks, drags, scrolls."""
 
+    def hit(self, x: int, y: int) -> str | None:
+        """Return the semantic id at a screen coordinate, if any.
+
+        Useful for mapping MouseEvent coordinates to rendered regions.
+        """
+        if self._buf is None:
+            return None
+        return self._buf.hit(x, y)
+
     def emit(self, kind: str, **data: Any) -> None:
         """Emit an observation. No-op if no callback registered."""
         if self._on_emit is not None:

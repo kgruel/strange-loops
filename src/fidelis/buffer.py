@@ -22,12 +22,18 @@ class CellWrite:
 class Buffer:
     """2D grid of Cells, row-major flat list for cache efficiency."""
 
-    __slots__ = ("width", "height", "_cells")
+    __slots__ = ("width", "height", "_cells", "_ids")
 
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
         self._cells: list[Cell] = [EMPTY_CELL] * (width * height)
+        self._ids: list[str | None] | None = None
+
+    def _ensure_ids(self) -> list[str | None]:
+        if self._ids is None:
+            self._ids = [None] * (self.width * self.height)
+        return self._ids
 
     def _index(self, x: int, y: int) -> Optional[int]:
         if 0 <= x < self.width and 0 <= y < self.height:
@@ -46,6 +52,16 @@ class Buffer:
         if idx is None:
             return
         self._cells[idx] = Cell(char, style)
+        if self._ids is not None:
+            self._ids[idx] = None
+
+    def put_id(self, x: int, y: int, char: str, style: Style, id: str) -> None:
+        """Set a single cell and record a semantic id for hit-testing."""
+        idx = self._index(x, y)
+        if idx is None:
+            return
+        self._cells[idx] = Cell(char, style)
+        self._ensure_ids()[idx] = id
 
     def put_text(self, x: int, y: int, text: str, style: Style) -> None:
         """Write a string horizontally, respecting wide characters."""
@@ -62,11 +78,15 @@ class Buffer:
             idx = self._index(col, y)
             if idx is not None:
                 self._cells[idx] = Cell(ch, style)
+                if self._ids is not None:
+                    self._ids[idx] = None
             # For wide chars (w == 2), fill the next cell with a placeholder
             if w == 2:
                 next_idx = self._index(col + 1, y)
                 if next_idx is not None:
                     self._cells[next_idx] = Cell(" ", style)
+                    if self._ids is not None:
+                        self._ids[next_idx] = None
             col += w
 
     def fill(self, x: int, y: int, w: int, h: int, char: str, style: Style) -> None:
@@ -77,10 +97,19 @@ class Buffer:
                 idx = self._index(col, row)
                 if idx is not None:
                     self._cells[idx] = cell
+                    if self._ids is not None:
+                        self._ids[idx] = None
 
     def region(self, x: int, y: int, w: int, h: int) -> BufferView:
         """Return a view that translates coordinates to a sub-region."""
         return BufferView(self, x, y, w, h)
+
+    def hit(self, x: int, y: int) -> str | None:
+        """Return the semantic id at (x, y), if any."""
+        idx = self._index(x, y)
+        if idx is None or self._ids is None:
+            return None
+        return self._ids[idx]
 
     def diff(self, other: Buffer) -> list[CellWrite]:
         """Compare with another buffer, return list of cells that differ."""
@@ -95,6 +124,8 @@ class Buffer:
         """Deep copy for diff comparison."""
         buf = Buffer(self.width, self.height)
         buf._cells = list(self._cells)  # Cells are frozen, shallow copy is fine
+        if self._ids is not None:
+            buf._ids = list(self._ids)
         return buf
 
 
@@ -129,6 +160,11 @@ class BufferView:
         if pos:
             self._buffer.put(pos[0], pos[1], char, style)
 
+    def put_id(self, x: int, y: int, char: str, style: Style, id: str) -> None:
+        pos = self._clip(x, y)
+        if pos:
+            self._buffer.put_id(pos[0], pos[1], char, style, id)
+
     def put_text(self, x: int, y: int, text: str, style: Style) -> None:
         """Write text, clipping characters that fall outside the view."""
         col = x
@@ -150,3 +186,10 @@ class BufferView:
                 pos = self._clip(col, row)
                 if pos:
                     self._buffer.put(pos[0], pos[1], char, style)
+
+    def hit(self, x: int, y: int) -> str | None:
+        """Return the semantic id at a local coordinate (or None)."""
+        pos = self._clip(x, y)
+        if not pos:
+            return None
+        return self._buffer.hit(pos[0], pos[1])

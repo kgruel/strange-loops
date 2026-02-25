@@ -65,3 +65,50 @@ class TestPost(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(SystemExit):
                 discord_chat.post_message("mrbits", "hi", {})
+
+
+class TestRead(unittest.TestCase):
+    @patch.dict("os.environ", {
+        "DISCORD_BOT_TOKEN": "Bot fake-token",
+        "DISCORD_CHANNEL_ID": "999888777",
+    })
+    @patch("discord_chat.urlopen")
+    def test_read_returns_formatted_messages(self, mock_urlopen):
+        api_response = json.dumps([
+            {"author": {"username": "mrbits"}, "content": "hello world"},
+            {"author": {"username": "noodle"}, "content": "hey mrbits"},
+        ]).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = api_response
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        result = discord_chat.read_messages(limit=10)
+
+        assert len(result) == 2
+        # Discord API returns newest first, we reverse for chronological
+        assert result[0] == "[noodle] hey mrbits"
+        assert result[1] == "[mrbits] hello world"
+
+    @patch.dict("os.environ", {
+        "DISCORD_BOT_TOKEN": "Bot fake-token",
+        "DISCORD_CHANNEL_ID": "999888777",
+    })
+    @patch("discord_chat.urlopen")
+    def test_read_respects_limit(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"[]"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        discord_chat.read_messages(limit=5)
+
+        req = mock_urlopen.call_args[0][0]
+        assert "limit=5" in req.full_url
+
+    def test_read_missing_token_raises(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(SystemExit):
+                discord_chat.read_messages()

@@ -52,6 +52,31 @@ def post_message(persona: str, message: str, personas: dict | None = None) -> No
             sys.exit(1)
 
 
+DISCORD_API_BASE = "https://discord.com/api/v10"
+
+
+def read_messages(limit: int = 20) -> list[str]:
+    """Read recent channel messages. Returns list of '[username] content' strings."""
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    channel_id = os.environ.get("DISCORD_CHANNEL_ID")
+    if not token or not channel_id:
+        print("Error: DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID must be set", file=sys.stderr)
+        sys.exit(1)
+
+    url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages?limit={limit}"
+    req = Request(url, headers={"Authorization": f"Bot {token}"})
+    with urlopen(req) as resp:
+        messages = json.loads(resp.read())
+
+    # Discord returns newest first; reverse for chronological order
+    lines = []
+    for msg in reversed(messages):
+        username = msg["author"]["username"]
+        content = msg["content"]
+        lines.append(f"[{username}] {content}")
+    return lines
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Discord chat for narrative debugging")
     sub = parser.add_subparsers(dest="command")
@@ -60,9 +85,16 @@ def main() -> None:
     post_p.add_argument("--persona", required=True, help="Persona handle")
     post_p.add_argument("--message", required=True, help="Message text")
 
+    read_p = sub.add_parser("read", help="Read recent messages")
+    read_p.add_argument("--limit", type=int, default=20, help="Number of messages")
+
     args = parser.parse_args()
     if args.command == "post":
         post_message(args.persona, args.message)
+    elif args.command == "read":
+        lines = read_messages(args.limit)
+        for line in lines:
+            print(line)
     else:
         parser.print_help()
 

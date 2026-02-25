@@ -11,16 +11,12 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 544 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+v0.1.0, 561 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
 
-Fidelity-aware style resolution **implemented and merged**: `Palette`
-(5 semantic Style roles) + `IconSet` (glyph vocabulary), both ambient via
-ContextVar. `themes/` and `ComponentTheme` deleted.
-
-**Capability signal question resolved** via design council: the question
-dissolved. Capabilities resolve at boundaries (Writer), not in pipelines
-(views). Color downconversion implemented in `Writer._color_codes()`. Design
-doc at `docs/plans/2026-02-25-capability-signal-design.md`.
+Charm v2 deep dive complete — research doc at `docs/research/2026-02-25-charm-v2-deep-dive.md`.
+Key finding: fidelis and Charm v2 converged on the same core principles independently
+(pure render, cell buffers, capability resolution at boundaries). Three concrete features
+adopted from the research: hit testing, scroll optimization, test harness.
 
 ## Relationship to Loops
 
@@ -36,14 +32,14 @@ fidelis is a path dependency from the loops monorepo:
 ```
 src/fidelis/           # ~10,000 LOC
   Primitives:          Cell, Style, Span, Line, Block, Cursor, Viewport, Focus
-  Composition:         join, pad, border, truncate, Align, vslice
+  Composition:         join, pad, border, truncate, Align, vslice (+ hit-testing ids)
   Views:               fidelis.views (flat namespace)
     Stateless:         shape_lens, tree_lens, chart_lens, sparkline, spinner,
                        progress_bar, render_big
     Stateful:          list_view, table, text_input, data_explorer
   Output:              Writer, print_block, InPlaceRenderer
   CLI Harness:         Zoom, OutputMode, Format, CliContext, run_cli
-  TUI:                 Surface, Layer, Search, Buffer, KeyboardInput
+  TUI:                 Surface, Layer, Search, Buffer, KeyboardInput, TestSurface
   Mouse:               MouseEvent, MouseButton, MouseAction
   Aesthetic:           Palette (ContextVar), IconSet (ContextVar)
 
@@ -53,7 +49,7 @@ docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 544 tests
+tests/                 # 561 tests
 demos/                 # Python files + tour.py + slides/
   slides/              # 17 markdown files (tour content)
   slide_loader.py      # Markdown parser with zoom levels + auto-nav
@@ -92,6 +88,19 @@ demos/                 # Python files + tour.py + slides/
   levels, auto-navigation from group+order, alignment via frontmatter
   defaults + bracket overrides. Removed ~1300 lines of inline definitions
   from `tour.py`. 47 new tests.
+- **Charm v2 deep dive** — researched Bubble Tea/Lip Gloss/Ultraviolet v2
+  architecture. All sources verified. Research doc at
+  `docs/research/2026-02-25-charm-v2-deep-dive.md`.
+- **Hit testing for mouse picking** — `Block.id`, `Buffer.hit(x, y)`,
+  `Surface.hit(x, y)`. Lazy provenance grid (zero cost when unused).
+  Composition propagates ids through join/pad/border/truncate/vslice.
+- **Surface test harness** — `TestSurface` for deterministic non-TTY testing.
+  Fixed dimensions, input queue, frame capture (`CapturedFrame`). Writer
+  accepts forced `color_depth`.
+- **Scroll optimization** — `Surface._try_flush_scroll_optimized()` detects
+  vertical content shifts via line hashing, emits DECSTBM + SU/SD instead of
+  full repaint. 25-40x byte reduction per scroll. Opt-in via
+  `scroll_optimization=True` or `FIDELIS_SCROLL_OPTIM=1`.
 
 ## Capability Signal Design (Resolved)
 
@@ -114,9 +123,18 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 | `fidelity-impl` | **Merged** | 8 commits, 472 tests, +1976/-730 lines |
 | `cells-to-fidelis` | In review | Full loops migration, needs review + merge |
 | `codex-design-review` | Complete (closed) | Found MONO/PLAIN conflict, resolved |
+| `charm-v2-research` | **Merged** | 455-line research doc, all sources verified |
+| `hit-testing` | **Merged** | Block.id + Buffer provenance + Surface.hit() |
+| `test-harness` | **Merged** | TestSurface + CapturedFrame + Writer color_depth override |
+| `scroll-optimization` | **Merged** | DECSTBM scroll + line hashing + detection |
 
 ## Open Threads
 
+- **Declarative terminal state** — deferred. When fidelis needs concurrent
+  windows (not just modal layers), composition units will need to declare
+  terminal mode requirements (mouse, cursor, graphics). Reconciliation
+  algebra at Surface. Design thread: `docs/plans/2026-02-25-declarative-terminal-state.md`.
+  Building blocks in place: hit testing, scroll regions.
 - **Auto light/dark detection** — deferred. Pattern when needed: detect in
   `_setup_defaults()`, set ambient Palette. Palette preset problem, not
   architectural. Mode 2031 (color-palette-update-notifications) is the future
@@ -129,3 +147,10 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
   sync source excerpts into zoom-level code blocks.
 - **Stale plan file** — `docs/plans/2026-02-22-project-cleanup.md` is
   untracked and fully executed. Can be deleted or committed as historical.
+- **Writer coalescing** — scroll optimization research identified that
+  `write_frame()` emits a cursor move per cell. Coalescing adjacent cells
+  into line runs would reduce output further, independent of scroll optimization.
+- **Tour expansion** — research complete (subtask `tour-expansion`, closed).
+  Gap analysis and expansion proposal in `.subtask/tasks/tour-expansion/PLAN.md`.
+  Superseded by slide rebuild but content gaps remain (lenses, CLI harness,
+  rendering pipeline, layers-as-API). Good input for demos session.

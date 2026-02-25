@@ -173,3 +173,47 @@ levels on each topic file.
   Python module identity issues with `match` statement type dispatch.
 
 **544 tests passing on main.**
+
+## 2026-02-25 — Charm v2 deep dive + infrastructure features
+
+**Charm v2 research** (subtask `charm-v2-research`):
+- Deep dive into Bubble Tea v2, Lip Gloss v2, Ultraviolet (all released 2026-02-24)
+- Cloned all three repos to `~/Code/forks/` for source verification
+- All 7 key claims verified against primary sources
+- Key finding: fidelis and Charm v2 converged independently on pure render, cell
+  buffers, and capability resolution at boundaries
+- Research doc: `docs/research/2026-02-25-charm-v2-deep-dive.md`
+
+**Hit testing for mouse picking** (subtask `hit-testing`):
+- `Block.id: str | None` — optional semantic identifier, immutable
+- `Buffer._ids` — lazy provenance grid (zero overhead when unused)
+- `Buffer.hit(x, y)` / `BufferView.hit(x, y)` / `Surface.hit(x, y)`
+- Composition propagates ids: join gap=None, pad inherits uniform id,
+  border can override with its own id, truncate/vslice preserve
+- Inspired by Lip Gloss v2 compositor but adapted to fidelis patterns
+
+**Surface test harness** (subtask `test-harness`):
+- `TestSurface` — wraps any Surface subclass for deterministic non-TTY testing
+- Fixed width/height, predetermined input queue (keys + mouse events)
+- `CapturedFrame` (frozen): buffer snapshot + writes diff + `.lines`/`.text`
+- `Writer` accepts forced `color_depth` kwarg (bypasses isatty check)
+- Inspired by Bubble Tea's WithWindowSize/WithColorProfile/WithInput
+
+**Scroll optimization** (subtask `scroll-optimization`):
+- Line-hash-based vertical scroll detection in `Surface._flush()`
+- Emits DECSTBM + SU/SD instead of full repaint for scrolling content
+- 25-40x byte reduction, ~50x CPU reduction per scroll frame (measured)
+- Opt-in: `Surface(scroll_optimization=True)` or `FIDELIS_SCROLL_OPTIM=1`
+- Constraints: alt-screen only, single region, |n| ≤ 3, min 6 lines, 80% match
+- `Writer.write_ops()` handles mixed `ScrollOp | CellWrite` streams
+- Inspired by Ultraviolet's hardscroll algorithm (simplified)
+
+**Declarative terminal state** — design conversation, deferred:
+- Charm's biggest v2 move: `View()` returns struct with mode declarations
+- fidelis doesn't need it today (Surface is sole authority, layers are modal)
+- Becomes necessary when concurrent windows need different terminal modes
+- Pattern documented: composition units declare modes, Surface reconciles per frame
+- Design thread: `docs/plans/2026-02-25-declarative-terminal-state.md`
+- Building blocks in place: hit testing, scroll regions
+
+**561 tests passing on main.**

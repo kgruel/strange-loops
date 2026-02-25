@@ -472,7 +472,7 @@ class TestIntegration:
         slides = load_slides_dir(self.SLIDES_DIR)
         validate_slides(slides)
 
-        assert len(slides) == 17
+        assert len(slides) == 21
 
         nav = build_navigation(slides)
         seq = get_navigation_sequence(slides)

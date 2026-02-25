@@ -238,6 +238,8 @@ class Writer:
 
         last_style: Style | None = None
         covered: set[tuple[int, int]] = set()  # trailing cells of wide chars written this frame
+        cursor_x: int = -1
+        cursor_y: int = -1
 
         for op in ops:
             if isinstance(op, ScrollOp):
@@ -259,6 +261,8 @@ class Writer:
                     parts.append(self.move_cursor(0, top))
                     parts.append(self.scroll_down(-n))
                 parts.append(self.reset_scroll_region())
+                cursor_x = -1
+                cursor_y = -1
                 continue
 
             # CellWrite
@@ -267,7 +271,8 @@ class Writer:
             if (w.x, w.y) in covered:
                 continue
 
-            parts.append(self.move_cursor(w.x, w.y))
+            if w.x != cursor_x or w.y != cursor_y:
+                parts.append(self.move_cursor(w.x, w.y))
 
             if w.cell.style != last_style:
                 parts.append(self.reset_style())
@@ -278,10 +283,14 @@ class Writer:
 
             parts.append(w.cell.char)
 
-            width = wcwidth(w.cell.char)
-            if width and width > 1:
-                for dx in range(1, width):
+            char_width = wcwidth(w.cell.char)
+            if char_width and char_width > 1:
+                for dx in range(1, char_width):
                     covered.add((w.x + dx, w.y))
+                cursor_x = w.x + char_width
+            else:
+                cursor_x = w.x + 1
+            cursor_y = w.y
 
         parts.append(self.reset_style())
         parts.append("\x1b[?2026l")  # synchronized output end

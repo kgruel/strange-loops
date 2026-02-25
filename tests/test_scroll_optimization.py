@@ -7,11 +7,17 @@ path that detects and applies scroll operations instead of full repaint.
 from __future__ import annotations
 
 import io
+import re
 
 from fidelis.buffer import Buffer
 from fidelis.cell import Style
 from fidelis.writer import Writer, ScrollOp
 from fidelis.tui import Surface
+
+
+def _count_cups(output: str) -> int:
+    """Count CUP (cursor position) sequences in raw ANSI output."""
+    return len(re.findall(r"\x1b\[\d+;\d+H", output))
 
 
 def _fill_line(buf: Buffer, y: int, ch: str) -> None:
@@ -91,10 +97,10 @@ class TestSurfaceScrollOptimization:
         assert "\x1b[2;9r" in out  # scroll region
         assert "\x1b[1S" in out  # scroll up by 1
 
-        # Heuristic: only the inserted line is repainted (8 cells) plus a few
-        # extra CUPs for the scroll operation itself.
-        cup_count = out.count("H")
-        assert width <= cup_count <= width + 5
+        # With coalescing, the inserted line needs only 1 CUP (not 8).
+        # Scroll ops add 2 more (region top/bottom positioning).
+        cup_count = _count_cups(out)
+        assert 1 <= cup_count <= 5
 
     def test_surface_flush_falls_back_when_disabled(self):
         width, height = 8, 10
@@ -137,5 +143,7 @@ class TestSurfaceScrollOptimization:
         assert "\x1b[1S" not in out
         assert "\x1b[2;9r" not in out
 
-        # Without scroll optimization, the region repaint is large.
-        assert out.count("H") >= width * 6
+        # Without scroll optimization, every changed row gets a CUP.
+        # 8 changed lines = 8 CUPs (one per line with coalescing).
+        cup_count = _count_cups(out)
+        assert cup_count >= 8

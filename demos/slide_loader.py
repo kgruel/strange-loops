@@ -1,27 +1,42 @@
-"""Markdown-based slide loader.
+"""Markdown-based slide loader with zoom levels and auto-navigation.
 
-Loads slides from markdown files with YAML frontmatter.
+Loads slides from markdown files with YAML frontmatter. Supports zoom-level
+markers for progressive detail, and computes navigation from group+order.
 
 Example:
     ---
     id: cell
-    nav:
-      left: intro
-      right: style
-      down: cell/detail
+    title: Cell
+    group: primitives
+    order: 1
     ---
 
     # Cell
 
     the atomic unit: one **character** + one `style`
 
+    [zoom:0]
+
     ```python
     cell = Cell("A", Style(fg="red", bold=True))
     ```
 
-    [demo:spinner]
+    ↓ for detail
 
-    ↓ for more detail
+    [zoom:1]
+
+    ```python
+    @dataclass(frozen=True)
+    class Cell:
+        char: str
+        style: Style
+    ```
+
+    [zoom:2]
+
+    ```python
+    # full source from docgen
+    ```
 """
 
 from __future__ import annotations
@@ -29,28 +44,28 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 from fidelis import Style, Span, Line
 
 
+# -- Group ordering for auto-navigation --
+
+GROUP_ORDER = ["primitives", "composition", "application", "components"]
+
+
 # -- Parsed Types (intermediate representation) --
-
-@dataclass
-class ParsedNav:
-    left: str | None = None
-    right: str | None = None
-    up: str | None = None
-    down: str | None = None
-
 
 @dataclass
 class ParsedSlide:
     """Intermediate representation of a parsed markdown slide."""
     id: str
     title: str = ""
-    nav: ParsedNav = field(default_factory=ParsedNav)
-    sections: list[dict] = field(default_factory=list)  # [{type: ..., ...}]
+    group: str = ""
+    order: int = 0
+    align: str = "left"  # "left" or "center" — slide-level default for text sections
+    common_sections: list[dict] = field(default_factory=list)
+    zoom_sections: dict[int, list[dict]] = field(default_factory=dict)
+    max_zoom: int = 0
 
 
 # -- Style Mapping --
@@ -85,24 +100,18 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
 
 
 def parse_simple_yaml(text: str) -> dict:
-    """Parse simple YAML (flat keys, nested dicts one level deep).
+    """Parse simple YAML (flat keys only).
 
     Handles:
         key: value
-        nav:
-          left: intro
-          right: style
+        order: 1
     """
     result = {}
-    current_dict = None
-    current_key = None
 
     for line in text.split('\n'):
         if not line.strip() or line.strip().startswith('#'):
             continue
 
-        # Check indentation
-        indent = len(line) - len(line.lstrip())
         stripped = line.strip()
 
         if ':' not in stripped:
@@ -112,45 +121,47 @@ def parse_simple_yaml(text: str) -> dict:
         key = key.strip()
         value = value.strip()
 
-        if indent == 0:
-            if value:
+        if value:
+            # Try to parse as int
+            try:
+                result[key] = int(value)
+            except ValueError:
                 result[key] = value
-                current_dict = None
-            else:
-                # Start of nested dict
-                result[key] = {}
-                current_dict = result[key]
-                current_key = key
-        elif indent > 0 and current_dict is not None:
-            current_dict[key] = value
 
     return result
 
 
 # -- Markdown Body Parser --
 
-def parse_body(body: str) -> tuple[str, list[dict]]:
-    """Parse markdown body into title and sections.
+def _parse_sections(lines: list[str], start: int, default_align: str = "left") -> tuple[list[dict], int]:
+    """Parse lines into sections until EOF or a [zoom:N] marker.
 
-    Returns (title, sections_list).
+    Returns (sections, next_line_index).
+
+    [align:center] or [align:left] overrides alignment for the next text section only,
+    then reverts to default_align.
     """
-    lines = body.split('\n')
-    title = ""
-    sections = []
+    sections: list[dict] = []
+    i = start
+    next_align: str | None = None  # one-shot override
 
-    i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
 
-        # Skip empty lines at start
-        if not stripped and not sections:
+        # Stop at zoom marker
+        if re.match(r'\[zoom:\d+\]', stripped):
+            break
+
+        # Skip docgen comment markers (pass through)
+        if stripped.startswith('<!-- docgen:'):
             i += 1
             continue
 
-        # Heading → title (first h1 only)
-        if stripped.startswith('# ') and not title:
-            title = stripped[2:].strip()
+        # Align marker [align:center] or [align:left]
+        align_match = re.match(r'\[align:(left|center)\]', stripped)
+        if align_match:
+            next_align = align_match.group(1)
             i += 1
             continue
 
@@ -192,7 +203,7 @@ def parse_body(body: str) -> tuple[str, list[dict]]:
             i += 1
             continue
 
-        # Empty line → skip (just paragraph separator, use [spacer] for explicit spacing)
+        # Empty line → skip
         if not stripped:
             i += 1
             continue
@@ -201,20 +212,71 @@ def parse_body(body: str) -> tuple[str, list[dict]]:
         para_lines = []
         while i < len(lines):
             l = lines[i].strip()
-            if not l or l.startswith('```') or l.startswith('#') or l.startswith('['):
+            if not l or l.startswith('```') or l.startswith('#') or l.startswith('[') or l.startswith('<!--'):
                 break
             para_lines.append(l)
             i += 1
 
         if para_lines:
             text = ' '.join(para_lines)
+            # Determine centering: one-shot override > slide default
+            align = next_align or default_align
+            next_align = None  # consume the override
             sections.append({
                 'type': 'text',
                 'content': text,
-                'center': text.startswith('↓') or text.startswith('→'),  # hint detection
+                'center': align == "center",
             })
 
-    return title, sections
+    return sections, i
+
+
+def parse_body(body: str, default_align: str = "left") -> tuple[str, list[dict], dict[int, list[dict]], int]:
+    """Parse markdown body into title, common sections, and zoom sections.
+
+    Returns (title, common_sections, zoom_sections, max_zoom).
+
+    Content before first [zoom:N] marker is common (shown at all zoom levels).
+    Content after [zoom:N] is shown only at that level (replacement, not additive).
+    default_align is passed through to text sections as the centering default.
+    """
+    lines = body.split('\n')
+    title = ""
+
+    # Find title (first h1)
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if stripped.startswith('# '):
+            title = stripped[2:].strip()
+            i += 1
+            break
+        # Non-empty, non-heading — stop looking for title
+        break
+
+    # Parse common sections (before any [zoom:N])
+    common_sections, i = _parse_sections(lines, i, default_align)
+
+    # Parse zoom sections
+    zoom_sections: dict[int, list[dict]] = {}
+    max_zoom = 0
+
+    while i < len(lines):
+        stripped = lines[i].strip()
+        zoom_match = re.match(r'\[zoom:(\d+)\]', stripped)
+        if zoom_match:
+            level = int(zoom_match.group(1))
+            max_zoom = max(max_zoom, level)
+            i += 1
+            sections, i = _parse_sections(lines, i, default_align)
+            zoom_sections[level] = sections
+        else:
+            i += 1
+
+    return title, common_sections, zoom_sections, max_zoom
 
 
 def parse_styled_text(text: str) -> Line:
@@ -265,6 +327,134 @@ def parse_styled_text(text: str) -> Line:
     return Line(spans=tuple(spans))
 
 
+# -- Validation --
+
+class SlideValidationError(Exception):
+    """Raised when slide validation fails."""
+
+
+def validate_slides(slides: dict[str, ParsedSlide]) -> None:
+    """Validate a collection of parsed slides.
+
+    Checks:
+    - Unique IDs (enforced by dict, but check for file-level collisions)
+    - Known groups (must be in GROUP_ORDER or empty for standalone)
+    - Contiguous zoom levels (no gaps: 0, 1, 2 not 0, 2)
+    - No duplicate (group, order) pairs within a group
+    """
+    # Check known groups
+    valid_groups = set(GROUP_ORDER) | {""}
+    for slide in slides.values():
+        if slide.group and slide.group not in valid_groups:
+            raise SlideValidationError(
+                f"Slide '{slide.id}': unknown group '{slide.group}'. "
+                f"Valid groups: {GROUP_ORDER}"
+            )
+
+    # Check contiguous zoom levels
+    for slide in slides.values():
+        if slide.max_zoom > 0:
+            for level in range(slide.max_zoom + 1):
+                if level not in slide.zoom_sections:
+                    raise SlideValidationError(
+                        f"Slide '{slide.id}': missing zoom level {level}. "
+                        f"max_zoom={slide.max_zoom} but levels {sorted(slide.zoom_sections.keys())} present."
+                    )
+
+    # Check unique (group, order) within groups
+    seen: dict[str, dict[int, str]] = {}
+    for slide in slides.values():
+        if not slide.group:
+            continue
+        if slide.group not in seen:
+            seen[slide.group] = {}
+        if slide.order in seen[slide.group]:
+            raise SlideValidationError(
+                f"Slide '{slide.id}': duplicate order {slide.order} in group '{slide.group}'. "
+                f"Already used by '{seen[slide.group][slide.order]}'."
+            )
+        seen[slide.group][slide.order] = slide.id
+
+
+# -- Auto-Navigation --
+
+def build_navigation(slides: dict[str, ParsedSlide]) -> dict[str, dict[str, str | None]]:
+    """Compute left/right navigation from group+order sorting.
+
+    Returns dict mapping slide_id -> {left, right, up, down}.
+
+    Sequence: intro first, then groups by GROUP_ORDER + order, then fin last.
+    Up/down are not assigned — zoom is handled by tour.py.
+    """
+    # Sort slides into sequence
+    standalone_intro = []
+    grouped: dict[str, list[ParsedSlide]] = {g: [] for g in GROUP_ORDER}
+    standalone_fin = []
+    other_standalone = []
+
+    for slide in slides.values():
+        if slide.id == "intro":
+            standalone_intro.append(slide)
+        elif slide.id == "fin":
+            standalone_fin.append(slide)
+        elif slide.group in grouped:
+            grouped[slide.group].append(slide)
+        else:
+            other_standalone.append(slide)
+
+    # Sort within groups by order
+    for group in grouped:
+        grouped[group].sort(key=lambda s: s.order)
+
+    # Build sequence
+    sequence: list[str] = []
+    for slide in standalone_intro:
+        sequence.append(slide.id)
+    for group in GROUP_ORDER:
+        for slide in grouped[group]:
+            sequence.append(slide.id)
+    for slide in other_standalone:
+        sequence.append(slide.id)
+    for slide in standalone_fin:
+        sequence.append(slide.id)
+
+    # Assign left/right
+    nav: dict[str, dict[str, str | None]] = {}
+    for i, sid in enumerate(sequence):
+        nav[sid] = {
+            'left': sequence[i - 1] if i > 0 else None,
+            'right': sequence[i + 1] if i < len(sequence) - 1 else None,
+            'up': None,
+            'down': None,
+        }
+
+    return nav
+
+
+def get_navigation_sequence(slides: dict[str, ParsedSlide]) -> list[str]:
+    """Return the ordered slide ID sequence (for minimap, quiet mode, etc.)."""
+    nav = build_navigation(slides)
+    # Reconstruct from left/right chain starting at first slide with no left
+    sequence = []
+    # Find the start (slide with no left)
+    start = None
+    for sid, n in nav.items():
+        if n['left'] is None:
+            start = sid
+            break
+    if start is None:
+        return list(slides.keys())
+
+    current = start
+    visited: set[str] = set()
+    while current and current not in visited:
+        visited.add(current)
+        sequence.append(current)
+        current = nav[current]['right']
+
+    return sequence
+
+
 # -- Main Loader --
 
 def load_slide_md(path: Path | str) -> ParsedSlide:
@@ -273,73 +463,36 @@ def load_slide_md(path: Path | str) -> ParsedSlide:
     content = path.read_text()
 
     frontmatter, body = parse_frontmatter(content)
-    title, sections = parse_body(body)
-
-    # Extract nav
-    nav_data = frontmatter.get('nav', {})
-    if isinstance(nav_data, str):
-        nav_data = {}
-
-    nav = ParsedNav(
-        left=nav_data.get('left'),
-        right=nav_data.get('right'),
-        up=nav_data.get('up'),
-        down=nav_data.get('down'),
-    )
+    align = frontmatter.get('align', 'left')
+    title, common_sections, zoom_sections, max_zoom = parse_body(body, default_align=align)
 
     return ParsedSlide(
         id=frontmatter.get('id', path.stem),
-        title=frontmatter.get('title', title),
-        nav=nav,
-        sections=sections,
+        title=frontmatter.get('title', title) or title,
+        group=frontmatter.get('group', ''),
+        order=frontmatter.get('order', 0),
+        align=align,
+        common_sections=common_sections,
+        zoom_sections=zoom_sections,
+        max_zoom=max_zoom,
     )
 
 
 def load_slides_dir(dir_path: Path | str) -> dict[str, ParsedSlide]:
-    """Load all markdown slides from a directory."""
+    """Load all markdown slides from a directory (recursive)."""
     dir_path = Path(dir_path)
     slides = {}
 
-    for md_file in sorted(dir_path.glob('*.md')):
+    for md_file in sorted(dir_path.rglob('*.md')):
         slide = load_slide_md(md_file)
+        if slide.id in slides:
+            raise SlideValidationError(
+                f"Duplicate slide ID '{slide.id}' in {md_file} "
+                f"(already loaded from another file)."
+            )
         slides[slide.id] = slide
 
     return slides
-
-
-# -- Conversion to Tour Types --
-
-def to_tour_slide(parsed: ParsedSlide):
-    """Convert ParsedSlide to tour.py Slide type.
-
-    Import tour types here to avoid circular imports.
-    """
-    from demos.tour import Slide, Navigation, Text, Code, Demo, Spacer, SUBTITLE_STYLE, HINT_STYLE
-
-    sections = []
-    for sec in parsed.sections:
-        if sec['type'] == 'spacer':
-            sections.append(Spacer(sec.get('lines', 1)))
-        elif sec['type'] == 'text':
-            line = parse_styled_text(sec['content'])
-            style = HINT_STYLE if sec.get('center') else SUBTITLE_STYLE
-            sections.append(Text(line, style, center=sec.get('center', False)))
-        elif sec['type'] == 'code':
-            sections.append(Code(source=sec['source'], title=sec.get('lang', '')))
-        elif sec['type'] == 'demo':
-            sections.append(Demo(demo_id=sec['demo_id']))
-
-    return Slide(
-        id=parsed.id,
-        title=parsed.title,
-        sections=tuple(sections),
-        nav=Navigation(
-            left=parsed.nav.left,
-            right=parsed.nav.right,
-            up=parsed.nav.up,
-            down=parsed.nav.down,
-        ),
-    )
 
 
 # -- CLI for testing --
@@ -348,15 +501,38 @@ if __name__ == '__main__':
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python slide_loader.py <file.md>")
+        print("Usage: python slide_loader.py <file_or_dir>")
         sys.exit(1)
 
     path = Path(sys.argv[1])
-    parsed = load_slide_md(path)
 
-    print(f"ID: {parsed.id}")
-    print(f"Title: {parsed.title}")
-    print(f"Nav: left={parsed.nav.left}, right={parsed.nav.right}, up={parsed.nav.up}, down={parsed.nav.down}")
-    print(f"Sections ({len(parsed.sections)}):")
-    for i, sec in enumerate(parsed.sections):
-        print(f"  {i+1}. {sec}")
+    if path.is_dir():
+        parsed = load_slides_dir(path)
+        validate_slides(parsed)
+        nav = build_navigation(parsed)
+        seq = get_navigation_sequence(parsed)
+
+        print(f"Loaded {len(parsed)} slides")
+        print(f"Sequence: {' -> '.join(seq)}")
+        print()
+        for sid in seq:
+            slide = parsed[sid]
+            n = nav.get(sid, {})
+            print(f"  {sid} (group={slide.group}, order={slide.order}, max_zoom={slide.max_zoom})")
+            print(f"    common: {len(slide.common_sections)} sections")
+            for level in sorted(slide.zoom_sections):
+                print(f"    zoom {level}: {len(slide.zoom_sections[level])} sections")
+            print(f"    nav: left={n.get('left')}, right={n.get('right')}")
+    else:
+        parsed = load_slide_md(path)
+        print(f"ID: {parsed.id}")
+        print(f"Title: {parsed.title}")
+        print(f"Group: {parsed.group}, Order: {parsed.order}")
+        print(f"Max zoom: {parsed.max_zoom}")
+        print(f"Common sections ({len(parsed.common_sections)}):")
+        for i, sec in enumerate(parsed.common_sections):
+            print(f"  {i+1}. {sec}")
+        for level in sorted(parsed.zoom_sections):
+            print(f"Zoom {level} sections ({len(parsed.zoom_sections[level])}):")
+            for i, sec in enumerate(parsed.zoom_sections[level]):
+                print(f"  {i+1}. {sec}")

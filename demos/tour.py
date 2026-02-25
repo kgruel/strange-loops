@@ -30,7 +30,7 @@ import argparse
 import asyncio
 import textwrap
 from dataclasses import dataclass, field, replace
-from typing import Callable
+from pathlib import Path
 
 import time
 
@@ -112,55 +112,25 @@ class Demo:
     center: bool = True
 
 
-@dataclass(frozen=True)
-class ZoomText:
-    """Text with content per zoom level.
-
-    levels[0] = summary (zoom 0)
-    levels[1] = detail (zoom 1)
-    levels[2] = source (zoom 2)
-
-    If zoom exceeds available levels, uses the highest available level.
-    """
-    levels: tuple[str | Line, ...]
-    style: Style = field(default_factory=Style)
-    center: bool = True
-
-
-@dataclass(frozen=True)
-class ZoomCode:
-    """Code with source per zoom level.
-
-    levels[0] = summary code (zoom 0)
-    levels[1] = detail code (zoom 1)
-    levels[2] = full source (zoom 2)
-
-    If zoom exceeds available levels, uses the highest available level.
-    """
-    levels: tuple[str, ...]
-    title: str = ""
-    center: bool = True
-
-
 # Section is any of these types
-Section = Text | Code | Spacer | Demo | ZoomText | ZoomCode
+Section = Text | Code | Spacer | Demo
 
 
 @dataclass(frozen=True)
 class Slide:
     """A single slide in the teaching bench.
 
-    max_zoom determines how many zoom levels this slide supports:
-    - 0: just the main content
-    - 1: main + detail
-    - 2: main + detail + source
+    common: sections shown at all zoom levels.
+    zooms: dict mapping zoom level -> sections shown only at that level.
+    max_zoom: highest zoom level (0 = no zoom support).
     """
     id: str
     title: str
-    sections: tuple[Section, ...] = ()
-    nav: Navigation = field(default_factory=Navigation)
+    group: str = ""
+    common: tuple[Section, ...] = ()
+    zooms: dict[int, tuple[Section, ...]] = field(default_factory=dict)
     max_zoom: int = 0
-    on_key: Callable[[str, "BenchState"], "BenchState"] | None = None
+    nav: Navigation = field(default_factory=Navigation)
 
 
 @dataclass(frozen=True)
@@ -267,26 +237,6 @@ NAV_KEY_STYLE = Style(fg="cyan", bold=True)
 NAV_DIM_STYLE = Style(dim=True)
 POSITION_STYLE = Style(fg="magenta", dim=True)
 HINT_STYLE = Style(fg="white", dim=True, italic=True)
-
-# Inline styling helpers
-KEYWORD = Style(fg="cyan", bold=True)  # for highlighting terms in prose
-EMPH = Style(fg="white", bold=True)
-
-
-def styled(*parts: str | tuple[str, Style]) -> Line:
-    """Create a Line from alternating text and styled segments.
-
-    Usage:
-        styled("a ", ("Cell", KEYWORD), " is one character")
-    """
-    spans = []
-    for part in parts:
-        if isinstance(part, str):
-            spans.append(Span(part, SUBTITLE_STYLE))
-        else:
-            text, style = part
-            spans.append(Span(text, style))
-    return Line(spans=tuple(spans))
 
 # Code highlighting styles
 CODE_KEYWORD = Style(fg="magenta", bold=True)
@@ -889,37 +839,6 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
     return content
 
 
-def zoom_text_lens(section: ZoomText, ctx: LensContext) -> Block:
-    """Render zoom-aware text section.
-
-    Selects content based on ctx.zoom, clamped to available levels.
-    """
-    zoom = min(ctx.zoom, len(section.levels) - 1)
-    content = section.levels[zoom]
-
-    if isinstance(content, Line):
-        block = content.to_block(content.width)
-    else:
-        block = Block.text(content, section.style)
-
-    if section.center:
-        padding = max(0, (ctx.width - block.width) // 2)
-        return pad(block, left=padding)
-    return block
-
-
-def zoom_code_lens(section: ZoomCode, ctx: LensContext) -> Block:
-    """Render zoom-aware code section.
-
-    Selects source based on ctx.zoom, clamped to available levels.
-    """
-    zoom = min(ctx.zoom, len(section.levels) - 1)
-    source = section.levels[zoom]
-
-    # Reuse render_code logic
-    temp_code = Code(source=source, title=section.title, center=section.center)
-    return render_code(temp_code, ctx.width)
-
 
 def section_lens(section: Section, ctx: LensContext) -> Block:
     """Dispatch to appropriate section lens.
@@ -935,10 +854,6 @@ def section_lens(section: Section, ctx: LensContext) -> Block:
             return spacer_lens(section, ctx)
         case Demo():
             return demo_lens(section, ctx)
-        case ZoomText():
-            return zoom_text_lens(section, ctx)
-        case ZoomCode():
-            return zoom_code_lens(section, ctx)
         case _:
             return Block.empty(ctx.width, 1)
 
@@ -946,17 +861,14 @@ def section_lens(section: Section, ctx: LensContext) -> Block:
 # -- Minimap Lens --
 
 
-def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, height: int) -> Block:
+def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, height: int, nav_sequence: list[str] | None = None) -> Block:
     """Render slide graph as a minimap sidebar.
 
     Shows all slide titles with the current slide highlighted.
     Includes zoom indicator for slides with zoom support.
+    Uses group headers as visual separators.
     """
-    # Build ordered list of main slides (exclude detail/source slides)
-    main_slides = [
-        sid for sid in slides.keys()
-        if "/" not in sid or slides[sid].max_zoom > 0
-    ]
+    sequence = nav_sequence or list(slides.keys())
 
     nodes: list[Block] = []
 
@@ -965,8 +877,19 @@ def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, heig
     nodes.append(title_block)
     nodes.append(Block.empty(1, 1))
 
-    for slide_id in main_slides:
+    last_group = None
+    for slide_id in sequence:
+        if slide_id not in slides:
+            continue
         slide = slides[slide_id]
+
+        # Group header when group changes
+        if slide.group and slide.group != last_group:
+            if last_group is not None:
+                nodes.append(Block.empty(1, 1))
+            nodes.append(Block.text(f" {slide.group}", Style(fg="yellow", dim=True)))
+            last_group = slide.group
+
         is_current = slide_id == current
 
         if is_current:
@@ -1004,1084 +927,81 @@ def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, heig
     return bordered
 
 
-# -- Slide Registry --
+# -- Slide Loading --
 
-def build_slides() -> dict[str, Slide]:
-    """Build the slide graph. Placeholder content for Phase 1."""
-    return {
-        # Entry point
-        "intro": Slide(
-            id="intro",
-            title="fidelis",
-            sections=(
-                Spacer(2),
-                Text("a cell-buffer terminal UI framework", SUBTITLE_STYLE, center=True),
-                Spacer(2),
-                Text(
-                    styled(
-                        "use ", ("arrow keys", KEYWORD), " to navigate"
-                    ),
-                    center=True,
-                ),
-                Text(
-                    styled(
-                        ("left", KEYWORD), " ", ("right", KEYWORD), " for topics, ",
-                        ("up", KEYWORD), " ", ("down", KEYWORD), " for depth"
-                    ),
-                    center=True,
-                ),
-                Spacer(2),
-                Text(
-                    styled("press ", ("right", KEYWORD), " to begin"),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(right="cell"),
+def _build_slides_dir() -> Path:
+    """Return path to the slides directory."""
+    return Path(__file__).parent / "slides"
+
+
+def _convert_sections(section_dicts: list[dict]) -> tuple[Section, ...]:
+    """Convert parsed section dicts to tour Section types."""
+    from slide_loader import parse_styled_text
+
+    sections: list[Section] = []
+    for sec in section_dicts:
+        if sec['type'] == 'spacer':
+            sections.append(Spacer(sec.get('lines', 1)))
+        elif sec['type'] == 'text':
+            line = parse_styled_text(sec['content'])
+            content = sec['content']
+            # Hint text (↓/→ prefixed) gets italic dim style
+            is_hint = content.startswith('↓') or content.startswith('→')
+            style = HINT_STYLE if is_hint else SUBTITLE_STYLE
+            sections.append(Text(line, style, center=sec.get('center', False)))
+        elif sec['type'] == 'code':
+            sections.append(Code(source=sec['source'], title=sec.get('lang', '')))
+        elif sec['type'] == 'demo':
+            sections.append(Demo(demo_id=sec['demo_id']))
+    return tuple(sections)
+
+
+def _to_tour_slide(parsed, nav_data: dict[str, str | None] | None = None) -> Slide:
+    """Convert a ParsedSlide to a tour Slide."""
+    common = _convert_sections(parsed.common_sections)
+    zooms = {}
+    for level, section_dicts in parsed.zoom_sections.items():
+        zooms[level] = _convert_sections(section_dicts)
+
+    n = nav_data or {}
+    return Slide(
+        id=parsed.id,
+        title=parsed.title,
+        group=parsed.group,
+        common=common,
+        zooms=zooms,
+        max_zoom=parsed.max_zoom,
+        nav=Navigation(
+            left=n.get('left'),
+            right=n.get('right'),
+            up=n.get('up'),
+            down=n.get('down'),
         ),
-
-        # Cell - the atom (zoom-aware: 3 levels)
-        "cell": Slide(
-            id="cell",
-            title="Cell",
-            sections=(
-                Spacer(1),
-                ZoomText(
-                    levels=(
-                        # Zoom 0: summary
-                        styled(
-                            "the atomic unit: one ", ("character", KEYWORD),
-                            " + one ", ("style", KEYWORD),
-                        ),
-                        # Zoom 1: detail
-                        styled(
-                            ("Cell", KEYWORD), " is a frozen dataclass - ",
-                            ("immutable", EMPH), " by design"
-                        ),
-                        # Zoom 2: source
-                        styled("from ", ("fidelis/cell.py", KEYWORD)),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                ZoomCode(
-                    levels=(
-                        # Zoom 0: minimal example
-                        'cell = Cell("A", Style(fg="red", bold=True))',
-                        # Zoom 1: class definition
-                        '''@dataclass(frozen=True)
-class Cell:
-    char: str
-    style: Style
-
-EMPTY_CELL = Cell(" ", Style())''',
-                        # Zoom 2: full source
-                        '''@dataclass(frozen=True)
-class Cell:
-    """A single cell in the buffer: one character + one style."""
-    char: str = " "
-    style: Style = field(default_factory=Style)
-
-    def __post_init__(self):
-        # Enforce single character (but allow multi-byte)
-        if len(self.char) != 1:
-            object.__setattr__(self, "char", self.char[0] if self.char else " ")
-
-EMPTY_CELL = Cell(" ", Style())''',
-                    ),
-                    title="cell.py",
-                ),
-                Spacer(1),
-                ZoomText(
-                    levels=(
-                        # Zoom 0: hint
-                        "down for more detail",
-                        # Zoom 1: footer note
-                        styled(
-                            ("EMPTY_CELL", KEYWORD), " is the default for unfilled buffer positions"
-                        ),
-                        # Zoom 2: empty (no extra text)
-                        "",
-                    ),
-                    style=HINT_STYLE,
-                    center=True,
-                ),
-            ),
-            nav=Navigation(left="intro", right="style"),
-            max_zoom=2,
-        ),
-
-        # Style
-        "style": Slide(
-            id="style",
-            title="Style",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("colors and attributes for rendering"),
-                    center=True,
-                ),
-                Spacer(2),
-                Code(
-                    source='''Style(fg="red")           # foreground color
-Style(bg="blue")          # background color
-Style(bold=True)          # bold text
-Style(fg="#ff6b35")       # hex colors
-Style(fg=196)             # 256-palette''',
-                    title="style.py",
-                ),
-            ),
-            nav=Navigation(left="cell", right="span", down="style/detail"),
-        ),
-
-        "style/detail": Slide(
-            id="style/detail",
-            title="Style (detail)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(("Style", KEYWORD), " attributes"),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Style:
-    fg: str | int | None = None   # foreground
-    bg: str | int | None = None   # background
-    bold: bool = False
-    dim: bool = False
-    italic: bool = False
-    underline: bool = False
-    reverse: bool = False''',
-                    title="full signature",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Style.merge(other)", KEYWORD),
-                        " combines styles - other wins on conflict"
-                    ),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(up="style", left="cell", right="span/detail", down="style/source"),
-        ),
-
-        # Span
-        "span": Slide(
-            id="span",
-            title="Span",
-            sections=(
-                Spacer(1),
-                Text("a run of text with one style", SUBTITLE_STYLE, center=True),
-                Spacer(2),
-                Code(
-                    source='''span = Span("hello", Style(fg="green", bold=True))
-# span.text = "hello"
-# span.width = 5''',
-                    title="span.py",
-                ),
-                Spacer(1),
-                Text("down for more detail", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="style", right="line", down="span/detail"),
-        ),
-
-        "span/detail": Slide(
-            id="span/detail",
-            title="Span (detail)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Span", KEYWORD), " handles wide characters via ",
-                        ("wcwidth", EMPH),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Span:
-    text: str
-    style: Style = Style()
-
-    @property
-    def width(self) -> int:
-        # accounts for CJK double-width chars
-        return span_width(self.text)''',
-                    title="definition",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        ("span.width", KEYWORD), " is display width, not ",
-                        ("len(text)", KEYWORD),
-                    ),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(up="span", left="style/detail", right="line/detail", down="span/source"),
-        ),
-
-        # Line
-        "line": Slide(
-            id="line",
-            title="Line",
-            sections=(
-                Spacer(1),
-                Text("a sequence of Spans - styled inline text", SUBTITLE_STYLE, center=True),
-                Spacer(2),
-                Code(
-                    source='''line = Line(spans=(
-    Span("error: ", Style(fg="red", bold=True)),
-    Span("file not found", Style(fg="white")),
-))
-# line.width = 21''',
-                    title="line.py",
-                ),
-                Spacer(1),
-                Text("down for more detail", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="span", right="buffer", down="line/detail"),
-        ),
-
-        "line/detail": Slide(
-            id="line/detail",
-            title="Line (detail)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Line", KEYWORD), " is a sequence of ", ("Spans", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Line:
-    spans: tuple[Span, ...] = ()
-    style: Style | None = None  # fallback style
-
-    @property
-    def width(self) -> int:
-        return sum(s.width for s in self.spans)
-
-    def paint(self, view: BufferView, x: int, y: int):
-        for span in self.spans:
-            # paint each span, advancing x''',
-                    title="definition",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Line.plain(text, style)", KEYWORD),
-                        " - convenience constructor"
-                    ),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(up="line", left="span/detail", right="buffer/view", down="line/source"),
-        ),
-
-        # Buffer
-        "buffer": Slide(
-            id="buffer",
-            title="Buffer",
-            sections=(
-                Spacer(1),
-                Text("the 2D canvas - a grid of Cells", SUBTITLE_STYLE, center=True),
-                Spacer(2),
-                Code(
-                    source='''buf = Buffer(80, 24)
-buf.put(0, 0, "A", Style(fg="red"))
-buf.put_text(0, 1, "hello", Style())
-buf.fill(10, 10, 5, 3, "X", Style(fg="blue"))''',
-                    title="buffer.py",
-                ),
-            ),
-            nav=Navigation(left="line", right="block", down="buffer/view"),
-        ),
-
-        "buffer/view": Slide(
-            id="buffer/view",
-            title="BufferView",
-            sections=(
-                Spacer(1),
-                Text("a clipped, translated region of a Buffer", SUBTITLE_STYLE, center=True),
-                Spacer(1),
-                Code(
-                    source='''view = buf.region(10, 5, 20, 10)
-# view.width = 20, view.height = 10
-# writes at (0,0) in view -> (10,5) in buffer
-# writes outside view bounds are clipped''',
-                    title="bufferview",
-                ),
-                Spacer(1),
-                Text("paint into views without bounds checking", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(up="buffer", left="line/detail", right="block/detail", down="buffer/source"),
-        ),
-
-        # Block
-        "block": Slide(
-            id="block",
-            title="Block",
-            sections=(
-                Spacer(1),
-                Text("immutable rectangle of Cells - the composition unit", SUBTITLE_STYLE, center=True),
-                Spacer(2),
-                Code(
-                    source='''block = Block.text("hello", Style(fg="cyan"))
-# block.width = 5, block.height = 1
-
-block.paint(buf, x=10, y=5)  # copy into buffer''',
-                    title="block.py",
-                ),
-                Spacer(1),
-                Text("down for more detail", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="buffer", right="compose", down="block/detail"),
-        ),
-
-        "block/detail": Slide(
-            id="block/detail",
-            title="Block (detail)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        ("Block", KEYWORD), " stores rows of ", ("Cells", KEYWORD),
-                        " - ", ("immutable", EMPH),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Block:
-    rows: list[list[Cell]]
-    width: int
-
-    @classmethod
-    def text(cls, text: str, style: Style) -> Block:
-        # create block from string
-
-    @classmethod
-    def empty(cls, width: int, height: int) -> Block:
-        # create blank block''',
-                    title="definition",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        "compose via ", ("join", KEYWORD), ", ",
-                        ("pad", KEYWORD), ", ", ("border", KEYWORD),
-                    ),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(up="block", left="buffer/view", right="focus/nav", down="block/source"),
-        ),
-
-        # Compose
-        "compose": Slide(
-            id="compose",
-            title="Compose",
-            sections=(
-                Spacer(1),
-                Text("combine blocks spatially", SUBTITLE_STYLE, center=True),
-                Spacer(1),
-                Code(
-                    source='''join_horizontal(a, b, gap=1)  # side by side
-join_vertical(a, b)           # stacked
-pad(block, left=2, top=1)     # margins
-border(block, ROUNDED)        # box drawing
-truncate(block, width=20)     # cut to size''',
-                    title="compose.py",
-                ),
-            ),
-            nav=Navigation(left="block", right="app", down="compose/source"),
-        ),
-
-        # App
-        "app": Slide(
-            id="app",
-            title="Surface",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "the application loop - ",
-                        ("keyboard", KEYWORD), ", ",
-                        ("resize", KEYWORD), ", ",
-                        ("diff rendering", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''class MyApp(Surface):
-    def render(self):
-        # paint into self._buf
-
-    def on_key(self, key: str):
-        if key == "q":
-            self.quit()''',
-                    title="app.py",
-                ),
-                Spacer(1),
-                Text(
-                    styled("right for ", ("components", KEYWORD), " (interactive widgets)"),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(left="compose", right="focus", down="app/source"),
-        ),
-
-        # Focus - two-tier keyboard handling
-        "focus": Slide(
-            id="focus",
-            title="Focus",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "immutable state: ", ("id", KEYWORD), " + ",
-                        ("captured", KEYWORD), " flag",
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''focus = Focus(id="sidebar")
-focus = focus.capture()   # widget handles keys
-focus = focus.release()   # nav handles keys''',
-                    title="focus.py",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        "navigation patterns: ",
-                        ("ring_next", KEYWORD), ", ",
-                        ("linear_prev", KEYWORD), ", ..."
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Text("down for navigation demo", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="app", right="search", down="focus/nav"),
-        ),
-
-        "focus/nav": Slide(
-            id="focus/nav",
-            title="Navigation Patterns",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "pure functions: ", ("items", KEYWORD), " + ",
-                        ("current", KEYWORD), " -> ", ("next", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''items = ("a", "b", "c")
-current = "b"
-
-ring_next(items, current)    # "c"
-ring_next(items, "c")        # "a" (wraps)
-
-linear_next(items, current)  # "c"
-linear_next(items, "c")      # "c" (stops)''',
-                    title="focus.py",
-                ),
-                Spacer(1),
-                Demo(demo_id="focus_nav"),
-            ),
-            nav=Navigation(up="focus", left="block/detail", right="search/demo", down="focus/source"),
-        ),
-
-        # Search - filtered selection primitive
-        "search": Slide(
-            id="search",
-            title="Search",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "filtered selection: ", ("query", KEYWORD), " + ",
-                        ("selected", KEYWORD), " index",
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''search = Search()
-search = search.type("f")     # query="f"
-search = search.type("o")     # query="fo"
-search = search.backspace()   # query="f"''',
-                    title="search.py",
-                ),
-                Spacer(1),
-                Text(
-                    styled(
-                        "filter patterns: ",
-                        ("contains", KEYWORD), ", ",
-                        ("prefix", KEYWORD), ", ",
-                        ("fuzzy", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Text("down for interactive demo", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="focus", right="components", down="search/demo"),
-        ),
-
-        "search/demo": Slide(
-            id="search/demo",
-            title="Search Demo",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "type to filter, ", ("up/down", KEYWORD), " to select, ",
-                        ("m", KEYWORD), " to change mode",
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="search"),
-            ),
-            nav=Navigation(up="search", left="focus/nav", right="components/progress", down="search/source"),
-        ),
-
-        # Components - interactive demos
-        "components": Slide(
-            id="components",
-            title="Components",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(
-                        "stateful widgets: ",
-                        ("spinner", KEYWORD), ", ",
-                        ("progress", KEYWORD), ", ",
-                        ("list", KEYWORD), ", ",
-                        ("text input", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="spinner"),
-                Spacer(1),
-                Text(
-                    styled(
-                        "state is ", ("immutable", EMPH), " - methods return new instances"
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Text("down for interactive examples", HINT_STYLE, center=True),
-            ),
-            nav=Navigation(left="search", down="components/progress"),
-        ),
-
-        "components/progress": Slide(
-            id="components/progress",
-            title="Progress Bar",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(("ProgressState", KEYWORD), " + ", ("progress_bar()", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="progress"),
-                Spacer(1),
-                Code(
-                    source='''state = ProgressState(value=0.5)
-state = state.set(0.75)  # returns new state
-
-bar = progress_bar(state, width=30)''',
-                    title="usage",
-                ),
-            ),
-            nav=Navigation(up="components", left="search/demo", right="components/list", down="components/list"),
-        ),
-
-        "components/list": Slide(
-            id="components/list",
-            title="List View",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(("ListState", KEYWORD), " + ", ("list_view()", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="list"),
-                Spacer(1),
-                Code(
-                    source='''state = ListState(cursor=Cursor(count=5))
-state = state.move_down()  # returns new state
-
-items = [Line.plain("Apple"), ...]
-state = state.scroll_into_view(visible_height=5)
-lst = list_view(state, items, visible_height=5)''',
-                    title="usage",
-                ),
-            ),
-            nav=Navigation(up="components/progress", left="components/progress", right="components/text", down="components/text"),
-        ),
-
-        "components/text": Slide(
-            id="components/text",
-            title="Text Input",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(("TextInputState", KEYWORD), " + ", ("text_input()", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="text_input"),
-                Spacer(1),
-                Code(
-                    source='''state = TextInputState(text="hello")
-state = state.insert("!")  # returns new state
-
-inp = text_input(state, width=20, focused=True)''',
-                    title="usage",
-                ),
-            ),
-            nav=Navigation(up="components/list", left="components/list", right="components/table", down="components/table"),
-        ),
-
-        "components/table": Slide(
-            id="components/table",
-            title="Table",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled(("TableState", KEYWORD), " + ", ("table()", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Demo(demo_id="table"),
-                Spacer(1),
-                Code(
-                    source='''columns = [Column(header=Line.plain("Name"), width=12)]
-rows = [[Line.plain("Cell")], [Line.plain("Block")]]
-state = TableState(cursor=Cursor(count=len(rows)))
-
-tbl = table(state, columns, rows, visible_height=3)''',
-                    title="usage",
-                ),
-            ),
-            nav=Navigation(up="components/text", left="components/text", down="fin"),
-        ),
-
-        # Finale
-        "fin": Slide(
-            id="fin",
-            title="fin",
-            sections=(
-                Spacer(2),
-                Text(
-                    Line(spans=(
-                        Span("that's ", Style(fg="white", dim=True)),
-                        Span("fidelis", Style(fg="cyan", bold=True)),
-                        Span(".", Style(fg="white", dim=True)),
-                    )),
-                    center=True,
-                ),
-                Spacer(2),
-                Text(
-                    styled(
-                        ("Cell", KEYWORD), " -> ",
-                        ("Style", KEYWORD), " -> ",
-                        ("Span", KEYWORD), " -> ",
-                        ("Line", KEYWORD), " -> ",
-                        ("Block", KEYWORD), " -> ",
-                        ("Buffer", KEYWORD),
-                    ),
-                    center=True,
-                ),
-                Spacer(1),
-                Text(
-                    styled("compose with ", ("join", KEYWORD), ", ", ("pad", KEYWORD), ", ", ("border", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Text(
-                    styled("run with ", ("Surface", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(2),
-                Text(
-                    Line(spans=(
-                        Span("go build something.", Style(fg="cyan", bold=True)),
-                    )),
-                    center=True,
-                ),
-            ),
-            nav=Navigation(up="components/table"),
-        ),
-
-        # -- Source slides (level 2) --
-        # These show the actual implementation code from the cells library
-        # Note: "cell" topic now uses zoom levels instead of separate slides
-
-        "style/source": Slide(
-            id="style/source",
-            title="Style (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/cell.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Style:
-    """Visual attributes for a cell."""
-    fg: str | int | None = None
-    bg: str | int | None = None
-    bold: bool = False
-    dim: bool = False
-    italic: bool = False
-    underline: bool = False
-    reverse: bool = False
-
-    def merge(self, other: "Style") -> "Style":
-        """Merge with another style; other wins on conflict."""
-        return Style(
-            fg=other.fg if other.fg is not None else self.fg,
-            bg=other.bg if other.bg is not None else self.bg,
-            bold=other.bold or self.bold,
-            # ... etc
-        )''',
-                    title="cell.py",
-                ),
-            ),
-            nav=Navigation(up="style/detail", left="cell", right="span/source"),
-        ),
-
-        "span/source": Slide(
-            id="span/source",
-            title="Span (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/span.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''def span_width(text: str) -> int:
-    """Calculate display width accounting for wide chars."""
-    total = 0
-    for ch in text:
-        w = wcwidth(ch)
-        if w < 0:
-            w = 0  # control chars
-        total += w
-    return total
-
-@dataclass(frozen=True)
-class Span:
-    """A run of text with one style."""
-    text: str
-    style: Style = field(default_factory=Style)
-
-    @property
-    def width(self) -> int:
-        return span_width(self.text)''',
-                    title="span.py",
-                ),
-            ),
-            nav=Navigation(up="span/detail", left="style/source", right="line/source"),
-        ),
-
-        "line/source": Slide(
-            id="line/source",
-            title="Line (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/span.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Line:
-    """A sequence of Spans - styled inline text."""
-    spans: tuple[Span, ...] = ()
-    style: Style | None = None
-
-    @property
-    def width(self) -> int:
-        return sum(s.width for s in self.spans)
-
-    def paint(self, view: BufferView, x: int, y: int) -> int:
-        """Paint spans left to right, return ending x."""
-        for span in self.spans:
-            view.put_text(x, y, span.text, span.style)
-            x += span.width
-        return x''',
-                    title="span.py",
-                ),
-            ),
-            nav=Navigation(up="line/detail", left="span/source", right="buffer/source"),
-        ),
-
-        "buffer/source": Slide(
-            id="buffer/source",
-            title="Buffer (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/buffer.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''class Buffer:
-    """2D grid of Cells - the rendering canvas."""
-
-    def __init__(self, width: int, height: int):
-        self._width = width
-        self._height = height
-        self._cells = [[EMPTY_CELL] * width for _ in range(height)]
-
-    def put(self, x: int, y: int, char: str, style: Style):
-        """Set a single cell."""
-        if 0 <= x < self._width and 0 <= y < self._height:
-            self._cells[y][x] = Cell(char, style)
-
-    def region(self, x: int, y: int, w: int, h: int) -> BufferView:
-        """Get a clipped, translated view of this buffer."""
-        return BufferView(self, x, y, w, h)''',
-                    title="buffer.py",
-                ),
-            ),
-            nav=Navigation(up="buffer/view", left="line/source", right="block/source"),
-        ),
-
-        "block/source": Slide(
-            id="block/source",
-            title="Block (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/block.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Block:
-    """Immutable rectangle of Cells."""
-    rows: list[list[Cell]]
-    width: int
-
-    @property
-    def height(self) -> int:
-        return len(self.rows)
-
-    @classmethod
-    def text(cls, text: str, style: Style) -> "Block":
-        """Create a Block from a string."""
-        cells = [Cell(ch, style) for ch in text]
-        return cls(rows=[cells], width=len(cells))
-
-    def paint(self, view: BufferView, x: int, y: int):
-        """Copy this block into the view."""
-        for row_idx, row in enumerate(self.rows):
-            for col_idx, cell in enumerate(row):
-                view.put(x + col_idx, y + row_idx, cell.char, cell.style)''',
-                    title="block.py",
-                ),
-            ),
-            nav=Navigation(up="block/detail", left="buffer/source", right="compose/source"),
-        ),
-
-        "compose/source": Slide(
-            id="compose/source",
-            title="Compose (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/compose.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''def join_horizontal(*blocks: Block, gap: int = 0) -> Block:
-    """Place blocks side by side."""
-    if not blocks:
-        return Block.empty(0, 0)
-    max_h = max(b.height for b in blocks)
-    rows = []
-    for y in range(max_h):
-        row = []
-        for i, block in enumerate(blocks):
-            if i > 0 and gap > 0:
-                row.extend([EMPTY_CELL] * gap)
-            if y < block.height:
-                row.extend(block.rows[y])
-            else:
-                row.extend([EMPTY_CELL] * block.width)
-        rows.append(row)
-    return Block(rows=rows, width=sum(len(r) for r in [rows[0]]))''',
-                    title="compose.py",
-                ),
-            ),
-            nav=Navigation(up="compose", left="block/source", right="app/source"),
-        ),
-
-        "app/source": Slide(
-            id="app/source",
-            title="Surface (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/app.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''class Surface:
-    """Async main loop with diff-based rendering."""
-
-    async def run(self):
-        self._writer.enter_alt_screen()
-        try:
-            while not self._quit:
-                # Handle input
-                for key in self._keyboard.read():
-                    self.on_key(key)
-                # Update state
-                self.update()
-                # Render if dirty
-                if self._dirty:
-                    self.render()
-                    self._flush()
-                await asyncio.sleep(1 / self._fps_cap)
-        finally:
-            self._writer.exit_alt_screen()''',
-                    title="app.py",
-                ),
-            ),
-            nav=Navigation(up="app", left="compose/source", right="focus/source"),
-        ),
-
-        "focus/source": Slide(
-            id="focus/source",
-            title="Focus (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/focus.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Focus:
-    """Immutable focus state: id + captured flag."""
-    id: str = ""
-    captured: bool = False
-
-    def capture(self) -> "Focus":
-        return replace(self, captured=True)
-
-    def release(self) -> "Focus":
-        return replace(self, captured=False)
-
-def ring_next(items: Sequence[T], current: T) -> T:
-    """Next item, wrapping at end."""
-    idx = items.index(current)
-    return items[(idx + 1) % len(items)]''',
-                    title="focus.py",
-                ),
-            ),
-            nav=Navigation(up="focus/nav", left="app/source", right="search/source"),
-        ),
-
-        "search/source": Slide(
-            id="search/source",
-            title="Search (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("from ", ("fidelis/search.py", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''@dataclass(frozen=True)
-class Search:
-    """Immutable search state: query + selected index."""
-    query: str = ""
-    selected: int = 0
-
-    def type(self, char: str) -> "Search":
-        return replace(self, query=self.query + char, selected=0)
-
-    def backspace(self) -> "Search":
-        return replace(self, query=self.query[:-1], selected=0)
-
-def filter_fuzzy(items: Sequence[str], query: str) -> list[str]:
-    """Filter items by fuzzy match (chars in order)."""
-    if not query:
-        return list(items)
-    return [item for item in items if _fuzzy_match(item, query)]''',
-                    title="search.py",
-                ),
-            ),
-            nav=Navigation(up="search/demo", left="focus/source", right="components/source"),
-        ),
-
-        "components/source": Slide(
-            id="components/source",
-            title="Components (source)",
-            sections=(
-                Spacer(1),
-                Text(
-                    styled("the component pattern: ", ("State", KEYWORD), " + ", ("render()", KEYWORD)),
-                    center=True,
-                ),
-                Spacer(1),
-                Code(
-                    source='''# Each component follows the same pattern:
-# 1. Immutable state dataclass
-# 2. Pure render function: state -> Block
-
-@dataclass(frozen=True)
-class SpinnerState:
-    frame: int = 0
-    frames: tuple[str, ...] = DOTS
-
-    def tick(self) -> "SpinnerState":
-        return replace(self, frame=(self.frame + 1) % len(self.frames))
-
-def spinner(state: SpinnerState, style: Style = Style()) -> Block:
-    char = state.frames[state.frame]
-    return Block.text(char, style)''',
-                    title="components/spinner.py",
-                ),
-            ),
-            nav=Navigation(up="components/progress", left="search/source"),
-        ),
-    }
+    )
+
+
+def build_slides() -> tuple[dict[str, Slide], list[str]]:
+    """Load slides from markdown files.
+
+    Returns (slides_dict, navigation_sequence).
+    """
+    import sys
+    demos_dir = str(Path(__file__).parent)
+    if demos_dir not in sys.path:
+        sys.path.insert(0, demos_dir)
+    from slide_loader import load_slides_dir, validate_slides, build_navigation, get_navigation_sequence
+
+    slides_dir = _build_slides_dir()
+    parsed = load_slides_dir(slides_dir)
+    validate_slides(parsed)
+    nav = build_navigation(parsed)
+    nav_sequence = get_navigation_sequence(parsed)
+
+    slides = {}
+    for sid, p in parsed.items():
+        slides[sid] = _to_tour_slide(p, nav.get(sid))
+
+    return slides, nav_sequence
 
 
 # -- Help Overlay --
@@ -2309,9 +1229,13 @@ class DemoLayerState:
     slides: dict[str, Slide] = field(default_factory=dict)
 
 
-def _get_demo_id(slide: Slide) -> str | None:
-    """Get the first interactive demo ID on a slide (not spinner)."""
-    for section in slide.sections:
+def _get_demo_id(slide: Slide, zoom: int = 0) -> str | None:
+    """Get the first interactive demo ID on a slide (not spinner).
+
+    Searches both common sections and the current zoom level's sections.
+    """
+    zoom_sections = slide.zooms.get(zoom, slide.zooms.get(0, ()))
+    for section in slide.common + zoom_sections:
         if isinstance(section, Demo) and section.demo_id != "spinner":
             return section.demo_id
     return None
@@ -2435,7 +1359,7 @@ def _handle_demo(key: str, layer_state: DemoLayerState, app_state: BenchState) -
     if not slide:
         return layer_state, app_state, Stay()
 
-    demo_id = _get_demo_id(slide)
+    demo_id = _get_demo_id(slide, app_state.zoom)
     if demo_id:
         new_app_state, handled = _handle_demo_input(key, app_state, demo_id)
         if handled:
@@ -2464,6 +1388,7 @@ def make_demo_layer(slides: dict[str, Slide]) -> Layer[DemoLayerState]:
 class NavLayerState:
     """State for the navigation layer."""
     slides: dict[str, Slide] = field(default_factory=dict)
+    nav_sequence: list[str] = field(default_factory=list)
 
 
 def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> tuple[NavLayerState, BenchState, Stay | Pop | Push | Quit]:
@@ -2487,7 +1412,7 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
     if not slide:
         return layer_state, app_state, Stay()
 
-    demo_id = _get_demo_id(slide)
+    demo_id = _get_demo_id(slide, app_state.zoom)
 
     # Escape: go back (reduce zoom, or go to parent slide)
     if key == "escape":
@@ -2542,11 +1467,6 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
         # Just change zoom level
         return layer_state, replace(app_state, zoom=new_zoom), Stay()
 
-    # Delegate to slide-specific handler
-    if slide.on_key:
-        new_app_state = slide.on_key(key, app_state)
-        return layer_state, new_app_state, Stay()
-
     return layer_state, app_state, Stay()
 
 
@@ -2564,7 +1484,7 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     # Calculate minimap width if shown
     minimap_width = 0
     if app_state.show_minimap:
-        minimap_block = minimap_lens(slides, app_state.current_slide, app_state.zoom, height - 2)
+        minimap_block = minimap_lens(slides, app_state.current_slide, app_state.zoom, height - 2, layer_state.nav_sequence)
         minimap_width = minimap_block.width + 1  # +1 for gap
 
         # Render minimap on the left
@@ -2584,8 +1504,12 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     # Create LensContext for section rendering (narrower when minimap shown)
     ctx = LensContext.from_state(app_state, content_width - 4)
 
+    # Gather sections: common + zoom-specific
+    zoom_sections = slide.zooms.get(app_state.zoom, slide.zooms.get(0, ()))
+    sections = slide.common + zoom_sections
+
     content_blocks = []
-    for section in slide.sections:
+    for section in sections:
         block = section_lens(section, ctx)
         content_blocks.append(block)
 
@@ -2599,11 +1523,11 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     footer.paint(view, 0, height - 1)
 
 
-def make_nav_layer(slides: dict[str, Slide]) -> Layer[NavLayerState]:
+def make_nav_layer(slides: dict[str, Slide], nav_sequence: list[str] | None = None) -> Layer[NavLayerState]:
     """Create the base navigation layer."""
     return Layer(
         name="nav",
-        state=NavLayerState(slides=slides),
+        state=NavLayerState(slides=slides, nav_sequence=nav_sequence or []),
         handle=_handle_nav,
         render=_render_nav,
     )
@@ -2689,14 +1613,17 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 class BenchApp(Surface):
     """Interactive teaching bench application."""
 
-    def __init__(self, slides: dict[str, Slide] | None = None, start_slide: str = "intro", start_zoom: int = 0):
+    def __init__(self, slides: dict[str, Slide] | None = None, nav_sequence: list[str] | None = None, start_slide: str = "intro", start_zoom: int = 0):
         super().__init__(fps_cap=30)
-        self._slides = slides or build_slides()
+        if slides is None:
+            slides, nav_sequence = build_slides()
+        self._slides = slides
+        self._nav_sequence = nav_sequence or []
         # Initialize state with base navigation layer (slides passed via layer state)
         self._state = BenchState(
             current_slide=start_slide,
             zoom=start_zoom,
-            layers=(make_nav_layer(self._slides),),
+            layers=(make_nav_layer(self._slides, self._nav_sequence),),
         )
         self._width = 80
         self._height = 24
@@ -2773,39 +1700,37 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_navigation_order(slides: dict[str, Slide]) -> list[str]:
-    """Walk the slide graph in navigation order (right/down).
+    """Return slide IDs in navigation order.
 
-    Traverses: right first, then down, depth-first.
-    Returns list of slide IDs in navigation order.
+    Walks left/right links starting from the slide with no left neighbor.
     """
+    # Find starting slide (no left)
+    start = None
+    for sid, slide in slides.items():
+        if slide.nav.left is None:
+            start = sid
+            break
+    if start is None:
+        return list(slides.keys())
+
+    order = []
+    current = start
     visited: set[str] = set()
-    order: list[str] = []
+    while current and current not in visited:
+        visited.add(current)
+        order.append(current)
+        slide = slides.get(current)
+        current = slide.nav.right if slide else None
 
-    def visit(slide_id: str) -> None:
-        if slide_id in visited or slide_id not in slides:
-            return
-        visited.add(slide_id)
-        order.append(slide_id)
-
-        slide = slides[slide_id]
-        # Visit detail (down) before moving right
-        if slide.nav.down:
-            visit(slide.nav.down)
-        if slide.nav.right:
-            visit(slide.nav.right)
-
-    # Start from intro
-    visit("intro")
-
-    # Add any remaining slides not reachable from intro
-    for slide_id in slides:
-        if slide_id not in visited:
-            visit(slide_id)
+    # Add any unreachable slides
+    for sid in slides:
+        if sid not in visited:
+            order.append(sid)
 
     return order
 
 
-def run_quiet_mode(slides: dict[str, Slide]) -> None:
+def run_quiet_mode(slides: dict[str, Slide], nav_sequence: list[str] | None = None) -> None:
     """Print all slides inline and exit (quiet mode).
 
     For slides with max_zoom > 0, prints each zoom level.
@@ -2813,7 +1738,7 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
     """
     import sys
 
-    order = get_navigation_order(slides)
+    order = nav_sequence or get_navigation_order(slides)
     state = BenchState()  # Demo components rendered in default state
 
     for slide_id in order:
@@ -2837,8 +1762,11 @@ def run_quiet_mode(slides: dict[str, Slide]) -> None:
             content_blocks.append(title_block)
             content_blocks.append(Block.empty(1, 1))
 
-            # Render all sections including demos
-            for section in slide.sections:
+            # Gather sections: common + zoom-specific
+            zoom_sections = slide.zooms.get(zoom, slide.zooms.get(0, ()))
+            sections = slide.common + zoom_sections
+
+            for section in sections:
                 block = section_lens(section, ctx)
                 content_blocks.append(block)
 
@@ -2869,16 +1797,16 @@ def get_start_slide(fidelity: int) -> tuple[str, int]:
 
 async def main():
     args = parse_args()
-    slides = build_slides()
+    slides, nav_sequence = build_slides()
 
     if args.quiet:
         # Quiet mode: print slides inline and exit
-        run_quiet_mode(slides)
+        run_quiet_mode(slides, nav_sequence)
         return
 
     # Fidelity determines starting slide and zoom level
     start_slide, start_zoom = get_start_slide(args.verbose)
-    app = BenchApp(slides=slides, start_slide=start_slide, start_zoom=start_zoom)
+    app = BenchApp(slides=slides, nav_sequence=nav_sequence, start_slide=start_slide, start_zoom=start_zoom)
 
     await app.run()
 

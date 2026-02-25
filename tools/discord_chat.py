@@ -19,7 +19,26 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 
-PERSONAS_PATH = Path(__file__).resolve().parent.parent / "docs" / "narrative-debug" / "personas.json"
+_SCRIPT_ROOT = Path(__file__).resolve().parent.parent
+PERSONAS_PATH = _SCRIPT_ROOT / "docs" / "narrative-debug" / "personas.json"
+
+
+def _load_dotenv() -> None:
+    """Load .env file from project root if env vars aren't already set."""
+    env_file = _SCRIPT_ROOT / ".env"
+    if not env_file.exists():
+        return
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() not in os.environ:
+                os.environ[key.strip()] = value.strip()
+
+
+_load_dotenv()
 
 
 def _load_personas() -> dict:

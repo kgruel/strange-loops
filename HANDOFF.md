@@ -11,12 +11,10 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 561 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+v0.1.0, 577 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
 
-Charm v2 deep dive complete — research doc at `docs/research/2026-02-25-charm-v2-deep-dive.md`.
-Key finding: fidelis and Charm v2 converged on the same core principles independently
-(pure render, cell buffers, capability resolution at boundaries). Three concrete features
-adopted from the research: hit testing, scroll optimization, test harness.
+Discord narrative debugging infrastructure implemented and validated. Two sessions
+completed (simulated + real Discord). Writer output path fully optimized.
 
 ## Relationship to Loops
 
@@ -43,15 +41,16 @@ src/fidelis/           # ~10,000 LOC
   Mouse:               MouseEvent, MouseButton, MouseAction
   Aesthetic:           Palette (ContextVar), IconSet (ContextVar)
 
-tools/                 # Doc extraction
+tools/                 # Dev tools
   docgen.py            # AST-based snippet extraction + markdown sync
+  discord_chat.py      # Discord webhook post + bot read for narrative debugging
 docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 561 tests
+tests/                 # 577 tests
 demos/                 # Python files + tour.py + slides/
-  slides/              # 17 markdown files (tour content)
+  slides/              # 21 markdown files (tour content, docgen-synced)
   slide_loader.py      # Markdown parser with zoom levels + auto-nav
 ```
 
@@ -101,6 +100,18 @@ demos/                 # Python files + tour.py + slides/
   vertical content shifts via line hashing, emits DECSTBM + SU/SD instead of
   full repaint. 25-40x byte reduction per scroll. Opt-in via
   `scroll_optimization=True` or `FIDELIS_SCROLL_OPTIM=1`.
+- **Tour content expansion** — 4 new slides covering rendering pipeline,
+  layer stack API, lenses, and CLI harness. Fills the major content gaps.
+- **Tour docgen integration** — `<!-- docgen:begin/end -->` sync blocks
+  populated across 11 existing slides. Source excerpts now stay in sync
+  with code via `docgen --check --roots demos/slides`.
+- **Writer cursor coalescing** — `write_ops()` tracks cursor position and
+  skips redundant `move_cursor` calls for adjacent cells. Wide-char aware.
+  Composes with scroll optimization. 10 new tests.
+- **Discord narrative debugging** — `tools/discord_chat.py` (stdlib-only,
+  webhook POST + bot GET), 4 persona agent definitions in `.claude/agents/`,
+  personas config, auto `.env` loading. Validated with real Discord session.
+  6 new tests.
 
 ## Capability Signal Design (Resolved)
 
@@ -127,9 +138,56 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 | `hit-testing` | **Merged** | Block.id + Buffer provenance + Surface.hit() |
 | `test-harness` | **Merged** | TestSurface + CapturedFrame + Writer color_depth override |
 | `scroll-optimization` | **Merged** | DECSTBM scroll + line hashing + detection |
+| `tour-content-gaps` | **Merged** | 4 new slides: pipeline, layers, lenses, CLI harness |
+| `tour-docgen` | **Merged** | Docgen sync blocks in 11 tour slides |
+
+## Narrative Debugging (Two Sessions Completed)
+
+Agent-swarm narrative debugging: 4 persona agents with separate contexts
+react to fidelis content. Two sessions completed.
+
+**Session 1** (simulated, SendMessage relay): Dropped README, found doc gaps.
+**Session 2** (real Discord): Conversation starter → CLAUDE.md drop → run_cli
+signature → shape_lens. Full async flow via `tools/discord_chat.py`.
+
+**Combined findings — README/value prop:**
+- Adoption ladder IS the differentiator: `print_block()` → compose → `run_cli()` → Surface
+  (3/4 agents independently: "that should be at the top of the README")
+- `show(data)` across pipe/static/live/interactive is the undocumented value prop
+  (mrbits: "if this delivers that, document it front and center")
+- Bubble Tea requires framework commitment at step 1; fidelis's ramp is unique
+  (synthwave: "real differentiator")
+- ghost_pipe validated progressive adoption: "swap print() for print_block()
+  one at a time" resolved their 30-subcommand blocker
+
+**Combined findings — API clarity:**
+- shape_lens = convenience/exploration tool, not production renderer (ghost_pipe named it)
+- Custom Lens/render function completely replaces shape_lens (opt-in, not opt-out)
+- Format axis orthogonality landed cleanly (JSON skips render entirely)
+- Lens described as "viewport" in API table — wrong (session 1, still unfixed)
+- `print_block` TTY auto-detect gap (session 1, still unfixed)
+
+**Process learnings:**
+- Persistent agents >>> fresh agents per round (memory, momentum, conversation)
+- Sonnet sufficient for personas (validated session 2)
+- Bash-only tools + channel-only content prevents hallucinated source analysis
+- ghost_pipe lurking correctly = real signal (broke silence twice, both sharp)
+- Discord channel IS the transcript (no manual serialization)
+
+Process reference: `docs/narrative-debug/process.md`
+Session 1 transcript: `docs/narrative-debug/transcript.md`
+Session 2 transcript: Discord channel #terminal-crafters
 
 ## Open Threads
 
+- **Review narrative debugging findings** — two sessions of findings to
+  synthesize. Adoption ladder, show(data) value prop, shape_lens positioning,
+  Lens naming, print_block TTY gap. Next session: review both sessions'
+  feedback and improve the process going forward.
+- **README rewrite** — informed by narrative debugging findings. Adoption
+  ladder as lede, show(data) value prop, progressive enhancement framing.
+- **`print_block` TTY auto-detect** — consider `use_ansi=None` default.
+  Small change, addresses the tier-1 paper cut.
 - **Declarative terminal state** — deferred. When fidelis needs concurrent
   windows (not just modal layers), composition units will need to declare
   terminal mode requirements (mouse, cursor, graphics). Reconciliation
@@ -142,15 +200,5 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 - **PyPI publish** — Package metadata ready. No CI/CD yet.
 - **Guide content** — 4 guides landed with draft-quality narrative. Need
   fleshing out once designs stabilize.
-- **Tour docgen integration** — slide markdown files support `<!-- docgen:begin/end -->`
-  markers but none are populated yet. Run `docgen --update --roots demos/slides` to
-  sync source excerpts into zoom-level code blocks.
 - **Stale plan file** — `docs/plans/2026-02-22-project-cleanup.md` is
   untracked and fully executed. Can be deleted or committed as historical.
-- **Writer coalescing** — scroll optimization research identified that
-  `write_frame()` emits a cursor move per cell. Coalescing adjacent cells
-  into line runs would reduce output further, independent of scroll optimization.
-- **Tour expansion** — research complete (subtask `tour-expansion`, closed).
-  Gap analysis and expansion proposal in `.subtask/tasks/tour-expansion/PLAN.md`.
-  Superseded by slide rebuild but content gaps remain (lenses, CLI harness,
-  rendering pipeline, layers-as-API). Good input for demos session.

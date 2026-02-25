@@ -217,3 +217,104 @@ levels on each topic file.
 - Building blocks in place: hit testing, scroll regions
 
 **561 tests passing on main.**
+
+## 2026-02-25 — Tour content + docgen sync + writer coalescing
+
+**Tour content expansion** (subtask `tour-content-gaps`):
+- 4 new markdown slides covering the major teaching gaps:
+  - `composition/rendering_pipeline.md` — Block.paint → Buffer.diff → Writer.write_frame
+  - `application/layers.md` — Layer stack API, Action algebra, process_key/render_layers
+  - `composition/lenses.md` — shape_lens/tree_lens/chart_lens, zoom as axis
+  - `application/cli_harness.md` — run_cli, OutputMode/Format/Zoom, callback contract
+- All zoom-leveled (0/1/2), markdown-only, no new Demo blocks
+- 17 → 21 slides total
+
+**Tour docgen integration** (subtask `tour-docgen`):
+- Added `<!-- docgen:begin/end -->` sync blocks to 11 existing slide files
+- Replaced stale hand-written source excerpts with real API signatures/definitions
+- Key fixes: Cell now shows `raise ValueError` (not truncation), Block shows real
+  signatures (not fake dataclass), Search/Focus show full current definitions
+- Snippet store refreshed
+- `docgen --check --roots demos/slides` passes
+
+**Writer cursor coalescing** (direct on main):
+- `write_ops()` tracks `(cursor_x, cursor_y)` and skips `move_cursor` when the
+  next CellWrite is at the natural cursor position
+- Wide-char aware: advances cursor by `wcwidth()` result
+- Resets tracking after ScrollOp (cursor position unknown after scroll)
+- Composes with scroll optimization (independent optimizations)
+- 10 new tests, 2 existing scroll tests updated to use regex CUP counting
+  instead of fragile `"H"` character heuristic
+
+**571 tests passing on main.**
+
+## 2026-02-25 — Narrative debugging experiment
+
+Explored narrative debugging (from ~/Documents/Obsidian/Programming/NDTD/)
+as an agent swarm rather than single-context roleplay. Reviewed the NDTD
+corpus — 12 documents, mostly over-documented scaffolding around a simple
+concept ("write a story about your user thinking about using it, fix it
+when you go 'oh no'"). The landing page and LLM guide were the real
+artifacts; the rest was dopamine-tap recursion.
+
+**Agent swarm session:**
+- Created team `terminal-crafters` with 4 Opus persona agents: mrbits
+  (ncurses veteran), noodle (Textual user), ghost_pipe (legacy CLI
+  maintainer), synthwave (Go/Rust cross-ecosystem)
+- Broadcast-based chat via SendMessage, facilitator serialized to transcript
+- Dropped fidelis README, let natural conversation flow
+- ~30 minutes of organic discussion, 50+ messages
+
+**Key findings:**
+- Value proposition not in README ("CLI framework that happens to support TUI")
+- Three-tier adoption path (print_block → InPlace → Surface) not documented
+- Lens described as "viewport" in API table — wrong, caused repeated confusion
+- `print_block` TTY auto-detect gap (real but `run_cli` already handles it)
+- "Block is the universal unit" and "who owns the state" as positioning frames
+
+**Process learnings:**
+- Separate contexts prevent pandering (agents corrected each other)
+- Agents partially hallucinated source analysis (had access but didn't explore
+  thoroughly — missed `run_cli`'s existing TTY detection)
+- Facilitator-as-relay was the bottleneck — async channel needed
+- Sonnet sufficient for personas, restrict to dropped content only
+- Natural conversation flow is the value — don't constrain to targeted rounds
+
+**Next:** Discord bot integration for real async agent-swarm conversations.
+
+Transcript: `docs/narrative-debug/transcript.md`
+
+## 2026-02-25 — Discord narrative debugging infrastructure + session 2
+
+Built Discord integration for narrative debugging and ran a live session.
+
+**Infrastructure (feature/discord-narrative-debug, merged):**
+- `tools/discord_chat.py` — stdlib-only CLI (webhook POST + bot GET), auto
+  `.env` loading, User-Agent fix for Discord API compatibility
+- 4 persona agent definitions in `.claude/agents/` (Bash-only, Sonnet)
+- `docs/narrative-debug/personas.json` — handle → avatar/description mapping
+- `docs/narrative-debug/process.md` — updated with Discord integration flow
+- 6 new tests, 577 total
+
+**Discord session (real-time, #terminal-crafters):**
+- Started with "what's your CLI output stack?" — no fidelis mention
+- Natural conversation: mrbits on cell buffers, noodle on Textual, synthwave
+  on Bubble Tea v2, ghost_pipe lurking
+- User dropped CLAUDE.md → all 4 reacted, ghost_pipe broke silence
+- Ran ~6 rounds with persistent agents (TeamCreate swarm)
+
+**Key findings (independent convergence):**
+- Adoption ladder is the differentiator (3/4 agents: "top of README")
+- `show(data)` across all modes is the undocumented value prop
+- shape_lens = convenience/exploration, not production (ghost_pipe named it)
+- Format orthogonality (JSON skips render) resolved noodle's two-script problem
+- ghost_pipe's blocker: "does run_cli compose with argparse?" → resolved by
+  `print_block()` as floor, not `run_cli`
+
+**Process findings:**
+- Persistent agents >>> fresh agents (memory, momentum)
+- Auto `.env` loading necessary (agents don't inherit shell env)
+- Sonnet sufficient, Bash-only prevents hallucinated source analysis
+- ghost_pipe lurking correctly = signal (spoke twice, both sharp)
+
+**577 tests passing on main.**

@@ -537,6 +537,19 @@ class CompiledVertex:
     routes: dict[str, str] | None = None
     store: Path | None = None
     path: Path | None = None
+    sources: list | None = None
+    template_specs: dict | None = None
+
+
+def collect_all_sources(compiled: CompiledVertex) -> tuple[list, dict]:
+    """Collect sources and template specs from a compiled vertex tree."""
+    sources = list(compiled.sources or [])
+    specs = dict(compiled.template_specs or {})
+    for child in compiled.children.values():
+        child_sources, child_specs = collect_all_sources(child)
+        sources.extend(child_sources)
+        specs.update(child_specs)
+    return sources, specs
 
 
 class CircularVertexError(Exception):
@@ -593,8 +606,11 @@ def compile_vertex_recursive(
     # Compile this vertex's specs
     specs = map_vertex_file(vertex)
 
-    # Collect child vertex paths from explicit list and discovery
+    # Compile this vertex's own sources
     base_dir = vertex.path.parent if vertex.path else Path.cwd()
+    own_sources, own_template_specs = compile_sources(vertex, base_dir)
+
+    # Collect child vertex paths from explicit list and discovery
     child_paths: list[Path] = []
 
     # Add explicit vertices
@@ -637,6 +653,8 @@ def compile_vertex_recursive(
         routes=vertex.routes,
         store=vertex.store,
         path=vertex.path,
+        sources=own_sources or None,
+        template_specs=own_template_specs or None,
     )
 
 

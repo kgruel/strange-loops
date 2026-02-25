@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from .compiler import FoldOverride, compile_sources, compile_vertex_recursive, materialize_vertex, substitute_vars
+from .compiler import FoldOverride, collect_all_sources, compile_vertex_recursive, materialize_vertex, substitute_vars
 from lang import parse_vertex_file
 from lang import validate
 from lang.ast import SourceParams, TemplateSource, VertexFile
@@ -163,8 +163,8 @@ def load_vertex_program(
     if validate_ast:
         validate(ast)
 
-    sources, template_specs = compile_sources(ast, vertex_path.parent)
     compiled = compile_vertex_recursive(ast)
+    sources, template_specs = collect_all_sources(compiled)
     compiled.specs.update(template_specs)
 
     overrides: dict[str, FoldOverride] = {}

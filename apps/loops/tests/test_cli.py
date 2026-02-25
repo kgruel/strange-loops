@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from loops.main import main, create_parser, _parse_vars
+from loops.main import main, create_parser, _parse_vars, loops_home
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -254,3 +254,91 @@ class TestHelp:
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "Files to validate" in captured.out or "files" in captured.out
+
+
+class TestLoopsHome:
+    """loops_home() resolution tests."""
+
+    def test_env_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "custom"))
+        assert loops_home() == tmp_path / "custom"
+
+    def test_xdg_config_home(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LOOPS_HOME", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        assert loops_home() == tmp_path / "xdg" / "loops"
+
+    def test_default(self, monkeypatch):
+        monkeypatch.delenv("LOOPS_HOME", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        result = loops_home()
+        assert result == Path.home() / ".config" / "loops"
+
+
+class TestInitCommand:
+    """loops init tests."""
+
+    def test_creates_root_vertex(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["init"])
+        assert result == 0
+        root = tmp_path / "root.vertex"
+        assert root.exists()
+        content = root.read_text()
+        assert 'name "root"' in content
+        assert "discover" in content
+        captured = capsys.readouterr()
+        assert "Created" in captured.out
+
+    def test_idempotent(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        main(["init"])
+        result = main(["init"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Already initialized" in captured.out
+
+    def test_creates_parent_dirs(self, monkeypatch, tmp_path, capsys):
+        deep = tmp_path / "a" / "b" / "c"
+        monkeypatch.setenv("LOOPS_HOME", str(deep))
+        result = main(["init"])
+        assert result == 0
+        assert (deep / "root.vertex").exists()
+
+
+class TestDefaultPaths:
+    """start/run/store default to LOOPS_HOME/root.vertex when no file given."""
+
+    def test_start_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["start"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "loops init" in captured.err
+
+    def test_run_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["run"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "loops init" in captured.err
+
+    def test_start_parser_file_optional(self):
+        parser = create_parser()
+        args = parser.parse_args(["start"])
+        assert args.file is None
+
+    def test_run_parser_file_optional(self):
+        parser = create_parser()
+        args = parser.parse_args(["run"])
+        assert args.file is None
+
+    def test_store_parser_file_optional(self):
+        parser = create_parser()
+        args = parser.parse_args(["store"])
+        assert args.file is None
+
+    def test_start_explicit_file_still_works(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "my.vertex"])
+        assert args.file == "my.vertex"

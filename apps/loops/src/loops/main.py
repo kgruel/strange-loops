@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import signal
 import sys
 from datetime import datetime, timezone
@@ -29,6 +30,49 @@ def _parse_vars(raw: list[str]) -> dict[str, str]:
         key, _, value = item.partition("=")
         result[key] = value
     return result
+
+
+def loops_home() -> Path:
+    """Resolve the loops config directory."""
+    if env := os.environ.get("LOOPS_HOME"):
+        return Path(env)
+    xdg = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    return Path(xdg) / "loops"
+
+
+_ROOT_VERTEX = """\
+// Root vertex — discovers all .vertex files under this directory
+name "root"
+
+discover "./**/*.vertex"
+"""
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    """Initialize a loops config directory with a root vertex."""
+    home = loops_home()
+    root = home / "root.vertex"
+    if root.exists():
+        print(f"Already initialized: {root}")
+        return 0
+    home.mkdir(parents=True, exist_ok=True)
+    root.write_text(_ROOT_VERTEX)
+    print(f"Created {root}")
+    return 0
+
+
+def _resolve_vertex_path(file_arg: str | None) -> Path | None:
+    """Resolve a vertex file path, defaulting to LOOPS_HOME/root.vertex."""
+    if file_arg is not None:
+        return Path(file_arg)
+    root = loops_home() / "root.vertex"
+    if not root.exists():
+        print(
+            f"Error: {root} not found. Run 'loops init' first.",
+            file=sys.stderr,
+        )
+        return None
+    return root
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -143,7 +187,10 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Execute a .loop or .vertex file."""
-    path = Path(args.file).resolve()
+    resolved = _resolve_vertex_path(args.file)
+    if resolved is None:
+        return 1
+    path = resolved.resolve()
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
@@ -344,7 +391,10 @@ def cmd_store(args: argparse.Namespace) -> int:
     from .commands.store import make_fetcher
     from .lenses.store import store_view
 
-    path = Path(args.file).resolve()
+    resolved = _resolve_vertex_path(args.file)
+    if resolved is None:
+        return 1
+    path = resolved.resolve()
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
@@ -395,7 +445,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     from cells.lens import shape_lens
     from engine import load_vertex_program
 
-    path = Path(args.file)
+    resolved = _resolve_vertex_path(args.file)
+    if resolved is None:
+        return 1
+    path = resolved
     if not path.exists():
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
@@ -463,6 +516,9 @@ def create_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # init
+    subparsers.add_parser("init", help="Initialize loops config directory")
+
     # validate
     validate_parser = subparsers.add_parser(
         "validate", help="Validate .loop or .vertex files"
@@ -485,7 +541,7 @@ def create_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser(
         "run", help="Execute a .loop or .vertex file"
     )
-    run_parser.add_argument("file", help=".loop or .vertex file to run")
+    run_parser.add_argument("file", nargs="?", default=None, help=".loop or .vertex file to run")
     run_parser.add_argument(
         "--json", "-j", action="store_true", help="Output as JSON"
     )
@@ -510,7 +566,7 @@ def create_parser() -> argparse.ArgumentParser:
     start_parser = subparsers.add_parser(
         "start", help="Run a .vertex file"
     )
-    start_parser.add_argument("file", help=".vertex file to start")
+    start_parser.add_argument("file", nargs="?", default=None, help=".vertex file to start")
     start_parser.add_argument(
         "--var", action="append", default=[], metavar="KEY=VALUE",
         help="Set vertex var (repeatable, e.g. --var hn_username=kg)",
@@ -520,7 +576,7 @@ def create_parser() -> argparse.ArgumentParser:
     store_parser = subparsers.add_parser(
         "store", help="Inspect store contents"
     )
-    store_parser.add_argument("file", help=".vertex or .db file")
+    store_parser.add_argument("file", nargs="?", default=None, help=".vertex or .db file")
 
     # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
     from cells import add_cli_args
@@ -535,7 +591,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = create_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "validate":
+    if args.command == "init":
+        return cmd_init(args)
+    elif args.command == "validate":
         return cmd_validate(args)
     elif args.command == "test":
         return cmd_test(args)

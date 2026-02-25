@@ -11,6 +11,7 @@ from ..focus import Focus, ring_next, ring_prev, linear_next, linear_prev
 from ..search import Search, filter_contains, filter_prefix, filter_fuzzy
 from ..cursor import Cursor, CursorMode
 from ..region import Region
+from .testing import TestSurface, CapturedFrame
 
 __all__ = [
     # Buffer
@@ -49,4 +50,7 @@ __all__ = [
     "CursorMode",
     # Region
     "Region",
+    # Testing
+    "TestSurface",
+    "CapturedFrame",
 ]

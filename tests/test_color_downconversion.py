@@ -184,6 +184,12 @@ class TestWriterNone:
         assert codes == ["31"]
 
 
+class TestWriterForcedDepth:
+    def test_detect_color_depth_respects_forced_depth_on_non_tty_stream(self):
+        w = Writer(io.StringIO(), color_depth=ColorDepth.EIGHT_BIT)
+        assert w.detect_color_depth() == ColorDepth.EIGHT_BIT
+
+
 class TestNordPaletteDownconversion:
     """NORD_PALETTE uses 256-color indexes. Verify they downconvert on 16-color."""
 

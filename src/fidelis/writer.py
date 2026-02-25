@@ -104,9 +104,11 @@ class Writer:
     Writer resolves against detected terminal capability.
     """
 
-    def __init__(self, stream: TextIO = sys.stdout):
+    def __init__(self, stream: TextIO = sys.stdout, *, color_depth: ColorDepth | None = None):
         self._stream = stream
-        self._color_depth: ColorDepth | None = None
+        # When provided, forces color capability resolution (useful for tests and
+        # non-interactive environments where isatty() is false).
+        self._color_depth: ColorDepth | None = color_depth
 
     def size(self) -> tuple[int, int]:
         """Terminal dimensions (columns, rows)."""

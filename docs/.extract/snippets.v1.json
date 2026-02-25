@@ -1,89 +1,137 @@
 {
-  "generated_at": "2026-02-24T05:32:42+00:00",
+  "generated_at": "2026-02-25T18:26:22+00:00",
   "snippets": {
+    "py:fidelis._components.spinner:SpinnerState#definition": {
+      "id": "py:fidelis._components.spinner:SpinnerState#definition",
+      "kind": "definition",
+      "language": "python",
+      "origin": {
+        "end_line": 38,
+        "path": "src/fidelis/_components/spinner.py",
+        "start_line": 28
+      },
+      "source": "@dataclass(frozen=True)\nclass SpinnerState:\n    \"\"\"Immutable spinner state tracking current frame.\"\"\"\n\n    frame: int = 0\n    frames: SpinnerFrames = DOTS\n\n    def tick(self) -> SpinnerState:\n        \"\"\"Advance to the next frame, wrapping around.\"\"\"\n        cursor = Cursor(index=self.frame, count=len(self.frames.frames), mode=CursorMode.WRAP).next()\n        return replace(self, frame=cursor.index)\n",
+      "title": "SpinnerState"
+    },
+    "py:fidelis._components.spinner:spinner#signature": {
+      "id": "py:fidelis._components.spinner:spinner#signature",
+      "kind": "signature",
+      "language": "python",
+      "origin": {
+        "end_line": 46,
+        "path": "src/fidelis/_components/spinner.py",
+        "start_line": 41
+      },
+      "source": "def spinner(\n    state: SpinnerState,\n    *,\n    style: Style | None = None,\n    icons: \"IconSet | None\" = None,\n) -> Block:\n",
+      "title": "spinner"
+    },
     "py:fidelis.app:Surface#signature": {
       "id": "py:fidelis.app:Surface#signature",
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 19,
+        "end_line": 20,
         "path": "src/fidelis/app.py",
-        "start_line": 19
+        "start_line": 20
       },
       "source": "class Surface:\n",
       "title": "Surface"
-    },
-    "py:fidelis.app:Surface.handle_key#signature": {
-      "id": "py:fidelis.app:Surface.handle_key#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 149,
-        "path": "src/fidelis/app.py",
-        "start_line": 143
-      },
-      "source": "    def handle_key(\n        self,\n        key: str,\n        state: Any,\n        get_layers: Callable[[Any], tuple[Layer, ...]],\n        set_layers: Callable[[Any, tuple[Layer, ...]], Any],\n    ) -> tuple[Any, bool, Any]:\n",
-      "title": "Surface.handle_key"
     },
     "py:fidelis.app:Surface.run#signature": {
       "id": "py:fidelis.app:Surface.run#signature",
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 49,
+        "end_line": 57,
         "path": "src/fidelis/app.py",
-        "start_line": 49
+        "start_line": 57
       },
       "source": "    async def run(self) -> None:\n",
       "title": "Surface.run"
-    },
-    "py:fidelis.block:Block#signature": {
-      "id": "py:fidelis.block:Block#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 20,
-        "path": "src/fidelis/block.py",
-        "start_line": 20
-      },
-      "source": "class Block:\n",
-      "title": "Block"
     },
     "py:fidelis.block:Block.empty#signature": {
       "id": "py:fidelis.block:Block.empty#signature",
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 88,
+        "end_line": 110,
         "path": "src/fidelis/block.py",
-        "start_line": 87
+        "start_line": 109
       },
-      "source": "    @staticmethod\n    def empty(width: int, height: int, style: Style = Style()) -> Block:\n",
+      "source": "    @staticmethod\n    def empty(width: int, height: int, style: Style = Style(), *, id: str | None = None) -> Block:\n",
       "title": "Block.empty"
+    },
+    "py:fidelis.block:Block.paint#signature": {
+      "id": "py:fidelis.block:Block.paint#signature",
+      "kind": "signature",
+      "language": "python",
+      "origin": {
+        "end_line": 116,
+        "path": "src/fidelis/block.py",
+        "start_line": 116
+      },
+      "source": "    def paint(self, buffer: Buffer | BufferView, x: int = 0, y: int = 0) -> None:\n",
+      "title": "Block.paint"
     },
     "py:fidelis.block:Block.text#signature": {
       "id": "py:fidelis.block:Block.text#signature",
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 45,
+        "end_line": 67,
         "path": "src/fidelis/block.py",
-        "start_line": 43
+        "start_line": 65
       },
-      "source": "    @staticmethod\n    def text(content: str, style: Style, *, width: int | None = None,\n             wrap: Wrap = Wrap.NONE) -> Block:\n",
+      "source": "    @staticmethod\n    def text(content: str, style: Style, *, width: int | None = None,\n             wrap: Wrap = Wrap.NONE, id: str | None = None) -> Block:\n",
       "title": "Block.text"
     },
-    "py:fidelis.block:Wrap#definition": {
-      "id": "py:fidelis.block:Wrap#definition",
-      "kind": "definition",
+    "py:fidelis.buffer:Buffer.fill#signature": {
+      "id": "py:fidelis.buffer:Buffer.fill#signature",
+      "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 17,
-        "path": "src/fidelis/block.py",
-        "start_line": 13
+        "end_line": 92,
+        "path": "src/fidelis/buffer.py",
+        "start_line": 92
       },
-      "source": "class Wrap(Enum):\n    NONE = \"none\"        # single line, truncate at width\n    CHAR = \"char\"        # break at any character\n    WORD = \"word\"        # break at word boundaries\n    ELLIPSIS = \"ellipsis\"  # truncate with \"\u2026\"\n",
-      "title": "Wrap"
+      "source": "    def fill(self, x: int, y: int, w: int, h: int, char: str, style: Style) -> None:\n",
+      "title": "Buffer.fill"
+    },
+    "py:fidelis.buffer:Buffer.put#signature": {
+      "id": "py:fidelis.buffer:Buffer.put#signature",
+      "kind": "signature",
+      "language": "python",
+      "origin": {
+        "end_line": 49,
+        "path": "src/fidelis/buffer.py",
+        "start_line": 49
+      },
+      "source": "    def put(self, x: int, y: int, char: str, style: Style) -> None:\n",
+      "title": "Buffer.put"
+    },
+    "py:fidelis.buffer:Buffer.put_text#signature": {
+      "id": "py:fidelis.buffer:Buffer.put_text#signature",
+      "kind": "signature",
+      "language": "python",
+      "origin": {
+        "end_line": 66,
+        "path": "src/fidelis/buffer.py",
+        "start_line": 66
+      },
+      "source": "    def put_text(self, x: int, y: int, text: str, style: Style) -> None:\n",
+      "title": "Buffer.put_text"
+    },
+    "py:fidelis.buffer:Buffer.region#signature": {
+      "id": "py:fidelis.buffer:Buffer.region#signature",
+      "kind": "signature",
+      "language": "python",
+      "origin": {
+        "end_line": 103,
+        "path": "src/fidelis/buffer.py",
+        "start_line": 103
+      },
+      "source": "    def region(self, x: int, y: int, w: int, h: int) -> BufferView:\n",
+      "title": "Buffer.region"
     },
     "py:fidelis.cell:Cell#definition": {
       "id": "py:fidelis.cell:Cell#definition",
@@ -109,42 +157,6 @@
       "source": "@dataclass(frozen=True)\nclass Style:\n    \"\"\"Immutable text style with color and attribute flags.\"\"\"\n\n    fg: Color = None\n    bg: Color = None\n    bold: bool = False\n    italic: bool = False\n    underline: bool = False\n    reverse: bool = False\n    dim: bool = False\n\n    def merge(self, other: Style) -> Style:\n        \"\"\"Combine styles. `other` overrides non-None/non-False fields.\"\"\"\n        return Style(\n            fg=other.fg if other.fg is not None else self.fg,\n            bg=other.bg if other.bg is not None else self.bg,\n            bold=other.bold or self.bold,\n            italic=other.italic or self.italic,\n            underline=other.underline or self.underline,\n            reverse=other.reverse or self.reverse,\n            dim=other.dim or self.dim,\n        )\n",
       "title": "Style"
     },
-    "py:fidelis.cell:Style.merge#signature": {
-      "id": "py:fidelis.cell:Style.merge#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 38,
-        "path": "src/fidelis/cell.py",
-        "start_line": 38
-      },
-      "source": "    def merge(self, other: Style) -> Style:\n",
-      "title": "Style.merge"
-    },
-    "py:fidelis.compose:Align#definition": {
-      "id": "py:fidelis.compose:Align#definition",
-      "kind": "definition",
-      "language": "python",
-      "origin": {
-        "end_line": 16,
-        "path": "src/fidelis/compose.py",
-        "start_line": 13
-      },
-      "source": "class Align(Enum):\n    START = \"start\"    # top or left\n    CENTER = \"center\"\n    END = \"end\"        # bottom or right\n",
-      "title": "Align"
-    },
-    "py:fidelis.compose:border#signature": {
-      "id": "py:fidelis.compose:border#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 116,
-        "path": "src/fidelis/compose.py",
-        "start_line": 114
-      },
-      "source": "def border(block: Block, chars: BorderChars = ROUNDED,\n           style: Style = Style(), title: str | None = None,\n           title_style: Style | None = None) -> Block:\n",
-      "title": "border"
-    },
     "py:fidelis.compose:join_horizontal#signature": {
       "id": "py:fidelis.compose:join_horizontal#signature",
       "kind": "signature",
@@ -162,156 +174,84 @@
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 50,
+        "end_line": 67,
         "path": "src/fidelis/compose.py",
-        "start_line": 49
+        "start_line": 66
       },
       "source": "def join_vertical(*blocks: Block, gap: int = 0,\n                  align: Align = Align.START) -> Block:\n",
       "title": "join_vertical"
     },
-    "py:fidelis.compose:pad#signature": {
-      "id": "py:fidelis.compose:pad#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 85,
-        "path": "src/fidelis/compose.py",
-        "start_line": 84
-      },
-      "source": "def pad(block: Block, *, left: int = 0, right: int = 0,\n        top: int = 0, bottom: int = 0, style: Style = Style()) -> Block:\n",
-      "title": "pad"
-    },
-    "py:fidelis.compose:truncate#signature": {
-      "id": "py:fidelis.compose:truncate#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 170,
-        "path": "src/fidelis/compose.py",
-        "start_line": 170
-      },
-      "source": "def truncate(block: Block, width: int, ellipsis: str = \"\u2026\") -> Block:\n",
-      "title": "truncate"
-    },
-    "py:fidelis.compose:vslice#signature": {
-      "id": "py:fidelis.compose:vslice#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 191,
-        "path": "src/fidelis/compose.py",
-        "start_line": 191
-      },
-      "source": "def vslice(block: Block, offset: int, height: int) -> Block:\n",
-      "title": "vslice"
-    },
-    "py:fidelis.fidelity:CliContext#definition": {
-      "id": "py:fidelis.fidelity:CliContext#definition",
+    "py:fidelis.focus:Focus#definition": {
+      "id": "py:fidelis.focus:Focus#definition",
       "kind": "definition",
       "language": "python",
       "origin": {
-        "end_line": 77,
-        "path": "src/fidelis/fidelity.py",
-        "start_line": 68
+        "end_line": 34,
+        "path": "src/fidelis/focus.py",
+        "start_line": 9
       },
-      "source": "@dataclass(frozen=True)\nclass CliContext:\n    \"\"\"Resolved runtime context.\"\"\"\n\n    zoom: Zoom\n    mode: OutputMode  # Resolved (never AUTO)\n    format: Format  # Resolved (never AUTO)\n    is_tty: bool\n    width: int\n    height: int\n",
-      "title": "CliContext"
+      "source": "@dataclass(frozen=True, slots=True)\nclass Focus:\n    \"\"\"Immutable focus state primitive.\n\n    Tracks what's focused and whether the focused component has captured\n    keyboard input (two-tier focus: navigation vs widget interaction).\n    \"\"\"\n\n    id: str\n    captured: bool = False\n\n    def focus(self, id: str) -> Focus:\n        \"\"\"Return new Focus on the given id, releasing capture.\"\"\"\n        return Focus(id=id, captured=False)\n\n    def capture(self) -> Focus:\n        \"\"\"Return new Focus with keyboard captured by current component.\"\"\"\n        return replace(self, captured=True)\n\n    def release(self) -> Focus:\n        \"\"\"Return new Focus with keyboard released to navigation.\"\"\"\n        return replace(self, captured=False)\n\n    def toggle_capture(self) -> Focus:\n        \"\"\"Return new Focus with capture toggled.\"\"\"\n        return replace(self, captured=not self.captured)\n",
+      "title": "Focus"
     },
-    "py:fidelis.fidelity:Format#definition": {
-      "id": "py:fidelis.fidelity:Format#definition",
+    "py:fidelis.focus:ring_next#definition": {
+      "id": "py:fidelis.focus:ring_next#definition",
       "kind": "definition",
       "language": "python",
       "origin": {
-        "end_line": 65,
-        "path": "src/fidelis/fidelity.py",
-        "start_line": 59
+        "end_line": 48,
+        "path": "src/fidelis/focus.py",
+        "start_line": 40
       },
-      "source": "class Format(Enum):\n    \"\"\"Serialization format.\"\"\"\n\n    AUTO = \"auto\"  # Detect from TTY\n    ANSI = \"ansi\"  # Styled terminal output\n    PLAIN = \"plain\"  # No escape codes\n    JSON = \"json\"  # Machine-readable\n",
-      "title": "Format"
+      "source": "def ring_next(items: Sequence[str], current: str) -> str:\n    \"\"\"Move to next item in ring, wrapping at end.\"\"\"\n    if not items:\n        return current\n    try:\n        idx = list(items).index(current)\n        return items[(idx + 1) % len(items)]\n    except ValueError:\n        return items[0] if items else current\n",
+      "title": "ring_next"
     },
-    "py:fidelis.fidelity:OutputMode#definition": {
-      "id": "py:fidelis.fidelity:OutputMode#definition",
+    "py:fidelis.search:Search#definition": {
+      "id": "py:fidelis.search:Search#definition",
       "kind": "definition",
       "language": "python",
       "origin": {
-        "end_line": 56,
-        "path": "src/fidelis/fidelity.py",
-        "start_line": 50
+        "end_line": 53,
+        "path": "src/fidelis/search.py",
+        "start_line": 11
       },
-      "source": "class OutputMode(Enum):\n    \"\"\"Delivery mechanism.\"\"\"\n\n    AUTO = \"auto\"  # Detect from TTY/pipe\n    STATIC = \"static\"  # print_block, scrolls away\n    LIVE = \"live\"  # InPlaceRenderer, cursor control\n    INTERACTIVE = \"interactive\"  # Surface, alt screen\n",
-      "title": "OutputMode"
+      "source": "@dataclass(frozen=True, slots=True)\nclass Search:\n    \"\"\"Immutable search state for filtered selection.\n\n    Tracks the query string and selected index within filtered results.\n    \"\"\"\n\n    query: str = \"\"\n    selected: int = 0\n\n    def type(self, char: str) -> Search:\n        \"\"\"Return new Search with char appended to query, resetting selection.\"\"\"\n        return Search(query=self.query + char, selected=0)\n\n    def backspace(self) -> Search:\n        \"\"\"Return new Search with last char removed from query.\"\"\"\n        if not self.query:\n            return self\n        return Search(query=self.query[:-1], selected=0)\n\n    def clear(self) -> Search:\n        \"\"\"Return new Search with empty query.\"\"\"\n        return Search(query=\"\", selected=0)\n\n    def select_next(self, match_count: int) -> Search:\n        \"\"\"Return new Search with selection moved to next match (wrapping).\"\"\"\n        if match_count == 0:\n            return self\n        cursor = Cursor(index=self.selected, count=match_count, mode=CursorMode.WRAP).next()\n        return replace(self, selected=cursor.index)\n\n    def select_prev(self, match_count: int) -> Search:\n        \"\"\"Return new Search with selection moved to previous match (wrapping).\"\"\"\n        if match_count == 0:\n            return self\n        cursor = Cursor(index=self.selected, count=match_count, mode=CursorMode.WRAP).prev()\n        return replace(self, selected=cursor.index)\n\n    def selected_item(self, matches: Sequence[str]) -> str | None:\n        \"\"\"Return the currently selected item from matches, or None if empty.\"\"\"\n        if not matches or self.selected >= len(matches):\n            return None\n        return matches[self.selected]\n",
+      "title": "Search"
     },
-    "py:fidelis.fidelity:Zoom#definition": {
-      "id": "py:fidelis.fidelity:Zoom#definition",
+    "py:fidelis.search:filter_fuzzy#definition": {
+      "id": "py:fidelis.search:filter_fuzzy#definition",
       "kind": "definition",
       "language": "python",
       "origin": {
-        "end_line": 47,
-        "path": "src/fidelis/fidelity.py",
-        "start_line": 41
+        "end_line": 94,
+        "path": "src/fidelis/search.py",
+        "start_line": 75
       },
-      "source": "class Zoom(IntEnum):\n    \"\"\"Detail level for rendering.\"\"\"\n\n    MINIMAL = 0  # One-liner, counts only\n    SUMMARY = 1  # Key information, tree structure\n    DETAILED = 2  # Everything visible, nested expansion\n    FULL = 3  # All fields, full depth\n",
-      "title": "Zoom"
+      "source": "def filter_fuzzy(items: Sequence[str], query: str) -> tuple[str, ...]:\n    \"\"\"Filter items by fuzzy match (characters appear in order).\n\n    Example: \"fb\" matches \"FooBar\" because 'f' and 'b' appear in order.\n    \"\"\"\n    if not query:\n        return tuple(items)\n\n    def matches(item: str, q: str) -> bool:\n        item_lower = item.lower()\n        q_lower = q.lower()\n        idx = 0\n        for char in q_lower:\n            idx = item_lower.find(char, idx)\n            if idx == -1:\n                return False\n            idx += 1\n        return True\n\n    return tuple(item for item in items if matches(item, query))\n",
+      "title": "filter_fuzzy"
     },
-    "py:fidelis.fidelity:run_cli#signature": {
-      "id": "py:fidelis.fidelity:run_cli#signature",
+    "py:fidelis.span:Line#signature": {
+      "id": "py:fidelis.span:Line#signature",
       "kind": "signature",
       "language": "python",
       "origin": {
-        "end_line": 363,
-        "path": "src/fidelis/fidelity.py",
-        "start_line": 352
-      },
-      "source": "def run_cli(\n    args: list[str],\n    render: Callable[[CliContext, T], \"Block\"],\n    fetch: Callable[[], T],\n    *,\n    fetch_stream: Callable[[], \"AsyncIterator[T]\"] | None = None,\n    handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None,\n    default_zoom: Zoom = Zoom.SUMMARY,\n    description: str | None = None,\n    prog: str | None = None,\n    add_args: Callable[[argparse.ArgumentParser], None] | None = None,\n) -> int:\n",
-      "title": "run_cli"
-    },
-    "py:fidelis.layer:Layer#definition": {
-      "id": "py:fidelis.layer:Layer#definition",
-      "kind": "definition",
-      "language": "python",
-      "origin": {
-        "end_line": 57,
-        "path": "src/fidelis/layer.py",
-        "start_line": 45
-      },
-      "source": "@dataclass(frozen=True, slots=True)\nclass Layer(Generic[S]):\n    \"\"\"A layer bundles state, input handling, and rendering for modal stacking.\n\n    - state: layer-local state, created on push, gone on pop\n    - handle: (key, layer_state, app_state) -> (layer_state, app_state, action)\n    - render: (layer_state, app_state, buffer_view) -> None\n    \"\"\"\n\n    name: str\n    state: S\n    handle: Callable[[str, S, Any], tuple[S, Any, Action]]\n    render: Callable[[S, Any, BufferView], None]\n",
-      "title": "Layer"
-    },
-    "py:fidelis.layer:process_key#signature": {
-      "id": "py:fidelis.layer:process_key#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 65,
-        "path": "src/fidelis/layer.py",
-        "start_line": 60
-      },
-      "source": "def process_key(\n    key: str,\n    state: A,\n    get_layers: Callable[[A], tuple[Layer, ...]],\n    set_layers: Callable[[A, tuple[Layer, ...]], A],\n) -> tuple[A, bool, Any]:\n",
-      "title": "process_key"
-    },
-    "py:fidelis.layer:render_layers#signature": {
-      "id": "py:fidelis.layer:render_layers#signature",
-      "kind": "signature",
-      "language": "python",
-      "origin": {
-        "end_line": 104,
-        "path": "src/fidelis/layer.py",
-        "start_line": 100
-      },
-      "source": "def render_layers(\n    state: A,\n    buf: Buffer,\n    get_layers: Callable[[A], tuple[Layer, ...]],\n) -> None:\n",
-      "title": "render_layers"
-    },
-    "py:fidelis.span:Line#definition": {
-      "id": "py:fidelis.span:Line#definition",
-      "kind": "definition",
-      "language": "python",
-      "origin": {
-        "end_line": 104,
+        "end_line": 31,
         "path": "src/fidelis/span.py",
         "start_line": 30
       },
-      "source": "@dataclass(frozen=True, slots=True)\nclass Line:\n    \"\"\"A sequence of spans forming a single line of styled text.\"\"\"\n\n    spans: tuple[Span, ...] = ()\n    style: Style = Style()\n\n    @classmethod\n    def plain(cls, text: str, style: Style = Style()) -> Line:\n        \"\"\"Create a Line from a single unstyled (or uniformly styled) string.\"\"\"\n        return cls((Span(text, style),))\n\n    @property\n    def width(self) -> int:\n        \"\"\"Total display width across all spans.\"\"\"\n        return sum(s.width for s in self.spans)\n\n    def paint(self, view: BufferView, x: int, y: int) -> None:\n        \"\"\"Render spans into a BufferView, merging base style onto each span.\"\"\"\n        col = x\n        for span in self.spans:\n            merged = self.style.merge(span.style)\n            view.put_text(col, y, span.text, merged)\n            col += span.width\n\n    def truncate(self, max_width: int) -> Line:\n        \"\"\"Return a new Line truncated to max_width display columns.\"\"\"\n        remaining = max_width\n        kept: list[Span] = []\n        for span in self.spans:\n            sw = span.width\n            if sw <= remaining:\n                kept.append(span)\n                remaining -= sw\n            else:\n                # Cut this span character by character\n                chars: list[str] = []\n                used = 0\n                for ch in span.text:\n                    cw = wcswidth(ch)\n                    if cw < 0:\n                        cw = 1\n                    if used + cw > remaining:\n                        break\n                    chars.append(ch)\n                    used += cw\n                if chars:\n                    kept.append(Span(\"\".join(chars), span.style))\n                break\n        return Line(spans=tuple(kept), style=self.style)\n\n    def to_block(self, width: int) -> \"Block\":\n        \"\"\"Convert this Line to a Block of the given width.\n\n        Builds cells directly from spans, merging Line style onto each span.\n        Pads with empty cells if Line is shorter than width.\n        Truncates if Line is longer than width.\n        \"\"\"\n        from .block import Block\n\n        cells: list[Cell] = []\n        for span in self.spans:\n            merged = self.style.merge(span.style)\n            for ch in span.text:\n                if len(cells) >= width:\n                    break\n                cells.append(Cell(ch, merged))\n            if len(cells) >= width:\n                break\n\n        # Pad to width\n        while len(cells) < width:\n            cells.append(EMPTY_CELL)\n\n        return Block([cells], width)\n",
+      "source": "@dataclass(frozen=True, slots=True)\nclass Line:\n",
       "title": "Line"
+    },
+    "py:fidelis.span:Line.paint#definition": {
+      "id": "py:fidelis.span:Line.paint#definition",
+      "kind": "definition",
+      "language": "python",
+      "origin": {
+        "end_line": 53,
+        "path": "src/fidelis/span.py",
+        "start_line": 47
+      },
+      "source": "    def paint(self, view: BufferView, x: int, y: int) -> None:\n        \"\"\"Render spans into a BufferView, merging base style onto each span.\"\"\"\n        col = x\n        for span in self.spans:\n            merged = self.style.merge(span.style)\n            view.put_text(col, y, span.text, merged)\n            col += span.width\n",
+      "title": "Line.paint"
     },
     "py:fidelis.span:Span#definition": {
       "id": "py:fidelis.span:Span#definition",

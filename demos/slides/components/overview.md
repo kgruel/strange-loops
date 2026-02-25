@@ -32,20 +32,29 @@ the component pattern: `State` + `render()`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis._components.spinner:SpinnerState#definition -->
 ```python
-# Each component follows the same pattern:
-# 1. Immutable state dataclass
-# 2. Pure render function: state -> Block
-
 @dataclass(frozen=True)
 class SpinnerState:
+    """Immutable spinner state tracking current frame."""
+
     frame: int = 0
-    frames: tuple[str, ...] = DOTS
+    frames: SpinnerFrames = DOTS
 
-    def tick(self) -> "SpinnerState":
-        return replace(self, frame=(self.frame + 1) % len(self.frames))
-
-def spinner(state: SpinnerState, style: Style = Style()) -> Block:
-    char = state.frames[state.frame]
-    return Block.text(char, style)
+    def tick(self) -> SpinnerState:
+        """Advance to the next frame, wrapping around."""
+        cursor = Cursor(index=self.frame, count=len(self.frames.frames), mode=CursorMode.WRAP).next()
+        return replace(self, frame=cursor.index)
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis._components.spinner:spinner#signature -->
+```python
+def spinner(
+    state: SpinnerState,
+    *,
+    style: Style | None = None,
+    icons: "IconSet | None" = None,
+) -> Block:
+```
+<!-- docgen:end -->

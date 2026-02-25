@@ -57,21 +57,47 @@ from `fidelis/focus.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.focus:Focus#definition -->
 ```python
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Focus:
-    """Immutable focus state: id + captured flag."""
-    id: str = ""
+    """Immutable focus state primitive.
+
+    Tracks what's focused and whether the focused component has captured
+    keyboard input (two-tier focus: navigation vs widget interaction).
+    """
+
+    id: str
     captured: bool = False
 
-    def capture(self) -> "Focus":
+    def focus(self, id: str) -> Focus:
+        """Return new Focus on the given id, releasing capture."""
+        return Focus(id=id, captured=False)
+
+    def capture(self) -> Focus:
+        """Return new Focus with keyboard captured by current component."""
         return replace(self, captured=True)
 
-    def release(self) -> "Focus":
+    def release(self) -> Focus:
+        """Return new Focus with keyboard released to navigation."""
         return replace(self, captured=False)
 
-def ring_next(items: Sequence[T], current: T) -> T:
-    """Next item, wrapping at end."""
-    idx = items.index(current)
-    return items[(idx + 1) % len(items)]
+    def toggle_capture(self) -> Focus:
+        """Return new Focus with capture toggled."""
+        return replace(self, captured=not self.captured)
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.focus:ring_next#definition -->
+```python
+def ring_next(items: Sequence[str], current: str) -> str:
+    """Move to next item in ring, wrapping at end."""
+    if not items:
+        return current
+    try:
+        idx = list(items).index(current)
+        return items[(idx + 1) % len(items)]
+    except ValueError:
+        return items[0] if items else current
+```
+<!-- docgen:end -->

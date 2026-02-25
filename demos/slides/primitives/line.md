@@ -59,21 +59,21 @@ from `fidelis/span.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.span:Line#signature -->
 ```python
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Line:
-    """A sequence of Spans - styled inline text."""
-    spans: tuple[Span, ...] = ()
-    style: Style | None = None
-
-    @property
-    def width(self) -> int:
-        return sum(s.width for s in self.spans)
-
-    def paint(self, view: BufferView, x: int, y: int) -> int:
-        """Paint spans left to right, return ending x."""
-        for span in self.spans:
-            view.put_text(x, y, span.text, span.style)
-            x += span.width
-        return x
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.span:Line.paint#definition -->
+```python
+    def paint(self, view: BufferView, x: int, y: int) -> None:
+        """Render spans into a BufferView, merging base style onto each span."""
+        col = x
+        for span in self.spans:
+            merged = self.style.merge(span.style)
+            view.put_text(col, y, span.text, merged)
+            col += span.width
+```
+<!-- docgen:end -->

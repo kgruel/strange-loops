@@ -54,24 +54,30 @@ from `fidelis/cell.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.cell:Style#definition -->
 ```python
 @dataclass(frozen=True)
 class Style:
-    """Visual attributes for a cell."""
-    fg: str | int | None = None
-    bg: str | int | None = None
+    """Immutable text style with color and attribute flags."""
+
+    fg: Color = None
+    bg: Color = None
     bold: bool = False
-    dim: bool = False
     italic: bool = False
     underline: bool = False
     reverse: bool = False
+    dim: bool = False
 
-    def merge(self, other: "Style") -> "Style":
-        """Merge with another style; other wins on conflict."""
+    def merge(self, other: Style) -> Style:
+        """Combine styles. `other` overrides non-None/non-False fields."""
         return Style(
             fg=other.fg if other.fg is not None else self.fg,
             bg=other.bg if other.bg is not None else self.bg,
             bold=other.bold or self.bold,
-            # ... etc
+            italic=other.italic or self.italic,
+            underline=other.underline or self.underline,
+            reverse=other.reverse or self.reverse,
+            dim=other.dim or self.dim,
         )
 ```
+<!-- docgen:end -->

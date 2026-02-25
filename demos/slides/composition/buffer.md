@@ -48,21 +48,26 @@ from `fidelis/buffer.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.buffer:Buffer.put#signature -->
 ```python
-class Buffer:
-    """2D grid of Cells - the rendering canvas."""
-
-    def __init__(self, width: int, height: int):
-        self._width = width
-        self._height = height
-        self._cells = [[EMPTY_CELL] * width for _ in range(height)]
-
-    def put(self, x: int, y: int, char: str, style: Style):
-        """Set a single cell."""
-        if 0 <= x < self._width and 0 <= y < self._height:
-            self._cells[y][x] = Cell(char, style)
-
-    def region(self, x: int, y: int, w: int, h: int) -> BufferView:
-        """Get a clipped, translated view of this buffer."""
-        return BufferView(self, x, y, w, h)
+    def put(self, x: int, y: int, char: str, style: Style) -> None:
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.buffer:Buffer.put_text#signature -->
+```python
+    def put_text(self, x: int, y: int, text: str, style: Style) -> None:
+```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.buffer:Buffer.fill#signature -->
+```python
+    def fill(self, x: int, y: int, w: int, h: int, char: str, style: Style) -> None:
+```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.buffer:Buffer.region#signature -->
+```python
+    def region(self, x: int, y: int, w: int, h: int) -> BufferView:
+```
+<!-- docgen:end -->

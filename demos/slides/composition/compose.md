@@ -30,22 +30,16 @@ from `fidelis/compose.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.compose:join_horizontal#signature -->
 ```python
-def join_horizontal(*blocks: Block, gap: int = 0) -> Block:
-    """Place blocks side by side."""
-    if not blocks:
-        return Block.empty(0, 0)
-    max_h = max(b.height for b in blocks)
-    rows = []
-    for y in range(max_h):
-        row = []
-        for i, block in enumerate(blocks):
-            if i > 0 and gap > 0:
-                row.extend([EMPTY_CELL] * gap)
-            if y < block.height:
-                row.extend(block.rows[y])
-            else:
-                row.extend([EMPTY_CELL] * block.width)
-        rows.append(row)
-    return Block(rows=rows, width=sum(len(r) for r in [rows[0]]))
+def join_horizontal(*blocks: Block, gap: int = 0,
+                    align: Align = Align.START) -> Block:
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.compose:join_vertical#signature -->
+```python
+def join_vertical(*blocks: Block, gap: int = 0,
+                  align: Align = Align.START) -> Block:
+```
+<!-- docgen:end -->

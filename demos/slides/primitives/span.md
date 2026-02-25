@@ -54,24 +54,22 @@ from `fidelis/span.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.span:Span#definition -->
 ```python
-def span_width(text: str) -> int:
-    """Calculate display width accounting for wide chars."""
-    total = 0
-    for ch in text:
-        w = wcwidth(ch)
-        if w < 0:
-            w = 0  # control chars
-        total += w
-    return total
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Span:
-    """A run of text with one style."""
+    """A run of text with a single style."""
+
     text: str
-    style: Style = field(default_factory=Style)
+    style: Style = Style()
 
     @property
     def width(self) -> int:
-        return span_width(self.text)
+        """Display width, accounting for wide characters."""
+        w = wcswidth(self.text)
+        if w < 0:
+            # Fallback for strings containing non-printable chars
+            return len(self.text)
+        return w
 ```
+<!-- docgen:end -->

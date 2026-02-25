@@ -49,17 +49,17 @@ from `fidelis/cell.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.cell:Cell#definition -->
 ```python
 @dataclass(frozen=True)
 class Cell:
-    """A single cell in the buffer: one character + one style."""
-    char: str = " "
-    style: Style = field(default_factory=Style)
+    """Atomic display unit: a single character with style."""
+
+    char: str
+    style: Style
 
     def __post_init__(self):
-        # Enforce single character (but allow multi-byte)
         if len(self.char) != 1:
-            object.__setattr__(self, "char", self.char[0] if self.char else " ")
-
-EMPTY_CELL = Cell(" ", Style())
+            raise ValueError(f"Cell char must be a single character, got {self.char!r}")
 ```
+<!-- docgen:end -->

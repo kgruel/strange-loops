@@ -58,26 +58,23 @@ from `fidelis/block.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.block:Block.text#signature -->
 ```python
-@dataclass(frozen=True)
-class Block:
-    """Immutable rectangle of Cells."""
-    rows: list[list[Cell]]
-    width: int
-
-    @property
-    def height(self) -> int:
-        return len(self.rows)
-
-    @classmethod
-    def text(cls, text: str, style: Style) -> "Block":
-        """Create a Block from a string."""
-        cells = [Cell(ch, style) for ch in text]
-        return cls(rows=[cells], width=len(cells))
-
-    def paint(self, view: BufferView, x: int, y: int):
-        """Copy this block into the view."""
-        for row_idx, row in enumerate(self.rows):
-            for col_idx, cell in enumerate(row):
-                view.put(x + col_idx, y + row_idx, cell.char, cell.style)
+    @staticmethod
+    def text(content: str, style: Style, *, width: int | None = None,
+             wrap: Wrap = Wrap.NONE, id: str | None = None) -> Block:
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.block:Block.empty#signature -->
+```python
+    @staticmethod
+    def empty(width: int, height: int, style: Style = Style(), *, id: str | None = None) -> Block:
+```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.block:Block.paint#signature -->
+```python
+    def paint(self, buffer: Buffer | BufferView, x: int = 0, y: int = 0) -> None:
+```
+<!-- docgen:end -->

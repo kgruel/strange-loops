@@ -36,24 +36,14 @@ from `fidelis/app.py`
 
 [spacer]
 
+<!-- docgen:begin py:fidelis.app:Surface#signature -->
 ```python
 class Surface:
-    """Async main loop with diff-based rendering."""
-
-    async def run(self):
-        self._writer.enter_alt_screen()
-        try:
-            while not self._quit:
-                # Handle input
-                for key in self._keyboard.read():
-                    self.on_key(key)
-                # Update state
-                self.update()
-                # Render if dirty
-                if self._dirty:
-                    self.render()
-                    self._flush()
-                await asyncio.sleep(1 / self._fps_cap)
-        finally:
-            self._writer.exit_alt_screen()
 ```
+<!-- docgen:end -->
+
+<!-- docgen:begin py:fidelis.app:Surface.run#signature -->
+```python
+    async def run(self) -> None:
+```
+<!-- docgen:end -->

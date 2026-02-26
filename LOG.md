@@ -318,3 +318,25 @@ Built Discord integration for narrative debugging and ran a live session.
 - ghost_pipe lurking correctly = signal (spoke twice, both sharp)
 
 **577 tests passing on main.**
+
+## 2026-02-26 — show() + CliRunner error handling
+
+**show() zero-config display** (direct on main, prior session):
+- `show(data)` entry point for progressive display across all output modes
+- Scalars bypass lens (direct `Block.text()`), Blocks pass through, structured
+  data goes through shape_lens. Auto-detects format from TTY.
+
+**CliRunner error handling** (subtask `error-handling`):
+- Graceful error handling at the runner boundary following "errors are data"
+  principle. No new types, no Result wrapper — just try/except at the boundary.
+- fetch() failures → styled error Block using `Palette.error` (fallback
+  `Style(fg="red")`) + exit code 1
+- render() failures → plain `Style()` error Block (can't trust Palette if
+  render is broken) + exit code 2
+- JSON path → `{"error": "message"}` + exit code 1
+- Streaming path covered (both fetch and render failures inside async context)
+- Surface.run() intentionally not wrapped — interactive render bugs should
+  crash visibly after terminal restore
+- 22 new tests
+
+**599 tests passing on main.**

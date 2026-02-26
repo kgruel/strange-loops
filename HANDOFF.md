@@ -11,7 +11,7 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 577 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+v0.1.0, 599 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
 
 Discord narrative debugging infrastructure implemented and validated. Two sessions
 completed (simulated + real Discord). Writer output path fully optimized.
@@ -48,7 +48,7 @@ docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 577 tests
+tests/                 # 599 tests
 demos/                 # Python files + tour.py + slides/
   slides/              # 21 markdown files (tour content, docgen-synced)
   slide_loader.py      # Markdown parser with zoom levels + auto-nav
@@ -112,6 +112,14 @@ demos/                 # Python files + tour.py + slides/
   webhook POST + bot GET), 4 persona agent definitions in `.claude/agents/`,
   personas config, auto `.env` loading. Validated with real Discord session.
   6 new tests.
+- **show() zero-config display** — `show(data)` entry point for progressive
+  display. Scalars bypass lens, Blocks pass through, dicts/lists use
+  shape_lens. Auto-detects format from TTY.
+- **CliRunner error handling** — graceful error handling at the runner
+  boundary. fetch() failures → styled error Block (Palette.error) + exit 1.
+  render() failures → plain error Block + exit 2. JSON → `{"error": "..."}`.
+  Streaming path covered. Surface intentionally not wrapped (render bugs
+  should crash visibly).
 
 ## Capability Signal Design (Resolved)
 
@@ -140,6 +148,7 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 | `scroll-optimization` | **Merged** | DECSTBM scroll + line hashing + detection |
 | `tour-content-gaps` | **Merged** | 4 new slides: pipeline, layers, lenses, CLI harness |
 | `tour-docgen` | **Merged** | Docgen sync blocks in 11 tour slides |
+| `error-handling` | **Merged** | CliRunner fetch/render error handling |
 
 ## Narrative Debugging (Two Sessions Completed)
 

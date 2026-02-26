@@ -96,3 +96,31 @@ class TestShowRendered:
         buf = io.StringIO()
         show("hello world", file=buf)
         assert "hello" in buf.getvalue()
+
+
+class TestShowAutoDetect:
+    """show() auto-detects format from TTY state."""
+
+    def test_non_tty_stream_uses_plain(self):
+        """Writing to a non-TTY stream produces plain text (no ANSI codes)."""
+        buf = io.StringIO()
+        show({"key": "value"}, file=buf)
+        output = buf.getvalue()
+        # StringIO.isatty() returns False -> format resolves to PLAIN
+        assert "\x1b[" not in output  # no ANSI escape codes
+
+    def test_format_json_override(self):
+        """format=JSON forces JSON output regardless of TTY."""
+        from fidelis import Format
+        buf = io.StringIO()
+        show({"key": "value"}, format=Format.JSON, file=buf)
+        parsed = json.loads(buf.getvalue())
+        assert parsed["key"] == "value"
+
+    def test_format_plain_override(self):
+        """format=PLAIN forces plain text (no ANSI)."""
+        from fidelis import Format
+        buf = io.StringIO()
+        show({"key": "value"}, format=Format.PLAIN, file=buf)
+        output = buf.getvalue()
+        assert "\x1b[" not in output

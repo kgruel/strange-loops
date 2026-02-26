@@ -119,6 +119,13 @@ def show(
         file.flush()
         return
 
+    # Scalars — no structure to inspect, just print
+    if lens is None and (data is None or isinstance(data, (str, int, float, bool))):
+        file.write(str(data))
+        file.write("\n")
+        file.flush()
+        return
+
     # Rendered path — lens to Block, then print
     render_fn = lens or shape_lens
     block = render_fn(data, ctx.zoom, ctx.width)

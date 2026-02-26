@@ -98,6 +98,56 @@ class TestShowRendered:
         assert "hello" in buf.getvalue()
 
 
+class TestShowScalars:
+    """Scalars bypass shape_lens — no structure to inspect."""
+
+    def test_string_no_padding(self):
+        """show(str) outputs the string without width padding."""
+        buf = io.StringIO()
+        show("hello", file=buf)
+        assert buf.getvalue() == "hello\n"
+
+    def test_int(self):
+        """show(int) prints the integer."""
+        buf = io.StringIO()
+        show(42, file=buf)
+        assert buf.getvalue() == "42\n"
+
+    def test_float(self):
+        """show(float) prints the float."""
+        buf = io.StringIO()
+        show(3.14, file=buf)
+        assert buf.getvalue() == "3.14\n"
+
+    def test_bool(self):
+        """show(bool) prints the boolean."""
+        buf = io.StringIO()
+        show(True, file=buf)
+        assert buf.getvalue() == "True\n"
+
+    def test_none(self):
+        """show(None) prints None."""
+        buf = io.StringIO()
+        show(None, file=buf)
+        assert buf.getvalue() == "None\n"
+
+    def test_scalar_with_explicit_lens_uses_lens(self):
+        """show(scalar, lens=fn) respects the lens override."""
+        def my_lens(data, zoom, width):
+            return Block.text(f"[{data}]", Style())
+
+        buf = io.StringIO()
+        show("hello", lens=my_lens, file=buf)
+        assert "[hello]" in buf.getvalue()
+
+    def test_scalar_json_still_works(self):
+        """show(scalar, format=JSON) still outputs JSON."""
+        from fidelis import Format
+        buf = io.StringIO()
+        show(42, format=Format.JSON, file=buf)
+        assert json.loads(buf.getvalue()) == 42
+
+
 class TestShowAutoDetect:
     """show() auto-detects format from TTY state."""
 

@@ -66,11 +66,11 @@ def _module_for_path(py_file: Path, *, src_root: Path) -> str:
     else:
         parts[-1] = parts[-1][:-3]  # strip .py
     if not parts:
-        return "fidelis"
-    return "fidelis." + ".".join(parts)
+        return "painted"
+    return "painted." + ".".join(parts)
 
 
-def _iter_fidelis_py_files(src_root: Path) -> Iterator[Path]:
+def _iter_painted_py_files(src_root: Path) -> Iterator[Path]:
     for path in sorted(src_root.rglob("*.py")):
         if path.name.startswith("."):
             continue
@@ -127,13 +127,13 @@ def _iter_defs(module: ast.Module, *, module_name: str, path: Path) -> Iterator[
     yield from walk(module.body, "")
 
 
-def index_fidelis_sources(*, repo_root: Path) -> dict[tuple[str, str], NodeInfo]:
-    src_root = repo_root / "src" / "fidelis"
+def index_painted_sources(*, repo_root: Path) -> dict[tuple[str, str], NodeInfo]:
+    src_root = repo_root / "src" / "painted"
     if not src_root.exists():
         raise FileNotFoundError(f"Missing src root: {src_root}")
 
     index: dict[tuple[str, str], NodeInfo] = {}
-    for py_file in _iter_fidelis_py_files(src_root):
+    for py_file in _iter_painted_py_files(src_root):
         module_name = _module_for_path(py_file, src_root=src_root)
         parsed = ast.parse(_read_text(py_file), filename=str(py_file))
         for info in _iter_defs(parsed, module_name=module_name, path=py_file):
@@ -527,7 +527,7 @@ def main(argv: list[str]) -> int:
     if not args.update and not args.check:
         ap.error("Must pass --update or --check")
 
-    index = index_fidelis_sources(repo_root=repo_root)
+    index = index_painted_sources(repo_root=repo_root)
 
     md_files = list(_iter_markdown_files(repo_root, args.roots))
     all_selectors: set[str] = set()

@@ -16,7 +16,7 @@ align: center
 
 [spacer]
 
-you provide `fetch` and `render(ctx, data) -> Block` — fidelis chooses delivery
+you provide `fetch` and `render(ctx, data) -> Block` — painted chooses delivery
 
 [spacer]
 
@@ -62,5 +62,5 @@ run_cli(
 
 [spacer]
 
-`src/fidelis/fidelity.py` defines `run_cli`, `CliContext`, `Zoom`, `OutputMode`, and `Format`.
+`src/painted/fidelity.py` defines `run_cli`, `CliContext`, `Zoom`, `OutputMode`, and `Format`.
 

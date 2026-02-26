@@ -1,6 +1,6 @@
 # Tour Design
 
-How prism teaches its concepts. This pattern originates here, in the fidelis
+How prism teaches its concepts. This pattern originates here, in the painted
 tour, but it generalizes to any library or system that builds up from
 composable primitives.
 
@@ -76,7 +76,7 @@ The CLI flags map directly to this model:
 
 ## The General Pattern
 
-This spatial model isn't specific to fidelis. Any library with a composable
+This spatial model isn't specific to painted. Any library with a composable
 primitive hierarchy can use the same axes:
 
 - **Horizontal**: the dependency chain of core concepts

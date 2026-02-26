@@ -4,7 +4,7 @@ Research on zoom management in multi-lens applications.
 
 ## Context
 
-The fidelis lens system provides three lens functions:
+The painted lens system provides three lens functions:
 - `shape_lens`: convention-based rendering of Python data structures
 - `tree_lens`: hierarchical tree visualization
 - `chart_lens`: sparklines and bar charts
@@ -266,7 +266,7 @@ PEER_LENS: dict[str, Lens] = {
 ```
 
 This separates:
-- `fidelis.views.Lens`: render function + capability metadata
+- `painted.views.Lens`: render function + capability metadata
 - `experiments.Lens`: zoom + scope (view configuration)
 
 Two different types with the same name. The experiment's Lens is richer — it

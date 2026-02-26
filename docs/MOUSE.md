@@ -1,6 +1,6 @@
 # Mouse Input in Terminal UIs
 
-Research findings on terminal mouse protocols and recommendations for fidelis.
+Research findings on terminal mouse protocols and recommendations for painted.
 
 ## Protocol Overview
 
@@ -141,7 +141,7 @@ configuration.
 5. **Capture mode** — one widget can claim all mouse events temporarily
 6. **Scroll → deltas** — scroll events become +1/-1 deltas for Viewport
 
-## Recommended Approach for fidelis
+## Recommended Approach for painted
 
 ### Design Principles
 
@@ -154,7 +154,7 @@ configuration.
 ### Proposed Types
 
 ```python
-# libs/fidelis/src/fidelis/mouse.py
+# libs/painted/src/painted/mouse.py
 
 from dataclasses import dataclass
 from enum import Enum, auto

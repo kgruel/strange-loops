@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fidelis import Style
-from fidelis.mouse import MouseAction, MouseButton, MouseEvent
-from fidelis.tui import (
+from painted import Style
+from painted.mouse import MouseAction, MouseButton, MouseEvent
+from painted.tui import (
     Layer,
     Pop,
     Push,

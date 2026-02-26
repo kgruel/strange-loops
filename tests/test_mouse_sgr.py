@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from fidelis._mouse import MouseAction, MouseButton, MouseEvent, parse_sgr_mouse
-from fidelis.tui import KeyboardInput
+from painted._mouse import MouseAction, MouseButton, MouseEvent, parse_sgr_mouse
+from painted.tui import KeyboardInput
 
 
 def _bytes_stream(data: bytes) -> list[bytes]:

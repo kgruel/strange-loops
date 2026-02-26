@@ -8,8 +8,8 @@ import pytest
 
 
 def test_block_defensively_freezes_rows() -> None:
-    from fidelis.block import Block
-    from fidelis.cell import Cell, Style
+    from painted.block import Block
+    from painted.cell import Cell, Style
 
     style = Style()
     rows = [[Cell("a", style), Cell("b", style)]]
@@ -47,7 +47,7 @@ def _dataclass_frozen_from_decorators(class_def: ast.ClassDef) -> bool | None:
 
 
 def test_state_dataclasses_declared_frozen() -> None:
-    fidelis_root = Path(__file__).resolve().parents[1] / "src" / "fidelis"
+    painted_root = Path(__file__).resolve().parents[1] / "src" / "painted"
 
     must_be_frozen = {
         "Region",
@@ -66,7 +66,7 @@ def test_state_dataclasses_declared_frozen() -> None:
         "IconSet",
     }
 
-    for py_file in fidelis_root.rglob("*.py"):
+    for py_file in painted_root.rglob("*.py"):
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
@@ -78,34 +78,33 @@ def test_state_dataclasses_declared_frozen() -> None:
 
 
 def test_block_rows_private_not_accessed_outside_block() -> None:
-    fidelis_root = Path(__file__).resolve().parents[1] / "src" / "fidelis"
-    block_py = fidelis_root / "block.py"
+    painted_root = Path(__file__).resolve().parents[1] / "src" / "painted"
+    block_py = painted_root / "block.py"
 
-    for py_file in fidelis_root.rglob("*.py"):
+    for py_file in painted_root.rglob("*.py"):
         if py_file == block_py:
             continue
         assert "._rows" not in py_file.read_text(encoding="utf-8"), f"{py_file} accesses Block._rows directly"
 
 
 def test_runtime_state_dataclasses_are_frozen() -> None:
-    from fidelis.borders import BorderChars
-    from fidelis.cell import Cell, Style
-    from fidelis._components.data_explorer import DataExplorerState
-    from fidelis._components.list_view import ListState
-    from fidelis._components.progress import ProgressState
-    from fidelis._components.spinner import SpinnerState
-    from fidelis._components.table import TableState
-    from fidelis._components.text_input import TextInputState
-    from fidelis.cursor import Cursor
-    from fidelis.fidelity import CliContext
-    from fidelis.focus import Focus
-    from fidelis.region import Region
-    from fidelis.search import Search
-    from fidelis.span import Line, Span
-    from fidelis.viewport import Viewport
-    from fidelis._lens import Lens
-    from fidelis.icon_set import IconSet
-    from fidelis.palette import Palette
+    from painted.borders import BorderChars
+    from painted.cell import Cell, Style
+    from painted._components.data_explorer import DataExplorerState
+    from painted._components.list_view import ListState
+    from painted._components.progress import ProgressState
+    from painted._components.spinner import SpinnerState
+    from painted._components.table import TableState
+    from painted._components.text_input import TextInputState
+    from painted.cursor import Cursor
+    from painted.fidelity import CliContext
+    from painted.focus import Focus
+    from painted.region import Region
+    from painted.search import Search
+    from painted.span import Line, Span
+    from painted.viewport import Viewport
+    from painted.icon_set import IconSet
+    from painted.palette import Palette
 
     for cls in (
         Region,
@@ -116,7 +115,6 @@ def test_runtime_state_dataclasses_are_frozen() -> None:
         BorderChars,
         Focus,
         Search,
-        Lens,
         Cursor,
         Viewport,
         CliContext,

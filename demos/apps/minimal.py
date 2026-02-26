@@ -14,8 +14,8 @@ Press 'q' to quit, arrow keys to move, 'c' to cycle colors.
 """
 
 import asyncio
-from fidelis import Block, Style, border
-from fidelis.tui import Surface
+from painted import Block, Style, border
+from painted.tui import Surface
 
 COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan"]
 

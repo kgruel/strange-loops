@@ -1,6 +1,6 @@
-# fidelis demos
+# painted demos
 
-Demonstrations of the fidelis library, organized by complexity.
+Demonstrations of the painted library, organized by complexity.
 
 ## Quick Start
 
@@ -72,7 +72,7 @@ Each fidelity demo supports:
 
 ## Teaching Platform
 
-`tour.py` is the primary entry point for learning fidelis. It provides:
+`tour.py` is the primary entry point for learning painted. It provides:
 - 2D slide navigation (←→ topics, ↑↓ zoom levels)
 - Interactive widget demos
 - Source code exploration

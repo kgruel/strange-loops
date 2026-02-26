@@ -4,7 +4,7 @@
 fallbacks for monochrome output.
 
 Usage:
-    from fidelis.palette import current_palette, use_palette, MONO_PALETTE
+    from painted.palette import current_palette, use_palette, MONO_PALETTE
 
     p = current_palette()
     fill_style = p.accent.merge(Style(bold=True))

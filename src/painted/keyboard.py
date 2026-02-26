@@ -14,6 +14,9 @@ from ._mouse import MouseEvent, parse_sgr_mouse
 # 50ms handles SSH latency while still feeling responsive for bare ESC
 _ESC_TIMEOUT = 0.050
 
+# UTF-8 continuation bytes are unambiguous; wait generously
+_UTF8_CONT_TIMEOUT = 1.0
+
 # Union type for input events
 Input = str | MouseEvent
 
@@ -107,7 +110,10 @@ class KeyboardInput:
         if b == b"O":
             return self._read_ss3()
 
-        # ESC followed by something else — treat as escape
+        # ESC followed by printable ASCII → Alt+key
+        ch = b[0]
+        if 0x20 <= ch <= 0x7E:
+            return f"alt_{chr(ch)}"
         return "escape"
 
     def _read_csi(self) -> Input:
@@ -183,9 +189,9 @@ class KeyboardInput:
 
         Handles escape sequences atomically. Returns named keys ("up", "down",
         "left", "right", "home", "end", "escape", "backspace", "enter",
-        "delete", "page_up", "page_down", "insert", "shift_tab", "f1"-"f4"),
-        single character strings, or MouseEvent for mouse input.
-        Returns None if no input is available.
+        "delete", "page_up", "page_down", "insert", "shift_tab", "f1"-"f4",
+        "alt_<char>" for Alt+key combinations), single character strings,
+        or MouseEvent for mouse input. Returns None if no input is available.
         """
         if not self._available:
             return None
@@ -219,7 +225,7 @@ class KeyboardInput:
 
         buf = bytearray(b)
         for _ in range(expected - 1):
-            cont = self._read_byte(_ESC_TIMEOUT)
+            cont = self._read_byte(_UTF8_CONT_TIMEOUT)
             if cont is None:
                 break
             buf.extend(cont)

@@ -1,6 +1,6 @@
 # Primitives Reference
 
-Quick reference for fidelis primitives. See ARCHITECTURE.md for data flow, DATA_PATTERNS.md for patterns.
+Quick reference for painted primitives. See ARCHITECTURE.md for data flow, DATA_PATTERNS.md for patterns.
 
 ---
 
@@ -191,27 +191,21 @@ item = search.selected_item(matches)
 
 ---
 
-## Lens
+## Lens Functions
 
-**Lens** — Bundles render function + zoom metadata for content transformation.
+Three built-in strategies, all `(data, zoom, width) -> Block`:
 
-```python
-@dataclass(frozen=True, slots=True)
-class Lens(Generic[T]):
-    render: Callable[[T, int, int], Block]  # (content, zoom, width) -> Block
-    max_zoom: int = 2
-```
-
-**shape_lens** — Default convention-based renderer for Python data:
-- Zoom 0: type/count only (`dict[3]`, `list[5]`)
-- Zoom 1: summary (keys, truncated values)
-- Zoom 2: full representation
+- **shape_lens** — Auto-dispatches by data shape. Numeric sequences → chart_lens. Hierarchical dicts → tree_lens. Everything else uses built-in shape rendering (zoom 0: type/count, zoom 1: summary, zoom 2: full).
+- **tree_lens** — Hierarchical data with branch characters. Supports dicts, tuples, node protocol.
+- **chart_lens** — Numeric data as sparklines (zoom 1) or bar charts (zoom 2).
 
 ```python
-from fidelis.views import shape_lens, SHAPE_LENS
+from painted.views import shape_lens, tree_lens, chart_lens
 
-block = shape_lens({"a": 1, "b": 2}, zoom=1, width=40)  # "a, b"
-block = shape_lens({"a": 1, "b": 2}, zoom=2, width=40)  # key: value table
+block = shape_lens({"name": "Alice", "age": 30}, zoom=1, width=40)  # keys
+block = shape_lens([10, 20, 30], zoom=1, width=40)                  # sparkline
+block = tree_lens({"src": {"main.py": None}}, zoom=2, width=40)     # tree
+block = chart_lens({"cpu": 70, "mem": 50}, zoom=2, width=40)        # bars
 ```
 
 **Connects to:** Produces Blocks. Nested structures reduce zoom at each level.

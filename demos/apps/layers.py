@@ -13,12 +13,12 @@ Press 'h' for help, 's' for settings, 'q' to quit.
 import asyncio
 from dataclasses import dataclass, replace
 
-from fidelis import (
+from painted import (
     Block, Style,
     join_vertical, pad, border,
     ROUNDED,
 )
-from fidelis.tui import (
+from painted.tui import (
     Surface, BufferView,
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
 )

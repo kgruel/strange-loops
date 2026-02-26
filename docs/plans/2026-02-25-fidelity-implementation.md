@@ -15,7 +15,7 @@
 ### Task 1: Create Palette type + ContextVar + presets
 
 **Files:**
-- Create: `src/fidelis/palette.py`
+- Create: `src/painted/palette.py`
 - Test: `tests/test_palette.py`
 
 **Step 1: Write the failing tests**
@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import pytest
 
-from fidelis.cell import Style
-from fidelis.palette import (
+from painted.cell import Style
+from painted.palette import (
     Palette,
     DEFAULT_PALETTE,
     MONO_PALETTE,
@@ -96,20 +96,20 @@ def test_palette_compose_with_merge():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `uv run --package fidelis pytest tests/test_palette.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'fidelis.palette'`
+Run: `uv run --package painted pytest tests/test_palette.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'painted.palette'`
 
 **Step 3: Write minimal implementation**
 
 ```python
-# src/fidelis/palette.py
+# src/painted/palette.py
 """Palette: semantic Style roles for aesthetic personalization.
 
 5 roles mapping to Style (not Color) — carries both color and modifier
 fallbacks for monochrome output.
 
 Usage:
-    from fidelis.palette import current_palette, use_palette, MONO_PALETTE
+    from painted.palette import current_palette, use_palette, MONO_PALETTE
 
     p = current_palette()
     fill_style = p.accent.merge(Style(bold=True))
@@ -183,24 +183,24 @@ def reset_palette() -> None:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `uv run --package fidelis pytest tests/test_palette.py -v`
+Run: `uv run --package painted pytest tests/test_palette.py -v`
 Expected: PASS (all 8 tests)
 
 **Step 5: Add Palette to architecture invariants**
 
 Edit `tests/test_architecture_invariants.py`:
 - Add `"Palette"` to the `must_be_frozen` set in `test_state_dataclasses_declared_frozen`
-- Add `from fidelis.palette import Palette` and include `Palette` in the runtime frozen check tuple in `test_runtime_state_dataclasses_are_frozen`
+- Add `from painted.palette import Palette` and include `Palette` in the runtime frozen check tuple in `test_runtime_state_dataclasses_are_frozen`
 
 **Step 6: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass (439 + new tests)
 
 **Step 7: Commit**
 
 ```bash
-git add src/fidelis/palette.py tests/test_palette.py tests/test_architecture_invariants.py
+git add src/painted/palette.py tests/test_palette.py tests/test_architecture_invariants.py
 git commit -m "Add Palette type with ContextVar delivery and presets"
 ```
 
@@ -209,7 +209,7 @@ git commit -m "Add Palette type with ContextVar delivery and presets"
 ### Task 2: Create IconSet type + ContextVar
 
 **Files:**
-- Create: `src/fidelis/icon_set.py`
+- Create: `src/painted/icon_set.py`
 - Test: `tests/test_icon_set.py`
 
 **Step 1: Write the failing tests**
@@ -221,7 +221,7 @@ from __future__ import annotations
 
 import pytest
 
-from fidelis.icon_set import (
+from painted.icon_set import (
     IconSet,
     ASCII_ICONS,
     current_icons,
@@ -278,21 +278,21 @@ def test_reset_icons_restores_default():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `uv run --package fidelis pytest tests/test_icon_set.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'fidelis.icon_set'`
+Run: `uv run --package painted pytest tests/test_icon_set.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'painted.icon_set'`
 
 **Step 3: Write minimal implementation**
 
 Port fields from `Icons` in `component_theme.py` (lines 31-61), renamed per design doc. The `sparkline` field changes from `str` to `tuple[str, ...]` for consistency with the design doc and to match how it's actually consumed (indexed by level).
 
 ```python
-# src/fidelis/icon_set.py
+# src/painted/icon_set.py
 """IconSet: glyph vocabulary for view rendering.
 
 Replaces ComponentTheme.Icons. Style fields removed (those move to Palette).
 
 Usage:
-    from fidelis.icon_set import current_icons, use_icons, ASCII_ICONS
+    from painted.icon_set import current_icons, use_icons, ASCII_ICONS
 
     icons = current_icons()
     fill = icons.progress_fill
@@ -380,24 +380,24 @@ def reset_icons() -> None:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `uv run --package fidelis pytest tests/test_icon_set.py -v`
+Run: `uv run --package painted pytest tests/test_icon_set.py -v`
 Expected: PASS (all 7 tests)
 
 **Step 5: Add IconSet to architecture invariants**
 
 Edit `tests/test_architecture_invariants.py`:
 - Add `"IconSet"` to the `must_be_frozen` set
-- Add `from fidelis.icon_set import IconSet` and include in runtime frozen check tuple
+- Add `from painted.icon_set import IconSet` and include in runtime frozen check tuple
 
 **Step 6: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass
 
 **Step 7: Commit**
 
 ```bash
-git add src/fidelis/icon_set.py tests/test_icon_set.py tests/test_architecture_invariants.py
+git add src/painted/icon_set.py tests/test_icon_set.py tests/test_architecture_invariants.py
 git commit -m "Add IconSet type with ContextVar delivery and ASCII fallback"
 ```
 
@@ -406,8 +406,8 @@ git commit -m "Add IconSet type with ContextVar delivery and ASCII fallback"
 ### Task 3: Update progress_bar and sparkline to use Palette + IconSet
 
 **Files:**
-- Modify: `src/fidelis/_components/progress.py`
-- Modify: `src/fidelis/_components/sparkline.py`
+- Modify: `src/painted/_components/progress.py`
+- Modify: `src/painted/_components/sparkline.py`
 - Create: `tests/test_progress_bar.py`
 - Create: `tests/test_sparkline_themed.py`
 
@@ -420,10 +420,10 @@ This is the critical task — the two views that use color switch from `theme: C
 """Progress bar rendering with Palette and IconSet."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis._components.progress import ProgressState, progress_bar
-from fidelis.palette import Palette, MONO_PALETTE, DEFAULT_PALETTE, current_palette, use_palette, reset_palette
-from fidelis.icon_set import IconSet, ASCII_ICONS, current_icons, use_icons, reset_icons
+from painted.cell import Style
+from painted._components.progress import ProgressState, progress_bar
+from painted.palette import Palette, MONO_PALETTE, DEFAULT_PALETTE, current_palette, use_palette, reset_palette
+from painted.icon_set import IconSet, ASCII_ICONS, current_icons, use_icons, reset_icons
 
 
 def test_progress_bar_default_no_args():
@@ -476,12 +476,12 @@ def test_progress_bar_style_overrides_palette():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `uv run --package fidelis pytest tests/test_progress_bar.py -v`
+Run: `uv run --package painted pytest tests/test_progress_bar.py -v`
 Expected: FAIL — progress_bar doesn't accept `palette` or `icons` kwargs yet
 
 **Step 3: Implement progress_bar changes**
 
-Modify `src/fidelis/_components/progress.py`:
+Modify `src/painted/_components/progress.py`:
 - Remove `from ..component_theme import ComponentTheme` (TYPE_CHECKING import, line 12)
 - Replace `theme: "ComponentTheme | None" = None` with `palette: "Palette | None" = None` and `icons: "IconSet | None" = None`
 - Resolve via `p = palette or current_palette()` and `ic = icons or current_icons()`
@@ -549,7 +549,7 @@ if TYPE_CHECKING:
 
 **Step 4: Run progress_bar tests**
 
-Run: `uv run --package fidelis pytest tests/test_progress_bar.py -v`
+Run: `uv run --package painted pytest tests/test_progress_bar.py -v`
 Expected: PASS
 
 **Step 5: Write failing tests for sparkline**
@@ -559,10 +559,10 @@ Expected: PASS
 """Sparkline rendering with Palette and IconSet."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis._components.sparkline import sparkline, sparkline_with_range
-from fidelis.palette import MONO_PALETTE, reset_palette, use_palette
-from fidelis.icon_set import ASCII_ICONS, reset_icons, use_icons
+from painted.cell import Style
+from painted._components.sparkline import sparkline, sparkline_with_range
+from painted.palette import MONO_PALETTE, reset_palette, use_palette
+from painted.icon_set import ASCII_ICONS, reset_icons, use_icons
 
 
 def test_sparkline_default():
@@ -616,7 +616,7 @@ def test_sparkline_style_overrides_palette():
 
 **Step 6: Implement sparkline changes**
 
-Modify `src/fidelis/_components/sparkline.py`:
+Modify `src/painted/_components/sparkline.py`:
 - Remove `from ..component_theme import ComponentTheme, component_theme` (line 19)
 - Replace `theme: ComponentTheme | None = None` with `palette: "Palette | None" = None` and `icons: "IconSet | None" = None` in both `sparkline()` and `sparkline_with_range()`
 - Replace `t = theme or component_theme()` with `p = palette or current_palette()` and `ic = icons or current_icons()`
@@ -625,22 +625,22 @@ Modify `src/fidelis/_components/sparkline.py`:
 
 **Important:** The `_sparkline_core.sparkline_text()` function receives `chars` as a parameter. Currently `Icons.sparkline` is a `str` (e.g., `"▁▂▃▄▅▆▇█"`). The new `IconSet.sparkline` is a `tuple[str, ...]`. Verify `_sparkline_core.py` indexes into `chars` with `chars[i]` — this works identically for both `str` and `tuple[str, ...]`. If it does string slicing or concatenation on `chars`, that will need adjustment.
 
-Check: `src/fidelis/_sparkline_core.py` — look at how `chars` is used.
+Check: `src/painted/_sparkline_core.py` — look at how `chars` is used.
 
 **Step 7: Run sparkline tests**
 
-Run: `uv run --package fidelis pytest tests/test_sparkline_themed.py -v`
+Run: `uv run --package painted pytest tests/test_sparkline_themed.py -v`
 Expected: PASS
 
 **Step 8: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass. Existing tests that don't pass `theme=` should still work (ambient defaults match old hardcoded defaults).
 
 **Step 9: Commit**
 
 ```bash
-git add src/fidelis/_components/progress.py src/fidelis/_components/sparkline.py \
+git add src/painted/_components/progress.py src/painted/_components/sparkline.py \
         tests/test_progress_bar.py tests/test_sparkline_themed.py
 git commit -m "Update progress_bar and sparkline to use Palette + IconSet"
 ```
@@ -650,8 +650,8 @@ git commit -m "Update progress_bar and sparkline to use Palette + IconSet"
 ### Task 4: Update tree_lens, chart_lens, and spinner to use IconSet
 
 **Files:**
-- Modify: `src/fidelis/_lens.py` (lines 310-316 `_get_tree_icons`, lines 325 `tree_lens`, lines 525-531 `_get_chart_icons`, lines 539 `chart_lens`)
-- Modify: `src/fidelis/_components/spinner.py` (lines 41-73)
+- Modify: `src/painted/_lens.py` (lines 310-316 `_get_tree_icons`, lines 325 `tree_lens`, lines 525-531 `_get_chart_icons`, lines 539 `chart_lens`)
+- Modify: `src/painted/_components/spinner.py` (lines 41-73)
 - Test: `tests/test_icon_set_views.py`
 
 These views use only glyphs from ComponentTheme (no color roles). They switch from `theme: ComponentTheme` to `icons: IconSet | None`.
@@ -663,10 +663,10 @@ These views use only glyphs from ComponentTheme (no color roles). They switch fr
 """Views that consume IconSet for glyph vocabulary."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis.icon_set import ASCII_ICONS, IconSet, reset_icons, use_icons
-from fidelis._components.spinner import SpinnerState, spinner, DOTS
-from fidelis.views import tree_lens, chart_lens
+from painted.cell import Style
+from painted.icon_set import ASCII_ICONS, IconSet, reset_icons, use_icons
+from painted._components.spinner import SpinnerState, spinner, DOTS
+from painted.views import tree_lens, chart_lens
 
 
 def test_spinner_ambient_icons():
@@ -710,19 +710,19 @@ def test_chart_lens_explicit_icons():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `uv run --package fidelis pytest tests/test_icon_set_views.py -v`
+Run: `uv run --package painted pytest tests/test_icon_set_views.py -v`
 Expected: FAIL — views don't accept `icons` kwarg
 
 **Step 3: Implement changes**
 
-**spinner.py** — Modify `src/fidelis/_components/spinner.py`:
+**spinner.py** — Modify `src/painted/_components/spinner.py`:
 - Remove TYPE_CHECKING import of ComponentTheme (line 13)
 - Replace `theme: "ComponentTheme | None" = None` with `icons: "IconSet | None" = None`
 - Resolve: `ic = icons or current_icons()`
 - Frame selection: `if ic is not current default and state.frames is DOTS: frames = ic.spinner`
 - Keep `style` kwarg as-is (spinner style is caller's choice per design doc — "caller chooses role")
 
-**_lens.py** — Modify `src/fidelis/_lens.py`:
+**_lens.py** — Modify `src/painted/_lens.py`:
 - Remove TYPE_CHECKING import of ComponentTheme (line 16)
 - Replace `_get_tree_icons(theme)` to accept `icons: IconSet | None`:
   ```python
@@ -745,18 +745,18 @@ Expected: FAIL — views don't accept `icons` kwarg
 
 **Step 4: Run tests**
 
-Run: `uv run --package fidelis pytest tests/test_icon_set_views.py -v`
+Run: `uv run --package painted pytest tests/test_icon_set_views.py -v`
 Expected: PASS
 
 **Step 5: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass. Existing tests don't pass `theme=` so they use ambient defaults (same values as before).
 
 **Step 6: Commit**
 
 ```bash
-git add src/fidelis/_components/spinner.py src/fidelis/_lens.py tests/test_icon_set_views.py
+git add src/painted/_components/spinner.py src/painted/_lens.py tests/test_icon_set_views.py
 git commit -m "Update spinner, tree_lens, chart_lens to use IconSet"
 ```
 
@@ -765,7 +765,7 @@ git commit -m "Update spinner, tree_lens, chart_lens to use IconSet"
 ### Task 5: Add _setup_defaults() bridge in run_cli
 
 **Files:**
-- Modify: `src/fidelis/fidelity.py` (add `_setup_defaults` after `detect_context`, call from `CliRunner._dispatch`)
+- Modify: `src/painted/fidelity.py` (add `_setup_defaults` after `detect_context`, call from `CliRunner._dispatch`)
 - Test: `tests/test_fidelity_defaults.py`
 
 **Step 1: Write failing tests**
@@ -778,10 +778,10 @@ Palette is never auto-set — it's a deliberate aesthetic choice.
 """
 from __future__ import annotations
 
-from fidelis.fidelity import CliContext, Format, OutputMode, Zoom
-from fidelis.fidelity import _setup_defaults
-from fidelis.palette import current_palette, reset_palette, DEFAULT_PALETTE
-from fidelis.icon_set import current_icons, reset_icons, ASCII_ICONS, IconSet
+from painted.fidelity import CliContext, Format, OutputMode, Zoom
+from painted.fidelity import _setup_defaults
+from painted.palette import current_palette, reset_palette, DEFAULT_PALETTE
+from painted.icon_set import current_icons, reset_icons, ASCII_ICONS, IconSet
 
 
 def test_plain_format_sets_ascii_icons():
@@ -824,12 +824,12 @@ def test_ansi_format_keeps_default_icons():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `uv run --package fidelis pytest tests/test_fidelity_defaults.py -v`
+Run: `uv run --package painted pytest tests/test_fidelity_defaults.py -v`
 Expected: FAIL — `_setup_defaults` doesn't exist
 
 **Step 3: Implement _setup_defaults**
 
-Add to `src/fidelis/fidelity.py` after `detect_context()` (after line 127):
+Add to `src/painted/fidelity.py` after `detect_context()` (after line 127):
 
 ```python
 def _setup_defaults(ctx: CliContext) -> None:
@@ -856,18 +856,18 @@ def _dispatch(self, ctx: CliContext) -> int:
 
 **Step 4: Run tests**
 
-Run: `uv run --package fidelis pytest tests/test_fidelity_defaults.py -v`
+Run: `uv run --package painted pytest tests/test_fidelity_defaults.py -v`
 Expected: PASS
 
 **Step 5: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass
 
 **Step 6: Commit**
 
 ```bash
-git add src/fidelis/fidelity.py tests/test_fidelity_defaults.py
+git add src/painted/fidelity.py tests/test_fidelity_defaults.py
 git commit -m "Add _setup_defaults bridge: run_cli sets ambient palette/icons"
 ```
 
@@ -876,29 +876,29 @@ git commit -m "Add _setup_defaults bridge: run_cli sets ambient palette/icons"
 ### Task 6: Delete themes/ and ComponentTheme
 
 **Files:**
-- Delete: `src/fidelis/themes/__init__.py` (323 LOC)
-- Delete: `src/fidelis/component_theme.py` (136 LOC)
-- Modify: `src/fidelis/__init__.py` (remove ComponentTheme exports, add Palette/IconSet)
-- Modify: `src/fidelis/views/__init__.py` (add Palette/IconSet re-exports)
+- Delete: `src/painted/themes/__init__.py` (323 LOC)
+- Delete: `src/painted/component_theme.py` (136 LOC)
+- Modify: `src/painted/__init__.py` (remove ComponentTheme exports, add Palette/IconSet)
+- Modify: `src/painted/views/__init__.py` (add Palette/IconSet re-exports)
 - Modify: `demos/apps/theme_carnival.py` (the only themes/ consumer — update or delete)
 
 **Step 1: Remove ComponentTheme imports from all view modules**
 
 At this point, Tasks 3 and 4 have already removed the `theme: ComponentTheme` kwarg from all view functions. Verify no remaining references:
 
-Run: `grep -r "component_theme\|ComponentTheme" src/fidelis/ --include="*.py"`
+Run: `grep -r "component_theme\|ComponentTheme" src/painted/ --include="*.py"`
 
 Expected: Only hits in `component_theme.py` itself and `__init__.py` (the re-exports). If any view module still references it, fix that first.
 
 **Step 2: Delete the files**
 
 ```bash
-rm src/fidelis/themes/__init__.py
-rmdir src/fidelis/themes/
-rm src/fidelis/component_theme.py
+rm src/painted/themes/__init__.py
+rmdir src/painted/themes/
+rm src/painted/component_theme.py
 ```
 
-**Step 3: Update `src/fidelis/__init__.py`**
+**Step 3: Update `src/painted/__init__.py`**
 
 Remove lines 57-67 (ComponentTheme imports) and lines 116-125 (ComponentTheme `__all__` entries).
 
@@ -946,28 +946,28 @@ Update the module docstring to replace the component theming lines with:
 
 ```python
 # For aesthetic customization:
-#     from fidelis import current_palette, use_palette, MONO_PALETTE
-#     from fidelis import current_icons, use_icons, ASCII_ICONS
+#     from painted import current_palette, use_palette, MONO_PALETTE
+#     from painted import current_icons, use_icons, ASCII_ICONS
 ```
 
-Remove the `fidelis.themes` reference from the docstring (line 13).
+Remove the `painted.themes` reference from the docstring (line 13).
 
 **Step 4: Handle theme_carnival.py demo**
 
-`demos/apps/theme_carnival.py` is the only consumer of `fidelis.themes`. Options:
+`demos/apps/theme_carnival.py` is the only consumer of `painted.themes`. Options:
 - Delete it (it demos the system being deleted)
 - Rewrite it to use Palette (show Palette switching instead of Theme switching)
 
 Rewrite is better — it becomes the Palette demo. The core idea (runtime aesthetic switching) still applies, just with a simpler type. Update imports and rendering to use `Palette` roles instead of `Theme` computed properties. This is a demo, not library code — exact implementation left to the implementer but the shape is:
 
 ```python
-from fidelis import current_palette, use_palette, Palette, DEFAULT_PALETTE, NORD_PALETTE, MONO_PALETTE
+from painted import current_palette, use_palette, Palette, DEFAULT_PALETTE, NORD_PALETTE, MONO_PALETTE
 # Show palette switching in a simple TUI
 ```
 
 **Step 5: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 
 Expected: All pass. If any test imported ComponentTheme or themes, it will fail — fix those. (The explore agent found zero test references to either, so this should be clean.)
 
@@ -1002,7 +1002,7 @@ Run a representative demo: `uv run python demos/tour.py` (if it uses theming)
 
 **Step 3: Run full test suite**
 
-Run: `uv run --package fidelis pytest tests/ -q`
+Run: `uv run --package painted pytest tests/ -q`
 Expected: All pass
 
 **Step 4: Commit**
@@ -1045,10 +1045,10 @@ In the Key Types section, replace the ComponentTheme/Icons entries with:
 In the Package Structure section, update the import examples:
 
 ```python
-from fidelis import Palette, IconSet, current_palette, use_palette  # Aesthetic
+from painted import Palette, IconSet, current_palette, use_palette  # Aesthetic
 ```
 
-Remove references to `fidelis.themes`, `ComponentTheme`, `Icons`.
+Remove references to `painted.themes`, `ComponentTheme`, `Icons`.
 
 **Step 2: Update HANDOFF.md**
 
@@ -1083,16 +1083,16 @@ git commit -m "Update docs for Palette + IconSet (fidelity implementation)"
 
 | File | Action | LOC Delta (est.) |
 |------|--------|-----------------|
-| `src/fidelis/palette.py` | Create | +65 |
-| `src/fidelis/icon_set.py` | Create | +80 |
-| `src/fidelis/component_theme.py` | Delete | -136 |
-| `src/fidelis/themes/__init__.py` | Delete | -323 |
-| `src/fidelis/_components/progress.py` | Modify | ~0 (swap theme→palette+icons) |
-| `src/fidelis/_components/sparkline.py` | Modify | ~0 (swap theme→palette+icons) |
-| `src/fidelis/_components/spinner.py` | Modify | ~0 (swap theme→icons) |
-| `src/fidelis/_lens.py` | Modify | ~0 (swap theme→icons) |
-| `src/fidelis/fidelity.py` | Modify | +10 (_setup_defaults) |
-| `src/fidelis/__init__.py` | Modify | ~0 (swap exports) |
+| `src/painted/palette.py` | Create | +65 |
+| `src/painted/icon_set.py` | Create | +80 |
+| `src/painted/component_theme.py` | Delete | -136 |
+| `src/painted/themes/__init__.py` | Delete | -323 |
+| `src/painted/_components/progress.py` | Modify | ~0 (swap theme→palette+icons) |
+| `src/painted/_components/sparkline.py` | Modify | ~0 (swap theme→palette+icons) |
+| `src/painted/_components/spinner.py` | Modify | ~0 (swap theme→icons) |
+| `src/painted/_lens.py` | Modify | ~0 (swap theme→icons) |
+| `src/painted/fidelity.py` | Modify | +10 (_setup_defaults) |
+| `src/painted/__init__.py` | Modify | ~0 (swap exports) |
 | `tests/test_palette.py` | Create | +70 |
 | `tests/test_icon_set.py` | Create | +55 |
 | `tests/test_progress_bar.py` | Create | +50 |
@@ -1107,6 +1107,6 @@ git commit -m "Update docs for Palette + IconSet (fidelity implementation)"
 
 2. **Demo breakage** (theme_carnival): The only meaningful consumer of the deleted code. **Mitigation:** Rewrite in Task 6, verify it runs.
 
-3. **External consumers** (loops monorepo): The `cells-to-fidelis` migration is in review. If it references ComponentTheme, it will need updating. **Mitigation:** Check after merge; the migration should have converted to whatever fidelis exports.
+3. **External consumers** (loops monorepo): The `cells-to-painted` migration is in review. If it references ComponentTheme, it will need updating. **Mitigation:** Check after merge; the migration should have converted to whatever painted exports.
 
 4. **Architecture invariant test** picks up Palette/IconSet automatically via the `*State` suffix heuristic — but these don't end in `State`. **Mitigation:** Explicitly add to `must_be_frozen` set in Tasks 1 and 2.

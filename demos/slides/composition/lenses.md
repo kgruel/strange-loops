@@ -12,7 +12,7 @@ align: center
 
 [zoom:0]
 
-`fidelis.views` lenses are pure helpers: **state → Block**
+`painted.views` lenses are pure helpers: **state → Block**
 
 [spacer]
 
@@ -36,7 +36,7 @@ width and zoom are orthogonal inputs — parents allocate width, callers choose 
 
 [spacer]
 
-some lenses publish a max zoom via `Lens` wrappers: `SHAPE_LENS`, `TREE_LENS`, `CHART_LENS`
+`shape_lens` auto-dispatches: numeric data → `chart_lens`, hierarchical → `tree_lens`
 
 [zoom:2]
 
@@ -45,7 +45,7 @@ some lenses publish a max zoom via `Lens` wrappers: `SHAPE_LENS`, `TREE_LENS`, `
 [spacer]
 
 ```python
-from fidelis.views import shape_lens, tree_lens, chart_lens
+from painted.views import shape_lens, tree_lens, chart_lens
 
 block = shape_lens(data, zoom=zoom, width=width)
 # or: tree_lens(data, zoom=zoom, width=width)

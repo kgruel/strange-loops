@@ -54,11 +54,11 @@ compose via `join`, `pad`, `border`
 
 [zoom:2]
 
-from `fidelis/block.py`
+from `painted/block.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.block:Block.text#signature -->
+<!-- docgen:begin py:painted.block:Block.text#signature -->
 ```python
     @staticmethod
     def text(content: str, style: Style, *, width: int | None = None,
@@ -66,14 +66,14 @@ from `fidelis/block.py`
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.block:Block.empty#signature -->
+<!-- docgen:begin py:painted.block:Block.empty#signature -->
 ```python
     @staticmethod
     def empty(width: int, height: int, style: Style = Style(), *, id: str | None = None) -> Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.block:Block.paint#signature -->
+<!-- docgen:begin py:painted.block:Block.paint#signature -->
 ```python
     def paint(self, buffer: Buffer | BufferView, x: int = 0, y: int = 0) -> None:
 ```

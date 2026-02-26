@@ -1,6 +1,6 @@
 """Tests for Surface emit mechanism."""
 
-from fidelis.tui import Surface, Emit, Layer, Stay, Pop, Quit
+from painted.tui import Surface, Emit, Layer, Stay, Pop, Quit
 
 
 class TestEmitWithCallback:

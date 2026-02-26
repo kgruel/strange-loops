@@ -1,44 +1,154 @@
-# fidelis
+# painted
 
-A cell-buffer terminal UI framework
+One library. Print to TUI. One dependency.
 
-## Atom
+```python
+from painted import show
 
-```
-Cell
- ├─ char: str       # single character
- └─ style: Style
-     ├─ fg: str     # foreground color
-     ├─ bg: str     # background color
-     ├─ bold: bool
-     ├─ dim: bool
-     ├─ italic: bool
-     └─ ...
+show({"cpu": 67, "mem": 82, "disk": 45})
 ```
 
-## Usage
+TTY gets a styled bar chart. Pipe gets plain text. `--json` gets JSON.
+Same data, same function — the stack figures out the rest.
+
+## The Ladder
+
+Start where you are. Move up when you need to.
+
+### Print styled output
+
+Replace `print()` one call at a time. Auto-detects TTY — no ANSI garbage in pipes.
+
+```python
+from painted import Block, Style, print_block
+
+block = Block.text("deploy OK", Style(fg="green", bold=True))
+print_block(block)
+```
+
+### Compose
+
+Blocks are immutable rectangles. Compose them with functions — no widget tree, no DOM.
+
+```python
+from painted import border, join_vertical, pad, ROUNDED
+
+header = Block.text(" api-gateway ", Style(bold=True, reverse=True))
+status = join_vertical(
+    Block.text("  replicas: 2/3 ready", Style(fg="yellow")),
+    Block.text("  /health:  200  12ms", Style(fg="green")),
+)
+card = border(join_vertical(header, status), chars=ROUNDED)
+print_block(card)
+```
+
+### CLI harness
+
+One render function, three output modes. Pipe gets static, TTY gets live updates,
+`-i` gets full interactive.
+
+```python
+from painted import run_cli, CliContext, Block
+
+def render(ctx: CliContext, data: dict) -> Block:
+    # your render logic — returns a Block
+    ...
+
+def fetch() -> dict:
+    return {"status": "ok", "replicas": 3}
+
+run_cli(sys.argv[1:], render=render, fetch=fetch)
+```
+
+```bash
+myapp              # auto-detect
+myapp -q           # quiet (zoom 0)
+myapp -v           # verbose (zoom 2)
+myapp -i           # interactive TUI
+myapp --json       # JSON output
+myapp | grep ok    # plain text, no ANSI
+```
+
+### Full TUI
+
+Alt screen, keyboard input, async render loop, diff-flush. Subclass `Surface`,
+override `render()` and `on_key()`.
 
 ```python
 import asyncio
-from fidelis import Surface, Block, Style, border
+from painted import Block, Style, border
+from painted.tui import Surface
 
-class HelloApp(Surface):
+class MyApp(Surface):
     def render(self):
-        block = Block.text("Hello, fidelis!", Style(fg="green"))
-        bordered = border(block, title="Demo")
-        bordered.paint(self._buf)
+        block = Block.text("Hello!", Style(fg="green"))
+        border(block, title="Demo").paint(self._buf)
 
-asyncio.run(HelloApp().run())
+    def on_key(self, key: str):
+        if key == "q":
+            self.quit()
+
+asyncio.run(MyApp().run())
 ```
+
+## Install
+
+```bash
+pip install painted
+```
+
+One dependency: [wcwidth](https://pypi.org/project/wcwidth/) (wide character display width).
 
 ## API
 
+### Primitives
+
 | Export | Purpose |
 |--------|---------|
-| `Cell` / `Style` | Atomic display unit (char + style) |
-| `Buffer` / `BufferView` | 2D cell grid with region clipping |
+| `Cell` / `Style` | Atomic display unit (char + style, frozen) |
+| `Span` / `Line` | Styled text with display-width awareness |
 | `Block` | Immutable rectangle of cells for composition |
-| `Span` / `Line` | Styled text primitives |
-| `join_horizontal`, `join_vertical`, `pad`, `border`, `truncate` | Composition functions |
-| `Surface` | Async main loop with keyboard input and resize handling |
-| `Layer` / `Lens` | Layered rendering and viewport |
+
+### Composition
+
+| Export | Purpose |
+|--------|---------|
+| `join_horizontal` / `join_vertical` | Combine Blocks |
+| `pad` / `border` / `truncate` | Transform Blocks |
+| `BorderChars` | ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII presets |
+
+### Display
+
+| Export | Purpose |
+|--------|---------|
+| `show(data)` | Zero-config display with auto-detection |
+| `print_block(block)` | Print a Block to stdout (TTY-aware) |
+| `run_cli(args, render=, fetch=)` | CLI harness with zoom/mode/format |
+
+### Views (`painted.views`)
+
+| Export | Purpose |
+|--------|---------|
+| `shape_lens` | Auto-dispatch renderer (numeric → chart, hierarchical → tree) |
+| `tree_lens` / `chart_lens` | Explicit tree and chart strategies |
+| `list_view` / `table` / `text_input` | Stateful interactive components |
+| `spinner` / `progress_bar` / `sparkline` | Animation and data viz |
+
+### TUI (`painted.tui`)
+
+| Export | Purpose |
+|--------|---------|
+| `Surface` | Alt screen, keyboard, resize, diff-flush render loop |
+| `Layer` | Modal stack: `Stay` / `Pop` / `Push` / `Quit` |
+| `Buffer` / `BufferView` | 2D cell grid with region clipping |
+
+### Aesthetic
+
+| Export | Purpose |
+|--------|---------|
+| `Palette` | 5 semantic Style roles (success, warning, error, accent, muted) |
+| `IconSet` | Glyph vocabulary with ASCII fallback |
+
+## License
+
+MIT

@@ -17,7 +17,7 @@ See also:
 
 ## Core types
 
-<!-- docgen:begin py:fidelis.fidelity:Zoom#definition -->
+<!-- docgen:begin py:painted.fidelity:Zoom#definition -->
 ```python
 class Zoom(IntEnum):
     """Detail level for rendering."""
@@ -29,7 +29,7 @@ class Zoom(IntEnum):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.fidelity:OutputMode#definition -->
+<!-- docgen:begin py:painted.fidelity:OutputMode#definition -->
 ```python
 class OutputMode(Enum):
     """Delivery mechanism."""
@@ -41,7 +41,7 @@ class OutputMode(Enum):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.fidelity:Format#definition -->
+<!-- docgen:begin py:painted.fidelity:Format#definition -->
 ```python
 class Format(Enum):
     """Serialization format."""
@@ -53,7 +53,7 @@ class Format(Enum):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.fidelity:CliContext#definition -->
+<!-- docgen:begin py:painted.fidelity:CliContext#definition -->
 ```python
 @dataclass(frozen=True)
 class CliContext:
@@ -72,7 +72,7 @@ class CliContext:
 
 `run_cli()` is the intended “one call” entry point.
 
-<!-- docgen:begin py:fidelis.fidelity:run_cli#signature -->
+<!-- docgen:begin py:painted.fidelity:run_cli#signature -->
 ```python
 def run_cli(
     args: list[str],
@@ -97,4 +97,4 @@ The harness keeps a strict separation:
 
 - your code owns *state fetching* (`fetch` / `fetch_stream`)
 - your code owns *rendering* (`render(ctx, state) -> Block`)
-- fidelis owns *delivery* (static/live/interactive formatting and terminal behavior)
+- painted owns *delivery* (static/live/interactive formatting and terminal behavior)

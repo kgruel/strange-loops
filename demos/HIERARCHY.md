@@ -1,4 +1,4 @@
-# fidelis Hierarchy
+# painted Hierarchy
 
 Reference for how primitives compose.
 
@@ -78,13 +78,13 @@ COMPONENTS (stateful widgets)
   Events ──→ Projection ──→ State ──→ Lens ──→ Block
                  ↑                      ↑
              fold ops               zoom level
-              (vertex)                (fidelis)
+              (vertex)                (painted)
 
   vertex owns DATA transformation:
     Projection[S, E]: fold events into derived state
     Stateful, incremental, O(new events)
 
-  fidelis owns VISUAL transformation:
+  painted owns VISUAL transformation:
     Lens[S]: render state at zoom level into Block
     Stateless, pure, convention-driven
 ```
@@ -94,9 +94,9 @@ COMPONENTS (stateful widgets)
 | Layer | Primitive | Signature | Nature |
 |-------|-----------|-----------|--------|
 | vertex | Projection | `(State, Event) -> State` | Fold (stateful) |
-| fidelis | Lens | `(State, zoom) -> Block` | Map (stateless) |
+| painted | Lens | `(State, zoom) -> Block` | Map (stateless) |
 
-They're **peers across domains**. Projection is vertex vocabulary. Lens is fidelis vocabulary.
+They're **peers across domains**. Projection is vertex vocabulary. Lens is painted vocabulary.
 
 ## Zoom Levels
 

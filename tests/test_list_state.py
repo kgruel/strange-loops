@@ -1,7 +1,7 @@
 """Tests for ListState cursor/viewport composition."""
 
-from fidelis import Cursor, Viewport
-from fidelis.views import ListState
+from painted import Cursor, Viewport
+from painted.views import ListState
 
 
 class TestListStateCursor:

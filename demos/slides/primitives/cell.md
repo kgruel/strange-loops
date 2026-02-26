@@ -45,11 +45,11 @@ EMPTY_CELL = Cell(" ", Style())
 
 [zoom:2]
 
-from `fidelis/cell.py`
+from `painted/cell.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.cell:Cell#definition -->
+<!-- docgen:begin py:painted.cell:Cell#definition -->
 ```python
 @dataclass(frozen=True)
 class Cell:

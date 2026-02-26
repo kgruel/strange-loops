@@ -5,9 +5,9 @@ from __future__ import annotations
 import io
 import re
 
-from fidelis.buffer import CellWrite
-from fidelis.cell import Cell, Style
-from fidelis.writer import Writer, ColorDepth, ScrollOp
+from painted.buffer import CellWrite
+from painted.cell import Cell, Style
+from painted.writer import Writer, ColorDepth, ScrollOp
 
 
 def _capture(ops) -> str:

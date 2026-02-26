@@ -1,6 +1,6 @@
-# Data Patterns in fidelis
+# Data Patterns in painted
 
-This document captures the data modeling patterns used throughout fidelis. When designing new primitives, follow these patterns for consistency.
+This document captures the data modeling patterns used throughout painted. When designing new primitives, follow these patterns for consistency.
 
 ## Core Principle
 
@@ -15,7 +15,7 @@ This enables:
 
 ## The Three Layers
 
-fidelis has three conceptual layers, each with its own pattern:
+painted has three conceptual layers, each with its own pattern:
 
 ### 1. Rendering Primitives
 

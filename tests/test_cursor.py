@@ -2,7 +2,7 @@
 
 import pytest
 
-from fidelis import Cursor, CursorMode
+from painted import Cursor, CursorMode
 
 
 class TestCursorClamp:

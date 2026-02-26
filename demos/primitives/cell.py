@@ -8,7 +8,7 @@ Both are immutable (frozen dataclasses).
 Run: uv run python demos/primitives/cell.py
 """
 
-from fidelis import Cell, Style, EMPTY_CELL
+from painted import Cell, Style, EMPTY_CELL
 
 # --- Style: colors and attributes ---
 

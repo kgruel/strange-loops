@@ -1,7 +1,7 @@
 """Tests for Search primitive and filter functions."""
 
 import pytest
-from fidelis.tui import Search, filter_contains, filter_prefix, filter_fuzzy
+from painted.tui import Search, filter_contains, filter_prefix, filter_fuzzy
 
 
 class TestSearch:

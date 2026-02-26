@@ -32,17 +32,17 @@ class MyApp(Surface):
 
 [zoom:1]
 
-from `fidelis/app.py`
+from `painted/app.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.app:Surface#signature -->
+<!-- docgen:begin py:painted.app:Surface#signature -->
 ```python
 class Surface:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.app:Surface.run#signature -->
+<!-- docgen:begin py:painted.app:Surface.run#signature -->
 ```python
     async def run(self) -> None:
 ```

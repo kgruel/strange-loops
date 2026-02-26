@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fidelis.tui import KeyboardInput
+from painted.tui import KeyboardInput
 
 
 def _bytes_stream(data: bytes) -> list[bytes]:
@@ -129,3 +129,68 @@ def test_incomplete_escape_sequences_return_escape(stream: list[bytes | None]):
 
 def test_unknown_csi_final_returns_escape():
     assert _get_input_from_stream(_bytes_stream(b"\x1b[X")) == "escape"
+
+
+# --- Alt key handling ---
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1ba", "alt_a"),
+        (b"\x1bA", "alt_A"),
+        (b"\x1b1", "alt_1"),
+        (b"\x1b ", "alt_ "),
+        (b"\x1b~", "alt_~"),
+    ],
+)
+def test_alt_key_combinations(seq: bytes, expected: str):
+    assert _get_input_from_stream(_bytes_stream(seq)) == expected
+
+
+def test_esc_bracket_still_routes_to_csi():
+    """ESC + '[' must route to CSI, not alt_[."""
+    assert _get_input_from_stream(_bytes_stream(b"\x1b[A")) == "up"
+
+
+def test_esc_o_still_routes_to_ss3():
+    """ESC + 'O' must route to SS3, not alt_O."""
+    assert _get_input_from_stream(_bytes_stream(b"\x1bOP")) == "f1"
+
+
+def test_esc_followed_by_control_byte_returns_escape():
+    """ESC + non-printable (e.g. 0x01) returns plain escape."""
+    assert _get_input_from_stream([b"\x1b", b"\x01"]) == "escape"
+
+
+# --- UTF-8 continuation timeout ---
+
+
+def test_utf8_continuation_uses_generous_timeout():
+    """Continuation bytes should be read with _UTF8_CONT_TIMEOUT, not _ESC_TIMEOUT."""
+    from painted.keyboard import _UTF8_CONT_TIMEOUT
+
+    kb = KeyboardInput()
+    kb._available = True
+
+    timeouts: list[float] = []
+    # é = 0xC3 0xA9 (2-byte UTF-8)
+    stream = iter([b"\xC3", b"\xA9"])
+
+    original_read_byte = kb._read_byte
+
+    def _tracking_read_byte(timeout: float = 0):
+        timeouts.append(timeout)
+        try:
+            return next(stream)
+        except StopIteration:
+            return None
+
+    with patch.object(kb, "_read_byte", side_effect=_tracking_read_byte):
+        result = kb.get_input()
+
+    assert result == "é"
+    # First call is non-blocking (timeout=0), second is the continuation read
+    assert len(timeouts) == 2
+    assert timeouts[0] == 0  # initial read
+    assert timeouts[1] == _UTF8_CONT_TIMEOUT  # continuation read

@@ -21,7 +21,7 @@ Research doc: `docs/research/2026-02-25-charm-v2-deep-dive.md`
 
 ## Why This Dissolved (For Now)
 
-fidelis doesn't have the distributed authority problem. Surface is the sole terminal authority,
+painted doesn't have the distributed authority problem. Surface is the sole terminal authority,
 modes are set imperatively in `Surface.run()`, and the Layer stack centralizes input handling
 (top layer wins). For modal overlays (help, search, confirm dialogs), this works because
 layers are exclusive — only one handles input at a time.
@@ -72,16 +72,16 @@ but applied to terminal modes rather than navigation state.
 ## Key Distinction: Render Layers vs Navigation Layers
 
 Lip Gloss v2 added a compositor (Layer/Canvas/Hit) for z-ordered visual composition with
-mouse picking. fidelis's Layer stack is navigation algebra. These are orthogonal:
+mouse picking. painted's Layer stack is navigation algebra. These are orthogonal:
 
-| | Navigation Layers (fidelis today) | Render Layers (future) |
+| | Navigation Layers (painted today) | Render Layers (future) |
 |---|---|---|
 | **Purpose** | Modal state stack | Visual composition with z-order |
 | **Authority** | Top layer handles input | All visible, focused window handles input |
 | **Rendering** | All paint into shared buffer, bottom-to-top | Each owns a region, composed |
 | **Composition** | Exclusive (modal) | Concurrent (windowed) |
 
-fidelis may need both. Navigation layers for modals (help, confirm, search overlays).
+painted may need both. Navigation layers for modals (help, confirm, search overlays).
 Render layers / windows for concurrent panes.
 
 ## Building Blocks Already In Place

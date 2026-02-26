@@ -12,9 +12,9 @@ Keys: 1-4 modes, s=size, f=format, q=quit
 """
 
 import asyncio
-from fidelis import Style, border, pad, join_horizontal, ROUNDED
-from fidelis.tui import Surface
-from fidelis.views import render_big, BigTextFormat
+from painted import Style, border, pad, join_horizontal, ROUNDED
+from painted.tui import Surface
+from painted.views import render_big, BigTextFormat
 
 
 # Color palettes using hex strings (the Color type supports str, int, or hex)

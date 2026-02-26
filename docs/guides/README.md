@@ -9,6 +9,6 @@ Current set:
 - `05-tui-core-surface-layers.md`
 
 Notes:
-- Code blocks in these guides are synced from `src/fidelis/` via `tools/docgen.py`.
+- Code blocks in these guides are synced from `src/painted/` via `tools/docgen.py`.
 - `docs/.extract/snippets.v1.json` is the shared artifact for both docs and (later) `demos/tour.py`.
 

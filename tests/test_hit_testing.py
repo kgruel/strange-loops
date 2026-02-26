@@ -1,7 +1,7 @@
 """Tests for optional hit-testing (mouse picking) support."""
 
-from fidelis import Block, Style, border, join_horizontal, join_vertical, pad, truncate, vslice
-from fidelis.tui import Buffer
+from painted import Block, Style, border, join_horizontal, join_vertical, pad, truncate, vslice
+from painted.tui import Buffer
 
 
 def test_buffer_hit_none_when_unused():

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fidelis import (
+from painted import (
     Block,
     DEFAULT_PALETTE,
     MONO_PALETTE,
@@ -29,9 +29,9 @@ from fidelis import (
     use_palette,
     vslice,
 )
-from fidelis.mouse import MouseEvent
-from fidelis.tui import Surface
-from fidelis.views import ProgressState, SpinnerState, progress_bar, spinner
+from painted.mouse import MouseEvent
+from painted.tui import Surface
+from painted.views import ProgressState, SpinnerState, progress_bar, spinner
 
 
 class PaletteCarnival(Surface):

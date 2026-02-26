@@ -21,7 +21,7 @@ Key inputs:
 
 ## Key Insights That Shaped the Design
 
-1. **No view constructs a color value.** (muser, codebase audit) Every view in fidelis consumes Style objects — from Palette, from callers, or bare `Style()`. Views express rendering *intent*, not terminal-specific output. This means capability information has no consumer in the pipeline.
+1. **No view constructs a color value.** (muser, codebase audit) Every view in painted consumes Style objects — from Palette, from callers, or bare `Style()`. Views express rendering *intent*, not terminal-specific output. This means capability information has no consumer in the pipeline.
 
 2. **Writer.detect_color_depth() exists but is dead code.** (siftd, finding #6) The detection side is built. The output side (`_color_codes`) ignores it — blindly emits truecolor/256-color codes regardless of terminal. The missing piece is the bridge between detection and output: color downconversion.
 
@@ -33,7 +33,7 @@ Key inputs:
    - Background light/dark → Palette choice (DARK_PALETTE vs LIGHT_PALETTE)
    - Color depth → Writer boundary concern (this design)
 
-5. **Ecosystem converges on "resolve at owner, give views resolved values."** (web-researcher) No framework threads raw capability through rendering. Rich, Textual, lipgloss all resolve at the output object. fidelis's Writer is that object.
+5. **Ecosystem converges on "resolve at owner, give views resolved values."** (web-researcher) No framework threads raw capability through rendering. Rich, Textual, lipgloss all resolve at the output object. painted's Writer is that object.
 
 6. **Koblinger's sync-first model wins.** (constraints doc, async/sync bridge) Sync detection (env vars) covers the common case. Async queries are a bridge that populates sync state. Views always read resolved state, never query directly. This eliminates the progressive re-render complexity.
 
@@ -209,7 +209,7 @@ That's the complete design. No new types. No new ContextVars. No Lens signature 
 
 1. **Capabilities resolve at boundaries, not in pipelines.** The rendering pipeline carries intent (Style). The terminal boundary (Writer) resolves intent against capability. Don't thread detection results through intermediate layers.
 
-2. **If no view consumes it, don't thread it.** Before designing a delivery mechanism, identify the consumer. Zero views in fidelis make capability-dependent rendering decisions. The consumer is Writer.
+2. **If no view consumes it, don't thread it.** Before designing a delivery mechanism, identify the consumer. Zero views in painted make capability-dependent rendering decisions. The consumer is Writer.
 
 3. **Dissolution before extension.** The constraints doc listed 5 open questions about delivery mechanisms. The dissolution test showed all 5 had the wrong premise — the thing being delivered had no consumer in the proposed destination.
 
@@ -295,6 +295,6 @@ class AdaptiveStyle:
 
 - **Async capability probes (DA1/DA2/DECRQSS).** Koblinger's argument holds: sync-first, async as bridge for SSH gaps. If needed, the result populates Writer state before rendering. Deferred until someone encounters a terminal where env-var detection fails and it matters.
 
-- **Multi-output (different terminals at different capabilities).** lipgloss hit this; fidelis has single Surface. If multi-output arises, each Writer carries its own ColorDepth. The design already supports this — detection is per-Writer instance. Deferred until multi-output is real.
+- **Multi-output (different terminals at different capabilities).** lipgloss hit this; painted has single Surface. If multi-output arises, each Writer carries its own ColorDepth. The design already supports this — detection is per-Writer instance. Deferred until multi-output is real.
 
 - **Perceptual color distance (CIEDE2000 vs Euclidean RGB).** Euclidean RGB is good enough for the 16/256 palette sizes involved. Upgrade to perceptual distance if color matching quality becomes a complaint. Deferred until evidence of poor matches.

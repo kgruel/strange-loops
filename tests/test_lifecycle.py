@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fidelis.tui import Surface
+from painted.tui import Surface
 
 
 def _make_surface(**kwargs):

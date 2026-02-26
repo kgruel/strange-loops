@@ -1,12 +1,12 @@
 """Tests for mouse input parsing."""
 
 import pytest
-from fidelis.mouse import (
+from painted.mouse import (
     MouseEvent,
     MouseButton,
     MouseAction,
 )
-from fidelis._mouse import parse_sgr_mouse
+from painted._mouse import parse_sgr_mouse
 
 
 class TestMouseEvent:

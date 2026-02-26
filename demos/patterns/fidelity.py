@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 
-from fidelis import (
+from painted import (
     Block,
     Cursor,
     Style,
@@ -37,8 +37,8 @@ from fidelis import (
     print_block,
     run_cli,
 )
-from fidelis.tui import Surface
-from fidelis.views import (
+from painted.tui import Surface
+from painted.views import (
     ListState,
     SpinnerState,
     DOTS,

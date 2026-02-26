@@ -1,6 +1,6 @@
 # TUI Core: Surface and Layers
 
-Interactive fidelis apps are built from:
+Interactive painted apps are built from:
 
 - `Surface`: owns the terminal lifecycle and buffer diff loop
 - `Layer`: a modal stack primitive for input routing and render ordering
@@ -15,19 +15,19 @@ See also:
 
 `Surface` is the async event loop wrapper (alt-screen, keyboard/mouse input, dirty rendering, resize handling).
 
-<!-- docgen:begin py:fidelis.app:Surface#signature -->
+<!-- docgen:begin py:painted.app:Surface#signature -->
 ```python
 class Surface:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.app:Surface.run#signature -->
+<!-- docgen:begin py:painted.app:Surface.run#signature -->
 ```python
     async def run(self) -> None:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.app:Surface.handle_key#signature -->
+<!-- docgen:begin py:painted.app:Surface.handle_key#signature -->
 ```python
     def handle_key(
         self,
@@ -43,7 +43,7 @@ class Surface:
 
 Layers model “modal scopes” (help overlay, search overlay, confirmation dialog). Input routes **top-down**; render paints **bottom-up**.
 
-<!-- docgen:begin py:fidelis.layer:Layer#definition -->
+<!-- docgen:begin py:painted.layer:Layer#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Layer(Generic[S]):
@@ -61,7 +61,7 @@ class Layer(Generic[S]):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.layer:process_key#signature -->
+<!-- docgen:begin py:painted.layer:process_key#signature -->
 ```python
 def process_key(
     key: str,
@@ -72,7 +72,7 @@ def process_key(
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.layer:render_layers#signature -->
+<!-- docgen:begin py:painted.layer:render_layers#signature -->
 ```python
 def render_layers(
     state: A,

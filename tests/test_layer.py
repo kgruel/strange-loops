@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 
-from fidelis.tui import Buffer, BufferView, Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
+from painted.tui import Buffer, BufferView, Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
 
 
 @dataclass

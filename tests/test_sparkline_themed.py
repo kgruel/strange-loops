@@ -1,10 +1,10 @@
 """Sparkline rendering with Palette and IconSet."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis._components.sparkline import sparkline, sparkline_with_range
-from fidelis.palette import MONO_PALETTE, reset_palette, use_palette
-from fidelis.icon_set import ASCII_ICONS, reset_icons, use_icons
+from painted.cell import Style
+from painted._components.sparkline import sparkline, sparkline_with_range
+from painted.palette import MONO_PALETTE, reset_palette, use_palette
+from painted.icon_set import ASCII_ICONS, reset_icons, use_icons
 
 
 def test_sparkline_default():

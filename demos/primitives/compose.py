@@ -12,12 +12,12 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fidelis import (
+from painted import (
     Block, Style, Align,
     join_horizontal, join_vertical, pad, border, truncate,
     ROUNDED, HEAVY, DOUBLE,
 )
-from fidelis.tui import Buffer
+from painted.tui import Buffer
 from demo_utils import render_buffer
 
 # --- join_horizontal: left to right ---

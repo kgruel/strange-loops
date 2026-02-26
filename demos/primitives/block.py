@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fidelis import Block, Style, Wrap
-from fidelis.tui import Buffer
+from painted import Block, Style, Wrap
+from painted.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Block.text: create from a string ---

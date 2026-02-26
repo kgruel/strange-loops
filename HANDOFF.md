@@ -1,6 +1,6 @@
 # HANDOFF
 
-Session continuity for fidelis. See `CLAUDE.md` for API reference.
+Session continuity for painted. See `CLAUDE.md` for API reference.
 
 ## What Is This
 
@@ -11,27 +11,27 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 599 tests passing, pushed to `git@git.gruel.network:kaygee/fidelis.git`.
+v0.1.0, 604 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
 
 Discord narrative debugging infrastructure implemented and validated. Two sessions
 completed (simulated + real Discord). Writer output path fully optimized.
 
 ## Relationship to Loops
 
-fidelis is a path dependency from the loops monorepo:
-- `apps/loops/pyproject.toml` → `fidelis = { path = "../../../fidelis" }`
-- `apps/hlab/pyproject.toml` → `fidelis = { path = "../../../fidelis" }`
-- **Full `cells` → `fidelis` migration** completed (subtask `cells-to-fidelis`,
+painted is a path dependency from the loops monorepo:
+- `apps/loops/pyproject.toml` → `painted = { path = "../../../painted" }`
+- `apps/hlab/pyproject.toml` → `painted = { path = "../../../painted" }`
+- **Full `cells` → `painted` migration** completed (subtask `cells-to-painted`,
   in review). 153 import sites across 73 files. `libs/cells/` deleted. 80 loops
   tests passing. Needs review + merge.
 
 ## Structure
 
 ```
-src/fidelis/           # ~10,000 LOC
+src/painted/           # ~10,000 LOC
   Primitives:          Cell, Style, Span, Line, Block, Cursor, Viewport, Focus
   Composition:         join, pad, border, truncate, Align, vslice (+ hit-testing ids)
-  Views:               fidelis.views (flat namespace)
+  Views:               painted.views (flat namespace)
     Stateless:         shape_lens, tree_lens, chart_lens, sparkline, spinner,
                        progress_bar, render_big
     Stateful:          list_view, table, text_input, data_explorer
@@ -64,8 +64,8 @@ demos/                 # Python files + tour.py + slides/
   ListState and TableState composed as `cursor: Cursor` + `viewport: Viewport`.
 - **View layer design** — stateless vs stateful as primary axis. Design doc at
   `docs/plans/2026-02-23-view-layer-primitives.md`.
-- **Module reorganization** — created `fidelis.views` (flat namespace), deleted
-  `fidelis.widgets`, `fidelis.lens`, `fidelis.effects`. Clean break at 0.1.0.
+- **Module reorganization** — created `painted.views` (flat namespace), deleted
+  `painted.widgets`, `painted.lens`, `painted.effects`. Clean break at 0.1.0.
 - **Sparkline dedup** — shared `_sparkline_core.py` helper used by both
   `sparkline()` (tail sampling) and `chart_lens(zoom=1)` (uniform sampling).
 - **Doc extraction pipeline** — `tools/docgen.py` (AST + sentinel extraction,
@@ -120,6 +120,17 @@ demos/                 # Python files + tour.py + slides/
   render() failures → plain error Block + exit 2. JSON → `{"error": "..."}`.
   Streaming path covered. Surface intentionally not wrapped (render bugs
   should crash visibly).
+- **Lens type dissolution** — Deleted the vestigial `Lens` dataclass and
+  `SHAPE_LENS`/`TREE_LENS`/`CHART_LENS` constants. Lens functions are bare
+  callables: `(data, zoom, width) -> Block`. `shape_lens` now auto-dispatches
+  by data shape: numeric sequences → `chart_lens`, labeled numeric dicts →
+  `chart_lens`, hierarchical dicts → `tree_lens`. `max_zoom` moved to
+  widget-level (demo app). 5 new auto-dispatch tests.
+- **`print_block` TTY auto-detect** — `use_ansi` default changed from
+  `True` to `None` (auto-detect via `stream.isatty()`). All internal
+  call sites pass explicit values, so no behavior change for `show()`
+  or `run_cli()`. Standalone `print_block(block)` now does the right
+  thing when piped. 617 total tests.
 
 ## Capability Signal Design (Resolved)
 
@@ -140,7 +151,7 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 | Task | Status | Notes |
 |------|--------|-------|
 | `fidelity-impl` | **Merged** | 8 commits, 472 tests, +1976/-730 lines |
-| `cells-to-fidelis` | In review | Full loops migration, needs review + merge |
+| `cells-to-painted` | In review | Full loops migration, needs review + merge |
 | `codex-design-review` | Complete (closed) | Found MONO/PLAIN conflict, resolved |
 | `charm-v2-research` | **Merged** | 455-line research doc, all sources verified |
 | `hit-testing` | **Merged** | Block.id + Buffer provenance + Surface.hit() |
@@ -153,7 +164,7 @@ arithmetic. Hex/256-color values auto-downgrade to match terminal capability.
 ## Narrative Debugging (Two Sessions Completed)
 
 Agent-swarm narrative debugging: 4 persona agents with separate contexts
-react to fidelis content. Two sessions completed.
+react to painted content. Two sessions completed.
 
 **Session 1** (simulated, SendMessage relay): Dropped README, found doc gaps.
 **Session 2** (real Discord): Conversation starter → CLAUDE.md drop → run_cli
@@ -164,7 +175,7 @@ signature → shape_lens. Full async flow via `tools/discord_chat.py`.
   (3/4 agents independently: "that should be at the top of the README")
 - `show(data)` across pipe/static/live/interactive is the undocumented value prop
   (mrbits: "if this delivers that, document it front and center")
-- Bubble Tea requires framework commitment at step 1; fidelis's ramp is unique
+- Bubble Tea requires framework commitment at step 1; painted's ramp is unique
   (synthwave: "real differentiator")
 - ghost_pipe validated progressive adoption: "swap print() for print_block()
   one at a time" resolved their 30-subcommand blocker
@@ -195,9 +206,8 @@ Session 2 transcript: Discord channel #terminal-crafters
   feedback and improve the process going forward.
 - **README rewrite** — informed by narrative debugging findings. Adoption
   ladder as lede, show(data) value prop, progressive enhancement framing.
-- **`print_block` TTY auto-detect** — consider `use_ansi=None` default.
-  Small change, addresses the tier-1 paper cut.
-- **Declarative terminal state** — deferred. When fidelis needs concurrent
+- **`print_block` TTY auto-detect** — DONE. `use_ansi=None` default.
+- **Declarative terminal state** — deferred. When painted needs concurrent
   windows (not just modal layers), composition units will need to declare
   terminal mode requirements (mouse, cursor, graphics). Reconciliation
   algebra at Surface. Design thread: `docs/plans/2026-02-25-declarative-terminal-state.md`.

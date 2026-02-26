@@ -1,6 +1,6 @@
 # Demo Patterns
 
-Findings and recommendations for the fidelis demo structure.
+Findings and recommendations for the painted demo structure.
 
 ## 1. tour.py Completeness Analysis
 
@@ -33,11 +33,11 @@ tour.py is a ~2880-line interactive teaching platform implementing:
 
 **Not actually missing — tour.py is functionally complete.** The gaps are pedagogical rather than structural:
 
-1. **Mouse input**: No slides covering `fidelis.mouse`. The framework supports mouse but tour.py doesn't demonstrate it. Consider adding a "mouse" slide pointing to `demo_mouse.py`.
+1. **Mouse input**: No slides covering `painted.mouse`. The framework supports mouse but tour.py doesn't demonstrate it. Consider adding a "mouse" slide pointing to `demo_mouse.py`.
 
-2. **Lens primitives**: No coverage of `fidelis.views` (shape_lens, tree_lens, chart_lens). These render arbitrary Python data at different zoom levels. Could add a "lens" slide between "buffer" and "app".
+2. **Lens primitives**: No coverage of `painted.views` (shape_lens, tree_lens, chart_lens). These render arbitrary Python data at different zoom levels. Could add a "lens" slide between "buffer" and "app".
 
-3. **Effects**: No coverage of `fidelis.views` (render_big). Low priority — visual flourish rather than core concept.
+3. **Effects**: No coverage of `painted.views` (render_big). Low priority — visual flourish rather than core concept.
 
 4. **Theme constants**: No explicit slide for the theme system. The styles are used but not explained.
 
@@ -145,7 +145,7 @@ No numbered prefixes — use README for learning path ordering.
 
 ### The Canonical Structure
 
-Based on tour.py, demo_09_layer.py, and demo_lenses.py, the pattern for TUI apps using fidelis submodules:
+Based on tour.py, demo_09_layer.py, and demo_lenses.py, the pattern for TUI apps using painted submodules:
 
 ```python
 #!/usr/bin/env python3
@@ -160,10 +160,10 @@ import asyncio
 from dataclasses import dataclass, replace
 
 # CLI core — always available
-from fidelis import Block, Style, join_vertical, pad, border, ROUNDED
+from painted import Block, Style, join_vertical, pad, border, ROUNDED
 
 # TUI primitives — for interactive apps
-from fidelis.tui import (
+from painted.tui import (
     Surface,              # Base class
     Layer, Stay, Pop, Push, Quit,  # Modal stack
     process_key, render_layers,     # Layer helpers
@@ -172,12 +172,12 @@ from fidelis.tui import (
 )
 
 # Views — optional, when needed
-from fidelis.views import spinner, progress_bar, list_view
+from painted.views import spinner, progress_bar, list_view
 
 # Optional imports based on features
-# from fidelis.views import shape_lens, tree_lens
-# from fidelis.mouse import MouseEvent, MouseButton
-# from fidelis.views import render_big
+# from painted.views import shape_lens, tree_lens
+# from painted.mouse import MouseEvent, MouseButton
+# from painted.views import render_big
 
 
 # ─── State ───────────────────────────────────────────────────────────
@@ -273,16 +273,16 @@ if __name__ == "__main__":
 
 ```python
 # Tier 1: CLI scripts (no async, print and exit)
-from fidelis import Block, Style, Span, Line, print_block
+from painted import Block, Style, Span, Line, print_block
 
 # Tier 2: Interactive TUI (async, input loop)
-from fidelis.tui import Surface, Layer, Focus, Search
+from painted.tui import Surface, Layer, Focus, Search
 
 # Tier 3: Optional extensions
-from fidelis.views import spinner, list_view, progress_bar
-from fidelis.views import shape_lens, tree_lens
-from fidelis.mouse import MouseEvent, MouseButton
-from fidelis.views import render_big
+from painted.views import spinner, list_view, progress_bar
+from painted.views import shape_lens, tree_lens
+from painted.mouse import MouseEvent, MouseButton
+from painted.views import render_big
 ```
 
 ### Simpler Pattern (No Layers)

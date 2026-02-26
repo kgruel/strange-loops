@@ -5,7 +5,7 @@
 
 ## Problem
 
-fidelis has all the pieces for "call one function, get appropriate output":
+painted has all the pieces for "call one function, get appropriate output":
 `shape_lens` renders any Python value, `print_block` outputs a Block,
 `detect_context` resolves TTY/pipe/format. But there's no single function
 that composes them. The simplest path today requires 3-4 imports and
@@ -42,7 +42,7 @@ def show(
 
 ### Location
 
-`fidelis/__init__.py`, exported as `from fidelis import show`.
+`painted/__init__.py`, exported as `from painted import show`.
 
 ### What it doesn't do
 

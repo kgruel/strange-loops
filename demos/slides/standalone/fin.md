@@ -9,7 +9,7 @@ align: center
 
 [spacer:2]
 
-*that's* `fidelis`*.*
+*that's* `painted`*.*
 
 [spacer:2]
 

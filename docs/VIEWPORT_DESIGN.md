@@ -2,7 +2,7 @@
 
 ## Problem
 
-Fidelis has mouse scroll events (`MouseEvent.scroll_delta`) and components like `ListState` and `TableState` that embed scroll management. The scroll logic is duplicated:
+Painted has mouse scroll events (`MouseEvent.scroll_delta`) and components like `ListState` and `TableState` that embed scroll management. The scroll logic is duplicated:
 
 ```python
 # ListState.scroll_into_view
@@ -230,9 +230,9 @@ def move_down(state: ListViewState) -> ListViewState:
 
 ## Location
 
-`libs/fidelis/src/fidelis/viewport.py` — new file in the CLI core layer (no TUI dependencies).
+`libs/painted/src/painted/viewport.py` — new file in the CLI core layer (no TUI dependencies).
 
-Export from `fidelis/__init__.py` alongside `Block`, `Span`, etc.
+Export from `painted/__init__.py` alongside `Block`, `Span`, etc.
 
 ## Why Not Extend ListState/TableState?
 

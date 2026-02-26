@@ -50,11 +50,11 @@ class Style:
 
 [zoom:2]
 
-from `fidelis/cell.py`
+from `painted/cell.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.cell:Style#definition -->
+<!-- docgen:begin py:painted.cell:Style#definition -->
 ```python
 @dataclass(frozen=True)
 class Style:

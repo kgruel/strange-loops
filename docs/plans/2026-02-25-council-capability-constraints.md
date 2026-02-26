@@ -6,7 +6,7 @@ How should terminal capability information flow through the rendering pipeline s
 
 ## Context
 
-fidelis renders the same data at different fidelity levels via the Lens/zoom system. Palette and IconSet (landing now) provide aesthetic choice via ContextVar. But views are blind to terminal capabilities beyond width.
+painted renders the same data at different fidelity levels via the Lens/zoom system. Palette and IconSet (landing now) provide aesthetic choice via ContextVar. But views are blind to terminal capabilities beyond width.
 
 The rendering pipeline today:
 
@@ -84,7 +84,7 @@ The `LC_TERM_CAPABILITIES` trick (using the `LC_` prefix so OpenSSH forwards it
 by default) addresses the SSH capability degradation problem identified in the
 research doc.
 
-**Implication for fidelis:** We may not be designing a "capability detection
+**Implication for painted:** We may not be designing a "capability detection
 system." We may be designing how a small number of genuinely-need-to-know
 signals (color depth, background mode, unicode width) reach the rendering
 pipeline, while everything else is either assumed (baseline) or tried
@@ -125,7 +125,7 @@ is missing. But Koblinger argues they probably shouldn't — it produces
 heuristic behavior, and the better response is pushing the ecosystem toward
 proper sync reporting at session boundaries.
 
-**Implications for fidelis:**
+**Implications for painted:**
 
 - **STATIC/LIVE mode**: sync detection only. Read env vars, render, done. This
   is the overwhelmingly common case and should be trivial to implement.
@@ -135,7 +135,7 @@ proper sync reporting at session boundaries.
 - **Progressive re-render** is the fallback path, not the primary model. The
   primary model is: sync state should be right before you render.
 - **The real long-term solution** is the ecosystem adopting proper sync
-  reporting (Edwards' `TERM_CAPABILITIES` or similar). fidelis should be ready
+  reporting (Edwards' `TERM_CAPABILITIES` or similar). painted should be ready
   to consume it when it arrives, not build a complex async detection system
   that replicates terminfo's mistakes in a new form.
 

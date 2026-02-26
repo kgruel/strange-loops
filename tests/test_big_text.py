@@ -1,8 +1,8 @@
 """Tests for big text rendering."""
 
 import pytest
-from fidelis import Style
-from fidelis.views import render_big, BIG_GLYPHS, BigTextFormat
+from painted import Style
+from painted.views import render_big, BIG_GLYPHS, BigTextFormat
 
 
 class TestRenderBig:

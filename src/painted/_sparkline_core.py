@@ -24,8 +24,8 @@ def sparkline_text(
     """Render a sparkline string of exactly ``width`` characters.
 
     This is an internal helper used by both:
-    - ``fidelis._components.sparkline`` (tail semantics + left padding)
-    - ``fidelis._lens.chart_lens`` at ``zoom=1`` (uniform sampling + right padding)
+    - ``painted._components.sparkline`` (tail semantics + left padding)
+    - ``painted._lens.chart_lens`` at ``zoom=1`` (uniform sampling + right padding)
     """
     if width <= 0:
         return ""

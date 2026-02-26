@@ -4,12 +4,12 @@ Goal: introduce a `Cursor` primitive and adopt it + `Viewport` consistently acro
 
 This plan is grounded in current implementations of:
 
-- `Viewport` (`src/fidelis/viewport.py`)
-- `ListState` (`src/fidelis/_components/list_view.py`)
-- `TableState` (`src/fidelis/_components/table.py`)
-- `SpinnerState` (`src/fidelis/_components/spinner.py`)
-- `DataExplorerState` (`src/fidelis/_components/data_explorer.py`)
-- `Search` (`src/fidelis/search.py`)
+- `Viewport` (`src/painted/viewport.py`)
+- `ListState` (`src/painted/_components/list_view.py`)
+- `TableState` (`src/painted/_components/table.py`)
+- `SpinnerState` (`src/painted/_components/spinner.py`)
+- `DataExplorerState` (`src/painted/_components/data_explorer.py`)
+- `Search` (`src/painted/search.py`)
 
 Constraints (enforced/observed today):
 
@@ -21,9 +21,9 @@ Constraints (enforced/observed today):
 
 ### Location
 
-- New module: `src/fidelis/cursor.py` (peer to `src/fidelis/viewport.py`)
-- Export from `src/fidelis/__init__.py` (similar to `Viewport`)
-- Consider exporting from `src/fidelis/tui/__init__.py` if we want Cursor available alongside `Search`/`Focus`
+- New module: `src/painted/cursor.py` (peer to `src/painted/viewport.py`)
+- Export from `src/painted/__init__.py` (similar to `Viewport`)
+- Consider exporting from `src/painted/tui/__init__.py` if we want Cursor available alongside `Search`/`Focus`
 
 ### Dataclass + semantics
 
@@ -111,4 +111,4 @@ If `DataExplorerState.cursor` changes from `int` to `Cursor`, this is a type cha
 4. Refactor `ListState`/`TableState` selection (Cursor clamp) + add list/table tests.
 5. Refactor list/table scrolling to use `Viewport` in state + render paths.
 6. Refactor `DataExplorerState` movement math to Cursor(clamp) (fields unchanged).
-7. Run full suite (`uv run --package fidelis pytest tests/ -q`).
+7. Run full suite (`uv run --package painted pytest tests/ -q`).

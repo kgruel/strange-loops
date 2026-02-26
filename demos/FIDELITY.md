@@ -1,6 +1,6 @@
 # Fidelity Pattern
 
-This document describes the fidelity pattern implemented in the fidelis tour.
+This document describes the fidelity pattern implemented in the painted tour.
 
 ## General Pattern
 
@@ -109,7 +109,7 @@ print_block()  ←────────────────────�
    (inline)            -v/-vv             (TUI)
 ```
 
-fidelis makes this transition smooth because the same primitives (Block, Span) work in both paths. Content is mode-agnostic; only the output path changes.
+painted makes this transition smooth because the same primitives (Block, Span) work in both paths. Content is mode-agnostic; only the output path changes.
 
 ### Flow Triggers Beyond Fidelity
 
@@ -157,7 +157,7 @@ Other factors that might drive CLI → TUI transitions:
 -vv → request/response TUI, history, replay (level 3)
 ```
 
-### Future Directions for fidelis
+### Future Directions for painted
 
 **Currently available:**
 - Block/Span work for both CLI and TUI modes

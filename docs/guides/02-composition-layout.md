@@ -1,6 +1,6 @@
 # Composition and Layout
 
-fidelis’s layout layer is intentionally small: it’s a set of pure functions that transform `Block` → `Block` (or join multiple blocks into one).
+painted’s layout layer is intentionally small: it’s a set of pure functions that transform `Block` → `Block` (or join multiple blocks into one).
 
 This lets you build complex UI surfaces without introducing mutable layout state.
 
@@ -13,7 +13,7 @@ See also:
 
 Join blocks horizontally or vertically, optionally with alignment and gaps.
 
-<!-- docgen:begin py:fidelis.compose:Align#definition -->
+<!-- docgen:begin py:painted.compose:Align#definition -->
 ```python
 class Align(Enum):
     START = "start"    # top or left
@@ -22,14 +22,14 @@ class Align(Enum):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.compose:join_horizontal#signature -->
+<!-- docgen:begin py:painted.compose:join_horizontal#signature -->
 ```python
 def join_horizontal(*blocks: Block, gap: int = 0,
                     align: Align = Align.START) -> Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.compose:join_vertical#signature -->
+<!-- docgen:begin py:painted.compose:join_vertical#signature -->
 ```python
 def join_vertical(*blocks: Block, gap: int = 0,
                   align: Align = Align.START) -> Block:
@@ -40,14 +40,14 @@ def join_vertical(*blocks: Block, gap: int = 0,
 
 Padding adds empty space. Borders wrap content, optionally with a title.
 
-<!-- docgen:begin py:fidelis.compose:pad#signature -->
+<!-- docgen:begin py:painted.compose:pad#signature -->
 ```python
 def pad(block: Block, *, left: int = 0, right: int = 0,
         top: int = 0, bottom: int = 0, style: Style = Style()) -> Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.compose:border#signature -->
+<!-- docgen:begin py:painted.compose:border#signature -->
 ```python
 def border(block: Block, chars: BorderChars = ROUNDED,
            style: Style = Style(), title: str | None = None,
@@ -61,13 +61,13 @@ Truncation is the simplest “responsive layout”: cap width, show an ellipsis,
 
 Slicing (`vslice`) is the bridge to scrollable UIs: build a full block, then window into it.
 
-<!-- docgen:begin py:fidelis.compose:truncate#signature -->
+<!-- docgen:begin py:painted.compose:truncate#signature -->
 ```python
 def truncate(block: Block, width: int, ellipsis: str = "…") -> Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.compose:vslice#signature -->
+<!-- docgen:begin py:painted.compose:vslice#signature -->
 ```python
 def vslice(block: Block, offset: int, height: int) -> Block:
 ```

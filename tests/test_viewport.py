@@ -1,6 +1,6 @@
 """Tests for cells.viewport: Viewport scroll state."""
 
-from fidelis import Viewport
+from painted import Viewport
 
 
 class TestViewportBasics:

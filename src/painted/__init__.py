@@ -3,18 +3,18 @@
 CLI core: styled output primitives for dressing up scripts.
 
 For interactive TUI apps, import from submodules:
-    from fidelis.tui import Surface, Layer
-    from fidelis.views import shape_lens
-    from fidelis.views import spinner, list_view
-    from fidelis.mouse import MouseEvent
-    from fidelis.views import render_big
+    from painted.tui import Surface, Layer
+    from painted.views import shape_lens
+    from painted.views import spinner, list_view
+    from painted.mouse import MouseEvent
+    from painted.views import render_big
 
 For aesthetic customization:
-    from fidelis import current_palette, use_palette, MONO_PALETTE
-    from fidelis import current_icons, use_icons, ASCII_ICONS
+    from painted import current_palette, use_palette, MONO_PALETTE
+    from painted import current_icons, use_icons, ASCII_ICONS
 
 For CLI harness and in-place rendering:
-    from fidelis.inplace import InPlaceRenderer
+    from painted.inplace import InPlaceRenderer
 """
 
 # Primitives

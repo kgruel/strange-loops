@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from fidelis.tui import KeyboardInput
+from painted.tui import KeyboardInput
 
 
 class TestGetKey:

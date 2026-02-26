@@ -1,55 +1,12 @@
-"""Tests for Lens primitive and lens functions (shape, tree, chart)."""
+"""Tests for lens functions (shape, tree, chart)."""
 
 import pytest
 
-from fidelis.views import (
-    Lens,
+from painted.views import (
     shape_lens,
-    SHAPE_LENS,
     tree_lens,
-    TREE_LENS,
     chart_lens,
-    CHART_LENS,
 )
-
-
-class TestLensDataclass:
-    """Tests for Lens dataclass properties."""
-
-    def test_lens_is_frozen(self):
-        """Lens dataclass is frozen."""
-        lens = Lens(render=lambda c, z, w: None, max_zoom=3)
-        with pytest.raises((AttributeError, TypeError)):
-            lens.max_zoom = 5  # type: ignore
-
-    def test_lens_default_max_zoom(self):
-        """Lens has default max_zoom of 2."""
-        lens = Lens(render=lambda c, z, w: None)
-        assert lens.max_zoom == 2
-
-    def test_lens_custom_max_zoom(self):
-        """Lens accepts custom max_zoom."""
-        lens = Lens(render=lambda c, z, w: None, max_zoom=5)
-        assert lens.max_zoom == 5
-
-    def test_lens_render_callable(self):
-        """Lens stores and exposes the render function."""
-        calls = []
-
-        def my_render(content, zoom, width):
-            calls.append((content, zoom, width))
-            return None
-
-        lens = Lens(render=my_render)
-        lens.render("test", 1, 40)
-
-        assert calls == [("test", 1, 40)]
-
-    def test_shape_lens_constant(self):
-        """SHAPE_LENS is a Lens with shape_lens as render."""
-        assert isinstance(SHAPE_LENS, Lens)
-        assert SHAPE_LENS.render is shape_lens
-        assert SHAPE_LENS.max_zoom == 2
 
 
 class TestShapeLensDictZoom:
@@ -57,7 +14,7 @@ class TestShapeLensDictZoom:
 
     def test_dict_zoom_0_shows_count(self):
         """At zoom 0, dict shows 'dict[N]' count."""
-        d = {"a": 1, "b": 2, "c": 3}
+        d = {"a": "x", "b": "y", "c": "z"}
         block = shape_lens(d, 0, 40)
 
         # Extract text from block
@@ -103,7 +60,7 @@ class TestShapeLensListZoom:
 
     def test_list_zoom_0_shows_count(self):
         """At zoom 0, list shows 'list[N]' count."""
-        lst = [1, 2, 3, 4, 5]
+        lst = ["a", "b", "c", "d", "e"]
         block = shape_lens(lst, 0, 40)
 
         text = _block_to_text(block)
@@ -272,7 +229,7 @@ class TestShapeLensSampling:
 
     def test_large_dict_truncated_at_zoom_2(self):
         """Large dict (100 keys) at zoom 2 shows '+80 more' footer."""
-        d = {f"key_{i}": i for i in range(100)}
+        d = {f"key_{i}": f"val_{i}" for i in range(100)}
         block = shape_lens(d, 2, 60)
         text = _block_to_text(block)
         assert "+80 more" in text
@@ -280,14 +237,14 @@ class TestShapeLensSampling:
 
     def test_large_list_truncated_at_zoom_2(self):
         """Large list (50 items) at zoom 2 shows '+30 more' footer."""
-        lst = list(range(50))
+        lst = [f"item_{i}" for i in range(50)]
         block = shape_lens(lst, 2, 40)
         text = _block_to_text(block)
         assert "+30 more" in text
 
     def test_small_dict_no_truncation(self):
         """Small dict (5 keys) at zoom 2 has no 'more' text."""
-        d = {f"key_{i}": i for i in range(5)}
+        d = {f"key_{i}": f"val_{i}" for i in range(5)}
         block = shape_lens(d, 2, 60)
         text = _block_to_text(block)
         assert "more" not in text
@@ -307,14 +264,14 @@ class TestShapeLensSampling:
 
     def test_exactly_20_dict_items_no_truncation(self):
         """Dict with exactly 20 items is not truncated."""
-        d = {f"key_{i}": i for i in range(20)}
+        d = {f"key_{i}": f"val_{i}" for i in range(20)}
         block = shape_lens(d, 2, 60)
         text = _block_to_text(block)
         assert "more" not in text
 
     def test_21_dict_items_truncated(self):
         """Dict with 21 items shows '+1 more'."""
-        d = {f"key_{i}": i for i in range(21)}
+        d = {f"key_{i}": f"val_{i}" for i in range(21)}
         block = shape_lens(d, 2, 60)
         text = _block_to_text(block)
         assert "+1 more" in text
@@ -356,16 +313,6 @@ def _block_to_text(block) -> str:
 # ---------------------------------------------------------------------------
 # Tree Lens Tests
 # ---------------------------------------------------------------------------
-
-
-class TestTreeLensConstant:
-    """Tests for TREE_LENS constant."""
-
-    def test_tree_lens_constant(self):
-        """TREE_LENS is a Lens with tree_lens as render."""
-        assert isinstance(TREE_LENS, Lens)
-        assert TREE_LENS.render is tree_lens
-        assert TREE_LENS.max_zoom == 4
 
 
 class TestTreeLensZoom:
@@ -477,16 +424,6 @@ class TestTreeLensWidth:
 # ---------------------------------------------------------------------------
 # Chart Lens Tests
 # ---------------------------------------------------------------------------
-
-
-class TestChartLensConstant:
-    """Tests for CHART_LENS constant."""
-
-    def test_chart_lens_constant(self):
-        """CHART_LENS is a Lens with chart_lens as render."""
-        assert isinstance(CHART_LENS, Lens)
-        assert CHART_LENS.render is chart_lens
-        assert CHART_LENS.max_zoom == 2
 
 
 class TestChartLensZoom:
@@ -612,3 +549,105 @@ class TestChartLensWidth:
         assert block.width == 15
         text = _block_to_text(block)
         assert len(text.strip()) > 0
+
+
+# ---------------------------------------------------------------------------
+# Auto-dispatch Tests (shape_lens dispatching to chart/tree)
+# ---------------------------------------------------------------------------
+
+
+class TestShapeLensAutoDispatchChart:
+    """Tests for shape_lens dispatching numeric data to chart_lens."""
+
+    def test_numeric_list_gets_sparkline(self):
+        """List of numbers at zoom 1 renders as sparkline, not comma-separated."""
+        data = [0, 50, 100]
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        # Sparkline uses block characters
+        assert any(c in text for c in "▁▂▃▄▅▆▇█")
+
+    def test_numeric_list_zoom_0_gets_stats(self):
+        """List of numbers at zoom 0 shows stats from chart_lens."""
+        data = [10, 20, 30]
+        block = shape_lens(data, 0, 40)
+        text = _block_to_text(block)
+        assert "3 values" in text
+
+    def test_labeled_numeric_dict_gets_bars(self):
+        """Dict with all-numeric values at zoom 2 renders as bar chart."""
+        data = {"cpu": 70, "mem": 50}
+        block = shape_lens(data, 2, 40)
+        text = _block_to_text(block)
+        assert "cpu" in text
+        assert "█" in text
+
+    def test_labeled_numeric_dict_zoom_1_gets_sparkline(self):
+        """Dict with all-numeric values at zoom 1 renders as sparkline."""
+        data = {"a": 10, "b": 50, "c": 90}
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        assert any(c in text for c in "▁▂▃▄▅▆▇█")
+
+    def test_bool_list_not_dispatched(self):
+        """List of bools is not treated as numeric."""
+        data = [True, False, True]
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        # Should be comma-separated list, not sparkline
+        assert "True" in text
+
+    def test_mixed_list_not_dispatched(self):
+        """List with mixed types falls back to shape rendering."""
+        data = [1, "two", 3]
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        assert "two" in text
+
+    def test_empty_list_not_dispatched(self):
+        """Empty list uses shape rendering."""
+        block = shape_lens([], 0, 40)
+        text = _block_to_text(block)
+        assert "list[0]" in text
+
+    def test_single_number_not_dispatched(self):
+        """Single number is a scalar, not a numeric sequence."""
+        block = shape_lens(42, 0, 40)
+        text = _block_to_text(block)
+        assert "int" in text
+
+
+class TestShapeLensAutoDispatchTree:
+    """Tests for shape_lens dispatching hierarchical data to tree_lens."""
+
+    def test_nested_dict_gets_tree(self):
+        """Dict with nested dict values renders as tree."""
+        data = {"parent": {"child": "value"}}
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        # Tree uses branch characters
+        assert "├" in text or "└" in text
+
+    def test_dict_with_nested_list_gets_tree(self):
+        """Dict with nested list values renders as tree."""
+        data = {"items": [1, 2, 3], "more": [4, 5]}
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        assert "├" in text or "└" in text
+
+    def test_flat_dict_not_dispatched_to_tree(self):
+        """Flat dict with string values uses shape rendering, not tree."""
+        data = {"name": "Alice", "role": "admin"}
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        # Should be comma-separated keys, not tree branches
+        assert "name" in text
+        assert "├" not in text and "└" not in text
+
+    def test_empty_nested_not_dispatched(self):
+        """Dict with empty nested containers uses shape rendering."""
+        data = {"items": [], "config": {}}
+        block = shape_lens(data, 1, 40)
+        text = _block_to_text(block)
+        # Empty containers don't count as hierarchical
+        assert "├" not in text and "└" not in text

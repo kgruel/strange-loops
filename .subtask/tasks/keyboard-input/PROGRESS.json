@@ -1,8 +1,0 @@
-[
-  { "step": "Revise steps for implementation phase", "done": true },
-  { "step": "Add sequence + UTF-8 + ESC timeout tests", "done": true },
-  { "step": "Add SGR mouse parsing tests (parser + integration)", "done": true },
-  { "step": "Fix CSI modifier arrows/home/end mapping", "done": true },
-  { "step": "Run full pytest suite", "done": true },
-  { "step": "Commit implementation changes", "done": true }
-]

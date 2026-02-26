@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-from fidelis import Block, Style
-from fidelis.fidelity import (
+from painted import Block, Style
+from painted.fidelity import (
     # New API
     Zoom,
     OutputMode,
@@ -273,11 +273,11 @@ class TestCliRunner:
 
     @staticmethod
     def _patch_print_block_to_current_stdout(monkeypatch):
-        from fidelis import writer as writer_mod
+        from painted import writer as writer_mod
 
         real_print_block = writer_mod.print_block
 
-        def print_block(block, stream=None, *, use_ansi=True):
+        def print_block(block, stream=None, *, use_ansi=None):
             return real_print_block(block, sys.stdout, use_ansi=use_ansi)
 
         monkeypatch.setattr(writer_mod, "print_block", print_block)

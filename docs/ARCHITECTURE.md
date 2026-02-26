@@ -1,6 +1,6 @@
-# fidelis Architecture
+# painted Architecture
 
-Data-flow reference for the fidelis TUI framework.
+Data-flow reference for the painted TUI framework.
 
 ## The Stack
 

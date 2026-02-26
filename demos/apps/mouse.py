@@ -13,9 +13,9 @@ Run: uv run python demos/apps/mouse.py
 """
 
 import asyncio
-from fidelis import Block, Style
-from fidelis.tui import Surface
-from fidelis.mouse import MouseEvent, MouseButton, MouseAction
+from painted import Block, Style
+from painted.tui import Surface
+from painted.mouse import MouseEvent, MouseButton, MouseAction
 
 PALETTE = [
     "#ff5555",  # red

@@ -4,10 +4,10 @@ Palette is never auto-set — it's a deliberate aesthetic choice.
 """
 from __future__ import annotations
 
-from fidelis.fidelity import CliContext, Format, OutputMode, Zoom
-from fidelis.fidelity import _setup_defaults
-from fidelis.palette import current_palette, reset_palette, DEFAULT_PALETTE
-from fidelis.icon_set import current_icons, reset_icons, ASCII_ICONS, IconSet
+from painted.fidelity import CliContext, Format, OutputMode, Zoom
+from painted.fidelity import _setup_defaults
+from painted.palette import current_palette, reset_palette, DEFAULT_PALETTE
+from painted.icon_set import current_icons, reset_icons, ASCII_ICONS, IconSet
 
 
 def test_plain_format_sets_ascii_icons():

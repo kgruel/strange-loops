@@ -1,7 +1,7 @@
 # Charm v2 Deep Dive (Bubble Tea v2, Lip Gloss v2, Bubbles v2)
 
 Date: 2026-02-25  
-Audience: `fidelis` (Python, cell-buffer TUI)
+Audience: `painted` (Python, cell-buffer TUI)
 
 ## Status Snapshot (as of 2026-02-25)
 
@@ -12,9 +12,9 @@ Audience: `fidelis` (Python, cell-buffer TUI)
 - A shared lower-level foundation, **Ultraviolet**, powers key parts of Bubble Tea v2 and Lip Gloss v2: https://github.com/charmbracelet/ultraviolet
   - Note: Ultraviolet’s README explicitly says it exists to serve internal use cases and has **no stability guarantees** (yet).
 
-## Executive Summary (What Matters for `fidelis`)
+## Executive Summary (What Matters for `painted`)
 
-- **The big v2 move is “declarative terminal state.”** Bubble Tea v2 replaces imperative “enter alt screen / enable mouse / hide cursor…” commands and program options with fields on the value returned by `View()`. This is a direct answer to v1 “state fights” and is extremely aligned with `fidelis`’s “pure render returns everything needed.”  
+- **The big v2 move is “declarative terminal state.”** Bubble Tea v2 replaces imperative “enter alt screen / enable mouse / hide cursor…” commands and program options with fields on the value returned by `View()`. This is a direct answer to v1 “state fights” and is extremely aligned with `painted`’s “pure render returns everything needed.”  
   - Sources: Bubble Tea upgrade guide + v2 “What’s New” discussion. https://github.com/charmbracelet/bubbletea/blob/v2.0.0/UPGRADE_GUIDE_V2.md, https://github.com/charmbracelet/bubbletea/discussions/1374
 - **The renderer is now truly cell-based and diff-driven (“Cursed Renderer”).** Bubble Tea v2 parses the rendered ANSI string into cells, writes it into a screen buffer, and emits minimal terminal updates using an ncurses-inspired algorithm (Ultraviolet).  
   - Sources: Bubble Tea v2.0.0 notes + Ultraviolet README + renderer code. https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0, https://github.com/charmbracelet/ultraviolet, https://github.com/charmbracelet/bubbletea/blob/v2.0.0/cursed_renderer.go
@@ -23,10 +23,10 @@ Audience: `fidelis` (Python, cell-buffer TUI)
 - **Ultraviolet is the real architectural “why.”** Charm’s v2 story is: build a production-grade, cross-platform terminal substrate (input + cell rendering + diffs + correctness), then rebase Bubble Tea/Lip Gloss/Bubbles on top.  
   - Sources: Charm blog v2 post + “Crush, Welcome Home” + Ultraviolet README. https://charm.land/blog/v2.md, https://charm.land/blog/crush-comes-home.md, https://github.com/charmbracelet/ultraviolet
 
-### Explicit `fidelis` Callouts (high-signal)
+### Explicit `painted` Callouts (high-signal)
 
-- **`fidelis already does:`** frozen state + pure render, cell buffers, diff rendering, capability resolution at Writer boundaries.
-- **`fidelis should consider:`**
+- **`painted already does:`** frozen state + pure render, cell buffers, diff rendering, capability resolution at Writer boundaries.
+- **`painted should consider:`**
   - Make terminal “mode requests” a first-class part of the render output (Bubble Tea’s `tea.View` is the proof this pays dividends).
   - Adopt a **damage model** (touched lines / dirty ranges) as an internal performance primitive, not just “compare whole buffers.”
   - Add optional support for terminal correctness/perf modes analogous to Bubble Tea’s “synchronized output” (mode 2026) and “Unicode core” (mode 2027) where appropriate.
@@ -59,14 +59,14 @@ Bubble Tea v2 makes `View()` return a `tea.View` value (not `string`), with fiel
 The runtime diffs **view state** and applies the minimal terminal changes needed.  
 Sources: Bubble Tea upgrade guide “The Big Idea: Declarative Views” + `tea.View` type. https://github.com/charmbracelet/bubbletea/blob/v2.0.0/UPGRADE_GUIDE_V2.md, https://github.com/charmbracelet/bubbletea/blob/v2.0.0/tea.go
 
-> **fidelis already does:** “render is the whole truth,” not a stream of imperative toggles.  
-> **fidelis should consider:** encode terminal-mode requests (alt-screen, mouse mode, cursor style, title, etc.) into the render result in a single place so feature ownership is compositional and testable.
+> **painted already does:** “render is the whole truth,” not a stream of imperative toggles.  
+> **painted should consider:** encode terminal-mode requests (alt-screen, mouse mode, cursor style, title, etc.) into the render result in a single place so feature ownership is compositional and testable.
 
 #### Why this matters for component composition
 
 In v1, any component could emit a command like “enter alt screen” at any time. In v2, **the only way** to request that state is to set `view.AltScreen = true` in the returned view.
 
-That forces a design rule that’s valuable for `fidelis` too:
+That forces a design rule that’s valuable for `painted` too:
 - **Feature requests must reconcile at a single render boundary.**
 - Conflicting requests are now an application-level decision (or a deterministic merge rule), not an emergent runtime race.
 
@@ -79,15 +79,15 @@ The v2 stack makes a clear boundary:
 This is an explicit architectural rebalancing to avoid deadlocks/lockups and eliminate “two libraries calling the shots.”  
 Source: Bubble Tea v2.0.0 release notes “No more fighting”. https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0
 
-> **fidelis already does:** “capabilities resolve at boundaries (Writer), not in pipelines.”  
-> **fidelis should consider:** ensure *only one subsystem* is responsible for terminal I/O queries, so styling/layout libraries can be fully deterministic.
+> **painted already does:** “capabilities resolve at boundaries (Writer), not in pipelines.”  
+> **painted should consider:** ensure *only one subsystem* is responsible for terminal I/O queries, so styling/layout libraries can be fully deterministic.
 
 ### Testing and determinism hooks (small but important)
 
 Bubble Tea v2 adds program options meant for deterministic testing (e.g. forcing window size / forcing a color profile).  
 Source: Bubble Tea upgrade guide “New Program Options”. https://github.com/charmbracelet/bubbletea/blob/v2.0.0/UPGRADE_GUIDE_V2.md
 
-> **fidelis should consider:** “test harness knobs” that make renders repeatable (fixed size, fixed capability profile), rather than relying on environment-dependent terminal probing during tests.
+> **painted should consider:** “test harness knobs” that make renders repeatable (fixed size, fixed capability profile), rather than relying on environment-dependent terminal probing during tests.
 
 ---
 
@@ -134,10 +134,10 @@ Ultraviolet (and Bubble Tea v2’s renderer) explicitly supports both:
 Bubble Tea’s renderer adjusts the “frame area” height based on `Content` height when not in alt screen, and uses relative cursor addressing in inline mode.  
 Source: `cursedRenderer.flush` logic around `frameArea` + `SetRelativeCursor`. https://github.com/charmbracelet/bubbletea/blob/v2.0.0/cursed_renderer.go
 
-> **fidelis already has:** orthogonal output modes in the CLI harness.  
-> **fidelis should consider:** ensuring inline-mode is not “second-class,” because it’s where performance/correctness edge cases (wrapping, scrollback interactions, cursor placement) are hardest.
+> **painted already has:** orthogonal output modes in the CLI harness.  
+> **painted should consider:** ensuring inline-mode is not “second-class,” because it’s where performance/correctness edge cases (wrapping, scrollback interactions, cursor placement) are hardest.
 
-### What’s surprising (and useful to `fidelis`)
+### What’s surprising (and useful to `painted`)
 
 Bubble Tea’s external API is still largely “render a string,” but internally it:
 - **decodes ANSI back into a cell grid** to do correct diff rendering.
@@ -146,8 +146,8 @@ This is a pragmatic bridge:
 - It preserves the huge existing ecosystem of “ANSI-styled strings,”
 - while enabling cell-accurate diffs, width correctness, and scroll optimizations.
 
-> **fidelis already does:** cell-buffer rendering natively (no decode step).  
-> **fidelis should consider:** the “decode ANSI → cells” approach as a compatibility layer if `fidelis` ever needs to ingest third-party ANSI output and still diff it correctly.
+> **painted already does:** cell-buffer rendering natively (no decode step).  
+> **painted should consider:** the “decode ANSI → cells” approach as a compatibility layer if `painted` ever needs to ingest third-party ANSI output and still diff it correctly.
 
 ### Correctness + terminal capability features bundled into rendering
 
@@ -159,7 +159,7 @@ Bubble Tea v2 also bakes in:
   https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0  
   https://github.com/charmbracelet/bubbletea/blob/v2.0.0/cursed_renderer.go
 
-> **fidelis should consider:** representing “render correctness modes” as capabilities negotiated at the Writer boundary and activated declaratively, similar to Bubble Tea’s approach.
+> **painted should consider:** representing “render correctness modes” as capabilities negotiated at the Writer boundary and activated declaratively, similar to Bubble Tea’s approach.
 
 ---
 
@@ -180,8 +180,8 @@ Sources: Lip Gloss upgrade guide (“Renderer Removal”, “Printing and Color 
 https://github.com/charmbracelet/lipgloss/blob/v2.0.0/UPGRADE_GUIDE_V2.md  
 https://github.com/charmbracelet/lipgloss/blob/v2.0.0/writer.go
 
-> **fidelis already does:** capability resolution at boundaries; rendering pipeline is pure.  
-> **fidelis should consider:** adopting a “full-fidelity internal styling, downsample at writer” policy (if not already implicit), and making the “writer profile” an explicit dependency for any output-mode adapters.
+> **painted already does:** capability resolution at boundaries; rendering pipeline is pure.  
+> **painted should consider:** adopting a “full-fidelity internal styling, downsample at writer” policy (if not already implicit), and making the “writer profile” an explicit dependency for any output-mode adapters.
 
 #### A subtle but crucial consequence: fewer “spooky action at a distance” bugs
 
@@ -191,7 +191,7 @@ Lip Gloss v2 is explicitly motivated by cases like:
 
 Source: Lip Gloss v2.0.0 release notes sections “Querying the right inputs and outputs” and “Going beyond localhost”. https://github.com/charmbracelet/lipgloss/releases/tag/v2.0.0
 
-> **fidelis should consider:** a crisp separation between “render output” (pure) and “output transport” (TTY/SSH/recording), with the transport owning stripping/downsampling decisions.
+> **painted should consider:** a crisp separation between “render output” (pure) and “output transport” (TTY/SSH/recording), with the transport owning stripping/downsampling decisions.
 
 ### Color + capability strategy: make choices explicit
 
@@ -204,7 +204,7 @@ Sources: Lip Gloss upgrade guide + v2 “What’s changing?” discussion/notes.
 https://github.com/charmbracelet/lipgloss/blob/v2.0.0/UPGRADE_GUIDE_V2.md  
 https://github.com/charmbracelet/lipgloss/discussions/506
 
-> **fidelis should consider:** whenever styling depends on environment (TTY, color depth, light/dark background), ensure the dependency is injected rather than global.
+> **painted should consider:** whenever styling depends on environment (TTY, color depth, light/dark background), ensure the dependency is injected rather than global.
 
 ### “Layout engine” expands: compositing + hit testing
 
@@ -218,7 +218,7 @@ Code to read:
 - https://github.com/charmbracelet/lipgloss/blob/v2.0.0/canvas.go
 - Bubble Tea clickable example using `Compositor.Hit` and `View.OnMouse`: https://github.com/charmbracelet/bubbletea/blob/v2.0.0/examples/clickable/main.go
 
-> **fidelis should consider:** a first-class “layer id” / hit-test story for mouse (or future pointer events), especially if `fidelis` wants to support composited overlays with deterministic picking.
+> **painted should consider:** a first-class “layer id” / hit-test story for mouse (or future pointer events), especially if `painted` wants to support composited overlays with deterministic picking.
 
 ---
 
@@ -241,8 +241,8 @@ The “declarative view fields” move changes how components share terminal fea
 
 This is effectively a **composition rule**: if you want multiple components to request features, the top-level view must reconcile them.
 
-> **fidelis already does:** top-level surface decides terminal output behavior.  
-> **fidelis should consider:** making feature reconciliation explicit (e.g., “cursor wants to be visible at x,y”, “mouse wants cell motion”, “screen wants alt-screen”) rather than letting it happen imperatively.
+> **painted already does:** top-level surface decides terminal output behavior.  
+> **painted should consider:** making feature reconciliation explicit (e.g., “cursor wants to be visible at x,y”, “mouse wants cell motion”, “screen wants alt-screen”) rather than letting it happen imperatively.
 
 ### A new composition affordance: `View.OnMouse`
 
@@ -257,11 +257,11 @@ Source: `tea.View` docs + clickable example.
 https://github.com/charmbracelet/bubbletea/blob/v2.0.0/tea.go  
 https://github.com/charmbracelet/bubbletea/blob/v2.0.0/examples/clickable/main.go
 
-> **fidelis should consider:** a similar pattern for pointer events: “render produces a pick map” (or layer tree) that can be queried by input handlers to produce semantic events.
+> **painted should consider:** a similar pattern for pointer events: “render produces a pick map” (or layer tree) that can be queried by input handlers to produce semantic events.
 
 ---
 
-## 5) Layout System (What Charm chose, and what to steal for `fidelis`)
+## 5) Layout System (What Charm chose, and what to steal for `painted`)
 
 ### Charm’s framing: Lip Gloss is the layout engine
 
@@ -286,21 +286,21 @@ Source: https://github.com/charmbracelet/ultraviolet/blob/524a6607adb8/layout/la
 
 This is closer to “region-based layout” (think: “split the screen into panes”) than a full constraint solver or flexbox.
 
-> **fidelis already does:** Block composition (join/pad/border).  
-> **fidelis should consider:** adding an explicit “rect layout” layer (split panes, allocate regions, then render blocks into regions) if it improves clarity/perf, especially for apps that naturally think in rectangles.
+> **painted already does:** Block composition (join/pad/border).  
+> **painted should consider:** adding an explicit “rect layout” layer (split panes, allocate regions, then render blocks into regions) if it improves clarity/perf, especially for apps that naturally think in rectangles.
 
-### Where Lip Gloss compositing overlaps with `fidelis` layer algebra
+### Where Lip Gloss compositing overlaps with `painted` layer algebra
 
 Lip Gloss v2’s compositor is effectively:
 - a z-ordered layer tree (with IDs),
 - with deterministic render order,
 - and deterministic hit-testing (“topmost layer at (x,y)”).
 
-That’s conceptually adjacent to `fidelis`’s layer stack algebra (`Stay | Pop | Push | Quit`), even though the mechanics differ:
+That’s conceptually adjacent to `painted`’s layer stack algebra (`Stay | Pop | Push | Quit`), even though the mechanics differ:
 - Lip Gloss layers are *render-time composition* primitives.
-- `fidelis` layers are *application navigation / state-stack* primitives.
+- `painted` layers are *application navigation / state-stack* primitives.
 
-> **fidelis should consider:** whether `fidelis` needs a *render-layer* concept distinct from *navigation layers*, especially for overlays/tooltips/modals with mouse picking.
+> **painted should consider:** whether `painted` needs a *render-layer* concept distinct from *navigation layers*, especially for overlays/tooltips/modals with mouse picking.
 
 ---
 
@@ -319,7 +319,7 @@ https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0
 https://github.com/charmbracelet/bubbletea/blob/v2.0.0/UPGRADE_GUIDE_V2.md  
 https://github.com/charmbracelet/ultraviolet/blob/524a6607adb8/key.go
 
-> **fidelis should consider:** separating “raw input decoding” from “semantic keybindings” and designing the key model so it can grow into modern terminal protocols (Kitty) without breaking API again.
+> **painted should consider:** separating “raw input decoding” from “semantic keybindings” and designing the key model so it can grow into modern terminal protocols (Kitty) without breaking API again.
 
 #### Bubble Tea’s pattern: request capabilities, then adapt
 
@@ -363,8 +363,8 @@ Sources: `RenderBuffer` and `TerminalRenderer.Render`.
 https://github.com/charmbracelet/ultraviolet/blob/524a6607adb8/buffer.go  
 https://github.com/charmbracelet/ultraviolet/blob/524a6607adb8/terminal_renderer.go
 
-> **fidelis already does:** diff-based rendering (only changed cells written).  
-> **fidelis should consider:** a first-class damage model (touched-line ranges) to avoid scanning or comparing large buffers when the app already knows what changed.
+> **painted already does:** diff-based rendering (only changed cells written).  
+> **painted should consider:** a first-class damage model (touched-line ranges) to avoid scanning or comparing large buffers when the app already knows what changed.
 
 ### Cursor-movement optimizations + scroll region optimization
 
@@ -377,7 +377,7 @@ Sources: Ultraviolet README + renderer implementation details.
 https://github.com/charmbracelet/ultraviolet  
 https://github.com/charmbracelet/ultraviolet/blob/524a6607adb8/terminal_renderer.go
 
-> **interesting but not applicable (mostly):** Bubble Tea/Ultraviolet invest heavily in generating optimal ANSI cursor movement sequences because their public render surface is “ANSI strings.” `fidelis` already owns cells directly, but may still want similar cursor-movement optimizations in the final “cells → ANSI” writer.
+> **interesting but not applicable (mostly):** Bubble Tea/Ultraviolet invest heavily in generating optimal ANSI cursor movement sequences because their public render surface is “ANSI strings.” `painted` already owns cells directly, but may still want similar cursor-movement optimizations in the final “cells → ANSI” writer.
 
 ### Synchronized output (2026) as a “flicker budget” tool
 
@@ -389,8 +389,8 @@ Source: Bubble Tea v2.0.0 notes + `cursed_renderer.go`. https://github.com/charm
 Bubble Tea v2 includes built-in downsampling using `colorprofile`, so ANSI output “just works” across truecolor/256/16/no-color contexts.  
 Source: Bubble Tea v2.0.0 notes + colorprofile repo. https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0, https://github.com/charmbracelet/colorprofile
 
-> **fidelis already does:** capability resolution at output boundaries.  
-> **fidelis should consider:** treating downsampling as a generic “writer transform” (a pipeline stage after rendering, before bytes hit the terminal).
+> **painted already does:** capability resolution at output boundaries.  
+> **painted should consider:** treating downsampling as a generic “writer transform” (a pipeline stage after rendering, before bytes hit the terminal).
 
 ---
 
@@ -427,7 +427,7 @@ Sources: Lip Gloss v2.0.0 notes + Bubble Tea v2.0.0 notes.
 https://github.com/charmbracelet/lipgloss/releases/tag/v2.0.0  
 https://github.com/charmbracelet/bubbletea/releases/tag/v2.0.0
 
-> **fidelis should consider:** designing the Writer boundary to explicitly represent “this output is remote/ssh” vs “local tty” vs “recording/logging,” and ensuring capability negotiation happens there.
+> **painted should consider:** designing the Writer boundary to explicitly represent “this output is remote/ssh” vs “local tty” vs “recording/logging,” and ensuring capability negotiation happens there.
 
 ### 8.4 Build the substrate first (Ultraviolet), then rebuild the framework
 

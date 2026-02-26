@@ -1,7 +1,7 @@
 """Shared utilities for demos."""
 
-from fidelis import Writer
-from fidelis.tui import Buffer
+from painted import Writer
+from painted.tui import Buffer
 
 # Shared writer instance
 writer = Writer()

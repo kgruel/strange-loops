@@ -3,8 +3,8 @@
 Renders a list of values as vertical bar characters showing relative magnitude.
 
 Usage:
-    from fidelis.views import sparkline
-    from fidelis import Style
+    from painted.views import sparkline
+    from painted import Style
 
     values = [12, 15, 23, 45, 67, 89, 95, 87, 76, 65]
     block = sparkline(values, width=20, style=Style(fg="cyan"))

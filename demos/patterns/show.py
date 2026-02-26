@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 
-from fidelis import (
+from painted import (
     Block,
     Format,
     Style,
@@ -66,7 +66,7 @@ def demo_zoom():
 
 def demo_lens():
     """Custom lens override — show the same data differently."""
-    from fidelis.views import tree_lens
+    from painted.views import tree_lens
 
     print("── show(data, lens=tree_lens) ──\n")
     show(DEPLOY, lens=tree_lens)

@@ -1,6 +1,6 @@
 """Tests for cells.compose: vslice, join_vertical."""
 
-from fidelis import Block, Style, Cell, vslice, join_vertical, join_horizontal, join_responsive, Align
+from painted import Block, Style, Cell, vslice, join_vertical, join_horizontal, join_responsive, Align
 
 
 def _text_block(lines: list[str], style: Style = Style()) -> Block:

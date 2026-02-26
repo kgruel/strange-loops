@@ -45,7 +45,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fidelis import Style, Span, Line
+from painted import Style, Span, Line
 
 
 # -- Group ordering for auto-navigation --

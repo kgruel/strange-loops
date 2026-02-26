@@ -12,9 +12,9 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 
 import asyncio
-from fidelis import Cursor, Style, Line, Span, border
-from fidelis.tui import Surface, Focus, ring_next
-from fidelis.views import (
+from painted import Cursor, Style, Line, Span, border
+from painted.tui import Surface, Focus, ring_next
+from painted.views import (
     SpinnerState, spinner,
     ProgressState, progress_bar,
     ListState, list_view,

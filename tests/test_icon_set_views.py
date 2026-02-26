@@ -1,10 +1,10 @@
 """Views that consume IconSet for glyph vocabulary."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis.icon_set import ASCII_ICONS, reset_icons, use_icons
-from fidelis._components.spinner import SpinnerState, spinner
-from fidelis.views import tree_lens, chart_lens
+from painted.cell import Style
+from painted.icon_set import ASCII_ICONS, reset_icons, use_icons
+from painted._components.spinner import SpinnerState, spinner
+from painted.views import tree_lens, chart_lens
 
 
 def test_spinner_ambient_icons():

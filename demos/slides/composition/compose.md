@@ -26,18 +26,18 @@ truncate(block, width=20)     # cut to size
 
 [zoom:1]
 
-from `fidelis/compose.py`
+from `painted/compose.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.compose:join_horizontal#signature -->
+<!-- docgen:begin py:painted.compose:join_horizontal#signature -->
 ```python
 def join_horizontal(*blocks: Block, gap: int = 0,
                     align: Align = Align.START) -> Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.compose:join_vertical#signature -->
+<!-- docgen:begin py:painted.compose:join_vertical#signature -->
 ```python
 def join_vertical(*blocks: Block, gap: int = 0,
                   align: Align = Align.START) -> Block:

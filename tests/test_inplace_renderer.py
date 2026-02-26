@@ -2,8 +2,8 @@ import io
 
 import pytest
 
-from fidelis import Block, Cell, Style
-from fidelis.inplace import InPlaceRenderer
+from painted import Block, Cell, Style
+from painted.inplace import InPlaceRenderer
 
 
 def _block(rows: list[list[Cell]]) -> Block:

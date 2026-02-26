@@ -1,6 +1,6 @@
 """Tests for SpinnerState tick wrapping."""
 
-from fidelis.views import SpinnerFrames, SpinnerState
+from painted.views import SpinnerFrames, SpinnerState
 
 
 def test_spinner_tick_wraps() -> None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tour: Interactive educational platform for fidelis.
+"""Tour: Interactive educational platform for painted.
 
 A 2D navigable space where:
 - left/right moves between topics (sibling concepts)
@@ -34,14 +34,14 @@ from pathlib import Path
 
 import time
 
-from fidelis import (
+from painted import (
     Block, Style, Span, Line,
     Cursor,
     join_horizontal, join_vertical, pad, border,
     ROUNDED,
     print_block,
 )
-from fidelis.tui import (
+from painted.tui import (
     Surface, BufferView,
     # Focus management
     Focus, ring_next, ring_prev, linear_next, linear_prev,
@@ -50,7 +50,7 @@ from fidelis.tui import (
     # Layer
     Layer, Stay, Pop, Push, Quit, process_key, render_layers,
 )
-from fidelis.views import (
+from painted.views import (
     SpinnerState, spinner, DOTS, BRAILLE, LINE,
     ProgressState, progress_bar,
     ListState, list_view,
@@ -1671,7 +1671,7 @@ class BenchApp(Surface):
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Tour: Interactive educational platform for fidelis",
+        description="Tour: Interactive educational platform for painted",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
             Fidelity = starting zoom level:

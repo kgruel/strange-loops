@@ -344,18 +344,21 @@ def print_block(
     block: "Block",
     stream: TextIO = sys.stdout,
     *,
-    use_ansi: bool = True,
+    use_ansi: bool | None = None,
 ) -> None:
     """Print a Block to a stream, optionally with ANSI styling.
 
     Renders the block line-by-line. When use_ansi is True, includes ANSI
     escape codes for styling. When False, outputs plain text only.
+    When None (default), auto-detects from stream.isatty().
 
     Args:
         block: The Block to print.
         stream: Output stream (defaults to stdout).
-        use_ansi: Whether to include ANSI escape codes (default True).
+        use_ansi: Whether to include ANSI escape codes (default: auto-detect).
     """
+    if use_ansi is None:
+        use_ansi = hasattr(stream, "isatty") and stream.isatty()
     if use_ansi:
         writer = Writer(stream)
         _write_block_ansi(block, writer, stream)

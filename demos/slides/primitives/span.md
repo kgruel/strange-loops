@@ -50,11 +50,11 @@ class Span:
 
 [zoom:2]
 
-from `fidelis/span.py`
+from `painted/span.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.span:Span#definition -->
+<!-- docgen:begin py:painted.span:Span#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Span:

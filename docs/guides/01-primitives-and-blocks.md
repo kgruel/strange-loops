@@ -1,6 +1,6 @@
 # Primitives and Blocks
 
-fidelis is built from a small set of immutable “render layer” value types:
+painted is built from a small set of immutable “render layer” value types:
 
 - **Primitives**: `Style`, `Cell`, `Span`, `Line`
 - **Rectangles**: `Block`
@@ -17,7 +17,7 @@ See also:
 
 `Style` is an immutable bundle of attributes (colors, bold/underline/etc). Styles combine via `merge()` (overlay wins).
 
-<!-- docgen:begin py:fidelis.cell:Style#definition -->
+<!-- docgen:begin py:painted.cell:Style#definition -->
 ```python
 @dataclass(frozen=True)
 class Style:
@@ -45,7 +45,7 @@ class Style:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.cell:Style.merge#signature -->
+<!-- docgen:begin py:painted.cell:Style.merge#signature -->
 ```python
     def merge(self, other: Style) -> Style:
 ```
@@ -55,7 +55,7 @@ class Style:
 
 `Cell` is the atom: one character + one style. Most code manipulates `Block`s rather than individual cells.
 
-<!-- docgen:begin py:fidelis.cell:Cell#definition -->
+<!-- docgen:begin py:painted.cell:Cell#definition -->
 ```python
 @dataclass(frozen=True)
 class Cell:
@@ -74,7 +74,7 @@ class Cell:
 
 `Span` is “text + style” with **display width** (wide-char aware). `Line` is a tuple of spans that can paint into a `BufferView` or convert into a `Block`.
 
-<!-- docgen:begin py:fidelis.span:Span#definition -->
+<!-- docgen:begin py:painted.span:Span#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Span:
@@ -94,7 +94,7 @@ class Span:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.span:Line#definition -->
+<!-- docgen:begin py:painted.span:Line#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Line:
@@ -180,7 +180,7 @@ class Line:
 
 Instead of embedding the full `Block` implementation here (it’s larger than the other primitives), the guide pins the public construction surface:
 
-<!-- docgen:begin py:fidelis.block:Wrap#definition -->
+<!-- docgen:begin py:painted.block:Wrap#definition -->
 ```python
 class Wrap(Enum):
     NONE = "none"        # single line, truncate at width
@@ -190,13 +190,13 @@ class Wrap(Enum):
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.block:Block#signature -->
+<!-- docgen:begin py:painted.block:Block#signature -->
 ```python
 class Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.block:Block.text#signature -->
+<!-- docgen:begin py:painted.block:Block.text#signature -->
 ```python
     @staticmethod
     def text(content: str, style: Style, *, width: int | None = None,
@@ -204,7 +204,7 @@ class Block:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.block:Block.empty#signature -->
+<!-- docgen:begin py:painted.block:Block.empty#signature -->
 ```python
     @staticmethod
     def empty(width: int, height: int, style: Style = Style()) -> Block:
@@ -215,7 +215,7 @@ class Block:
 
 ## Why this matters
 
-fidelis deliberately pushes complexity *up* the stack:
+painted deliberately pushes complexity *up* the stack:
 
 - These types are immutable values → safe to share and cache.
 - Higher-level systems (buffers, layers, widgets) can treat rendering as pure transformation: state → blocks.

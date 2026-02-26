@@ -1,7 +1,7 @@
 """Tests for TableState cursor/viewport composition."""
 
-from fidelis import Cursor, Viewport
-from fidelis.views import TableState
+from painted import Cursor, Viewport
+from painted.views import TableState
 
 
 class TestTableStateCursor:

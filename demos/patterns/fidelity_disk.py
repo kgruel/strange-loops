@@ -18,7 +18,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 
-from fidelis import (
+from painted import (
     Block,
     Style,
     CliContext,
@@ -32,7 +32,7 @@ from fidelis import (
     print_block,
     run_cli,
 )
-from fidelis.tui import Surface
+from painted.tui import Surface
 
 
 @dataclass(frozen=True)

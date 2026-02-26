@@ -5,7 +5,7 @@ order: 0
 align: center
 ---
 
-# fidelis
+# painted
 
 [spacer:2]
 

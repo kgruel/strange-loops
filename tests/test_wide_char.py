@@ -6,10 +6,10 @@ semantics (terminal columns), not code-point counts.
 
 from __future__ import annotations
 
-from fidelis import Block, Style, Wrap, border
-from fidelis.block import _word_wrap
-from fidelis._components.text_input import TextInputState, text_input
-from fidelis._text_width import display_width
+from painted import Block, Style, Wrap, border
+from painted.block import _word_wrap
+from painted._components.text_input import TextInputState, text_input
+from painted._text_width import display_width
 
 
 def _row_chars(block: Block, y: int = 0) -> list[str]:

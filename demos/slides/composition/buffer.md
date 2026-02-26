@@ -44,29 +44,29 @@ paint into views without bounds checking
 
 [zoom:2]
 
-from `fidelis/buffer.py`
+from `painted/buffer.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.buffer:Buffer.put#signature -->
+<!-- docgen:begin py:painted.buffer:Buffer.put#signature -->
 ```python
     def put(self, x: int, y: int, char: str, style: Style) -> None:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.buffer:Buffer.put_text#signature -->
+<!-- docgen:begin py:painted.buffer:Buffer.put_text#signature -->
 ```python
     def put_text(self, x: int, y: int, text: str, style: Style) -> None:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.buffer:Buffer.fill#signature -->
+<!-- docgen:begin py:painted.buffer:Buffer.fill#signature -->
 ```python
     def fill(self, x: int, y: int, w: int, h: int, char: str, style: Style) -> None:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.buffer:Buffer.region#signature -->
+<!-- docgen:begin py:painted.buffer:Buffer.region#signature -->
 ```python
     def region(self, x: int, y: int, w: int, h: int) -> BufferView:
 ```

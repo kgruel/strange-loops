@@ -32,7 +32,7 @@ the component pattern: `State` + `render()`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis._components.spinner:SpinnerState#definition -->
+<!-- docgen:begin py:painted._components.spinner:SpinnerState#definition -->
 ```python
 @dataclass(frozen=True)
 class SpinnerState:
@@ -48,7 +48,7 @@ class SpinnerState:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis._components.spinner:spinner#signature -->
+<!-- docgen:begin py:painted._components.spinner:spinner#signature -->
 ```python
 def spinner(
     state: SpinnerState,

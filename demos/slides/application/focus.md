@@ -53,11 +53,11 @@ linear_next(items, "c")      # "c" (stops)
 
 [zoom:2]
 
-from `fidelis/focus.py`
+from `painted/focus.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.focus:Focus#definition -->
+<!-- docgen:begin py:painted.focus:Focus#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Focus:
@@ -88,7 +88,7 @@ class Focus:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.focus:ring_next#definition -->
+<!-- docgen:begin py:painted.focus:ring_next#definition -->
 ```python
 def ring_next(items: Sequence[str], current: str) -> str:
     """Move to next item in ring, wrapping at end."""

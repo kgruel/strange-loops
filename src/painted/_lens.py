@@ -1,9 +1,16 @@
-"""Lens: stateless content-to-Block transformation at zoom levels."""
+"""Lens functions: stateless content-to-Block transformation at zoom levels.
+
+Three built-in strategies:
+  shape_lens  — auto-dispatches by data shape (generic Python values)
+  tree_lens   — hierarchical data with branch characters
+  chart_lens  — numeric data as sparklines/bars
+
+All share the same signature: (data, zoom, width) -> Block.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Generic, Sequence, TypeVar, TYPE_CHECKING
+from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 from .block import Block
 from .cell import Style
@@ -15,8 +22,6 @@ from ._sparkline_core import sparkline_text
 if TYPE_CHECKING:
     from .icon_set import IconSet
 
-T = TypeVar("T")
-
 # Sampling limits for large data at zoom >= 2
 _MAX_DICT_ITEMS = 20
 _MAX_LIST_ITEMS = 20
@@ -26,24 +31,37 @@ _MAX_STR_DISPLAY = 200
 NodeRenderer = Callable[[str, Any, int], Block]
 
 
-@dataclass(frozen=True, slots=True)
-class Lens(Generic[T]):
-    """Bundles a render function with zoom metadata.
+def _is_numeric_sequence(data: Any) -> bool:
+    """Check if data is a non-empty list/tuple of all numbers."""
+    if not isinstance(data, (list, tuple)) or not data:
+        return False
+    return all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in data)
 
-    render: (content, zoom, width) -> Block
-    max_zoom: highest meaningful zoom level (default 2)
-    default_zoom: suggested starting zoom level (default 1, caller decides)
-    """
 
-    render: Callable[[T, int, int], Block]
-    max_zoom: int = 2
-    default_zoom: int = 1
+def _is_labeled_numeric(data: Any) -> bool:
+    """Check if data is a non-empty dict with all numeric values."""
+    if not isinstance(data, dict) or not data:
+        return False
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in data.values())
+
+
+def _is_hierarchical(data: Any) -> bool:
+    """Check if data is a dict containing nested dict/list values."""
+    if not isinstance(data, dict) or not data:
+        return False
+    return any(isinstance(v, (dict, list)) and v for v in data.values())
 
 
 def shape_lens(content: Any, zoom: int, width: int) -> Block:
-    """Convention-based rendering of Python data structures at zoom levels.
+    """Auto-dispatching renderer: picks the best strategy based on data shape.
 
-    Zoom levels:
+    Dispatch rules:
+    - Numeric sequences (list/tuple of numbers) → chart_lens
+    - Labeled numeric dicts (all values are numbers) → chart_lens
+    - Hierarchical dicts (nested dict/list values) → tree_lens
+    - Everything else → built-in shape rendering
+
+    Zoom levels (for built-in rendering):
     - 0: minimal (type/count)
     - 1: summary (keys or truncated values)
     - 2: full (complete representation)
@@ -62,6 +80,17 @@ def shape_lens(content: Any, zoom: int, width: int) -> Block:
 
     if isinstance(content, (str, int, float)):
         return _render_scalar(content, zoom, width)
+
+    # Auto-dispatch: numeric data → chart
+    if _is_numeric_sequence(content):
+        return chart_lens(content, zoom, width)
+
+    if _is_labeled_numeric(content):
+        return chart_lens(content, zoom, width)
+
+    # Auto-dispatch: hierarchical data → tree
+    if _is_hierarchical(content):
+        return tree_lens(content, zoom, width)
 
     if isinstance(content, dict):
         return _render_dict(content, zoom, width)
@@ -298,8 +327,6 @@ def _summarize_item(item: Any) -> str:
     return str(item)[:10]
 
 
-# Default lens for shape-based rendering
-SHAPE_LENS: Lens[Any] = Lens(render=shape_lens, max_zoom=2)
 
 
 # ---------------------------------------------------------------------------
@@ -509,8 +536,6 @@ def _truncate_ellipsis(text: str, width: int) -> str:
     return truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
 
 
-# Default tree lens
-TREE_LENS: Lens[Any] = Lens(render=tree_lens, max_zoom=4)
 
 
 # ---------------------------------------------------------------------------
@@ -696,5 +721,3 @@ def _chart_bars_themed(
     return join_vertical(*rows)
 
 
-# Default chart lens
-CHART_LENS: Lens[Any] = Lens(render=chart_lens, max_zoom=2)

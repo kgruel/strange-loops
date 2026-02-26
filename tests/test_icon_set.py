@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from fidelis.icon_set import (
+from painted.icon_set import (
     IconSet,
     ASCII_ICONS,
     current_icons,

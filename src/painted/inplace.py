@@ -6,8 +6,8 @@ Uses cursor control to hide, move up, clear, and redraw.
 For CLI spinners, progress bars, and live-updating status.
 
 Usage:
-    from fidelis.inplace import InPlaceRenderer
-    from fidelis import Block, Style
+    from painted.inplace import InPlaceRenderer
+    from painted import Block, Style
 
     with InPlaceRenderer() as renderer:
         for i in range(100):

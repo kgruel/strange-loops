@@ -6,7 +6,7 @@ Separates three orthogonal concerns:
 - Format (serialization): --json/--plain or auto-detected
 
 Usage:
-    from fidelis.fidelity import run_cli, CliContext, Zoom
+    from painted.fidelity import run_cli, CliContext, Zoom
 
     def render(ctx: CliContext, data: dict) -> Block:
         return status_view(data, zoom=ctx.zoom, width=ctx.width)

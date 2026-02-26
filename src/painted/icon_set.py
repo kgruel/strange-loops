@@ -3,7 +3,7 @@
 Replaces ComponentTheme.Icons. Style fields removed (those move to Palette).
 
 Usage:
-    from fidelis.icon_set import current_icons, use_icons, ASCII_ICONS
+    from painted.icon_set import current_icons, use_icons, ASCII_ICONS
 
     icons = current_icons()
     fill = icons.progress_fill

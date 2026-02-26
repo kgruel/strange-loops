@@ -9,10 +9,10 @@ from __future__ import annotations
 import io
 import re
 
-from fidelis.buffer import Buffer
-from fidelis.cell import Style
-from fidelis.writer import Writer, ScrollOp
-from fidelis.tui import Surface
+from painted.buffer import Buffer
+from painted.cell import Style
+from painted.writer import Writer, ScrollOp
+from painted.tui import Surface
 
 
 def _count_cups(output: str) -> int:

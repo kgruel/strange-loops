@@ -55,18 +55,18 @@ class Line:
 
 [zoom:2]
 
-from `fidelis/span.py`
+from `painted/span.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.span:Line#signature -->
+<!-- docgen:begin py:painted.span:Line#signature -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Line:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.span:Line.paint#definition -->
+<!-- docgen:begin py:painted.span:Line.paint#definition -->
 ```python
     def paint(self, view: BufferView, x: int, y: int) -> None:
         """Render spans into a BufferView, merging base style onto each span."""

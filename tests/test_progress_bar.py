@@ -1,14 +1,14 @@
 """Progress bar rendering with Palette and IconSet."""
 from __future__ import annotations
 
-from fidelis.cell import Style
-from fidelis._components.progress import ProgressState, progress_bar
-from fidelis.palette import (
+from painted.cell import Style
+from painted._components.progress import ProgressState, progress_bar
+from painted.palette import (
     MONO_PALETTE,
     reset_palette,
     use_palette,
 )
-from fidelis.icon_set import (
+from painted.icon_set import (
     ASCII_ICONS,
     reset_icons,
     use_icons,

@@ -16,7 +16,7 @@ Controls:
 import asyncio
 from dataclasses import dataclass, replace
 
-from fidelis import (
+from painted import (
     Block,
     Style,
     join_vertical,
@@ -25,8 +25,12 @@ from fidelis import (
     border,
     ROUNDED,
 )
-from fidelis.tui import Surface
-from fidelis.views import tree_lens, chart_lens, TREE_LENS, CHART_LENS
+from painted.tui import Surface
+from painted.views import tree_lens, chart_lens
+
+# Zoom bounds for each mode — UI concern, not strategy metadata
+_TREE_MAX_ZOOM = 4
+_CHART_MAX_ZOOM = 2
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +156,8 @@ class LensesApp(Surface):
         self._state = replace(self._state, width=width, height=height)
 
     @property
-    def _current_lens(self):
-        return TREE_LENS if self._state.mode == "tree" else CHART_LENS
+    def _max_zoom(self) -> int:
+        return _TREE_MAX_ZOOM if self._state.mode == "tree" else _CHART_MAX_ZOOM
 
     @property
     def _current_data(self):
@@ -184,14 +188,13 @@ class LensesApp(Surface):
         tabs.paint(self._buf, self._state.width - 20, 1)
 
         # Zoom indicator
-        lens = self._current_lens
-        zoom_text = f"Zoom: {self._state.zoom}/{lens.max_zoom}"
+        zoom_text = f"Zoom: {self._state.zoom}/{self._max_zoom}"
         zoom_block = Block.text(zoom_text, Style(fg="yellow", bold=True))
         zoom_block.paint(self._buf, 2, 3)
 
         # Zoom bar
         bar_chars = []
-        for i in range(lens.max_zoom + 1):
+        for i in range(self._max_zoom + 1):
             if i == self._state.zoom:
                 bar_chars.append("*")
             else:
@@ -242,14 +245,14 @@ class LensesApp(Surface):
         if key == "tab":
             new_mode = "chart" if self._state.mode == "tree" else "tree"
             # Reset zoom to reasonable default for new mode
-            max_zoom = CHART_LENS.max_zoom if new_mode == "chart" else TREE_LENS.max_zoom
+            max_zoom = _CHART_MAX_ZOOM if new_mode == "chart" else _TREE_MAX_ZOOM
             new_zoom = min(self._state.zoom, max_zoom)
             self._state = replace(self._state, mode=new_mode, zoom=new_zoom, data_index=0)
             return
 
         # Zoom
         if key in ("+", "="):
-            max_zoom = self._current_lens.max_zoom
+            max_zoom = self._max_zoom
             new_zoom = min(max_zoom, self._state.zoom + 1)
             self._state = replace(self._state, zoom=new_zoom)
             return

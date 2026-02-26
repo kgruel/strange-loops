@@ -1,9 +1,10 @@
-"""Tests for show() — zero-config display entry point."""
+"""Tests for show() and print_block() — zero-config display."""
 
 import io
 import json
 
-from fidelis import Block, Style, show
+from painted import Block, Style, show
+from painted.writer import print_block
 
 
 class TestShowBlock:
@@ -31,7 +32,7 @@ class TestShowJSON:
 
     def test_json_dict(self):
         """show(dict, format=JSON) outputs valid JSON."""
-        from fidelis import Format
+        from painted import Format
         buf = io.StringIO()
         show({"status": "ok", "count": 42}, format=Format.JSON, file=buf)
         parsed = json.loads(buf.getvalue())
@@ -40,7 +41,7 @@ class TestShowJSON:
 
     def test_json_list(self):
         """show(list, format=JSON) outputs valid JSON."""
-        from fidelis import Format
+        from painted import Format
         buf = io.StringIO()
         show([1, 2, 3], format=Format.JSON, file=buf)
         parsed = json.loads(buf.getvalue())
@@ -48,7 +49,7 @@ class TestShowJSON:
 
     def test_json_non_serializable_uses_str(self):
         """show() with non-serializable data falls back to str()."""
-        from fidelis import Format
+        from painted import Format
         from datetime import datetime
         buf = io.StringIO()
         dt = datetime(2026, 2, 25, 12, 0, 0)
@@ -57,7 +58,7 @@ class TestShowJSON:
         assert "2026" in parsed["when"]
 
 
-from fidelis import Zoom
+from painted import Zoom
 
 
 class TestShowRendered:
@@ -142,7 +143,7 @@ class TestShowScalars:
 
     def test_scalar_json_still_works(self):
         """show(scalar, format=JSON) still outputs JSON."""
-        from fidelis import Format
+        from painted import Format
         buf = io.StringIO()
         show(42, format=Format.JSON, file=buf)
         assert json.loads(buf.getvalue()) == 42
@@ -161,7 +162,7 @@ class TestShowAutoDetect:
 
     def test_format_json_override(self):
         """format=JSON forces JSON output regardless of TTY."""
-        from fidelis import Format
+        from painted import Format
         buf = io.StringIO()
         show({"key": "value"}, format=Format.JSON, file=buf)
         parsed = json.loads(buf.getvalue())
@@ -169,8 +170,58 @@ class TestShowAutoDetect:
 
     def test_format_plain_override(self):
         """format=PLAIN forces plain text (no ANSI)."""
-        from fidelis import Format
+        from painted import Format
         buf = io.StringIO()
         show({"key": "value"}, format=Format.PLAIN, file=buf)
         output = buf.getvalue()
+        assert "\x1b[" not in output
+
+
+class TestPrintBlockAutoDetect:
+    """print_block() auto-detects ANSI from stream.isatty()."""
+
+    def test_non_tty_default_no_ansi(self):
+        """StringIO (non-TTY) produces plain text by default."""
+        block = Block.text("hello", Style(fg="red", bold=True))
+        buf = io.StringIO()
+        print_block(block, buf)
+        output = buf.getvalue()
+        assert "hello" in output
+        assert "\x1b[" not in output
+
+    def test_explicit_use_ansi_true(self):
+        """use_ansi=True forces ANSI even on non-TTY stream."""
+        block = Block.text("hello", Style(fg="red"))
+        buf = io.StringIO()
+        print_block(block, buf, use_ansi=True)
+        output = buf.getvalue()
+        assert "\x1b[" in output
+
+    def test_explicit_use_ansi_false(self):
+        """use_ansi=False forces plain text."""
+        block = Block.text("hello", Style(fg="red"))
+        buf = io.StringIO()
+        print_block(block, buf, use_ansi=False)
+        output = buf.getvalue()
+        assert "hello" in output
+        assert "\x1b[" not in output
+
+    def test_stream_without_isatty(self):
+        """Stream without isatty() method defaults to no ANSI."""
+
+        class BareStream:
+            def __init__(self):
+                self.data = []
+
+            def write(self, s):
+                self.data.append(s)
+
+            def flush(self):
+                pass
+
+        block = Block.text("hi", Style(fg="red"))
+        stream = BareStream()
+        print_block(block, stream)
+        output = "".join(stream.data)
+        assert "hi" in output
         assert "\x1b[" not in output

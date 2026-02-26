@@ -7,7 +7,7 @@ import io
 
 import pytest
 
-from fidelis.writer import (
+from painted.writer import (
     Writer,
     ColorDepth,
     _idx_to_rgb,

@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fidelis import Style
-from fidelis.tui import Buffer
+from painted import Style
+from painted.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Setup: buffer with border markers ---

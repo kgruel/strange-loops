@@ -1,7 +1,7 @@
 """Tests for cells.span: Span and Line primitives."""
 
-from fidelis import Style, Span, Line
-from fidelis.tui import Buffer
+from painted import Style, Span, Line
+from painted.tui import Buffer
 
 
 class TestSpanWidth:

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from fidelis.cell import Style
-from fidelis.palette import (
+from painted.cell import Style
+from painted.palette import (
     Palette,
     DEFAULT_PALETTE,
     MONO_PALETTE,

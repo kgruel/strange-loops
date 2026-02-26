@@ -1,36 +1,36 @@
 # LOG
 
-Session history for fidelis.
+Session history for painted.
 
 ---
 
 ## 2026-02-22 — Extraction and cleanup
 
-Extracted `libs/cells/` from the loops monorepo into standalone fidelis repo.
+Extracted `libs/cells/` from the loops monorepo into standalone painted repo.
 
 **What happened:**
-- Created `/Users/kaygee/Code/fidelis/` with `git init`
+- Created `/Users/kaygee/Code/painted/` with `git init`
 - Copied src, tests, demos, docs from `libs/cells/` and `demos/cells/`
-- Renamed all `cells` → `fidelis` (package, imports, docs, demos)
+- Renamed all `cells` → `painted` (package, imports, docs, demos)
 - Set up pyproject.toml with full PyPI metadata (MIT, hatchling, py>=3.11)
 - 349 tests passing on initial commit
 
 **Monorepo side:**
 - Removed `libs/cells/` and `demos/cells/` from loops
-- Updated app pyproject.toml files to path dep `../../../fidelis`
+- Updated app pyproject.toml files to path dep `../../../painted`
 - Fixed path resolution (uv resolves relative to member location, not workspace root)
 - 732 monorepo tests passing (atoms 295 + engine 357 + loops 80)
 
 **Post-extraction cleanup:**
 - Renamed `bench.py` → `tour.py`
-- Updated all stale `demos/cells/` and `demos/fidelis/` paths to `demos/`
+- Updated all stale `demos/cells/` and `demos/painted/` paths to `demos/`
 - Fixed `slide_loader.py` broken import (`from demos.bench` → `from demos.tour`)
 - Removed deprecated Fidelity API (Fidelity enum, HarnessContext, detect_fidelity,
   add_fidelity_args, run_with_fidelity, fidelity_to_zoom) — clean break at 0.1.0
 - Updated DEMO_PATTERNS.md, README.md, FIDELITY.md for tour rename
 - 347 tests passing after cleanup (4 deprecated tests removed)
 
-**Pushed to:** `git@git.gruel.network:kaygee/fidelis.git` (8 commits on main)
+**Pushed to:** `git@git.gruel.network:kaygee/painted.git` (8 commits on main)
 
 ---
 
@@ -60,8 +60,8 @@ primitive.
 
 ## 2026-02-23 — View layer design + module reorg + doc extraction
 
-Settled view layer primitives. Created `fidelis.views` flat namespace. Deleted
-`fidelis.widgets/`, `fidelis.lens/`, `fidelis.effects/`. Landed doc extraction
+Settled view layer primitives. Created `painted.views` flat namespace. Deleted
+`painted.widgets/`, `painted.lens/`, `painted.effects/`. Landed doc extraction
 pipeline. Sparkline deduped.
 
 **439 tests passing on main.**
@@ -70,7 +70,7 @@ pipeline. Sparkline deduped.
 
 ## 2026-02-23 — Theming research + loops migration + fidelity reframe
 
-Theme analysis complete. `cells` → `fidelis` loops migration in review.
+Theme analysis complete. `cells` → `painted` loops migration in review.
 Critical design reframe: "theming" is the wrong question — the real question
 is fidelity-aware style resolution.
 
@@ -111,7 +111,7 @@ Design doc: `docs/plans/2026-02-24-fidelity-design.md`
 - Classified every detectable terminal capability by reliability tier
 - Key finding: source tracking > confidence scores
 - Key finding: progressive detection (env-var first, queries second) fits
-  fidelis's OutputMode axis naturally
+  painted's OutputMode axis naturally
 - Research doc: `docs/plans/2026-02-25-terminal-capabilities-survey.md`
 
 **Capability signal design conversation:**
@@ -131,7 +131,7 @@ Design doc: `docs/plans/2026-02-24-fidelity-design.md`
 - Design doc: `docs/plans/2026-02-25-capability-signal-design.md`
 - Cold reactor perspective: `docs/plans/2026-02-25-council-cold-reactor-perspective.md`
 - Principle established: "Capabilities resolve at boundaries, not in pipelines"
-- Key finding: no view in fidelis constructs fg/bg colors — all color originates from Palette or caller kwargs
+- Key finding: no view in painted constructs fg/bg colors — all color originates from Palette or caller kwargs
 
 **Color downconversion** implemented in Writer:
 - Wired up `detect_color_depth()` (was dead code) to `_color_codes()`
@@ -180,7 +180,7 @@ levels on each topic file.
 - Deep dive into Bubble Tea v2, Lip Gloss v2, Ultraviolet (all released 2026-02-24)
 - Cloned all three repos to `~/Code/forks/` for source verification
 - All 7 key claims verified against primary sources
-- Key finding: fidelis and Charm v2 converged independently on pure render, cell
+- Key finding: painted and Charm v2 converged independently on pure render, cell
   buffers, and capability resolution at boundaries
 - Research doc: `docs/research/2026-02-25-charm-v2-deep-dive.md`
 
@@ -190,7 +190,7 @@ levels on each topic file.
 - `Buffer.hit(x, y)` / `BufferView.hit(x, y)` / `Surface.hit(x, y)`
 - Composition propagates ids: join gap=None, pad inherits uniform id,
   border can override with its own id, truncate/vslice preserve
-- Inspired by Lip Gloss v2 compositor but adapted to fidelis patterns
+- Inspired by Lip Gloss v2 compositor but adapted to painted patterns
 
 **Surface test harness** (subtask `test-harness`):
 - `TestSurface` — wraps any Surface subclass for deterministic non-TTY testing
@@ -210,7 +210,7 @@ levels on each topic file.
 
 **Declarative terminal state** — design conversation, deferred:
 - Charm's biggest v2 move: `View()` returns struct with mode declarations
-- fidelis doesn't need it today (Surface is sole authority, layers are modal)
+- painted doesn't need it today (Surface is sole authority, layers are modal)
 - Becomes necessary when concurrent windows need different terminal modes
 - Pattern documented: composition units declare modes, Surface reconciles per frame
 - Design thread: `docs/plans/2026-02-25-declarative-terminal-state.md`
@@ -262,7 +262,7 @@ artifacts; the rest was dopamine-tap recursion.
   (ncurses veteran), noodle (Textual user), ghost_pipe (legacy CLI
   maintainer), synthwave (Go/Rust cross-ecosystem)
 - Broadcast-based chat via SendMessage, facilitator serialized to transcript
-- Dropped fidelis README, let natural conversation flow
+- Dropped painted README, let natural conversation flow
 - ~30 minutes of organic discussion, 50+ messages
 
 **Key findings:**
@@ -297,7 +297,7 @@ Built Discord integration for narrative debugging and ran a live session.
 - 6 new tests, 577 total
 
 **Discord session (real-time, #terminal-crafters):**
-- Started with "what's your CLI output stack?" — no fidelis mention
+- Started with "what's your CLI output stack?" — no painted mention
 - Natural conversation: mrbits on cell buffers, noodle on Textual, synthwave
   on Bubble Tea v2, ghost_pipe lurking
 - User dropped CLAUDE.md → all 4 reacted, ghost_pipe broke silence

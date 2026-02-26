@@ -1,6 +1,6 @@
 # Project Cleanup Design
 
-Post-extraction hygiene pass. Get fidelis into clean working order as a standalone project.
+Post-extraction hygiene pass. Get painted into clean working order as a standalone project.
 
 ## Decisions
 
@@ -19,13 +19,13 @@ Post-extraction hygiene pass. Get fidelis into clean working order as a standalo
 
 ## 2. Remove Deprecated API
 
-Remove from `src/fidelis/fidelity.py`:
+Remove from `src/painted/fidelity.py`:
 - `Fidelity` enum
 - `HarnessContext` dataclass
 - `detect_fidelity()`, `add_fidelity_args()`, `run_with_fidelity()`
 - `fidelity_to_zoom()` converter
 
-Remove from `src/fidelis/__init__.py` exports if present. Update any internal references.
+Remove from `src/painted/__init__.py` exports if present. Update any internal references.
 
 ## 3. CLAUDE.md / Docs Alignment
 

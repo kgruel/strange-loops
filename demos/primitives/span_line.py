@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fidelis import Style, Span, Line
-from fidelis.tui import Buffer
+from painted import Style, Span, Line
+from painted.tui import Buffer
 from demo_utils import render_buffer
 
 # --- Span: text + style ---

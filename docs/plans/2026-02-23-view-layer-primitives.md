@@ -29,30 +29,30 @@ All existing view functions fit the cut cleanly once “stateful” is interpret
 
 | View | Current public module | Implementation | Notes |
 |---|---|---|---|
-| `shape_lens`, `SHAPE_LENS`, `Lens`, `NodeRenderer` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed “data → Block” renderer; pure. |
-| `tree_lens`, `TREE_LENS` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed; optional `node_renderer` hook remains pure. |
-| `chart_lens`, `CHART_LENS` | `fidelis.views` | `src/fidelis/_lens.py` | Zoomed; duplicates sparkline logic today (§3). |
-| `render_big`, `BIG_GLYPHS`, `BigTextFormat` | `fidelis.views` | `src/fidelis/big_text.py` | Pure “text → Block”. |
-| `sparkline`, `sparkline_with_range` | `fidelis.views` | `src/fidelis/_components/sparkline.py` | Pure “values → Block”; already uses contextvar theme by default. |
-| `progress_bar` (+ `ProgressState`) | `fidelis.views` | `src/fidelis/_components/progress.py` | Pure render; “state” is just a value container. |
-| `spinner` (+ `SpinnerState`, frames) | `fidelis.views` | `src/fidelis/_components/spinner.py` | Pure render; animation is driven by `SpinnerState.tick()` (time-based). |
+| `shape_lens`, `SHAPE_LENS`, `Lens`, `NodeRenderer` | `painted.views` | `src/painted/_lens.py` | Zoomed “data → Block” renderer; pure. |
+| `tree_lens`, `TREE_LENS` | `painted.views` | `src/painted/_lens.py` | Zoomed; optional `node_renderer` hook remains pure. |
+| `chart_lens`, `CHART_LENS` | `painted.views` | `src/painted/_lens.py` | Zoomed; duplicates sparkline logic today (§3). |
+| `render_big`, `BIG_GLYPHS`, `BigTextFormat` | `painted.views` | `src/painted/big_text.py` | Pure “text → Block”. |
+| `sparkline`, `sparkline_with_range` | `painted.views` | `src/painted/_components/sparkline.py` | Pure “values → Block”; already uses contextvar theme by default. |
+| `progress_bar` (+ `ProgressState`) | `painted.views` | `src/painted/_components/progress.py` | Pure render; “state” is just a value container. |
+| `spinner` (+ `SpinnerState`, frames) | `painted.views` | `src/painted/_components/spinner.py` | Pure render; animation is driven by `SpinnerState.tick()` (time-based). |
 
 ### Stateful views (interactive components; caller wires events)
 
 | View | Current public module | Implementation | Notes |
 |---|---|---|---|
-| `list_view` (+ `ListState`) | `fidelis.views` | `src/fidelis/_components/list_view.py` | Composes `Cursor + Viewport`. Caller maps keys to `move_up/down`, etc. |
-| `table` (+ `TableState`, `Column`) | `fidelis.views` | `src/fidelis/_components/table.py` | Same pattern, row selection + scrolling. |
-| `text_input` (+ `TextInputState`) | `fidelis.views` | `src/fidelis/_components/text_input.py` | Caller maps keys → insert/delete/move; state tracks cursor + scroll. |
-| `data_explorer` (+ `DataExplorerState`, `DataNode`, `flatten`) | `fidelis.views` | `src/fidelis/_components/data_explorer.py` | Caller maps keys → navigation + expand/collapse; composes `Cursor + Viewport`. |
+| `list_view` (+ `ListState`) | `painted.views` | `src/painted/_components/list_view.py` | Composes `Cursor + Viewport`. Caller maps keys to `move_up/down`, etc. |
+| `table` (+ `TableState`, `Column`) | `painted.views` | `src/painted/_components/table.py` | Same pattern, row selection + scrolling. |
+| `text_input` (+ `TextInputState`) | `painted.views` | `src/painted/_components/text_input.py` | Caller maps keys → insert/delete/move; state tracks cursor + scroll. |
+| `data_explorer` (+ `DataExplorerState`, `DataNode`, `flatten`) | `painted.views` | `src/painted/_components/data_explorer.py` | Caller maps keys → navigation + expand/collapse; composes `Cursor + Viewport`. |
 
-Flag: the “historical accident” was real: `fidelis.widgets` contained both stateless and stateful views, while `fidelis.lens` and `fidelis.effects` were also view layer packages.
+Flag: the “historical accident” was real: `painted.widgets` contained both stateless and stateful views, while `painted.lens` and `painted.effects` were also view layer packages.
 
 ## 2) Module structure recommendation
 
 ### Decision
 
-Create a **single flat public namespace**: `fidelis.views`.
+Create a **single flat public namespace**: `painted.views`.
 
 - The stateless/stateful split remains the **primary mental model** taught in documentation, but it is not a package boundary.
 - With ~11 view functions, a single import path is simpler and more discoverable than subpackages.
@@ -62,7 +62,7 @@ Create a **single flat public namespace**: `fidelis.views`.
 Recommended canonical imports:
 
 ```python
-from fidelis.views import (
+from painted.views import (
     # Stateless
     shape_lens,
     tree_lens,
@@ -85,27 +85,27 @@ from fidelis.views import (
 )
 ```
 
-What `fidelis.views` should export:
+What `painted.views` should export:
 
 - All view functions listed above.
 - The associated `*State` types and small types that are tightly coupled to those views (`Column`, `SpinnerFrames`, etc.).
-- The lens support types/constants exported from `fidelis.views` (`Lens`, `NodeRenderer`, `*_LENS` constants) so “zoomable data views” remain first-class.
+- The lens support types/constants exported from `painted.views` (`Lens`, `NodeRenderer`, `*_LENS` constants) so “zoomable data views” remain first-class.
 
 ### Internal source organization (implementation detail)
 
-`fidelis.views` should be a *package* (`src/fidelis/views/`) so growth stays easy, but keep the **public** namespace flat:
+`painted.views` should be a *package* (`src/painted/views/`) so growth stays easy, but keep the **public** namespace flat:
 
-- `src/fidelis/views/__init__.py` re-exports the full public surface.
+- `src/painted/views/__init__.py` re-exports the full public surface.
 - Implementations may remain in existing internal modules initially, then be moved:
-  - stateless: `src/fidelis/_lens.py`, `src/fidelis/big_text.py`, `src/fidelis/_components/sparkline.py`, etc.
-  - stateful: `src/fidelis/_components/list_view.py`, etc.
-- If the namespace grows, add private submodules (e.g. `src/fidelis/views/_stateless.py`) while still re-exporting from `fidelis.views` to avoid import churn.
+  - stateless: `src/painted/_lens.py`, `src/painted/big_text.py`, `src/painted/_components/sparkline.py`, etc.
+  - stateful: `src/painted/_components/list_view.py`, etc.
+- If the namespace grows, add private submodules (e.g. `src/painted/views/_stateless.py`) while still re-exporting from `painted.views` to avoid import churn.
 
 ## 3) Sparkline vs `chart_lens(zoom=1)` duplication
 
 ### Current state
 
-`chart_lens(zoom=1)` implements its own sparkline algorithm in `src/fidelis/_lens.py` rather than composing `sparkline()` from `src/fidelis/_components/sparkline.py`.
+`chart_lens(zoom=1)` implements its own sparkline algorithm in `src/painted/_lens.py` rather than composing `sparkline()` from `src/painted/_components/sparkline.py`.
 
 The two differ in policy:
 
@@ -116,7 +116,7 @@ The two differ in policy:
 
 Keep **both** public entrypoints, but eliminate duplicated math:
 
-- Extract a single internal helper for “values → spark chars” (normalization + bucketing), e.g. `fidelis.views._sparkline_impl`.
+- Extract a single internal helper for “values → spark chars” (normalization + bucketing), e.g. `painted.views._sparkline_impl`.
 - Parameterize sampling so both policies remain available:
   - `sparkline`: defaults to `sampling="tail"` (current behavior).
   - `chart_lens(zoom=1)`: uses `sampling="sample"` (current behavior).
@@ -146,7 +146,7 @@ Zoom is a capability of *some stateless views* (“zoomable views”). It should
 
 ### The bridge
 
-The standard bridge is `Block.paint(buffer_or_view, x, y)` (`src/fidelis/block.py`).
+The standard bridge is `Block.paint(buffer_or_view, x, y)` (`src/painted/block.py`).
 
 ### Recommendation
 
@@ -187,13 +187,13 @@ We are at 0.1.0: make a clean break with no compatibility shims.
 
 ### Steps
 
-1) Introduce `fidelis.views` and make it the sole public “view layer” import path.
+1) Introduce `painted.views` and make it the sole public “view layer” import path.
 2) Delete public packages:
-   - `fidelis.widgets`
-   - `fidelis.lens`
-   - `fidelis.effects`
-3) Update all in-repo imports (docs, demos, tests) to `from fidelis.views import ...`.
-4) Update the one external consumer (“loops”: 29 import sites across 13 files) to `from fidelis.views import ...`.
+   - `painted.widgets`
+   - `painted.lens`
+   - `painted.effects`
+3) Update all in-repo imports (docs, demos, tests) to `from painted.views import ...`.
+4) Update the one external consumer (“loops”: 29 import sites across 13 files) to `from painted.views import ...`.
 
 ### What breaks
 
@@ -203,15 +203,15 @@ Concrete mapping examples:
 
 ```python
 # Old
-from fidelis.views import list_view, ListState, chart_lens, render_big
+from painted.views import list_view, ListState, chart_lens, render_big
 
 # New
-from fidelis.views import list_view, ListState, chart_lens, render_big
+from painted.views import list_view, ListState, chart_lens, render_big
 ```
 
 ## Follow-ups (post-doc, implementation tasks)
 
-1) Implement `fidelis.views` (flat exports) and delete legacy packages.
+1) Implement `painted.views` (flat exports) and delete legacy packages.
 2) Normalize theming to use the contextvar default where applicable.
 3) Deduplicate sparkline implementation (shared helper).
 4) Update loops imports and run its integration tests.

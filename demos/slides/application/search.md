@@ -41,11 +41,11 @@ type to filter, `up/down` to select, `m` to change mode
 
 [zoom:2]
 
-from `fidelis/search.py`
+from `painted/search.py`
 
 [spacer]
 
-<!-- docgen:begin py:fidelis.search:Search#definition -->
+<!-- docgen:begin py:painted.search:Search#definition -->
 ```python
 @dataclass(frozen=True, slots=True)
 class Search:
@@ -93,7 +93,7 @@ class Search:
 ```
 <!-- docgen:end -->
 
-<!-- docgen:begin py:fidelis.search:filter_fuzzy#definition -->
+<!-- docgen:begin py:painted.search:filter_fuzzy#definition -->
 ```python
 def filter_fuzzy(items: Sequence[str], query: str) -> tuple[str, ...]:
     """Filter items by fuzzy match (characters appear in order).

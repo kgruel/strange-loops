@@ -1,11 +1,11 @@
-# CLAUDE.md — fidelis
+# CLAUDE.md — painted
 
 Terminal UI framework built on cell buffers. Answers: **where is state displayed?**
 
 ## Build & Test
 
 ```bash
-uv run --package fidelis pytest tests/ -q
+uv run --package painted pytest tests/ -q
 ```
 
 ## Atom
@@ -30,7 +30,7 @@ Actions: Stay | Pop(result) | Push(layer) | Quit
 ## Rendering Pipeline
 
 ```
-state ──→ Lens.render(state, w, h) ──→ Block
+state ──→ lens_fn(state, zoom, w) ──→ Block
 Block ──→ Buffer.paint(block, x, y)
 Buffer ──→ diff(prev) ──→ CellWrite[]
 CellWrite[] ──→ Writer.write_frame() ──→ ANSI escape sequences
@@ -68,7 +68,6 @@ CellWrite[] ──→ Writer.write_frame() ──→ ANSI escape sequences
 |------|---------|
 | `Focus` | id + captured (two-tier: navigation vs widget capture) |
 | `Search` | query + selected (fuzzy, prefix, contains filters) |
-| `Lens` | render function + max_zoom. `shape_lens` for convention-based rendering |
 
 ### Components
 | Type | Purpose |
@@ -98,13 +97,13 @@ CellWrite[] ──→ Writer.write_frame() ──→ ANSI escape sequences
 - All state types frozen. Components follow `State + render_fn(state, ...) -> Block` pattern.
 - Surface diff-renders: only changed cells written to terminal.
 - Layer stack: top handles keys, all render bottom-to-top. Base layer never pops.
-- `shape_lens` renders any Python value at zoom levels 0 (minimal), 1 (summary), 2 (full).
+- `shape_lens` auto-dispatches by data shape: numeric → chart, hierarchical → tree, else built-in rendering.
 - `Emit` is the feedback boundary — Surface emits observations that become Facts upstream.
 
 ## Pipeline Role
 
 ```
-Projection.state ──→ Lens.render() ──→ Block ──→ Surface ──→ terminal
+Projection.state ──→ lens_fn() ──→ Block ──→ Surface ──→ terminal
                                                     │
 Surface.emit(kind, **data) ──→ Fact.of() ──→ Stream  (feedback loop)
 
@@ -134,7 +133,7 @@ FORMAT (serialization)
 ### Usage
 
 ```python
-from fidelis.fidelity import run_cli, CliContext, Zoom, OutputMode
+from painted.fidelity import run_cli, CliContext, Zoom, OutputMode
 
 def render(ctx: CliContext, data: dict) -> Block:
     return status_view(data, zoom=ctx.zoom, width=ctx.width)
@@ -173,14 +172,14 @@ myapp --plain      # format=PLAIN (no ANSI codes)
 Layered submodules — CLI core at top level, TUI features in subpackages:
 
 ```python
-from fidelis import Style, Cell, Span, Line, Block, print_block  # CLI core
-from fidelis import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
-from fidelis import Palette, IconSet, current_palette, use_palette # Aesthetic
-from fidelis.tui import Surface, Layer, Focus, Search             # Interactive apps
-from fidelis.views import shape_lens, tree_lens, chart_lens        # Data rendering
-from fidelis.views import spinner, list_view, progress_bar         # Components
-from fidelis.mouse import MouseEvent, MouseButton                 # Optional mouse
-from fidelis.views import render_big                               # Visual effects
+from painted import Style, Cell, Span, Line, Block, print_block  # CLI core
+from painted import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
+from painted import Palette, IconSet, current_palette, use_palette # Aesthetic
+from painted.tui import Surface, Layer, Focus, Search             # Interactive apps
+from painted.views import shape_lens, tree_lens, chart_lens        # Data rendering
+from painted.views import spinner, list_view, progress_bar         # Components
+from painted.mouse import MouseEvent, MouseButton                 # Optional mouse
+from painted.views import render_big                               # Visual effects
 ```
 
 ## Documentation
@@ -199,7 +198,7 @@ docs/
 ## Source Layout
 
 ```
-src/fidelis/
+src/painted/
   __init__.py       # CLI core exports + Palette/IconSet
   cell.py           # Cell, Style, EMPTY_CELL
   span.py           # Span, Line
@@ -217,7 +216,7 @@ src/fidelis/
   tui/              # Interactive app primitives
     __init__.py     # Buffer, Surface, Layer, Focus, Search, KeyboardInput
   lens/             # Data structure rendering
-    __init__.py     # Lens, shape_lens, tree_lens, chart_lens
+    __init__.py     # shape_lens, tree_lens, chart_lens
   widgets/          # Pre-built components
     __init__.py     # spinner, progress_bar, list_view, text_input, table
   mouse/            # Mouse support

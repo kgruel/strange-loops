@@ -1,6 +1,8 @@
 """Tests for the fidelity module: Zoom, OutputMode, Format, CliRunner."""
 
 import argparse
+import json
+import sys
 
 import pytest
 
@@ -269,6 +271,17 @@ class TestCliContext:
 class TestCliRunner:
     """Tests for CliRunner class."""
 
+    @staticmethod
+    def _patch_print_block_to_current_stdout(monkeypatch):
+        from fidelis import writer as writer_mod
+
+        real_print_block = writer_mod.print_block
+
+        def print_block(block, stream=None, *, use_ansi=True):
+            return real_print_block(block, sys.stdout, use_ansi=use_ansi)
+
+        monkeypatch.setattr(writer_mod, "print_block", print_block)
+
     def test_static_output(self):
         """Static mode uses print_block and returns 0."""
         render_called = False
@@ -359,3 +372,56 @@ class TestCliRunner:
         assert handler_called
         assert received_ctx.mode == OutputMode.INTERACTIVE
         assert result == 42
+
+    def test_fetch_failure_static_renders_error_and_returns_1(self, capsys, monkeypatch):
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        self._patch_print_block_to_current_stdout(monkeypatch)
+        render_called = False
+
+        def render(ctx: CliContext, data: str) -> Block:
+            nonlocal render_called
+            render_called = True
+            return Block.text("unused", Style())
+
+        def fetch() -> str:
+            raise ValueError("nope")
+
+        result = run_cli(["--static"], render=render, fetch=fetch)
+
+        assert result == 1
+        assert render_called is False
+        captured = capsys.readouterr()
+        assert "nope" in captured.out
+        assert "Traceback" not in captured.out
+
+    def test_fetch_failure_json_outputs_error_object_and_returns_1(self, capsys, monkeypatch):
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+        def fetch() -> dict:
+            raise RuntimeError("badness")
+
+        result = run_cli(
+            ["--json"],
+            render=lambda ctx, data: Block.text("unused", Style()),
+            fetch=fetch,
+        )
+
+        assert result == 1
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert payload == {"error": "badness"}
+
+    def test_render_failure_static_renders_minimal_error_and_returns_2(self, capsys, monkeypatch):
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        self._patch_print_block_to_current_stdout(monkeypatch)
+
+        def render(ctx: CliContext, data: str) -> Block:
+            raise KeyError("kaboom")
+
+        result = run_cli(["--static"], render=render, fetch=lambda: "ok")
+
+        assert result == 2
+        captured = capsys.readouterr()
+        assert "KeyError" in captured.out
+        assert "kaboom" in captured.out
+        assert "Traceback" not in captured.out

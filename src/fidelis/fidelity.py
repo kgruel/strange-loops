@@ -296,7 +296,12 @@ class CliRunner(Generic[T]):
 
         # JSON format special case
         if ctx.format == Format.JSON:
-            state = self.fetch()
+            try:
+                state = self.fetch()
+            except Exception as exc:
+                message = self._exception_message(exc)
+                print(json.dumps({"error": message}))
+                return 1
             print(json.dumps(state, default=str))
             return 0
 
@@ -317,8 +322,20 @@ class CliRunner(Generic[T]):
         """Run with static output (print_block)."""
         from .writer import print_block
 
-        state = self.fetch()
-        block = self.render(ctx, state)
+        try:
+            state = self.fetch()
+        except Exception as exc:
+            block = self._fetch_error_block(ctx, exc)
+            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            return 1
+
+        try:
+            block = self.render(ctx, state)
+        except Exception as exc:
+            block = self._render_error_block(ctx, exc)
+            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            return 2
+
         print_block(block, use_ansi=(ctx.format == Format.ANSI))
         return 0
 
@@ -331,22 +348,79 @@ class CliRunner(Generic[T]):
 
         if self.fetch_stream is not None:
             # Streaming mode: update as data arrives
-            async def stream():
+            async def stream() -> int:
                 with InPlaceRenderer() as renderer:
-                    async for state in self.fetch_stream():
-                        block = self.render(ctx, state)
-                        renderer.render(block)
+                    try:
+                        async for state in self.fetch_stream():
+                            try:
+                                block = self.render(ctx, state)
+                            except Exception as exc:
+                                renderer.render(self._render_error_block(ctx, exc))
+                                renderer.finalize()
+                                return 2
+                            renderer.render(block)
+                    except Exception as exc:
+                        renderer.render(self._fetch_error_block(ctx, exc))
+                        renderer.finalize()
+                        return 1
                     # Keep final output visible
                     renderer.finalize()
+                    return 0
 
-            asyncio.run(stream())
-            return 0
+            return asyncio.run(stream())
 
         # No streaming: just fetch and render
-        state = self.fetch()
-        block = self.render(ctx, state)
+        try:
+            state = self.fetch()
+        except Exception as exc:
+            block = self._fetch_error_block(ctx, exc)
+            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            return 1
+
+        try:
+            block = self.render(ctx, state)
+        except Exception as exc:
+            block = self._render_error_block(ctx, exc)
+            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            return 2
+
         print_block(block, use_ansi=(ctx.format == Format.ANSI))
         return 0
+
+    @staticmethod
+    def _exception_message(exc: Exception) -> str:
+        message = str(exc).strip()
+        return message or type(exc).__name__
+
+    @staticmethod
+    def _fetch_error_block(ctx: CliContext, exc: Exception) -> "Block":
+        from .block import Block, Wrap
+        from .cell import Style
+
+        try:
+            from .palette import current_palette
+
+            style = current_palette().error
+        except Exception:
+            style = Style(fg="red")
+
+        message = CliRunner._exception_message(exc)
+        width = max(1, ctx.width)
+        return Block.text(message.replace("\n", " "), style, width=width, wrap=Wrap.WORD)
+
+    @staticmethod
+    def _render_error_block(ctx: CliContext, exc: Exception) -> "Block":
+        from .block import Block, Wrap
+        from .cell import Style
+
+        message = str(exc).strip()
+        if message:
+            text = f"{type(exc).__name__}: {message}"
+        else:
+            text = type(exc).__name__
+
+        width = max(1, ctx.width)
+        return Block.text(text.replace("\n", " "), Style(), width=width, wrap=Wrap.WORD)
 
 
 def run_cli(

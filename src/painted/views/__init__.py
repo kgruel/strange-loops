@@ -21,6 +21,7 @@ from painted._lens import (  # noqa: F401
     shape_lens,
     tree_lens,
     chart_lens,
+    flame_lens,
 )
 from painted._components.sparkline import sparkline, sparkline_with_range  # noqa: F401
 from painted._components.spinner import (  # noqa: F401
@@ -64,6 +65,7 @@ __all__ = [
     "shape_lens",
     "tree_lens",
     "chart_lens",
+    "flame_lens",
     "sparkline",
     "sparkline_with_range",
     "SpinnerState",

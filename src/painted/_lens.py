@@ -728,3 +728,292 @@ def _chart_bars_themed(
     return join_vertical(*rows)
 
 
+# ---------------------------------------------------------------------------
+# Flame Lens — proportional horizontal segments (flame graph style)
+# ---------------------------------------------------------------------------
+
+# Warm color cycle, one per depth level
+_FLAME_COLORS = ("red", "yellow", "208", "202", "166", "214")
+
+
+def flame_lens(data: Any, zoom: int, width: int) -> Block:
+    """Render hierarchical data as proportional horizontal segments.
+
+    Each depth level becomes a row where segments fill proportional width
+    based on their numeric values (flame graph style).
+
+    Supports:
+    - Flat dicts {label: number}: single row of proportional segments
+    - Nested dicts {label: {child: number}}: multi-row flame chart
+
+    Zoom levels:
+    - 0: Root label + total value as one-liner
+    - 1: Top-level segments only (one row)
+    - 2+: Expand child segments, one row per depth level
+
+    Args:
+        data: Hierarchical dict with numeric leaf values.
+        zoom: Zoom level (0+).
+        width: Available width in characters.
+
+    Returns:
+        Block with rendered flame chart.
+    """
+    if width <= 0:
+        return Block.empty(0, 1)
+
+    segments = _flame_extract(data)
+    if not segments:
+        return Block.text("(no data)", Style(), width=width)
+
+    total = _flame_total(segments)
+
+    if zoom <= 0:
+        text = f"flame: {total:.4g}"
+        if display_width(text) > width:
+            text = truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
+        return Block.text(text, Style(), width=width)
+
+    if zoom == 1:
+        # Single row: top-level segments only
+        return _flame_render_row(segments, total, width, depth=0)
+
+    # zoom >= 2: expand children into additional rows
+    rows: list[Block] = []
+    _flame_render_levels(segments, total, width, zoom, depth=0, rows=rows)
+    if not rows:
+        return Block.text("(no data)", Style(), width=width)
+    return join_vertical(*rows)
+
+
+def _flame_extract(data: Any) -> list[tuple[str, Any]]:
+    """Extract [(label, value_or_children)] from data.
+
+    Leaf entries have numeric values. Branch entries have dict children.
+    """
+    if not isinstance(data, dict) or not data:
+        return []
+    result: list[tuple[str, Any]] = []
+    for k, v in data.items():
+        result.append((str(k), v))
+    return result
+
+
+def _flame_total(segments: list[tuple[str, Any]]) -> float:
+    """Recursively sum all numeric leaf values in segments."""
+    total = 0.0
+    for _, v in segments:
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            total += float(v)
+        elif isinstance(v, dict):
+            total += _flame_total([(str(ck), cv) for ck, cv in v.items()])
+    return total
+
+
+def _flame_render_row(
+    segments: list[tuple[str, Any]],
+    total: float,
+    width: int,
+    depth: int,
+) -> Block:
+    """Build one row of proportional segments for the given depth level."""
+    if width <= 0:
+        return Block.empty(0, 1)
+
+    color = _FLAME_COLORS[depth % len(_FLAME_COLORS)]
+    style = Style(fg=color, reverse=True)
+
+    blocks: list[Block] = []
+    remaining_width = width
+
+    if total <= 0:
+        # Everything is zero — give equal space
+        if segments:
+            each = width // len(segments)
+            for i, (label, _) in enumerate(segments):
+                seg_w = each if i < len(segments) - 1 else remaining_width
+                text = truncate(label, seg_w) if display_width(label) > seg_w else label
+                text = text.ljust(seg_w)
+                blocks.append(Block.text(text, style))
+                remaining_width -= seg_w
+        if not blocks:
+            return Block.empty(width, 1)
+        return join_horizontal(*blocks)
+
+    # Two-pass width allocation:
+    # 1. Give each segment at least label-width as minimum (capped)
+    # 2. Distribute surplus proportionally to larger segments
+    n = len(segments)
+    seg_widths = [0] * n
+
+    # Pass 1: compute proportional widths
+    for i, (label, v) in enumerate(segments):
+        val = _seg_value(v)
+        if val <= 0:
+            seg_widths[i] = 1
+        elif i < n - 1:
+            seg_widths[i] = max(1, int(width * val / total))
+        else:
+            seg_widths[i] = width - sum(seg_widths[:i])
+
+    # Pass 2: ensure each segment fits its label when width allows
+    for i, (label, _v) in enumerate(segments):
+        label_w = display_width(label)
+        if seg_widths[i] < label_w:
+            deficit = label_w - seg_widths[i]
+            # Steal from the largest segment that has surplus
+            donors = sorted(range(n), key=lambda j: seg_widths[j], reverse=True)
+            for d in donors:
+                if d == i:
+                    continue
+                give = min(deficit, seg_widths[d] - max(1, display_width(segments[d][0])))
+                if give > 0:
+                    seg_widths[d] -= give
+                    seg_widths[i] += give
+                    deficit -= give
+                if deficit <= 0:
+                    break
+
+    # Build segment blocks
+    blocks = []
+    for (label, _v), seg_w in zip(segments, seg_widths):
+        if seg_w <= 0:
+            continue
+        text = truncate(label, seg_w) if display_width(label) > seg_w else label
+        text = text.ljust(seg_w)
+        blocks.append(Block.text(text, style))
+
+    if not blocks:
+        return Block.empty(width, 1)
+    return join_horizontal(*blocks)
+
+
+def _flame_render_levels(
+    segments: list[tuple[str, Any]],
+    total: float,
+    width: int,
+    remaining_zoom: int,
+    depth: int,
+    rows: list[Block],
+) -> None:
+    """Recursively render flame rows, one per depth level."""
+    if not segments or width <= 0:
+        return
+
+    # Render this level
+    rows.append(_flame_render_row(segments, total, width, depth))
+
+    if remaining_zoom <= 1:
+        return
+
+    # Expand children: each parent's children occupy that parent's proportional width
+    child_blocks: list[Block] = []
+    used_width = 0
+
+    for i, (label, v) in enumerate(segments):
+        val = _seg_value(v)
+        if i < len(segments) - 1:
+            if total > 0:
+                seg_w = max(1, int(width * val / total))
+            else:
+                seg_w = width // len(segments)
+        else:
+            seg_w = width - used_width
+
+        seg_w = max(0, min(seg_w, width - used_width))
+        used_width += seg_w
+
+        if seg_w <= 0:
+            continue
+
+        if isinstance(v, dict) and v:
+            child_segments = [(str(ck), cv) for ck, cv in v.items()]
+            child_total = _flame_total(child_segments)
+            # Render one row for these children
+            child_blocks.append(
+                _flame_render_row(child_segments, child_total, seg_w, depth + 1)
+            )
+        else:
+            # Leaf at this level — render as a single block at child depth color
+            color = _FLAME_COLORS[(depth + 1) % len(_FLAME_COLORS)]
+            child_style = Style(fg=color, reverse=True)
+            text = truncate(label, seg_w) if display_width(label) > seg_w else label
+            text = text.ljust(seg_w)
+            child_blocks.append(Block.text(text, child_style))
+
+    if child_blocks:
+        rows.append(join_horizontal(*child_blocks))
+
+    # Recurse deeper if zoom allows
+    if remaining_zoom > 2:
+        _flame_expand_deeper(segments, total, width, remaining_zoom, depth, rows)
+
+
+def _flame_expand_deeper(
+    segments: list[tuple[str, Any]],
+    total: float,
+    width: int,
+    remaining_zoom: int,
+    depth: int,
+    rows: list[Block],
+) -> None:
+    """Expand deeper levels for segments with grandchildren."""
+    child_blocks: list[Block] = []
+    used_width = 0
+    has_content = False
+
+    for i, (label, v) in enumerate(segments):
+        val = _seg_value(v)
+        if i < len(segments) - 1:
+            if total > 0:
+                seg_w = max(1, int(width * val / total))
+            else:
+                seg_w = width // len(segments)
+        else:
+            seg_w = width - used_width
+
+        seg_w = max(0, min(seg_w, width - used_width))
+        used_width += seg_w
+
+        if seg_w <= 0:
+            continue
+
+        if isinstance(v, dict) and v:
+            child_segments = [(str(ck), cv) for ck, cv in v.items()]
+            child_total = _flame_total(child_segments)
+            # Check if any children have dict grandchildren
+            has_grandchildren = any(
+                isinstance(cv, dict) and cv for _, cv in child_segments
+            )
+            if has_grandchildren:
+                sub_rows: list[Block] = []
+                _flame_render_levels(
+                    child_segments, child_total, seg_w,
+                    remaining_zoom - 1, depth + 1, sub_rows,
+                )
+                # Take the third row onwards (first two already rendered)
+                if len(sub_rows) > 1:
+                    has_content = True
+                    child_blocks.append(sub_rows[1])
+                else:
+                    child_blocks.append(Block.empty(seg_w, 1))
+            else:
+                child_blocks.append(Block.empty(seg_w, 1))
+        else:
+            child_blocks.append(Block.empty(seg_w, 1))
+
+    if has_content and child_blocks:
+        rows.append(join_horizontal(*child_blocks))
+
+
+def _seg_value(v: Any) -> float:
+    """Get numeric value of a segment (leaf or recursive total)."""
+    if isinstance(v, bool):
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, dict):
+        return _flame_total([(str(k), val) for k, val in v.items()])
+    return 0.0
+
+

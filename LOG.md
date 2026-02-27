@@ -5,6 +5,63 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-24 — Bend-native reader + vertex-as-compilation-target
+
+**The arc.** Three experiments pushing the loops compute model onto interaction
+combinators, each moving more work into Bend. Started from the disk_monitor
+proof (integers only), ended with persistent state surviving across runs.
+
+**Experiment 1: `experiments/bend/reader/`** — Integer-pipe approach.
+Witness hashes links to u24 in bash, Bend folds integers. Proves substrate
+independence — same dedup/count/boundary result as Python. Wire format:
+`kind feed_id value` (all u24). Reuses disk_monitor's IO pattern (recursive
+`IO/input()` loop).
+
+**Experiment 2: `experiments/bend/vertex/feeds.bend`** — Vertex-as-Bend.
+Thin witness outputs raw URLs, Bend hashes strings itself via
+`hash_string(s) = fold s: acc * 31 + char`. Parsing boundary moved INTO Bend.
+Worker discovered better pattern: `IO/FS/read_to_end(STDIN)` + pure byte
+scanning (one IO call at boundary, pure reduction in middle). Structured to
+map back to vertex spec clauses.
+
+**Experiment 3: `experiments/bend/vertex/feeds_persistent.bend`** — Persistence.
+State survives across runs. First run: `(40 new, 40 total)`. Second run:
+`(0 new, 40 total)`. The loop loops. Implements vertex `store` clause.
+
+**Walls hit (the point of the experiments):**
+
+| Wall | Impact | Workaround |
+|---|---|---|
+| `Map` has no iteration | Can't serialize state | Parallel `List(u24)` of keys alongside Map |
+| `IO/FS/read_line` breaks on pipes | Can't read stdin line-by-line | `read_to_end` + manual byte scanning |
+| `String/split` reverses substrings | Parsing produces wrong results | Avoid; do byte-level scanning instead |
+| u24 numbers | Timestamps overflow, URLs lose data | Hash to u24 (Bend2 fixes with 32/64-bit) |
+
+**Architectural insight: loop vs vertex in Bend.**
+The vertex is the program (`main`). The loop is a function within it (IO
+source). They remain separate for composition — adding a feed doesn't change
+the fold logic. In Bend2 with native IO, the witness dissolves and loops
+become IO functions inside the vertex program.
+
+**Bend2 context.** Victor Taelin's tweet: Bend2 = "write specs as precise
+types, AI codes it, proves correctness." The `.vertex` file IS a spec. If
+Bend2's type system can express vertex specs, the Python orchestrator dissolves
+into a compiler emitting verified Bend programs. HVM3 (32-bit) and HVM4
+(32-bit + FFI) already exist in `~/Code/forks/` but lack the proof system.
+
+**Perspective shift.** The Python runtime is rich (persistence, errors, TUI,
+templates) but the Bend version strips to just computation — 30 lines for the
+full fold/boundary/tick. The honest tension: purity vs richness. Bend1's
+persistent version sprawls to 195 lines for what Python does in 71. The
+verbosity trajectory concerns — each new vertex clause adds boilerplate.
+The vertex-spec-to-Bend-code mapping (which would guide a compiler) weakened
+in the persistent version as implementation details overtook spec structure.
+
+**Next session:** Deep comparison of Python vs Bend implementations — the shape
+of the runtime, where to direct focus.
+
+---
+
 ## 2026-02-10 — `from file` + reader app + `--var` flag
 
 **The feature.** External parameter sources for template sources. The vertex

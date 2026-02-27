@@ -129,6 +129,12 @@ run, compile, start, store). **apps/hlab** is the first domain app.
 **apps/reader** is the second domain app (personal reading intelligence).
 `experiments/homelab/` is archived predecessor — don't develop there.
 
+### Bend Experiments (Parked)
+
+Three experiments in `experiments/bend/` confirmed the loops model maps to
+interaction combinators. Parked — Python runtime is more productive for current
+needs. See Open Threads for Bend2 revisit criteria.
+
 ### Structure
 
 ```
@@ -182,6 +188,14 @@ apps/reader/
 3. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
+
+- **Bend / interaction combinators** — Three experiments confirmed the model
+  maps to Bend (reader, vertex-as-Bend, persistent state). Key finding: Bend
+  strips vertex to ~30 lines of pure computation but sprawls at ~3x Python
+  for persistence/IO. Python runtime is richer and more productive for current
+  needs. Revisit when Bend2 lands (32/64-bit numbers, native IO, spec-as-types
+  with AI-proven correctness). HVM3/HVM4 in `~/Code/forks/`. Experiments in
+  `experiments/bend/`.
 
 - **Prometheus alerts → loops stream** — Replace Grafana with loops as the
   alert surface. Prometheus stays as collection/alerting engine (~160 MB,

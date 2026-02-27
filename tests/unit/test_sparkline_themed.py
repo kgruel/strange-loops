@@ -53,6 +53,43 @@ def test_sparkline_with_range_palette():
     assert block.row(0)[0].style.dim is True
 
 
+def test_sparkline_with_range_empty_values_uses_empty_char():
+    block = sparkline_with_range([], width=4, empty_char=".")
+    assert "".join(c.char for c in block.row(0)) == "...."
+
+
+def test_sparkline_with_range_zero_width_returns_empty_block():
+    block = sparkline_with_range([1, 2, 3], width=0)
+    assert block.width == 0
+    assert block.height == 1
+
+
+def test_sparkline_with_range_explicit_range_affects_output():
+    class FakeIcons:
+        sparkline = ("0", "1")
+
+    values = [0.0, 10.0]
+    full_scale = sparkline_with_range(
+        values,
+        width=2,
+        min_val=0.0,
+        max_val=10.0,
+        style=Style(),
+        icons=FakeIcons(),  # type: ignore[arg-type]
+    )
+    half_scale = sparkline_with_range(
+        values,
+        width=2,
+        min_val=0.0,
+        max_val=20.0,
+        style=Style(),
+        icons=FakeIcons(),  # type: ignore[arg-type]
+    )
+
+    assert "".join(c.char for c in full_scale.row(0)) == "01"
+    assert "".join(c.char for c in half_scale.row(0)) == "00"
+
+
 def test_sparkline_style_overrides_palette():
     custom = Style(fg="magenta")
     block = sparkline([1, 2, 3], width=3, style=custom, palette=MONO_PALETTE)

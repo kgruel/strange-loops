@@ -3,58 +3,42 @@
 from painted import (
     Align,
     Block,
-    Cell,
     Style,
     join_responsive,
     join_vertical,
     vslice,
 )
-
-
-def _text_block(lines: list[str], style: Style = Style()) -> Block:
-    """Helper: build a Block from lines of text, width = max line length."""
-    width = max(len(ln) for ln in lines) if lines else 0
-    rows = []
-    for line in lines:
-        row = [Cell(ch, style) for ch in line]
-        # pad to width
-        row += [Cell(" ", style)] * (width - len(line))
-        rows.append(row)
-    return Block(rows, width)
-
-
-def _row_text(block: Block, row_idx: int) -> str:
-    return "".join(c.char for c in block.row(row_idx))
+from tests.helpers import row_text, text_block
 
 
 class TestVslice:
     def test_basic_slice(self):
-        b = _text_block(["aaa", "bbb", "ccc", "ddd", "eee"])
+        b = text_block(["aaa", "bbb", "ccc", "ddd", "eee"])
         result = vslice(b, 1, 2)
         assert result.height == 2
         assert result.width == 3
-        assert _row_text(result, 0) == "bbb"
-        assert _row_text(result, 1) == "ccc"
+        assert row_text(result, 0) == "bbb"
+        assert row_text(result, 1) == "ccc"
 
     def test_offset_zero(self):
-        b = _text_block(["aaa", "bbb", "ccc"])
+        b = text_block(["aaa", "bbb", "ccc"])
         result = vslice(b, 0, 2)
         assert result.height == 2
-        assert _row_text(result, 0) == "aaa"
-        assert _row_text(result, 1) == "bbb"
+        assert row_text(result, 0) == "aaa"
+        assert row_text(result, 1) == "bbb"
 
     def test_offset_beyond_content(self):
-        b = _text_block(["aaa", "bbb"])
+        b = text_block(["aaa", "bbb"])
         result = vslice(b, 5, 2)
         assert result.height == 0
         assert result.width == 3
 
     def test_height_larger_than_content(self):
-        b = _text_block(["aaa", "bbb", "ccc"])
+        b = text_block(["aaa", "bbb", "ccc"])
         result = vslice(b, 1, 10)
         assert result.height == 2
-        assert _row_text(result, 0) == "bbb"
-        assert _row_text(result, 1) == "ccc"
+        assert row_text(result, 0) == "bbb"
+        assert row_text(result, 1) == "ccc"
 
     def test_empty_block(self):
         b = Block.empty(5, 0)
@@ -63,135 +47,135 @@ class TestVslice:
         assert result.width == 5
 
     def test_single_row_block(self):
-        b = _text_block(["hello"])
+        b = text_block(["hello"])
         result = vslice(b, 0, 1)
         assert result.height == 1
-        assert _row_text(result, 0) == "hello"
+        assert row_text(result, 0) == "hello"
 
     def test_single_row_offset_past(self):
-        b = _text_block(["hello"])
+        b = text_block(["hello"])
         result = vslice(b, 1, 1)
         assert result.height == 0
 
     def test_negative_offset_clamped(self):
-        b = _text_block(["aaa", "bbb", "ccc"])
+        b = text_block(["aaa", "bbb", "ccc"])
         result = vslice(b, -2, 2)
         assert result.height == 2
-        assert _row_text(result, 0) == "aaa"
-        assert _row_text(result, 1) == "bbb"
+        assert row_text(result, 0) == "aaa"
+        assert row_text(result, 1) == "bbb"
 
     def test_preserves_width(self):
-        b = _text_block(["abcde", "fghij"])
+        b = text_block(["abcde", "fghij"])
         result = vslice(b, 0, 1)
         assert result.width == 5
 
     def test_full_block_slice(self):
-        b = _text_block(["aa", "bb", "cc"])
+        b = text_block(["aa", "bb", "cc"])
         result = vslice(b, 0, 3)
         assert result.height == 3
-        assert _row_text(result, 0) == "aa"
-        assert _row_text(result, 1) == "bb"
-        assert _row_text(result, 2) == "cc"
+        assert row_text(result, 0) == "aa"
+        assert row_text(result, 1) == "bb"
+        assert row_text(result, 2) == "cc"
 
 
 class TestJoinVerticalGap:
     def test_join_vertical_no_gap(self):
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         result = join_vertical(a, b)
         assert result.height == 2
         assert result.width == 3
-        assert _row_text(result, 0) == "aaa"
-        assert _row_text(result, 1) == "bbb"
+        assert row_text(result, 0) == "aaa"
+        assert row_text(result, 1) == "bbb"
 
     def test_join_vertical_gap_1(self):
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         result = join_vertical(a, b, gap=1)
         assert result.height == 3
         assert result.width == 3
-        assert _row_text(result, 0) == "aaa"
-        assert _row_text(result, 1) == "   "
-        assert _row_text(result, 2) == "bbb"
+        assert row_text(result, 0) == "aaa"
+        assert row_text(result, 1) == "   "
+        assert row_text(result, 2) == "bbb"
 
     def test_join_vertical_gap_2(self):
-        a = _text_block(["aa"])
-        b = _text_block(["bb"])
-        c = _text_block(["cc"])
+        a = text_block(["aa"])
+        b = text_block(["bb"])
+        c = text_block(["cc"])
         result = join_vertical(a, b, c, gap=2)
         # 3 blocks, 2 gaps of 2 rows each = 3 + 4 = 7 rows
         assert result.height == 7
-        assert _row_text(result, 0) == "aa"
-        assert _row_text(result, 1) == "  "
-        assert _row_text(result, 2) == "  "
-        assert _row_text(result, 3) == "bb"
-        assert _row_text(result, 4) == "  "
-        assert _row_text(result, 5) == "  "
-        assert _row_text(result, 6) == "cc"
+        assert row_text(result, 0) == "aa"
+        assert row_text(result, 1) == "  "
+        assert row_text(result, 2) == "  "
+        assert row_text(result, 3) == "bb"
+        assert row_text(result, 4) == "  "
+        assert row_text(result, 5) == "  "
+        assert row_text(result, 6) == "cc"
 
     def test_join_vertical_gap_single_block(self):
-        a = _text_block(["aaa"])
+        a = text_block(["aaa"])
         result = join_vertical(a, gap=3)
         assert result.height == 1
         assert result.width == 3
-        assert _row_text(result, 0) == "aaa"
+        assert row_text(result, 0) == "aaa"
 
     def test_join_vertical_gap_with_align(self):
-        a = _text_block(["aa"])
-        b = _text_block(["bbbb"])
+        a = text_block(["aa"])
+        b = text_block(["bbbb"])
         result = join_vertical(a, b, gap=1, align=Align.CENTER)
         assert result.height == 3
         assert result.width == 4
         # "aa" centered in width 4 → offset 1 → " aa "
-        assert _row_text(result, 0) == " aa "
-        assert _row_text(result, 1) == "    "
-        assert _row_text(result, 2) == "bbbb"
+        assert row_text(result, 0) == " aa "
+        assert row_text(result, 1) == "    "
+        assert row_text(result, 2) == "bbbb"
 
 
 class TestJoinResponsive:
     def test_fits_horizontal(self):
         """When blocks fit, join horizontally."""
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         result = join_responsive(a, b, available_width=10)
         # Horizontal: 3 + 3 = 6, fits in 10
         assert result.width == 6
         assert result.height == 1
-        assert _row_text(result, 0) == "aaabbb"
+        assert row_text(result, 0) == "aaabbb"
 
     def test_does_not_fit_vertical(self):
         """When blocks don't fit, join vertically."""
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         result = join_responsive(a, b, available_width=5)
         # 3 + 3 = 6 > 5, so vertical
         assert result.width == 3
         assert result.height == 2
-        assert _row_text(result, 0) == "aaa"
-        assert _row_text(result, 1) == "bbb"
+        assert row_text(result, 0) == "aaa"
+        assert row_text(result, 1) == "bbb"
 
     def test_exact_fit_is_horizontal(self):
         """Exactly fitting is horizontal."""
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         result = join_responsive(a, b, available_width=6)
         assert result.width == 6
         assert result.height == 1
 
     def test_gap_included_in_fit_calculation(self):
         """Gap is counted when checking fit."""
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         # 3 + 2 (gap) + 3 = 8
         result = join_responsive(a, b, available_width=8, gap=2)
         assert result.width == 8
         assert result.height == 1
-        assert _row_text(result, 0) == "aaa  bbb"
+        assert row_text(result, 0) == "aaa  bbb"
 
     def test_gap_causes_overflow(self):
         """Gap can cause switch to vertical."""
-        a = _text_block(["aaa"])
-        b = _text_block(["bbb"])
+        a = text_block(["aaa"])
+        b = text_block(["bbb"])
         # 3 + 2 (gap) + 3 = 8 > 7, so vertical
         result = join_responsive(a, b, available_width=7, gap=2)
         assert result.height == 4  # 1 + 2 (gap) + 1
@@ -205,7 +189,7 @@ class TestJoinResponsive:
 
     def test_single_block(self):
         """Single block returns as-is."""
-        a = _text_block(["hello"])
+        a = text_block(["hello"])
         result = join_responsive(a, available_width=3)
         # Single block, no joining needed
         assert result.width == 5
@@ -213,10 +197,10 @@ class TestJoinResponsive:
 
     def test_alignment_passed_through(self):
         """Alignment is used in both modes."""
-        a = _text_block(["aa"])
-        b = _text_block(["bbbb"])
+        a = text_block(["aa"])
+        b = text_block(["bbbb"])
         # Vertical with center align
         result = join_responsive(a, b, available_width=5, align=Align.CENTER)
         assert result.height == 2
-        assert _row_text(result, 0) == " aa "
-        assert _row_text(result, 1) == "bbbb"
+        assert row_text(result, 0) == " aa "
+        assert row_text(result, 1) == "bbbb"

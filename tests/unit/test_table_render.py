@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from painted import Block, Cursor, Style, Viewport
+from painted import Cursor, Style, Viewport
 from painted.span import Line
 from painted.views import Column, TableState, table
-
-
-def _row_text(block: Block, idx: int) -> str:
-    """Extract text content from a block row."""
-    return "".join(c.char for c in block.row(idx))
+from tests.helpers import row_text
 
 
 def _make_columns(headers: list[str], widths: list[int]) -> list[Column]:
@@ -31,8 +27,8 @@ class TestBasicTableRendering:
         blk = table(state, cols, rows, visible_height=3)
 
         assert blk.height >= 3  # header + separator + at least 1 data row
-        assert "Name" in _row_text(blk, 0)
-        assert "Alice" in _row_text(blk, 2)
+        assert "Name" in row_text(blk, 0)
+        assert "Alice" in row_text(blk, 2)
 
     def test_two_columns_with_separator(self) -> None:
         cols = _make_columns(["Name", "Age"], [6, 4])
@@ -41,7 +37,7 @@ class TestBasicTableRendering:
 
         blk = table(state, cols, rows, visible_height=3)
 
-        header = _row_text(blk, 0)
+        header = row_text(blk, 0)
         assert "Name" in header
         assert "Age" in header
         assert "│" in header
@@ -53,9 +49,9 @@ class TestBasicTableRendering:
 
         blk = table(state, cols, rows, visible_height=5)
 
-        assert "apple" in _row_text(blk, 2)
-        assert "banana" in _row_text(blk, 3)
-        assert "cherry" in _row_text(blk, 4)
+        assert "apple" in row_text(blk, 2)
+        assert "banana" in row_text(blk, 3)
+        assert "cherry" in row_text(blk, 4)
 
 
 class TestSeparatorRow:
@@ -66,7 +62,7 @@ class TestSeparatorRow:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        sep_row = _row_text(blk, 1)
+        sep_row = row_text(blk, 1)
         assert "─" in sep_row
         assert "┼" in sep_row
 
@@ -77,7 +73,7 @@ class TestSeparatorRow:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        sep_row = _row_text(blk, 1)
+        sep_row = row_text(blk, 1)
         assert "─" in sep_row
         assert "┼" not in sep_row
 
@@ -155,9 +151,9 @@ class TestColumnWidthAllocation:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        row_text = _row_text(blk, 2)
-        assert len(row_text) == 10
-        assert row_text.startswith("Hi")
+        row_line = row_text(blk, 2)
+        assert len(row_line) == 10
+        assert row_line.startswith("Hi")
 
     def test_long_content_truncated(self) -> None:
         cols = _make_columns(["Name"], [4])
@@ -166,8 +162,8 @@ class TestColumnWidthAllocation:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        row_text = _row_text(blk, 2)
-        assert len(row_text) == 4
+        row_line = row_text(blk, 2)
+        assert len(row_line) == 4
 
 
 class TestScrollingBehavior:
@@ -178,9 +174,9 @@ class TestScrollingBehavior:
 
         blk = table(state, cols, rows, visible_height=5)
 
-        assert "a" in _row_text(blk, 2)
-        assert "b" in _row_text(blk, 3)
-        assert "c" in _row_text(blk, 4)
+        assert "a" in row_text(blk, 2)
+        assert "b" in row_text(blk, 3)
+        assert "c" in row_text(blk, 4)
 
     def test_scroll_offset_skips_rows(self) -> None:
         cols = _make_columns(["V"], [5])
@@ -193,9 +189,9 @@ class TestScrollingBehavior:
         blk = table(state, cols, rows, visible_height=3)
 
         # Visible window: rows c, d, e (offset=2)
-        assert "c" in _row_text(blk, 2)
-        assert "d" in _row_text(blk, 3)
-        assert "e" in _row_text(blk, 4)
+        assert "c" in row_text(blk, 2)
+        assert "d" in row_text(blk, 3)
+        assert "e" in row_text(blk, 4)
 
     def test_scroll_shows_correct_selection(self) -> None:
         cols = _make_columns(["V"], [5])
@@ -227,8 +223,8 @@ class TestEdgeCases:
 
         blk = table(state, cols, [], visible_height=3)
 
-        assert "Name" in _row_text(blk, 0)
-        assert "─" in _row_text(blk, 1)
+        assert "Name" in row_text(blk, 0)
+        assert "─" in row_text(blk, 1)
         # Data area should be blank
         assert blk.height >= 3
 
@@ -239,7 +235,7 @@ class TestEdgeCases:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        data_text = _row_text(blk, 2)
+        data_text = row_text(blk, 2)
         assert "x" in data_text
 
     def test_custom_separator(self) -> None:
@@ -249,7 +245,7 @@ class TestEdgeCases:
 
         blk = table(state, cols, rows, visible_height=2, separator=" | ")
 
-        header = _row_text(blk, 0)
+        header = row_text(blk, 0)
         assert " | " in header
 
     def test_header_style_applied(self) -> None:
@@ -284,7 +280,7 @@ class TestColumnAlignment:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        data_text = _row_text(blk, 2)
+        data_text = row_text(blk, 2)
         # "42" should be right-aligned in a 6-wide column
         assert data_text.endswith("42") or data_text.rstrip() == "42"
 
@@ -297,7 +293,7 @@ class TestColumnAlignment:
 
         blk = table(state, cols, rows, visible_height=2)
 
-        data_text = _row_text(blk, 2)
+        data_text = row_text(blk, 2)
         stripped = data_text.strip()
         assert stripped == "hi"
         # Should have padding on both sides

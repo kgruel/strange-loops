@@ -4,11 +4,7 @@ from painted import Style
 from painted.span import Line, Span
 from painted.views import ListState, list_view
 from painted import Cursor, Viewport
-
-
-def _row_text(block, idx: int) -> str:
-    """Extract the text content of a block row."""
-    return "".join(cell.char for cell in block.row(idx))
+from tests.helpers import row_text
 
 
 class TestListViewEmpty:
@@ -24,7 +20,7 @@ class TestListViewEmpty:
         block = list_view(state, [], visible_height=3)
 
         for y in range(block.height):
-            text = _row_text(block, y)
+            text = row_text(block, y)
             assert text.strip() == ""
 
 
@@ -34,9 +30,9 @@ class TestListViewBasicRender:
         state = ListState(cursor=Cursor(index=0, count=3))
         block = list_view(state, items, visible_height=3)
 
-        row0 = _row_text(block, 0)
-        row1 = _row_text(block, 1)
-        row2 = _row_text(block, 2)
+        row0 = row_text(block, 0)
+        row1 = row_text(block, 1)
+        row2 = row_text(block, 2)
 
         assert "alpha" in row0
         assert "beta" in row1
@@ -58,7 +54,7 @@ class TestListViewCursor:
         state = ListState(cursor=Cursor(index=0, count=2))
         block = list_view(state, items, visible_height=2)
 
-        row0 = _row_text(block, 0)
+        row0 = row_text(block, 0)
         assert row0.startswith("\u25b8 ")  # default cursor_char
 
     def test_space_on_unselected(self) -> None:
@@ -66,7 +62,7 @@ class TestListViewCursor:
         state = ListState(cursor=Cursor(index=0, count=2))
         block = list_view(state, items, visible_height=2)
 
-        row1 = _row_text(block, 1)
+        row1 = row_text(block, 1)
         assert row1.startswith("  ")  # space prefix, not cursor
 
     def test_custom_cursor_char(self) -> None:
@@ -74,7 +70,7 @@ class TestListViewCursor:
         state = ListState(cursor=Cursor(index=0, count=1))
         block = list_view(state, items, visible_height=1, cursor_char=">")
 
-        row0 = _row_text(block, 0)
+        row0 = row_text(block, 0)
         assert row0.startswith("> ")
 
     def test_cursor_moves_with_selection(self) -> None:
@@ -82,8 +78,8 @@ class TestListViewCursor:
         state = ListState(cursor=Cursor(index=2, count=3))
         block = list_view(state, items, visible_height=3)
 
-        row0 = _row_text(block, 0)
-        row2 = _row_text(block, 2)
+        row0 = row_text(block, 0)
+        row2 = row_text(block, 2)
         assert row0.startswith("  ")
         assert row2.startswith("\u25b8 ")
 
@@ -139,10 +135,10 @@ class TestListViewScrolling:
         block = list_view(state, items, visible_height=4)
 
         # Visible window: items 3, 4, 5, 6
-        assert "item-3" in _row_text(block, 0)
-        assert "item-4" in _row_text(block, 1)
-        assert "item-5" in _row_text(block, 2)
-        assert "item-6" in _row_text(block, 3)
+        assert "item-3" in row_text(block, 0)
+        assert "item-4" in row_text(block, 1)
+        assert "item-5" in row_text(block, 2)
+        assert "item-6" in row_text(block, 3)
 
     def test_cursor_in_scrolled_view(self) -> None:
         items = [Line.plain(f"item-{i}") for i in range(10)]
@@ -153,7 +149,7 @@ class TestListViewScrolling:
         block = list_view(state, items, visible_height=4)
 
         # item-5 is selected, which is at visual row 2 (offset=3, 5-3=2)
-        row2 = _row_text(block, 2)
+        row2 = row_text(block, 2)
         assert row2.startswith("\u25b8 ")
 
     def test_items_exceeding_visible_height(self) -> None:
@@ -166,8 +162,8 @@ class TestListViewScrolling:
 
         # Only 5 rows rendered
         assert block.height == 5
-        assert "row-0" in _row_text(block, 0)
-        assert "row-4" in _row_text(block, 4)
+        assert "row-0" in row_text(block, 0)
+        assert "row-4" in row_text(block, 4)
 
     def test_scroll_near_end(self) -> None:
         items = [Line.plain(f"n{i}") for i in range(10)]
@@ -177,12 +173,12 @@ class TestListViewScrolling:
         )
         block = list_view(state, items, visible_height=3)
 
-        assert "n7" in _row_text(block, 0)
-        assert "n8" in _row_text(block, 1)
-        assert "n9" in _row_text(block, 2)
+        assert "n7" in row_text(block, 0)
+        assert "n8" in row_text(block, 1)
+        assert "n9" in row_text(block, 2)
 
         # n9 is selected (index=9, offset=7, visual row=2)
-        assert _row_text(block, 2).startswith("\u25b8 ")
+        assert row_text(block, 2).startswith("\u25b8 ")
 
 
 class TestListStateWithVisible:
@@ -208,4 +204,4 @@ class TestListViewWidthCalculation:
         block = list_view(state, items, visible_height=3)
 
         assert block.height == 3
-        assert "only" in _row_text(block, 0)
+        assert "only" in row_text(block, 0)

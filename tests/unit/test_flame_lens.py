@@ -1,16 +1,7 @@
 """Tests for flame_lens — proportional hierarchical visualization."""
 
 from painted.views import flame_lens
-
-
-def _block_to_text(block) -> str:
-    """Extract text content from a block for testing."""
-    result = []
-    for y in range(block.height):
-        row = block.row(y)
-        line = "".join(cell.char for cell in row)
-        result.append(line)
-    return "\n".join(result)
+from tests.helpers import block_to_text
 
 
 class TestFlameLensZoom:
@@ -20,14 +11,14 @@ class TestFlameLensZoom:
         """At zoom 0, flame shows root label + total value."""
         data = {"render": 45, "diff": 30, "flush": 25}
         block = flame_lens(data, 0, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "100" in text  # total of 45+30+25
 
     def test_zoom_1_shows_single_row(self):
         """At zoom 1, flame shows top-level segments in one row."""
         data = {"render": 45, "diff": 30, "flush": 25}
         block = flame_lens(data, 1, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "render" in text
         assert "diff" in text
         assert "flush" in text
@@ -37,7 +28,7 @@ class TestFlameLensZoom:
         """At zoom 2+, flame expands child segments into additional rows."""
         data = {"main": {"render": 45, "diff": 30, "flush": 25}}
         block = flame_lens(data, 2, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "main" in text
         assert "render" in text
         assert block.height >= 2
@@ -73,7 +64,7 @@ class TestFlameLensEdgeCases:
     def test_empty_data(self):
         """Empty dict produces valid output."""
         block = flame_lens({}, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "no data" in text.lower() or block.height >= 1
 
     def test_zero_width_returns_empty(self):
@@ -85,7 +76,7 @@ class TestFlameLensEdgeCases:
         """Three-level nesting at high zoom."""
         data = {"top": {"mid": {"leaf": 100}}}
         block = flame_lens(data, 3, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "top" in text
         assert "mid" in text
         assert "leaf" in text
@@ -94,7 +85,7 @@ class TestFlameLensEdgeCases:
         """Zero-valued segments don't cause division errors."""
         data = {"active": 100, "idle": 0}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "active" in text
 
     def test_width_respected(self):

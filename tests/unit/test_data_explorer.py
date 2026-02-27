@@ -5,6 +5,7 @@ from painted.views import (
     data_explorer,
     flatten,
 )
+from tests.helpers import block_to_text
 
 
 class TestFlatten:
@@ -136,6 +137,40 @@ class TestDataExplorerState:
         new_state = state.toggle_expand()
         assert new_state.expanded == state.expanded
 
+    def test_page_down_moves_by_visible_height(self):
+        data = {f"k{i}": i for i in range(10)}
+        state = DataExplorerState(data=data).with_visible(3)
+
+        state = state.page_down()
+        assert state.cursor_index == 3
+
+        state = state.page_down()
+        assert state.cursor_index == 6
+
+    def test_page_up_moves_by_visible_height(self):
+        data = {f"k{i}": i for i in range(10)}
+        state = DataExplorerState(data=data).with_visible(3)
+
+        state = state.end()
+        assert state.cursor_index == 9
+
+        state = state.page_up()
+        assert state.cursor_index == 6
+
+        state = state.page_up()
+        assert state.cursor_index == 3
+
+        state = state.page_up()
+        assert state.cursor_index == 0
+
+    def test_page_down_clamps_at_end(self):
+        data = {f"k{i}": i for i in range(5)}
+        state = DataExplorerState(data=data).with_visible(3).end()
+        assert state.cursor_index == 4
+
+        state = state.page_down()
+        assert state.cursor_index == 4
+
 
 class TestDataExplorerRender:
     """Tests for the data_explorer render function."""
@@ -152,7 +187,7 @@ class TestDataExplorerRender:
         """Empty data shows (empty) message."""
         state = DataExplorerState(data={})
         block = data_explorer(state, width=40, height=5)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "empty" in text
 
     def test_expand_indicator_shown(self):
@@ -160,7 +195,7 @@ class TestDataExplorerRender:
         data = {"nested": {"a": 1}}
         state = DataExplorerState(data=data)
         block = data_explorer(state, width=40, height=5)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert ">" in text
 
     def test_expanded_indicator_shown(self):
@@ -168,7 +203,7 @@ class TestDataExplorerRender:
         data = {"nested": {"a": 1}}
         state = DataExplorerState(data=data, expanded=frozenset({("nested",)}))
         block = data_explorer(state, width=40, height=5)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "v " in text
 
     def test_leaf_values_shown(self):
@@ -176,16 +211,6 @@ class TestDataExplorerRender:
         data = {"name": "Alice"}
         state = DataExplorerState(data=data)
         block = data_explorer(state, width=40, height=5)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "name" in text
         assert "Alice" in text
-
-
-def _block_to_text(block) -> str:
-    """Extract text content from a block for testing."""
-    result = []
-    for y in range(block.height):
-        row = block.row(y)
-        line = "".join(cell.char for cell in row)
-        result.append(line)
-    return "\n".join(result)

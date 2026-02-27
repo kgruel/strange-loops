@@ -3,16 +3,7 @@
 from painted.block import Block
 from painted.cell import Style
 from painted.views import chart_lens, flame_lens, shape_lens, tree_lens
-
-
-def _block_to_text(block: Block) -> str:
-    """Extract text content from a block for testing."""
-    result = []
-    for y in range(block.height):
-        row = block.row(y)
-        line = "".join(cell.char for cell in row)
-        result.append(line)
-    return "\n".join(result)
+from tests.helpers import block_to_text
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +20,7 @@ class TestShapeLensFallbackObject:
                 return "custom-repr"
 
         block = shape_lens(MyObj(), 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "custom-repr" in text
 
 
@@ -45,13 +36,13 @@ class TestRenderScalarEdges:
         """Width=1 at zoom 1 uses truncate (not truncate_ellipsis)."""
         block = shape_lens("hello", 1, 1)
         assert block.width == 1
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert len(text.strip()) <= 1
 
     def test_scalar_zoom_1_long_string_truncated(self):
         """Long string at zoom 1 gets truncated with ellipsis."""
         block = shape_lens("a" * 50, 1, 10)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "…" in text
 
     def test_scalar_zoom_2_long_string_with_char_count(self):
@@ -59,7 +50,7 @@ class TestRenderScalarEdges:
         s = "x" * 300
         # Width must be large enough to show the "[300 chars]" suffix
         block = shape_lens(s, 2, 250)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "300 chars" in text
 
     def test_scalar_zoom_2_width_1(self):
@@ -80,21 +71,21 @@ class TestRenderDictEdges:
     def test_empty_dict_zoom_1(self):
         """Empty dict at zoom 1 shows '{}'."""
         block = shape_lens({}, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "{}" in text
 
     def test_dict_zoom_1_long_pairs_truncated(self):
         """Dict with long k:v at zoom 1 truncates with ellipsis."""
         d = {"longkey": "longvalue", "another": "item"}
         block = shape_lens(d, 1, 15)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "…" in text
 
     def test_dict_zoom_2_key_truncation_narrow(self):
         """Dict at zoom 2 truncates keys when key_col_width is very small."""
         d = {"very_long_key": "val"}
         block = shape_lens(d, 2, 10)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert block.width <= 10
 
 
@@ -109,7 +100,7 @@ class TestRenderListEdges:
     def test_empty_list_zoom_1(self):
         """Empty list at zoom 1 shows '[]'."""
         block = shape_lens([], 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "[]" in text
 
     def test_list_zoom_2_multi_row_items(self):
@@ -126,7 +117,7 @@ class TestRenderListEdges:
         # truncated by Block.text.
         data = list("abcdefghijklmnopqrstuvwxyz")
         block = shape_lens(data, 1, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # The overflow marker "..." appears as the last item in the joined text
         assert "..." in text
 
@@ -142,14 +133,14 @@ class TestRenderSetEdges:
     def test_empty_set_zoom_1(self):
         """Empty set at zoom 1 shows '{}'."""
         block = shape_lens(set(), 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "{}" in text
 
     def test_set_overflow_tags(self):
         """Set with many items at narrow width truncates tags."""
         s = {"alpha", "beta", "gamma", "delta", "epsilon"}
         block = shape_lens(s, 1, 15)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # Should have at least one tag but not all of them
         assert "[" in text
 
@@ -166,28 +157,28 @@ class TestSummarizeItem:
         """Long string items in list zoom 1 are truncated."""
         data = ["this is a very long string item"]
         block = shape_lens(data, 1, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "…" in text
 
     def test_dict_item_in_list(self):
         """Dict item in list zoom 1 shows 'dict[N]'."""
         data = [{"a": 1, "b": 2}]
         block = shape_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "dict[2]" in text
 
     def test_list_item_in_list(self):
         """Nested list item in list zoom 1 shows 'list[N]'."""
         data = [[1, 2, 3]]
         block = shape_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "list[3]" in text
 
     def test_set_item_in_list(self):
         """Set item in list zoom 1 shows 'set[N]'."""
         data = [{1, 2}]
         block = shape_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "set[2]" in text
 
     def test_unknown_item_in_list(self):
@@ -199,21 +190,21 @@ class TestSummarizeItem:
 
         data = [Obj()]
         block = shape_lens(data, 1, 60)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "obj-repres" in text
 
     def test_none_item_in_list(self):
         """None item in list zoom 1 shows 'None'."""
         data = [None, "x"]
         block = shape_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "None" in text
 
     def test_bool_item_in_list(self):
         """Bool item in list zoom 1 shows True/False."""
         data = [True, False]
         block = shape_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "True" in text
         assert "False" in text
 
@@ -233,14 +224,14 @@ class TestTreeLensExtended:
         """Tuple (label, list) form enumerates children."""
         data = ("root", ["child_a", "child_b"])
         block = tree_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "root" in text
 
     def test_tuple_form_with_none_children(self):
         """Tuple (label, None) form is a leaf."""
         data = ("leaf_node", None)
         block = tree_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "leaf_node" in text
 
     def test_node_protocol(self):
@@ -256,7 +247,7 @@ class TestTreeLensExtended:
 
         root = Node("root", [Node("child1"), Node("child2")])
         block = tree_lens(root, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "root" in text
 
     def test_node_protocol_no_children(self):
@@ -271,13 +262,13 @@ class TestTreeLensExtended:
                 return self._name
 
         block = tree_lens(Node("leaf"), 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "leaf" in text
 
     def test_leaf_node_no_children(self):
         """Scalar data (not dict/tuple/node) is a leaf."""
         block = tree_lens("just a string", 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "just a string" in text
 
     def test_custom_node_renderer(self):
@@ -292,7 +283,7 @@ class TestTreeLensExtended:
 
         data = {"a": 1, "b": 2}
         block = tree_lens(data, 1, 40, node_renderer=renderer)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # Renderer should have been called for root and children
         assert len(calls) >= 1
         assert "<root>" in text
@@ -306,7 +297,7 @@ class TestTreeLensExtended:
 
         data = {"parent": {"child": "val"}}
         block = tree_lens(data, 2, 40, node_renderer=renderer)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "[root]" in text
 
     def test_very_narrow_tree_skips_branches(self):
@@ -343,21 +334,21 @@ class TestChartLensExtended:
     def test_empty_dict(self):
         """Empty dict shows no-data message."""
         block = chart_lens({}, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "no data" in text
 
     def test_all_same_values_stats(self):
         """When all values are the same, stats shows 'all X'."""
         data = [5, 5, 5]
         block = chart_lens(data, 0, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "all 5" in text
 
     def test_bars_too_narrow_for_bar_chars(self):
         """When width is too narrow for bars, shows 'label: value' format."""
         data = {"cpu": 70, "mem": 50}
         block = chart_lens(data, 3, 12)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "cpu" in text
         assert "mem" in text
 
@@ -365,7 +356,7 @@ class TestChartLensExtended:
         """Values outside 0-100 use raw format, not percentage."""
         data = {"x": 500, "y": 1000}
         block = chart_lens(data, 3, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "%" not in text
         assert "500" in text
 
@@ -373,7 +364,7 @@ class TestChartLensExtended:
         """Negative values render without crashing."""
         data = {"a": -10, "b": 20}
         block = chart_lens(data, 3, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "a" in text
         assert "b" in text
 
@@ -381,20 +372,20 @@ class TestChartLensExtended:
         """Numeric list at zoom 3 generates index labels for bars."""
         data = [10, 20, 30]
         block = chart_lens(data, 3, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "0" in text  # index label
 
     def test_zero_span_values(self):
         """When all values are equal, bars should still render."""
         data = {"a": 50, "b": 50}
         block = chart_lens(data, 3, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "a" in text
 
     def test_sparkline_empty_values(self):
         """Empty sparkline returns empty block."""
         block = chart_lens([], 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "no data" in text
 
 
@@ -410,7 +401,7 @@ class TestFlameLens:
         """Flat dict at zoom 0 shows total."""
         data = {"a": 30, "b": 70}
         block = flame_lens(data, 0, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "flame" in text
         assert "100" in text
 
@@ -418,7 +409,7 @@ class TestFlameLens:
         """Flat dict at zoom 1 shows single row of segments."""
         data = {"a": 30, "b": 70}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "a" in text
         assert "b" in text
         assert block.height == 1
@@ -428,7 +419,7 @@ class TestFlameLens:
         data = {"parent": {"child1": 20, "child2": 30}}
         block = flame_lens(data, 2, 40)
         assert block.height >= 2
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "parent" in text
 
     def test_nested_dict_zoom_3_deeper(self):
@@ -439,19 +430,19 @@ class TestFlameLens:
         }
         block = flame_lens(data, 3, 60)
         assert block.height >= 2
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "a" in text
 
     def test_empty_dict(self):
         """Empty dict shows no-data message."""
         block = flame_lens({}, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "no data" in text
 
     def test_non_dict_data(self):
         """Non-dict data shows no-data message."""
         block = flame_lens("not a dict", 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "no data" in text
 
     def test_zero_width(self):
@@ -463,7 +454,7 @@ class TestFlameLens:
         """Single item fills entire width."""
         data = {"only": 100}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         assert "only" in text
 
     def test_many_items(self):
@@ -489,7 +480,7 @@ class TestFlameLens:
         """Bool values in flame data contribute 0 to totals."""
         data = {"flag": True, "num": 10}
         block = flame_lens(data, 0, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # Total should be 10, not 11
         assert "10" in text
 
@@ -534,7 +525,7 @@ class TestFlameAllocateWidths:
         """Negative values get minimum width of 1."""
         data = {"neg": -5, "pos": 10}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # Both should appear
         assert block.height == 1
 
@@ -542,6 +533,6 @@ class TestFlameAllocateWidths:
         """Short-labeled large segment donates width to long-labeled small one."""
         data = {"x": 90, "very_long_label": 10}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
+        text = block_to_text(block)
         # The long label should at least partially appear
         assert "very" in text

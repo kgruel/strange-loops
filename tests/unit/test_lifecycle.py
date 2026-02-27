@@ -1,25 +1,32 @@
 """Tests for Surface on_start / on_stop lifecycle hooks."""
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from painted.tui import Surface
+from painted.tui import Surface, TestSurface
 
 
-def _make_surface(**kwargs):
-    """Create a Surface with mocked terminal internals so run() works in tests."""
-    surface = Surface(**kwargs)
-    # Mock the writer so no terminal interaction occurs
-    writer = MagicMock()
-    writer.size.return_value = (80, 24)
-    surface._writer = writer
-    # Mock keyboard so context manager is a no-op and get_key returns None
-    kb = MagicMock()
-    kb.__enter__ = MagicMock(return_value=kb)
-    kb.__exit__ = MagicMock(return_value=False)
-    kb.get_input.return_value = None
-    surface._keyboard = kb
+class _QueueKeyboard:
+    def __init__(self, inputs=()):
+        self._inputs = list(inputs)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def get_input(self):
+        if not self._inputs:
+            return None
+        return self._inputs.pop(0)
+
+
+def _make_surface(**kwargs) -> Surface:
+    surface = Surface(fps_cap=1000, **kwargs)
+    harness = TestSurface(surface, width=80, height=24, input_queue=[])
+    # Surface.run() calls writer.size() to allocate buffers; keep it deterministic.
+    surface._writer.size = lambda: (harness.width, harness.height)  # type: ignore[method-assign]
+    surface._keyboard = _QueueKeyboard()
     return surface
 
 
@@ -32,14 +39,15 @@ class TestLifecycleOnStart:
             called.append("start")
 
         surface = _make_surface(on_start=on_start)
-        # Quit immediately from on_start so run() exits
+
         original_on_start = surface._on_start
 
         async def start_then_quit():
+            assert original_on_start is not None
             await original_on_start()
             surface.quit()
 
-        surface._on_start = start_then_quit
+        surface._on_start = start_then_quit  # type: ignore[assignment]
 
         await surface.run()
         assert "start" in called
@@ -51,6 +59,7 @@ class TestLifecycleOnStart:
 
         async def on_start():
             order.append("start")
+            surface.quit()
 
         surface = _make_surface(on_start=on_start)
 
@@ -60,18 +69,7 @@ class TestLifecycleOnStart:
             order.append("update")
             original_update()
 
-        surface.update = tracking_update
-
-        async def start_then_quit():
-            await surface._on_start.__wrapped__()
-            surface.quit()
-
-        # Simpler approach: on_start quits immediately, so update never runs
-        async def on_start_quit():
-            order.append("start")
-            surface.quit()
-
-        surface._on_start = on_start_quit
+        surface.update = tracking_update  # type: ignore[assignment]
 
         await surface.run()
         assert order == ["start"]  # update never ran because we quit in on_start
@@ -91,7 +89,7 @@ class TestLifecycleOnStop:
         def quit_on_update():
             surface.quit()
 
-        surface.update = quit_on_update
+        surface.update = quit_on_update  # type: ignore[assignment]
 
         await surface.run()
         assert "stop" in called
@@ -109,7 +107,7 @@ class TestLifecycleOnStop:
         def raise_on_update():
             raise RuntimeError("boom")
 
-        surface.update = raise_on_update
+        surface.update = raise_on_update  # type: ignore[assignment]
 
         with pytest.raises(RuntimeError, match="boom"):
             await surface.run()
@@ -121,23 +119,17 @@ class TestLifecycleOrder:
     @pytest.mark.asyncio
     async def test_start_before_stop(self):
         order = []
+        surface_holder: dict[str, Surface] = {}
 
         async def on_start():
             order.append("start")
-            # quit so the loop exits immediately
-            # (surface reference captured via closure below)
+            surface_holder["surface"].quit()
 
         async def on_stop():
             order.append("stop")
 
         surface = _make_surface(on_start=on_start, on_stop=on_stop)
-
-        # Replace on_start to also quit
-        async def start_and_quit():
-            order.append("start")
-            surface.quit()
-
-        surface._on_start = start_and_quit
+        surface_holder["surface"] = surface
 
         await surface.run()
         assert order == ["start", "stop"]
@@ -152,7 +144,7 @@ class TestLifecycleBackwardsCompat:
         def quit_on_update():
             surface.quit()
 
-        surface.update = quit_on_update
+        surface.update = quit_on_update  # type: ignore[assignment]
 
         await surface.run()  # Should not raise
 
@@ -164,7 +156,7 @@ class TestLifecycleBackwardsCompat:
         def quit_on_update():
             surface.quit()
 
-        surface.update = quit_on_update
+        surface.update = quit_on_update  # type: ignore[assignment]
 
         await surface.run()  # Should not raise
 

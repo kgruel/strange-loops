@@ -343,3 +343,172 @@ class TestCliRunnerLiveFallback:
         assert result == 0
         captured = capsys.readouterr()
         assert "interactive-fallback" in captured.out
+
+
+# =============================================================================
+# CliRunner._run_live with fetch_stream
+# =============================================================================
+
+
+class TestCliRunnerLiveStreaming:
+    def test_live_with_stream_renders_each_state_and_finalizes(self, monkeypatch):
+        renderers: list[object] = []
+
+        class StubRenderer:
+            def __init__(self, *args, **kwargs):
+                self.blocks: list[Block] = []
+                self.finalized = False
+                renderers.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def render(self, block: Block) -> None:
+                self.blocks.append(block)
+
+            def finalize(self) -> None:
+                self.finalized = True
+
+        import painted.inplace as inplace_mod
+
+        monkeypatch.setattr(inplace_mod, "InPlaceRenderer", StubRenderer)
+
+        ctx = CliContext(
+            zoom=Zoom.SUMMARY,
+            mode=OutputMode.LIVE,
+            format=Format.PLAIN,
+            is_tty=False,
+            width=40,
+            height=5,
+        )
+
+        async def fake_stream():
+            yield "a"
+            yield "b"
+
+        runner = CliRunner(
+            render=lambda ctx, data: Block.text(str(data), Style()),
+            fetch=lambda: "unused",
+            fetch_stream=fake_stream,
+        )
+
+        result = runner._dispatch(ctx)
+        assert result == 0
+        assert len(renderers) == 1
+        renderer: StubRenderer = renderers[0]  # type: ignore[assignment]
+        assert [row[0].char for row in (renderer.blocks[0].row(0), renderer.blocks[1].row(0))] == [
+            "a",
+            "b",
+        ]
+        assert renderer.finalized is True
+
+    def test_live_stream_render_error_returns_2(self, monkeypatch):
+        renderers: list[object] = []
+
+        class StubRenderer:
+            def __init__(self, *args, **kwargs):
+                self.blocks: list[Block] = []
+                self.finalized = False
+                renderers.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def render(self, block: Block) -> None:
+                self.blocks.append(block)
+
+            def finalize(self) -> None:
+                self.finalized = True
+
+        import painted.inplace as inplace_mod
+
+        monkeypatch.setattr(inplace_mod, "InPlaceRenderer", StubRenderer)
+
+        ctx = CliContext(
+            zoom=Zoom.SUMMARY,
+            mode=OutputMode.LIVE,
+            format=Format.PLAIN,
+            is_tty=False,
+            width=40,
+            height=5,
+        )
+
+        async def fake_stream():
+            yield "ok"
+            yield "boom"
+
+        def maybe_bad_render(ctx, data):
+            if data == "boom":
+                raise ValueError("render broke")
+            return Block.text(str(data), Style())
+
+        runner = CliRunner(
+            render=maybe_bad_render,
+            fetch=lambda: "unused",
+            fetch_stream=fake_stream,
+        )
+
+        result = runner._dispatch(ctx)
+        assert result == 2
+        assert len(renderers) == 1
+        renderer: StubRenderer = renderers[0]  # type: ignore[assignment]
+        assert renderer.finalized is True
+        # Last rendered block should be an error block.
+        assert "ValueError" in "".join(c.char for c in renderer.blocks[-1].row(0))
+
+    def test_live_stream_fetch_error_returns_1(self, monkeypatch):
+        renderers: list[object] = []
+
+        class StubRenderer:
+            def __init__(self, *args, **kwargs):
+                self.blocks: list[Block] = []
+                self.finalized = False
+                renderers.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def render(self, block: Block) -> None:
+                self.blocks.append(block)
+
+            def finalize(self) -> None:
+                self.finalized = True
+
+        import painted.inplace as inplace_mod
+
+        monkeypatch.setattr(inplace_mod, "InPlaceRenderer", StubRenderer)
+
+        ctx = CliContext(
+            zoom=Zoom.SUMMARY,
+            mode=OutputMode.LIVE,
+            format=Format.PLAIN,
+            is_tty=False,
+            width=40,
+            height=5,
+        )
+
+        async def bad_stream():
+            yield "ok"
+            raise RuntimeError("fetch broke")
+
+        runner = CliRunner(
+            render=lambda ctx, data: Block.text(str(data), Style()),
+            fetch=lambda: "unused",
+            fetch_stream=bad_stream,
+        )
+
+        result = runner._dispatch(ctx)
+        assert result == 1
+        assert len(renderers) == 1
+        renderer: StubRenderer = renderers[0]  # type: ignore[assignment]
+        assert renderer.finalized is True
+        assert "fetch broke" in "".join(c.char for c in renderer.blocks[-1].row(0))

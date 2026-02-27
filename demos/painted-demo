@@ -11,9 +11,12 @@ case "$cmd" in
   rendering)   exec uv run python demos/patterns/rendering.py "$@" ;;
   fidelity)    exec uv run python demos/patterns/fidelity.py "$@" ;;
   live)        exec uv run python demos/patterns/live.py "$@" ;;
+  profiler)    exec uv run python demos/patterns/profiler.py "$@" ;;
+  # primitives
+  show)        exec uv run python demos/primitives/show.py "$@" ;;
   # apps
   widgets)     exec uv run python demos/apps/widgets.py "$@" ;;
   big-text)    exec uv run python demos/apps/big_text.py "$@" ;;
   tour)        exec uv run python demos/tour.py "$@" ;;
-  *)           echo "Unknown demo: $cmd"; echo "Available: rendering fidelity live widgets big-text tour"; exit 1 ;;
+  *)           echo "Unknown demo: $cmd"; echo "Available: rendering fidelity live profiler widgets big-text tour"; exit 1 ;;
 esac

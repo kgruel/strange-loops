@@ -41,6 +41,8 @@ patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
   live.py            Live streaming: fetch_stream, spinners, --live  ✓
+  testing.py        Replay testing: emit capture, observation traces      ✓
+  profiler.py       Self-profiling: frame cost, emission timeline, flame graph  ✓
 ```
 
 Old stepping stones (`block.py`, `buffer.py`, `buffer_view.py`) deleted —

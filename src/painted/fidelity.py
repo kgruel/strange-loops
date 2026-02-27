@@ -20,7 +20,7 @@ import argparse
 import json
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum, IntEnum
 from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
@@ -302,7 +302,11 @@ class CliRunner(Generic[T]):
                 message = self._exception_message(exc)
                 print(json.dumps({"error": message}))
                 return 1
-            print(json.dumps(state, default=str))
+            try:
+                data = asdict(state)
+            except TypeError:
+                data = state
+            print(json.dumps(data, default=str))
             return 0
 
         # Dispatch by mode

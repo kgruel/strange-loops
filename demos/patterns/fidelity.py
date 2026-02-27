@@ -18,8 +18,11 @@ The flags drive the output — the code doesn't switch on modes.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 from painted import (
     Block,
@@ -76,6 +79,7 @@ class DiskData:
     total_bytes: int
     used_bytes: int
     entries: tuple[DirEntry, ...]
+    timestamp: str = ""
 
     @property
     def free_bytes(self) -> int:
@@ -149,8 +153,9 @@ SAMPLE_DISK = DiskData(
 
 
 def render_minimal(data: DiskData) -> Block:
+    ts = f"  [{data.timestamp}]" if data.timestamp else ""
     return Block.text(
-        f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human})",
+        f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human}){ts}",
         Style(),
     )
 
@@ -178,6 +183,8 @@ def render_standard(data: DiskData) -> Block:
 
     rows.append(Block.text("", Style()))
     rows.append(Block.text(f"Free: {data.free_human}", Style()))
+    if data.timestamp:
+        rows.append(Block.text(f"  {data.timestamp}", Style(dim=True)))
     return join_vertical(*rows)
 
 
@@ -242,13 +249,16 @@ def render_styled(data: DiskData, width: int) -> Block:
     dir_padded = pad(dir_table, right=content_width - dir_table.width)
 
     free_style = Style(fg="green" if data.used_percent < 75 else "yellow", bold=True)
-    return join_vertical(
+    blocks = [
         border(usage_padded, title=f"Disk: {data.mount}", chars=ROUNDED),
         Block.text("", Style()),
         border(dir_padded, title="By Directory", chars=ROUNDED),
         Block.text("", Style()),
         Block.text(f"  Free: {data.free_human}  ", free_style),
-    )
+    ]
+    if data.timestamp:
+        blocks.append(Block.text(f"  {data.timestamp}", Style(dim=True)))
+    return join_vertical(*blocks)
 
 
 # --- Zoom 3: full detail with children ---
@@ -276,13 +286,16 @@ def render_full(data: DiskData, width: int) -> Block:
     dir_padded = pad(dir_table, right=content_width - dir_table.width)
 
     free_style = Style(fg="green" if data.used_percent < 75 else "yellow", bold=True)
-    return join_vertical(
+    blocks = [
         border(usage_padded, title=f"Disk: {data.mount}", chars=ROUNDED),
         Block.text("", Style()),
         border(dir_padded, title="By Directory", chars=ROUNDED),
         Block.text("", Style()),
         Block.text(f"  Free: {data.free_human}  ", free_style),
-    )
+    ]
+    if data.timestamp:
+        blocks.append(Block.text(f"  {data.timestamp}", Style(dim=True)))
+    return join_vertical(*blocks)
 
 
 # --- Interactive: TUI tree browser ---
@@ -479,7 +492,19 @@ class DiskSurface(Surface):
 
 
 def _fetch() -> DiskData:
-    return SAMPLE_DISK
+    """Real disk stats for home directory, sample subdirectories."""
+    home = Path.home()
+    try:
+        usage = shutil.disk_usage(home)
+    except OSError:
+        return SAMPLE_DISK
+    return DiskData(
+        mount=str(home),
+        total_bytes=usage.total,
+        used_bytes=usage.used,
+        entries=SAMPLE_DISK.entries,
+        timestamp=datetime.now().isoformat(timespec="seconds"),
+    )
 
 
 def _render(ctx: CliContext, data: DiskData) -> Block:

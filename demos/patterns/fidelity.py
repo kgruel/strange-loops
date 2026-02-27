@@ -207,12 +207,14 @@ def _dir_row(entry: DirEntry, parent_bytes: int, bar_width: int, indent: int = 0
     """Single directory row with size bar."""
     pct = (entry.size_bytes / parent_bytes) * 100 if parent_bytes > 0 else 0
 
-    prefix = "  " * indent
-    size_block = Block.text(f"{prefix}{entry.size_human.rjust(6)}", Style(bold=True))
+    size_block = Block.text(entry.size_human.rjust(6), Style(bold=True if indent == 0 else False))
 
     filled = int(pct / 100 * bar_width)
     bar_style = Style(fg="yellow") if pct > 20 else Style(fg="cyan")
     bar = "\u2593" * filled + "\u2591" * (bar_width - filled)
+
+    name_prefix = "  " + "  " * indent
+    name_style = Style() if indent == 0 else Style(dim=True)
 
     return join_horizontal(
         size_block,
@@ -220,7 +222,7 @@ def _dir_row(entry: DirEntry, parent_bytes: int, bar_width: int, indent: int = 0
         Block.text(bar, bar_style),
         Block.text(" ", Style()),
         Block.text(f"{pct:5.1f}%", Style(dim=True)),
-        Block.text(f"  {entry.name}", Style()),
+        Block.text(f"{name_prefix}{entry.name}", name_style),
     )
 
 

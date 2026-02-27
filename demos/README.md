@@ -60,7 +60,7 @@ Real-world patterns showing lens selection and the CLI→TUI spectrum.
 
 | File | Pattern | Run |
 |------|---------|-----|
-| `auto_dispatch.py` | Lens selection: auto → explicit → custom | `uv run python demos/patterns/auto_dispatch.py` |
+| `rendering.py` | Rendering patterns: lens API, custom render, palette | `uv run python demos/patterns/rendering.py` |
 | `fidelity.py` | CLI harness at 4 zoom levels | `uv run python demos/patterns/fidelity.py -vv` |
 
 The fidelity demo supports:

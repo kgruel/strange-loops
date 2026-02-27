@@ -38,7 +38,7 @@ primitives/
   show.py           show() auto-dispatch                       ✓
 
 patterns/
-  auto_dispatch.py  Lens selection: auto → explicit → custom   ✓
+  rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
 ```
 

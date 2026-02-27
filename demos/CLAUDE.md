@@ -40,6 +40,7 @@ primitives/
 patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
+  live.py            Live streaming: fetch_stream, spinners, --live  ✓
 ```
 
 Old stepping stones (`block.py`, `buffer.py`, `buffer_view.py`) deleted —

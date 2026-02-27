@@ -735,8 +735,28 @@ def _chart_bars_themed(
 # Flame Lens — proportional horizontal segments (flame graph style)
 # ---------------------------------------------------------------------------
 
-# Warm color cycle, one per depth level
-_FLAME_COLORS = ("red", "yellow", "208", "202", "166", "214")
+
+def _flame_palette_colors() -> tuple[str, ...]:
+    """Extract fg colors from Palette roles for flame segments.
+
+    Falls back to warm color cycle when palette roles lack fg (e.g. MONO_PALETTE).
+    """
+    from .palette import current_palette
+
+    p = current_palette()
+    colors: list[str] = []
+    for role in (p.error, p.warning, p.success, p.accent):
+        if role.fg is not None:
+            colors.append(str(role.fg))
+    return tuple(colors) if colors else ("red", "yellow", "green", "cyan")
+
+
+def _flame_color_for_label(label: str, prev_idx: int, palette: tuple[str, ...]) -> int:
+    """Stable color index for a segment label, with adjacent-collision avoidance."""
+    idx = hash(label) % len(palette)
+    if idx == prev_idx:
+        idx = (idx + 1) % len(palette)
+    return idx
 
 
 def flame_lens(
@@ -744,32 +764,37 @@ def flame_lens(
     zoom: int,
     width: int,
     *,
+    height: int | None = None,
     colors: tuple[str, ...] | None = None,
 ) -> Block:
-    """Render hierarchical data as proportional horizontal segments.
+    """Render hierarchical data as proportional segments (flame graph style).
 
-    Each depth level becomes a row where segments fill proportional width
-    based on their numeric values (flame graph style).
+    When height is None (default), renders horizontal rows where each depth
+    level is a row with segments filling proportional width.
+
+    When height is provided, renders vertical columns where each segment's
+    bar height is proportional to its value.
 
     Supports:
-    - Flat dicts {label: number}: single row of proportional segments
-    - Nested dicts {label: {child: number}}: multi-row flame chart
+    - Flat dicts {label: number}: single row/columns of proportional segments
+    - Nested dicts {label: {child: number}}: multi-row flame chart (horizontal)
 
     Zoom levels:
     - 0: Root label + total value as one-liner
-    - 1: Top-level segments only (one row)
-    - 2+: Expand child segments, one row per depth level
+    - 1: Top-level segments only
+    - 2+: Expand child segments (horizontal: one row per depth; vertical: flat only)
 
     Args:
         data: Hierarchical dict with numeric leaf values.
         zoom: Zoom level (0+).
         width: Available width in characters.
-        colors: Optional color cycle tuple; defaults to _FLAME_COLORS.
+        height: When set, render vertical columns with this total height.
+        colors: Optional color cycle tuple; defaults to palette-derived colors.
 
     Returns:
         Block with rendered flame chart.
     """
-    palette = colors if colors is not None else _FLAME_COLORS
+    palette = colors if colors is not None else _flame_palette_colors()
     if width <= 0:
         return Block.empty(0, 1)
 
@@ -785,13 +810,17 @@ def flame_lens(
             text = truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
         return Block.text(text, Style(), width=width)
 
+    if height is not None:
+        # Vertical orientation
+        return _flame_render_vertical(segments, total, width, height, zoom, palette)
+
     if zoom == 1:
         # Single row: top-level segments only
-        return _flame_render_row(segments, total, width, depth=0, palette=palette)
+        return _flame_render_row(segments, total, width, palette=palette)
 
     # zoom >= 2: expand children into additional rows
     rows: list[Block] = []
-    _flame_render_levels(segments, total, width, zoom, depth=0, rows=rows, palette=palette)
+    _flame_render_levels(segments, total, width, zoom, rows=rows, palette=palette)
     if not rows:
         return Block.text("(no data)", Style(), width=width)
     return join_vertical(*rows)
@@ -807,7 +836,7 @@ def _flame_extract(data: Any) -> list[tuple[str, Any]]:
     result: list[tuple[str, Any]] = []
     for k, v in data.items():
         result.append((str(k), v))
-    return result
+    return sorted(result, key=lambda x: x[0])
 
 
 def _flame_total(segments: list[tuple[str, Any]]) -> float:
@@ -875,23 +904,23 @@ def _flame_render_row(
     segments: list[tuple[str, Any]],
     total: float,
     width: int,
-    depth: int,
-    palette: tuple[str, ...] = _FLAME_COLORS,
+    palette: tuple[str, ...],
 ) -> Block:
-    """Build one row of proportional segments for the given depth level."""
+    """Build one row of proportional segments with per-label coloring."""
     if width <= 0:
         return Block.empty(0, 1)
 
-    color = palette[depth % len(palette)]
-    style = Style(fg=color, reverse=True)
-
     seg_widths = _flame_allocate_widths(segments, total, width)
 
-    # Build segment blocks
+    # Build segment blocks with per-label color
     blocks: list[Block] = []
+    prev_color_idx = -1
     for (label, _v), seg_w in zip(segments, seg_widths):
         if seg_w <= 0:
             continue
+        color_idx = _flame_color_for_label(label, prev_color_idx, palette)
+        prev_color_idx = color_idx
+        style = Style(fg=palette[color_idx], reverse=True)
         text = truncate(label, seg_w) if display_width(label) > seg_w else label
         text = text.ljust(seg_w)
         blocks.append(Block.text(text, style))
@@ -906,16 +935,15 @@ def _flame_render_levels(
     total: float,
     width: int,
     remaining_zoom: int,
-    depth: int,
     rows: list[Block],
-    palette: tuple[str, ...] = _FLAME_COLORS,
+    palette: tuple[str, ...],
 ) -> None:
     """Recursively render flame rows, one per depth level."""
     if not segments or width <= 0:
         return
 
     # Render this level
-    rows.append(_flame_render_row(segments, total, width, depth, palette=palette))
+    rows.append(_flame_render_row(segments, total, width, palette=palette))
 
     if remaining_zoom <= 1:
         return
@@ -924,6 +952,7 @@ def _flame_render_levels(
     seg_widths = _flame_allocate_widths(segments, total, width)
     child_blocks: list[Block] = []
     used_width = 0
+    prev_color_idx = -1
 
     for (label, v), seg_w in zip(segments, seg_widths):
         seg_w = max(0, min(seg_w, width - used_width))
@@ -933,16 +962,16 @@ def _flame_render_levels(
             continue
 
         if isinstance(v, dict) and v:
-            child_segments = [(str(ck), cv) for ck, cv in v.items()]
+            child_segments = sorted([(str(ck), cv) for ck, cv in v.items()], key=lambda x: x[0])
             child_total = _flame_total(child_segments)
-            # Render one row for these children
             child_blocks.append(
-                _flame_render_row(child_segments, child_total, seg_w, depth + 1, palette=palette)
+                _flame_render_row(child_segments, child_total, seg_w, palette=palette)
             )
         else:
-            # Leaf at this level — render as a single block at child depth color
-            color = palette[(depth + 1) % len(palette)]
-            child_style = Style(fg=color, reverse=True)
+            # Leaf at this level — per-label color
+            color_idx = _flame_color_for_label(label, prev_color_idx, palette)
+            prev_color_idx = color_idx
+            child_style = Style(fg=palette[color_idx], reverse=True)
             text = truncate(label, seg_w) if display_width(label) > seg_w else label
             text = text.ljust(seg_w)
             child_blocks.append(Block.text(text, child_style))
@@ -952,7 +981,7 @@ def _flame_render_levels(
 
     # Recurse deeper if zoom allows
     if remaining_zoom > 2:
-        _flame_expand_deeper(segments, total, width, remaining_zoom, depth, rows, palette=palette)
+        _flame_expand_deeper(segments, total, width, remaining_zoom, rows, palette=palette)
 
 
 def _flame_expand_deeper(
@@ -960,9 +989,8 @@ def _flame_expand_deeper(
     total: float,
     width: int,
     remaining_zoom: int,
-    depth: int,
     rows: list[Block],
-    palette: tuple[str, ...] = _FLAME_COLORS,
+    palette: tuple[str, ...],
 ) -> None:
     """Expand deeper levels for segments with grandchildren."""
     seg_widths = _flame_allocate_widths(segments, total, width)
@@ -978,7 +1006,7 @@ def _flame_expand_deeper(
             continue
 
         if isinstance(v, dict) and v:
-            child_segments = [(str(ck), cv) for ck, cv in v.items()]
+            child_segments = sorted([(str(ck), cv) for ck, cv in v.items()], key=lambda x: x[0])
             child_total = _flame_total(child_segments)
             # Check if any children have dict grandchildren
             has_grandchildren = any(isinstance(cv, dict) and cv for _, cv in child_segments)
@@ -989,7 +1017,6 @@ def _flame_expand_deeper(
                     child_total,
                     seg_w,
                     remaining_zoom - 1,
-                    depth + 1,
                     sub_rows,
                     palette=palette,
                 )
@@ -1006,6 +1033,63 @@ def _flame_expand_deeper(
 
     if has_content and child_blocks:
         rows.append(join_horizontal(*child_blocks))
+
+
+def _flame_render_vertical(
+    segments: list[tuple[str, Any]],
+    total: float,
+    width: int,
+    height: int,
+    zoom: int,
+    palette: tuple[str, ...],
+) -> Block:
+    """Render segments as vertical columns (height = cost)."""
+    n = len(segments)
+    if n == 0 or height <= 0:
+        return Block.empty(width, 1)
+
+    col_width = width // n
+    if col_width < 1:
+        col_width = 1
+
+    chart_height = max(1, height - 1)  # reserve 1 row for labels
+    max_value = max(_seg_value(v) for _, v in segments)
+    if max_value <= 0:
+        max_value = 1.0
+
+    columns: list[Block] = []
+    prev_color_idx = -1
+
+    for i, (label, v) in enumerate(segments):
+        # Actual column width — last column absorbs remainder
+        cw = col_width if i < n - 1 else width - col_width * (n - 1)
+        if cw <= 0:
+            continue
+
+        val = _seg_value(v)
+        bar_height = max(1, round(val / max_value * chart_height))
+        empty_height = chart_height - bar_height
+
+        color_idx = _flame_color_for_label(label, prev_color_idx, palette)
+        prev_color_idx = color_idx
+        bar_style = Style(fg=palette[color_idx], reverse=True)
+
+        # Label row (bottom)
+        label_text = truncate(label, cw) if display_width(label) > cw else label
+        label_centered = label_text.center(cw)[:cw]
+        label_block = Block.text(label_centered, Style(dim=True), width=cw)
+
+        parts: list[Block] = []
+        if empty_height > 0:
+            parts.append(Block.empty(cw, empty_height))
+        parts.append(Block.empty(cw, bar_height, bar_style))
+        parts.append(label_block)
+
+        columns.append(join_vertical(*parts))
+
+    if not columns:
+        return Block.empty(width, 1)
+    return join_horizontal(*columns)
 
 
 def _seg_value(v: Any) -> float:

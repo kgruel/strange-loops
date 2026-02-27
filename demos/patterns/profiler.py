@@ -250,14 +250,33 @@ def render_summary(data: ProfileData) -> Block:
 # --- Zoom 2: frame chart + flame graph ---
 
 
+def _build_emission_tree(emissions_raw: tuple[tuple[str, dict], ...]) -> dict[str, dict[str, int]]:
+    """Build hierarchical emission tree from raw emission data.
+
+    Groups emissions by category (prefix before '.'), aggregates counts
+    for each unique emission entry.
+    """
+    tree: dict[str, dict[str, int]] = {}
+    for kind, data_dict in emissions_raw:
+        category = kind.split(".")[0] if "." in kind else kind
+        if category not in tree:
+            tree[category] = {}
+        detail = " ".join(f"{k}={v}" for k, v in data_dict.items())
+        entry = f"{kind}: {detail}" if detail else kind
+        count = tree[category].get(entry, 0)
+        tree[category][entry] = count + 1
+    return tree
+
+
 def render_detailed(data: ProfileData, width: int) -> Block:
-    """Per-frame write chart and emission flame graph."""
+    """Per-frame write chart, emission flame (horizontal + vertical)."""
     p = current_palette()
     sections: list[Block] = []
+    inner_width = min(width - 4, 70)
 
     # Frame write counts as bar chart
     frame_data = {f.label: f.write_count for f in data.frames}
-    chart_block = chart_lens(frame_data, 3, min(width - 4, 70))
+    chart_block = chart_lens(frame_data, 3, inner_width)
     sections.append(border(chart_block, title="Writes per Frame", chars=ROUNDED))
     sections.append(Block.text("", Style()))
 
@@ -272,11 +291,21 @@ def render_detailed(data: ProfileData, width: int) -> Block:
         sections.append(join_vertical(*hot_rows))
         sections.append(Block.text("", Style()))
 
-    # Emission proportions as flame graph
+    # Horizontal flame: category-level proportions (short labels)
+    category_totals: dict[str, int] = {}
+    for es in data.emission_summary:
+        cat = es.kind.split(".")[0] if "." in es.kind else es.kind
+        category_totals[cat] = category_totals.get(cat, 0) + es.count
+    if category_totals:
+        flame_h = flame_lens(category_totals, 1, inner_width)
+        sections.append(border(flame_h, title="Emission Proportions", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # Vertical flame: per-kind comparison
     emission_data = {es.kind: es.count for es in data.emission_summary}
     if emission_data:
-        flame_block = flame_lens(emission_data, 1, min(width - 4, 70))
-        sections.append(border(flame_block, title="Emission Proportions", chars=ROUNDED))
+        flame_v = flame_lens(emission_data, 1, inner_width, height=12)
+        sections.append(border(flame_v, title="Emission Cost", chars=ROUNDED))
 
     return join_vertical(*sections)
 
@@ -315,16 +344,7 @@ def render_full(data: ProfileData, width: int) -> Block:
         sections.append(Block.text("", Style()))
 
     # Full emission tree
-    emission_tree: dict[str, dict[str, int]] = {}
-    for kind, data_dict in data.emissions_raw:
-        category = kind.split(".")[0] if "." in kind else kind
-        if category not in emission_tree:
-            emission_tree[category] = {}
-        detail = " ".join(f"{k}={v}" for k, v in data_dict.items())
-        entry = f"{kind}: {detail}" if detail else kind
-        count = emission_tree[category].get(entry, 0)
-        emission_tree[category][entry] = count + 1
-
+    emission_tree = _build_emission_tree(data.emissions_raw)
     if emission_tree:
         tree_block = tree_lens(emission_tree, 2, min(width - 4, 70))
         sections.append(border(tree_block, title="Emission Timeline", chars=ROUNDED))

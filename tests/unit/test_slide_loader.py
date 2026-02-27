@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 # slide_loader lives in demos/, not in the package
-_demos_dir = str(Path(__file__).resolve().parent.parent / "demos")
+_demos_dir = str(Path(__file__).resolve().parent.parent.parent / "demos")
 if _demos_dir not in sys.path:
     sys.path.insert(0, _demos_dir)
 
@@ -461,10 +461,10 @@ class TestLoadSlidesDir:
 class TestIntegration:
     """Integration tests loading the actual slides directory."""
 
-    SLIDES_DIR = Path(__file__).resolve().parent.parent / "demos" / "slides"
+    SLIDES_DIR = Path(__file__).resolve().parent.parent.parent / "demos" / "slides"
 
     @pytest.mark.skipif(
-        not (Path(__file__).resolve().parent.parent / "demos" / "slides").exists(),
+        not (Path(__file__).resolve().parent.parent.parent / "demos" / "slides").exists(),
         reason="slides directory not present",
     )
     def test_load_all_slides(self):
@@ -492,7 +492,7 @@ class TestIntegration:
                 assert nav[sid]["right"] == seq[i + 1]
 
     @pytest.mark.skipif(
-        not (Path(__file__).resolve().parent.parent / "demos" / "slides").exists(),
+        not (Path(__file__).resolve().parent.parent.parent / "demos" / "slides").exists(),
         reason="slides directory not present",
     )
     def test_group_order_correct(self):

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Add tools to path so we can import discord_chat
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
 import discord_chat
 

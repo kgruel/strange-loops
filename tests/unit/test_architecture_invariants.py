@@ -47,7 +47,7 @@ def _dataclass_frozen_from_decorators(class_def: ast.ClassDef) -> bool | None:
 
 
 def test_state_dataclasses_declared_frozen() -> None:
-    painted_root = Path(__file__).resolve().parents[1] / "src" / "painted"
+    painted_root = Path(__file__).resolve().parents[2] / "src" / "painted"
 
     must_be_frozen = {
         "Region",
@@ -78,7 +78,7 @@ def test_state_dataclasses_declared_frozen() -> None:
 
 
 def test_block_rows_private_not_accessed_outside_block() -> None:
-    painted_root = Path(__file__).resolve().parents[1] / "src" / "painted"
+    painted_root = Path(__file__).resolve().parents[2] / "src" / "painted"
     block_py = painted_root / "block.py"
 
     for py_file in painted_root.rglob("*.py"):

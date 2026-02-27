@@ -301,8 +301,10 @@ class CliRunner(Generic[T]):
         mode = parse_mode(parsed)
         fmt = parse_format(parsed)
 
-        # JSON implies static mode
-        if fmt == Format.JSON and mode == OutputMode.AUTO:
+        # Non-animated formats and minimal zoom imply static mode
+        if mode == OutputMode.AUTO and (
+            fmt in (Format.JSON, Format.PLAIN) or zoom == Zoom.MINIMAL
+        ):
             mode = OutputMode.STATIC
 
         ctx = detect_context(zoom, mode, fmt)

@@ -11,9 +11,12 @@ show({"cpu": 67, "mem": 82, "disk": 45})
 TTY gets a styled bar chart. Pipe gets plain text. `--json` gets JSON.
 Same data, same function — the stack figures out the rest.
 
-## The Ladder
+<!-- TODO: tapes/hero.gif — show() in TTY, pipe, JSON contexts -->
 
-Start where you are. Move up when you need to.
+## Enter anywhere
+
+Every entry point uses the same building blocks. Pick the one that fits your problem —
+you never hand over control, and there's no cliff between them.
 
 ### Print styled output
 
@@ -25,6 +28,8 @@ from painted import Block, Style, print_block
 block = Block.text("deploy OK", Style(fg="green", bold=True))
 print_block(block)
 ```
+
+<!-- TODO: tapes/styled.gif — print vs print_block contrast -->
 
 ### Compose
 
@@ -41,6 +46,8 @@ status = join_vertical(
 card = border(join_vertical(header, status), chars=ROUNDED)
 print_block(card)
 ```
+
+<!-- TODO: tapes/compose.gif — bordered card output -->
 
 ### CLI harness
 
@@ -69,6 +76,8 @@ myapp --json       # JSON output
 myapp | grep ok    # plain text, no ANSI
 ```
 
+<!-- TODO: tapes/zoom.gif — quiet/default/verbose spectrum -->
+
 ### Full TUI
 
 Alt screen, keyboard input, async render loop, diff-flush. Subclass `Surface`,
@@ -90,6 +99,8 @@ class MyApp(Surface):
 
 asyncio.run(MyApp().run())
 ```
+
+<!-- TODO: tapes/tui.gif — alt screen flash with navigation -->
 
 ## Install
 
@@ -129,7 +140,7 @@ One dependency: [wcwidth](https://pypi.org/project/wcwidth/) (wide character dis
 
 | Export | Purpose |
 |--------|---------|
-| `shape_lens` | Auto-dispatch renderer (numeric → chart, hierarchical → tree) |
+| `shape_lens` | Auto-dispatch for exploration (numeric → chart, hierarchical → tree) |
 | `tree_lens` / `chart_lens` | Explicit tree and chart strategies |
 | `list_view` / `table` / `text_input` | Stateful interactive components |
 | `spinner` / `progress_bar` / `sparkline` | Animation and data viz |

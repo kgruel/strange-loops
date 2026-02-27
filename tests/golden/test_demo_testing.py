@@ -20,7 +20,7 @@ from painted.writer import print_block
 # Import demo module without mutating sys.path
 # ---------------------------------------------------------------------------
 
-_DEMO_PATH = Path(__file__).resolve().parent.parent / "demos" / "patterns" / "testing.py"
+_DEMO_PATH = Path(__file__).resolve().parent.parent.parent / "demos" / "patterns" / "testing.py"
 
 _spec = importlib.util.spec_from_file_location("_demo_testing", _DEMO_PATH)
 _mod = importlib.util.module_from_spec(_spec)

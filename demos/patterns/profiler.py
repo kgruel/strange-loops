@@ -27,13 +27,12 @@ from painted import (
     Style,
     Zoom,
     border,
-    join_horizontal,
     join_vertical,
     pad,
     run_cli,
     ROUNDED,
 )
-from painted.views import chart_lens, flame_lens, tree_lens
+from painted.views import chart_lens, flame_lens, profile, tree_lens
 from painted.palette import current_palette
 from painted.tui import Layer, Pop, Push, Quit, Stay, Surface, TestSurface, render_layers
 
@@ -71,6 +70,9 @@ class ProfileData:
     frames: tuple[FrameProfile, ...]
     emission_summary: tuple[EmissionSummary, ...]
     emissions_raw: tuple[tuple[str, dict], ...]
+    cprofile_flame: dict
+    cprofile_total: float
+    cprofile_calls: int
 
 
 # --- Mini app under test ---
@@ -156,7 +158,9 @@ class _ProfileApp(Surface):
 # --- Profile extraction ---
 
 
-def _extract_profile(name: str, harness: TestSurface, frames: list) -> ProfileData:
+def _extract_profile(
+    name: str, harness: TestSurface, frames: list, prof_result,
+) -> ProfileData:
     """Pure function: extract ProfileData from a completed TestSurface run."""
     write_counts = [len(f.writes) for f in frames]
     avg = sum(write_counts) / len(write_counts) if write_counts else 0.0
@@ -192,6 +196,9 @@ def _extract_profile(name: str, harness: TestSurface, frames: list) -> ProfileDa
         frames=frame_profiles,
         emission_summary=emission_summary,
         emissions_raw=tuple((k, d) for k, d in harness.emissions),
+        cprofile_flame=prof_result.flame_dict,
+        cprofile_total=prof_result.total_time,
+        cprofile_calls=prof_result.call_count,
     )
 
 
@@ -199,8 +206,9 @@ def _fetch() -> ProfileData:
     """Run the scenario and extract profiling data."""
     app = _ProfileApp()
     harness = TestSurface(app, width=80, height=24, input_queue=_SCENARIO_INPUTS)
-    frames = harness.run_to_completion()
-    return _extract_profile("list_nav", harness, frames)
+    with profile(module="painted") as prof:
+        frames = harness.run_to_completion()
+    return _extract_profile("list_nav", harness, frames, prof[0])
 
 
 # --- Zoom 0: one-line summary ---
@@ -236,6 +244,12 @@ def render_summary(data: ProfileData) -> Block:
     if data.hot_frame_count:
         rows.append(Block.text(
             f"Hot frames: {data.hot_frame_count} (>2x avg)", p.warning,
+        ))
+
+    if data.cprofile_calls > 0:
+        rows.append(Block.text(
+            f"cProfile:  {data.cprofile_calls} calls, {data.cprofile_total:.4f}s",
+            Style(),
         ))
 
     rows.append(Block.text("", Style()))
@@ -291,21 +305,16 @@ def render_detailed(data: ProfileData, width: int) -> Block:
         sections.append(join_vertical(*hot_rows))
         sections.append(Block.text("", Style()))
 
-    # Horizontal flame: category-level proportions (short labels)
-    category_totals: dict[str, int] = {}
-    for es in data.emission_summary:
-        cat = es.kind.split(".")[0] if "." in es.kind else es.kind
-        category_totals[cat] = category_totals.get(cat, 0) + es.count
-    if category_totals:
-        flame_h = flame_lens(category_totals, 1, inner_width)
-        sections.append(border(flame_h, title="Emission Proportions", chars=ROUNDED))
+    # cProfile flame graph (horizontal — call tree timing)
+    if data.cprofile_flame:
+        cprof_h = flame_lens(data.cprofile_flame, 2, inner_width)
+        sections.append(border(cprof_h, title="cProfile Timing", chars=ROUNDED))
         sections.append(Block.text("", Style()))
 
-    # Vertical flame: per-kind comparison
-    emission_data = {es.kind: es.count for es in data.emission_summary}
-    if emission_data:
-        flame_v = flame_lens(emission_data, 1, inner_width, height=12)
-        sections.append(border(flame_v, title="Emission Cost", chars=ROUNDED))
+    # cProfile vertical flame (per-phase timing comparison)
+    if data.cprofile_flame:
+        cprof_v = flame_lens(data.cprofile_flame, 1, inner_width, height=12)
+        sections.append(border(cprof_v, title="cProfile Cost", chars=ROUNDED))
 
     return join_vertical(*sections)
 
@@ -314,9 +323,10 @@ def render_detailed(data: ProfileData, width: int) -> Block:
 
 
 def render_full(data: ProfileData, width: int) -> Block:
-    """Frame-by-frame detail with full emission tree."""
+    """Frame-by-frame detail with cProfile flame and emission tree."""
     p = current_palette()
     sections: list[Block] = []
+    inner_width = min(width - 4, 70)
 
     # Per-frame detail
     for frame in data.frames:
@@ -336,17 +346,29 @@ def render_full(data: ProfileData, width: int) -> Block:
 
     sections.append(Block.text("", Style()))
 
+    # cProfile flame graph (horizontal — detailed call tree)
+    if data.cprofile_flame:
+        cprof_h = flame_lens(data.cprofile_flame, 2, inner_width)
+        sections.append(border(cprof_h, title="cProfile Timing", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # cProfile vertical flame (per-phase comparison)
+    if data.cprofile_flame:
+        cprof_v = flame_lens(data.cprofile_flame, 1, inner_width, height=12)
+        sections.append(border(cprof_v, title="cProfile Cost (Vertical)", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
     # Emission frequency chart
     emission_data = {es.kind: es.count for es in data.emission_summary}
     if emission_data:
-        chart_block = chart_lens(emission_data, 3, min(width - 4, 70))
+        chart_block = chart_lens(emission_data, 3, inner_width)
         sections.append(border(chart_block, title="Emission Frequency", chars=ROUNDED))
         sections.append(Block.text("", Style()))
 
     # Full emission tree
     emission_tree = _build_emission_tree(data.emissions_raw)
     if emission_tree:
-        tree_block = tree_lens(emission_tree, 2, min(width - 4, 70))
+        tree_block = tree_lens(emission_tree, 2, inner_width)
         sections.append(border(tree_block, title="Emission Timeline", chars=ROUNDED))
 
     return join_vertical(*sections)

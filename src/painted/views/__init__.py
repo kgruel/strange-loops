@@ -11,6 +11,9 @@ from .._components.data_explorer import (  # noqa: F401
     flatten,
 )
 
+# Profile bridge
+from .._profile import ProfileResult, parse_collapsed, profile  # noqa: F401
+
 # Stateful views
 from .._components.list_view import ListState, list_view  # noqa: F401
 from .._components.progress import ProgressState, progress_bar  # noqa: F401
@@ -97,4 +100,8 @@ __all__ = [
     "DataNode",
     "data_explorer",
     "flatten",
+    # Profile bridge
+    "ProfileResult",
+    "profile",
+    "parse_collapsed",
 ]

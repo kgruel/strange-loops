@@ -34,20 +34,19 @@ class Block:
         frozen_ids: tuple[tuple[str | None, ...], ...] | None = (
             tuple(tuple(r) for r in ids) if ids is not None else None
         )
-        if __debug__:
-            for row_idx, row in enumerate(frozen_rows):
+        for row_idx, row in enumerate(frozen_rows):
+            if len(row) != width:
+                raise ValueError(f"Block row {row_idx} width {len(row)} != block width {width}")
+        if frozen_ids is not None:
+            if len(frozen_ids) != len(frozen_rows):
+                raise ValueError(
+                    f"Block ids height {len(frozen_ids)} != block height {len(frozen_rows)}"
+                )
+            for row_idx, row in enumerate(frozen_ids):
                 if len(row) != width:
-                    raise ValueError(f"Block row {row_idx} width {len(row)} != block width {width}")
-            if frozen_ids is not None:
-                if len(frozen_ids) != len(frozen_rows):
                     raise ValueError(
-                        f"Block ids height {len(frozen_ids)} != block height {len(frozen_rows)}"
+                        f"Block ids row {row_idx} width {len(row)} != block width {width}"
                     )
-                for row_idx, row in enumerate(frozen_ids):
-                    if len(row) != width:
-                        raise ValueError(
-                            f"Block ids row {row_idx} width {len(row)} != block width {width}"
-                        )
         object.__setattr__(self, "width", width)
         object.__setattr__(self, "height", len(frozen_rows))
         object.__setattr__(self, "id", id)

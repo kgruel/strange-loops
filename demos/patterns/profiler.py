@@ -201,3 +201,159 @@ def _fetch() -> ProfileData:
     harness = TestSurface(app, width=80, height=24, input_queue=_SCENARIO_INPUTS)
     frames = harness.run_to_completion()
     return _extract_profile("list_nav", harness, frames)
+
+
+# --- Zoom 0: one-line summary ---
+
+
+def render_minimal(data: ProfileData) -> Block:
+    """Single-line profiling summary."""
+    return Block.text(
+        f"{data.frame_count} frames, {data.total_writes} writes, "
+        f"avg {data.avg_writes:.0f}/frame",
+        Style(),
+    )
+
+
+# --- Zoom 1: emission traces ---
+
+
+def render_summary(data: ProfileData) -> Block:
+    """Scenario overview with emission counts."""
+    p = current_palette()
+    rows: list[Block] = [
+        Block.text(f"Scenario: {data.scenario_name}", Style(bold=True)),
+        Block.text(f"  {data.input_count} inputs, {data.dimensions}", Style(dim=True)),
+        Block.text("", Style()),
+        Block.text(f"Frames:    {data.frame_count}", Style()),
+        Block.text(
+            f"Writes:    {data.total_writes} total "
+            f"(avg {data.avg_writes:.0f}, max {data.max_writes})",
+            Style(),
+        ),
+    ]
+
+    if data.hot_frame_count:
+        rows.append(Block.text(
+            f"Hot frames: {data.hot_frame_count} (>2x avg)", p.warning,
+        ))
+
+    rows.append(Block.text("", Style()))
+    rows.append(Block.text("Emissions:", Style(dim=True)))
+    for es in data.emission_summary:
+        style = p.accent if not es.kind.startswith("ui.") else Style(dim=True)
+        rows.append(Block.text(f"  {es.count:>3}x  {es.kind}", style))
+
+    return join_vertical(*rows)
+
+
+# --- Zoom 2: frame chart + flame graph ---
+
+
+def render_detailed(data: ProfileData, width: int) -> Block:
+    """Per-frame write chart and emission flame graph."""
+    p = current_palette()
+    sections: list[Block] = []
+
+    # Frame write counts as bar chart
+    frame_data = {f.label: f.write_count for f in data.frames}
+    chart_block = chart_lens(frame_data, 3, min(width - 4, 70))
+    sections.append(border(chart_block, title="Writes per Frame", chars=ROUNDED))
+    sections.append(Block.text("", Style()))
+
+    # Hot frame callouts
+    hot_frames = [f for f in data.frames if f.is_hot]
+    if hot_frames:
+        hot_rows = [Block.text("Hot frames (>2x average):", p.warning)]
+        for f in hot_frames:
+            hot_rows.append(Block.text(
+                f"  Frame {f.index} ({f.label}): {f.write_count} writes", p.warning,
+            ))
+        sections.append(join_vertical(*hot_rows))
+        sections.append(Block.text("", Style()))
+
+    # Emission proportions as flame graph
+    emission_data = {es.kind: es.count for es in data.emission_summary}
+    if emission_data:
+        flame_block = flame_lens(emission_data, 1, min(width - 4, 70))
+        sections.append(border(flame_block, title="Emission Proportions", chars=ROUNDED))
+
+    return join_vertical(*sections)
+
+
+# --- Zoom 3: frame-by-frame breakdown ---
+
+
+def render_full(data: ProfileData, width: int) -> Block:
+    """Frame-by-frame detail with full emission tree."""
+    p = current_palette()
+    sections: list[Block] = []
+
+    # Per-frame detail
+    for frame in data.frames:
+        style = p.warning if frame.is_hot else Style()
+        hot_marker = " HOT" if frame.is_hot else ""
+        header = Block.text(
+            f"Frame {frame.index}: {frame.write_count} writes{hot_marker}",
+            style,
+        )
+        label_line = Block.text(f"  {frame.label}", Style(dim=True))
+        inner = join_vertical(header, label_line)
+        sections.append(border(
+            pad(inner, right=max(0, min(50, width - 4) - inner.width)),
+            title=f"Frame {frame.index}",
+            chars=ROUNDED,
+        ))
+
+    sections.append(Block.text("", Style()))
+
+    # Emission frequency chart
+    emission_data = {es.kind: es.count for es in data.emission_summary}
+    if emission_data:
+        chart_block = chart_lens(emission_data, 3, min(width - 4, 70))
+        sections.append(border(chart_block, title="Emission Frequency", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # Full emission tree
+    emission_tree: dict[str, dict[str, int]] = {}
+    for kind, data_dict in data.emissions_raw:
+        category = kind.split(".")[0] if "." in kind else kind
+        if category not in emission_tree:
+            emission_tree[category] = {}
+        detail = " ".join(f"{k}={v}" for k, v in data_dict.items())
+        entry = f"{kind}: {detail}" if detail else kind
+        count = emission_tree[category].get(entry, 0)
+        emission_tree[category][entry] = count + 1
+
+    if emission_tree:
+        tree_block = tree_lens(emission_tree, 2, min(width - 4, 70))
+        sections.append(border(tree_block, title="Emission Timeline", chars=ROUNDED))
+
+    return join_vertical(*sections)
+
+
+# --- run_cli integration ---
+
+
+def _render(ctx: CliContext, data: ProfileData) -> Block:
+    if ctx.zoom == Zoom.MINIMAL:
+        return render_minimal(data)
+    if ctx.zoom == Zoom.SUMMARY:
+        return render_summary(data)
+    if ctx.zoom == Zoom.FULL:
+        return render_full(data, ctx.width)
+    return render_detailed(data, ctx.width)
+
+
+def main() -> int:
+    return run_cli(
+        sys.argv[1:],
+        render=_render,
+        fetch=_fetch,
+        description=__doc__,
+        prog="profiler.py",
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

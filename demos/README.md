@@ -56,19 +56,18 @@ Interactive TUI applications demonstrating different features.
 
 ## Patterns
 
-Real-world patterns showing the CLI→TUI spectrum.
+Real-world patterns showing lens selection and the CLI→TUI spectrum.
 
 | File | Pattern | Run |
 |------|---------|-----|
-| `fidelity.py` | Task runner at 4 fidelity levels | `uv run python demos/patterns/fidelity.py -vv` |
-| `fidelity_disk.py` | Disk usage browser | `uv run python demos/patterns/fidelity_disk.py -vv` |
-| `fidelity_health.py` | Health check dashboard | `uv run python demos/patterns/fidelity_health.py -vv` |
+| `auto_dispatch.py` | Lens selection: auto → explicit → custom | `uv run python demos/patterns/auto_dispatch.py` |
+| `fidelity.py` | CLI harness at 4 zoom levels | `uv run python demos/patterns/fidelity.py -vv` |
 
-Each fidelity demo supports:
+The fidelity demo supports:
 - `-q` : One-line summary
-- (default) : Standard output
-- `-v` : Styled output
-- `-vv` : Interactive TUI
+- (default) : Directory list
+- `-v` : Styled bars
+- `-vv -i` : Interactive tree browser
 
 ## Teaching Platform
 

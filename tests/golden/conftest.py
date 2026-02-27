@@ -24,7 +24,7 @@ class Golden:
     update: bool
 
     def assert_match(self, text: str, name: str) -> None:
-        """Compare *text* against ``tests/goldens/{module}/{test}/{name}.txt``."""
+        """Compare *text* against ``goldens/{module}/{test}/{name}.txt``."""
         # Normalize: right-strip each line, ensure trailing newline
         normalized = "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
 

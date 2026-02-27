@@ -1,7 +1,7 @@
-"""Golden integration test for the testing.py demo.
+"""Golden integration test for the live.py demo.
 
-Exercises: TestSurface replay, emission capture, layer push/pop/quit,
-Block composition pipeline, zoom-level render dispatch.
+Exercises: deterministic health check data, status icons, spinner/progress
+rendering, palette + icon dispatch, zoom-level render.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from painted.writer import print_block
 
 _PROJECT = Path(__file__).resolve().parent.parent.parent
 _spec = importlib.util.spec_from_file_location(
-    "_demo_testing", _PROJECT / "demos" / "patterns" / "testing.py",
+    "_demo_live", _PROJECT / "demos" / "patterns" / "live.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _mod
@@ -41,7 +41,7 @@ def _ctx(zoom: Zoom) -> CliContext:
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
-def test_testing_demo(golden, zoom):
-    results = _fetch()
-    block = _render(_ctx(zoom), results)
+def test_live_demo(golden, zoom):
+    report = _fetch()
+    block = _render(_ctx(zoom), report)
     golden.assert_match(_block_to_text(block), "output")

@@ -31,6 +31,7 @@ from painted import (
     border,
     join_vertical,
     join_horizontal,
+    pad,
     ROUNDED,
     print_block,
     run_cli,
@@ -180,14 +181,11 @@ def render_standard(data: DiskData) -> Block:
     return join_vertical(*rows)
 
 
-# --- Zoom 2+: styled bars ---
+# --- Zoom 2: styled bars ---
 
 
-def render_styled(data: DiskData, width: int) -> Block:
-    sections: list[Block] = []
-
-    # Overall usage bar
-    bar_width = min(40, width - 20)
+def _usage_bar(data: DiskData, bar_width: int) -> Block:
+    """Overall disk usage bar."""
     filled = int(data.used_percent / 100 * bar_width)
 
     if data.used_percent > 90:
@@ -198,43 +196,91 @@ def render_styled(data: DiskData, width: int) -> Block:
         bar_style = Style(fg="green")
 
     bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
-    usage_line = join_horizontal(
+    return join_horizontal(
         Block.text(f"{data.used_percent:5.1f}% ", bar_style),
         Block.text(bar, bar_style),
         Block.text(f" {data.used_human}/{data.total_human}", Style(dim=True)),
     )
-    sections.append(border(usage_line, title=f"Disk: {data.mount}", chars=ROUNDED))
 
-    # Directory breakdown
-    rows: list[Block] = []
+
+def _dir_row(entry: DirEntry, parent_bytes: int, bar_width: int, indent: int = 0) -> Block:
+    """Single directory row with size bar."""
+    pct = (entry.size_bytes / parent_bytes) * 100 if parent_bytes > 0 else 0
+
+    prefix = "  " * indent
+    size_block = Block.text(f"{prefix}{entry.size_human.rjust(6)}", Style(bold=True))
+
+    filled = int(pct / 100 * bar_width)
+    bar_style = Style(fg="yellow") if pct > 20 else Style(fg="cyan")
+    bar = "\u2593" * filled + "\u2591" * (bar_width - filled)
+
+    return join_horizontal(
+        size_block,
+        Block.text(" ", Style()),
+        Block.text(bar, bar_style),
+        Block.text(" ", Style()),
+        Block.text(f"{pct:5.1f}%", Style(dim=True)),
+        Block.text(f"  {entry.name}", Style()),
+    )
+
+
+def render_styled(data: DiskData, width: int) -> Block:
+    """Zoom 2: styled bars, top-level directories only."""
+    # Shared bar width for consistent alignment
+    bar_width = min(30, width - 30)
+
+    usage = _usage_bar(data, bar_width)
     sorted_entries = sorted(data.entries, key=lambda e: e.size_bytes, reverse=True)
+    rows = [_dir_row(e, data.used_bytes, bar_width) for e in sorted_entries]
+    dir_table = join_vertical(*rows)
 
-    for entry in sorted_entries:
-        pct = (entry.size_bytes / data.used_bytes) * 100 if data.used_bytes > 0 else 0
-
-        size_block = Block.text(entry.size_human.rjust(6), Style(bold=True))
-
-        entry_bar_width = 20
-        entry_filled = int(pct / 100 * entry_bar_width)
-        entry_bar_style = Style(fg="yellow") if pct > 20 else Style(fg="cyan")
-        entry_bar = "\u2593" * entry_filled + "\u2591" * (entry_bar_width - entry_filled)
-
-        row = join_horizontal(
-            size_block,
-            Block.text(" ", Style()),
-            Block.text(entry_bar, entry_bar_style),
-            Block.text(" ", Style()),
-            Block.text(f"{pct:5.1f}%", Style(dim=True)),
-            Block.text(f"  {entry.name}", Style()),
-        )
-        rows.append(row)
-
-    sections.append(border(join_vertical(*rows), title="By Directory", chars=ROUNDED))
+    # Pad narrower block so both boxes match width
+    content_width = max(usage.width, dir_table.width)
+    usage_padded = pad(usage, right=content_width - usage.width)
+    dir_padded = pad(dir_table, right=content_width - dir_table.width)
 
     free_style = Style(fg="green" if data.used_percent < 75 else "yellow", bold=True)
-    sections.append(Block.text(f"  Free: {data.free_human}  ", free_style))
+    return join_vertical(
+        border(usage_padded, title=f"Disk: {data.mount}", chars=ROUNDED),
+        Block.text("", Style()),
+        border(dir_padded, title="By Directory", chars=ROUNDED),
+        Block.text("", Style()),
+        Block.text(f"  Free: {data.free_human}  ", free_style),
+    )
 
-    return join_vertical(*sections, gap=1)
+
+# --- Zoom 3: full detail with children ---
+
+
+def render_full(data: DiskData, width: int) -> Block:
+    """Zoom 3: styled bars with subdirectories expanded."""
+    bar_width = min(30, width - 30)
+
+    usage = _usage_bar(data, bar_width)
+    sorted_entries = sorted(data.entries, key=lambda e: e.size_bytes, reverse=True)
+
+    rows: list[Block] = []
+    for entry in sorted_entries:
+        rows.append(_dir_row(entry, data.used_bytes, bar_width))
+        if entry.children:
+            sorted_children = sorted(entry.children, key=lambda e: e.size_bytes, reverse=True)
+            for child in sorted_children:
+                rows.append(_dir_row(child, entry.size_bytes, bar_width, indent=1))
+
+    dir_table = join_vertical(*rows)
+
+    content_width = max(usage.width, dir_table.width)
+    usage_padded = pad(usage, right=content_width - usage.width)
+    dir_padded = pad(dir_table, right=content_width - dir_table.width)
+
+    free_style = Style(fg="green" if data.used_percent < 75 else "yellow", bold=True)
+    return join_vertical(
+        border(usage_padded, title=f"Disk: {data.mount}", chars=ROUNDED),
+        Block.text("", Style()),
+        border(dir_padded, title="By Directory", chars=ROUNDED),
+        Block.text("", Style()),
+        Block.text(f"  Free: {data.free_human}  ", free_style),
+    )
 
 
 # --- Interactive: TUI tree browser ---
@@ -439,6 +485,8 @@ def _render(ctx: CliContext, data: DiskData) -> Block:
         return render_minimal(data)
     if ctx.zoom == Zoom.SUMMARY:
         return render_standard(data)
+    if ctx.zoom == Zoom.FULL:
+        return render_full(data, ctx.width)
     return render_styled(data, ctx.width)
 
 

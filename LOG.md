@@ -597,3 +597,56 @@ to introspect its own rendering performance. Two deliverables:
 **Deferred:** timeline_lens, heatmap_lens, flame_lens Phase B (py-spy/cProfile).
 
 **653 tests passing on main.**
+
+## 2026-02-27 — Dev harness + coverage push (77% → 93%)
+
+Built `./dev` harness (siftd pattern) and pushed test coverage from 653 to
+1078 tests.
+
+**Dev harness** (`dev` + `scripts/`):
+- Dispatcher auto-discovers `scripts/*.sh`, extracts `# DESC:` for help
+- `check.sh` — fast-fail gate: arch → ty + format → unit → golden
+- `test.sh` — pytest wrapper with passthrough args
+- `lint.sh` — ty check + ruff format check
+- `cov.sh` — coverage report with `--html` option
+- `fmt.sh` — ruff format
+- Shared `lib/dev.sh` (colors, ok/fail/step helpers, `run_uv()`)
+
+**Lint toolchain change:**
+- Switched from ruff lint to **ty** for type checking
+- ruff retained for formatting only
+- Fixed 16 pre-existing issues: unused vars, type annotations, ambiguous names
+- Suppressed `unresolved-attribute` in ty config (Block uses `object.__setattr__`
+  with `__slots__` for immutability — 69 false positives)
+- Corrected `keyboard.py` `_read_escape_sequence` return type (`str | MouseEvent`)
+- Updated `pyproject.toml`: removed `[tool.ruff.lint]` section, added `[tool.ty.rules]`
+
+**Coverage (12 new test files, 425 new tests):**
+
+| File | Before | After | Tests |
+|------|--------|-------|-------|
+| `test_timer.py` | 0% | 100% | 30 |
+| `test_table_render.py` | 33% | 99% | 24 |
+| `test_list_render.py` | 49% | 100% | 19 |
+| `test_text_input_render.py` | 54% | 93% | 37 |
+| `test_lens_extended.py` | 81% | 95% | 55 |
+| `test_buffer_extended.py` | 63% | 99% | 50 |
+| `test_block_extended.py` | 74% | 92% | 42 |
+| `test_compose_extended.py` | 78% | 98% | 49 |
+| `test_writer_extended.py` | 83% | 99% | 43 |
+| `test_text_width_extended.py` | 79% | 100% | 33 |
+| `test_sparkline_core.py` | 81% | 100% | 24 |
+| `test_fidelity_extended.py` | 79% | 90% | 19 |
+
+Pattern: existing `test_*_state.py` files cover state mutations, new
+`test_*_render.py` files cover the `render_fn(state, ...) -> Block` side.
+
+**Remaining uncovered (~7%):** `app.py` async run loop (75%), `keyboard.py`
+TTY file descriptors (86%), `data_explorer.py` navigation edges (81%),
+`_mouse.py` SGR protocol edges (88%), `inplace.py` lifecycle (89%).
+All TTY-dependent or async-lifecycle — test complexity exceeds value.
+
+**CLAUDE.md updated:** Build & Test section now documents `./dev check` as
+the success gate with all 5 commands.
+
+**1078 tests passing on main.**

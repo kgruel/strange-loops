@@ -11,10 +11,10 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 624 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
+v0.1.0, **1078 tests passing** (93% coverage), pushed to `git@git.gruel.network:kaygee/painted.git`.
 
-Discord narrative debugging infrastructure implemented and validated. Two sessions
-completed (simulated + real Discord). Writer output path fully optimized.
+`./dev check` is the success gate (arch → ty + format → unit → golden).
+Lint is **ty** (type checking) + **ruff** (formatting only).
 
 ## Relationship to Loops
 
@@ -41,6 +41,15 @@ src/painted/           # ~10,000 LOC
   Mouse:               MouseEvent, MouseButton, MouseAction
   Aesthetic:           Palette (ContextVar), IconSet (ContextVar)
 
+dev                    # Dispatcher (auto-discovers scripts/*.sh)
+scripts/
+  lib/dev.sh           # Colors, ok/fail/step, run_uv()
+  lib/paths.sh         # PROJECT_ROOT, SRC_DIR, TESTS_DIR
+  check.sh             # Fast-fail: arch → ty + format → unit → golden
+  test.sh              # pytest wrapper, passthrough args
+  lint.sh              # ty check + ruff format check
+  cov.sh               # Coverage report (--html option)
+  fmt.sh               # ruff format
 tools/                 # Dev tools
   docgen.py            # AST-based snippet extraction + markdown sync
   discord_chat.py      # Discord webhook post + bot read for narrative debugging
@@ -48,7 +57,7 @@ docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 624 tests
+tests/                 # 1078 tests (93% coverage)
 demos/                 # Python files + tour.py + slides/
   slides/              # 21 markdown files (tour content, docgen-synced)
   slide_loader.py      # Markdown parser with zoom levels + auto-nav
@@ -163,6 +172,18 @@ demos/                 # Python files + tour.py + slides/
   chart_lens (writes/frame bars) + tree_lens (emission timeline) +
   flame_lens (emission proportions). Same run_cli pattern as fidelity.py.
   Design doc: `docs/plans/2026-02-27-profiler-demo-design.md`.
+- **`./dev` harness** — siftd-pattern dispatcher with auto-discovered
+  `scripts/*.sh`. Commands: check (fast-fail gate), test, lint, cov, fmt.
+  Lint switched from ruff to **ty** (type checking) + ruff (formatting only).
+  Fixed 16 pre-existing lint issues, suppressed `unresolved-attribute` for
+  Block's `object.__setattr__` pattern, corrected keyboard.py return type.
+- **Coverage push** — 653 → 1078 tests, 77% → 93% coverage. 12 new test
+  files covering: `_timer.py` (0→100%), `table.py` render (33→99%),
+  `list_view.py` render (49→100%), `text_input.py` (54→93%),
+  `_lens.py` edge cases (81→95%), `buffer.py` ops (63→99%),
+  `block.py` wrap/paint (74→92%), `compose.py` id propagation (78→98%),
+  `writer.py` ops (83→99%), `_text_width.py` (79→100%),
+  `_sparkline_core.py` (81→100%), `fidelity.py` error paths (79→90%).
 
 ## Capability Signal Design (Resolved)
 
@@ -248,7 +269,7 @@ Session 2 transcript: Discord channel #terminal-crafters
   `_setup_defaults()`, set ambient Palette. Palette preset problem, not
   architectural. Mode 2031 (color-palette-update-notifications) is the future
   trigger mechanism.
-- **PyPI publish** — Package metadata ready. No CI/CD yet.
+- **PyPI publish** — Package metadata ready. `./dev check` as local CI gate. No remote CI/CD yet.
 - **Guide content** — 4 guides landed with draft-quality narrative. Need
   fleshing out once designs stabilize.
 - **Primitives demo ladder** — complete. Four demos, each at its API layer:

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Disk usage at different fidelity levels.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["painted"]
+# ///
+"""Fidelity spectrum — same data, four presentations.
 
-Demonstrates the fidelity spectrum with hierarchical data:
+Disk usage rendered at every zoom level through run_cli.
+The flags drive the output — the code doesn't switch on modes.
 
-    uv run python demos/patterns/fidelity_disk.py -q        # Zoom 0: minimal one line
-    uv run python demos/patterns/fidelity_disk.py           # Zoom 1: top directories list
-    uv run python demos/patterns/fidelity_disk.py -v        # Zoom 2: styled bars per directory
-    uv run python demos/patterns/fidelity_disk.py -vv       # Zoom 3: full detail
-    uv run python demos/patterns/fidelity_disk.py -vv -i    # Interactive TUI file tree browser
-
-The TUI mode shows a navigable tree with expandable directories.
+    uv run demos/patterns/fidelity.py -q        # one line
+    uv run demos/patterns/fidelity.py           # directory list
+    uv run demos/patterns/fidelity.py -v        # styled bars
+    uv run demos/patterns/fidelity.py -vv       # full detail
+    uv run demos/patterns/fidelity.py -vv -i    # interactive tree
 """
 
 from __future__ import annotations
@@ -35,6 +38,21 @@ from painted import (
 from painted.tui import Surface
 
 
+# --- Data model ---
+
+
+def _human_size(n: int) -> str:
+    """Format byte count as human-readable string."""
+    size: float = n
+    for unit in ("B", "K", "M", "G", "T"):
+        if size < 1024:
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            return f"{size:.1f}{unit}"
+        size /= 1024
+    return f"{size:.1f}P"
+
+
 @dataclass(frozen=True)
 class DirEntry:
     """A directory or file with its size."""
@@ -46,15 +64,7 @@ class DirEntry:
 
     @property
     def size_human(self) -> str:
-        """Human-readable size."""
-        size = self.size_bytes
-        for unit in ("B", "K", "M", "G", "T"):
-            if size < 1024:
-                if unit == "B":
-                    return f"{size}{unit}"
-                return f"{size:.1f}{unit}"
-            size /= 1024
-        return f"{size:.1f}P"
+        return _human_size(self.size_bytes)
 
 
 @dataclass(frozen=True)
@@ -87,21 +97,12 @@ class DiskData:
         return _human_size(self.free_bytes)
 
 
-def _human_size(size: int) -> str:
-    for unit in ("B", "K", "M", "G", "T"):
-        if size < 1024:
-            if unit == "B":
-                return f"{size}{unit}"
-            return f"{size:.1f}{unit}"
-        size /= 1024
-    return f"{size:.1f}P"
+# --- Sample data ---
 
-
-# Sample disk data (simulating /home)
 SAMPLE_DISK = DiskData(
     mount="/home",
-    total_bytes=200 * 1024**3,  # 200G
-    used_bytes=134 * 1024**3,  # 134G
+    total_bytes=200 * 1024**3,
+    used_bytes=134 * 1024**3,
     entries=(
         DirEntry(
             "projects",
@@ -143,50 +144,46 @@ SAMPLE_DISK = DiskData(
 )
 
 
-# ============================================================================
-# Level 0: Quiet — one line summary
-# ============================================================================
+# --- Zoom 0: one-line summary ---
 
 
-def render_minimal(data: DiskData) -> str:
-    """Level 0: Minimal one-line output."""
-    return f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human})"
+def render_minimal(data: DiskData) -> Block:
+    return Block.text(
+        f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human})",
+        Style(),
+    )
 
 
-# ============================================================================
-# Level 1: Standard — multi-line text output
-# ============================================================================
+# --- Zoom 1: directory list ---
 
 
-def render_standard(data: DiskData) -> str:
-    """Level 1: Standard CLI output."""
-    lines = [
-        f"Disk usage: {data.mount}",
-        f"  {data.used_human} / {data.total_human} ({data.used_percent:.1f}% used)",
-        "",
-        "Top directories:",
+def render_standard(data: DiskData) -> Block:
+    rows: list[Block] = [
+        Block.text(f"Disk usage: {data.mount}", Style(bold=True)),
+        Block.text(
+            f"  {data.used_human} / {data.total_human} ({data.used_percent:.1f}% used)",
+            Style(),
+        ),
+        Block.text("", Style()),
+        Block.text("Top directories:", Style()),
     ]
 
-    # Sort by size descending
     sorted_entries = sorted(data.entries, key=lambda e: e.size_bytes, reverse=True)
-
     for entry in sorted_entries[:8]:
         pct = (entry.size_bytes / data.used_bytes) * 100 if data.used_bytes > 0 else 0
-        lines.append(f"  {entry.size_human:>6}  {pct:4.1f}%  {entry.name}")
+        rows.append(Block.text(
+            f"  {entry.size_human:>6}  {pct:4.1f}%  {entry.name}", Style(),
+        ))
 
-    lines.append("")
-    lines.append(f"Free: {data.free_human}")
+    rows.append(Block.text("", Style()))
+    rows.append(Block.text(f"Free: {data.free_human}", Style()))
+    return join_vertical(*rows)
 
-    return "\n".join(lines)
 
-
-# ============================================================================
-# Level 2: Verbose — styled Block output with bars
-# ============================================================================
+# --- Zoom 2+: styled bars ---
 
 
 def render_styled(data: DiskData, width: int) -> Block:
-    """Level 2: Styled output with visual bars."""
     sections: list[Block] = []
 
     # Overall usage bar
@@ -200,62 +197,47 @@ def render_styled(data: DiskData, width: int) -> Block:
     else:
         bar_style = Style(fg="green")
 
-    bar = "█" * filled + "░" * (bar_width - filled)
+    bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
     usage_line = join_horizontal(
         Block.text(f"{data.used_percent:5.1f}% ", bar_style),
         Block.text(bar, bar_style),
         Block.text(f" {data.used_human}/{data.total_human}", Style(dim=True)),
     )
-    usage_box = border(usage_line, title=f"Disk: {data.mount}", chars=ROUNDED)
-    sections.append(usage_box)
+    sections.append(border(usage_line, title=f"Disk: {data.mount}", chars=ROUNDED))
 
     # Directory breakdown
     rows: list[Block] = []
     sorted_entries = sorted(data.entries, key=lambda e: e.size_bytes, reverse=True)
-    max_name_len = max(len(e.name) for e in sorted_entries)
 
     for entry in sorted_entries:
         pct = (entry.size_bytes / data.used_bytes) * 100 if data.used_bytes > 0 else 0
 
-        # Size
         size_block = Block.text(entry.size_human.rjust(6), Style(bold=True))
 
-        # Percentage bar
         entry_bar_width = 20
         entry_filled = int(pct / 100 * entry_bar_width)
+        entry_bar_style = Style(fg="yellow") if pct > 20 else Style(fg="cyan")
+        entry_bar = "\u2593" * entry_filled + "\u2591" * (entry_bar_width - entry_filled)
 
-        if pct > 20:
-            entry_bar_style = Style(fg="yellow")
-        else:
-            entry_bar_style = Style(fg="cyan")
-
-        entry_bar = "▓" * entry_filled + "░" * (entry_bar_width - entry_filled)
-        bar_block = Block.text(entry_bar, entry_bar_style)
-
-        # Percentage
-        pct_block = Block.text(f"{pct:5.1f}%", Style(dim=True))
-
-        # Name
-        name_block = Block.text(f"  {entry.name}", Style())
-
-        row = join_horizontal(size_block, Block.text(" ", Style()), bar_block, Block.text(" ", Style()), pct_block, name_block)
+        row = join_horizontal(
+            size_block,
+            Block.text(" ", Style()),
+            Block.text(entry_bar, entry_bar_style),
+            Block.text(" ", Style()),
+            Block.text(f"{pct:5.1f}%", Style(dim=True)),
+            Block.text(f"  {entry.name}", Style()),
+        )
         rows.append(row)
 
-    dir_table = join_vertical(*rows)
-    dir_box = border(dir_table, title="By Directory", chars=ROUNDED)
-    sections.append(dir_box)
+    sections.append(border(join_vertical(*rows), title="By Directory", chars=ROUNDED))
 
-    # Free space
     free_style = Style(fg="green" if data.used_percent < 75 else "yellow", bold=True)
-    free_block = Block.text(f"  Free: {data.free_human}  ", free_style)
-    sections.append(free_block)
+    sections.append(Block.text(f"  Free: {data.free_human}  ", free_style))
 
     return join_vertical(*sections, gap=1)
 
 
-# ============================================================================
-# Level 3: Interactive — TUI file tree browser
-# ============================================================================
+# --- Interactive: TUI tree browser ---
 
 
 @dataclass
@@ -269,19 +251,16 @@ class TreeNode:
 
 
 class DiskSurface(Surface):
-    """Level 3: Interactive TUI with expandable tree."""
+    """Interactive TUI with expandable file tree."""
 
     def __init__(self, data: DiskData):
         super().__init__()
         self._data = data
         self._width = 80
         self._height = 24
-
-        # Build flat list of visible nodes
         self._nodes: list[TreeNode] = []
         for entry in data.entries:
             self._nodes.append(TreeNode(entry=entry, depth=0))
-
         self._selected = 0
         self._scroll_offset = 0
 
@@ -290,13 +269,11 @@ class DiskSurface(Surface):
         self._height = height
 
     def _visible_nodes(self) -> list[TreeNode]:
-        """Get flat list of currently visible nodes (respecting expand state)."""
         result: list[TreeNode] = []
 
         def visit(entries: tuple[DirEntry, ...], depth: int, parent: TreeNode | None = None) -> None:
             for entry in sorted(entries, key=lambda e: e.size_bytes, reverse=True):
                 node = TreeNode(entry=entry, depth=depth, parent=parent)
-                # Check if this node was previously expanded
                 for n in self._nodes:
                     if n.entry.name == entry.name and n.depth == depth:
                         node.expanded = n.expanded
@@ -316,49 +293,45 @@ class DiskSurface(Surface):
         self._buf.fill(0, 0, self._width, self._height, " ", Style())
 
         # Header
-        header_style = Style(bold=True, fg="cyan", reverse=True)
         header_text = f" Disk Usage: {self._data.mount} ".center(self._width)
-        header = Block.text(header_text, header_style)
-        header.paint(self._buf, 0, 0)
+        Block.text(header_text, Style(bold=True, fg="cyan", reverse=True)).paint(self._buf, 0, 0)
 
-        # Overall usage bar (compact)
+        # Usage bar
         bar_width = min(30, self._width - 30)
         filled = int(self._data.used_percent / 100 * bar_width)
-        bar_style = Style(fg="green" if self._data.used_percent < 75 else "yellow" if self._data.used_percent < 90 else "red")
-        bar = "█" * filled + "░" * (bar_width - filled)
-        usage = join_horizontal(
-            Block.text(f" {self._data.used_percent:.0f}% ", bar_style),
-            Block.text(bar, bar_style),
-            Block.text(f" {self._data.used_human}/{self._data.total_human} ", Style(dim=True)),
+        bar_style = Style(
+            fg="green" if self._data.used_percent < 75
+            else "yellow" if self._data.used_percent < 90
+            else "red",
         )
-        usage.paint(self._buf, 0, 1)
+        join_horizontal(
+            Block.text(f" {self._data.used_percent:.0f}% ", bar_style),
+            Block.text("\u2588" * filled + "\u2591" * (bar_width - filled), bar_style),
+            Block.text(f" {self._data.used_human}/{self._data.total_human} ", Style(dim=True)),
+        ).paint(self._buf, 0, 1)
 
-        # Tree view
+        # Tree
         visible = self._visible_nodes()
         tree_height = self._height - 6
         tree_width = self._width - 2
-
-        tree_block = self._render_tree(visible, tree_width, tree_height)
-        tree_box = border(tree_block, title="Files", chars=ROUNDED)
+        tree_box = border(
+            self._render_tree(visible, tree_width, tree_height),
+            title="Files", chars=ROUNDED,
+        )
         tree_box.paint(self._buf, 0, 3)
 
         # Footer
-        footer_style = Style(dim=True)
-        footer = Block.text(" j/k: navigate  Enter: expand/collapse  q: quit ", footer_style)
-        footer.paint(self._buf, 0, self._height - 1)
+        Block.text(
+            " j/k: navigate  Enter: expand/collapse  q: quit ",
+            Style(dim=True),
+        ).paint(self._buf, 0, self._height - 1)
 
     def _render_tree(self, nodes: list[TreeNode], width: int, height: int) -> Block:
-        """Render the tree view."""
         if not nodes:
             return Block.text("(empty)", Style(dim=True))
 
-        # Clamp selection
-        if self._selected >= len(nodes):
-            self._selected = len(nodes) - 1
-        if self._selected < 0:
-            self._selected = 0
+        self._selected = max(0, min(self._selected, len(nodes) - 1))
 
-        # Scroll into view
         if self._selected < self._scroll_offset:
             self._scroll_offset = self._selected
         elif self._selected >= self._scroll_offset + height:
@@ -368,63 +341,50 @@ class DiskSurface(Surface):
         for i in range(self._scroll_offset, min(self._scroll_offset + height, len(nodes))):
             node = nodes[i]
             selected = i == self._selected
-
-            # Indent
             indent = "  " * node.depth
 
-            # Expand indicator
             if node.entry.children:
-                if node.expanded:
-                    expand = "▼ "
-                else:
-                    expand = "▶ "
+                expand = "\u25bc " if node.expanded else "\u25b6 "
             else:
                 expand = "  "
 
-            # Icon
-            if node.entry.is_dir:
-                icon = "📁" if not node.expanded else "📂"
-            else:
-                icon = "📄"
-
-            # Size
+            icon = ("\U0001f4c2" if node.expanded else "\U0001f4c1") if node.entry.is_dir else "\U0001f4c4"
             size = node.entry.size_human.rjust(6)
 
-            # Percentage of parent or total
             if node.depth == 0:
                 pct = (node.entry.size_bytes / self._data.used_bytes) * 100
+            elif node.parent:
+                pct = (node.entry.size_bytes / node.parent.entry.size_bytes) * 100
             else:
-                # Find parent size
-                parent = node.parent
-                if parent:
-                    pct = (node.entry.size_bytes / parent.entry.size_bytes) * 100
-                else:
-                    pct = 0
+                pct = 0
 
-            # Build row
             name_width = width - len(indent) - 2 - 2 - 6 - 8
             name = node.entry.name[:name_width].ljust(name_width)
 
             if selected:
                 row_style = Style(reverse=True)
-                size_style = Style(bold=True, reverse=True)
+                row = join_horizontal(
+                    Block.text(indent, row_style),
+                    Block.text(expand, row_style),
+                    Block.text(icon + " ", row_style),
+                    Block.text(name, row_style),
+                    Block.text(size, row_style),
+                    Block.text(f" {pct:4.1f}%", row_style),
+                )
             else:
-                row_style = Style()
-                if pct > 30:
-                    size_style = Style(fg="yellow", bold=True)
-                elif pct > 10:
-                    size_style = Style(bold=True)
-                else:
-                    size_style = Style()
-
-            row = join_horizontal(
-                Block.text(indent, row_style),
-                Block.text(expand, row_style),
-                Block.text(icon + " ", row_style),
-                Block.text(name, row_style),
-                Block.text(size, size_style if not selected else row_style),
-                Block.text(f" {pct:4.1f}%", Style(dim=True) if not selected else row_style),
-            )
+                size_style = (
+                    Style(fg="yellow", bold=True) if pct > 30
+                    else Style(bold=True) if pct > 10
+                    else Style()
+                )
+                row = join_horizontal(
+                    Block.text(indent, Style()),
+                    Block.text(expand, Style()),
+                    Block.text(icon + " ", Style()),
+                    Block.text(name, Style()),
+                    Block.text(size, size_style),
+                    Block.text(f" {pct:4.1f}%", Style(dim=True)),
+                )
             rows.append(row)
 
         return join_vertical(*rows)
@@ -449,42 +409,25 @@ class DiskSurface(Surface):
                     node.expanded = not node.expanded
             self.mark_dirty()
         elif key in ("l", "right"):
-            # Expand
             if visible and self._selected < len(visible):
                 node = visible[self._selected]
                 if node.entry.children and not node.expanded:
                     node.expanded = True
             self.mark_dirty()
         elif key in ("h", "left"):
-            # Collapse or go to parent
             if visible and self._selected < len(visible):
                 node = visible[self._selected]
                 if node.expanded:
                     node.expanded = False
-                elif node.depth > 0:
-                    # Find parent index
+                elif node.depth > 0 and node.parent:
                     for i, n in enumerate(visible):
-                        if n.entry == node.parent.entry if node.parent else False:
+                        if n.entry == node.parent.entry:
                             self._selected = i
                             break
             self.mark_dirty()
 
 
-def run_interactive(data: DiskData) -> None:
-    """Level 3: Launch the interactive TUI."""
-    surface = DiskSurface(data)
-    asyncio.run(surface.run())
-
-
-# ============================================================================
-# Main entry point
-# ============================================================================
-
-def _text_block(text: str, *, width: int) -> Block:
-    lines = text.splitlines() or [""]
-    max_len = max(len(line) for line in lines)
-    target_width = max(1, min(width, max_len)) if width > 0 else max(1, max_len)
-    return join_vertical(*(Block.text(line, Style(), width=target_width) for line in lines))
+# --- run_cli integration ---
 
 
 def _fetch() -> DiskData:
@@ -493,10 +436,9 @@ def _fetch() -> DiskData:
 
 def _render(ctx: CliContext, data: DiskData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return Block.text(render_minimal(data), Style())
+        return render_minimal(data)
     if ctx.zoom == Zoom.SUMMARY:
-        return _text_block(render_standard(data), width=ctx.width)
-    # DETAILED/FULL: styled Blocks
+        return render_standard(data)
     return render_styled(data, ctx.width)
 
 
@@ -506,7 +448,8 @@ def _handle_interactive(ctx: CliContext) -> int:
         block = _render(ctx, data)
         print_block(block, use_ansi=(ctx.format == Format.ANSI))
         return 0
-    run_interactive(data)
+    surface = DiskSurface(data)
+    asyncio.run(surface.run())
     return 0
 
 
@@ -517,7 +460,7 @@ def main() -> int:
         fetch=_fetch,
         handlers={OutputMode.INTERACTIVE: _handle_interactive},
         description=__doc__,
-        prog="fidelity_disk.py",
+        prog="fidelity.py",
     )
 
 

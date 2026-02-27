@@ -120,9 +120,12 @@ def render_minimal(data: HealthData) -> str:
 # ============================================================================
 
 
-def render_standard(data: HealthData) -> str:
-    """Level 1: Standard CLI output."""
-    lines = [f"Health Check ({data.checked_at})", ""]
+def render_standard(data: HealthData) -> Block:
+    """Level 1: Standard CLI output — Block directly."""
+    rows: list[Block] = [
+        Block.text(f"Health Check ({data.checked_at})", Style(bold=True)),
+        Block.text("", Style()),
+    ]
 
     for svc in data.services:
         if svc.status == HealthStatus.HEALTHY:
@@ -139,14 +142,14 @@ def render_standard(data: HealthData) -> str:
             line += f" ({svc.latency_ms}ms)"
         if svc.error:
             line += f" — {svc.error}"
-        lines.append(line)
+        rows.append(Block.text(line, Style()))
 
-    lines.append("")
-    lines.append(f"Status: {data.healthy}/{len(data.services)} healthy")
+    rows.append(Block.text("", Style()))
+    rows.append(Block.text(f"Status: {data.healthy}/{len(data.services)} healthy", Style()))
     if data.avg_latency > 0:
-        lines.append(f"Avg latency: {data.avg_latency:.0f}ms")
+        rows.append(Block.text(f"Avg latency: {data.avg_latency:.0f}ms", Style()))
 
-    return "\n".join(lines)
+    return join_vertical(*rows)
 
 
 # ============================================================================
@@ -487,13 +490,6 @@ def run_interactive(data: HealthData) -> None:
 # Main entry point
 # ============================================================================
 
-def _text_block(text: str, *, width: int) -> Block:
-    lines = text.splitlines() or [""]
-    max_len = max(len(line) for line in lines)
-    target_width = max(1, min(width, max_len)) if width > 0 else max(1, max_len)
-    return join_vertical(*(Block.text(line, Style(), width=target_width) for line in lines))
-
-
 def _exit_code(data: HealthData) -> int:
     return 1 if data.unhealthy > 0 else 0
 
@@ -502,11 +498,29 @@ def _fetch() -> HealthData:
     return SAMPLE_HEALTH
 
 
+async def _fetch_stream():
+    """Yield health data with jittering latencies for --live mode."""
+    data = SAMPLE_HEALTH
+    yield data
+    for _ in range(5):
+        await asyncio.sleep(0.8)
+        new_services = []
+        for svc in data.services:
+            if svc.latency_ms is not None and svc.status != HealthStatus.UNHEALTHY:
+                delta = random.randint(-20, 30)
+                new_lat = max(10, svc.latency_ms + delta)
+                new_services.append(replace(svc, latency_ms=new_lat))
+            else:
+                new_services.append(svc)
+        data = replace(data, services=tuple(new_services))
+        yield data
+
+
 def _render(ctx: CliContext, data: HealthData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
         return Block.text(render_minimal(data), Style())
     if ctx.zoom == Zoom.SUMMARY:
-        return _text_block(render_standard(data), width=ctx.width)
+        return render_standard(data)
     # DETAILED/FULL: styled Blocks
     return render_styled(data, ctx.width)
 
@@ -526,6 +540,7 @@ def main() -> int:
         sys.argv[1:],
         render=_render,
         fetch=_fetch,
+        fetch_stream=_fetch_stream,
         handlers={OutputMode.INTERACTIVE: _handle_interactive},
         description=__doc__,
         prog="fidelity_health.py",

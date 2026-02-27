@@ -1,150 +1,173 @@
 #!/usr/bin/env python3
-"""Compose — combining blocks.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["painted"]
+# ///
+"""Compose — spatial combination of Blocks.
 
-Blocks are immutable, so you combine them with functions:
-join_horizontal, join_vertical, pad, border, truncate.
-Each returns a new Block.
+Blocks are immutable. Composition functions take Blocks in,
+return new Blocks out: join, pad, border, truncate.
+This is how you build layouts without a mutable canvas.
 
-Run: uv run python demos/primitives/compose.py
+Run: uv run demos/primitives/compose.py
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from painted import (
-    Block, Style, Align,
+    Block, Style, Wrap, Align,
     join_horizontal, join_vertical, pad, border, truncate,
-    ROUNDED, HEAVY, DOUBLE,
+    print_block, ROUNDED, HEAVY, DOUBLE,
 )
-from painted.tui import Buffer
-from demo_utils import render_buffer
 
-# --- join_horizontal: left to right ---
 
-left = Block.text("LEFT", Style(fg="red"))
-middle = Block.text("MID", Style(fg="green"))
-right = Block.text("RIGHT", Style(fg="blue"))
+def header(text: str) -> Block:
+    """Dim section header."""
+    return Block.text(f"  {text}", Style(dim=True))
 
-joined = join_horizontal(left, middle, right)
 
-print("join_horizontal(left, middle, right):")
-buf = Buffer(joined.width + 2, 3)
-joined.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
+def spacer() -> Block:
+    return Block.text("", Style())
 
-# --- join_horizontal with gap ---
 
-joined_gap = join_horizontal(left, middle, right, gap=2)
+# --- join_horizontal: side by side ---
 
-print("join_horizontal(..., gap=2):")
-buf = Buffer(joined_gap.width + 2, 3)
-joined_gap.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
+h_joined = join_horizontal(
+    Block.text("  cpu ", Style(fg="green", bold=True)),
+    Block.text(" mem ", Style(fg="yellow", bold=True)),
+    Block.text(" net ", Style(fg="cyan", bold=True)),
+)
 
-# --- join_vertical: top to bottom ---
+h_gapped = join_horizontal(
+    Block.text("  cpu ", Style(fg="green", bold=True)),
+    Block.text(" mem ", Style(fg="yellow", bold=True)),
+    Block.text(" net ", Style(fg="cyan", bold=True)),
+    gap=2,
+)
 
-top = Block.text("Top line", Style(fg="yellow"))
-bottom = Block.text("Bottom", Style(fg="cyan"))
+horizontal = join_vertical(
+    header("join_horizontal"),
+    spacer(),
+    h_joined,
+    h_gapped,
+)
 
-stacked = join_vertical(top, bottom)
+# --- join_vertical + alignment ---
 
-print("join_vertical(top, bottom):")
-buf = Buffer(stacked.width + 2, stacked.height + 2)
-stacked.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
+short = Block.text("  ok", Style(fg="green"))
+long = Block.text("  deploy complete", Style(fg="cyan"))
 
-# --- Alignment ---
+alignment = join_vertical(
+    header("alignment"),
+    spacer(),
+    join_horizontal(
+        border(join_vertical(short, long, align=Align.START),
+               title="START", style=Style(dim=True)),
+        border(join_vertical(short, long, align=Align.CENTER),
+               title="CENTER", style=Style(dim=True)),
+        border(join_vertical(short, long, align=Align.END),
+               title="END", style=Style(dim=True)),
+        gap=1,
+    ),
+)
 
-short = Block.text("Hi", Style(fg="green"))
-long = Block.text("Hello world", Style(fg="magenta"))
+# --- pad: margins ---
 
-print("join_vertical with different alignments:")
+content = Block.text("content", Style(fg="cyan"))
 
-for align in [Align.START, Align.CENTER, Align.END]:
-    aligned = join_vertical(short, long, align=align)
-    print(f"  Align.{align.name}:")
-    buf = Buffer(aligned.width + 4, aligned.height + 2)
-    buf.fill(0, 0, buf.width, buf.height, "·", Style(dim=True))
-    aligned.paint(buf, x=2, y=1)
-    render_buffer(buf)
-    print()
+padding = join_vertical(
+    header("pad"),
+    spacer(),
+    join_horizontal(
+        border(content, title="no pad", style=Style(dim=True)),
+        border(pad(content, left=2, right=2),
+               title="h-pad", style=Style(dim=True)),
+        border(pad(content, left=2, right=2, top=1, bottom=1),
+               title="all", style=Style(dim=True)),
+        gap=1,
+    ),
+)
 
-# --- pad: add margins ---
+# --- border: box drawing ---
 
-content = Block.text("Padded", Style(fg="cyan"))
-padded = pad(content, left=2, right=2, top=1, bottom=1)
+inner = Block.text("status: ok", Style(fg="green"))
 
-print(f"pad(block, left=2, right=2, top=1, bottom=1):")
-print(f"  original: {content.width}x{content.height}")
-print(f"  padded:   {padded.width}x{padded.height}")
-buf = Buffer(padded.width + 2, padded.height + 2)
-buf.fill(0, 0, buf.width, buf.height, "░", Style(dim=True))
-padded.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
-
-# --- border: wrap with box drawing ---
-
-inner = Block.text("Bordered", Style(fg="green"))
-boxed = border(inner)
-
-print("border(block) - default ROUNDED chars:")
-buf = Buffer(boxed.width + 2, boxed.height + 2)
-boxed.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
-
-# --- border with title ---
-
-titled = border(inner, title="Title", style=Style(fg="blue"))
-
-print("border(block, title='Title'):")
-buf = Buffer(titled.width + 2, titled.height + 2)
-titled.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
-
-# --- border styles ---
-
-print("Border character sets:")
-for name, chars in [("ROUNDED", ROUNDED), ("HEAVY", HEAVY), ("DOUBLE", DOUBLE)]:
-    b = border(Block.text(name, Style()), chars=chars)
-    buf = Buffer(b.width + 2, b.height + 2)
-    b.paint(buf, x=1, y=1)
-    render_buffer(buf)
-print()
+borders = join_vertical(
+    header("border"),
+    spacer(),
+    join_horizontal(
+        border(inner, chars=ROUNDED, title="ROUNDED"),
+        border(inner, chars=HEAVY, title="HEAVY"),
+        border(inner, chars=DOUBLE, title="DOUBLE"),
+        gap=1,
+    ),
+)
 
 # --- truncate: cut to width ---
 
-wide = Block.text("This is too wide", Style(fg="red"))
-narrow = truncate(wide, width=10)
+wide = Block.text("  the configuration file could not be parsed", Style(fg="red"))
 
-print(f"truncate(block, width=10): '{wide.width}' -> '{narrow.width}'")
-buf = Buffer(12, 3)
-narrow.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
+trunc = join_vertical(
+    header("truncate"),
+    spacer(),
+    wide,
+    truncate(wide, width=30),
+    truncate(wide, width=18),
+)
 
-# --- Composition: combining everything ---
+# --- wrap: text fitting with Block.text(width=, wrap=) ---
 
-print("Composition example - building a panel:")
+text = "the quick brown fox jumps over the lazy dog"
 
-title_block = Block.text("Status", Style(fg="white", bold=True))
+wrapping = join_vertical(
+    header("wrap modes (Block.text with width=20)"),
+    spacer(),
+    join_horizontal(
+        border(Block.text(text, Style(), width=20, wrap=Wrap.NONE),
+               title="NONE", style=Style(dim=True)),
+        border(Block.text(text, Style(), width=20, wrap=Wrap.ELLIPSIS),
+               title="ELLIPSIS", style=Style(dim=True)),
+        gap=1,
+    ),
+    spacer(),
+    join_horizontal(
+        border(Block.text(text, Style(), width=20, wrap=Wrap.WORD),
+               title="WORD", style=Style(dim=True)),
+        border(Block.text(text, Style(), width=20, wrap=Wrap.CHAR),
+               title="CHAR", style=Style(dim=True)),
+        gap=1,
+    ),
+)
+
+# --- Composition: everything together ---
+
 body = join_vertical(
-    Block.text("CPU: 45%", Style(fg="green")),
-    Block.text("MEM: 2.1G", Style(fg="yellow")),
-    Block.text("NET: 12MB/s", Style(fg="cyan")),
+    Block.text(" CPU   45%", Style(fg="green")),
+    Block.text(" MEM  2.1G", Style(fg="yellow")),
+    Block.text(" NET  12MB", Style(fg="cyan")),
 )
 panel = border(pad(body, left=1, right=1), title="Status", style=Style(fg="blue"))
 
-buf = Buffer(panel.width + 2, panel.height + 2)
-panel.paint(buf, x=1, y=1)
-render_buffer(buf)
-print()
+composed = join_vertical(
+    header("composition"),
+    spacer(),
+    join_horizontal(Block.text("  ", Style()), panel),
+)
 
-print("Compose functions are pure: Block in, Block out.")
-print("Span/Line give styled text primitives (demo_06).")
+# --- Print it ---
+
+print_block(join_vertical(
+    spacer(),
+    horizontal,
+    spacer(),
+    alignment,
+    spacer(),
+    padding,
+    spacer(),
+    borders,
+    spacer(),
+    trunc,
+    spacer(),
+    wrapping,
+    spacer(),
+    composed,
+    spacer(),
+))

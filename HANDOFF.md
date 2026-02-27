@@ -113,8 +113,11 @@ demos/                 # Python files + tour.py + slides/
   personas config, auto `.env` loading. Validated with real Discord session.
   6 new tests.
 - **show() zero-config display** — `show(data)` entry point for progressive
-  display. Scalars bypass lens, Blocks pass through, dicts/lists use
-  shape_lens. Auto-detects format from TTY.
+  display. Defaults to `Zoom.DETAILED` (key-value tables, vertical lists,
+  expanded trees, bar charts). `show()` with no args prints a blank line.
+  Scalars bypass lens, Blocks pass through, dicts/lists use shape_lens.
+  Auto-detects format from TTY. Dict at SUMMARY zoom shows compact
+  `key: value` pairs (not just keys).
 - **CliRunner error handling** — graceful error handling at the runner
   boundary. fetch() failures → styled error Block (Palette.error) + exit 1.
   render() failures → plain error Block + exit 2. JSON → `{"error": "..."}`.

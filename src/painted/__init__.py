@@ -76,28 +76,38 @@ import sys as _sys
 from typing import Any as _Any, Callable as _Callable, TextIO as _TextIO
 
 
+_MISSING = object()
+
+
 def show(
-    data: _Any,
+    data: _Any = _MISSING,
     *,
-    zoom: Zoom = Zoom.SUMMARY,
+    zoom: Zoom = Zoom.DETAILED,
     lens: _Callable[[_Any, int, int], "Block"] | None = None,
     format: Format = Format.AUTO,
     file: _TextIO = _sys.stdout,
 ) -> None:
     """Display data with auto-detected formatting.
 
-    Three paths:
+    Four paths:
+    - No args: blank line (like print())
     - Block: print directly via print_block
     - JSON format (piped or explicit): json.dumps with default=str
     - Otherwise: render through lens (default shape_lens) then print_block
 
     Args:
-        data: Any Python value, or a pre-built Block.
+        data: Any Python value, or a pre-built Block. Omit for blank line.
         zoom: Detail level (default SUMMARY).
         lens: Render function override (default: shape_lens).
         format: Force output format (default: auto-detect from TTY).
         file: Output stream (default: sys.stdout).
     """
+    # No args — blank line
+    if data is _MISSING:
+        file.write("\n")
+        file.flush()
+        return
+
     from ._lens import shape_lens
     from .fidelity import _setup_defaults
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fidelity spectrum — same data, four presentations.
 
-This demo shows how cells enables the CLI→TUI continuum. Run with different
+This demo shows how painted enables the CLI→TUI continuum. Run with different
 fidelity flags to see the same task data rendered at each level:
 
     uv run python demos/patterns/fidelity.py -q        # Zoom 0: minimal one line

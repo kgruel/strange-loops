@@ -7,6 +7,46 @@ from painted import Block, Style, show
 from painted.writer import print_block
 
 
+class TestShowNoArgs:
+    """show() with no arguments prints a blank line."""
+
+    def test_no_args_prints_newline(self):
+        """show() outputs a single newline."""
+        buf = io.StringIO()
+        show(file=buf)
+        assert buf.getvalue() == "\n"
+
+    def test_no_args_does_not_invoke_lens(self):
+        """show() with no data skips all rendering paths."""
+        buf = io.StringIO()
+        show(file=buf)
+        # Just a newline, nothing else
+        assert buf.getvalue() == "\n"
+
+
+class TestShowDefaultZoom:
+    """show() defaults to DETAILED zoom for structured data."""
+
+    def test_default_zoom_is_detailed(self):
+        """show(dict) at default zoom produces key-value table, not just keys."""
+        buf = io.StringIO()
+        show({"host": "prod-1", "status": "ok"}, file=buf)
+        output = buf.getvalue()
+        # DETAILED renders vertical key-value pairs
+        assert "host" in output
+        assert "prod-1" in output
+        assert "status" in output
+        assert "ok" in output
+
+    def test_explicit_summary_zoom_compact(self):
+        """show(dict, zoom=SUMMARY) gives compact inline form."""
+        buf = io.StringIO()
+        show({"host": "prod-1", "status": "ok"}, zoom=Zoom.SUMMARY, file=buf)
+        output = buf.getvalue()
+        assert "host: prod-1" in output
+        assert output.count("\n") == 1  # single line
+
+
 class TestShowBlock:
     """show() with a pre-built Block passes it through to print_block."""
 

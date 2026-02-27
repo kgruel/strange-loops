@@ -469,3 +469,25 @@ companion GIF set for README.
 - Implementation plan: `docs/plans/2026-02-26-companion-gifs-plan.md`
 
 **617 tests passing on main.**
+
+## 2026-02-26 — show() UX improvements
+
+Demo-driven improvements to `show()` — the primitives demo surfaced that
+default output looked worse than `print()`.
+
+**show() default zoom → DETAILED (2)**: Default output now shows structured
+views — key-value tables for dicts, vertical bulleted lists, expanded trees,
+labeled bar charts. SUMMARY still available via `show(data, zoom=Zoom.SUMMARY)`.
+
+**Dict SUMMARY (zoom=1) shows values**: Was `host, status, uptime, cpu` (keys
+only — less useful than print()). Now `host: prod-1, status: healthy, ...`.
+
+**show() no-arg blank line**: `show()` prints `\n`, matching `print()` ergonomics.
+Uses `_MISSING` sentinel to distinguish from `show(None)`.
+
+**Stale fidelis venv contamination**: `_fidelis.pth` in painted's venv was
+shadowing local source. PEP 723 `dependencies = ["painted"]` pulls a different
+`painted` from PyPI. Fixed: recreated venv, demos run via
+`uv run --package painted python demos/primitives/foo.py`.
+
+4 new tests. **621 tests passing on main.**

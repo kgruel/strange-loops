@@ -1,65 +1,106 @@
 #!/usr/bin/env python3
-"""Cell and Style — the atomic unit.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["painted"]
+# ///
+"""Cell and Style — the visual atom.
 
-A Cell is a single character with a Style. That's it.
-Style holds colors (fg/bg) and attributes (bold, italic, etc).
-Both are immutable (frozen dataclasses).
+Style controls how a character looks: color, weight, emphasis.
+Cell pairs a character with a Style. Together they're the smallest
+unit of terminal output.
 
-Run: uv run python demos/primitives/cell.py
+Run: uv run demos/primitives/cell.py
 """
 
-from painted import Cell, Style, EMPTY_CELL
+from painted import Block, Style, join_vertical, print_block
 
-# --- Style: colors and attributes ---
 
-plain = Style()
-red = Style(fg="red")
-bold_green = Style(fg="green", bold=True)
-warning = Style(fg="black", bg="yellow", bold=True)
+def row(label: str, style: Style) -> Block:
+    """Label + styled sample on one line."""
+    return Block.text(f"  {label:<16} deploy OK", style)
 
-print("Styles are data:")
-print(f"  plain:      {plain}")
-print(f"  red:        {red}")
-print(f"  bold_green: {bold_green}")
-print(f"  warning:    {warning}")
-print()
 
-# --- Style.merge: combine styles ---
+def swatch(color: str) -> Block:
+    """A colored block swatch."""
+    return Block.text(f"  {color:<10}", Style(fg=color))
+
+
+# --- Attributes: what Style can express on a single character ---
+
+attributes = join_vertical(
+    Block.text("  attributes", Style(dim=True)),
+    Block.text("", Style()),
+    row("bold", Style(bold=True)),
+    row("italic", Style(italic=True)),
+    row("underline", Style(underline=True)),
+    row("dim", Style(dim=True)),
+    row("reverse", Style(reverse=True)),
+)
+
+# --- Foreground colors ---
+
+fg_colors = join_vertical(
+    Block.text("  foreground", Style(dim=True)),
+    Block.text("", Style()),
+    swatch("red"),
+    swatch("green"),
+    swatch("blue"),
+    swatch("yellow"),
+    swatch("cyan"),
+    swatch("magenta"),
+)
+
+# --- Background colors ---
+
+bg_colors = join_vertical(
+    Block.text("  background", Style(dim=True)),
+    Block.text("", Style()),
+    Block.text("  red       ", Style(bg="red", fg="white")),
+    Block.text("  green     ", Style(bg="green", fg="black")),
+    Block.text("  blue      ", Style(bg="blue", fg="white")),
+    Block.text("  yellow    ", Style(bg="yellow", fg="black")),
+    Block.text("  cyan      ", Style(bg="cyan", fg="black")),
+    Block.text("  magenta   ", Style(bg="magenta", fg="white")),
+)
+
+# --- Combinations ---
+
+combos = join_vertical(
+    Block.text("  combinations", Style(dim=True)),
+    Block.text("", Style()),
+    row("bold + green", Style(bold=True, fg="green")),
+    row("dim + italic", Style(dim=True, italic=True)),
+    row("reverse + cyan", Style(reverse=True, fg="cyan")),
+    row("bold + underline", Style(bold=True, underline=True, fg="yellow")),
+    row("bg + bold", Style(bg="blue", fg="white", bold=True)),
+)
+
+# --- Merge: styles compose ---
 
 base = Style(fg="blue", bold=True)
-overlay = Style(italic=True, fg="red")  # fg overrides, italic adds
+overlay = Style(italic=True, fg="red")
 merged = base.merge(overlay)
 
-print("Style.merge() combines styles (overlay wins for colors):")
-print(f"  base:    {base}")
-print(f"  overlay: {overlay}")
-print(f"  merged:  {merged}")
-print()
+merge_demo = join_vertical(
+    Block.text("  merge", Style(dim=True)),
+    Block.text("", Style()),
+    Block.text("  base             deploy OK", base),
+    Block.text("  + overlay        deploy OK", overlay),
+    Block.text("  = merged         deploy OK", merged),
+)
 
-# --- Cell: character + style ---
+# --- Print it ---
 
-cell_a = Cell("A", red)
-cell_star = Cell("*", warning)
-
-print("Cells are character + style pairs:")
-print(f"  cell_a:    {cell_a}")
-print(f"  cell_star: {cell_star}")
-print()
-
-# --- EMPTY_CELL: the default ---
-
-print(f"EMPTY_CELL is a space with no style: {EMPTY_CELL}")
-print()
-
-# --- Immutability ---
-
-print("Both are frozen (immutable):")
-try:
-    cell_a.char = "B"  # type: ignore
-except Exception as e:
-    print(f"  cell_a.char = 'B' -> {type(e).__name__}: {e}")
-
-# --- What's next? ---
-
-print()
-print("Cells are data. To display them, we need a Buffer (demo_02).")
+print_block(join_vertical(
+    Block.text("", Style()),
+    attributes,
+    Block.text("", Style()),
+    fg_colors,
+    Block.text("", Style()),
+    bg_colors,
+    Block.text("", Style()),
+    combos,
+    Block.text("", Style()),
+    merge_demo,
+    Block.text("", Style()),
+))

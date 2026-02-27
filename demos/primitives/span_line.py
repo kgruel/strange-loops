@@ -1,89 +1,135 @@
 #!/usr/bin/env python3
-"""Span and Line — styled text primitives.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["painted"]
+# ///
+"""Span and Line — mixed styles in a single line.
 
-Span: a run of text with one style.
-Line: a sequence of Spans that paints to a BufferView.
+Span is a run of text with one style. Line combines spans,
+giving you mixed styles within a single line — the thing
+Block.text() can't do.
 
-These are lighter-weight than Block for inline styled text.
-
-Run: uv run python demos/primitives/span_line.py
+Run: uv run demos/primitives/span_line.py
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from painted import Block, Style, Span, Line, join_vertical, print_block
 
-from painted import Style, Span, Line
-from painted.tui import Buffer
-from demo_utils import render_buffer
 
-# --- Span: text + style ---
+def header(text: str) -> Block:
+    """Dim section header."""
+    return Block.text(f"  {text}", Style(dim=True))
 
-s1 = Span("Hello", Style(fg="green", bold=True))
-s2 = Span(" world", Style(fg="cyan"))
 
-print(f"Span stores text + style:")
-print(f"  s1.text={s1.text!r}, s1.width={s1.width}")
-print(f"  s2.text={s2.text!r}, s2.width={s2.width}")
-print()
+def spacer() -> Block:
+    return Block.text("", Style())
 
-# --- Line: sequence of spans ---
 
-line = Line(spans=(s1, s2))
-print(f"Line combines spans: width={line.width}")
+def show(line: Line) -> Block:
+    """Convert a Line to a Block at its natural width."""
+    return line.to_block(line.width)
 
-buf = Buffer(20, 3)
-view = buf.region(0, 0, 20, 3)
-line.paint(view, x=1, y=1)
-render_buffer(buf)
-print()
 
-# --- Line.plain: convenience for uniform style ---
+# --- Spans: styled text runs ---
 
-plain = Line.plain("Simple text", Style(fg="yellow"))
-buf = Buffer(20, 3)
-plain.paint(buf.region(0, 0, 20, 3), x=1, y=1)
-render_buffer(buf)
-print()
-
-# --- Line.truncate: cut to width ---
-
-long_line = Line(spans=(
-    Span("Error: ", Style(fg="red", bold=True)),
-    Span("something went wrong with the configuration", Style(fg="white")),
-))
-
-print(f"Long line width={long_line.width}")
-truncated = long_line.truncate(30)
-print(f"Truncated to 30: width={truncated.width}")
-
-buf = Buffer(35, 3)
-truncated.paint(buf.region(0, 0, 35, 3), x=1, y=1)
-render_buffer(buf)
-print()
-
-# --- Style inheritance: Line style merges onto Span ---
-
-base_style = Style(fg="blue")
-line_with_base = Line(
-    spans=(Span("inherit", Style(bold=True)),),  # no fg, inherits blue
-    style=base_style
+spans = join_vertical(
+    header("spans"),
+    spacer(),
+    show(Line((Span("  deploy successful", Style(fg="green", bold=True)),))),
+    show(Line((Span("  connection timed out", Style(fg="red")),))),
+    show(Line((Span("  waiting for response", Style(fg="yellow", italic=True)),))),
+    show(Line((Span("  cached result", Style(dim=True)),))),
 )
 
-buf = Buffer(15, 3)
-line_with_base.paint(buf.region(0, 0, 15, 3), x=1, y=1)
-print("Line style merges onto spans (blue fg + bold from span):")
-render_buffer(buf)
-print()
+# --- Mixed styles: the point of Span/Line ---
 
-# --- Wide character support ---
+mixed = join_vertical(
+    header("mixed styles"),
+    spacer(),
+    show(Line((
+        Span("  Error: ", Style(fg="red", bold=True)),
+        Span("connection timed out", Style()),
+    ))),
+    show(Line((
+        Span("  12:04:31 ", Style(dim=True)),
+        Span("INFO  ", Style(fg="green", bold=True)),
+        Span("request handled in 42ms", Style()),
+    ))),
+    show(Line((
+        Span("  status  ", Style(dim=True)),
+        Span("healthy", Style(fg="green", bold=True)),
+    ))),
+    show(Line((
+        Span("  latency ", Style(dim=True)),
+        Span("127ms", Style(fg="yellow")),
+    ))),
+)
 
-wide = Line(spans=(Span("日本語", Style(fg="magenta")),))
-print(f"Wide chars: text='日本語', width={wide.width} (3 chars, 6 columns)")
+# --- Style inheritance: Line style merges onto spans ---
 
-buf = Buffer(12, 3)
-wide.paint(buf.region(0, 0, 12, 3), x=1, y=1)
-render_buffer(buf)
-print()
+base = Style(fg="blue")
 
-print("Span/Line are for inline text. Surface runs the event loop (demo_07).")
+inherit = join_vertical(
+    header("style inheritance"),
+    spacer(),
+    show(Line(
+        spans=(Span("  base style only  ", Style()),),
+        style=base,
+    )),
+    show(Line(
+        spans=(Span("  span adds bold   ", Style(bold=True)),),
+        style=base,
+    )),
+    show(Line(
+        spans=(Span("  span overrides fg", Style(fg="red")),),
+        style=base,
+    )),
+)
+
+# --- Truncation: cut to width, preserving styles ---
+
+long_line = Line((
+    Span("  Error: ", Style(fg="red", bold=True)),
+    Span("the configuration file at /etc/app/config.yaml could not be parsed",
+         Style()),
+))
+
+truncation = join_vertical(
+    header("truncation"),
+    spacer(),
+    show(long_line),
+    show(long_line.truncate(40)),
+    show(long_line.truncate(20)),
+)
+
+# --- Wide characters: width-aware ---
+
+wide = join_vertical(
+    header("wide characters"),
+    spacer(),
+    show(Line((
+        Span("  ", Style()),
+        Span("日本語", Style(fg="magenta")),
+        Span(" width=6", Style(dim=True)),
+    ))),
+    show(Line((
+        Span("  ", Style()),
+        Span("café", Style(fg="cyan")),
+        Span("   width=4", Style(dim=True)),
+    ))),
+)
+
+# --- Print it ---
+
+print_block(join_vertical(
+    spacer(),
+    spans,
+    spacer(),
+    mixed,
+    spacer(),
+    inherit,
+    spacer(),
+    truncation,
+    spacer(),
+    wide,
+    spacer(),
+))

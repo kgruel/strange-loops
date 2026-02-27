@@ -152,14 +152,14 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
         return Block.text(text, style, width=width)
 
     if zoom == 1:
-        # Keys only, comma-separated
+        # Compact key: value pairs, comma-separated
         if not d:
             text = "{}"
         else:
-            keys = ", ".join(str(k) for k in d.keys())
-            if display_width(keys) > width:
-                keys = truncate_ellipsis(keys, width) if width > 1 else truncate(keys, width)
-            text = keys
+            pairs = ", ".join(f"{k}: {v}" for k, v in d.items())
+            if display_width(pairs) > width:
+                pairs = truncate_ellipsis(pairs, width) if width > 1 else truncate(pairs, width)
+            text = pairs
         return Block.text(text, style, width=width)
 
     # zoom >= 2: key-value table
@@ -568,11 +568,12 @@ def chart_lens(
     Zoom levels:
     - 0: Summary stats (count, range)
     - 1: Inline sparkline
-    - 2: Vertical bars with labels
+    - 2: Stats + sparkline
+    - 3+: Labeled horizontal bars
 
     Args:
         data: Numeric data in supported format.
-        zoom: Zoom level (0-2).
+        zoom: Zoom level (0-3).
         width: Available width in characters.
         icons: Optional IconSet override (uses ambient if None).
 
@@ -593,10 +594,16 @@ def chart_lens(
         return _chart_stats(values, width)
 
     if zoom == 1:
-        # Sparkline
+        # Sparkline only
         return _chart_sparkline_themed(values, width, spark_chars)
 
-    # zoom >= 2: labeled bars
+    if zoom == 2:
+        # Stats + sparkline
+        stats = _chart_stats(values, width)
+        sparkline = _chart_sparkline_themed(values, width, spark_chars)
+        return join_vertical(stats, sparkline)
+
+    # zoom >= 3: labeled bars
     return _chart_bars_themed(values, labels, width, bar_filled, bar_empty)
 
 

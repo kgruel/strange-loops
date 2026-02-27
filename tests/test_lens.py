@@ -21,14 +21,14 @@ class TestShapeLensDictZoom:
         text = _block_to_text(block)
         assert "dict[3]" in text
 
-    def test_dict_zoom_1_shows_keys(self):
-        """At zoom 1, dict shows comma-separated keys."""
+    def test_dict_zoom_1_shows_key_value_pairs(self):
+        """At zoom 1, dict shows compact key: value pairs."""
         d = {"name": "Alice", "age": 30}
         block = shape_lens(d, 1, 40)
 
         text = _block_to_text(block)
-        assert "name" in text
-        assert "age" in text
+        assert "name: Alice" in text
+        assert "age: 30" in text
 
     def test_dict_zoom_2_shows_key_value_table(self):
         """At zoom 2, dict shows key-value pairs."""
@@ -448,10 +448,18 @@ class TestChartLensZoom:
         # Should contain sparkline block characters
         assert any(c in text for c in "▁▂▃▄▅▆▇█")
 
-    def test_zoom_2_shows_bars(self):
-        """At zoom 2, chart shows horizontal bars."""
+    def test_zoom_2_shows_stats_and_sparkline(self):
+        """At zoom 2, chart shows stats + sparkline."""
         data = {"cpu": 70, "mem": 50}
         block = chart_lens(data, 2, 40)
+
+        text = _block_to_text(block)
+        assert "2 values" in text  # stats line
+
+    def test_zoom_3_shows_bars(self):
+        """At zoom 3, chart shows horizontal bars."""
+        data = {"cpu": 70, "mem": 50}
+        block = chart_lens(data, 3, 40)
 
         text = _block_to_text(block)
         assert "cpu" in text
@@ -474,9 +482,9 @@ class TestChartLensData:
         assert block.width == 20
 
     def test_labeled_dict(self):
-        """Dict with numeric values shows labels."""
+        """Dict with numeric values shows labels at zoom 3 (bars)."""
         data = {"alpha": 25, "beta": 75}
-        block = chart_lens(data, 2, 40)
+        block = chart_lens(data, 3, 40)
 
         text = _block_to_text(block)
         assert "alpha" in text
@@ -496,7 +504,7 @@ class TestChartLensData:
     def test_percentage_format(self):
         """Values 0-100 format as percentages."""
         data = {"test": 50}
-        block = chart_lens(data, 2, 40)
+        block = chart_lens(data, 3, 40)
 
         text = _block_to_text(block)
         assert "%" in text
@@ -575,9 +583,9 @@ class TestShapeLensAutoDispatchChart:
         assert "3 values" in text
 
     def test_labeled_numeric_dict_gets_bars(self):
-        """Dict with all-numeric values at zoom 2 renders as bar chart."""
+        """Dict with all-numeric values at zoom 3 renders as bar chart."""
         data = {"cpu": 70, "mem": 50}
-        block = shape_lens(data, 2, 40)
+        block = shape_lens(data, 3, 40)
         text = _block_to_text(block)
         assert "cpu" in text
         assert "█" in text

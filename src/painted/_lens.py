@@ -1,9 +1,10 @@
 """Lens functions: stateless content-to-Block transformation at zoom levels.
 
-Three built-in strategies:
+Four built-in strategies:
   shape_lens  — auto-dispatches by data shape (generic Python values)
   tree_lens   — hierarchical data with branch characters
   chart_lens  — numeric data as sparklines/bars
+  flame_lens  — hierarchical data as proportional horizontal segments
 
 All share the same signature: (data, zoom, width) -> Block.
 """
@@ -736,7 +737,13 @@ def _chart_bars_themed(
 _FLAME_COLORS = ("red", "yellow", "208", "202", "166", "214")
 
 
-def flame_lens(data: Any, zoom: int, width: int) -> Block:
+def flame_lens(
+    data: Any,
+    zoom: int,
+    width: int,
+    *,
+    colors: tuple[str, ...] | None = None,
+) -> Block:
     """Render hierarchical data as proportional horizontal segments.
 
     Each depth level becomes a row where segments fill proportional width
@@ -755,10 +762,12 @@ def flame_lens(data: Any, zoom: int, width: int) -> Block:
         data: Hierarchical dict with numeric leaf values.
         zoom: Zoom level (0+).
         width: Available width in characters.
+        colors: Optional color cycle tuple; defaults to _FLAME_COLORS.
 
     Returns:
         Block with rendered flame chart.
     """
+    palette = colors if colors is not None else _FLAME_COLORS
     if width <= 0:
         return Block.empty(0, 1)
 
@@ -776,11 +785,11 @@ def flame_lens(data: Any, zoom: int, width: int) -> Block:
 
     if zoom == 1:
         # Single row: top-level segments only
-        return _flame_render_row(segments, total, width, depth=0)
+        return _flame_render_row(segments, total, width, depth=0, palette=palette)
 
     # zoom >= 2: expand children into additional rows
     rows: list[Block] = []
-    _flame_render_levels(segments, total, width, zoom, depth=0, rows=rows)
+    _flame_render_levels(segments, total, width, zoom, depth=0, rows=rows, palette=palette)
     if not rows:
         return Block.text("(no data)", Style(), width=width)
     return join_vertical(*rows)
@@ -810,58 +819,41 @@ def _flame_total(segments: list[tuple[str, Any]]) -> float:
     return total
 
 
-def _flame_render_row(
+def _flame_allocate_widths(
     segments: list[tuple[str, Any]],
     total: float,
     width: int,
-    depth: int,
-) -> Block:
-    """Build one row of proportional segments for the given depth level."""
-    if width <= 0:
-        return Block.empty(0, 1)
+) -> list[int]:
+    """Compute proportional widths for segments, fitting labels where possible.
 
-    color = _FLAME_COLORS[depth % len(_FLAME_COLORS)]
-    style = Style(fg=color, reverse=True)
-
-    blocks: list[Block] = []
-    remaining_width = width
-
-    if total <= 0:
-        # Everything is zero — give equal space
-        if segments:
-            each = width // len(segments)
-            for i, (label, _) in enumerate(segments):
-                seg_w = each if i < len(segments) - 1 else remaining_width
-                text = truncate(label, seg_w) if display_width(label) > seg_w else label
-                text = text.ljust(seg_w)
-                blocks.append(Block.text(text, style))
-                remaining_width -= seg_w
-        if not blocks:
-            return Block.empty(width, 1)
-        return join_horizontal(*blocks)
-
-    # Two-pass width allocation:
-    # 1. Give each segment at least label-width as minimum (capped)
-    # 2. Distribute surplus proportionally to larger segments
+    Two-pass algorithm:
+    1. Assign proportional widths based on segment values.
+    2. Redistribute surplus from large segments to small ones that can't
+       fit their labels, stealing only from donors with excess.
+    """
     n = len(segments)
+    if n == 0:
+        return []
+
     seg_widths = [0] * n
 
-    # Pass 1: compute proportional widths
-    for i, (label, v) in enumerate(segments):
+    # Pass 1: proportional widths
+    for i, (_label, v) in enumerate(segments):
         val = _seg_value(v)
-        if val <= 0:
+        if total <= 0:
+            seg_widths[i] = width // n if i < n - 1 else width - sum(seg_widths[:i])
+        elif val <= 0:
             seg_widths[i] = 1
         elif i < n - 1:
             seg_widths[i] = max(1, int(width * val / total))
         else:
             seg_widths[i] = width - sum(seg_widths[:i])
 
-    # Pass 2: ensure each segment fits its label when width allows
+    # Pass 2: steal from large segments to fit labels
     for i, (label, _v) in enumerate(segments):
         label_w = display_width(label)
         if seg_widths[i] < label_w:
             deficit = label_w - seg_widths[i]
-            # Steal from the largest segment that has surplus
             donors = sorted(range(n), key=lambda j: seg_widths[j], reverse=True)
             for d in donors:
                 if d == i:
@@ -874,8 +866,27 @@ def _flame_render_row(
                 if deficit <= 0:
                     break
 
+    return seg_widths
+
+
+def _flame_render_row(
+    segments: list[tuple[str, Any]],
+    total: float,
+    width: int,
+    depth: int,
+    palette: tuple[str, ...] = _FLAME_COLORS,
+) -> Block:
+    """Build one row of proportional segments for the given depth level."""
+    if width <= 0:
+        return Block.empty(0, 1)
+
+    color = palette[depth % len(palette)]
+    style = Style(fg=color, reverse=True)
+
+    seg_widths = _flame_allocate_widths(segments, total, width)
+
     # Build segment blocks
-    blocks = []
+    blocks: list[Block] = []
     for (label, _v), seg_w in zip(segments, seg_widths):
         if seg_w <= 0:
             continue
@@ -895,31 +906,24 @@ def _flame_render_levels(
     remaining_zoom: int,
     depth: int,
     rows: list[Block],
+    palette: tuple[str, ...] = _FLAME_COLORS,
 ) -> None:
     """Recursively render flame rows, one per depth level."""
     if not segments or width <= 0:
         return
 
     # Render this level
-    rows.append(_flame_render_row(segments, total, width, depth))
+    rows.append(_flame_render_row(segments, total, width, depth, palette=palette))
 
     if remaining_zoom <= 1:
         return
 
     # Expand children: each parent's children occupy that parent's proportional width
+    seg_widths = _flame_allocate_widths(segments, total, width)
     child_blocks: list[Block] = []
     used_width = 0
 
-    for i, (label, v) in enumerate(segments):
-        val = _seg_value(v)
-        if i < len(segments) - 1:
-            if total > 0:
-                seg_w = max(1, int(width * val / total))
-            else:
-                seg_w = width // len(segments)
-        else:
-            seg_w = width - used_width
-
+    for (label, v), seg_w in zip(segments, seg_widths):
         seg_w = max(0, min(seg_w, width - used_width))
         used_width += seg_w
 
@@ -931,11 +935,11 @@ def _flame_render_levels(
             child_total = _flame_total(child_segments)
             # Render one row for these children
             child_blocks.append(
-                _flame_render_row(child_segments, child_total, seg_w, depth + 1)
+                _flame_render_row(child_segments, child_total, seg_w, depth + 1, palette=palette)
             )
         else:
             # Leaf at this level — render as a single block at child depth color
-            color = _FLAME_COLORS[(depth + 1) % len(_FLAME_COLORS)]
+            color = palette[(depth + 1) % len(palette)]
             child_style = Style(fg=color, reverse=True)
             text = truncate(label, seg_w) if display_width(label) > seg_w else label
             text = text.ljust(seg_w)
@@ -946,7 +950,7 @@ def _flame_render_levels(
 
     # Recurse deeper if zoom allows
     if remaining_zoom > 2:
-        _flame_expand_deeper(segments, total, width, remaining_zoom, depth, rows)
+        _flame_expand_deeper(segments, total, width, remaining_zoom, depth, rows, palette=palette)
 
 
 def _flame_expand_deeper(
@@ -956,22 +960,15 @@ def _flame_expand_deeper(
     remaining_zoom: int,
     depth: int,
     rows: list[Block],
+    palette: tuple[str, ...] = _FLAME_COLORS,
 ) -> None:
     """Expand deeper levels for segments with grandchildren."""
+    seg_widths = _flame_allocate_widths(segments, total, width)
     child_blocks: list[Block] = []
     used_width = 0
     has_content = False
 
-    for i, (label, v) in enumerate(segments):
-        val = _seg_value(v)
-        if i < len(segments) - 1:
-            if total > 0:
-                seg_w = max(1, int(width * val / total))
-            else:
-                seg_w = width // len(segments)
-        else:
-            seg_w = width - used_width
-
+    for (label, v), seg_w in zip(segments, seg_widths):
         seg_w = max(0, min(seg_w, width - used_width))
         used_width += seg_w
 
@@ -990,8 +987,9 @@ def _flame_expand_deeper(
                 _flame_render_levels(
                     child_segments, child_total, seg_w,
                     remaining_zoom - 1, depth + 1, sub_rows,
+                    palette=palette,
                 )
-                # Take the third row onwards (first two already rendered)
+                # Skip the first row (already rendered at this level); take the second
                 if len(sub_rows) > 1:
                     has_content = True
                     child_blocks.append(sub_rows[1])

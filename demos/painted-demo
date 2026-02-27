@@ -8,13 +8,10 @@ shift
 
 case "$cmd" in
   # patterns
-  fidelity)   exec uv run python demos/patterns/fidelity.py "$@" ;;
-  health)      exec uv run python demos/patterns/fidelity_health.py "$@" ;;
-  show)        exec uv run python demos/patterns/show.py "$@" ;;
   auto)        exec uv run python demos/patterns/auto_dispatch.py "$@" ;;
   # apps
   widgets)     exec uv run python demos/apps/widgets.py "$@" ;;
   big-text)    exec uv run python demos/apps/big_text.py "$@" ;;
   tour)        exec uv run python demos/tour.py "$@" ;;
-  *)           echo "Unknown demo: $cmd"; echo "Available: fidelity show auto widgets big-text tour"; exit 1 ;;
+  *)           echo "Unknown demo: $cmd"; echo "Available: auto widgets big-text tour"; exit 1 ;;
 esac

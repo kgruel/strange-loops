@@ -237,7 +237,7 @@ def _run_loop(path: Path, args: argparse.Namespace) -> int:
 
 
 def _run_vertex(path: Path, args: argparse.Namespace) -> int:
-    """Run a .vertex file as a long-lived daemon."""
+    """Run a .vertex file. Defaults to 1 round; --daemon for continuous."""
     from engine import load_vertex_program
 
     try:
@@ -248,7 +248,10 @@ def _run_vertex(path: Path, args: argparse.Namespace) -> int:
             print("Error: no sources configured", file=sys.stderr)
             return 1
 
-        rounds = getattr(args, "rounds", None)
+        daemon = getattr(args, "daemon", False)
+        rounds = getattr(args, "rounds", 1)
+        if daemon or rounds == 0:
+            rounds = None  # None = run forever
         use_json = getattr(args, "json", False)
 
         def log_error(fact):
@@ -549,7 +552,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--limit", "-n", type=int, help="Limit number of facts (.loop only)"
     )
     run_parser.add_argument(
-        "--rounds", "-r", type=int, help="Number of complete rounds (.vertex only)"
+        "--rounds", "-r", type=int, default=1,
+        help="Number of complete rounds; 0 = run forever (.vertex only, default: 1)",
+    )
+    run_parser.add_argument(
+        "--daemon", "-d", action="store_true",
+        help="Run forever (equivalent to --rounds 0)",
     )
     run_parser.add_argument(
         "--var", action="append", default=[], metavar="KEY=VALUE",
@@ -578,6 +586,29 @@ def create_parser() -> argparse.ArgumentParser:
     )
     store_parser.add_argument("file", nargs="?", default=None, help=".vertex or .db file")
 
+    # Population management
+    ls_parser = subparsers.add_parser("ls", help="List template populations")
+    ls_parser.add_argument("target", help="Vertex name or vertex/template")
+
+    add_parser = subparsers.add_parser("add", help="Add to template population")
+    add_parser.add_argument("target", help="Vertex name or vertex/template")
+    add_parser.add_argument("values", nargs="+", help="Column values in header order")
+
+    rm_parser = subparsers.add_parser("rm", help="Remove from template population")
+    rm_parser.add_argument("target", help="Vertex name or vertex/template")
+    rm_parser.add_argument("key", help="Key (first column) to remove")
+
+    export_parser = subparsers.add_parser("export", help="Inline with -> .list file")
+    export_parser.add_argument("target", help="Vertex name or vertex/template")
+    export_parser.add_argument("--output", "-o", help="Output path (default: auto)")
+
+    import_parser = subparsers.add_parser("import", help=".list file -> inline with")
+    import_parser.add_argument("target", help="Vertex name or vertex/template")
+
+    merge_parser = subparsers.add_parser("merge", help="Merge external file into population")
+    merge_parser.add_argument("target", help="Vertex name or vertex/template")
+    merge_parser.add_argument("file", help=".list file to merge from")
+
     # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
     from cells import add_cli_args
     add_cli_args(start_parser)
@@ -605,6 +636,24 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_start(args)
     elif args.command == "store":
         return cmd_store(args)
+    elif args.command == "ls":
+        from .commands.pop import cmd_ls
+        return cmd_ls(args)
+    elif args.command == "add":
+        from .commands.pop import cmd_add
+        return cmd_add(args)
+    elif args.command == "rm":
+        from .commands.pop import cmd_rm
+        return cmd_rm(args)
+    elif args.command == "export":
+        from .commands.pop import cmd_export
+        return cmd_export(args)
+    elif args.command == "import":
+        from .commands.pop import cmd_import
+        return cmd_import(args)
+    elif args.command == "merge":
+        from .commands.pop import cmd_merge
+        return cmd_merge(args)
     else:
         parser.print_help()
         return 1

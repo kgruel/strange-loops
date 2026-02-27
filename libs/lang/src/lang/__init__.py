@@ -43,6 +43,14 @@ from .ast import (
 )
 from .errors import DSLError, LexError, Location, ParseError, ValidationError
 from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
+from .population import (
+    PopulationInfo,
+    PopulationRow,
+    read_population,
+    resolve_template,
+    resolve_vertex,
+    template_name,
+)
 from .validator import validate, validate_loop, validate_vertex
 
 __all__ = [
@@ -99,6 +107,13 @@ __all__ = [
     "ParseError",
     "ValidationError",
     "Location",
+    # Population management
+    "PopulationRow",
+    "PopulationInfo",
+    "resolve_vertex",
+    "resolve_template",
+    "template_name",
+    "read_population",
     # Validator
     "validate",
     "validate_loop",

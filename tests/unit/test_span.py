@@ -206,3 +206,14 @@ class TestLineToBlock:
         assert block.height == 1
         # All empty cells
         assert block.row(0)[0].char == " "
+
+    def test_wide_char_expands_with_placeholder(self):
+        line = Line(spans=(Span("\u4e16"),))  # "世" (2 columns)
+        block = line.to_block(2)
+        assert block.row(0)[0].char == "\u4e16"
+        assert block.row(0)[1].char == " "
+
+    def test_wide_char_dropped_if_width_too_small(self):
+        line = Line(spans=(Span("\u4e16"),))
+        block = line.to_block(1)
+        assert block.row(0)[0].char == " "

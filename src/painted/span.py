@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 from wcwidth import wcswidth
 
+from ._text_width import char_width
 from .buffer import BufferView
-from .cell import EMPTY_CELL, Cell, Style
+from .cell import Cell, Style
 
 if TYPE_CHECKING:
     from .block import Block
@@ -91,18 +92,40 @@ class Line:
         """
         from .block import Block
 
+        if width <= 0:
+            return Block([[]], 0)
+
         cells: list[Cell] = []
+        used = 0
+        done = False
         for span in self.spans:
             merged = self.style.merge(span.style)
             for ch in span.text:
-                if len(cells) >= width:
+                w = char_width(ch)
+                if w == 0:
+                    # Zero-width (combining) characters aren't representable as separate cells.
+                    continue
+                if used + w > width:
+                    done = True
                     break
                 cells.append(Cell(ch, merged))
-            if len(cells) >= width:
+                if w == 2:
+                    # Placeholder cell for wide characters.
+                    if used + 2 > width:
+                        cells.pop()
+                        done = True
+                        break
+                    cells.append(Cell(" ", merged))
+                used += w
+                if used >= width:
+                    done = True
+                    break
+            if done:
                 break
 
         # Pad to width
-        while len(cells) < width:
-            cells.append(EMPTY_CELL)
+        if used < width:
+            pad = Cell(" ", self.style)
+            cells.extend([pad] * (width - used))
 
         return Block([cells], width)

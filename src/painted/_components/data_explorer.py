@@ -146,15 +146,23 @@ class DataExplorerState:
     cursor: Cursor = Cursor()
     expanded: frozenset[tuple[str, ...]] = frozenset()
     viewport: Viewport = Viewport()
+    _nodes: tuple[DataNode, ...] | None = None
 
     @property
     def cursor_index(self) -> int:
         return self.cursor.index
 
     @property
-    def nodes(self) -> list[DataNode]:
-        """Current visible nodes."""
-        return flatten(self.data, self.expanded)
+    def nodes(self) -> tuple[DataNode, ...]:
+        """Current visible nodes.
+
+        Cached on the instance to avoid re-flattening on cursor/viewport-only updates.
+        """
+        if self._nodes is None:
+            object.__setattr__(self, "_nodes", tuple(flatten(self.data, self.expanded)))
+        nodes = self._nodes
+        assert nodes is not None
+        return nodes
 
     def toggle_expand(self) -> DataExplorerState:
         """Toggle expansion of the node at cursor."""
@@ -173,7 +181,7 @@ class DataExplorerState:
             new_expanded = self.expanded | {node.path}
 
         # After expansion change, re-sync cursor + viewport to the new node list.
-        new_state = replace(self, expanded=new_expanded)
+        new_state = replace(self, expanded=new_expanded, _nodes=None)
         new_nodes = new_state.nodes
         new_cursor = cursor.with_count(len(new_nodes))
         new_viewport = viewport.with_content(len(new_nodes)).scroll_into_view(new_cursor.index)

@@ -152,6 +152,17 @@ demos/                 # Python files + tour.py + slides/
   using CSS variables. Zero build step. `.nojekyll` for GitHub Pages.
   Design docs: `docs/plans/2026-02-26-landing-page-design.md`,
   `docs/plans/2026-02-26-companion-gifs-design.md`.
+- **flame_lens** — New lens type for proportional hierarchical visualization
+  (flame graph style). Horizontal segments proportional to numeric values,
+  warm color cycling by depth, multi-depth rows at zoom 2+. Customizable
+  via `colors` kwarg. Not auto-dispatched by shape_lens — explicit choice
+  alongside tree_lens. Two-pass width allocation (proportional + label fit).
+  11 new tests.
+- **Profiler demo** — `demos/patterns/profiler.py`: TestSurface profiles
+  a mini list-navigation app, renders results at 4 zoom levels using
+  chart_lens (writes/frame bars) + tree_lens (emission timeline) +
+  flame_lens (emission proportions). Same run_cli pattern as fidelity.py.
+  Design doc: `docs/plans/2026-02-27-profiler-demo-design.md`.
 
 ## Capability Signal Design (Resolved)
 
@@ -284,5 +295,9 @@ Session 2 transcript: Discord channel #terminal-crafters
 - **README rewrite** — informed by narrative debugging findings. Adoption
   ladder as lede, show(data) value prop, progressive enhancement framing.
   VHS GIFs ready to embed once polished.
+- **Deferred lens types** — timeline_lens (events on time axis),
+  heatmap_lens (2D frequency grid), flame_lens Phase B (py-spy/cProfile
+  integration with real call stacks). Design doc:
+  `docs/plans/2026-02-27-profiler-demo-design.md`.
 - **Stale plan file** — `docs/plans/2026-02-22-project-cleanup.md` is
   untracked and fully executed. Can be deleted or committed as historical.

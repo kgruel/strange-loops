@@ -181,6 +181,7 @@ from painted import Zoom, OutputMode, Format, CliContext, run_cli # CLI harness
 from painted import Palette, IconSet, current_palette, use_palette # Aesthetic
 from painted.tui import Surface, Layer, Focus, Search             # Interactive apps
 from painted.views import shape_lens, tree_lens, chart_lens        # Data rendering
+from painted.views import flame_lens                               # Proportional viz
 from painted.views import spinner, list_view, progress_bar         # Components
 from painted.mouse import MouseEvent, MouseButton                 # Optional mouse
 from painted.views import render_big                               # Visual effects
@@ -221,7 +222,7 @@ src/painted/
   tui/              # Interactive app primitives
     __init__.py     # Buffer, Surface, Layer, Focus, Search, KeyboardInput
   lens/             # Data structure rendering
-    __init__.py     # shape_lens, tree_lens, chart_lens
+    __init__.py     # shape_lens, tree_lens, chart_lens, flame_lens
   widgets/          # Pre-built components
     __init__.py     # spinner, progress_bar, list_view, text_input, table
   mouse/            # Mouse support

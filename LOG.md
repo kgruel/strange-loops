@@ -560,3 +560,40 @@ and AUTO doesn't escalate to animation when it shouldn't.
 updated to use AUTO resolution instead of explicit `--static`.
 
 **624 tests passing on main.**
+
+## 2026-02-27 — flame_lens + profiler demo
+
+Discord narrative debugging feedback inspired a profiler that uses painted
+to introspect its own rendering performance. Two deliverables:
+
+**flame_lens** (new library lens):
+- Proportional hierarchical visualization (flame graph style)
+- `flame_lens(data, zoom, width, *, colors=None) -> Block`
+- Each depth level is a row of horizontal segments proportional to values
+- Warm color cycling by depth, customizable via `colors` kwarg
+- Two-pass width allocation (proportional sizing + label-fitting redistribution)
+- Not auto-dispatched by shape_lens — explicit choice alongside tree_lens
+- 11 new tests
+
+**Profiler demo** (`demos/patterns/profiler.py`):
+- TestSurface profiles a mini list-navigation app (Layer system, push/pop)
+- Extracts frame metrics (writes per frame, hot frames) and emission data
+- Renders at 4 zoom levels through run_cli:
+  - `-q`: "9 frames, 272 writes, avg 30/frame"
+  - default: scenario metadata + emission kind breakdown
+  - `-v`: chart_lens bar chart + flame_lens emission proportions
+  - `-vv`: per-frame cards + emission frequency + tree_lens emission timeline
+- Demonstrates lens composition: three different lenses in one view
+
+**Code quality review findings (fixed):**
+- Extracted `_flame_allocate_widths` shared helper (was duplicated 3x)
+- Added `colors` kwarg (matches tree_lens/chart_lens pattern with `icons`)
+- Updated module docstring ("Three" → "Four built-in strategies")
+
+**Design docs:**
+- `docs/plans/2026-02-27-profiler-demo-design.md` (design)
+- `docs/plans/2026-02-27-profiler-demo-plan.md` (implementation plan)
+
+**Deferred:** timeline_lens, heatmap_lens, flame_lens Phase B (py-spy/cProfile).
+
+**653 tests passing on main.**

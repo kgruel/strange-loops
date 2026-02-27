@@ -533,3 +533,30 @@ Cleaned up the patterns demo level, following the primitives demo methodology.
 (tables), `demos/painted-demo` (dispatcher entries).
 
 **622 tests passing on main.**
+
+## 2026-02-27 — Mode resolution: capability filtering + AUTO collapse
+
+Hardened `run_cli` mode resolution so CLIs only advertise what they support
+and AUTO doesn't escalate to animation when it shouldn't.
+
+**Capability-filtered flags** (`add_cli_args` + `CliRunner.run`):
+- `add_cli_args` gained `modes: set[OutputMode] | None` kwarg
+- `CliRunner.run` infers supported modes from config: `fetch_stream` → LIVE,
+  `handlers[INTERACTIVE]` → INTERACTIVE, STATIC always present
+- `--help` only shows flags for modes the CLI actually supports
+- Backward-compatible: `modes=None` adds all flags (direct callers unaffected)
+
+**AUTO collapse rules:**
+- `-q` (MINIMAL) → STATIC: one-liner doesn't need InPlaceRenderer
+- `--plain` → STATIC: cursor control requires ANSI escape sequences
+- `--json` → STATIC: already existed, now part of a coherent set
+- Pipe → STATIC: already existed via `resolve_mode`
+
+**Documentation:**
+- `docs/MODE_RESOLUTION.md` — full rules with rationale for each collapse
+- `CLAUDE.md` updated with summary and cross-reference
+
+2 new tests (filtered mode args, static-only mode group). 4 existing tests
+updated to use AUTO resolution instead of explicit `--static`.
+
+**624 tests passing on main.**

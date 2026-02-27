@@ -11,7 +11,7 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 622 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
+v0.1.0, 624 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
 
 Discord narrative debugging infrastructure implemented and validated. Two sessions
 completed (simulated + real Discord). Writer output path fully optimized.
@@ -48,7 +48,7 @@ docs/
   guides/              # Narrative docs with docgen sync blocks
   plans/               # Design docs (including fidelity council output)
   .extract/            # Generated snippet store (snippets.v1.json)
-tests/                 # 599 tests
+tests/                 # 624 tests
 demos/                 # Python files + tour.py + slides/
   slides/              # 21 markdown files (tour content, docgen-synced)
   slide_loader.py      # Markdown parser with zoom levels + auto-nav
@@ -245,12 +245,12 @@ Session 2 transcript: Discord channel #terminal-crafters
   `compose.py` (join/border/pad/truncate/Wrap/Align) → `show.py` (auto-dispatch).
   Old stepping stones deleted (`block.py`, `buffer.py`, `buffer_view.py`).
   Rules in `demos/CLAUDE.md`.
-- **Patterns demo cleanup** — complete. Two demos as runnable examples with CLI flags:
+- **Patterns demo cleanup** — complete. Three demos as runnable examples with CLI flags:
   `rendering.py` (--explicit/--custom/--palette: lens API, custom render, palette
-  switching) and `fidelity.py` (disk usage at 4 zoom levels via run_cli, real disk
-  stats from shutil.disk_usage, `--json` produces proper JSON via dataclasses.asdict).
+  switching), `fidelity.py` (disk usage at 4 zoom levels via run_cli, real disk
+  stats from shutil.disk_usage, `--json` produces proper JSON via dataclasses.asdict),
+  and `live.py` (fetch_stream + spinners for parallel health checks).
   Deleted: `demo_utils.py`, `show.py`, old `fidelity.py`, `fidelity_health.py`.
-  `--live` intentionally omitted — needs a real async fan-out example.
   Design: `docs/plans/2026-02-26-patterns-demo-cleanup-design.md`.
 - **VHS companion GIFs** — in progress on `feature/companion-gifs` branch
   (worktree at `.worktrees/companion-gifs`). Scripts written, hero.tape and

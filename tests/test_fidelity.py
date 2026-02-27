@@ -213,6 +213,35 @@ class TestAddCliArgs:
         args = parser.parse_args(["--live"])
         assert args.live is True
 
+    def test_mode_args_filtered(self):
+        """Passing modes={STATIC, LIVE} omits -i."""
+        parser = argparse.ArgumentParser()
+        add_cli_args(parser, modes={OutputMode.STATIC, OutputMode.LIVE})
+
+        # --static and --live available
+        args = parser.parse_args(["--static"])
+        assert args.static is True
+
+        args = parser.parse_args(["--live"])
+        assert args.live is True
+
+        # -i not recognized
+        with pytest.raises(SystemExit):
+            parser.parse_args(["-i"])
+
+    def test_mode_args_static_only(self):
+        """Mode group omitted entirely when only STATIC."""
+        parser = argparse.ArgumentParser()
+        add_cli_args(parser, modes={OutputMode.STATIC})
+
+        # No mode flags at all
+        with pytest.raises(SystemExit):
+            parser.parse_args(["-i"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--live"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--static"])
+
     def test_format_args(self):
         """Format arguments are added correctly."""
         parser = argparse.ArgumentParser()
@@ -282,8 +311,9 @@ class TestCliRunner:
 
         monkeypatch.setattr(writer_mod, "print_block", print_block)
 
-    def test_static_output(self):
+    def test_static_output(self, monkeypatch):
         """Static mode uses print_block and returns 0."""
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
         render_called = False
         fetch_called = False
         received_ctx = None
@@ -299,9 +329,9 @@ class TestCliRunner:
             fetch_called = True
             return "test data"
 
-        # Use --static to force static mode regardless of TTY
+        # AUTO resolves to STATIC when not a TTY
         result = run_cli(
-            ["--static"],
+            [],
             render=render,
             fetch=fetch,
         )
@@ -343,7 +373,7 @@ class TestCliRunner:
             return Block.text(data, Style())
 
         run_cli(
-            ["-v", "--static"],
+            ["-v"],
             render=render,
             fetch=lambda: "data",
         )
@@ -386,7 +416,7 @@ class TestCliRunner:
         def fetch() -> str:
             raise ValueError("nope")
 
-        result = run_cli(["--static"], render=render, fetch=fetch)
+        result = run_cli([], render=render, fetch=fetch)
 
         assert result == 1
         assert render_called is False
@@ -418,7 +448,7 @@ class TestCliRunner:
         def render(ctx: CliContext, data: str) -> Block:
             raise KeyError("kaboom")
 
-        result = run_cli(["--static"], render=render, fetch=lambda: "ok")
+        result = run_cli([], render=render, fetch=lambda: "ok")
 
         assert result == 2
         captured = capsys.readouterr()

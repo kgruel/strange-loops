@@ -145,8 +145,18 @@ def _setup_defaults(ctx: CliContext) -> None:
 # =============================================================================
 
 
-def add_cli_args(parser: argparse.ArgumentParser) -> None:
-    """Add standard zoom/mode/format arguments."""
+def add_cli_args(
+    parser: argparse.ArgumentParser,
+    *,
+    modes: set[OutputMode] | None = None,
+) -> None:
+    """Add standard zoom/mode/format arguments.
+
+    Args:
+        parser: ArgumentParser to add arguments to.
+        modes: Supported output modes. When provided, only adds flags for
+            modes in the set. When None, adds all flags (backward-compatible).
+    """
     # Zoom group
     zoom_group = parser.add_mutually_exclusive_group()
     zoom_group.add_argument(
@@ -163,24 +173,30 @@ def add_cli_args(parser: argparse.ArgumentParser) -> None:
         help="Increase detail level (-v=detailed, -vv=full)",
     )
 
-    # Mode group
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "-i",
-        "--interactive",
-        action="store_true",
-        help="Interactive TUI mode",
-    )
-    mode_group.add_argument(
-        "--static",
-        action="store_true",
-        help="Static output, no animation",
-    )
-    mode_group.add_argument(
-        "--live",
-        action="store_true",
-        help="Live output with in-place updates",
-    )
+    # Mode group — only add flags for supported modes
+    has_live = modes is None or OutputMode.LIVE in modes
+    has_interactive = modes is None or OutputMode.INTERACTIVE in modes
+    if has_live or has_interactive:
+        mode_group = parser.add_mutually_exclusive_group()
+        if has_interactive:
+            mode_group.add_argument(
+                "-i",
+                "--interactive",
+                action="store_true",
+                help="Interactive TUI mode",
+            )
+        # --static is the "force no animation" escape hatch
+        mode_group.add_argument(
+            "--static",
+            action="store_true",
+            help="Static output, no animation",
+        )
+        if has_live:
+            mode_group.add_argument(
+                "--live",
+                action="store_true",
+                help="Live output with in-place updates",
+            )
 
     # Format
     parser.add_argument(
@@ -266,7 +282,15 @@ class CliRunner(Generic[T]):
             description=self.description,
             prog=self.prog,
         )
-        add_cli_args(parser)
+
+        # Infer supported modes from config
+        modes: set[OutputMode] = {OutputMode.STATIC}
+        if self.fetch_stream is not None:
+            modes.add(OutputMode.LIVE)
+        if self.handlers and OutputMode.INTERACTIVE in self.handlers:
+            modes.add(OutputMode.INTERACTIVE)
+
+        add_cli_args(parser, modes=modes)
 
         if self.add_args is not None:
             self.add_args(parser)

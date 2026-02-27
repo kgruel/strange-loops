@@ -164,8 +164,12 @@ myapp -i           # mode=INTERACTIVE (TUI)
 myapp --static     # mode=STATIC (no animation)
 myapp --live       # mode=LIVE (in-place updates)
 myapp --json       # format=JSON (implies static)
-myapp --plain      # format=PLAIN (no ANSI codes)
+myapp --plain      # format=PLAIN (implies static)
 ```
+
+AUTO collapses to STATIC when: `--json`, `--plain`, `-q`, or pipe.
+Flags are filtered by capability — only modes the CLI supports appear in `--help`.
+See `docs/MODE_RESOLUTION.md` for full rules.
 
 ## Package Structure
 
@@ -192,6 +196,7 @@ docs/
   MOUSE.md            # Terminal mouse protocol research
   VIEWPORT_DESIGN.md  # Scroll state management
   ZOOM_PATTERNS.md    # Lens zoom propagation patterns
+  MODE_RESOLUTION.md  # AUTO mode collapse rules, capability filtering
   DEMO_PATTERNS.md    # TUI app pattern, demo organization
 ```
 

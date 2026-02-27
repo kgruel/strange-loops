@@ -11,7 +11,7 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 617 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
+v0.1.0, 622 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
 
 Discord narrative debugging infrastructure implemented and validated. Two sessions
 completed (simulated + real Discord). Writer output path fully optimized.
@@ -245,6 +245,13 @@ Session 2 transcript: Discord channel #terminal-crafters
   `compose.py` (join/border/pad/truncate/Wrap/Align) → `show.py` (auto-dispatch).
   Old stepping stones deleted (`block.py`, `buffer.py`, `buffer_view.py`).
   Rules in `demos/CLAUDE.md`.
+- **Patterns demo cleanup** — complete. Two demos as runnable examples with CLI flags:
+  `rendering.py` (--explicit/--custom/--palette: lens API, custom render, palette
+  switching) and `fidelity.py` (disk usage at 4 zoom levels via run_cli, real disk
+  stats from shutil.disk_usage, `--json` produces proper JSON via dataclasses.asdict).
+  Deleted: `demo_utils.py`, `show.py`, old `fidelity.py`, `fidelity_health.py`.
+  `--live` intentionally omitted — needs a real async fan-out example.
+  Design: `docs/plans/2026-02-26-patterns-demo-cleanup-design.md`.
 - **VHS companion GIFs** — in progress on `feature/companion-gifs` branch
   (worktree at `.worktrees/companion-gifs`). Scripts written, hero.tape and
   styled.tape recorded. Remaining: compose.tape, zoom.tape, tui.tape, final review.

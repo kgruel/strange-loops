@@ -491,3 +491,45 @@ shadowing local source. PEP 723 `dependencies = ["painted"]` pulls a different
 `uv run --package painted python demos/primitives/foo.py`.
 
 4 new tests. **621 tests passing on main.**
+
+## 2026-02-26 — Patterns demo cleanup + real disk data
+
+Cleaned up the patterns demo level, following the primitives demo methodology.
+
+**Deletions:**
+- `demos/demo_utils.py` — dead helper module
+- `demos/patterns/show.py` — redundant with `primitives/show.py`
+- `demos/patterns/fidelity.py` (old build-tasks version) — replaced
+- `demos/patterns/fidelity_health.py` — consolidated into new fidelity.py
+
+**rendering.py** (was `auto_dispatch.py`):
+- `--help` default shows available patterns (not auto-dispatch, which was
+  redundant with `primitives/show.py`)
+- `--explicit` — lens API with zoom (tree_lens, chart_lens at various levels)
+- `--custom` — custom `(data, zoom, width) -> Block` render function
+- `--palette` — same card rendered with DEFAULT/NORD/MONO palettes side-by-side
+- PEP 723 compliant, styled Block headers throughout
+
+**fidelity.py** (was `fidelity_disk.py`):
+- Disk usage at four zoom levels through `run_cli`
+- `-q` one-liner, default directory list, `-v` styled bars, `-vv` children expanded
+- `-vv -i` interactive TUI tree browser
+- Box widths aligned via `pad()` to match content widths
+- Real disk stats from `shutil.disk_usage(Path.home())` with timestamps
+- Sample subdirectory entries preserved (lesson is the harness, not du)
+- PEP 723, standardized `# ---` section banners
+
+**run_cli JSON fix** (`src/painted/fidelity.py`):
+- JSON path was `json.dumps(state, default=str)` — produced repr() for dataclasses
+- Now uses `dataclasses.asdict()` with `TypeError` fallback for non-dataclass state
+- `--json` output is proper recursive JSON for any frozen dataclass state
+
+**`--live` removed from fidelity demo:**
+- Without a real streaming use case, `--live` just grabs the keyboard for no reason
+- Right demo for live is async fan-out (parallel health checks with spinners)
+- Falls through to static output gracefully (no fetch_stream provided)
+
+**Docs updated:** `demos/CLAUDE.md` (ladder + patterns rule), `demos/README.md`
+(tables), `demos/painted-demo` (dispatcher entries).
+
+**622 tests passing on main.**

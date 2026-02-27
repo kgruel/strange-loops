@@ -11,7 +11,7 @@ Cell-buffer terminal UI framework. Extracted from the loops monorepo
 
 ## Current State
 
-v0.1.0, 604 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
+v0.1.0, 617 tests passing, pushed to `git@git.gruel.network:kaygee/painted.git`.
 
 Discord narrative debugging infrastructure implemented and validated. Two sessions
 completed (simulated + real Discord). Writer output path fully optimized.
@@ -131,6 +131,24 @@ demos/                 # Python files + tour.py + slides/
   call sites pass explicit values, so no behavior change for `show()`
   or `run_cli()`. Standalone `print_block(block)` now does the right
   thing when piped. 617 total tests.
+- **VHS demo recordings** — charmbracelet/vhs tape infrastructure for
+  terminal GIF recordings. Wrapper script (`demos/painted-demo`), purpose-built
+  demo scripts (`tapes/scripts/`), narrative tapes with `# comment` technique
+  for in-terminal explainers. Four tapes: paint-it (print→show transformation),
+  ladder (composition escalation), zero-to-interactive (fidelity spectrum),
+  health (full -q → standard → -v → --live → -i progression with InPlaceRenderer).
+  `fidelity_health.py` modernized: `render_standard()` returns Block directly
+  (removed `_text_block` helper), added `fetch_stream` for `--live` mode.
+  Stale `cells` docstring fixed in `fidelity.py`.
+- **Landing page** — Single static HTML page (`site/index.html` + `site/style.css`)
+  for GitHub Pages. Adaptive dark/light theme via CSS custom properties
+  (Catppuccin Latte/Mocha tokens, designed to be swapped for custom design
+  tokens before release). Alternating code+GIF layout telling the adoption
+  ladder story (hero → print_block → compose → CLI harness → full TUI).
+  Prism.js CDN for Python/Bash syntax highlighting with custom token colors
+  using CSS variables. Zero build step. `.nojekyll` for GitHub Pages.
+  Design docs: `docs/plans/2026-02-26-landing-page-design.md`,
+  `docs/plans/2026-02-26-companion-gifs-design.md`.
 
 ## Capability Signal Design (Resolved)
 
@@ -219,5 +237,42 @@ Session 2 transcript: Discord channel #terminal-crafters
 - **PyPI publish** — Package metadata ready. No CI/CD yet.
 - **Guide content** — 4 guides landed with draft-quality narrative. Need
   fleshing out once designs stabilize.
+- **Primitives demo ladder** — complete. Four demos, each at its API layer:
+  `cell.py` (Style + print_block) → `span_line.py` (Span/Line/to_block) →
+  `compose.py` (join/border/pad/truncate/Wrap/Align) → `show.py` (auto-dispatch).
+  Old stepping stones deleted (`block.py`, `buffer.py`, `buffer_view.py`).
+  Rules in `demos/CLAUDE.md`.
+- **VHS companion GIFs** — in progress on `feature/companion-gifs` branch
+  (worktree at `.worktrees/companion-gifs`). Scripts written, hero.tape and
+  styled.tape recorded. Remaining: compose.tape, zoom.tape, tui.tape, final review.
+  Plan: `docs/plans/2026-02-26-companion-gifs-plan.md`.
+- **VHS demo iteration** — infrastructure works, four tapes record. Next
+  session should start with reviewing the GIFs and iterating on content,
+  pacing, and narrative. Key VHS limitations to ground requests:
+  - `Hide`/`Show` only suppresses frame capture, not terminal state.
+    Commands typed during `Hide` remain in scrollback. Must `clear`
+    before `Show` to get a clean canvas.
+  - `LoopOffset N%` starts the GIF loop at that point in the recording.
+    Use `0%` for demos that should start from the beginning.
+  - InPlaceRenderer (`--live`) redraws in-place by moving cursor up.
+    Previous terminal output gets overwritten. Must `clear` between
+    sections when mixing static and live output.
+  - VHS uses a pty — `show()` always detects TTY within the recording.
+    Pipe detection only works when the command actually pipes (`| cat`).
+  - `uv run` shows build messages on first invocation. Hidden warm-up
+    run needed in preamble to cache deps.
+  - No native "edit a file" capability. Narrative technique: hidden `cp`
+    of pre-staged file variants + visible `cat` for the reveal.
+  - Alias/function definitions in preamble (hidden) give clean short
+    commands. `health -q` reads better than `painted-demo health -q`.
+  - Terminal size is in pixels. Font size determines actual columns/rows.
+    900x600 at FontSize 16 ≈ 80-90 columns, 30-35 rows.
+  - GIF file sizes: simple demos ~250-350K, complex (TUI + animation)
+    ~500K-1M.
+  - Tapes are at `tapes/*.tape`, scripts at `tapes/scripts/`, GIFs at
+    `tapes/*.gif`. Design doc: `docs/plans/2026-02-26-vhs-demos-design.md`.
+- **README rewrite** — informed by narrative debugging findings. Adoption
+  ladder as lede, show(data) value prop, progressive enhancement framing.
+  VHS GIFs ready to embed once polished.
 - **Stale plan file** — `docs/plans/2026-02-22-project-cleanup.md` is
   untracked and fully executed. Can be deleted or committed as historical.

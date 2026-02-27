@@ -340,3 +340,132 @@ Built Discord integration for narrative debugging and ran a live session.
 - 22 new tests
 
 **599 tests passing on main.**
+
+## 2026-02-26 — VHS demo recordings
+
+Built terminal GIF recording infrastructure using charmbracelet/vhs (v0.10.0).
+Iterative design session — started bland, evolved to narrative-driven demos
+with `# comment` in-terminal explainers and hidden file swaps for "surprise"
+moments.
+
+**Infrastructure:**
+- `demos/painted-demo` — dispatcher script mapping short names to demo scripts
+  (fidelity, health, show, auto, widgets, big-text, tour)
+- `tapes/scripts/` — purpose-built demo scripts: `app.py` (print version),
+  `.app_painted.py` (show version), `.app_composed.py` (border/join version),
+  plus step1-3 for ladder progression
+- `tapes/*.tape` — VHS tape files with shared patterns: hidden venv activation,
+  hidden `clear` between sections, `# comment` + `Enter` for narration
+
+**Four tapes:**
+1. `paint-it.tape` — the transformation: `print(data)` → `show(data)` via
+   hidden file swap. Shows pipe auto-detection as kicker.
+2. `ladder.tape` — composition escalation: `show()` → `border(join_vertical(...))`
+3. `zero-to-interactive.tape` — fidelity spectrum with build data
+4. `health.tape` — full progression: `-q` → standard → `-v` → `--live -v`
+   (InPlaceRenderer with jittering latencies) → `-i` (TUI dashboard with
+   navigation). Each section gets own canvas via hidden `clear`.
+
+**Demo modernization:**
+- `fidelity_health.py`: `render_standard()` returns Block directly (was string
+  wrapped by `_text_block`). Added `fetch_stream` for `--live` mode (5 iterations,
+  0.8s interval, random latency jitter). Removed `_text_block` helper.
+- `fidelity.py`: fixed stale `cells` → `painted` in docstring.
+
+**VHS learnings (for grounding future requests):**
+- `Hide`/`Show` suppresses frame capture only — `clear` before `Show` required
+- InPlaceRenderer needs clean canvas — `clear` between sections
+- Alias in hidden preamble gives clean commands (`health -q` vs full path)
+- Warm-up run in preamble caches `uv` deps (avoids "Building painted..." in GIF)
+- `LoopOffset` sets GIF loop start point — use `0%` for sequential demos
+- Narrative technique: hidden `cp` of staged variants + visible `cat` for reveal
+
+**617 tests passing on main.**
+
+## 2026-02-26 — Companion GIFs + primitives demo rewrite
+
+**VHS companion GIFs** (partial, `feature/companion-gifs` branch):
+- Plan: `docs/plans/2026-02-26-companion-gifs-plan.md`
+- Scripts created: `show_hero.py`, `plain.py`, `styled.py`, `compose.py`
+- `hero.tape` recorded (show() in TTY/pipe/JSON contexts)
+- `styled.tape` recorded (print vs print_block contrast)
+- Remaining: compose.tape, zoom.tape, tui.tape, final review
+- Worktree at `.worktrees/companion-gifs`
+
+**Primitives demo rewrite** (direct on main):
+- Rebuilt `demos/primitives/cell.py` as visual best-practice example
+- Old approach: repr strings, Buffer + render_buffer, explanatory print()
+- New approach: `Block.text()` + `join_vertical` + `print_block` — visual catalog
+  of all Style attributes, fg/bg colors, combinations, and Style.merge()
+- PEP 723 compliant (`# /// script` metadata, runnable via `uv run` directly)
+- Established methodology: each demo uses exactly the API layer it demonstrates.
+  Demo ladder mirrors the library's own layer stack.
+
+**617 tests passing on main.**
+
+## 2026-02-26 — Span/Line primitives demo
+
+Rebuilt `demos/primitives/span_line.py` following the cell.py treatment.
+
+**Old approach:** sys.path hacking, Buffer + BufferView + `render_buffer` helper,
+explanatory `print()` statements — reached up the stack.
+
+**New approach:** PEP 723 compliant, visual catalog using `Line.to_block()` →
+`join_vertical` → `print_block`. Five sections: spans (styled runs), mixed styles
+(multi-style lines — the thing Block.text() can't do), style inheritance
+(Line base style merging onto spans), truncation (preserving styles across cuts),
+wide characters (width awareness). Display path uses `to_block()` as Line's
+natural bridge to Block — each ladder step shows the manual version of what
+the next step automates.
+
+Demo ladder progress: cell.py ✓ → span_line.py ✓ → block.py → compose.py.
+
+**617 tests passing on main.**
+
+## 2026-02-26 — Primitives demo ladder complete
+
+Finished the four-rung primitives demo ladder. Each demo uses exactly
+the API at its level — the code is the lesson.
+
+**compose.py** (rewritten): join_horizontal, join_vertical + Align,
+pad, border (ROUNDED/HEAVY/DOUBLE + titles), truncate, Wrap modes
+(NONE/ELLIPSIS/WORD/CHAR), and a composition example building a status
+panel. Absorbed Wrap content from old block.py.
+
+**show.py** (new): show() auto-dispatch — scalars, dicts, lists, nested
+dicts (tree), numeric lists (chart). Intentionally minimal: the brevity
+is the point.
+
+**Deleted:** `block.py` (covered by cell.py), `buffer.py` (TUI internals),
+`buffer_view.py` (TUI internals). Stepping stones from API development
+that no longer teach the final API.
+
+Demo rules captured in `demos/CLAUDE.md`.
+
+**617 tests passing on main.**
+
+## 2026-02-26 — Landing page + companion GIF design
+
+Designed and built a single-page landing page for GitHub Pages, plus designed
+companion GIF set for README.
+
+**Landing page** (`site/index.html` + `site/style.css`):
+- Single static HTML page, zero build step
+- Adaptive dark/light via `prefers-color-scheme` with CSS custom properties
+- Catppuccin Latte (light) / Mocha (dark) — all tokens in one swap point
+- 24 CSS custom properties including Prism syntax highlighting tokens
+- Alternating code+GIF layout: hero → print_block → compose → CLI harness → TUI
+- Prism.js CDN (Python + Bash), custom token styling via CSS variables
+- 960px max-width, flexbox, 768px responsive breakpoint
+- `.nojekyll` for GitHub Pages deployment
+- Ready for `Settings → Pages → Branch: main, Folder: /site`
+
+**Companion GIF design** (not yet recorded):
+- 5 purpose-built VHS tapes, one per README section
+- hero (show three ways), styled (print→print_block), compose (card),
+  zoom (CLI harness spectrum), tui (interactive flash)
+- 5-8s each, no narration, commands-only
+- Design doc: `docs/plans/2026-02-26-companion-gifs-design.md`
+- Implementation plan: `docs/plans/2026-02-26-companion-gifs-plan.md`
+
+**617 tests passing on main.**

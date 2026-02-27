@@ -1,11 +1,9 @@
 """Tests for lens functions (shape, tree, chart)."""
 
-import pytest
-
 from painted.views import (
+    chart_lens,
     shape_lens,
     tree_lens,
-    chart_lens,
 )
 
 
@@ -295,7 +293,6 @@ class TestShapeLensNestedStructures:
         data = [{"name": "Alice"}, {"name": "Bob"}]
         block = shape_lens(data, 2, 40)
 
-        text = _block_to_text(block)
         # Should show list items
         assert block.height >= 2
 

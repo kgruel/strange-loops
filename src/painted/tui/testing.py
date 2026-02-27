@@ -8,8 +8,9 @@ signals). It is intended for pytest/CI usage.
 from __future__ import annotations
 
 import io
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, TextIO
+from typing import TextIO
 
 from .._mouse import MouseEvent
 from ..app import Surface
@@ -21,10 +22,7 @@ InputItem = str | MouseEvent
 
 def buffer_to_lines(buf: Buffer) -> list[str]:
     """Return the buffer as a list of text lines (characters only)."""
-    return [
-        "".join(buf.get(x, y).char for x in range(buf.width))
-        for y in range(buf.height)
-    ]
+    return ["".join(buf.get(x, y).char for x in range(buf.width)) for y in range(buf.height)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +71,16 @@ class TestSurface:
         self.input_queue = list(input_queue)
         self.stream = stream if stream is not None else io.StringIO()
         self.write_ansi = write_ansi
+        self.emissions: list[tuple[str, dict]] = []
+
+        original_emit = self.surface._on_emit
+
+        def _capture_emit(kind: str, data: dict) -> None:
+            self.emissions.append((kind, data))
+            if original_emit is not None:
+                original_emit(kind, data)
+
+        self.surface._on_emit = _capture_emit
 
         # Ensure the Surface has deterministic dimensions and no TTY dependency.
         self.surface._writer = Writer(self.stream, color_depth=color_depth)

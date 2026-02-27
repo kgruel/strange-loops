@@ -5,14 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .._text_width import display_width, truncate
 from ..block import Block
 from ..cell import Style
 from ..compose import join_vertical
-from ..span import Line, Span
 from ..cursor import Cursor
 from ..viewport import Viewport
-from .._text_width import display_width, truncate
-
 
 _MAX_CHILDREN = 50
 
@@ -55,33 +53,40 @@ def flatten(
             expandable = isinstance(value, (dict, list)) and len(value) > 0
             is_expanded = child_path in expanded
 
-            nodes.append(DataNode(
-                key=str_key,
-                value=value,
-                depth=_depth,
-                path=child_path,
-                expandable=expandable,
-                expanded=is_expanded,
-            ))
+            nodes.append(
+                DataNode(
+                    key=str_key,
+                    value=value,
+                    depth=_depth,
+                    path=child_path,
+                    expandable=expandable,
+                    expanded=is_expanded,
+                )
+            )
 
             if is_expanded and expandable:
-                nodes.extend(flatten(
-                    value, expanded,
-                    max_children=max_children,
-                    _path=child_path,
-                    _depth=_depth + 1,
-                ))
+                nodes.extend(
+                    flatten(
+                        value,
+                        expanded,
+                        max_children=max_children,
+                        _path=child_path,
+                        _depth=_depth + 1,
+                    )
+                )
 
         if truncated:
             sentinel_path = _path + (f"__more_{truncated}__",)
-            nodes.append(DataNode(
-                key=f"... +{truncated} more",
-                value=None,
-                depth=_depth,
-                path=sentinel_path,
-                expandable=False,
-                expanded=False,
-            ))
+            nodes.append(
+                DataNode(
+                    key=f"... +{truncated} more",
+                    value=None,
+                    depth=_depth,
+                    path=sentinel_path,
+                    expandable=False,
+                    expanded=False,
+                )
+            )
 
     elif isinstance(data, list):
         items = list(enumerate(data))
@@ -95,33 +100,40 @@ def flatten(
             expandable = isinstance(value, (dict, list)) and len(value) > 0
             is_expanded = child_path in expanded
 
-            nodes.append(DataNode(
-                key=str_key,
-                value=value,
-                depth=_depth,
-                path=child_path,
-                expandable=expandable,
-                expanded=is_expanded,
-            ))
+            nodes.append(
+                DataNode(
+                    key=str_key,
+                    value=value,
+                    depth=_depth,
+                    path=child_path,
+                    expandable=expandable,
+                    expanded=is_expanded,
+                )
+            )
 
             if is_expanded and expandable:
-                nodes.extend(flatten(
-                    value, expanded,
-                    max_children=max_children,
-                    _path=child_path,
-                    _depth=_depth + 1,
-                ))
+                nodes.extend(
+                    flatten(
+                        value,
+                        expanded,
+                        max_children=max_children,
+                        _path=child_path,
+                        _depth=_depth + 1,
+                    )
+                )
 
         if truncated:
             sentinel_path = _path + (f"__more_{truncated}__",)
-            nodes.append(DataNode(
-                key=f"... +{truncated} more",
-                value=None,
-                depth=_depth,
-                path=sentinel_path,
-                expandable=False,
-                expanded=False,
-            ))
+            nodes.append(
+                DataNode(
+                    key=f"... +{truncated} more",
+                    value=None,
+                    depth=_depth,
+                    path=sentinel_path,
+                    expandable=False,
+                    expanded=False,
+                )
+            )
 
     return nodes
 
@@ -300,7 +312,9 @@ def data_explorer(
             line_text = prefix + summary
         elif not node.expandable and node.value is not None:
             # Leaf: key: value
-            val_text = _format_leaf_value(node.value, max(1, remaining - display_width(node.key) - 2))
+            val_text = _format_leaf_value(
+                node.value, max(1, remaining - display_width(node.key) - 2)
+            )
             leaf = f"{node.key}: {val_text}"
             line_text = prefix + leaf
         else:

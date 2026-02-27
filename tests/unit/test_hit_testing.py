@@ -97,4 +97,3 @@ def test_vslice_preserves_composed_ids():
     buf = Buffer(sliced.width, sliced.height)
     sliced.paint(buf, 0, 0)
     assert buf.hit(0, 0) == "b"
-

@@ -49,4 +49,3 @@ def test_cursor_is_frozen() -> None:
     c = Cursor()
     with pytest.raises((AttributeError, TypeError)):
         c.index = 2  # type: ignore[misc]
-

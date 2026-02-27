@@ -1,11 +1,19 @@
 """Tests for cells.compose: vslice, join_vertical."""
 
-from painted import Block, Style, Cell, vslice, join_vertical, join_horizontal, join_responsive, Align
+from painted import (
+    Align,
+    Block,
+    Cell,
+    Style,
+    join_responsive,
+    join_vertical,
+    vslice,
+)
 
 
 def _text_block(lines: list[str], style: Style = Style()) -> Block:
     """Helper: build a Block from lines of text, width = max line length."""
-    width = max(len(l) for l in lines) if lines else 0
+    width = max(len(ln) for ln in lines) if lines else 0
     rows = []
     for line in lines:
         row = [Cell(ch, style) for ch in line]

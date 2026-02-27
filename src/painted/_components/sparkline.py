@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .._sparkline_core import sparkline_text
 from ..block import Block
 from ..cell import Style
-from .._sparkline_core import sparkline_text
 
 if TYPE_CHECKING:
     from ..icon_set import IconSet
@@ -29,8 +29,8 @@ def sparkline(
     *,
     style: Style | None = None,
     empty_char: str = "─",
-    palette: "Palette | None" = None,
-    icons: "IconSet | None" = None,
+    palette: Palette | None = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Render values as a sparkline bar.
 
@@ -82,8 +82,8 @@ def sparkline_with_range(
     max_val: float | None = None,
     style: Style | None = None,
     empty_char: str = "─",
-    palette: "Palette | None" = None,
-    icons: "IconSet | None" = None,
+    palette: Palette | None = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Sparkline with explicit value range.
 

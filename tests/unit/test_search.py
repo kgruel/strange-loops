@@ -1,7 +1,8 @@
 """Tests for Search primitive and filter functions."""
 
 import pytest
-from painted.tui import Search, filter_contains, filter_prefix, filter_fuzzy
+
+from painted.tui import Search, filter_contains, filter_fuzzy, filter_prefix
 
 
 class TestSearch:

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from ..cell import Style
 from ..block import Block
+from ..cell import Style
 from ..cursor import Cursor, CursorMode
 
 if TYPE_CHECKING:
@@ -34,7 +34,9 @@ class SpinnerState:
 
     def tick(self) -> SpinnerState:
         """Advance to the next frame, wrapping around."""
-        cursor = Cursor(index=self.frame, count=len(self.frames.frames), mode=CursorMode.WRAP).next()
+        cursor = Cursor(
+            index=self.frame, count=len(self.frames.frames), mode=CursorMode.WRAP
+        ).next()
         return replace(self, frame=cursor.index)
 
 
@@ -42,7 +44,7 @@ def spinner(
     state: SpinnerState,
     *,
     style: Style | None = None,
-    icons: "IconSet | None" = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Render current spinner frame as a 1x1 block.
 

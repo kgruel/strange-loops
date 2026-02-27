@@ -20,12 +20,13 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import Enum, IntEnum
-from typing import TYPE_CHECKING, Callable, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
-    from typing import AsyncIterator
+    from collections.abc import AsyncIterator
 
     from .block import Block
 
@@ -253,13 +254,13 @@ class CliRunner(Generic[T]):
     """CLI runner with sensible defaults and explicit overrides."""
 
     # Required: how to render state to Block
-    render: Callable[[CliContext, T], "Block"]
+    render: Callable[[CliContext, T], Block]
 
     # Required: how to fetch state (sync)
     fetch: Callable[[], T]
 
     # Optional: streaming fetch for live mode
-    fetch_stream: Callable[[], "AsyncIterator[T]"] | None = None
+    fetch_stream: Callable[[], AsyncIterator[T]] | None = None
 
     # Optional: custom handlers for specific modes
     handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None
@@ -302,9 +303,7 @@ class CliRunner(Generic[T]):
         fmt = parse_format(parsed)
 
         # Non-animated formats and minimal zoom imply static mode
-        if mode == OutputMode.AUTO and (
-            fmt in (Format.JSON, Format.PLAIN) or zoom == Zoom.MINIMAL
-        ):
+        if mode == OutputMode.AUTO and (fmt in (Format.JSON, Format.PLAIN) or zoom == Zoom.MINIMAL):
             mode = OutputMode.STATIC
 
         ctx = detect_context(zoom, mode, fmt)
@@ -329,7 +328,7 @@ class CliRunner(Generic[T]):
                 print(json.dumps({"error": message}))
                 return 1
             try:
-                data = asdict(state)
+                data = asdict(state)  # type: ignore[arg-type]  # T may be dataclass
             except TypeError:
                 data = state
             print(json.dumps(data, default=str))
@@ -381,7 +380,7 @@ class CliRunner(Generic[T]):
             async def stream() -> int:
                 with InPlaceRenderer() as renderer:
                     try:
-                        async for state in self.fetch_stream():
+                        async for state in self.fetch_stream():  # type: ignore[misc]
                             try:
                                 block = self.render(ctx, state)
                             except Exception as exc:
@@ -423,7 +422,7 @@ class CliRunner(Generic[T]):
         return message or type(exc).__name__
 
     @staticmethod
-    def _fetch_error_block(ctx: CliContext, exc: Exception) -> "Block":
+    def _fetch_error_block(ctx: CliContext, exc: Exception) -> Block:
         from .block import Block, Wrap
         from .cell import Style
 
@@ -439,7 +438,7 @@ class CliRunner(Generic[T]):
         return Block.text(message.replace("\n", " "), style, width=width, wrap=Wrap.WORD)
 
     @staticmethod
-    def _render_error_block(ctx: CliContext, exc: Exception) -> "Block":
+    def _render_error_block(ctx: CliContext, exc: Exception) -> Block:
         from .block import Block, Wrap
         from .cell import Style
 
@@ -455,10 +454,10 @@ class CliRunner(Generic[T]):
 
 def run_cli(
     args: list[str],
-    render: Callable[[CliContext, T], "Block"],
+    render: Callable[[CliContext, T], Block],
     fetch: Callable[[], T],
     *,
-    fetch_stream: Callable[[], "AsyncIterator[T]"] | None = None,
+    fetch_stream: Callable[[], AsyncIterator[T]] | None = None,
     handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None,
     default_zoom: Zoom = Zoom.SUMMARY,
     description: str | None = None,
@@ -485,7 +484,7 @@ def run_cli(
         render=render,
         fetch=fetch,
         fetch_stream=fetch_stream,
-        handlers=handlers,
+        handlers=handlers,  # type: ignore[arg-type]
         default_zoom=default_zoom,
         description=description,
         prog=prog,

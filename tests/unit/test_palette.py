@@ -1,17 +1,17 @@
 """Palette: semantic Style roles with ContextVar delivery."""
+
 from __future__ import annotations
 
 import pytest
 
 from painted.cell import Style
 from painted.palette import (
-    Palette,
     DEFAULT_PALETTE,
     MONO_PALETTE,
-    NORD_PALETTE,
+    Palette,
     current_palette,
-    use_palette,
     reset_palette,
+    use_palette,
 )
 
 
@@ -68,4 +68,3 @@ def test_palette_compose_with_merge():
     composed = p.accent.merge(Style(bold=True))
     assert composed.fg == p.accent.fg
     assert composed.bold is True
-

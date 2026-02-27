@@ -3,15 +3,15 @@
 Use this when building interactive terminal applications.
 """
 
+from ..app import Emit, LifecycleHook, Surface
 from ..buffer import Buffer, BufferView, CellWrite
-from ..keyboard import KeyboardInput, Input
-from ..app import Surface, Emit, LifecycleHook
-from ..layer import Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
-from ..focus import Focus, ring_next, ring_prev, linear_next, linear_prev
-from ..search import Search, filter_contains, filter_prefix, filter_fuzzy
 from ..cursor import Cursor, CursorMode
+from ..focus import Focus, linear_next, linear_prev, ring_next, ring_prev
+from ..keyboard import Input, KeyboardInput
+from ..layer import Action, Layer, Pop, Push, Quit, Stay, process_key, render_layers
 from ..region import Region
-from .testing import TestSurface, CapturedFrame
+from ..search import Search, filter_contains, filter_fuzzy, filter_prefix
+from .testing import CapturedFrame, TestSurface
 
 __all__ = [
     # Buffer

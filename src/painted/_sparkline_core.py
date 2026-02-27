@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 SamplingStrategy = Literal["tail", "uniform"]
 RangeSource = Literal["all", "sampled"]
@@ -62,7 +63,9 @@ def _sample(values: Sequence[float], width: int, sampling: SamplingStrategy) -> 
     raise ValueError(f"Unknown sampling strategy: {sampling}")
 
 
-def _map_to_chars(values: Sequence[float], chars: Sequence[str], *, lo: float, hi: float, clamp: bool) -> str:
+def _map_to_chars(
+    values: Sequence[float], chars: Sequence[str], *, lo: float, hi: float, clamp: bool
+) -> str:
     if not values:
         return ""
 

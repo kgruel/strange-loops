@@ -1,7 +1,5 @@
 """Tests for flame_lens — proportional hierarchical visualization."""
 
-import pytest
-
 from painted.views import flame_lens
 
 
@@ -58,7 +56,6 @@ class TestFlameLensProportions:
         """Segment with larger value gets proportionally more characters."""
         data = {"big": 90, "small": 10}
         block = flame_lens(data, 1, 40)
-        text = _block_to_text(block)
         row = block.row(0)
         row_text = "".join(c.char for c in row)
         assert row_text.index("big") < row_text.index("small")

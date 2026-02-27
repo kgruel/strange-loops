@@ -11,8 +11,8 @@ import re
 
 from painted.buffer import Buffer
 from painted.cell import Style
-from painted.writer import Writer, ScrollOp
 from painted.tui import Surface
+from painted.writer import ScrollOp, Writer
 
 
 def _count_cups(output: str) -> int:

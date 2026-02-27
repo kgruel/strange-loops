@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
 import io
 
-import pytest
-
 from painted.writer import (
-    Writer,
     ColorDepth,
+    Writer,
     _idx_to_rgb,
+    _nearest_basic,
     _rgb_to_256,
     _rgb_to_basic,
-    _nearest_basic,
-    _color_distance_sq,
-    _BASIC_RGB,
 )
-
 
 # --- Pure color arithmetic ---
 

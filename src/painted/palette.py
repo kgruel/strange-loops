@@ -77,4 +77,3 @@ def reset_palette() -> None:
     """Reset to the default palette."""
 
     _palette.set(DEFAULT_PALETTE)
-

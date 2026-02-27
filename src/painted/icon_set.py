@@ -11,9 +11,9 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Sequence
 
 
 @dataclass(frozen=True)
@@ -88,4 +88,3 @@ def reset_icons() -> None:
     """Reset to the default icon set."""
 
     _icons.set(_DEFAULT_ICONS)
-

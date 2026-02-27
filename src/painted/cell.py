@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Union
 
 # Color can be:
 #   - Named string: "red", "green", "blue", etc.
 #   - 256-color int: 0-255
 #   - Hex RGB string: "#ff0000"
-Color = Optional[Union[str, int]]
+Color = str | int | None
 
 NAMED_COLORS = {
     "black": 0,

@@ -19,7 +19,8 @@ from painted.writer import print_block
 
 _PROJECT = Path(__file__).resolve().parent.parent.parent
 _spec = importlib.util.spec_from_file_location(
-    "_demo_testing", _PROJECT / "demos" / "patterns" / "testing.py",
+    "_demo_testing",
+    _PROJECT / "demos" / "patterns" / "testing.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _mod
@@ -36,8 +37,9 @@ def _block_to_text(block: Block) -> str:
 
 
 def _ctx(zoom: Zoom) -> CliContext:
-    return CliContext(zoom=zoom, mode=OutputMode.STATIC, format=Format.PLAIN,
-                      is_tty=False, width=80, height=24)
+    return CliContext(
+        zoom=zoom, mode=OutputMode.STATIC, format=Format.PLAIN, is_tty=False, width=80, height=24
+    )
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)

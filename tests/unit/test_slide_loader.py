@@ -25,7 +25,6 @@ from slide_loader import (
     validate_slides,
 )
 
-
 # -- Frontmatter Parsing --
 
 
@@ -271,7 +270,8 @@ class TestValidation:
             group=group,
             order=order,
             max_zoom=max_zoom,
-            zoom_sections=zoom_sections or ({i: [] for i in range(max_zoom + 1)} if max_zoom > 0 else {}),
+            zoom_sections=zoom_sections
+            or ({i: [] for i in range(max_zoom + 1)} if max_zoom > 0 else {}),
         )
 
     def test_valid_slides(self):
@@ -387,7 +387,9 @@ class TestLoadSlideMd:
     def test_load_single_slide(self, tmp_path):
         """Loads a markdown file into a ParsedSlide."""
         md = tmp_path / "test.md"
-        md.write_text("---\nid: test\ntitle: Test\ngroup: primitives\norder: 1\n---\n\n# Test\n\nhello world")
+        md.write_text(
+            "---\nid: test\ntitle: Test\ngroup: primitives\norder: 1\n---\n\n# Test\n\nhello world"
+        )
         slide = load_slide_md(md)
         assert slide.id == "test"
         assert slide.title == "Test"
@@ -421,10 +423,7 @@ class TestLoadSlideMd:
         """Zoom markers are parsed into zoom_sections."""
         md = tmp_path / "test.md"
         md.write_text(
-            "---\nid: test\n---\n\n# Test\n\n"
-            "common\n\n"
-            "[zoom:0]\n\nzero\n\n"
-            "[zoom:1]\n\none\n"
+            "---\nid: test\n---\n\n# Test\n\ncommon\n\n[zoom:0]\n\nzero\n\n[zoom:1]\n\none\n"
         )
         slide = load_slide_md(md)
         assert len(slide.common_sections) == 1

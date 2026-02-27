@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from enum import Enum
+from enum import StrEnum
 
 
-class CursorMode(str, Enum):
+class CursorMode(StrEnum):
     """Cursor boundary semantics."""
 
     CLAMP = "clamp"
@@ -69,4 +69,3 @@ class Cursor:
 
     def end(self) -> Cursor:
         return self.move_to(self.max_index)
-

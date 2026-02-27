@@ -1,38 +1,40 @@
-# show() — zero-config display, three output modes.
+# show() — zero-config display.
+# Pass data in, painted picks the rendering.
 
 Output tapes/show.gif
 
 Set Shell "bash"
-Set FontSize 18
+Set FontSize 16
 Set Width 900
-Set Height 500
-Set Padding 20
+Set Height 550
+Set Padding 16
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 50ms
+Set TypingSpeed 35ms
 Set BorderRadius 8
+Set LoopOffset 0%
 
-# Hidden preamble
+# Hidden: add wrapper to PATH
 Hide
 Type "export PATH=$PWD/demos:$PATH"
 Enter
 Sleep 500ms
 Show
 
-# --- TTY: styled auto-detected ---
-Sleep 500ms
+# --- Run it: auto-dispatches by data shape ---
+Sleep 300ms
+Type "# show() auto-dispatches by data shape"
+Enter
+Sleep 1.5s
+
 Type "painted-demo show"
-Sleep 300ms
 Enter
-Sleep 3s
+Sleep 4s
 
-# --- JSON ---
-Type "painted-demo show --json"
-Sleep 300ms
+# --- Show the code: it's just show() calls ---
+Type "# that's it — here's the code"
 Enter
-Sleep 3s
+Sleep 1.5s
 
-# --- Piped: plain text ---
-Type "painted-demo show | cat"
-Sleep 300ms
+Type "cat demos/primitives/show.py"
 Enter
-Sleep 2s
+Sleep 5s

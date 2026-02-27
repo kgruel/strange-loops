@@ -1,12 +1,13 @@
 """Tests for mouse input parsing."""
 
 import pytest
-from painted.mouse import (
-    MouseEvent,
-    MouseButton,
-    MouseAction,
-)
+
 from painted._mouse import parse_sgr_mouse
+from painted.mouse import (
+    MouseAction,
+    MouseButton,
+    MouseEvent,
+)
 
 
 class TestMouseEvent:

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from ..cell import Style, Cell
 from ..block import Block
+from ..cell import Cell, Style
 
 if TYPE_CHECKING:
     from ..icon_set import IconSet
@@ -32,8 +32,8 @@ def progress_bar(
     empty_style: Style | None = None,
     filled_char: str | None = None,
     empty_char: str | None = None,
-    palette: "Palette | None" = None,
-    icons: "IconSet | None" = None,
+    palette: Palette | None = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Render a horizontal progress bar.
 
@@ -64,8 +64,7 @@ def progress_bar(
     filled_count = round(state.value * width)
     empty_count = width - filled_count
 
-    cells = (
-        [Cell(filled_char, filled_style)] * filled_count
-        + [Cell(empty_char, empty_style)] * empty_count
-    )
+    cells = [Cell(filled_char, filled_style)] * filled_count + [
+        Cell(empty_char, empty_style)
+    ] * empty_count
     return Block([cells], width)

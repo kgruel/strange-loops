@@ -1,6 +1,6 @@
 """Tests for cells.span: Span and Line primitives."""
 
-from painted import Style, Span, Line
+from painted import Line, Span, Style
 from painted.tui import Buffer
 
 
@@ -187,10 +187,12 @@ class TestLineToBlock:
         assert cell.style.bold is True
 
     def test_multiple_spans(self):
-        line = Line(spans=(
-            Span("ab", Style(fg="red")),
-            Span("cd", Style(fg="blue")),
-        ))
+        line = Line(
+            spans=(
+                Span("ab", Style(fg="red")),
+                Span("cd", Style(fg="blue")),
+            )
+        )
         block = line.to_block(6)
         assert block.row(0)[0].char == "a"
         assert block.row(0)[0].style.fg == "red"

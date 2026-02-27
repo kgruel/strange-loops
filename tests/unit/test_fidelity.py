@@ -8,22 +8,19 @@ import pytest
 
 from painted import Block, Style
 from painted.fidelity import (
+    CliContext,
+    Format,
+    OutputMode,
     # New API
     Zoom,
-    OutputMode,
-    Format,
-    CliContext,
-    CliRunner,
     add_cli_args,
-    parse_zoom,
-    parse_mode,
     parse_format,
-    resolve_mode,
+    parse_mode,
+    parse_zoom,
     resolve_format,
-    detect_context,
+    resolve_mode,
     run_cli,
 )
-
 
 # =============================================================================
 # Zoom Tests
@@ -115,7 +112,10 @@ class TestResolveMode:
         """Non-AUTO modes are returned unchanged."""
         assert resolve_mode(OutputMode.STATIC, is_tty=True, is_pipe=False) == OutputMode.STATIC
         assert resolve_mode(OutputMode.LIVE, is_tty=False, is_pipe=True) == OutputMode.LIVE
-        assert resolve_mode(OutputMode.INTERACTIVE, is_tty=False, is_pipe=True) == OutputMode.INTERACTIVE
+        assert (
+            resolve_mode(OutputMode.INTERACTIVE, is_tty=False, is_pipe=True)
+            == OutputMode.INTERACTIVE
+        )
 
     def test_auto_tty_gives_live(self):
         """AUTO resolves to LIVE for TTY."""
@@ -288,7 +288,7 @@ class TestCliContext:
             width=80,
             height=24,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             ctx.zoom = Zoom.FULL  # type: ignore
 
 

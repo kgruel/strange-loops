@@ -11,14 +11,14 @@ All share the same signature: (data, zoom, width) -> Block.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
+from ._sparkline_core import sparkline_text
+from ._text_width import display_width, truncate, truncate_ellipsis
 from .block import Block
 from .cell import Style
-from .compose import join_vertical, join_horizontal
-from .span import Line, Span
-from ._text_width import display_width, truncate, truncate_ellipsis
-from ._sparkline_core import sparkline_text
+from .compose import join_horizontal, join_vertical
 
 if TYPE_CHECKING:
     from .icon_set import IconSet
@@ -169,7 +169,6 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
 
     rows: list[Block] = []
     key_style = Style(bold=True)
-    val_style = Style()
 
     # Sample items if too many
     items = list(d.items())
@@ -185,7 +184,11 @@ def _render_dict(d: dict, zoom: int, width: int) -> Block:
     for key, value in items:
         key_text = str(key) + ":"
         if display_width(key_text) > key_col_width:
-            key_text = truncate_ellipsis(key_text, key_col_width) if key_col_width > 1 else truncate(key_text, key_col_width)
+            key_text = (
+                truncate_ellipsis(key_text, key_col_width)
+                if key_col_width > 1
+                else truncate(key_text, key_col_width)
+            )
         key_block = Block.text(key_text, key_style, width=key_col_width)
 
         # Render value recursively with reduced zoom
@@ -291,7 +294,6 @@ def _render_set(s: set, zoom: int, width: int) -> Block:
     if not s:
         return Block.text("{}", style, width=width)
 
-    tag_style = Style()
     tags: list[str] = []
     total_len = 0
 
@@ -328,14 +330,12 @@ def _summarize_item(item: Any) -> str:
     return str(item)[:10]
 
 
-
-
 # ---------------------------------------------------------------------------
 # Tree Lens — hierarchical data with branch characters
 # ---------------------------------------------------------------------------
 
 
-def _get_tree_icons(icons: "IconSet | None") -> tuple[str, str, str, str]:
+def _get_tree_icons(icons: IconSet | None) -> tuple[str, str, str, str]:
     """Get tree branch characters from icons or ambient defaults."""
     from .icon_set import current_icons
 
@@ -349,7 +349,7 @@ def tree_lens(
     width: int,
     *,
     node_renderer: NodeRenderer | None = None,
-    icons: "IconSet | None" = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Render hierarchical data as an indented tree with branch characters.
 
@@ -438,7 +438,7 @@ def _tree_extract(data: Any) -> tuple[str, list[tuple[str, Any]] | None]:
 
     # Node protocol: has .children attribute
     if hasattr(data, "children") and hasattr(data, "__str__"):
-        children_attr = getattr(data, "children")
+        children_attr = data.children
         if isinstance(children_attr, (list, tuple)):
             child_list = [(str(i), c) for i, c in enumerate(children_attr)]
             return str(data), child_list if child_list else None
@@ -481,7 +481,9 @@ def _tree_render_children_themed(
             if node_renderer is not None:
                 content_block = node_renderer(key, value, depth)
                 # Prefix with branch chars
-                row_cells = list(Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0))
+                row_cells = list(
+                    Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0)
+                )
                 # Add content (truncated if needed)
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
@@ -502,7 +504,9 @@ def _tree_render_children_themed(
             # Expand this branch
             if node_renderer is not None:
                 content_block = node_renderer(key, value, depth)
-                row_cells = list(Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0))
+                row_cells = list(
+                    Block.text(branch_prefix, Style(), width=display_width(branch_prefix)).row(0)
+                )
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
                 rows.append(Block([row_cells], width))
@@ -537,14 +541,12 @@ def _truncate_ellipsis(text: str, width: int) -> str:
     return truncate_ellipsis(text, width) if width > 1 else truncate(text, width)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Chart Lens — text-based visualizations for numeric data
 # ---------------------------------------------------------------------------
 
 
-def _get_chart_icons(icons: "IconSet | None") -> tuple[str | tuple[str, ...], str, str]:
+def _get_chart_icons(icons: IconSet | None) -> tuple[str | tuple[str, ...], str, str]:
     """Get chart characters from icons or ambient defaults."""
     from .icon_set import current_icons
 
@@ -557,7 +559,7 @@ def chart_lens(
     zoom: int,
     width: int,
     *,
-    icons: "IconSet | None" = None,
+    icons: IconSet | None = None,
 ) -> Block:
     """Render numeric data as text-based charts.
 
@@ -968,7 +970,7 @@ def _flame_expand_deeper(
     used_width = 0
     has_content = False
 
-    for (label, v), seg_w in zip(segments, seg_widths):
+    for (_label, v), seg_w in zip(segments, seg_widths):
         seg_w = max(0, min(seg_w, width - used_width))
         used_width += seg_w
 
@@ -979,14 +981,16 @@ def _flame_expand_deeper(
             child_segments = [(str(ck), cv) for ck, cv in v.items()]
             child_total = _flame_total(child_segments)
             # Check if any children have dict grandchildren
-            has_grandchildren = any(
-                isinstance(cv, dict) and cv for _, cv in child_segments
-            )
+            has_grandchildren = any(isinstance(cv, dict) and cv for _, cv in child_segments)
             if has_grandchildren:
                 sub_rows: list[Block] = []
                 _flame_render_levels(
-                    child_segments, child_total, seg_w,
-                    remaining_zoom - 1, depth + 1, sub_rows,
+                    child_segments,
+                    child_total,
+                    seg_w,
+                    remaining_zoom - 1,
+                    depth + 1,
+                    sub_rows,
                     palette=palette,
                 )
                 # Skip the first row (already rendered at this level); take the second
@@ -1013,5 +1017,3 @@ def _seg_value(v: Any) -> float:
     if isinstance(v, dict):
         return _flame_total([(str(k), val) for k, val in v.items()])
     return 0.0
-
-

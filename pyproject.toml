@@ -60,8 +60,8 @@ exclude_lines = [
 line-length = 100
 target-version = "py311"
 
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+[tool.ty.rules]
+unresolved-attribute = "ignore"  # Block uses object.__setattr__ + __slots__ for immutability
 
 [tool.ty.environment]
 python-version = "3.11"

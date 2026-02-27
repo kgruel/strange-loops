@@ -1,17 +1,17 @@
 """Progress bar rendering with Palette and IconSet."""
+
 from __future__ import annotations
 
-from painted.cell import Style
 from painted._components.progress import ProgressState, progress_bar
+from painted.cell import Style
+from painted.icon_set import (
+    ASCII_ICONS,
+    reset_icons,
+)
 from painted.palette import (
     MONO_PALETTE,
     reset_palette,
     use_palette,
-)
-from painted.icon_set import (
-    ASCII_ICONS,
-    reset_icons,
-    use_icons,
 )
 
 
@@ -61,4 +61,3 @@ def test_progress_bar_style_overrides_palette():
     state = ProgressState(value=1.0)
     block = progress_bar(state, width=4, filled_style=custom)
     assert block.row(0)[0].style.fg == "magenta"
-

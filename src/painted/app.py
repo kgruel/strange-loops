@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from .buffer import Buffer, CellWrite
-from .layer import Layer, process_key as _process_key
-from .writer import Writer, ScrollOp
-from .keyboard import KeyboardInput
 from ._mouse import MouseEvent
+from .buffer import Buffer, CellWrite
+from .keyboard import KeyboardInput
+from .layer import Layer
+from .layer import process_key as _process_key
+from .writer import ScrollOp, Writer
 
 Emit = Callable[[str, dict[str, Any]], None]
 LifecycleHook = Callable[[], Awaitable[None]]
@@ -173,7 +175,10 @@ class Surface:
           - ui.action action="stay"   otherwise
         """
         new_state, should_quit, pop_result = _process_key(
-            key, state, get_layers, set_layers,
+            key,
+            state,
+            get_layers,
+            set_layers,
         )
         if should_quit:
             self.emit("ui.action", action="quit")
@@ -281,7 +286,7 @@ class Surface:
             for x in range(width):
                 cell_ops.append(CellWrite(x, y, cells[row_start + x]))
 
-        self._writer.write_ops(cell_ops)  # type: ignore[arg-type]
+        self._writer.write_ops(cell_ops)
 
         if self._scroll_optimization_emit:
             self.emit(

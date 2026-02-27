@@ -1,14 +1,15 @@
 """IconSet: glyph vocabulary with ContextVar delivery."""
+
 from __future__ import annotations
 
 import pytest
 
 from painted.icon_set import (
-    IconSet,
     ASCII_ICONS,
+    IconSet,
     current_icons,
-    use_icons,
     reset_icons,
+    use_icons,
 )
 
 
@@ -63,4 +64,3 @@ def test_reset_icons_restores_default():
     use_icons(ASCII_ICONS)
     reset_icons()
     assert current_icons().check == "✓"
-

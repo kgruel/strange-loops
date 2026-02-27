@@ -1,8 +1,7 @@
 """Tests for big text rendering."""
 
-import pytest
 from painted import Style
-from painted.views import render_big, BIG_GLYPHS, BigTextFormat
+from painted.views import BIG_GLYPHS, BigTextFormat, render_big
 
 
 class TestRenderBig:
@@ -58,9 +57,9 @@ class TestRenderBig:
         assert block.height == 3
         assert block.width == 3
         # Should be the fallback box glyph
-        fallback = BIG_GLYPHS['\x00']
+        fallback = BIG_GLYPHS["\x00"]
         for row_idx in range(3):
-            row_chars = ''.join(c.char for c in block.row(row_idx))
+            row_chars = "".join(c.char for c in block.row(row_idx))
             assert row_chars == fallback[row_idx]
 
     def test_digits(self):
@@ -87,9 +86,9 @@ class TestRenderBig:
         for row in range(3):
             row_cells = list(block.row(row))
             # Gap is at index 3, space glyph at 4,5,6
-            assert row_cells[4].char == ' '
-            assert row_cells[5].char == ' '
-            assert row_cells[6].char == ' '
+            assert row_cells[4].char == " "
+            assert row_cells[5].char == " "
+            assert row_cells[6].char == " "
 
     def test_whitespace_normalization(self):
         """Tabs and newlines become spaces."""
@@ -118,21 +117,21 @@ class TestBigGlyphs:
 
     def test_fallback_exists(self):
         """Fallback glyph exists at null character."""
-        assert '\x00' in BIG_GLYPHS
+        assert "\x00" in BIG_GLYPHS
 
     def test_alphabet_coverage(self):
         """All lowercase letters have glyphs."""
-        for char in 'abcdefghijklmnopqrstuvwxyz':
+        for char in "abcdefghijklmnopqrstuvwxyz":
             assert char in BIG_GLYPHS, f"Missing glyph for '{char}'"
 
     def test_digit_coverage(self):
         """All digits have glyphs."""
-        for char in '0123456789':
+        for char in "0123456789":
             assert char in BIG_GLYPHS, f"Missing glyph for '{char}'"
 
     def test_common_punctuation_coverage(self):
         """Common punctuation has glyphs."""
-        for char in ' .,!?-:':
+        for char in " .,!?-:":
             assert char in BIG_GLYPHS, f"Missing glyph for '{char}'"
 
 
@@ -207,5 +206,5 @@ class TestBigTextFormat:
         outline = render_big("o", format=BigTextFormat.OUTLINE)
         chars = set(c.char for row in range(3) for c in outline.row(row))
         # Should contain box-drawing characters
-        box_chars = {'┌', '┐', '└', '┘', '│', '─'}
+        box_chars = {"┌", "┐", "└", "┘", "│", "─"}
         assert chars & box_chars, f"Expected box-drawing chars, got {chars}"

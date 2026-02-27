@@ -13,6 +13,7 @@ from pathlib import Path
 @dataclass
 class FrameRecord:
     """Timing for a single frame, keyed by phase name."""
+
     phases: dict[str, float] = field(default_factory=dict)
     meta: dict[str, object] = field(default_factory=dict)
     total: float = 0.0
@@ -93,7 +94,7 @@ class FrameTimer:
 
     def dump_jsonl(self, path: Path) -> int:
         """Write all logged frames to a JSONL file. Returns frame count."""
-        with open(path, "w") as f:
+        with path.open("w") as f:
             for record in self._log:
                 obj = {
                     "t": round(record.timestamp, 3),

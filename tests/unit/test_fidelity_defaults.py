@@ -2,12 +2,12 @@
 
 Palette is never auto-set — it's a deliberate aesthetic choice.
 """
+
 from __future__ import annotations
 
-from painted.fidelity import CliContext, Format, OutputMode, Zoom
-from painted.fidelity import _setup_defaults
-from painted.palette import current_palette, reset_palette, DEFAULT_PALETTE
-from painted.icon_set import current_icons, reset_icons, ASCII_ICONS, IconSet
+from painted.fidelity import CliContext, Format, OutputMode, Zoom, _setup_defaults
+from painted.icon_set import ASCII_ICONS, IconSet, current_icons, reset_icons
+from painted.palette import DEFAULT_PALETTE, current_palette, reset_palette
 
 
 def test_plain_format_sets_ascii_icons():
@@ -46,4 +46,3 @@ def test_ansi_format_keeps_default_icons():
     assert current_icons().check == IconSet().check  # unicode default
     reset_palette()
     reset_icons()
-

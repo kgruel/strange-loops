@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, TextIO, Union
+from typing import TYPE_CHECKING, TextIO
 
 from wcwidth import wcwidth
 
 from .buffer import CellWrite
-from .cell import Cell, Style, NAMED_COLORS
+from .cell import NAMED_COLORS, Style
 
 if TYPE_CHECKING:
     from .block import Block
@@ -29,21 +29,21 @@ _CUBE_START = 16
 _GRAY_START = 232
 
 _BASIC_RGB: tuple[tuple[int, int, int], ...] = (
-    (0, 0, 0),        # 0: black
-    (128, 0, 0),      # 1: red
-    (0, 128, 0),      # 2: green
-    (128, 128, 0),    # 3: yellow
-    (0, 0, 128),      # 4: blue
-    (128, 0, 128),    # 5: magenta
-    (0, 128, 128),    # 6: cyan
+    (0, 0, 0),  # 0: black
+    (128, 0, 0),  # 1: red
+    (0, 128, 0),  # 2: green
+    (128, 128, 0),  # 3: yellow
+    (0, 0, 128),  # 4: blue
+    (128, 0, 128),  # 5: magenta
+    (0, 128, 128),  # 6: cyan
     (192, 192, 192),  # 7: white
     (128, 128, 128),  # 8: bright black (gray)
-    (255, 0, 0),      # 9: bright red
-    (0, 255, 0),      # 10: bright green
-    (255, 255, 0),    # 11: bright yellow
-    (0, 0, 255),      # 12: bright blue
-    (255, 0, 255),    # 13: bright magenta
-    (0, 255, 255),    # 14: bright cyan
+    (255, 0, 0),  # 9: bright red
+    (0, 255, 0),  # 10: bright green
+    (255, 255, 0),  # 11: bright yellow
+    (0, 0, 255),  # 12: bright blue
+    (255, 0, 255),  # 13: bright magenta
+    (0, 255, 255),  # 14: bright cyan
     (255, 255, 255),  # 15: bright white
 )
 
@@ -300,7 +300,7 @@ class Writer:
 
     def write_frame(self, writes: list[CellWrite]) -> None:
         """Render cell writes to terminal. Batches into a single write call."""
-        self.write_ops(writes)
+        self.write_ops(writes)  # type: ignore[arg-type]  # CellWrite is a RenderOp
 
     def enter_alt_screen(self) -> None:
         self._stream.write("\x1b[?1049h")
@@ -341,7 +341,7 @@ class Writer:
 
 
 def print_block(
-    block: "Block",
+    block: Block,
     stream: TextIO = sys.stdout,
     *,
     use_ansi: bool | None = None,
@@ -372,7 +372,7 @@ def print_block(
     stream.flush()
 
 
-def _write_block_ansi(block: "Block", writer: Writer, stream: TextIO) -> None:
+def _write_block_ansi(block: Block, writer: Writer, stream: TextIO) -> None:
     """Write a Block to a stream with ANSI styling, line-by-line.
 
     Shared by `print_block` and `InPlaceRenderer`.
@@ -407,4 +407,4 @@ class ScrollOp:
     n: int
 
 
-RenderOp = Union[CellWrite, ScrollOp]
+RenderOp = CellWrite | ScrollOp

@@ -80,10 +80,10 @@ class KeyboardInput:
 
     def __exit__(self, *args):
         if self._old_settings:
-            try:
+            import contextlib
+
+            with contextlib.suppress(termios.error, OSError):
                 termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
-            except (termios.error, OSError):
-                pass
 
     def _read_byte(self, timeout: float = 0) -> bytes | None:
         """Read a single byte with optional timeout. Returns None if unavailable."""
@@ -94,7 +94,7 @@ class KeyboardInput:
             self._available = False
         return None
 
-    def _read_escape_sequence(self) -> str:
+    def _read_escape_sequence(self) -> str | MouseEvent:
         """After reading ESC, read and classify the full escape sequence.
 
         Handles CSI (ESC [), SS3 (ESC O), and bare ESC.

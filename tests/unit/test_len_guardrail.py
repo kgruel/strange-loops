@@ -10,7 +10,6 @@ import ast
 import re
 from pathlib import Path
 
-
 TARGET_MODULES = [
     Path("src/painted/block.py"),
     Path("src/painted/compose.py"),
@@ -73,4 +72,3 @@ def test_no_new_len_on_text_variables_in_display_modules():
             "Current ALLOWLIST:\n"
             f"{allow}\n"
         )
-

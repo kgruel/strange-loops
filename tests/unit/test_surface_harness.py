@@ -136,6 +136,31 @@ class LayerApp(Surface):
             self.quit()
 
 
+class TestHarnessEmissions:
+    def test_emissions_captured_on_harness(self):
+        app = SimpleApp()  # no on_emit
+        harness = TestSurface(app, width=10, height=2, input_queue=["x", "q"])
+        harness.run_to_completion()
+
+        assert harness.emissions == [
+            ("ui.key", {"key": "x"}),
+            ("ui.key", {"key": "q"}),
+        ]
+
+    def test_emissions_chain_with_existing_callback(self):
+        external: list[tuple[str, dict]] = []
+        app = SimpleApp(on_emit=lambda k, d: external.append((k, d)))
+        harness = TestSurface(app, width=10, height=2, input_queue=["x", "q"])
+        harness.run_to_completion()
+
+        expected = [
+            ("ui.key", {"key": "x"}),
+            ("ui.key", {"key": "q"}),
+        ]
+        assert harness.emissions == expected
+        assert external == expected
+
+
 class TestHarnessLayers:
     def test_layer_stack_push_pop_quit(self):
         app = LayerApp()

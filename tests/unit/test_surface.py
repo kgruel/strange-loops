@@ -1,6 +1,6 @@
 """Tests for Surface emit mechanism."""
 
-from painted.tui import Surface, Emit, Layer, Stay, Pop, Quit
+from painted.tui import Layer, Pop, Quit, Stay, Surface
 
 
 class TestEmitWithCallback:
@@ -83,6 +83,7 @@ class TestAutoEmitKinds:
 
 # -- Helpers for action auto-emission tests ----------------------------------
 
+
 def _make_layer(action_fn):
     """Create a Layer whose handle returns the action from action_fn(key)."""
     return Layer(
@@ -109,7 +110,10 @@ class TestActionAutoEmission:
         state = {"layers": (layer,)}
 
         new_state, should_quit, pop_result = surface.handle_key(
-            "j", state, _get_layers, _set_layers,
+            "j",
+            state,
+            _get_layers,
+            _set_layers,
         )
 
         assert not should_quit
@@ -123,7 +127,10 @@ class TestActionAutoEmission:
         state = {"layers": (layer,)}
 
         new_state, should_quit, pop_result = surface.handle_key(
-            "q", state, _get_layers, _set_layers,
+            "q",
+            state,
+            _get_layers,
+            _set_layers,
         )
 
         assert should_quit
@@ -138,7 +145,10 @@ class TestActionAutoEmission:
         state = {"layers": (base, top)}
 
         new_state, should_quit, pop_result = surface.handle_key(
-            "enter", state, _get_layers, _set_layers,
+            "enter",
+            state,
+            _get_layers,
+            _set_layers,
         )
 
         assert not should_quit
@@ -154,7 +164,10 @@ class TestActionAutoEmission:
         state = {"layers": (base, top)}
 
         new_state, should_quit, pop_result = surface.handle_key(
-            "escape", state, _get_layers, _set_layers,
+            "escape",
+            state,
+            _get_layers,
+            _set_layers,
         )
 
         assert not should_quit
@@ -168,7 +181,10 @@ class TestActionAutoEmission:
         state = {"layers": (layer,)}
 
         new_state, should_quit, pop_result = surface.handle_key(
-            "q", state, _get_layers, _set_layers,
+            "q",
+            state,
+            _get_layers,
+            _set_layers,
         )
 
         assert should_quit

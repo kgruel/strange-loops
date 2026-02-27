@@ -20,7 +20,8 @@ import pytest
 
 _PROJECT = Path(__file__).resolve().parent.parent.parent
 _spec = importlib.util.spec_from_file_location(
-    "_demo_rendering", _PROJECT / "demos" / "patterns" / "rendering.py",
+    "_demo_rendering",
+    _PROJECT / "demos" / "patterns" / "rendering.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _mod

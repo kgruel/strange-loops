@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ..cell import Style, Cell
-from ..block import Block
 from .._text_width import char_width, display_width, index_for_col, take_prefix
+from ..block import Block
+from ..cell import Cell, Style
 
 
 @dataclass(frozen=True)
@@ -19,21 +19,21 @@ class TextInputState:
 
     def insert(self, ch: str) -> TextInputState:
         """Insert character(s) at cursor position."""
-        new_text = self.text[:self.cursor] + ch + self.text[self.cursor:]
+        new_text = self.text[: self.cursor] + ch + self.text[self.cursor :]
         return replace(self, text=new_text, cursor=self.cursor + len(ch))
 
     def delete_back(self) -> TextInputState:
         """Delete character before cursor (backspace)."""
         if self.cursor == 0:
             return self
-        new_text = self.text[:self.cursor - 1] + self.text[self.cursor:]
+        new_text = self.text[: self.cursor - 1] + self.text[self.cursor :]
         return replace(self, text=new_text, cursor=self.cursor - 1)
 
     def delete_forward(self) -> TextInputState:
         """Delete character at cursor (delete key)."""
         if self.cursor >= len(self.text):
             return self
-        new_text = self.text[:self.cursor] + self.text[self.cursor + 1:]
+        new_text = self.text[: self.cursor] + self.text[self.cursor + 1 :]
         return replace(self, text=new_text)
 
     def move_left(self) -> TextInputState:
@@ -118,7 +118,7 @@ def text_input(
         return Block([cells], width)
 
     # Extract visible portion of text
-    tail = state.text[state.scroll_offset:]
+    tail = state.text[state.scroll_offset :]
     visible_text, _ = take_prefix(tail, width)
 
     cells: list[Cell] = []
@@ -138,8 +138,8 @@ def text_input(
 
     # Cursor at end of visible text: render cursor as a space cell
     if focused:
-        cursor_col = display_width(state.text[:state.cursor])
-        offset_col = display_width(state.text[:state.scroll_offset])
+        cursor_col = display_width(state.text[: state.cursor])
+        offset_col = display_width(state.text[: state.scroll_offset])
         cursor_vis_col = cursor_col - offset_col
         if 0 <= cursor_vis_col < width and cursor_vis_col == used_cols:
             cells.append(Cell(" ", cursor_style))

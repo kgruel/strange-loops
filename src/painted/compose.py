@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from enum import Enum
 
-from .block import Block
-from .cell import Style, Cell
-from .borders import BorderChars, ROUNDED
 from ._text_width import char_width, display_width
+from .block import Block
+from .borders import ROUNDED, BorderChars
+from .cell import Cell, Style
 
 
 class Align(Enum):
-    START = "start"    # top or left
+    START = "start"  # top or left
     CENTER = "center"
-    END = "end"        # bottom or right
+    END = "end"  # bottom or right
 
 
-def join_horizontal(*blocks: Block, gap: int = 0,
-                    align: Align = Align.START) -> Block:
+def join_horizontal(*blocks: Block, gap: int = 0, align: Align = Align.START) -> Block:
     """Join blocks left-to-right with optional gap and vertical alignment."""
     if not blocks:
         return Block.empty(0, 0)
@@ -27,9 +26,7 @@ def join_horizontal(*blocks: Block, gap: int = 0,
 
     rows: list[list[Cell]] = [[] for _ in range(max_height)]
     has_ids = any((b.id is not None) or (b._ids is not None) for b in blocks)
-    ids_rows: list[list[str | None]] | None = (
-        [[] for _ in range(max_height)] if has_ids else None
-    )
+    ids_rows: list[list[str | None]] | None = [[] for _ in range(max_height)] if has_ids else None
     gap_cell = Cell(" ", Style())
 
     for i, block in enumerate(blocks):
@@ -63,8 +60,7 @@ def join_horizontal(*blocks: Block, gap: int = 0,
     return Block(rows, total_width, ids=ids_rows)
 
 
-def join_vertical(*blocks: Block, gap: int = 0,
-                  align: Align = Align.START) -> Block:
+def join_vertical(*blocks: Block, gap: int = 0, align: Align = Align.START) -> Block:
     """Join blocks top-to-bottom with optional gap and horizontal alignment."""
     if not blocks:
         return Block.empty(0, 0)
@@ -118,11 +114,17 @@ def join_vertical(*blocks: Block, gap: int = 0,
     return Block(rows, max_width, ids=ids_rows)
 
 
-def pad(block: Block, *, left: int = 0, right: int = 0,
-        top: int = 0, bottom: int = 0, style: Style = Style()) -> Block:
+def pad(
+    block: Block,
+    *,
+    left: int = 0,
+    right: int = 0,
+    top: int = 0,
+    bottom: int = 0,
+    style: Style = Style(),
+) -> Block:
     """Add empty cell padding around a block."""
     new_width = block.width + left + right
-    new_height = block.height + top + bottom
     space = Cell(" ", style)
 
     rows: list[list[Cell]] = []
@@ -164,9 +166,14 @@ def pad(block: Block, *, left: int = 0, right: int = 0,
     return Block(rows, new_width, ids=ids_rows)
 
 
-def border(block: Block, chars: BorderChars = ROUNDED,
-           style: Style = Style(), title: str | None = None,
-           title_style: Style | None = None, id: str | None = None) -> Block:
+def border(
+    block: Block,
+    chars: BorderChars = ROUNDED,
+    style: Style = Style(),
+    title: str | None = None,
+    title_style: Style | None = None,
+    id: str | None = None,
+) -> Block:
     """Wrap a block with a 1-cell border, optionally with a title in the top row."""
     new_width = block.width + 2
     rows: list[list[Cell]] = []
@@ -177,9 +184,11 @@ def border(block: Block, chars: BorderChars = ROUNDED,
         border_id = block.id
 
     # Top border
-    top_row = ([Cell(chars.top_left, style)]
-               + [Cell(chars.horizontal, style)] * block.width
-               + [Cell(chars.top_right, style)])
+    top_row = (
+        [Cell(chars.top_left, style)]
+        + [Cell(chars.horizontal, style)] * block.width
+        + [Cell(chars.top_right, style)]
+    )
 
     # Paint title into top row if provided
     title_width = display_width(title) if title else 0
@@ -213,9 +222,9 @@ def border(block: Block, chars: BorderChars = ROUNDED,
 
     # Content rows with vertical borders
     for row_idx in range(block.height):
-        row = ([Cell(chars.vertical, style)]
-               + list(block.row(row_idx))
-               + [Cell(chars.vertical, style)])
+        row = (
+            [Cell(chars.vertical, style)] + list(block.row(row_idx)) + [Cell(chars.vertical, style)]
+        )
         rows.append(row)
         if ids_rows is not None:
             inner_ids: list[str | None]
@@ -228,9 +237,11 @@ def border(block: Block, chars: BorderChars = ROUNDED,
             ids_rows.append([border_id] + inner_ids + [border_id])
 
     # Bottom border
-    bottom_row = ([Cell(chars.bottom_left, style)]
-                  + [Cell(chars.horizontal, style)] * block.width
-                  + [Cell(chars.bottom_right, style)])
+    bottom_row = (
+        [Cell(chars.bottom_left, style)]
+        + [Cell(chars.horizontal, style)] * block.width
+        + [Cell(chars.bottom_right, style)]
+    )
     rows.append(bottom_row)
     if ids_rows is not None:
         ids_rows.append([border_id] * new_width)
@@ -259,12 +270,12 @@ def truncate(block: Block, width: int, ellipsis: str = "…") -> Block:
             if ids_rows is not None:
                 ids_rows.append([block._ids[row_idx][0]])
         else:
-            new_row = list(src_row[:width - 1])
+            new_row = list(src_row[: width - 1])
             new_row.append(Cell(ellipsis, src_row[width - 1].style))
             rows.append(new_row)
             if ids_rows is not None:
                 src_ids = block._ids[row_idx]
-                new_ids = list(src_ids[:width - 1])
+                new_ids = list(src_ids[: width - 1])
                 new_ids.append(src_ids[width - 1])
                 ids_rows.append(new_ids)
 

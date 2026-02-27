@@ -18,35 +18,53 @@ For CLI harness and in-place rendering:
 """
 
 # Primitives
-from .cell import Style, Cell, EMPTY_CELL
-from .span import Span, Line
+# Display
+import json as _json
+import sys as _sys
+from collections.abc import Callable as _Callable
+from typing import Any as _Any
+from typing import TextIO as _TextIO
+
 from .block import Block, Wrap
+from .borders import ASCII, DOUBLE, HEAVY, LIGHT, ROUNDED, BorderChars
+from .cell import EMPTY_CELL, Cell, Style
 
 # Composition
-from .compose import Align, join_horizontal, join_vertical, join_responsive, pad, border, truncate, vslice
+from .compose import (
+    Align,
+    border,
+    join_horizontal,
+    join_responsive,
+    join_vertical,
+    pad,
+    truncate,
+    vslice,
+)
 from .cursor import Cursor, CursorMode
-from .viewport import Viewport
-from .borders import BorderChars, ROUNDED, HEAVY, DOUBLE, LIGHT, ASCII
-
-# Output
-from .writer import Writer, ColorDepth, print_block
 
 # Fidelity (CLI harness)
 from .fidelity import (
-    # New API
-    Zoom,
-    OutputMode,
-    Format,
     CliContext,
     CliRunner,
-    run_cli,
+    Format,
+    OutputMode,
+    # New API
+    Zoom,
     add_cli_args,
-    parse_zoom,
-    parse_mode,
-    parse_format,
-    resolve_mode,
-    resolve_format,
     detect_context,
+    parse_format,
+    parse_mode,
+    parse_zoom,
+    resolve_format,
+    resolve_mode,
+    run_cli,
+)
+from .icon_set import (
+    ASCII_ICONS,
+    IconSet,
+    current_icons,
+    reset_icons,
+    use_icons,
 )
 
 # In-place rendering
@@ -54,27 +72,19 @@ from .inplace import InPlaceRenderer
 
 # Aesthetic
 from .palette import (
-    Palette,
     DEFAULT_PALETTE,
-    NORD_PALETTE,
     MONO_PALETTE,
+    NORD_PALETTE,
+    Palette,
     current_palette,
-    use_palette,
     reset_palette,
+    use_palette,
 )
-from .icon_set import (
-    IconSet,
-    ASCII_ICONS,
-    current_icons,
-    use_icons,
-    reset_icons,
-)
+from .span import Line, Span
+from .viewport import Viewport
 
-# Display
-import json as _json
-import sys as _sys
-from typing import Any as _Any, Callable as _Callable, TextIO as _TextIO
-
+# Output
+from .writer import ColorDepth, Writer, print_block
 
 _MISSING = object()
 

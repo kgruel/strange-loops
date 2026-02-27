@@ -38,9 +38,17 @@ def _dataclass_frozen_from_decorators(class_def: ast.ClassDef) -> bool | None:
     for decorator in class_def.decorator_list:
         if isinstance(decorator, ast.Name) and decorator.id == "dataclass":
             return False
-        if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name) and decorator.func.id == "dataclass":
+        if (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "dataclass"
+        ):
             for kw in decorator.keywords:
-                if kw.arg == "frozen" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                if (
+                    kw.arg == "frozen"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True
+                ):
                     return True
             return False
     return None
@@ -74,7 +82,9 @@ def test_state_dataclasses_declared_frozen() -> None:
 
             if node.name.endswith("State") or node.name in must_be_frozen:
                 frozen = _dataclass_frozen_from_decorators(node)
-                assert frozen is True, f"{py_file}: class {node.name} must be @dataclass(frozen=True)"
+                assert frozen is True, (
+                    f"{py_file}: class {node.name} must be @dataclass(frozen=True)"
+                )
 
 
 def test_block_rows_private_not_accessed_outside_block() -> None:
@@ -84,27 +94,29 @@ def test_block_rows_private_not_accessed_outside_block() -> None:
     for py_file in painted_root.rglob("*.py"):
         if py_file == block_py:
             continue
-        assert "._rows" not in py_file.read_text(encoding="utf-8"), f"{py_file} accesses Block._rows directly"
+        assert "._rows" not in py_file.read_text(encoding="utf-8"), (
+            f"{py_file} accesses Block._rows directly"
+        )
 
 
 def test_runtime_state_dataclasses_are_frozen() -> None:
-    from painted.borders import BorderChars
-    from painted.cell import Cell, Style
     from painted._components.data_explorer import DataExplorerState
     from painted._components.list_view import ListState
     from painted._components.progress import ProgressState
     from painted._components.spinner import SpinnerState
     from painted._components.table import TableState
     from painted._components.text_input import TextInputState
+    from painted.borders import BorderChars
+    from painted.cell import Cell, Style
     from painted.cursor import Cursor
     from painted.fidelity import CliContext
     from painted.focus import Focus
+    from painted.icon_set import IconSet
+    from painted.palette import Palette
     from painted.region import Region
     from painted.search import Search
     from painted.span import Line, Span
     from painted.viewport import Viewport
-    from painted.icon_set import IconSet
-    from painted.palette import Palette
 
     for cls in (
         Region,

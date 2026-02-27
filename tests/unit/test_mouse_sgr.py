@@ -134,4 +134,3 @@ def test_keyboardinput_mouse_events_filtered_by_get_key():
 def test_keyboardinput_malformed_sgr_sequence_degrades_to_escape():
     # Missing coordinates => parse_sgr_mouse returns None => KeyboardInput returns "escape".
     assert _get_input_from_bytes(b"\x1b[<0;10M") == "escape"
-

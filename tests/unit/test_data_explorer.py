@@ -1,10 +1,7 @@
 """Tests for the data_explorer component."""
 
-import pytest
-
 from painted.views import (
     DataExplorerState,
-    DataNode,
     data_explorer,
     flatten,
 )

@@ -1,10 +1,11 @@
 """Sparkline rendering with Palette and IconSet."""
+
 from __future__ import annotations
 
-from painted.cell import Style
 from painted._components.sparkline import sparkline, sparkline_with_range
-from painted.palette import MONO_PALETTE, reset_palette, use_palette
+from painted.cell import Style
 from painted.icon_set import ASCII_ICONS, reset_icons, use_icons
+from painted.palette import MONO_PALETTE, reset_palette
 
 
 def test_sparkline_default():
@@ -56,4 +57,3 @@ def test_sparkline_style_overrides_palette():
     custom = Style(fg="magenta")
     block = sparkline([1, 2, 3], width=3, style=custom, palette=MONO_PALETTE)
     assert block.row(0)[0].style.fg == "magenta"
-

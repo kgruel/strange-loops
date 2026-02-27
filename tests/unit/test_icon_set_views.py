@@ -1,10 +1,11 @@
 """Views that consume IconSet for glyph vocabulary."""
+
 from __future__ import annotations
 
+from painted._components.spinner import SpinnerState, spinner
 from painted.cell import Style
 from painted.icon_set import ASCII_ICONS, reset_icons, use_icons
-from painted._components.spinner import SpinnerState, spinner
-from painted.views import tree_lens, chart_lens
+from painted.views import chart_lens, tree_lens
 
 
 def test_spinner_ambient_icons():
@@ -44,4 +45,3 @@ def test_chart_lens_explicit_icons():
     # ASCII sparkline chars should all be ASCII
     for cell in row:
         assert ord(cell.char) < 128
-

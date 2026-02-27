@@ -116,4 +116,3 @@ class TestInPlaceRenderer:
 
         with pytest.raises(RuntimeError, match="outside of a context manager"):
             renderer.clear()
-

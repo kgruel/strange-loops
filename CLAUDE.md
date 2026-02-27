@@ -5,8 +5,14 @@ Terminal UI framework built on cell buffers. Answers: **where is state displayed
 ## Build & Test
 
 ```bash
-uv run --package painted pytest tests/ -q
+./dev check              # success gate: arch → ty + format → unit → golden
+./dev test [-v]          # pytest wrapper, passthrough args
+./dev lint               # ty check + ruff format check
+./dev cov [--html]       # coverage report (target: ≥93%)
+./dev fmt                # auto-format (ruff)
 ```
+
+`./dev check` must pass before any commit. Lint is **ty** (type checking) + **ruff** (formatting only).
 
 ## Atom
 

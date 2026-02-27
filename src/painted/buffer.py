@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from wcwidth import wcwidth
 
-from .cell import Cell, Style, EMPTY_CELL
+from .cell import EMPTY_CELL, Cell, Style
 
 
 @dataclass
@@ -35,7 +34,7 @@ class Buffer:
             self._ids = [None] * (self.width * self.height)
         return self._ids
 
-    def _index(self, x: int, y: int) -> Optional[int]:
+    def _index(self, x: int, y: int) -> int | None:
         if 0 <= x < self.width and 0 <= y < self.height:
             return y * self.width + x
         return None
@@ -223,7 +222,7 @@ class BufferView:
     def height(self) -> int:
         return self._h
 
-    def _clip(self, x: int, y: int) -> Optional[tuple[int, int]]:
+    def _clip(self, x: int, y: int) -> tuple[int, int] | None:
         """Translate and clip. Returns absolute coords or None if out of bounds."""
         if 0 <= x < self._w and 0 <= y < self._h:
             return (self._ox + x, self._oy + y)

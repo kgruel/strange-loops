@@ -7,7 +7,7 @@ import re
 
 from painted.buffer import CellWrite
 from painted.cell import Cell, Style
-from painted.writer import Writer, ColorDepth, ScrollOp
+from painted.writer import ColorDepth, ScrollOp, Writer
 
 
 def _capture(ops) -> str:

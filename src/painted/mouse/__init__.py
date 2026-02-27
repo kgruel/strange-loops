@@ -3,7 +3,7 @@
 SGR mouse protocol support for interactive applications.
 """
 
-from .._mouse import MouseEvent, MouseButton, MouseAction
+from .._mouse import MouseAction, MouseButton, MouseEvent
 
 __all__ = [
     "MouseEvent",

@@ -1,7 +1,5 @@
 """Tests for Surface on_start / on_stop lifecycle hooks."""
 
-import asyncio
-from contextlib import nullcontext
 from unittest.mock import MagicMock
 
 import pytest

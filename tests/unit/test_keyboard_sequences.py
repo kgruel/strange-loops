@@ -112,7 +112,7 @@ def test_utf8_multibyte_assembly(text: str):
 
 def test_utf8_incomplete_sequence_degrades_gracefully():
     # 0xC3 expects one continuation byte; omit it.
-    assert _get_input_from_stream([b"\xC3", None]) == "�"
+    assert _get_input_from_stream([b"\xc3", None]) == "�"
 
 
 @pytest.mark.parametrize(
@@ -175,9 +175,7 @@ def test_utf8_continuation_uses_generous_timeout():
 
     timeouts: list[float] = []
     # é = 0xC3 0xA9 (2-byte UTF-8)
-    stream = iter([b"\xC3", b"\xA9"])
-
-    original_read_byte = kb._read_byte
+    stream = iter([b"\xc3", b"\xa9"])
 
     def _tracking_read_byte(timeout: float = 0):
         timeouts.append(timeout)

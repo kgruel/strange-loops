@@ -4,7 +4,18 @@ from dataclasses import dataclass, replace
 
 import pytest
 
-from painted.tui import Buffer, BufferView, Layer, Stay, Pop, Push, Quit, Action, process_key, render_layers
+from painted.tui import (
+    Action,
+    Buffer,
+    BufferView,
+    Layer,
+    Pop,
+    Push,
+    Quit,
+    Stay,
+    process_key,
+    render_layers,
+)
 
 
 @dataclass
@@ -92,7 +103,9 @@ class TestProcessKeyStay:
     def test_stay_keeps_layer_returns_new_state(self):
         """Stay action keeps the layer and returns the new state."""
 
-        def handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, replace(app_state, counter=app_state.counter + 1), Stay()
 
         layer = Layer(name="base", state=None, handle=handle, render=lambda ls, app, v: None)
@@ -122,10 +135,14 @@ class TestProcessKeyPop:
     def test_pop_removes_top_layer(self):
         """Pop action removes top layer from stack."""
 
-        def base_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Stay()
 
-        def modal_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, replace(app_state, counter=99), Pop()
 
         base = Layer(name="base", state=None, handle=base_handle, render=lambda ls, app, v: None)
@@ -143,7 +160,9 @@ class TestProcessKeyPop:
     def test_pop_does_not_remove_base_layer(self):
         """Pop action does not remove the last (base) layer."""
 
-        def handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, replace(app_state, counter=42), Pop()
 
         base = Layer(name="base", state=None, handle=handle, render=lambda ls, app, v: None)
@@ -161,10 +180,14 @@ class TestProcessKeyPop:
     def test_pop_with_result(self):
         """Pop action can return a result value."""
 
-        def modal_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Pop(result="selected_item")
 
-        def base_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Stay()
 
         base = Layer(name="base", state=None, handle=base_handle, render=lambda ls, app, v: None)
@@ -185,12 +208,16 @@ class TestProcessKeyPush:
     def test_push_adds_new_layer(self):
         """Push action adds a new layer on top of the stack."""
 
-        def modal_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Stay()
 
         modal = Layer(name="modal", state=None, handle=modal_handle, render=lambda ls, app, v: None)
 
-        def base_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, replace(app_state, counter=10), Push(layer=modal)
 
         base = Layer(name="base", state=None, handle=base_handle, render=lambda ls, app, v: None)
@@ -208,12 +235,16 @@ class TestProcessKeyPush:
     def test_top_layer_handles_next_key(self):
         """After Push, the new top layer handles subsequent keys."""
 
-        def modal_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, replace(app_state, counter=app_state.counter + 100), Stay()
 
         modal = Layer(name="modal", state=None, handle=modal_handle, render=lambda ls, app, v: None)
 
-        def base_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             if key == "m":
                 return None, app_state, Push(layer=modal)
             return None, replace(app_state, counter=app_state.counter + 1), Stay()
@@ -236,7 +267,9 @@ class TestProcessKeyQuit:
     def test_quit_signals_should_quit(self):
         """Quit action returns should_quit=True."""
 
-        def handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             if key == "q":
                 return None, app_state, Quit()
             return None, app_state, Stay()
@@ -252,10 +285,14 @@ class TestProcessKeyQuit:
     def test_quit_from_modal_layer(self):
         """Quit from a modal layer also signals should_quit."""
 
-        def base_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Stay()
 
-        def modal_handle(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: None, app_state: AppState
+        ) -> tuple[None, AppState, Action]:
             return None, app_state, Quit()
 
         base = Layer(name="base", state=None, handle=base_handle, render=lambda ls, app, v: None)
@@ -295,7 +332,9 @@ class TestLayerState:
     def test_layer_state_independent_of_app_state(self):
         """Layer state and app state are updated independently."""
 
-        def handle(key: str, layer_state: dict, app_state: AppState) -> tuple[dict, AppState, Action]:
+        def handle(
+            key: str, layer_state: dict, app_state: AppState
+        ) -> tuple[dict, AppState, Action]:
             new_layer_state = {**layer_state, "count": layer_state.get("count", 0) + 1}
             new_app_state = replace(app_state, counter=app_state.counter + 10)
             return new_layer_state, new_app_state, Stay()
@@ -311,12 +350,18 @@ class TestLayerState:
     def test_pushed_layer_has_its_own_state(self):
         """A pushed layer starts with its own initial state."""
 
-        def modal_handle(key: str, layer_state: str, app_state: AppState) -> tuple[str, AppState, Action]:
+        def modal_handle(
+            key: str, layer_state: str, app_state: AppState
+        ) -> tuple[str, AppState, Action]:
             return layer_state + "!", app_state, Stay()
 
-        modal = Layer(name="modal", state="hello", handle=modal_handle, render=lambda ls, app, v: None)
+        modal = Layer(
+            name="modal", state="hello", handle=modal_handle, render=lambda ls, app, v: None
+        )
 
-        def base_handle(key: str, layer_state: int, app_state: AppState) -> tuple[int, AppState, Action]:
+        def base_handle(
+            key: str, layer_state: int, app_state: AppState
+        ) -> tuple[int, AppState, Action]:
             if key == "m":
                 return layer_state, app_state, Push(layer=modal)
             return layer_state + 1, app_state, Stay()

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import Enum
-from typing import Sequence
 
-from .cell import Style, Cell, EMPTY_CELL
-from .buffer import Buffer, BufferView
 from ._text_width import char_width, display_width
+from .buffer import Buffer, BufferView
+from .cell import Cell, Style
 
 
 class Wrap(Enum):
-    NONE = "none"        # single line, truncate at width
-    CHAR = "char"        # break at any character
-    WORD = "word"        # break at word boundaries
+    NONE = "none"  # single line, truncate at width
+    CHAR = "char"  # break at any character
+    WORD = "word"  # break at word boundaries
     ELLIPSIS = "ellipsis"  # truncate with "…"
 
 
@@ -37,9 +37,7 @@ class Block:
         if __debug__:
             for row_idx, row in enumerate(frozen_rows):
                 if len(row) != width:
-                    raise ValueError(
-                        f"Block row {row_idx} width {len(row)} != block width {width}"
-                    )
+                    raise ValueError(f"Block row {row_idx} width {len(row)} != block width {width}")
             if frozen_ids is not None:
                 if len(frozen_ids) != len(frozen_rows):
                     raise ValueError(
@@ -63,8 +61,14 @@ class Block:
         object.__setattr__(self, name, value)
 
     @staticmethod
-    def text(content: str, style: Style, *, width: int | None = None,
-             wrap: Wrap = Wrap.NONE, id: str | None = None) -> Block:
+    def text(
+        content: str,
+        style: Style,
+        *,
+        width: int | None = None,
+        wrap: Wrap = Wrap.NONE,
+        id: str | None = None,
+    ) -> Block:
         """Create a block from text content with optional wrapping."""
         if width is not None and width <= 0:
             return Block([[]], 0, id=id)
@@ -100,8 +104,10 @@ class Block:
         if wrap == Wrap.WORD:
             # Break at word boundaries
             lines = _word_wrap(content, width)
-            rows = [_pad_row(_cells_from_text(line, style, max_width=width), width, style)
-                    for line in lines]
+            rows = [
+                _pad_row(_cells_from_text(line, style, max_width=width), width, style)
+                for line in lines
+            ]
             return Block(rows, width, id=id)
 
         raise ValueError(f"Unknown wrap mode: {wrap}")

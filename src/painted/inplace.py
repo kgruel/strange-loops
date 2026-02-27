@@ -40,7 +40,7 @@ class InPlaceRenderer:
         self._height = 0  # lines written by last frame
         self._active = False
 
-    def __enter__(self) -> "InPlaceRenderer":
+    def __enter__(self) -> InPlaceRenderer:
         """Enter context: hide cursor."""
         self._writer.hide_cursor()
         self._active = True
@@ -52,7 +52,7 @@ class InPlaceRenderer:
             self._writer.show_cursor()
             self._active = False
 
-    def render(self, block: "Block") -> None:
+    def render(self, block: Block) -> None:
         """Render block, replacing previous output.
 
         First call: just write lines.
@@ -74,7 +74,7 @@ class InPlaceRenderer:
         self._write_block(block)
         self._height = block.height
 
-    def _write_block(self, block: "Block") -> None:
+    def _write_block(self, block: Block) -> None:
         """Write block content line by line with ANSI styling."""
         _write_block_ansi(block, self._writer, self._stream)
         self._stream.flush()
@@ -92,7 +92,7 @@ class InPlaceRenderer:
             self._stream.flush()
             self._height = 0
 
-    def finalize(self, block: "Block | None" = None) -> None:
+    def finalize(self, block: Block | None = None) -> None:
         """Finalize output: clear, optionally print final block, show cursor.
 
         Call this to "lock in" a final state. The cursor is shown and

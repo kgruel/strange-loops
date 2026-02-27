@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from wcwidth import wcswidth
 
 from .buffer import BufferView
-from .cell import Style, Cell, EMPTY_CELL
+from .cell import EMPTY_CELL, Cell, Style
+
+if TYPE_CHECKING:
+    from .block import Block
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +82,7 @@ class Line:
                 break
         return Line(spans=tuple(kept), style=self.style)
 
-    def to_block(self, width: int) -> "Block":
+    def to_block(self, width: int) -> Block:
         """Convert this Line to a Block of the given width.
 
         Builds cells directly from spans, merging Line style onto each span.

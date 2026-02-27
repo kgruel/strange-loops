@@ -6,7 +6,7 @@ not code points (len()).
 
 from __future__ import annotations
 
-from wcwidth import wcwidth, wcswidth
+from wcwidth import wcswidth, wcwidth
 
 
 def display_width(text: str) -> int:
@@ -97,4 +97,3 @@ def index_for_col(text: str, col: int) -> int:
         used += w
 
     return len(text)
-

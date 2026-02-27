@@ -1,7 +1,8 @@
 """Tests for Focus primitive and navigation functions."""
 
 import pytest
-from painted.tui import Focus, ring_next, ring_prev, linear_next, linear_prev
+
+from painted.tui import Focus, linear_next, linear_prev, ring_next, ring_prev
 
 
 class TestFocus:

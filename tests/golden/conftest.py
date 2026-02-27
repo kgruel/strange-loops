@@ -15,6 +15,19 @@ import pytest
 GOLDENS_DIR = Path(__file__).parent / "goldens"
 
 
+@pytest.fixture(autouse=True)
+def _reset_ambient():
+    """Reset icon/palette ContextVars so test order doesn't matter."""
+    from painted.icon_set import reset_icons
+    from painted.palette import reset_palette
+
+    reset_icons()
+    reset_palette()
+    yield
+    reset_icons()
+    reset_palette()
+
+
 @dataclass
 class Golden:
     """Compare rendered text against committed golden files."""

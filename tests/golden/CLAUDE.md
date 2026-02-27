@@ -9,12 +9,15 @@ zoom level is compared against committed golden files.
 Golden files are the contract. When output changes legitimately,
 `--update-goldens` regenerates them; the git diff is the review.
 
-## The Pattern
+## Two Shapes
 
-Every `run_cli` demo exposes `_fetch()` and `_render(ctx, data)`. A golden
-test imports the demo module via `importlib`, renders at each zoom level with
-a fixed `CliContext` (STATIC, PLAIN, width=80), and asserts the plain-text
-output matches.
+**run_cli demos** (testing, live, fidelity) expose `_fetch()` and
+`_render(ctx, data)`. Parametrize over zoom levels, render to Block, compare.
+
+**Direct-output demos** (rendering) have standalone functions that write to
+stdout via `print_block`/`show`. Capture stdout with `redirect_stdout`, compare.
+
+## The run_cli Pattern
 
 Each test file is self-contained with three small helpers:
 
@@ -53,10 +56,31 @@ def test_<name>_demo(golden, zoom):
     golden.assert_match(_block_to_text(block), "output")
 ```
 
+## The stdout-capture Pattern
+
+For demos that call `print_block`/`show` directly:
+
+```python
+from contextlib import redirect_stdout
+from io import StringIO
+
+_DEMOS = {"explicit": _mod.demo_explicit, "custom": _mod.demo_custom, ...}
+
+def _capture(fn) -> str:
+    buf = StringIO()
+    with redirect_stdout(buf):
+        fn()
+    return buf.getvalue()
+
+@pytest.mark.parametrize("mode", list(_DEMOS.keys()))
+def test_rendering_demo(golden, mode):
+    golden.assert_match(_capture(_DEMOS[mode]), "output")
+```
+
 ## Adding a New Demo Test
 
-1. Ensure the demo has deterministic `_fetch()` and `_render(ctx, data)` functions
-2. Create `tests/golden/test_demo_<name>.py` following the pattern above
+1. Ensure the demo has deterministic output (no real I/O in the render path)
+2. Create `tests/golden/test_demo_<name>.py` following whichever pattern fits
 3. Bootstrap: `uv run --package painted pytest tests/golden/test_demo_<name>.py --update-goldens -q`
 4. Commit the golden files — they're the regression contract
 
@@ -69,6 +93,8 @@ which uses `SAMPLE_DISK` rather than calling `_fetch()`.
 ## Infrastructure
 
 - `conftest.py` — `Golden` class + `golden` fixture (auto-discovered by pytest)
+- `_reset_ambient` autouse fixture — resets icon/palette ContextVars before
+  each test so test execution order doesn't matter (demos can mutate these)
 - `--update-goldens` flag — registered in root `tests/conftest.py` (pytest
   requires early hook registration, before collection reaches subdirectories)
 - Demo imports use `importlib.util.spec_from_file_location` — no `sys.path`
@@ -96,11 +122,13 @@ uv run --package painted pytest tests/ -q
 tests/golden/
   CLAUDE.md              # this file
   conftest.py            # golden fixture + shared helpers
-  test_demo_testing.py   # testing.py demo (TestSurface, emissions, layers)
-  test_demo_live.py      # live.py demo (health checks, spinners, progress)
-  test_demo_fidelity.py  # fidelity.py demo (disk usage, sample data)
+  test_demo_testing.py   # testing.py (TestSurface, emissions, layers)
+  test_demo_live.py      # live.py (health checks, spinners, progress)
+  test_demo_fidelity.py  # fidelity.py (disk usage, sample data)
+  test_demo_rendering.py # rendering.py (lens API, custom lens, palette)
   goldens/               # committed expected output
     test_demo_testing/
     test_demo_live/
     test_demo_fidelity/
+    test_demo_rendering/
 ```

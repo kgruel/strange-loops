@@ -17,10 +17,16 @@ Demonstrate zoom variation (orthogonal to width):
     uv run demos/patterns/responsive.py        # summary
     uv run demos/patterns/responsive.py -v     # detailed
     uv run demos/patterns/responsive.py -vv    # full
+
+Interactive mode — resize terminal to watch breakpoints shift live:
+
+    uv run demos/patterns/responsive.py -i
+    uv run demos/patterns/responsive.py -i -v  # starts at DETAILED zoom
 """
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from dataclasses import dataclass
 
@@ -28,6 +34,8 @@ from painted import (
     Align,
     Block,
     CliContext,
+    Format,
+    OutputMode,
     Style,
     Wrap,
     Zoom,
@@ -36,11 +44,13 @@ from painted import (
     join_responsive,
     join_vertical,
     pad,
+    print_block,
     truncate,
     run_cli,
     ROUNDED,
 )
 from painted.palette import current_palette
+from painted.tui import Surface
 
 
 # =============================================================================
@@ -493,6 +503,52 @@ def render_dashboard(ctx: CliContext, data: Dashboard) -> Block:
 
 
 # =============================================================================
+# Interactive surface
+# =============================================================================
+
+
+class ResponsiveSurface(Surface):
+    """Resize terminal to watch breakpoints shift live."""
+
+    def __init__(self, data: Dashboard, *, zoom: Zoom = Zoom.SUMMARY):
+        super().__init__()
+        self._data = data
+        self._zoom = zoom
+        self._width = 80
+        self._height = 24
+
+    def layout(self, width: int, height: int) -> None:
+        self._width = width
+        self._height = height
+
+    def render(self) -> None:
+        if self._buf is None:
+            return
+        self._buf.fill(0, 0, self._width, self._height, " ", Style())
+        ctx = CliContext(
+            zoom=self._zoom,
+            mode=OutputMode.INTERACTIVE,
+            format=Format.ANSI,
+            is_tty=True,
+            width=self._width,
+            height=self._height,
+        )
+        block = render_dashboard(ctx, self._data)
+        block.paint(self._buf, 0, 0)
+        Block.text(
+            " 1-4: zoom  q: quit ",
+            Style(dim=True),
+        ).paint(self._buf, 0, self._height - 1)
+
+    def on_key(self, key: str) -> None:
+        if key == "q":
+            self.quit()
+        elif key in ("1", "2", "3", "4"):
+            self._zoom = Zoom(int(key) - 1)
+            self.mark_dirty()
+
+
+# =============================================================================
 # run_cli integration
 # =============================================================================
 
@@ -505,11 +561,23 @@ def _render(ctx: CliContext, data: Dashboard) -> Block:
     return render_dashboard(ctx, data)
 
 
+def _handle_interactive(ctx: CliContext) -> int:
+    data = SAMPLE
+    if not ctx.is_tty:
+        block = _render(ctx, data)
+        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        return 0
+    surface = ResponsiveSurface(data, zoom=ctx.zoom)
+    asyncio.run(surface.run())
+    return 0
+
+
 def main() -> int:
     return run_cli(
         sys.argv[1:],
         render=_render,
         fetch=_fetch,
+        handlers={OutputMode.INTERACTIVE: _handle_interactive},
         description=__doc__,
         prog="responsive.py",
     )

@@ -305,6 +305,21 @@ class TestInitCommand:
         assert result == 0
         assert (deep / "root.vertex").exists()
 
+    def test_template_flag_parsed(self):
+        parser = create_parser()
+        args = parser.parse_args(["init", "--template", "session"])
+        assert args.template == "session"
+
+    def test_template_flag_short(self):
+        parser = create_parser()
+        args = parser.parse_args(["init", "-t", "tasks"])
+        assert args.template == "tasks"
+
+    def test_no_template_is_none(self):
+        parser = create_parser()
+        args = parser.parse_args(["init"])
+        assert args.template is None
+
 
 class TestDefaultPaths:
     """start/run/store default to LOOPS_HOME/root.vertex when no file given."""
@@ -342,3 +357,53 @@ class TestDefaultPaths:
         parser = create_parser()
         args = parser.parse_args(["start", "my.vertex"])
         assert args.file == "my.vertex"
+
+
+class TestStatusLogParsers:
+    """Parser tests for top-level status and log commands."""
+
+    def test_status_parser(self):
+        parser = create_parser()
+        args = parser.parse_args(["status"])
+        assert args.command == "status"
+
+    def test_status_json_flag(self):
+        parser = create_parser()
+        args = parser.parse_args(["status", "--json"])
+        assert args.json is True
+
+    def test_log_parser(self):
+        parser = create_parser()
+        args = parser.parse_args(["log"])
+        assert args.command == "log"
+
+    def test_log_since_flag(self):
+        parser = create_parser()
+        args = parser.parse_args(["log", "--since", "24h"])
+        assert args.since == "24h"
+
+    def test_log_kind_flag(self):
+        parser = create_parser()
+        args = parser.parse_args(["log", "--kind", "decision"])
+        assert args.kind == "decision"
+
+    def test_emit_without_vertex_arg(self):
+        """When vertex is omitted, argparse fills vertex greedily.
+        Runtime reinterprets via resolution (tested in test_session.py)."""
+        parser = create_parser()
+        args = parser.parse_args(["emit", "decision", "topic=test"])
+        # argparse always fills vertex first — runtime shifts if it doesn't resolve
+        assert args.vertex == "decision"
+        assert args.kind == "topic=test"
+
+    def test_emit_with_vertex_arg(self):
+        parser = create_parser()
+        args = parser.parse_args(["emit", "session", "decision", "topic=test"])
+        assert args.vertex == "session"
+        assert args.kind == "decision"
+
+    def test_no_session_subcommand(self):
+        """session subcommand group has been dissolved."""
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["session", "start"])

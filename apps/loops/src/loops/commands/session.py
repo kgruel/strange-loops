@@ -1,4 +1,4 @@
-"""Session continuity commands."""
+"""Local store commands — status and log."""
 
 from __future__ import annotations
 
@@ -11,66 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-_SESSION_VERTEX = """\
-name "session"
-store "./data/session.db"
-
-loops {
-  decision { fold { items "by" "topic" } }
-  thread   { fold { items "by" "name" } }
-  change   { fold { items "collect" 20 } }
-  task     { fold { items "by" "name" } }
-}
-"""
-
-
 def _observer() -> str:
     """Read observer from LOOPS_OBSERVER env var."""
     return os.environ.get("LOOPS_OBSERVER", "")
 
 
-def _ensure_session_vertex(home: Path) -> Path:
-    """Create session vertex if not present. Returns vertex path."""
-    session_dir = home / "session"
-    vertex_path = session_dir / "session.vertex"
-    if not vertex_path.exists():
-        session_dir.mkdir(parents=True, exist_ok=True)
-        vertex_path.write_text(_SESSION_VERTEX)
-    return vertex_path
-
-
-def _session_vertex_path(home: Path) -> Path:
-    """Return expected session vertex path (does NOT create it)."""
-    return home / "session" / "session.vertex"
-
-
-def _resolve_session_store(home: Path, *, create: bool = False) -> tuple[Path, Path]:
-    """Resolve session vertex and store path.
-
-    With create=True, auto-creates vertex if missing (used by session start).
-    With create=False, raises if vertex doesn't exist (used by read commands).
-
-    Returns (vertex_path, store_path).
-    """
-    if create:
-        vertex_path = _ensure_session_vertex(home)
-    else:
-        vertex_path = _session_vertex_path(home)
-        if not vertex_path.exists():
-            raise FileNotFoundError(
-                "No session initialized. Run 'loops session start' first."
-            )
-
-    from loops.main import _resolve_vertex_store_path
-
-    store_path = _resolve_vertex_store_path(vertex_path)
-    if store_path is None:
-        raise RuntimeError("Session vertex has no store configured")
-    return vertex_path, store_path
-
-
 def _emit_fact(store_path: Path, kind: str, observer: str, payload: dict) -> None:
-    """Emit a fact into the session store."""
+    """Emit a fact into a store."""
     from atoms import Fact
     from engine import SqliteStore
 
@@ -82,6 +29,36 @@ def _emit_fact(store_path: Path, kind: str, observer: str, payload: dict) -> Non
         path=store_path, serialize=Fact.to_dict, deserialize=Fact.from_dict
     ) as store:
         store.append(fact)
+
+
+def _resolve_local_store() -> Path:
+    """Find store via local vertex or LOOPS_HOME fallback.
+
+    Resolution order:
+    1. Local vertex in cwd (*.vertex)
+    2. LOOPS_HOME/session/session.vertex
+
+    Raises FileNotFoundError if neither found.
+    """
+    from loops.main import _find_local_vertex, _resolve_vertex_store_path, loops_home
+
+    # 1. Local vertex in cwd
+    local = _find_local_vertex()
+    if local is not None:
+        store_path = _resolve_vertex_store_path(local)
+        if store_path is not None:
+            return store_path
+
+    # 2. LOOPS_HOME session fallback
+    session_vertex = loops_home() / "session" / "session.vertex"
+    if session_vertex.exists():
+        store_path = _resolve_vertex_store_path(session_vertex)
+        if store_path is not None:
+            return store_path
+
+    raise FileNotFoundError(
+        "No vertex found. Run 'loops init --template session' or 'loops emit <kind> ...' first."
+    )
 
 
 def _latest_by_group(reader, kind: str, group_field: str) -> list[dict]:
@@ -113,39 +90,6 @@ def _format_date(ts) -> str:
     else:
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
     return f"{dt.strftime('%b')} {dt.day}"
-
-
-def cmd_session_start(args: argparse.Namespace) -> int:
-    """Start a session: auto-create vertex, emit start fact, show status."""
-    from loops.main import loops_home
-
-    home = loops_home()
-    try:
-        _vertex_path, store_path = _resolve_session_store(home, create=True)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    observer = getattr(args, "observer", None) or _observer()
-    _emit_fact(store_path, "session.start", observer, {})
-
-    return _print_status(store_path, use_json=False)
-
-
-def cmd_session_end(args: argparse.Namespace) -> int:
-    """End a session: emit end fact."""
-    from loops.main import loops_home
-
-    home = loops_home()
-    try:
-        _vertex_path, store_path = _resolve_session_store(home)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    observer = getattr(args, "observer", None) or _observer()
-    _emit_fact(store_path, "session.end", observer, {})
-    return 0
 
 
 def _print_status(store_path: Path, *, use_json: bool) -> int:
@@ -269,34 +213,29 @@ def _print_status(store_path: Path, *, use_json: bool) -> int:
     return 0
 
 
-def cmd_session_status(args: argparse.Namespace) -> int:
-    """Show session status."""
-    from loops.main import loops_home
-
-    home = loops_home()
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show local store status."""
     try:
-        _vertex_path, store_path = _resolve_session_store(home)
-    except Exception as e:
+        store_path = _resolve_local_store()
+    except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
     return _print_status(store_path, use_json=getattr(args, "json", False))
 
 
-def cmd_session_log(args: argparse.Namespace) -> int:
-    """Show session log."""
+def cmd_log(args: argparse.Namespace) -> int:
+    """Show recent facts from local store."""
     from engine import StoreReader
-    from loops.main import loops_home
 
-    home = loops_home()
     try:
-        _vertex_path, store_path = _resolve_session_store(home)
-    except Exception as e:
+        store_path = _resolve_local_store()
+    except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
     if not store_path.exists():
-        print("No session data yet.")
+        print("No facts yet.")
         return 0
 
     try:
@@ -357,19 +296,3 @@ def cmd_session_log(args: argparse.Namespace) -> int:
         print("No facts in the given time range.")
 
     return 0
-
-
-def cmd_session(args: argparse.Namespace) -> int:
-    """Dispatch session subcommands."""
-    cmd = getattr(args, "session_command", None)
-    if cmd == "start":
-        return cmd_session_start(args)
-    elif cmd == "end":
-        return cmd_session_end(args)
-    elif cmd == "status":
-        return cmd_session_status(args)
-    elif cmd == "log":
-        return cmd_session_log(args)
-    else:
-        print("Usage: loops session {start|end|status|log}", file=sys.stderr)
-        return 1

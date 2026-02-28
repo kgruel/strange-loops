@@ -47,9 +47,62 @@ name "root"
 discover "./**/*.vertex"
 """
 
+_SESSION_VERTEX = """\
+name "session"
+store "./data/session.db"
+
+loops {
+  decision { fold { items "by" "topic" } }
+  thread   { fold { items "by" "name" } }
+  change   { fold { items "collect" 20 } }
+  task     { fold { items "by" "name" } }
+}
+"""
+
+_TASKS_VERTEX = """\
+name "tasks"
+store "./data/tasks.db"
+
+loops {
+  task     { fold { items "by" "name" } }
+  thread   { fold { items "by" "name" } }
+  change   { fold { items "collect" 20 } }
+}
+"""
+
+_TEMPLATES: dict[str, str] = {
+    "session": _SESSION_VERTEX,
+    "tasks": _TASKS_VERTEX,
+}
+
+
+def _find_local_vertex() -> Path | None:
+    """Find a .vertex file in cwd. Returns first match or None."""
+    matches = sorted(Path.cwd().glob("*.vertex"))
+    return matches[0] if matches else None
+
+
+def _init_local_vertex(template: str) -> Path:
+    """Create a vertex + data dir in cwd from a template. Returns vertex path."""
+    content = _TEMPLATES[template]
+    vertex_path = Path.cwd() / f"{template}.vertex"
+    if not vertex_path.exists():
+        vertex_path.write_text(content)
+    data_dir = Path.cwd() / "data"
+    data_dir.mkdir(exist_ok=True)
+    return vertex_path
+
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Initialize a loops config directory with a root vertex."""
+    """Initialize a loops config directory or local vertex from template."""
+    template = getattr(args, "template", None)
+
+    if template:
+        vertex_path = _init_local_vertex(template)
+        print(f"Created {vertex_path}")
+        return 0
+
+    # Default: root vertex in LOOPS_HOME
     home = loops_home()
     root = home / "root.vertex"
     if root.exists():
@@ -564,26 +617,51 @@ def cmd_emit(args: argparse.Namespace) -> int:
         pop_store_has_facts,
     )
 
-    # Allow emit to target a specific template via vertex/template (for multi-template vertices).
+    # Resolve vertex: explicit arg → LOOPS_HOME → local cwd → auto-init
+    #
+    # Argparse ambiguity: with vertex as nargs="?", `emit decision topic=x`
+    # gives vertex="decision", kind="topic=x". We detect this by checking
+    # whether the vertex arg actually resolves. If not, reinterpret it as
+    # the kind and shift args.
     vertex_ref = args.vertex
+    kind = args.kind
+    parts = list(args.parts or [])
     template_qualifier = None
-    if (
-        "/" in vertex_ref
-        and not vertex_ref.endswith(".vertex")
-        and not vertex_ref.startswith("./")
-        and not vertex_ref.startswith("/")
-    ):
-        vertex_ref, template_qualifier = vertex_ref.split("/", 1)
 
-    vertex_path = resolve_vertex(vertex_ref, loops_home()).resolve()
-    if not vertex_path.exists():
-        print(f"Error: {vertex_path} not found", file=sys.stderr)
-        return 1
+    def _is_path_like(s: str) -> bool:
+        return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
 
-    payload = _parse_emit_parts(list(args.parts or []))
+    if vertex_ref is not None:
+        if "/" in vertex_ref and not _is_path_like(vertex_ref):
+            vertex_ref, template_qualifier = vertex_ref.split("/", 1)
+
+        # Try resolving as vertex
+        candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
+        if candidate.exists():
+            vertex_path = candidate
+        elif _is_path_like(vertex_ref):
+            # Explicit path that doesn't exist — error
+            print(f"Error: {candidate} not found", file=sys.stderr)
+            return 1
+        else:
+            # vertex_ref doesn't resolve — reinterpret as kind, shift args
+            parts = [kind] + parts
+            kind = vertex_ref
+            vertex_ref = None
+
+    if vertex_ref is None:
+        # No vertex: try local, then auto-init
+        local = _find_local_vertex()
+        if local is not None:
+            vertex_path = local.resolve()
+        else:
+            vertex_path = _init_local_vertex("session").resolve()
+            print(f"Auto-initialized: {vertex_path}", file=sys.stderr)
+
+    payload = _parse_emit_parts(parts)
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(
-        kind=args.kind,
+        kind=kind,
         ts=ts,
         payload=payload,
         observer=args.observer or "",
@@ -608,7 +686,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
         from engine import SqliteStore
 
         # Special-case: pop facts also materialize the configured .list file.
-        is_pop = args.kind in (POP_ADD_KIND, POP_RM_KIND)
+        is_pop = kind in (POP_ADD_KIND, POP_RM_KIND)
         list_path = None
         header = None
         template_name = None
@@ -665,7 +743,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
                 )
                 return 1
 
-            if args.kind == POP_ADD_KIND:
+            if kind == POP_ADD_KIND:
                 if "key" not in payload:
                     print("Error: pop.add requires key=...", file=sys.stderr)
                     return 1
@@ -677,7 +755,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
                         file=sys.stderr,
                     )
                     return 1
-            if args.kind == POP_RM_KIND and "key" not in payload:
+            if kind == POP_RM_KIND and "key" not in payload:
                 print("Error: pop.rm requires key=...", file=sys.stderr)
                 return 1
 
@@ -748,7 +826,11 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # init
-    subparsers.add_parser("init", help="Initialize loops config directory")
+    init_parser = subparsers.add_parser("init", help="Initialize loops config directory")
+    init_parser.add_argument(
+        "--template", "-t", choices=["session", "tasks"],
+        help="Create a local vertex from template (in cwd)",
+    )
 
     # validate
     validate_parser = subparsers.add_parser(
@@ -818,7 +900,7 @@ def create_parser() -> argparse.ArgumentParser:
     emit_parser = subparsers.add_parser(
         "emit", help="Inject a fact into a vertex store"
     )
-    emit_parser.add_argument("vertex", help="Vertex name or .vertex path")
+    emit_parser.add_argument("vertex", nargs="?", default=None, help="Vertex name or .vertex path (optional; auto-resolves local vertex)")
     emit_parser.add_argument("kind", help="Fact kind")
     emit_parser.add_argument(
         "parts",
@@ -856,27 +938,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="(deprecated) ignored; export materializes configured .list",
     )
 
-    # session
-    session_parser = subparsers.add_parser("session", help="Session continuity")
-    session_sub = session_parser.add_subparsers(
-        dest="session_command", required=True
-    )
-
-    start_session_p = session_sub.add_parser("start")
-    start_session_p.add_argument("--observer", default=None)
-
-    end_session_p = session_sub.add_parser("end")
-    end_session_p.add_argument("--observer", default=None)
-
-    status_session_p = session_sub.add_parser("status")
-    status_session_p.add_argument(
+    # status
+    status_parser = subparsers.add_parser("status", help="Show local store status")
+    status_parser.add_argument(
         "--json", "-j", action="store_true", help="Output as JSON"
     )
 
-    log_session_p = session_sub.add_parser("log")
-    log_session_p.add_argument("--since", default="7d", help="Lookback window (e.g. 7d, 24h)")
-    log_session_p.add_argument("--kind", help="Filter by fact kind")
-    log_session_p.add_argument(
+    # log
+    log_parser = subparsers.add_parser("log", help="Show recent facts")
+    log_parser.add_argument("--since", default="7d", help="Lookback window (e.g. 7d, 24h)")
+    log_parser.add_argument("--kind", help="Filter by fact kind")
+    log_parser.add_argument(
         "--json", "-j", action="store_true", help="Output as JSON"
     )
 
@@ -921,9 +993,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "export":
         from .commands.pop import cmd_export
         return cmd_export(args)
-    elif args.command == "session":
-        from .commands.session import cmd_session
-        return cmd_session(args)
+    elif args.command == "status":
+        from .commands.session import cmd_status
+        return cmd_status(args)
+    elif args.command == "log":
+        from .commands.session import cmd_log
+        return cmd_log(args)
     else:
         parser.print_help()
         return 1

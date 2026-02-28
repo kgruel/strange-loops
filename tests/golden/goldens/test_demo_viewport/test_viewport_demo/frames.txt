@@ -1,0 +1,644 @@
+ Scroll list (↑/↓)                                 │ Viewport inspector
+▸  3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      0
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3100  python3      -m uvic…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+▸  3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      0
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3100  python3      -m uvic…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+▸  3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      1
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3101  node         dev-ser…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+▸  3102  rg           --files | xargs -n1 stat     │selected      2
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3102  rg           --files…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      3
+▸  3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3103  bash         -lc ./d…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      4
+   3103  bash         -lc ./dev check              │visible_count 12
+▸  3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3104  postgres     -D /usr…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      5
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+▸  3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3105  redis-server 127.0.0…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      6
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+▸  3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3106  python3      -m pyte…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      7
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+▸  3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3107  python3      -m pain…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      8
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+▸  3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3108  git          status …
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      9
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+▸  3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3109  ssh          prod-we…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      10
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+▸  3110  python3      -m uvicorn api.server:app --p│ 3110  python3      -m uvic…
+   3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3100  python3      -m uvicorn api.server:app --p│
+   3101  node         dev-server --watch src/      │offset        0
+   3102  rg           --files | xargs -n1 stat     │selected      11
+   3103  bash         -lc ./dev check              │visible_count 12
+   3104  postgres     -D /usr/local/var/postgres   │total_items   24
+   3105  redis-server 127.0.0.1:6379               │window        [0..12)
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│map [███████████···········]
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3110  python3      -m uvicorn api.server:app --p│ 3111  node         dev-ser…
+▸  3111  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3101  node         dev-server --watch src/      │
+   3102  rg           --files | xargs -n1 stat     │offset        1
+   3103  bash         -lc ./dev check              │selected      12
+   3104  postgres     -D /usr/local/var/postgres   │visible_count 12
+   3105  redis-server 127.0.0.1:6379               │total_items   24
+   3106  python3      -m pytest tests/golden -q    │window        [1..13)
+   3107  python3      -m painted.demo --interactive│
+   3108  git          status --porcelain=v1        │map [███████████···········]
+   3109  ssh          prod-web-02 tail -f /var/log/│
+   3110  python3      -m uvicorn api.server:app --p│selected_row:
+   3111  node         dev-server --watch src/      │ 3112  rg           --files…
+▸  3112  rg           --files | xargs -n1 stat     │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3102  rg           --files | xargs -n1 stat     │
+   3103  bash         -lc ./dev check              │offset        2
+   3104  postgres     -D /usr/local/var/postgres   │selected      13
+   3105  redis-server 127.0.0.1:6379               │visible_count 12
+   3106  python3      -m pytest tests/golden -q    │total_items   24
+   3107  python3      -m painted.demo --interactive│window        [2..14)
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│map [·███████████··········]
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │selected_row:
+   3112  rg           --files | xargs -n1 stat     │ 3113  bash         -lc ./d…
+▸  3113  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3103  bash         -lc ./dev check              │
+   3104  postgres     -D /usr/local/var/postgres   │offset        3
+   3105  redis-server 127.0.0.1:6379               │selected      14
+   3106  python3      -m pytest tests/golden -q    │visible_count 12
+   3107  python3      -m painted.demo --interactive│total_items   24
+   3108  git          status --porcelain=v1        │window        [3..15)
+   3109  ssh          prod-web-02 tail -f /var/log/│
+   3110  python3      -m uvicorn api.server:app --p│map [··███████████·········]
+   3111  node         dev-server --watch src/      │
+   3112  rg           --files | xargs -n1 stat     │selected_row:
+   3113  bash         -lc ./dev check              │ 3114  postgres     -D /usr…
+▸  3114  postgres     -D /usr/local/var/postgres   │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      15
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3115  redis-server 127.0.0…
+▸  3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      14
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+▸  3114  postgres     -D /usr/local/var/postgres   │ 3114  postgres     -D /usr…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      13
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+▸  3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3113  bash         -lc ./d…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      12
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+▸  3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3112  rg           --files…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      11
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+▸  3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3111  node         dev-ser…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      10
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+▸  3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3110  python3      -m uvic…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      11
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+▸  3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3111  node         dev-ser…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      12
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+▸  3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3112  rg           --files…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      13
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+▸  3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3113  bash         -lc ./d…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      14
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+▸  3114  postgres     -D /usr/local/var/postgres   │ 3114  postgres     -D /usr…
+   3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3104  postgres     -D /usr/local/var/postgres   │
+   3105  redis-server 127.0.0.1:6379               │offset        4
+   3106  python3      -m pytest tests/golden -q    │selected      15
+   3107  python3      -m painted.demo --interactive│visible_count 12
+   3108  git          status --porcelain=v1        │total_items   24
+   3109  ssh          prod-web-02 tail -f /var/log/│window        [4..16)
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │map [···███████████········]
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │selected_row:
+   3114  postgres     -D /usr/local/var/postgres   │ 3115  redis-server 127.0.0…
+▸  3115  redis-server 127.0.0.1:6379               │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3105  redis-server 127.0.0.1:6379               │
+   3106  python3      -m pytest tests/golden -q    │offset        5
+   3107  python3      -m painted.demo --interactive│selected      16
+   3108  git          status --porcelain=v1        │visible_count 12
+   3109  ssh          prod-web-02 tail -f /var/log/│total_items   24
+   3110  python3      -m uvicorn api.server:app --p│window        [5..17)
+   3111  node         dev-server --watch src/      │
+   3112  rg           --files | xargs -n1 stat     │map [····███████████·······]
+   3113  bash         -lc ./dev check              │
+   3114  postgres     -D /usr/local/var/postgres   │selected_row:
+   3115  redis-server 127.0.0.1:6379               │ 3116  python3      -m pyte…
+▸  3116  python3      -m pytest tests/golden -q    │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3106  python3      -m pytest tests/golden -q    │
+   3107  python3      -m painted.demo --interactive│offset        6
+   3108  git          status --porcelain=v1        │selected      17
+   3109  ssh          prod-web-02 tail -f /var/log/│visible_count 12
+   3110  python3      -m uvicorn api.server:app --p│total_items   24
+   3111  node         dev-server --watch src/      │window        [6..18)
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │map [·····███████████······]
+   3114  postgres     -D /usr/local/var/postgres   │
+   3115  redis-server 127.0.0.1:6379               │selected_row:
+   3116  python3      -m pytest tests/golden -q    │ 3117  python3      -m pain…
+▸  3117  python3      -m painted.demo --interactive│
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3107  python3      -m painted.demo --interactive│
+   3108  git          status --porcelain=v1        │offset        7
+   3109  ssh          prod-web-02 tail -f /var/log/│selected      18
+   3110  python3      -m uvicorn api.server:app --p│visible_count 12
+   3111  node         dev-server --watch src/      │total_items   24
+   3112  rg           --files | xargs -n1 stat     │window        [7..19)
+   3113  bash         -lc ./dev check              │
+   3114  postgres     -D /usr/local/var/postgres   │map [······███████████·····]
+   3115  redis-server 127.0.0.1:6379               │
+   3116  python3      -m pytest tests/golden -q    │selected_row:
+   3117  python3      -m painted.demo --interactive│ 3118  git          status …
+▸  3118  git          status --porcelain=v1        │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3108  git          status --porcelain=v1        │
+   3109  ssh          prod-web-02 tail -f /var/log/│offset        8
+   3110  python3      -m uvicorn api.server:app --p│selected      19
+   3111  node         dev-server --watch src/      │visible_count 12
+   3112  rg           --files | xargs -n1 stat     │total_items   24
+   3113  bash         -lc ./dev check              │window        [8..20)
+   3114  postgres     -D /usr/local/var/postgres   │
+   3115  redis-server 127.0.0.1:6379               │map [·······███████████····]
+   3116  python3      -m pytest tests/golden -q    │
+   3117  python3      -m painted.demo --interactive│selected_row:
+   3118  git          status --porcelain=v1        │ 3119  ssh          prod-we…
+▸  3119  ssh          prod-web-02 tail -f /var/log/│
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3109  ssh          prod-web-02 tail -f /var/log/│
+   3110  python3      -m uvicorn api.server:app --p│offset        9
+   3111  node         dev-server --watch src/      │selected      20
+   3112  rg           --files | xargs -n1 stat     │visible_count 12
+   3113  bash         -lc ./dev check              │total_items   24
+   3114  postgres     -D /usr/local/var/postgres   │window        [9..21)
+   3115  redis-server 127.0.0.1:6379               │
+   3116  python3      -m pytest tests/golden -q    │map [········███████████···]
+   3117  python3      -m painted.demo --interactive│
+   3118  git          status --porcelain=v1        │selected_row:
+   3119  ssh          prod-web-02 tail -f /var/log/│ 3120  python3      -m uvic…
+▸  3120  python3      -m uvicorn api.server:app --p│
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3110  python3      -m uvicorn api.server:app --p│
+   3111  node         dev-server --watch src/      │offset        10
+   3112  rg           --files | xargs -n1 stat     │selected      21
+   3113  bash         -lc ./dev check              │visible_count 12
+   3114  postgres     -D /usr/local/var/postgres   │total_items   24
+   3115  redis-server 127.0.0.1:6379               │window        [10..22)
+   3116  python3      -m pytest tests/golden -q    │
+   3117  python3      -m painted.demo --interactive│map [·········███████████··]
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│selected_row:
+   3120  python3      -m uvicorn api.server:app --p│ 3121  node         dev-ser…
+▸  3121  node         dev-server --watch src/      │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3111  node         dev-server --watch src/      │
+   3112  rg           --files | xargs -n1 stat     │offset        11
+   3113  bash         -lc ./dev check              │selected      22
+   3114  postgres     -D /usr/local/var/postgres   │visible_count 12
+   3115  redis-server 127.0.0.1:6379               │total_items   24
+   3116  python3      -m pytest tests/golden -q    │window        [11..23)
+   3117  python3      -m painted.demo --interactive│
+   3118  git          status --porcelain=v1        │map [··········███████████·]
+   3119  ssh          prod-web-02 tail -f /var/log/│
+   3120  python3      -m uvicorn api.server:app --p│selected_row:
+   3121  node         dev-server --watch src/      │ 3122  rg           --files…
+▸  3122  rg           --files | xargs -n1 stat     │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit
+--- frame ---
+ Scroll list (↑/↓)                                 │ Viewport inspector
+   3112  rg           --files | xargs -n1 stat     │
+   3113  bash         -lc ./dev check              │offset        12
+   3114  postgres     -D /usr/local/var/postgres   │selected      23
+   3115  redis-server 127.0.0.1:6379               │visible_count 12
+   3116  python3      -m pytest tests/golden -q    │total_items   24
+   3117  python3      -m painted.demo --interactive│window        [12..24)
+   3118  git          status --porcelain=v1        │
+   3119  ssh          prod-web-02 tail -f /var/log/│map [···········███████████]
+   3120  python3      -m uvicorn api.server:app --p│
+   3121  node         dev-server --watch src/      │selected_row:
+   3122  rg           --files | xargs -n1 stat     │ 3123  bash         -lc ./d…
+▸  3123  bash         -lc ./dev check              │
+ q quit                                            │ ↑/↓ move  q quit

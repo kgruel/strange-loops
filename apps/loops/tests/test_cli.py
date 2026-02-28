@@ -359,33 +359,8 @@ class TestDefaultPaths:
         assert args.file == "my.vertex"
 
 
-class TestStatusLogParsers:
-    """Parser tests for top-level status and log commands."""
-
-    def test_status_parser(self):
-        parser = create_parser()
-        args = parser.parse_args(["status"])
-        assert args.command == "status"
-
-    def test_status_json_flag(self):
-        parser = create_parser()
-        args = parser.parse_args(["status", "--json"])
-        assert args.json is True
-
-    def test_log_parser(self):
-        parser = create_parser()
-        args = parser.parse_args(["log"])
-        assert args.command == "log"
-
-    def test_log_since_flag(self):
-        parser = create_parser()
-        args = parser.parse_args(["log", "--since", "24h"])
-        assert args.since == "24h"
-
-    def test_log_kind_flag(self):
-        parser = create_parser()
-        args = parser.parse_args(["log", "--kind", "decision"])
-        assert args.kind == "decision"
+class TestEmitParsers:
+    """Parser tests for emit and dissolved session commands."""
 
     def test_emit_without_vertex_arg(self):
         """When vertex is omitted, argparse fills vertex greedily.

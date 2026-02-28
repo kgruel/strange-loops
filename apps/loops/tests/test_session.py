@@ -55,8 +55,24 @@ class TestStatus:
 
         out = capsys.readouterr().out
         assert "Decisions (2):" in out
-        assert "sigil:" in out
-        assert "store:" in out
+        # SUMMARY zoom: topics shown, messages omitted
+        assert "sigil" in out
+        assert "store" in out
+
+    def test_shows_decisions_verbose(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
+        _seed_session(tmp_path)
+
+        assert _emit_local("decision", "topic=sigil", "{{var}} over ${var}") == 0
+
+        result = main(["status", "-v"])
+        assert result == 0
+
+        out = capsys.readouterr().out
+        # DETAILED+ zoom: message bodies visible
+        assert "sigil" in out
+        assert "{{var}} over ${var}" in out
 
     def test_latest_decision_wins(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -67,11 +83,17 @@ class TestStatus:
         time.sleep(0.01)
         assert _emit_local("decision", "topic=sigil", "new choice") == 0
 
+        # SUMMARY: only topic visible, message bodies hidden
         result = main(["status"])
         assert result == 0
-
         out = capsys.readouterr().out
         assert "Decisions (1):" in out
+        assert "sigil" in out
+
+        # DETAILED: message body visible, latest wins
+        result = main(["status", "-v"])
+        assert result == 0
+        out = capsys.readouterr().out
         assert "new choice" in out
         assert "old choice" not in out
 
@@ -146,8 +168,9 @@ class TestStatus:
         result = main(["status"])
         assert result == 1
 
-        err = capsys.readouterr().err
-        assert "No vertex found" in err
+        # run_cli renders errors as styled blocks on stdout
+        out = capsys.readouterr().out
+        assert "No vertex found" in out
 
     def test_empty_store(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -206,8 +229,9 @@ class TestLog:
 
         out = capsys.readouterr().out
         assert "[decision]" in out
-        assert "topic=first" in out
-        assert "topic=second" in out
+        # Kind-aware formatting: "topic: message" not "topic=x message=y"
+        assert "first: one" in out
+        assert "second: two" in out
 
     def test_kind_filter(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -235,12 +259,13 @@ class TestLog:
         result = main(["log", "--since", "1h", "--json"])
         assert result == 0
 
-        lines = capsys.readouterr().out.strip().split("\n")
-        assert len(lines) >= 1
-        for line in lines:
-            parsed = json.loads(line)
-            assert "kind" in parsed
-            assert "ts" in parsed
+        # run_cli serializes the whole fetch result as JSON
+        data = json.loads(capsys.readouterr().out)
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        for item in data:
+            assert "kind" in item
+            assert "ts" in item
 
     def test_since_filter(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -262,8 +287,9 @@ class TestLog:
         result = main(["log"])
         assert result == 1
 
-        err = capsys.readouterr().err
-        assert "No vertex found" in err
+        # run_cli renders errors as styled blocks on stdout
+        out = capsys.readouterr().out
+        assert "No vertex found" in out
 
 
 class TestAutoInit:

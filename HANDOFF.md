@@ -15,7 +15,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 - **atoms** — what data looks like, how to get it (Fact, Spec, Source, Parse, Fold)
 - **engine** — how it runs, when boundaries fire, compiles DSL to runtime (Vertex, Loop, Tick, Store, Grant, Compiler, Program)
 - **lang** — `.loop` and `.vertex` file parser, pure grammar (AST + loader + validator, zero runtime deps)
-- **cells** — terminal UI, separate concern
+- **painted** — terminal UI, separate concern (external dep, `~/Code/painted`)
 
 **Three apps:**
 - **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store/ls/add/rm`)
@@ -27,8 +27,8 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 ```
 lang → ckdl                             (pure grammar)
 engine → atoms, lang                    (runtime + compiler)
-apps/loops → lang, atoms, engine, cells (CLI app)
-apps/hlab → atoms, engine, cells        (no direct lang dep)
+apps/loops → lang, atoms, engine, painted (CLI app)
+apps/hlab → atoms, engine, painted      (no direct lang dep)
 ```
 
 Key separation: `lang` is portable (only depends on `ckdl`). The compiler
@@ -42,7 +42,7 @@ live in engine where the target runtime types are defined.
 | **atoms** | Observation + Contract + Ingress: Fact, Spec, Source, Parse, Fold |
 | **engine** | Runtime + Identity + Compiler: Tick, Vertex, Loop, Store, StoreReader, Peer, Grant, compile_loop, load_vertex_program |
 | **lang** | Pure grammar: .loop/.vertex files → AST, loader, validator (zero runtime deps) |
-| **cells** | Terminal UI: Cell, Block, Buffer, Surface, Zoom, Lens |
+| **painted** | Terminal UI: Cell, Block, Buffer, Surface, Zoom, Lens, run_cli (external dep) |
 
 ## Documentation
 
@@ -83,27 +83,32 @@ uv run loops import reading              # .list file → inline with
 uv run loops merge reading external.list # union external rows into population
 ```
 
-### Session Continuity
+### Session Continuity (Dissolved)
+
+The `loops session` subcommand group has been dissolved. `status` and `log` are
+now top-level commands that work on any local vertex store. `emit` works with
+local vertex resolution (cwd first, LOOPS_HOME fallback).
 
 ```bash
-loops session start                          # auto-creates vertex, emits start, shows status
-loops session start --observer human         # explicit observer
-loops session end                            # emit session.end fact
-loops session status                         # decisions, threads, tasks, changes
-loops session status --json                  # machine-readable
-loops session log                            # last 7 days
-loops session log --since 24h --kind decision
+loops status                                 # decisions, threads, tasks, changes
+loops status --json                          # machine-readable
+loops log                                    # last 7 days
+loops log --since 24h --kind decision        # filtered
 
-# Emit structured observations during session (via existing emit command)
-loops emit session decision topic="env-passthrough" "drop env line, rely on inheritance"
-loops emit session change files="compiler.py,source.py" summary="env wiring + test coverage"
-loops emit session thread name="sigil-migration" status="resolved"
-loops emit session task name="fix/review" status="merged" summary="env fix + tests"
+# Emit structured observations (vertex resolved from cwd or LOOPS_HOME)
+loops emit decision topic="env-passthrough" "drop env line, rely on inheritance"
+loops emit change files="compiler.py,source.py" summary="env wiring + test coverage"
+loops emit thread name="sigil-migration" status="resolved"
+loops emit task name="fix/review" status="merged" summary="env fix + tests"
+
+# Initialize a local vertex
+loops init --template session                # session vertex in LOOPS_HOME
+loops init --template tasks                  # task-tracking vertex
 ```
 
-Session vertex auto-created at `LOOPS_HOME/session/session.vertex`. Store at
-`LOOPS_HOME/session/data/session.db`. Observer from `LOOPS_OBSERVER` env var
-(falls back to empty). HANDOFF.md and LOG.md remain as reference.
+Display commands (`status`, `log`, `store`) route through painted's `run_cli`
+harness for automatic zoom/mode/format resolution, JSON serialization, and
+styled error rendering. HANDOFF.md and LOG.md remain as reference.
 
 ### hlab App
 
@@ -170,13 +175,13 @@ CLI commands) and Claude/Codex harnesses (different commands, same fact pipeline
 See `apps/strange-loops/DESIGN.md` for architecture.
 
 **apps/loops** is the general-purpose CLI (validate, test, run, compile, start,
-store, emit, session). **apps/hlab** is the first domain app. **apps/reader**
+store, status, log, emit). **apps/hlab** is the first domain app. **apps/reader**
 is the second domain app. `experiments/homelab/` is archived.
 
-**Session continuity** via `loops session start/end/status/log`. Session state
-lives at `LOOPS_HOME/session/`. Next evolution: named sessions with separate
-stores (`docs/NAMED_SESSIONS.md`). HANDOFF.md and LOG.md remain as reference
-but session facts are the source of truth going forward.
+**Display commands through painted run_cli.** `status`, `log`, and `store` are
+now routed through painted's `run_cli` harness (per-subcommand pattern). Each
+has `fetch() -> data` + `render(ctx, data) -> Block`. Next: extend to `start`
+command, then evaluate remaining commands.
 
 **Meta-discussion workspace** at `~/Documents/meta-discussion/` — cross-project
 analysis of development patterns (test layers, dev harness, dissolution method,
@@ -219,11 +224,11 @@ apps/reader/
 
 apps/loops/
 ├── src/loops/
-│   ├── main.py               # CLI: validate/test/run/start/store/emit/session/ls/add/rm
+│   ├── main.py               # CLI: validate/test/run/start/store/status/log/emit/ls/add/rm
 │   ├── commands/
 │   │   ├── pop.py            # Population verbs: ls, add, rm, export, import, merge
-│   │   ├── session.py        # Session continuity: start, end, status, log
-│   │   └── store.py          # Store viewer
+│   │   ├── session.py        # Local store: fetch/render for status + log (via run_cli)
+│   │   └── store.py          # Store viewer: fetch/render for store (via run_cli)
 │   └── lenses/
 │       └── store.py          # Zoom-aware store rendering
 └── tests/
@@ -258,25 +263,22 @@ apps/strange-loops/              # Task orchestration built on loops
   vertex's template populations. Auto-detects storage (file vs inline KDL).
 - **`--var` flag** — `loops run/start` accept `--var KEY=VALUE` for vertex vars
 - **`--daemon` flag** — `loops run` defaults to one round; `--daemon`/`-d` for continuous
-- **Session continuity** — `loops session start/end/status/log`. Facts as
-  structured observations, query-time fold for state. `LOOPS_OBSERVER` for
-  multi-agent tagging. Correction by re-emit (latest-per-key fold resolves).
+- **Session continuity** — `loops status/log/emit` with local vertex resolution.
+  Facts as structured observations, query-time fold for state. `LOOPS_OBSERVER`
+  for multi-agent tagging. Correction by re-emit (latest-per-key fold resolves).
 - **tick.name IS the stack** — No re-grouping in render
-- **Zoom rendering** — Zoom 0-3 controls detail level via cells
+- **Zoom rendering** — Zoom 0-3 controls detail level via painted
 - **Polling** — `every "30s"` for live updates
+- **run_cli harness** — Display commands (status, log, store) route through
+  painted's `run_cli` for automatic zoom/mode/format resolution, JSON output,
+  and styled error blocks
 
 ## Next Steps
 
-1. **Session dissolution** — `loops session` dissolves into local vertex
-   resolution + auto-init. The `session` subcommand group goes away. `status`
-   and `log` promote to top-level (work on any local store). `emit` gains
-   auto-init (no store? create one with default vertex). `init` evolves to
-   support template selection (`--template session|tasks|...`). Local-first
-   resolution: find vertex in cwd, fall back to LOOPS_HOME. A "session" is
-   just one vertex pattern among several. Design rationale in
-   `docs/NAMED_SESSIONS.md` (superseded by this dissolution).
-   Immediate use case: `~/Documents/meta-discussion/` as a local vertex
-   directory for cross-project methodology tracking.
+1. **Extend run_cli to `start` command** — `loops start` already renders via
+   painted but doesn't go through `run_cli`. Wrap it to gain automatic
+   zoom/mode/format resolution and consistent error handling. The
+   `handlers={OutputMode.INTERACTIVE: ...}` pattern already proven in `store`.
 2. **Self-feeding detection** — `Fact.origin` now distinguishes external
    observations (`origin=""`) from derived facts. Build a query or fold that
    computes exhaust ratio: "what fraction of this loop's input is its own
@@ -335,6 +337,17 @@ apps/strange-loops/              # Task orchestration built on loops
   no safeguard logic exists yet. Becomes urgent when LLM-as-peer is implemented.
 
 ## Resolved
+
+85. ~~Session dissolution + cells→painted + run_cli harness~~ — Dissolved `loops session`
+    subcommand group. `status`/`log` promoted to top-level, work on any local store via
+    `_resolve_local_store()` (cwd vertex → LOOPS_HOME fallback). Migrated all cells imports
+    to painted. Display commands (status, log, store) now route through painted's `run_cli`
+    with `fetch()`/`render(ctx, data)` pattern. Pre-parsing with `parse_known_args` for
+    command-specific flags (--since, --kind). Fixed `print_block` default arg in painted
+    (late-bind `sys.stdout` for testability). 147 loops tests, 1169 painted tests.
+
+84. ~~Population as facts~~ — `loops add/rm` emit `pop.add`/`pop.rm` facts, `.list`
+    materialized as projection. `loops ls` reads fold state.
 
 83. ~~Session continuity + strange-loops scaffold~~ — `loops session start/end/status/log`
     backed by vertex store at `LOOPS_HOME/session/`. Query-time fold: latest per

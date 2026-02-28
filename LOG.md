@@ -5,6 +5,69 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-28 — Session dissolution + cells→painted migration + run_cli harness
+
+**Three interconnected changes in one arc.** Session dissolution (dissolve
+`loops session` subcommand), cells→painted migration (swap UI dependency),
+and run_cli integration (route display commands through painted's CLI harness).
+
+**Session dissolution.** `loops session start/end/status/log` dissolved into
+simpler primitives. `status` and `log` promoted to top-level commands that work
+on any local vertex store. `emit` gains local vertex resolution (cwd first,
+LOOPS_HOME fallback). `init` supports `--template session|tasks`. The `session`
+subcommand group is gone. Resolution helper `_find_local_vertex()` in main.py
+finds `*.vertex` in cwd. `_resolve_local_store()` in session.py chains local
+vertex → LOOPS_HOME fallback.
+
+**cells→painted migration.** All `cells` imports in `apps/loops/` replaced with
+`painted` equivalents. `pyproject.toml` dependency updated. Identical API surface
+— painted is the continuation of cells as an external package.
+
+**run_cli harness integration.** Display commands (`status`, `log`, `store`)
+routed through painted's `run_cli` before argparse. Per-subcommand pattern:
+
+```python
+_display = {"status": _run_status, "log": _run_log, "store": _run_store}
+if argv and argv[0] in _display:
+    return _display[argv[0]](argv[1:])
+```
+
+Each `_run_*` function wraps `fetch()` + `render(ctx, data) -> Block`:
+- `_run_status`: zero-arg fetch, straightforward
+- `_run_log`: pre-parses `--since`/`--kind` via `parse_known_args`, closure captures values
+- `_run_store`: pre-parses file arg, `handlers={OutputMode.INTERACTIVE: handle_interactive}`
+
+`commands/session.py` reshaped: removed `_print_status`, `cmd_status`, `cmd_log`.
+Added `fetch_status`, `render_status`, `fetch_log`, `render_log` — pure data
+functions that pair with `run_cli`.
+
+**Bug fixed in painted: `print_block` default argument.** `stream: TextIO = sys.stdout`
+evaluated at import time, bypassing pytest's capsys replacement. Changed to
+`stream: TextIO | None = None` with runtime resolution. Updated 4 golden test
+files in painted (they had empty expected output from the same bug).
+
+**Bug fixed in render_status.** Thread rendering used `t.get("message")` but
+`fetch_status` builds thread dicts with `name`/`status`/`ts` — no `message`.
+Fixed to `t.get("status")`.
+
+**Dead code removed.** Status/log subparsers in `create_parser()` became
+unreachable after routing through `_run_*`. Removed along with 5 dead parser
+tests. `add_cli_args(store_parser)` also removed.
+
+**Tests:** 147 loops tests pass (5 dead tests removed). 1169 painted tests pass.
+
+**Design insight: pre-parsing for command-specific args.** `run_cli` takes full
+control of argparse, but `log` needs `--since`/`--kind`. Solution: pre-parse
+with `argparse.ArgumentParser(add_help=False)` + `parse_known_args`, pass
+remaining args to `run_cli`. The closure captures pre-parsed values for `fetch()`.
+
+**run_cli error handling change.** Exceptions in `fetch()` render as styled error
+blocks on stdout (not stderr). Test assertions updated accordingly. JSON output
+for log changed from NDJSON to a single JSON array (run_cli serializes the
+return value of fetch, which is `list[dict]`).
+
+---
+
 ## 2026-02-28 — Meta-discussion: development patterns + named sessions design
 
 **State-of-the-monorepo review.** Full history walk: 393 commits, 28 active

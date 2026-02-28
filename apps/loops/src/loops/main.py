@@ -432,58 +432,6 @@ def cmd_compile(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_store(args: argparse.Namespace) -> int:
-    """Inspect store contents."""
-    from painted import (
-        Format,
-        OutputMode,
-        detect_context,
-        parse_format,
-        parse_mode,
-        parse_zoom,
-        print_block,
-    )
-
-    from .commands.store import make_fetcher
-    from .lenses.store import store_view
-
-    resolved = _resolve_vertex_path(args.file)
-    if resolved is None:
-        return 1
-    path = resolved.resolve()
-    if not path.exists():
-        print(f"Error: {path} does not exist", file=sys.stderr)
-        return 1
-
-    try:
-        zoom = parse_zoom(args)
-        mode = parse_mode(args)
-        fmt = parse_format(args)
-        ctx = detect_context(zoom, mode, fmt)
-
-        if ctx.mode == OutputMode.INTERACTIVE:
-            from .tui import StoreExplorerApp
-
-            app = StoreExplorerApp(path)
-            asyncio.run(app.run())
-            return 0
-
-        fetch = make_fetcher(path, zoom=ctx.zoom.value)
-        data = fetch()
-
-        if ctx.format == Format.JSON:
-            print(json.dumps(data, indent=2, default=str))
-        else:
-            block = store_view(data, ctx.zoom, ctx.width)
-            print_block(block, use_ansi=ctx.format != Format.PLAIN)
-
-        return 0
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
     from painted import (
@@ -816,6 +764,99 @@ def cmd_emit(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_status(argv: list[str]) -> int:
+    """Run status command via painted CLI harness."""
+    from painted import run_cli
+    from .commands.session import _resolve_local_store, fetch_status, render_status
+
+    def fetch():
+        store_path = _resolve_local_store()
+        return fetch_status(store_path)
+
+    return run_cli(
+        argv,
+        fetch=fetch,
+        render=render_status,
+        prog="loops status",
+        description="Show local store status",
+    )
+
+
+def _run_log(argv: list[str]) -> int:
+    """Run log command via painted CLI harness."""
+    from painted import run_cli
+    from .commands.session import _resolve_local_store, fetch_log, render_log
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--since", default="7d")
+    pre.add_argument("--kind", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    def fetch():
+        store_path = _resolve_local_store()
+        return fetch_log(store_path, known.since, known.kind)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render_log,
+        prog="loops log",
+        description="Show recent facts",
+    )
+
+
+def _run_store(argv: list[str]) -> int:
+    """Run store command via painted CLI harness."""
+    from painted import run_cli, OutputMode
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("file", nargs="?", default=None)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = known.file
+
+    def fetch():
+        from .commands.store import make_fetcher
+
+        if file_arg is not None:
+            path = Path(file_arg)
+        else:
+            root = loops_home() / "root.vertex"
+            if not root.exists():
+                raise FileNotFoundError(
+                    f"{root} not found. Run 'loops init' first."
+                )
+            path = root
+        path = path.resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"{path} does not exist")
+        return make_fetcher(path, zoom=3)()
+
+    def render(ctx, data):
+        from .lenses.store import store_view
+
+        return store_view(data, ctx.zoom, ctx.width)
+
+    def handle_interactive(ctx):
+        from .tui import StoreExplorerApp
+
+        if file_arg is not None:
+            path = Path(file_arg).resolve()
+        else:
+            path = (loops_home() / "root.vertex").resolve()
+        app = StoreExplorerApp(path)
+        asyncio.run(app.run())
+        return 0
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        handlers={OutputMode.INTERACTIVE: handle_interactive},
+        prog="loops store",
+        description="Inspect store contents",
+    )
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
@@ -938,30 +979,27 @@ def create_parser() -> argparse.ArgumentParser:
         help="(deprecated) ignored; export materializes configured .list",
     )
 
-    # status
-    status_parser = subparsers.add_parser("status", help="Show local store status")
-    status_parser.add_argument(
-        "--json", "-j", action="store_true", help="Output as JSON"
-    )
+    # status, log, store: routed through run_cli in main(), not via argparse.
+    # Their parsers live inside _run_status/_run_log/_run_store.
 
-    # log
-    log_parser = subparsers.add_parser("log", help="Show recent facts")
-    log_parser.add_argument("--since", default="7d", help="Lookback window (e.g. 7d, 24h)")
-    log_parser.add_argument("--kind", help="Filter by fact kind")
-    log_parser.add_argument(
-        "--json", "-j", action="store_true", help="Output as JSON"
-    )
-
-    # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
+    # Add painted fidelity args to start (still argparse-dispatched)
     from painted import add_cli_args
     add_cli_args(start_parser)
-    add_cli_args(store_parser)
 
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Display commands routed through painted run_cli
+    _display = {"status": _run_status, "log": _run_log, "store": _run_store}
+    if argv and argv[0] in _display:
+        return _display[argv[0]](argv[1:])
+
+    # All other commands via shared parser
     parser = create_parser()
     args = parser.parse_args(argv)
 
@@ -977,8 +1015,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compile(args)
     elif args.command == "start":
         return cmd_start(args)
-    elif args.command == "store":
-        return cmd_store(args)
     elif args.command == "emit":
         return cmd_emit(args)
     elif args.command == "ls":
@@ -993,12 +1029,6 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "export":
         from .commands.pop import cmd_export
         return cmd_export(args)
-    elif args.command == "status":
-        from .commands.session import cmd_status
-        return cmd_status(args)
-    elif args.command == "log":
-        from .commands.session import cmd_log
-        return cmd_log(args)
     else:
         parser.print_help()
         return 1

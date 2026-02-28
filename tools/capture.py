@@ -128,6 +128,10 @@ def capture_demo(
     with _patch_painted_output_to_sys_stdout(), redirect_stdout(buf):
         mod = import_module_by_path(demo_path, module_name=f"_demo_{Path(demo_path).stem}_output")
         if fn_name == "<module>":
+            if data_attr is not None:
+                val = getattr(mod, data_attr, None)
+                if isinstance(val, Block):
+                    return val
             return buf.getvalue()
         fn = getattr(mod, fn_name, None)
         if not callable(fn):

@@ -219,3 +219,50 @@ painted deliberately pushes complexity *up* the stack:
 
 - These types are immutable values → safe to share and cache.
 - Higher-level systems (buffers, layers, widgets) can treat rendering as pure transformation: state → blocks.
+
+## Demo output
+
+<!-- outputgen:begin name="cell_demo" -->
+<pre class="painted-output">                            
+<span style="opacity: 0.6">  attributes</span>                
+                            
+<span style="font-weight: bold">  bold             deploy OK</span>
+<span style="font-style: italic">  italic           deploy OK</span>
+<span style="text-decoration: underline">  underline        deploy OK</span>
+<span style="opacity: 0.6">  dim              deploy OK</span>
+<span style="color: var(--painted-bg, var(--code-bg)); background-color: var(--painted-fg, var(--text))">  reverse          deploy OK</span>
+                            
+<span style="opacity: 0.6">  foreground</span>                
+                            
+<span style="color: red">  red       </span>                
+<span style="color: green">  green     </span>                
+<span style="color: blue">  blue      </span>                
+<span style="color: yellow">  yellow    </span>                
+<span style="color: cyan">  cyan      </span>                
+<span style="color: magenta">  magenta   </span>                
+                            
+<span style="opacity: 0.6">  background</span>                
+                            
+<span style="color: white; background-color: red">  red       </span>                
+<span style="color: black; background-color: green">  green     </span>                
+<span style="color: white; background-color: blue">  blue      </span>                
+<span style="color: black; background-color: yellow">  yellow    </span>                
+<span style="color: black; background-color: cyan">  cyan      </span>                
+<span style="color: white; background-color: magenta">  magenta   </span>                
+                            
+<span style="opacity: 0.6">  combinations</span>              
+                            
+<span style="color: green; font-weight: bold">  bold + green     deploy OK</span>
+<span style="font-style: italic; opacity: 0.6">  dim + italic     deploy OK</span>
+<span style="color: var(--painted-bg, var(--code-bg)); background-color: cyan">  reverse + cyan   deploy OK</span>
+<span style="color: yellow; font-weight: bold; text-decoration: underline">  bold + underline deploy OK</span>
+<span style="color: white; background-color: blue; font-weight: bold">  bg + bold        deploy OK</span>
+                            
+<span style="opacity: 0.6">  merge</span>                     
+                            
+<span style="color: blue; font-weight: bold">  base             deploy OK</span>
+<span style="color: red; font-style: italic">  + overlay        deploy OK</span>
+<span style="color: red; font-weight: bold; font-style: italic">  = merged         deploy OK</span>
+                            
+</pre>
+<!-- outputgen:end -->

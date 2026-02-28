@@ -102,7 +102,7 @@ def test_capture_demo_direct_output_shape(tmp_path: Path) -> None:
     assert "yo" in out
 
 
-def test_outputgen_update_html_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_outputgen_update_doc_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     demo = tmp_path / "demo_runcli.py"
     demo.write_text(
         "\n".join(
@@ -142,13 +142,13 @@ def test_outputgen_update_html_round_trip(tmp_path: Path, monkeypatch: pytest.Mo
         ]
     )
 
-    updated, touched = outputgen.update_html(html_doc, repo_root=tmp_path)
+    updated, touched = outputgen.update_doc(html_doc, repo_root=tmp_path)
     assert touched == ["demo"]
     assert '<pre class="painted-output">' in updated
     assert "ok" in updated
 
-    assert outputgen.check_html(updated, repo_root=tmp_path) == []
-    updated2, touched2 = outputgen.update_html(updated, repo_root=tmp_path)
+    assert outputgen.check_doc(updated, repo_root=tmp_path) == []
+    updated2, touched2 = outputgen.update_doc(updated, repo_root=tmp_path)
     assert touched2 == ["demo"]
     assert updated2 == updated
 
@@ -157,7 +157,7 @@ def test_outputgen_missing_manifest_entry_raises(tmp_path: Path) -> None:
     from tools import outputgen
 
     with pytest.raises(KeyError):
-        outputgen.update_html(
+        outputgen.update_doc(
             '<!-- outputgen:begin name="nope" -->\n<!-- outputgen:end -->\n',
             repo_root=tmp_path,
         )

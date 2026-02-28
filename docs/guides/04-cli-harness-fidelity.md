@@ -98,3 +98,32 @@ The harness keeps a strict separation:
 - your code owns *state fetching* (`fetch` / `fetch_stream`)
 - your code owns *rendering* (`render(ctx, state) -> Block`)
 - painted owns *delivery* (static/live/interactive formatting and terminal behavior)
+
+## Demo output (fidelity.py)
+
+### Zoom.MINIMAL
+
+<!-- outputgen:begin name="fidelity_minimal" -->
+<pre class="painted-output">67% used (134.0G/200.0G)
+</pre>
+<!-- outputgen:end -->
+
+### Zoom.DETAILED
+
+<!-- outputgen:begin name="fidelity_detailed" -->
+<pre class="painted-output">╭─ Disk: /home ─────────────────────────────────────────╮
+│<span style="color: green"> 67.0% ████████████████████░░░░░░░░░░</span><span style="opacity: 0.6"> 134.0G/200.0G</span>    │
+╰───────────────────────────────────────────────────────╯
+                                                         
+╭─ By Directory ────────────────────────────────────────╮
+│<span style="font-weight: bold"> 45.0G</span> <span style="color: yellow">▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 33.6%</span>  projects │
+│<span style="font-weight: bold"> 28.0G</span> <span style="color: yellow">▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 20.9%</span>  downloads│
+│<span style="font-weight: bold"> 22.0G</span> <span style="color: cyan">▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 16.4%</span>  .cache   │
+│<span style="font-weight: bold"> 18.0G</span> <span style="color: cyan">▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 13.4%</span>  documents│
+│<span style="font-weight: bold"> 12.0G</span> <span style="color: cyan">▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6">  9.0%</span>  pictures │
+│<span style="font-weight: bold">  9.0G</span> <span style="color: cyan">▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6">  6.7%</span>  .local   │
+╰───────────────────────────────────────────────────────╯
+                                                         
+<span style="color: green; font-weight: bold">  Free: 66.0G  </span>                                          
+</pre>
+<!-- outputgen:end -->

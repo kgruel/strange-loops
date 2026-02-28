@@ -89,9 +89,9 @@ merge_demo = join_vertical(
     Block.text("  = merged         deploy OK", merged),
 )
 
-# --- Print it ---
+# --- Output ---
 
-print_block(join_vertical(
+output = join_vertical(
     Block.text("", Style()),
     attributes,
     Block.text("", Style()),
@@ -103,4 +103,6 @@ print_block(join_vertical(
     Block.text("", Style()),
     merge_demo,
     Block.text("", Style()),
-))
+)
+
+print_block(output)

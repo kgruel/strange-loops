@@ -58,6 +58,7 @@ def markdown_to_html(md: str) -> str:
     in_ul = False
     in_ol = False
     in_code = False
+    in_raw_html = False
     code_lang = "none"
     code_lines: list[str] = []
 
@@ -95,6 +96,12 @@ def markdown_to_html(md: str) -> str:
                 code_lines = []
             else:
                 code_lines.append(raw)
+            continue
+
+        if in_raw_html:
+            out.append(line)
+            if "</pre>" in line:
+                in_raw_html = False
             continue
 
         m_fence = _FENCE_RE.match(line)
@@ -160,6 +167,14 @@ def markdown_to_html(md: str) -> str:
                 out.append("<ol>")
                 in_ol = True
             out.append(f"<li>{_inline_md(m_ol.group('text'))}</li>")
+            continue
+
+        if line.lstrip().startswith("<pre"):
+            flush_para()
+            close_lists()
+            out.append(line)
+            if "</pre>" not in line:
+                in_raw_html = True
             continue
 
         if line.lstrip().startswith("<") and line.rstrip().endswith(">"):

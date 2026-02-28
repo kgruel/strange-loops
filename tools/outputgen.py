@@ -33,6 +33,7 @@ MANIFEST: dict[str, OutputSpec] = {
         function_or_zoom="<module>",
         format="html",
         width=80,
+        data_attr="output",
     ),
     "fidelity_minimal": OutputSpec(
         name="fidelity_minimal",
@@ -91,11 +92,11 @@ def find_outputgen_names(html_doc: str) -> list[str]:
     return [m.group("name").strip() for m in _BEGIN_RE.finditer(html_doc)]
 
 
-def update_html(html_doc: str, *, repo_root: Path) -> tuple[str, list[str]]:
+def update_doc(doc: str, *, repo_root: Path) -> tuple[str, list[str]]:
     out: list[str] = []
     updated: list[str] = []
 
-    lines = html_doc.splitlines(keepends=True)
+    lines = doc.splitlines(keepends=True)
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -126,22 +127,22 @@ def update_html(html_doc: str, *, repo_root: Path) -> tuple[str, list[str]]:
     return "".join(out), updated
 
 
-def check_html(html_doc: str, *, repo_root: Path) -> list[str]:
-    updated, touched = update_html(html_doc, repo_root=repo_root)
-    if updated == html_doc:
+def check_doc(doc: str, *, repo_root: Path) -> list[str]:
+    updated, touched = update_doc(doc, repo_root=repo_root)
+    if updated == doc:
         return []
     return touched
 
 
-def _iter_html_files(repo_root: Path, roots: list[str]) -> list[Path]:
+def _iter_doc_files(repo_root: Path, roots: list[str]) -> list[Path]:
     out: list[Path] = []
     for root in roots:
         p = (repo_root / root).resolve()
-        if p.is_file() and p.suffix.lower() == ".html":
+        if p.is_file() and p.suffix.lower() == ".md":
             out.append(p)
             continue
         if p.is_dir():
-            out.extend(sorted(p.rglob("*.html")))
+            out.extend(sorted(p.rglob("*.md")))
     return out
 
 
@@ -150,16 +151,16 @@ def main(argv: list[str] | None = None) -> int:
         prog="outputgen", description="Inject captured demo output into docs."
     )
     ap.add_argument("--repo-root", type=Path, default=_repo_root())
-    ap.add_argument("--roots", nargs="+", default=["site/docs"])
+    ap.add_argument("--roots", nargs="+", default=["docs/guides"])
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Verify output blocks are up to date.")
     mode.add_argument("--update", action="store_true", help="Regenerate and inject output blocks.")
     args = ap.parse_args(argv)
 
     repo_root: Path = args.repo_root
-    files = _iter_html_files(repo_root, args.roots)
+    files = _iter_doc_files(repo_root, args.roots)
     if not files:
-        print("No HTML files found under roots.", file=sys.stderr)
+        print("No doc files found under roots.", file=sys.stderr)
         return 2
 
     mismatched: list[tuple[Path, list[str]]] = []
@@ -174,12 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         seen_names.update(names)
 
         if args.check:
-            bad = check_html(src, repo_root=repo_root)
+            bad = check_doc(src, repo_root=repo_root)
             if bad:
                 mismatched.append((path, bad))
             continue
 
-        updated, touched = update_html(src, repo_root=repo_root)
+        updated, touched = update_doc(src, repo_root=repo_root)
         if touched and updated != src:
             _write_text(path, updated)
             changed.append(path)

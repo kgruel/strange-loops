@@ -20,7 +20,7 @@ from painted import (
 )
 from painted.tui import (
     Surface, BufferView,
-    Layer, Stay, Pop, Push, Quit, process_key, render_layers,
+    Layer, Stay, Pop, Push, Quit, render_layers,
 )
 
 
@@ -30,8 +30,6 @@ class AppState:
     counter: int = 0
     volume: int = 50  # 0-100
     layers: tuple[Layer, ...] = ()
-    width: int = 80
-    height: int = 24
 
 
 # -- Layer accessors --
@@ -68,8 +66,8 @@ def render_help(layer_state: None, app_state: AppState, view: BufferView) -> Non
     boxed = border(content, ROUNDED, Style(fg="cyan"))
 
     # Center
-    x = max(0, (app_state.width - boxed.width) // 2)
-    y = max(0, (app_state.height - boxed.height) // 2)
+    x = max(0, (view.width - boxed.width) // 2)
+    y = max(0, (view.height - boxed.height) // 2)
     boxed.paint(view, x, y)
 
 
@@ -128,8 +126,8 @@ def render_settings(layer_state: SettingsEdit, app_state: AppState, view: Buffer
     boxed = border(content, ROUNDED, Style(fg="yellow"))
 
     # Center
-    x = max(0, (app_state.width - boxed.width) // 2)
-    y = max(0, (app_state.height - boxed.height) // 2)
+    x = max(0, (view.width - boxed.width) // 2)
+    y = max(0, (view.height - boxed.height) // 2)
     boxed.paint(view, x, y)
 
 
@@ -196,7 +194,7 @@ def render_base(layer_state: None, app_state: AppState, view: BufferView) -> Non
     layer_names = [layer.name for layer in app_state.layers]
     stack_text = "layers: " + " > ".join(layer_names)
     stack = Block.text(stack_text, Style(fg="magenta", dim=True))
-    stack.paint(view, 2, app_state.height - 1)
+    stack.paint(view, 2, view.height - 1)
 
 
 def make_base_layer() -> Layer[None]:
@@ -209,21 +207,26 @@ class LayersApp(Surface):
     def __init__(self):
         super().__init__()
         self._state = AppState(layers=(make_base_layer(),))
-        self._should_quit = False
-
-    def layout(self, width: int, height: int) -> None:
-        self._state = replace(self._state, width=width, height=height)
 
     def render(self) -> None:
         self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
         render_layers(self._state, self._buf, get_layers)
 
     def on_key(self, key: str) -> None:
-        self._state, should_quit, _result = process_key(key, self._state, get_layers, set_layers)
+        self._state, should_quit, _result = self.handle_key(
+            key,
+            self._state,
+            get_layers,
+            set_layers,
+        )
 
         if should_quit:
             self.quit()
 
+async def main() -> int:
+    await LayersApp().run()
+    return 0
+
 
 if __name__ == "__main__":
-    asyncio.run(LayersApp().run())
+    raise SystemExit(asyncio.run(main()))

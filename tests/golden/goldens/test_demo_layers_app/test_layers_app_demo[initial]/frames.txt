@@ -1,0 +1,24 @@
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 50%
+
+
+    +/-  counter
+    h    help
+    s    settings
+    q    quit
+
+
+
+
+
+
+
+
+
+
+  layers: base

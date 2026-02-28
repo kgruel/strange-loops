@@ -343,6 +343,16 @@ def cmd_task_merge(args: argparse.Namespace) -> int:
             capture_output=True,
             text=True,
         )
+        # Check if branch has changes to merge
+        diff_result = subprocess.run(
+            ["git", "diff", f"{base}...{name}", "--quiet"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if diff_result.returncode == 0:
+            print(f"Nothing to merge — '{name}' has no changes vs {base}.", file=sys.stderr)
+            return 1
         subprocess.run(
             ["git", "merge", "--squash", name],
             cwd=repo_root,

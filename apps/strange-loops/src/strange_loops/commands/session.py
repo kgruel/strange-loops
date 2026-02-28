@@ -9,17 +9,14 @@ from datetime import datetime, timezone
 
 from pathlib import Path
 
-from strange_loops.store import emit_fact, observer, parse_duration, require_store, store_path
-
-
-def _format_ts(dt: datetime) -> str:
-    """Format datetime as 'HH:MM' for log display."""
-    return dt.strftime("%H:%M")
-
-
-def _format_date(dt: datetime) -> str:
-    """Format datetime as 'YYYY-MM-DD' for log grouping."""
-    return dt.strftime("%Y-%m-%d")
+from strange_loops.store import (
+    emit_fact,
+    observer,
+    parse_duration,
+    render_log,
+    require_store,
+    store_path,
+)
 
 
 # -- Rendering (painted) --
@@ -57,32 +54,6 @@ def _render_status(sp: Path) -> None:
         lines.append(Block.text(f"  {kind}: {count}  {age}", p.muted))
 
     show(join_vertical(*lines), file=sys.stdout)
-
-
-def _render_log_entry(fact: dict) -> None:
-    """Render a single fact as a styled line via painted."""
-    from painted import show
-    from painted.block import Block
-    from painted.palette import current_palette
-
-    p = current_palette()
-    ts = fact["ts"]
-    if isinstance(ts, datetime):
-        dt = ts
-    else:
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-
-    time_str = _format_ts(dt)
-    kind = fact["kind"]
-    obs = fact.get("observer", "")
-    payload = fact["payload"]
-
-    parts = [f"{k}={v}" for k, v in payload.items() if v is not None and v != ""]
-    summary = " ".join(parts)
-
-    who = f" ({obs})" if obs else ""
-    text = f"  {time_str} [{kind}]{who} {summary}" if summary else f"  {time_str} [{kind}]{who}"
-    show(Block.text(text, p.muted), file=sys.stdout)
 
 
 # -- Commands --
@@ -168,34 +139,7 @@ def cmd_session_log(args: argparse.Namespace) -> int:
             print(json.dumps(f_out, default=str))
         return 0
 
-    if not facts:
-        from painted import show
-        from painted.block import Block
-        from painted.palette import current_palette
-
-        p = current_palette()
-        show(Block.text("No facts in the given time range.", p.muted), file=sys.stdout)
-        return 0
-
-    # Group by date
-    current_date = None
-    for f in facts:
-        ts = f["ts"]
-        dt = ts if isinstance(ts, datetime) else datetime.fromtimestamp(ts, tz=timezone.utc)
-        date_str = _format_date(dt)
-        if date_str != current_date:
-            if current_date is not None:
-                print()
-            from painted import show
-            from painted.block import Block
-            from painted.palette import current_palette
-
-            p = current_palette()
-            show(Block.text(f"{date_str}:", p.accent), file=sys.stdout)
-            current_date = date_str
-
-        _render_log_entry(f)
-
+    render_log(facts)
     return 0
 
 

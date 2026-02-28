@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DESC: Lint + test (CI gate)
+# DESC: Format + lint + test (CI gate)
 # Usage: ./dev check [-v]
 source "$(dirname "$0")/lib/dev.sh"
 
@@ -29,6 +29,7 @@ run_step() {
 main() {
     cd "$DEV_ROOT"
 
+    run_step "fmt"   bash "$DEV_ROOT/scripts/fmt.sh"
     run_step "lint"  bash "$DEV_ROOT/scripts/lint.sh"
     run_step "test"  bash "$DEV_ROOT/scripts/test.sh"
 

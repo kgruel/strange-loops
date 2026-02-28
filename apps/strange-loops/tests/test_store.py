@@ -8,7 +8,17 @@ from pathlib import Path
 from atoms import Fact
 from engine import SqliteStore
 
-from strange_loops.store import emit_fact, observer, parse_duration, require_store, store_path
+from strange_loops.store import (
+    emit_fact,
+    format_date,
+    format_ts,
+    observer,
+    parse_duration,
+    render_log_entry,
+    require_store,
+    store_path,
+    store_path_for,
+)
 
 import pytest
 
@@ -65,6 +75,12 @@ class TestRequireStore:
         require_store(db)  # should not raise
 
 
+class TestRequireStoreCustomMessage:
+    def test_custom_message(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError, match="custom error"):
+            require_store(tmp_path / "nope.db", message="custom error")
+
+
 class TestParseDuration:
     def test_days(self):
         assert parse_duration("7d") == 7 * 86400
@@ -75,3 +91,65 @@ class TestParseDuration:
     def test_invalid(self):
         with pytest.raises(ValueError, match="Invalid duration"):
             parse_duration("nope")
+
+
+class TestStorePathFor:
+    def test_resolves_tasks_vertex(self):
+        path = store_path_for("tasks")
+        assert path.name == "tasks.db"
+        assert "data" in str(path)
+
+    def test_resolves_project_vertex(self):
+        path = store_path_for("project")
+        assert path.name == "project.db"
+        assert "data" in str(path)
+
+    def test_raises_for_missing_vertex(self):
+        with pytest.raises(Exception):
+            store_path_for("nonexistent")
+
+
+class TestFormatHelpers:
+    def test_format_ts(self):
+        from datetime import datetime, timezone
+
+        dt = datetime(2026, 2, 28, 14, 30, 0, tzinfo=timezone.utc)
+        assert format_ts(dt) == "14:30"
+
+    def test_format_date(self):
+        from datetime import datetime, timezone
+
+        dt = datetime(2026, 2, 28, 14, 30, 0, tzinfo=timezone.utc)
+        assert format_date(dt) == "2026-02-28"
+
+
+class TestRenderLogEntry:
+    def test_renders_fact(self, capsys):
+        from datetime import datetime, timezone
+
+        fact = {
+            "kind": "test.kind",
+            "ts": datetime(2026, 2, 28, 14, 30, 0, tzinfo=timezone.utc),
+            "observer": "alice",
+            "payload": {"key": "val"},
+        }
+        render_log_entry(fact)
+        out = capsys.readouterr().out
+        assert "14:30" in out
+        assert "test.kind" in out
+        assert "alice" in out
+        assert "key=val" in out
+
+    def test_renders_without_observer(self, capsys):
+        from datetime import datetime, timezone
+
+        fact = {
+            "kind": "decision",
+            "ts": datetime(2026, 2, 28, 10, 0, 0, tzinfo=timezone.utc),
+            "observer": "",
+            "payload": {"topic": "auth"},
+        }
+        render_log_entry(fact)
+        out = capsys.readouterr().out
+        assert "decision" in out
+        assert "()" not in out

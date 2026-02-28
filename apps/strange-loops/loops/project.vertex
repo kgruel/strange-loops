@@ -1,0 +1,22 @@
+name "project"
+store "data/project.db"
+
+loops {
+  decision {
+    fold {
+      items "by" "topic"
+    }
+  }
+
+  thread {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  plan {
+    fold {
+      items "by" "name"
+    }
+  }
+}

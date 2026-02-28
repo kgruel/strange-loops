@@ -73,6 +73,23 @@ def create_parser() -> argparse.ArgumentParser:
     close_p.add_argument("name", help="Task name")
     close_p.add_argument("--observer", help="Observer identity")
 
+    # project
+    project_parser = subparsers.add_parser("project", help="Project coordination surface")
+    project_sub = project_parser.add_subparsers(dest="project_command", required=True)
+
+    emit_p = project_sub.add_parser("emit", help="Emit a project fact")
+    emit_p.add_argument("kind", help="Fact kind (decision, thread, plan)")
+    emit_p.add_argument("parts", nargs="*", help="KEY=VALUE pairs and/or message")
+    emit_p.add_argument("--observer", help="Observer identity")
+
+    pstatus_p = project_sub.add_parser("status", help="Show project status")
+    pstatus_p.add_argument("--json", action="store_true", help="JSON output")
+
+    plog_p = project_sub.add_parser("log", help="Show project log")
+    plog_p.add_argument("--since", default="7d", help="Time range (e.g. 7d, 24h)")
+    plog_p.add_argument("--kind", help="Filter by fact kind")
+    plog_p.add_argument("--json", action="store_true", help="JSONL output")
+
     return parser
 
 
@@ -93,6 +110,11 @@ def main(argv: list[str] | None = None) -> int:
         from strange_loops.commands.task import cmd_task
 
         return cmd_task(args)
+
+    if args.command == "project":
+        from strange_loops.commands.project import cmd_project
+
+        return cmd_project(args)
 
     parser.print_help()
     return 1

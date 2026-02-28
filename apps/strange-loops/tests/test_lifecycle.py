@@ -8,6 +8,7 @@ from atoms import Fact
 from engine import StoreReader, SqliteStore
 
 from strange_loops.lifecycle import (
+    _PKG_ROOT,
     _vertex_path,
     fold_all_tasks,
     fold_task_state,
@@ -116,6 +117,61 @@ class TestVertexParsesAndCompiles:
         assert loop.format == "lines"
         assert "gemini" in loop.source
         assert "{{prompt}}" in loop.source
+
+
+class TestProjectVertexCompiles:
+    def test_project_vertex_file_exists(self):
+        project_path = _PKG_ROOT / "loops" / "project.vertex"
+        assert project_path.exists()
+
+    def test_project_vertex_parses(self):
+        from lang import parse_vertex_file
+
+        project_path = _PKG_ROOT / "loops" / "project.vertex"
+        v = parse_vertex_file(project_path)
+        assert v.name == "project"
+        assert "decision" in v.loops
+        assert "thread" in v.loops
+        assert "plan" in v.loops
+
+    def test_project_vertex_compiles(self):
+        from engine import compile_vertex_recursive
+        from lang import parse_vertex_file
+
+        project_path = _PKG_ROOT / "loops" / "project.vertex"
+        vertex = parse_vertex_file(project_path)
+        compiled = compile_vertex_recursive(vertex)
+        assert "decision" in compiled.specs
+        assert "thread" in compiled.specs
+        assert "plan" in compiled.specs
+        assert len(compiled.specs) == 3
+
+    def test_project_specs_have_correct_folds(self):
+        from atoms import Upsert
+        from engine import compile_vertex_recursive
+        from lang import parse_vertex_file
+
+        project_path = _PKG_ROOT / "loops" / "project.vertex"
+        vertex = parse_vertex_file(project_path)
+        compiled = compile_vertex_recursive(vertex)
+
+        # decision by topic
+        spec = compiled.specs["decision"]
+        assert len(spec.folds) == 1
+        assert isinstance(spec.folds[0], Upsert)
+        assert spec.folds[0].key == "topic"
+
+        # thread by name
+        spec = compiled.specs["thread"]
+        assert len(spec.folds) == 1
+        assert isinstance(spec.folds[0], Upsert)
+        assert spec.folds[0].key == "name"
+
+        # plan by name
+        spec = compiled.specs["plan"]
+        assert len(spec.folds) == 1
+        assert isinstance(spec.folds[0], Upsert)
+        assert spec.folds[0].key == "name"
 
 
 class TestFoldTaskState:

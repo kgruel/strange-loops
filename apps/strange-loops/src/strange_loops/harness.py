@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lang import parse_loop_file
 
-from strange_loops.store import emit_fact
+from strange_loops.store import emit_fact, emit_tick
 
 # Package root: apps/strange-loops/
 _PKG_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -86,6 +86,16 @@ def run_harness(
     if exit_code != 0:
         complete_payload["error"] = f"Process exited with code {exit_code}"
     emit_fact(path, "worker.output.complete", obs, complete_payload)
+
+    # Advance task stage and emit tick (boundary crossing)
+    stage = "completed" if exit_code == 0 else "errored"
+    emit_fact(path, "task.stage", obs, {"name": task_name, "status": stage})
+    emit_tick(
+        path,
+        name="task.tick",
+        payload={"task": task_name, "status": stage, "exit_code": exit_code},
+        origin="tasks",
+    )
 
     return exit_code
 

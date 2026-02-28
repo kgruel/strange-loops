@@ -120,8 +120,8 @@ class StoreReader:
         if kind is not None:
             rows = self._conn.execute(
                 "SELECT kind, ts, observer, origin, payload FROM facts "
-                "WHERE ts >= ? AND ts <= ? AND kind = ? ORDER BY ts",
-                (since_ts, until_ts, kind),
+                "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?) ORDER BY ts",
+                (since_ts, until_ts, kind, kind + ".%"),
             ).fetchall()
         else:
             rows = self._conn.execute(

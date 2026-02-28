@@ -41,6 +41,7 @@ patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
   live.py            Live streaming: fetch_stream, spinners, --live  ✓
+  focus.py          Focus + Cursor + Search: navigation vs capture        ✓
   testing.py        Replay testing: emit capture, observation traces      ✓
   profiler.py       Self-profiling: frame cost, emission timeline, flame graph  ✓
 ```

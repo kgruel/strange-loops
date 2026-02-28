@@ -1,0 +1,41 @@
+  same content, different offsets (vslice windowing)
+
+╭───────────────────────╮  ╭───────────────────────╮  ╭───────────────────────╮
+│00 ▸ deploy api-gateway│  │03   deploy api-gateway│  │13   tail logs api-gate│
+│01   deploy api-gateway│  │04   deploy api-gateway│  │14   tail logs api-gate│
+│02   deploy api-gateway│  │05   deploy api-gateway│  │15   tail logs api-gate│
+│03   deploy api-gateway│  │06   deploy api-gateway│  │16   rollout complete: │
+│04   deploy api-gateway│  │07   deploy api-gateway│  │17   status: green     │
+╰───────────────────────╯  ╰───────────────────────╯  ╰───────────────────────╯
+
+  cursor-follow: the offset that keeps selection visible
+
+[cursor=5 (scroll_into_view)]
+cursor=5/17  offset=1 visible=5 content=18 max=13  window=[1..5]
+
+window (vslice):
+01   deploy api-gateway: push image
+02   deploy api-gateway: rollout 1/3 ready
+03   deploy api-gateway: rollout 2/3 ready
+04   deploy api-gateway: rollout 3/3 ready
+05 ▸ deploy api-gateway: smoke tests
+
+overlay (full content with viewport window):
+  00   deploy api-gateway: build ✓ sha=9f2c7a1
+┌ 01   deploy api-gateway: push image
+│ 02   deploy api-gateway: rollout 1/3 ready
+│ 03   deploy api-gateway: rollout 2/3 ready
+│ 04   deploy api-gateway: rollout 3/3 ready
+└ 05 ▸ deploy api-gateway: smoke tests
+  06   deploy api-gateway: health /ready 200
+  07   deploy api-gateway: metrics p95=72ms
+  08   deploy api-gateway: error_rate=0.08%
+  09   deploy api-gateway: done
+  10   tail logs api-gateway: conn=1243
+  11   tail logs api-gateway: conn=1244
+  12   tail logs api-gateway: conn=1245
+  13   tail logs api-gateway: conn=1246
+  14   tail logs api-gateway: warn: retrying
+  15   tail logs api-gateway: ok
+  16   rollout complete: 3/3 healthy
+  17   status: green

@@ -9,6 +9,7 @@ shift
 case "$cmd" in
   # patterns
   rendering)   exec uv run python demos/patterns/rendering.py "$@" ;;
+  hit-testing) exec uv run python demos/patterns/hit_testing.py "$@" ;;
   fidelity)    exec uv run python demos/patterns/fidelity.py "$@" ;;
   live)        exec uv run python demos/patterns/live.py "$@" ;;
   focus)       exec uv run python demos/patterns/focus.py "$@" ;;
@@ -19,5 +20,5 @@ case "$cmd" in
   widgets)     exec uv run python demos/apps/widgets.py "$@" ;;
   big-text)    exec uv run python demos/apps/big_text.py "$@" ;;
   tour)        exec uv run python demos/tour.py "$@" ;;
-  *)           echo "Unknown demo: $cmd"; echo "Available: rendering fidelity live focus profiler widgets big-text tour"; exit 1 ;;
+  *)           echo "Unknown demo: $cmd"; echo "Available: rendering hit-testing fidelity live focus profiler widgets big-text tour"; exit 1 ;;
 esac

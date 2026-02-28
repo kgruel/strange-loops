@@ -39,6 +39,7 @@ primitives/
 
 patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
+  hit_testing.py    Hit testing: Block.id -> composition -> Buffer.hit()   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
   live.py            Live streaming: fetch_stream, spinners, --live  ✓
   focus.py          Focus + Cursor + Search: navigation vs capture        ✓

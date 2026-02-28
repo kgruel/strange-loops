@@ -98,3 +98,17 @@ The harness keeps a strict separation:
 - your code owns *state fetching* (`fetch` / `fetch_stream`)
 - your code owns *rendering* (`render(ctx, state) -> Block`)
 - painted owns *delivery* (static/live/interactive formatting and terminal behavior)
+
+---
+
+## Demo output (fidelity.py)
+
+### Zoom.MINIMAL
+
+<!-- outputgen:begin name="fidelity_minimal" --><span hidden></span>
+<!-- outputgen:end --><span hidden></span>
+
+### Zoom.DETAILED
+
+<!-- outputgen:begin name="fidelity_detailed" --><span hidden></span>
+<!-- outputgen:end --><span hidden></span>

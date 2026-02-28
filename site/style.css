@@ -493,6 +493,18 @@ pre[class*="language-"] {
   margin: 0;
 }
 
+pre.painted-output {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  box-shadow: var(--code-shadow);
+  margin: 0;
+}
+
 .code-copy {
   position: absolute;
   top: 0.65rem;

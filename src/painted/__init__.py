@@ -85,6 +85,7 @@ from .viewport import Viewport
 
 # Output
 from .writer import ColorDepth, Writer, print_block
+from .html import render_html
 
 _MISSING = object()
 
@@ -183,6 +184,7 @@ __all__ = [
     "Writer",
     "ColorDepth",
     "print_block",
+    "render_html",
     # Display
     "show",
     # Fidelity (new API)

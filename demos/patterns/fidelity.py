@@ -12,12 +12,10 @@ The flags drive the output — the code doesn't switch on modes.
     uv run demos/patterns/fidelity.py           # directory list
     uv run demos/patterns/fidelity.py -v        # styled bars
     uv run demos/patterns/fidelity.py -vv       # full detail
-    uv run demos/patterns/fidelity.py -vv -i    # interactive tree
 """
 
 from __future__ import annotations
 
-import asyncio
 import shutil
 import sys
 from dataclasses import dataclass
@@ -29,17 +27,14 @@ from painted import (
     Style,
     CliContext,
     Zoom,
-    OutputMode,
-    Format,
     border,
     join_vertical,
     join_horizontal,
     pad,
+    truncate,
     ROUNDED,
-    print_block,
     run_cli,
 )
-from painted.tui import Surface
 
 
 # --- Data model ---
@@ -152,18 +147,19 @@ SAMPLE_DISK = DiskData(
 # --- Zoom 0: one-line summary ---
 
 
-def render_minimal(data: DiskData) -> Block:
+def render_minimal(data: DiskData, width: int) -> Block:
     ts = f"  [{data.timestamp}]" if data.timestamp else ""
-    return Block.text(
+    result = Block.text(
         f"{data.used_percent:.0f}% used ({data.used_human}/{data.total_human}){ts}",
         Style(),
     )
+    return truncate(result, width)
 
 
 # --- Zoom 1: directory list ---
 
 
-def render_standard(data: DiskData) -> Block:
+def render_standard(data: DiskData, width: int) -> Block:
     rows: list[Block] = [
         Block.text(f"Disk usage: {data.mount}", Style(bold=True)),
         Block.text(
@@ -185,7 +181,7 @@ def render_standard(data: DiskData) -> Block:
     rows.append(Block.text(f"Free: {data.free_human}", Style()))
     if data.timestamp:
         rows.append(Block.text(f"  {data.timestamp}", Style(dim=True)))
-    return join_vertical(*rows)
+    return truncate(join_vertical(*rows), width)
 
 
 # --- Zoom 2: styled bars ---
@@ -298,196 +294,6 @@ def render_full(data: DiskData, width: int) -> Block:
     return join_vertical(*blocks)
 
 
-# --- Interactive: TUI tree browser ---
-
-
-@dataclass
-class TreeNode:
-    """Mutable tree node for navigation state."""
-
-    entry: DirEntry
-    depth: int
-    expanded: bool = False
-    parent: "TreeNode | None" = None
-
-
-class DiskSurface(Surface):
-    """Interactive TUI with expandable file tree."""
-
-    def __init__(self, data: DiskData):
-        super().__init__()
-        self._data = data
-        self._width = 80
-        self._height = 24
-        self._nodes: list[TreeNode] = []
-        for entry in data.entries:
-            self._nodes.append(TreeNode(entry=entry, depth=0))
-        self._selected = 0
-        self._scroll_offset = 0
-
-    def layout(self, width: int, height: int) -> None:
-        self._width = width
-        self._height = height
-
-    def _visible_nodes(self) -> list[TreeNode]:
-        result: list[TreeNode] = []
-
-        def visit(entries: tuple[DirEntry, ...], depth: int, parent: TreeNode | None = None) -> None:
-            for entry in sorted(entries, key=lambda e: e.size_bytes, reverse=True):
-                node = TreeNode(entry=entry, depth=depth, parent=parent)
-                for n in self._nodes:
-                    if n.entry.name == entry.name and n.depth == depth:
-                        node.expanded = n.expanded
-                        break
-                result.append(node)
-                if node.expanded and entry.children:
-                    visit(entry.children, depth + 1, node)
-
-        visit(self._data.entries, 0)
-        self._nodes = result
-        return result
-
-    def render(self) -> None:
-        if self._buf is None:
-            return
-
-        self._buf.fill(0, 0, self._width, self._height, " ", Style())
-
-        # Header
-        header_text = f" Disk Usage: {self._data.mount} ".center(self._width)
-        Block.text(header_text, Style(bold=True, fg="cyan", reverse=True)).paint(self._buf, 0, 0)
-
-        # Usage bar
-        bar_width = min(30, self._width - 30)
-        filled = int(self._data.used_percent / 100 * bar_width)
-        bar_style = Style(
-            fg="green" if self._data.used_percent < 75
-            else "yellow" if self._data.used_percent < 90
-            else "red",
-        )
-        join_horizontal(
-            Block.text(f" {self._data.used_percent:.0f}% ", bar_style),
-            Block.text("\u2588" * filled + "\u2591" * (bar_width - filled), bar_style),
-            Block.text(f" {self._data.used_human}/{self._data.total_human} ", Style(dim=True)),
-        ).paint(self._buf, 0, 1)
-
-        # Tree
-        visible = self._visible_nodes()
-        tree_height = self._height - 6
-        tree_width = self._width - 2
-        tree_box = border(
-            self._render_tree(visible, tree_width, tree_height),
-            title="Files", chars=ROUNDED,
-        )
-        tree_box.paint(self._buf, 0, 3)
-
-        # Footer
-        Block.text(
-            " j/k: navigate  Enter: expand/collapse  q: quit ",
-            Style(dim=True),
-        ).paint(self._buf, 0, self._height - 1)
-
-    def _render_tree(self, nodes: list[TreeNode], width: int, height: int) -> Block:
-        if not nodes:
-            return Block.text("(empty)", Style(dim=True))
-
-        self._selected = max(0, min(self._selected, len(nodes) - 1))
-
-        if self._selected < self._scroll_offset:
-            self._scroll_offset = self._selected
-        elif self._selected >= self._scroll_offset + height:
-            self._scroll_offset = self._selected - height + 1
-
-        rows: list[Block] = []
-        for i in range(self._scroll_offset, min(self._scroll_offset + height, len(nodes))):
-            node = nodes[i]
-            selected = i == self._selected
-            indent = "  " * node.depth
-
-            if node.entry.children:
-                expand = "\u25bc " if node.expanded else "\u25b6 "
-            else:
-                expand = "  "
-
-            icon = ("\U0001f4c2" if node.expanded else "\U0001f4c1") if node.entry.is_dir else "\U0001f4c4"
-            size = node.entry.size_human.rjust(6)
-
-            if node.depth == 0:
-                pct = (node.entry.size_bytes / self._data.used_bytes) * 100
-            elif node.parent:
-                pct = (node.entry.size_bytes / node.parent.entry.size_bytes) * 100
-            else:
-                pct = 0
-
-            name_width = width - len(indent) - 2 - 2 - 6 - 8
-            name = node.entry.name[:name_width].ljust(name_width)
-
-            if selected:
-                row_style = Style(reverse=True)
-                row = join_horizontal(
-                    Block.text(indent, row_style),
-                    Block.text(expand, row_style),
-                    Block.text(icon + " ", row_style),
-                    Block.text(name, row_style),
-                    Block.text(size, row_style),
-                    Block.text(f" {pct:4.1f}%", row_style),
-                )
-            else:
-                size_style = (
-                    Style(fg="yellow", bold=True) if pct > 30
-                    else Style(bold=True) if pct > 10
-                    else Style()
-                )
-                row = join_horizontal(
-                    Block.text(indent, Style()),
-                    Block.text(expand, Style()),
-                    Block.text(icon + " ", Style()),
-                    Block.text(name, Style()),
-                    Block.text(size, size_style),
-                    Block.text(f" {pct:4.1f}%", Style(dim=True)),
-                )
-            rows.append(row)
-
-        return join_vertical(*rows)
-
-    def on_key(self, key: str) -> None:
-        visible = self._visible_nodes()
-
-        if key == "q":
-            self.quit()
-        elif key in ("j", "down"):
-            if self._selected < len(visible) - 1:
-                self._selected += 1
-            self.mark_dirty()
-        elif key in ("k", "up"):
-            if self._selected > 0:
-                self._selected -= 1
-            self.mark_dirty()
-        elif key == "enter":
-            if visible and self._selected < len(visible):
-                node = visible[self._selected]
-                if node.entry.children:
-                    node.expanded = not node.expanded
-            self.mark_dirty()
-        elif key in ("l", "right"):
-            if visible and self._selected < len(visible):
-                node = visible[self._selected]
-                if node.entry.children and not node.expanded:
-                    node.expanded = True
-            self.mark_dirty()
-        elif key in ("h", "left"):
-            if visible and self._selected < len(visible):
-                node = visible[self._selected]
-                if node.expanded:
-                    node.expanded = False
-                elif node.depth > 0 and node.parent:
-                    for i, n in enumerate(visible):
-                        if n.entry == node.parent.entry:
-                            self._selected = i
-                            break
-            self.mark_dirty()
-
-
 # --- run_cli integration ---
 
 
@@ -509,23 +315,12 @@ def _fetch() -> DiskData:
 
 def _render(ctx: CliContext, data: DiskData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return render_minimal(data)
+        return render_minimal(data, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return render_standard(data)
+        return render_standard(data, ctx.width)
     if ctx.zoom == Zoom.FULL:
         return render_full(data, ctx.width)
     return render_styled(data, ctx.width)
-
-
-def _handle_interactive(ctx: CliContext) -> int:
-    data = _fetch()
-    if not ctx.is_tty:
-        block = _render(ctx, data)
-        print_block(block, use_ansi=(ctx.format == Format.ANSI))
-        return 0
-    surface = DiskSurface(data)
-    asyncio.run(surface.run())
-    return 0
 
 
 def main() -> int:
@@ -533,7 +328,6 @@ def main() -> int:
         sys.argv[1:],
         render=_render,
         fetch=_fetch,
-        handlers={OutputMode.INTERACTIVE: _handle_interactive},
         description=__doc__,
         prog="fidelity.py",
     )

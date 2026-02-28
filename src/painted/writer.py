@@ -304,6 +304,11 @@ class Writer:
         """Render cell writes to terminal. Batches into a single write call."""
         self.write_ops(writes, clear_first=clear_first)  # type: ignore[arg-type]  # CellWrite is a RenderOp
 
+    def clear_screen(self) -> None:
+        """Erase entire display (ED2)."""
+        self._stream.write("\x1b[2J")
+        self._stream.flush()
+
     def enter_alt_screen(self) -> None:
         self._stream.write("\x1b[?1049h")
         self._stream.flush()

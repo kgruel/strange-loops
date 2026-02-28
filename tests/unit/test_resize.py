@@ -71,6 +71,14 @@ class TestBufferDiffDimensionMismatch:
         assert writes == [CellWrite(2, 1, Cell("Z", Style()))]
 
 
+class TestWriterClearScreen:
+    def test_clear_screen_emits_ed2(self):
+        stream = io.StringIO()
+        w = Writer(stream, color_depth=ColorDepth.BASIC)
+        w.clear_screen()
+        assert stream.getvalue() == "\x1b[2J"
+
+
 class TestWriterClearFirst:
     def test_write_frame_clear_first_with_no_writes(self):
         stream = io.StringIO()
@@ -148,6 +156,123 @@ class TestSurfaceNeedsClear:
 
         out = stream.getvalue()
         assert out.count(_clear()) == 1
+
+
+class TestResizeHandling:
+    """End-to-end resize behavior via TestSurface harness."""
+
+    def test_resize_produces_correct_dimensions(self):
+        """Buffer dimensions match new terminal size after resize."""
+        app = FillSurface()
+        harness = TestSurface(app, width=80, height=24)
+
+        harness.resize(60, 20)
+        assert app._buf.width == 60
+        assert app._buf.height == 20
+        assert harness.width == 60
+        assert harness.height == 20
+
+    def test_no_stale_content_after_resize(self):
+        """Every cell in the post-resize buffer is the expected content.
+
+        Renders 'A' at 6x3, resizes to 4x2 with 'B', verifies no 'A' remains.
+        """
+        app = FillSurface(ch="A")
+        harness = TestSurface(app, width=6, height=3)
+        frames = harness.run_to_completion()
+
+        # Pre-resize: every cell is 'A'.
+        pre = frames[0]
+        assert all(ch == "A" for line in pre.lines for ch in line)
+
+        # Resize and render with 'B'.
+        app.ch = "B"
+        harness.resize(4, 2)
+        post_frames: list = []
+        harness.surface.update()
+        harness._render_and_capture(post_frames)
+
+        post = post_frames[0]
+        assert post.buffer.width == 4
+        assert post.buffer.height == 2
+        # Every cell must be 'B' -- no 'A' from the old frame.
+        for y, line in enumerate(post.lines):
+            for x, ch in enumerate(line):
+                assert ch == "B", f"Stale content at ({x}, {y}): got {ch!r}, expected 'B'"
+
+    def test_ansi_clear_sequence_on_resize_frame(self):
+        """ANSI clear screen sequence appears in output on resize frame."""
+        app = FillSurface()
+        stream = io.StringIO()
+        harness = TestSurface(
+            app, width=10, height=5, stream=stream, write_ansi=True, color_depth=ColorDepth.BASIC
+        )
+        harness.run_to_completion()
+
+        # Normal frame: no clear.
+        assert _clear() not in stream.getvalue()
+
+        before = len(stream.getvalue())
+        harness.resize(8, 4)
+        post_frames: list = []
+        harness.surface.update()
+        harness._render_and_capture(post_frames)
+        resize_output = stream.getvalue()[before:]
+
+        assert _clear() in resize_output
+
+    def test_post_resize_diff_covers_all_cells(self):
+        """Post-resize diff produces a write for every cell (full repaint)."""
+        app = FillSurface(ch="Z")
+        harness = TestSurface(app, width=5, height=3)
+        harness.run_to_completion()
+
+        harness.resize(4, 2)
+        post_frames: list = []
+        harness.surface.update()
+        harness._render_and_capture(post_frames)
+
+        frame = post_frames[0]
+        total_cells = 4 * 2
+        assert len(frame.writes) == total_cells, (
+            f"Expected {total_cells} writes (full repaint), got {len(frame.writes)}"
+        )
+
+    def test_multiple_rapid_resizes_correct_final_state(self):
+        """Multiple resizes between renders produce correct final dimensions and content."""
+        app = FillSurface(ch="R")
+        harness = TestSurface(app, width=20, height=10)
+        harness.run_to_completion()
+
+        # Fire three resizes without rendering in between.
+        harness.resize(15, 8)
+        harness.resize(10, 5)
+        harness.resize(6, 3)
+
+        post_frames: list = []
+        harness.surface.update()
+        harness._render_and_capture(post_frames)
+
+        frame = post_frames[0]
+        assert frame.buffer.width == 6
+        assert frame.buffer.height == 3
+        for line in frame.lines:
+            assert all(ch == "R" for ch in line)
+
+    def test_buffer_diff_dimension_mismatch_full_repaint(self):
+        """Buffer.diff() with dimension mismatch returns writes for all cells."""
+        a = Buffer(5, 2)
+        for x in range(5):
+            for y in range(2):
+                a.put(x, y, "X", Style())
+
+        b = Buffer(3, 3)
+
+        writes = a.diff(b)
+        assert len(writes) == 10  # 5 * 2 = all cells in `a`
+        coords = {(w.x, w.y) for w in writes}
+        expected = {(x, y) for x in range(5) for y in range(2)}
+        assert coords == expected
 
 
 class TestHarnessResizeIntegration:

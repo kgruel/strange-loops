@@ -20,11 +20,32 @@ because it exists.
 5. **Sections as `join_vertical` groups** — dim header, spacer, content. Consistent visual rhythm.
 6. **Real-ish sample text** — terminal output, deploy messages, status lines. Not "Hello world".
 
-### Patterns rule
+## Demo Tiers
 
-Patterns demos are **runnable examples** with CLI flags — the invocation IS the lesson.
-Visual-not-explanatory still applies (styled Block headers, not `print()`), but CLI arg
-modes are allowed because the lesson is the workflow, not just the types.
+Three tiers, distinguished by where state lives and how you test them.
+
+| Tier | Lesson | State | Test shape |
+|------|--------|-------|------------|
+| **Primitive** | Type API | None | `function() → stdout capture` |
+| **Pattern** | Workflow | Data only | `_render(ctx, data) → Block` |
+| **App** | Interaction | Mutable (Surface) | `TestSurface(keys) → frames` |
+
+**Primitives** teach a single type or composition. No `main()`, no CLI flags.
+Output via `print_block` / `show`. The output is the lesson.
+
+**Patterns** are runnable examples with CLI flags — the invocation IS the lesson.
+They expose `_fetch()` and `_render(ctx, data) → Block` for golden testing.
+A pattern may offer `-i` interactive mode **only** when it's a live frame around
+the same `_render` function (e.g. responsive.py). If `-i` introduces new state
+or its own render pipeline, it's an app.
+
+**Apps** have their own state machines: selection, navigation, modal layers.
+`surface.render()` owns the layout. Tested via `TestSurface` replay: send keys,
+assert on captured frames and emissions.
+
+The test shape *is* the boundary. If you can test the full lesson by calling
+`_render(ctx, data)`, it's a pattern. If you need to send keys and inspect
+frames, it's an app.
 
 ## Demo Ladder
 
@@ -40,13 +61,16 @@ primitives/
 patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   hit_testing.py    Hit testing: Block.id -> composition -> Buffer.hit()   ✓
-  fidelity.py       CLI harness: -q → default → -v → -i       ✓
-  responsive.py     Responsive layout: join_responsive + breakpoints      ✓
-  live.py            Live streaming: fetch_stream, spinners, --live  ✓
+  fidelity.py       CLI harness: -q → default → -v → -vv      ✓
+  responsive.py     Responsive layout: join_responsive + breakpoints (-i) ✓
+  live.py           Live streaming: fetch_stream, spinners, --live        ✓
   focus.py          Focus + Cursor + Search: navigation vs capture        ✓
   testing.py        Replay testing: emit capture, observation traces      ✓
-  profiler.py       Self-profiling: frame cost, emission timeline, flame graph  ✓
-  help.py           Zoom-aware help: HelpData rendered at each zoom level      ✓
+  profiler.py       Self-profiling: frame cost, emission timeline, flame  ✓
+  help.py           Zoom-aware help: HelpData rendered at each zoom level ✓
+
+apps/
+  (not yet graduated to golden tests — needs TestSurface integration)
 ```
 
 Old stepping stones (`block.py`, `buffer.py`, `buffer_view.py`) deleted —

@@ -1,0 +1,4 @@
+source #"claude -p --model sonnet --output-format text --allowedTools 'Bash,Read,Edit,Write,Glob,Grep' --max-turns 25 {{prompt}}"#
+kind "worker.output"
+observer "sonnet"
+format "lines"

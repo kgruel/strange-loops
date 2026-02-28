@@ -1,0 +1,4 @@
+source "{{command}}"
+kind "worker.output"
+observer "shell"
+format "lines"

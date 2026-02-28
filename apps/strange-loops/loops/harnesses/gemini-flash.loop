@@ -1,0 +1,4 @@
+source #"gemini -p -m gemini-2.5-flash --yolo {{prompt}}"#
+kind "worker.output"
+observer "gemini-flash"
+format "lines"

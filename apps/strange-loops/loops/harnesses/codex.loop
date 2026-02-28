@@ -1,0 +1,4 @@
+source #"codex exec --model codex-mini-latest --full-auto {{prompt}}"#
+kind "worker.output"
+observer "codex"
+format "lines"

@@ -1,0 +1,49 @@
+name "tasks"
+store "data/tasks.db"
+
+loops {
+  task.created {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  task.assigned {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  task.stage {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  task.completed {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  task.merged {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  worker.output {
+    fold {
+      output "collect" 10000
+    }
+  }
+
+  worker.output.complete {
+    fold {
+      items "by" "task"
+    }
+    boundary when="worker.output.complete"
+  }
+}
+
+emit "task.tick"

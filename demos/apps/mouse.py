@@ -13,7 +13,7 @@ Run: uv run python demos/apps/mouse.py
 """
 
 import asyncio
-from painted import Block, Style
+from painted import Style
 from painted.tui import Surface
 from painted.mouse import MouseEvent, MouseButton, MouseAction
 
@@ -29,52 +29,47 @@ PALETTE = [
 ]
 
 
-class DrawCanvas(Surface):
+class MouseApp(Surface):
     def __init__(self):
-        super().__init__(enable_mouse=True)
+        super().__init__(enable_mouse=True, mouse_all_motion=True)
         self.color_idx = 0
         self.canvas: dict[tuple[int, int], str] = {}  # (x, y) -> color
         self.last_pos: tuple[int, int] | None = None
         self.mouse_pos: tuple[int, int] = (0, 0)
         self.drawing = False
 
-    def layout(self, width: int, height: int) -> None:
-        self.width = width
-        self.height = height
-
     def render(self) -> None:
+        if self._buf is None:
+            return
+        width, height = self._buf.width, self._buf.height
+
         # Clear with dots
-        self._buf.fill(0, 0, self.width, self.height, "·", Style(dim=True))
+        self._buf.fill(0, 0, width, height, "·", Style(dim=True))
 
         # Draw canvas pixels
         for (x, y), color in self.canvas.items():
-            if 0 <= x < self.width and 1 <= y < self.height - 1:
+            if 0 <= x < width and 1 <= y < height - 1:
                 self._buf.put_text(x, y, "█", Style(fg=color))
 
         # Status bar at top
         color = PALETTE[self.color_idx]
-        status = Block.text(
-            f" Mouse Demo │ Color: █ │ Scroll=color, Click=draw, Right=erase, c=clear, q=quit ",
-            Style(fg="black", bg="white"),
-        )
-        # Colorize the block character in status
-        status_text = f" Mouse Demo │ Color: "
+        status_text = f" Mouse Demo │ Color {self.color_idx + 1}/{len(PALETTE)}: "
         self._buf.put_text(0, 0, status_text, Style(fg="black", bg="white"))
         self._buf.put_text(len(status_text), 0, "█", Style(fg=color, bg="white"))
-        rest = f" │ Scroll=color, Click=draw, Right=erase, c=clear, q=quit "
+        rest = f" │ Scroll=color, Left=draw/drag, Right=erase, c=clear, q=quit "
         self._buf.put_text(len(status_text) + 1, 0, rest, Style(fg="black", bg="white"))
         # Fill rest of status bar
         filled = len(status_text) + 1 + len(rest)
-        if filled < self.width:
-            self._buf.put_text(filled, 0, " " * (self.width - filled), Style(bg="white"))
+        if filled < width:
+            self._buf.put_text(filled, 0, " " * (width - filled), Style(bg="white"))
 
         # Coordinates at bottom
         mx, my = self.mouse_pos
         coords = f" ({mx}, {my}) "
-        self._buf.put_text(0, self.height - 1, coords, Style(dim=True))
+        self._buf.put_text(0, height - 1, coords, Style(dim=True))
 
         # Brush preview follows cursor (if in canvas area)
-        if 1 <= my < self.height - 1:
+        if 1 <= my < height - 1:
             preview_char = "○" if not self.drawing else "●"
             self._buf.put_text(mx, my, preview_char, Style(fg=color, bold=True))
 
@@ -105,9 +100,9 @@ class DrawCanvas(Surface):
 
         # Scroll changes color
         if event.is_scroll:
-            if event.button == MouseButton.SCROLL_UP:
+            if event.scroll_delta < 0:
                 self.color_idx = (self.color_idx - 1) % len(PALETTE)
-            else:
+            elif event.scroll_delta > 0:
                 self.color_idx = (self.color_idx + 1) % len(PALETTE)
             return
 
@@ -132,13 +127,11 @@ class DrawCanvas(Surface):
                     self._draw_line(self.last_pos, (event.x, event.y))
                 self.last_pos = (event.x, event.y)
 
-        # Motion without button (hover) - just update cursor position
-        if event.button == MouseButton.NONE and event.action == MouseAction.MOVE:
-            pass  # Cursor position already updated
-
     def _draw_at(self, x: int, y: int) -> None:
         """Draw a pixel at the given position."""
-        if 1 <= y < self.height - 1:  # Stay within canvas area
+        if self._buf is None:
+            return
+        if 0 <= x < self._buf.width and 1 <= y < self._buf.height - 1:  # canvas area
             self.canvas[(x, y)] = PALETTE[self.color_idx]
 
     def _erase_at(self, x: int, y: int) -> None:
@@ -169,5 +162,9 @@ class DrawCanvas(Surface):
                 y1 += sy
 
 
+async def main() -> None:
+    await MouseApp().run()
+
+
 if __name__ == "__main__":
-    asyncio.run(DrawCanvas().run())
+    asyncio.run(main())

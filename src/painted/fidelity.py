@@ -79,6 +79,40 @@ class CliContext:
 
 
 # =============================================================================
+# Help Data Types
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class HelpFlag:
+    """A single CLI flag for help rendering."""
+
+    short: str | None  # "-v"
+    long: str | None  # "--verbose"
+    description: str  # shown at all zoom levels
+    detail: str | None = None  # shown at DETAILED+
+
+
+@dataclass(frozen=True)
+class HelpGroup:
+    """A group of related flags."""
+
+    name: str  # "Zoom"
+    hint: str | None = None  # "(what to show)" — after name at SUMMARY+
+    detail: str | None = None  # longer description at DETAILED+
+    flags: tuple[HelpFlag, ...] = ()
+
+
+@dataclass(frozen=True)
+class HelpData:
+    """Complete help information for a CLI tool."""
+
+    prog: str | None
+    description: str | None
+    groups: tuple[HelpGroup, ...]
+
+
+# =============================================================================
 # Resolution Logic
 # =============================================================================
 
@@ -139,6 +173,206 @@ def setup_defaults(ctx: CliContext) -> None:
 
     if ctx.format == Format.PLAIN:
         use_icons(ASCII_ICONS)
+
+
+# =============================================================================
+# Help Rendering
+# =============================================================================
+
+
+def _build_help_data(runner: CliRunner[T]) -> HelpData:
+    """Construct help data from a CliRunner's config."""
+    # Zoom group — always present
+    zoom_flags = (
+        HelpFlag("-q", "--quiet", "Minimal output"),
+        HelpFlag("-v", "--verbose", "Detailed (-v) or full (-vv)"),
+    )
+    zoom_group = HelpGroup(
+        name="Zoom",
+        hint="(what to show)",
+        detail="Controls how much detail is rendered. Stackable: -v for detailed, -vv for full.",
+        flags=zoom_flags,
+    )
+
+    # Mode group — filtered by capability (same logic as add_cli_args)
+    has_live = runner.fetch_stream is not None
+    has_interactive = runner.handlers is not None and OutputMode.INTERACTIVE in runner.handlers
+    mode_flags: list[HelpFlag] = []
+    if has_interactive:
+        mode_flags.append(HelpFlag("-i", "--interactive", "Interactive TUI"))
+    mode_flags.append(
+        HelpFlag(None, "--static", "Static output, no animation"),
+    )
+    if has_live:
+        mode_flags.append(
+            HelpFlag(None, "--live", "Live output with in-place updates"),
+        )
+
+    mode_group: HelpGroup | None = None
+    if has_live or has_interactive:
+        mode_group = HelpGroup(
+            name="Mode",
+            hint="(how to deliver)",
+            detail="Delivery mechanism. AUTO selects LIVE for TTY, STATIC for pipes.",
+            flags=tuple(mode_flags),
+        )
+
+    # Format group — always present
+    format_flags = (
+        HelpFlag(None, "--json", "JSON output", detail="Implies --static."),
+        HelpFlag(
+            None, "--plain", "Plain text, no ANSI codes", detail="Implies --static when piped."
+        ),
+    )
+    format_group = HelpGroup(
+        name="Format",
+        hint="(serialization)",
+        detail="Output serialization. ANSI is default for TTY, PLAIN for pipes.",
+        flags=format_flags,
+    )
+
+    # Help flag itself
+    help_flags = (HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),)
+    help_group = HelpGroup(name="Help", flags=help_flags)
+
+    groups: list[HelpGroup] = [zoom_group]
+    if mode_group is not None:
+        groups.append(mode_group)
+    groups.append(format_group)
+    groups.append(help_group)
+
+    return HelpData(
+        prog=runner.prog,
+        description=runner.description,
+        groups=tuple(groups),
+    )
+
+
+def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Block:
+    """Render help data as a composed Block."""
+    from .block import Block
+    from .cell import Style
+    from .compose import join_vertical, pad
+
+    rows: list[Block] = []
+
+    # Header: prog + description
+    if data.prog or data.description:
+        parts: list[str] = []
+        if data.prog:
+            parts.append(data.prog)
+        desc = data.description
+        if desc:
+            # Take first line/sentence for summary
+            first_line = desc.strip().split("\n")[0].strip()
+            parts.append(first_line)
+        header = " — ".join(parts) if len(parts) > 1 else parts[0]
+        rows.append(Block.text(header, Style(bold=True) if use_ansi else Style()))
+        rows.append(Block.text("", Style()))
+
+    # Flag column width: find widest flag string for alignment
+    flag_strs: list[str] = []
+    for group in data.groups:
+        for flag in group.flags:
+            parts_f: list[str] = []
+            if flag.short:
+                parts_f.append(flag.short)
+            if flag.long:
+                parts_f.append(flag.long)
+            flag_strs.append(", ".join(parts_f))
+    col_width = max((len(s) for s in flag_strs), default=10) + 2  # padding
+
+    for group in data.groups:
+        # Group name + hint
+        group_label = group.name
+        if group.hint:
+            group_label += f" {group.hint}"
+        rows.append(
+            Block.text(
+                group_label,
+                Style(bold=True) if use_ansi else Style(),
+            )
+        )
+
+        # Group detail at DETAILED+
+        if zoom >= Zoom.DETAILED and group.detail:
+            rows.append(
+                Block.text(
+                    f"  {group.detail}",
+                    Style(dim=True) if use_ansi else Style(),
+                )
+            )
+
+        # Flags
+        for flag in group.flags:
+            parts_f = []
+            if flag.short:
+                parts_f.append(flag.short)
+            if flag.long:
+                parts_f.append(flag.long)
+            flag_str = ", ".join(parts_f)
+            line = f"  {flag_str:<{col_width}}{flag.description}"
+            rows.append(Block.text(line, Style()))
+
+            # Flag detail at DETAILED+
+            if zoom >= Zoom.DETAILED and flag.detail:
+                detail_indent = "  " + " " * col_width
+                rows.append(
+                    Block.text(
+                        f"{detail_indent}{flag.detail}",
+                        Style(dim=True) if use_ansi else Style(),
+                    )
+                )
+
+        rows.append(Block.text("", Style()))
+
+    # Interaction rules at DETAILED+
+    if zoom >= Zoom.DETAILED:
+        rules_header = "Interaction rules"
+        rules = [
+            "--json and --plain imply --static (no animation).",
+            "-q (minimal zoom) implies --static.",
+            "AUTO mode selects LIVE for TTY, STATIC for pipes.",
+        ]
+        rows.append(
+            Block.text(
+                rules_header,
+                Style(bold=True) if use_ansi else Style(),
+            )
+        )
+        for rule in rules:
+            rows.append(Block.text(f"  {rule}", Style(dim=True) if use_ansi else Style()))
+        rows.append(Block.text("", Style()))
+
+    return join_vertical(*rows)
+
+
+def _scan_help_args(args: list[str]) -> tuple[Zoom, Format]:
+    """Quick-scan args for zoom and format when --help is present."""
+    zoom = Zoom.SUMMARY
+    fmt = Format.AUTO
+
+    v_count = 0
+    for arg in args:
+        if arg == "-h" or arg == "--help":
+            continue
+        if arg == "-q" or arg == "--quiet":
+            zoom = Zoom.MINIMAL
+        elif arg.startswith("-v"):
+            # Count v's: -v, -vv, -vvv
+            if arg.startswith("--verbose"):
+                v_count += 1
+            else:
+                v_count += len(arg) - 1  # strip the dash
+        elif arg == "--json":
+            fmt = Format.JSON
+        elif arg == "--plain":
+            fmt = Format.PLAIN
+
+    if zoom != Zoom.MINIMAL and v_count > 0:
+        zoom = Zoom.FULL if v_count >= 2 else Zoom.DETAILED
+
+    return zoom, fmt
 
 
 # =============================================================================
@@ -279,10 +513,17 @@ class CliRunner(Generic[T]):
 
     def run(self, args: list[str]) -> int:
         """Parse args, resolve context, dispatch."""
+        # Intercept --help before argparse
+        if "-h" in args or "--help" in args:
+            return self._handle_help(args)
+
         parser = argparse.ArgumentParser(
             description=self.description,
             prog=self.prog,
+            add_help=False,
         )
+        # Re-add -h/--help so argparse still recognizes it for error messages
+        parser.add_argument("-h", "--help", action="help", help=argparse.SUPPRESS)
 
         # Infer supported modes from config
         modes: set[OutputMode] = {OutputMode.STATIC}
@@ -309,6 +550,27 @@ class CliRunner(Generic[T]):
         ctx = detect_context(zoom, mode, fmt)
 
         return self._dispatch(ctx)
+
+    def _handle_help(self, args: list[str]) -> int:
+        """Render zoom-aware help and return 0."""
+        zoom, fmt = _scan_help_args(args)
+        help_data = _build_help_data(self)
+
+        if fmt == Format.JSON:
+            print(json.dumps(asdict(help_data), default=str))
+            return 0
+
+        use_ansi = fmt != Format.PLAIN
+        if fmt == Format.AUTO:
+            use_ansi = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+        width = shutil.get_terminal_size().columns
+        block = _render_help(help_data, zoom, width, use_ansi)
+
+        from .writer import print_block
+
+        print_block(block, use_ansi=use_ansi)
+        return 0
 
     def _dispatch(self, ctx: CliContext) -> int:
         """Dispatch to appropriate output mechanism."""

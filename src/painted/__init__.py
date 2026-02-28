@@ -47,6 +47,9 @@ from .fidelity import (
     CliContext,
     CliRunner,
     Format,
+    HelpData,
+    HelpFlag,
+    HelpGroup,
     OutputMode,
     # New API
     Zoom,

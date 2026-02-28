@@ -650,3 +650,23 @@ All TTY-dependent or async-lifecycle — test complexity exceeds value.
 the success gate with all 5 commands.
 
 **1078 tests passing on main.**
+
+---
+
+## 2026-02-28 — Terminal resize fix (Option C)
+
+Fixed visual corruption on terminal resize by clearing the display atomically
+with the next repaint.
+
+**What changed:**
+- `Writer.write_ops()` / `Writer.write_frame()` gained `clear_first=` which emits
+  `\x1b[2J` inside the mode-2026 synchronized output block.
+- `Surface` gained a one-shot `_needs_clear` flag set by `_resize()` (called by
+  `_on_resize()`); `_flush()` consumes it, skips scroll optimization for that
+  frame, and emits a clear frame even when there are no cell writes.
+- `Buffer.diff()` now guards dimension mismatches by returning a full repaint
+  instead of raising `IndexError`.
+- `TestSurface.resize()` added to exercise the same resize path in unit tests.
+- New unit tests cover clear emission + lifecycle and the diff guard.
+
+**Verification:** `./dev check` passes.

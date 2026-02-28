@@ -112,6 +112,15 @@ class Buffer:
 
     def diff(self, other: Buffer) -> list[CellWrite]:
         """Compare with another buffer, return list of cells that differ."""
+        if self.width != other.width or self.height != other.height:
+            # Dimension mismatch: treat every cell as changed. This avoids IndexError
+            # and ensures coordinates are computed against `self`'s stride.
+            writes: list[CellWrite] = []
+            for i in range(len(self._cells)):
+                y, x = divmod(i, self.width)
+                writes.append(CellWrite(x, y, self._cells[i]))
+            return writes
+
         writes: list[CellWrite] = []
         for i in range(len(self._cells)):
             if self._cells[i] != other._cells[i]:

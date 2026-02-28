@@ -45,6 +45,7 @@ class Surface:
         self._keyboard = KeyboardInput()
         self._running = False
         self._dirty = True
+        self._needs_clear = False
         self._enable_mouse = enable_mouse
         self._mouse_all_motion = mouse_all_motion
         if scroll_optimization is None:
@@ -199,6 +200,11 @@ class Surface:
     def _on_resize(self) -> None:
         """Handle SIGWINCH: resize buffers and recalculate layout."""
         width, height = self._writer.size()
+        self._resize(width, height)
+
+    def _resize(self, width: int, height: int) -> None:
+        """Apply a resize event (buffer + layout + clear-on-next-flush)."""
+        self._needs_clear = True
         self._buf = Buffer(width, height)
         self._prev = Buffer(width, height)
         self.layout(width, height)
@@ -210,13 +216,16 @@ class Surface:
         if self._buf is None or self._prev is None:
             return
 
-        if self._scroll_optimization and self._try_flush_scroll_optimized():
+        needs_clear = self._needs_clear
+        self._needs_clear = False
+
+        if not needs_clear and self._scroll_optimization and self._try_flush_scroll_optimized():
             self._prev = self._buf.clone()
             return
 
         writes = self._buf.diff(self._prev)
-        if writes:
-            self._writer.write_frame(writes)
+        if writes or needs_clear:
+            self._writer.write_frame(writes, clear_first=needs_clear)
         # Swap: current becomes previous for next frame
         self._prev = self._buf.clone()
 

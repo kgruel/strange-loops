@@ -228,13 +228,15 @@ class Writer:
         """Scroll down (content moves down) by n lines: CSI n T."""
         return f"\x1b[{n}T"
 
-    def write_ops(self, ops: list[RenderOp]) -> None:
+    def write_ops(self, ops: list[RenderOp], *, clear_first: bool = False) -> None:
         """Render a mixed stream of operations (scroll + cell writes)."""
-        if not ops:
+        if not ops and not clear_first:
             return
 
         parts: list[str] = []
         parts.append("\x1b[?2026h")  # synchronized output begin
+        if clear_first:
+            parts.append("\x1b[2J")  # erase display
 
         last_style: Style | None = None
         covered: set[tuple[int, int]] = set()  # trailing cells of wide chars written this frame
@@ -298,9 +300,9 @@ class Writer:
         self._stream.write("".join(parts))
         self._stream.flush()
 
-    def write_frame(self, writes: list[CellWrite]) -> None:
+    def write_frame(self, writes: list[CellWrite], *, clear_first: bool = False) -> None:
         """Render cell writes to terminal. Batches into a single write call."""
-        self.write_ops(writes)  # type: ignore[arg-type]  # CellWrite is a RenderOp
+        self.write_ops(writes, clear_first=clear_first)  # type: ignore[arg-type]  # CellWrite is a RenderOp
 
     def enter_alt_screen(self) -> None:
         self._stream.write("\x1b[?1049h")

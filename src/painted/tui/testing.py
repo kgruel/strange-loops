@@ -127,6 +127,12 @@ class TestSurface:
 
         return frames
 
+    def resize(self, width: int, height: int) -> None:
+        """Simulate a terminal resize (SIGWINCH) for the harness dimensions."""
+        self.width = width
+        self.height = height
+        self.surface._resize(width, height)
+
     def _render_and_capture(self, frames: list[CapturedFrame]) -> None:
         if not self.surface._dirty:
             return
@@ -138,9 +144,12 @@ class TestSurface:
         if buf is None or prev is None:
             return
 
+        needs_clear = getattr(self.surface, "_needs_clear", False)
+        self.surface._needs_clear = False
+
         writes = buf.diff(prev)
-        if self.write_ansi and writes:
-            self.surface._writer.write_frame(writes)
+        if self.write_ansi and (writes or needs_clear):
+            self.surface._writer.write_frame(writes, clear_first=needs_clear)
 
         # Swap: current becomes previous for next frame.
         self.surface._prev = buf.clone()

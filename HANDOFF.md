@@ -105,6 +105,9 @@ demos/                 # Python files + tour.py + slides/
 - **Surface test harness** — `TestSurface` for deterministic non-TTY testing.
   Fixed dimensions, input queue, frame capture (`CapturedFrame`). Writer
   accepts forced `color_depth`.
+- **Terminal resize fix** — clears terminal on resize atomically (Erase Display
+  inside synchronized output, mode 2026) using a one-shot `_needs_clear` flag.
+  Added `Buffer.diff()` dimension-mismatch guard and `TestSurface.resize()`.
 - **Scroll optimization** — `Surface._try_flush_scroll_optimized()` detects
   vertical content shifts via line hashing, emits DECSTBM + SU/SD instead of
   full repaint. 25-40x byte reduction per scroll. Opt-in via

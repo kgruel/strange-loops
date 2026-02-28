@@ -56,6 +56,7 @@ live in engine where the target runtime types are defined.
 | `docs/TEMPORAL.md` | Boundaries and nesting |
 | `docs/PERSISTENCE.md` | Durable state, replay |
 | `docs/CADENCE.md` | Cadence/Source split — when vs what |
+| `docs/NAMED_SESSIONS.md` | Named sessions — scoped stores, directory convention |
 | `apps/hlab/docs/prometheus-alerts-to-loops.md` | Design note: route Prometheus alerts into loops stream, drop Grafana |
 
 ## Run Guide
@@ -161,16 +162,25 @@ from engine import StoreReader
 ## Current Focus
 
 **apps/strange-loops** is the active frontier — task orchestration built on
-loops primitives. Tasks are facts, state is fold, completion is tick. Harnesses
-are Sources. See `apps/strange-loops/DESIGN.md` for architecture.
+loops primitives. Full vertical slice working: create → assign → send → monitor
+→ diff → merge → close. Shell harness spawns detached workers that write facts
+to the shared store. Query-time fold derives task state. 56 tests, all passing.
+Next: orchestrator skill (drive the lifecycle with judgment, not just wrapping
+CLI commands) and Claude/Codex harnesses (different commands, same fact pipeline).
+See `apps/strange-loops/DESIGN.md` for architecture.
 
 **apps/loops** is the general-purpose CLI (validate, test, run, compile, start,
 store, emit, session). **apps/hlab** is the first domain app. **apps/reader**
 is the second domain app. `experiments/homelab/` is archived.
 
 **Session continuity** via `loops session start/end/status/log`. Session state
-lives at `LOOPS_HOME/session/`. HANDOFF.md and LOG.md remain as reference but
-session facts are the source of truth going forward.
+lives at `LOOPS_HOME/session/`. Next evolution: named sessions with separate
+stores (`docs/NAMED_SESSIONS.md`). HANDOFF.md and LOG.md remain as reference
+but session facts are the source of truth going forward.
+
+**Meta-discussion workspace** at `~/Documents/meta-discussion/` — cross-project
+analysis of development patterns (test layers, dev harness, dissolution method,
+scaffold template, etc.). Feeds back into loops via design docs and conventions.
 
 ### Bend Experiments (Parked)
 
@@ -227,9 +237,14 @@ apps/strange-loops/              # Task orchestration built on loops
 ├── scripts/                     # Dev scripts (siftd/painted pattern)
 ├── src/strange_loops/
 │   ├── cli.py                   # Thin dispatcher
-│   └── commands/                # Subcommand implementations
-├── tests/
-├── CLAUDE.md                    # Dev conventions
+│   ├── store.py                 # Shared store helpers (observer, emit_fact, require_store)
+│   ├── worktree.py              # Git worktree ops (create, remove, list, diff)
+│   ├── harness.py               # Shell harness runner (detached, captures output as facts)
+│   └── commands/
+│       ├── session.py           # Session lifecycle
+│       └── task.py              # Task lifecycle (create→assign→send→monitor→merge→close)
+├── tests/                       # 56 tests (store, session, task, worktree, harness)
+├── CLAUDE.md                    # Dev conventions + patterns
 └── DESIGN.md                    # Architecture + fact kinds + harness interface
 ```
 
@@ -252,14 +267,23 @@ apps/strange-loops/              # Task orchestration built on loops
 
 ## Next Steps
 
-1. **Self-feeding detection** — `Fact.origin` now distinguishes external
+1. **Session dissolution** — `loops session` dissolves into local vertex
+   resolution + auto-init. The `session` subcommand group goes away. `status`
+   and `log` promote to top-level (work on any local store). `emit` gains
+   auto-init (no store? create one with default vertex). `init` evolves to
+   support template selection (`--template session|tasks|...`). Local-first
+   resolution: find vertex in cwd, fall back to LOOPS_HOME. A "session" is
+   just one vertex pattern among several. Design rationale in
+   `docs/NAMED_SESSIONS.md` (superseded by this dissolution).
+   Immediate use case: `~/Documents/meta-discussion/` as a local vertex
+   directory for cross-project methodology tracking.
+2. **Self-feeding detection** — `Fact.origin` now distinguishes external
    observations (`origin=""`) from derived facts. Build a query or fold that
    computes exhaust ratio: "what fraction of this loop's input is its own
    output?" Store has the data; the safeguard logic doesn't exist yet.
-2. **`loops store` refresh loop** — Periodic re-fetch for live vertex viewing.
+3. **`loops store` refresh loop** — Periodic re-fetch for live vertex viewing.
    SQLite concurrent readers make this straightforward. `start` and `store`
    may converge.
-3. **Actions** — keypress → fact → automation loop (restart container)
 
 ## Open Threads (Deferred)
 
@@ -276,6 +300,16 @@ apps/strange-loops/              # Task orchestration built on loops
   doing real work). Grafana gets dropped (~175 MB, nobody opens it). Alerts
   become `infra.alert` Facts via polling `/api/v1/alerts` — hlab already has
   the `.loop` files for this. Design note: `apps/hlab/docs/prometheus-alerts-to-loops.md`.
+
+- **Population as facts** — Population commands dissolve into `emit`. Adding
+  a row is emitting a `pop.add` fact; removing is `pop.rm`. The `.list` file
+  becomes a materialized projection of fold state (facts → fold → write .list).
+  Store becomes the audit trail for population changes (who added what, when).
+  `import`/`merge` go away. `ls` becomes `status` scoped to pop facts. `export`
+  is just the materialization step. Compiler reads `.list` as before — no
+  compiler changes needed. Materializes on emit (simplest) or on compile (purest).
+  Research confirmed: only one real `.list` in repo (reader/feeds.list), apps
+  already manage populations directly, top-level verbs are disproportionate.
 
 - **String structure** — observer, kind, origin namespacing. Pattern hasn't
   emerged yet.

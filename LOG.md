@@ -5,6 +5,46 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-28 — Meta-discussion: development patterns + named sessions design
+
+**State-of-the-monorepo review.** Full history walk: 393 commits, 28 active
+days, 935 tests across 4 libs + 1 app. Mapped the arc from genesis (Jan 3)
+through crystallization (Jan 26–31) to current state. Identified the sine wave
+pattern in development intensity — crystallization bursts, proving-out phases,
+gaps where other projects get focus.
+
+**Cross-project pattern mining.** Compared development patterns across loops,
+siftd, painted, gruel.network, and strange-loops. Key findings:
+
+- **Architecture tests** exist in siftd (imports, contracts, hard rules) and
+  painted (frozen dataclasses, layer boundaries, encapsulation) but not in loops.
+  Three tiers identified: packaging (tier 1, have it), import boundaries (tier 2,
+  tach), domain invariants (tier 3, hand-rolled AST tests).
+- **`./dev` harness** is identical across siftd, painted, and strange-loops.
+  Convention-based dispatcher from `scripts/*.sh`. Check ordering varies:
+  painted does arch→lint→unit→golden, siftd does lint→arch→unit.
+- **Testing philosophy** solidified: factories over mocks, integration over
+  simulation, behavior-grouped test classes, building-block fixtures.
+
+**Tool landscape for architecture enforcement.** Evaluated tach, import-linter,
+pytest-archon, PyTestArch. Recommendation: tach for tier 2 (Rust, TOML,
+fits uv/ruff/ty family), hand-rolled pytest tests for tier 3 (domain-specific
+invariants no tool can express).
+
+**Named sessions design.** Dissolution test: named session = vertex + store +
+directory convention. No new atoms. `LOOPS_HOME/sessions/<name>/` with own
+vertex + store per session. Backward compat with existing `LOOPS_HOME/session/`.
+New commands: `session ls`, `session switch`, name argument on `session start`.
+Immediate use case: `loops session start meta-discussion` for the methodology
+workspace. Design note: `docs/NAMED_SESSIONS.md`.
+
+**Meta-discussion workspace created.** `~/Documents/meta-discussion/` with 8
+thread files covering test layers, dev harness, session continuity, experiment
+graduation, CLAUDE.md hierarchy, dissolution as method, sine wave development,
+and a scaffold template draft. Living documents, not session logs.
+
+---
+
 ## 2026-02-28 — Session continuity + strange-loops scaffold
 
 **Session continuity via loops.** `loops session start/end/status/log` — session

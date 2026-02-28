@@ -155,6 +155,73 @@ class _ProfileApp(Surface):
             self.quit()
 
 
+# --- Sample data (deterministic, for golden tests) ---
+
+SAMPLE_PROFILE = ProfileData(
+    scenario_name="list_nav",
+    dimensions="80x24",
+    input_count=8,
+    frame_count=9,
+    total_writes=272,
+    avg_writes=30.2,
+    max_writes=77,
+    hot_frame_count=1,
+    frames=(
+        FrameProfile(0, "initial", 77, True),
+        FrameProfile(1, "after 'j'", 27, False),
+        FrameProfile(2, "after 'j'", 22, False),
+        FrameProfile(3, "after 'j'", 19, False),
+        FrameProfile(4, "after 'k'", 19, False),
+        FrameProfile(5, "after 'k'", 22, False),
+        FrameProfile(6, "after 'enter'", 43, False),
+        FrameProfile(7, "after 'escape'", 43, False),
+        FrameProfile(8, "after 'q'", 0, False),
+    ),
+    emission_summary=(
+        EmissionSummary("ui.action", 8),
+        EmissionSummary("ui.key", 8),
+        EmissionSummary("list.select", 5),
+        EmissionSummary("list.open", 1),
+        EmissionSummary("list.close", 1),
+    ),
+    emissions_raw=(
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "auth-service", "index": 1}),
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "worker", "index": 2}),
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "scheduler", "index": 3}),
+        ("ui.key", {"key": "k"}),
+        ("list.select", {"service": "worker", "index": 2}),
+        ("ui.key", {"key": "k"}),
+        ("list.select", {"service": "auth-service", "index": 1}),
+        ("ui.key", {"key": "enter"}),
+        ("list.open", {"service": "auth-service"}),
+        ("ui.key", {"key": "escape"}),
+        ("list.close", {"service": "auth-service"}),
+        ("ui.key", {"key": "q"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "push", "layer": "detail"}),
+        ("ui.action", {"action": "pop"}),
+        ("ui.action", {"action": "quit"}),
+    ),
+    cprofile_flame={
+        "run_to_completion": {
+            "render": {"fill": 0.003, "put_text": 0.002, "[self]": 0.001},
+            "handle_key": {"on_key": 0.001, "[self]": 0.001},
+            "diff": {"__eq__": 0.002, "[self]": 0.001},
+            "[self]": 0.002,
+        },
+    },
+    cprofile_total=0.015,
+    cprofile_calls=5000,
+)
+
+
 # --- Profile extraction ---
 
 

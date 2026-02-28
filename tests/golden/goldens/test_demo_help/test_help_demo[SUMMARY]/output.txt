@@ -1,0 +1,20 @@
+Help at default zoom:
+
+deploy — Ship services to production.
+
+Zoom (what to show)
+  -q, --quiet        Minimal output
+  -v, --verbose      Detailed (-v) or full (-vv)
+
+Mode (how to deliver)
+  -i, --interactive  Interactive TUI
+  --static           Static output, no animation
+  --live             Live output with in-place updates
+
+Format (serialization)
+  --json             JSON output
+  --plain            Plain text, no ANSI codes
+
+Help
+  -h, --help         Show this help
+

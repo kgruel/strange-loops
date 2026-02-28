@@ -1,0 +1,1 @@
+9 frames, 272 writes, avg 30/frame

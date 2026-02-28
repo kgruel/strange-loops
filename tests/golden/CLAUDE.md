@@ -126,9 +126,13 @@ tests/golden/
   test_demo_live.py      # live.py (health checks, spinners, progress)
   test_demo_fidelity.py  # fidelity.py (disk usage, sample data)
   test_demo_rendering.py # rendering.py (lens API, custom lens, palette)
+  test_demo_profiler.py  # profiler.py (frame cost, flame graph, emissions)
+  test_demo_help.py      # help.py (HelpData, zoom-aware help rendering)
   goldens/               # committed expected output
     test_demo_testing/
     test_demo_live/
     test_demo_fidelity/
     test_demo_rendering/
+    test_demo_profiler/
+    test_demo_help/
 ```

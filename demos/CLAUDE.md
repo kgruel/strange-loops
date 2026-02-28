@@ -46,6 +46,7 @@ patterns/
   focus.py          Focus + Cursor + Search: navigation vs capture        ✓
   testing.py        Replay testing: emit capture, observation traces      ✓
   profiler.py       Self-profiling: frame cost, emission timeline, flame graph  ✓
+  help.py           Zoom-aware help: HelpData rendered at each zoom level      ✓
 ```
 
 Old stepping stones (`block.py`, `buffer.py`, `buffer_view.py`) deleted —

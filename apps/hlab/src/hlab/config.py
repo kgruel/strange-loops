@@ -1,7 +1,7 @@
 """Config resolution — inventory + environment to vertex vars.
 
 Reads Ansible inventory and environment variables to produce the vars dict
-that load_vertex_program() uses to resolve ${var} references in .vertex files.
+that load_vertex_program() uses to resolve {{var}} references in .vertex files.
 """
 
 from __future__ import annotations

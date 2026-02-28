@@ -64,7 +64,7 @@ class TestResolveTemplate:
             '    with kind="lobsters" feed_url="https://lobste.rs/rss"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -78,14 +78,14 @@ class TestResolveTemplate:
             '    with kind="FEDFUNDS"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             '  template "./sources/bls.loop" {\n'
             '    with kind="CPI"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -136,12 +136,12 @@ class TestResolveTemplate:
             '  template "./sources/feed.loop" {\n'
             '    from file "./feeds.list"\n'
             "    loop { fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete" }\n'
+            '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             '  template "./sources/feed.loop" {\n'
             '    with kind="rx.hn" feed_url="https://hn.example/rss"\n'
             "    loop { fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete" }\n'
+            '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             "}\n"
             "loops { source.error { fold { count \"inc\" } } }\n"
@@ -289,7 +289,7 @@ class TestReadPopulation:
             '    from file "./feeds.list"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -310,7 +310,7 @@ class TestReadPopulation:
             '    with kind="media" host="192.168.1.40"\n'
             "    loop {\n"
             '      fold { containers "collect" 50 }\n'
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -336,7 +336,7 @@ class TestReadPopulation:
             '    with kind="pinned" feed_url="https://pinned.com/rss"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -359,7 +359,7 @@ class TestReadPopulation:
             '    from file "./feeds.list"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -389,7 +389,7 @@ sources {
         items "by" "link"
         count "inc"
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }
@@ -491,7 +491,7 @@ class TestExportImport:
             '    from file "./feeds.list"\n'
             "    loop {\n"
             "      fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"
@@ -568,7 +568,7 @@ class TestExportImport:
             '    with kind="infra" host="192.168.1.30"\n'
             "    loop {\n"
             '      fold { containers "collect" 50 }\n'
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             "    }\n"
             "  }\n"
             "}\n"

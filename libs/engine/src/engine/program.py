@@ -89,7 +89,7 @@ class VertexProgram:
 
 
 def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile:
-    """Resolve ${var} references in template source param values.
+    """Resolve {{var}} references in template source param values.
 
     Walks ast.sources, and for each TemplateSource, substitutes vars in
     each SourceParams.values dict's values. Returns a new VertexFile with
@@ -147,7 +147,7 @@ def load_vertex_program(
     Args:
         vertex_path: Path to the .vertex file.
         vars: Optional dict of variables to substitute in template source
-            param values before compilation. Resolves ${var} references.
+            param values before compilation. Resolves {{var}} references.
         fold_overrides: Optional per-kind fold overrides.
         default_fold_override: Optional override applied to all compiled kinds
             (unless overridden by fold_overrides).

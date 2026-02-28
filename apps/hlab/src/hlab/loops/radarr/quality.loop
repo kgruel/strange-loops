@@ -1,8 +1,8 @@
 // Radarr quality definitions
-// Variables: ${host}, ${apikey}
+// Variables: {{host}}, {{apikey}}
 // Radarr returns a JSON array; format: json wraps it as {"_json": [...]}.
 
-source #"curl -sf "http://${host}/api/v3/qualitydefinition?apikey=${apikey}""#
+source #"curl -sf "http://{{host}}/api/v3/qualitydefinition?apikey={{apikey}}""#
 kind "quality"
 observer "hlab"
 format "json"

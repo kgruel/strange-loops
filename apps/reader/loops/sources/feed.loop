@@ -1,11 +1,11 @@
 // Unified feed template — auto-detects RSS 2.0 vs Atom
-// Template vars: ${feed_url}, ${kind}
+// Template vars: {{feed_url}}, {{kind}}
 // yq's // operator: tries .rss.channel.item (RSS), falls back to .feed.entry (Atom)
 // Atom link normalization: .link.["+@href"] extracts href from Atom's link object,
 // // .link falls back to RSS's plain string link.
 
-source #"curl -sfL -A 'Mozilla/5.0' '${feed_url}' | yq -p xml -o json -I0 '(.rss.channel.item // .feed.entry)[] | .link = (.link.["+@href"] // .link)'"#
+source #"curl -sfL -A 'Mozilla/5.0' '{{feed_url}}' | yq -p xml -o json -I0 '(.rss.channel.item // .feed.entry)[] | .link = (.link.["+@href"] // .link)'"#
 every "30m"
-kind "${kind}"
+kind "{{kind}}"
 observer "rss"
 format "ndjson"

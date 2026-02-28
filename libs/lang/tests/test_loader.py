@@ -111,8 +111,8 @@ class TestParseLoopFull:
         assert loop.source == "df -h"
         assert loop.kind == "disk"
         assert loop.observer == "disk-monitor"
-        assert loop.every == Duration(5000)
-        assert loop.timeout == Duration(30000)
+        assert loop.every == "5s"
+        assert loop.timeout == "30s"
 
     def test_parse_steps(self):
         loop = parse_loop_file(FIXTURES / "disk.loop")
@@ -245,7 +245,7 @@ kind "test"
 observer "test"
 """
         loop = parse_loop(text)
-        assert loop.every.seconds() == 5.0
+        assert loop.every == "5s"
 
 
 class TestParseErrors:
@@ -305,16 +305,6 @@ discover "./**/*.vertex"
         assert v.name == "root"
         assert v.loops == {}
         assert v.discover == "./**/*.vertex"
-
-    def test_invalid_format(self):
-        text = """\
-source "echo"
-kind "test"
-observer "test"
-format "xml"
-"""
-        with pytest.raises(ParseError, match="format must be"):
-            parse_loop(text)
 
     def test_pick_mismatch(self):
         text = """\
@@ -397,7 +387,7 @@ observer "clock"
 """
         loop = parse_loop(text)
         assert loop.source is None
-        assert loop.every == Duration(60000)
+        assert loop.every == "60s"
         assert loop.kind == "minute"
         assert loop.observer == "clock"
         assert loop.on is None
@@ -883,7 +873,7 @@ sources {
       fold {
         count "inc"
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }
@@ -913,7 +903,7 @@ sources {
       fold {
         count "inc"
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }

@@ -14,7 +14,7 @@ sources {
         count "inc"
         updated "latest"
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }

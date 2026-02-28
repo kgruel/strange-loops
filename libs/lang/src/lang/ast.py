@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 
 # -----------------------------------------------------------------------------
@@ -388,10 +387,10 @@ class LoopFile:
     kind: str
     observer: str
     source: str | None = None  # Optional for pure timer loops
-    every: Duration | None = None
+    every: str | None = None
     on: Trigger | None = None  # Event trigger (mutually exclusive with every)
-    format: Literal["lines", "json", "ndjson", "blob"] = "lines"
-    timeout: Duration = Duration(60000)  # 60s default
+    format: str = "lines"
+    timeout: str = "60s"
     env: dict[str, str] | None = None
     parse: tuple[ParseStep, ...] = ()
 

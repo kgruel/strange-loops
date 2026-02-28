@@ -292,6 +292,13 @@ def map_loop_file(loop: LoopFile) -> Source:
     - loop.every + no source: → pure timer (emits ticks)
     """
     from atoms import Source
+    from lang.ast import Duration
+
+    # Validate format at compile time
+    if loop.format not in ("lines", "json", "ndjson", "blob"):
+        raise ValueError(
+            f"format must be 'lines', 'json', 'ndjson', or 'blob', got {loop.format!r}"
+        )
 
     # Compile parse pipeline
     parse_ops = map_parse_steps(loop.parse) if loop.parse else None
@@ -305,10 +312,11 @@ def map_loop_file(loop: LoopFile) -> Source:
         command=loop.source,
         kind=loop.kind,
         observer=loop.observer,
-        every=loop.every.seconds() if loop.every else None,
+        every=Duration.parse(loop.every).seconds() if loop.every else None,
         trigger=trigger,
         format=loop.format,
         parse=parse_ops,
+        env=loop.env,
     )
 
 
@@ -318,7 +326,7 @@ def map_loop_file(loop: LoopFile) -> Source:
 
 
 def substitute_vars(text: str, params: dict[str, str]) -> str:
-    """Replace ${var} with values from params."""
+    r"""Replace {{var}} with values from params."""
     import re
 
     def replacer(match: re.Match) -> str:
@@ -328,20 +336,20 @@ def substitute_vars(text: str, params: dict[str, str]) -> str:
         # Leave unmatched variables as-is
         return match.group(0)
 
-    return re.sub(r"\$\{(\w+)\}", replacer, text)
+    return re.sub(r"\{\{(\w+)\}\}", replacer, text)
 
 
 def instantiate_template(loop_ast: LoopFile, params: dict[str, str]) -> LoopFile:
     """Create a new LoopFile with variables substituted."""
     return LoopFile(
         kind=substitute_vars(loop_ast.kind, params),
-        observer=loop_ast.observer,
+        observer=substitute_vars(loop_ast.observer, params),
         source=substitute_vars(loop_ast.source, params) if loop_ast.source else None,
-        every=loop_ast.every,
+        every=substitute_vars(loop_ast.every, params) if loop_ast.every else None,
         on=loop_ast.on,
-        format=loop_ast.format,
-        timeout=loop_ast.timeout,
-        env=loop_ast.env,
+        format=substitute_vars(loop_ast.format, params),
+        timeout=substitute_vars(loop_ast.timeout, params),
+        env={k: substitute_vars(v, params) for k, v in loop_ast.env.items()} if loop_ast.env else None,
         parse=loop_ast.parse,
         path=loop_ast.path,
     )

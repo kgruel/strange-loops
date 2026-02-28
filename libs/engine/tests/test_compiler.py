@@ -21,6 +21,7 @@ from engine.compiler import (
     compile_vertex_recursive,
     instantiate_template,
     map_fold_op,
+    map_loop_file,
     map_parse_steps,
     map_pick,
     map_skip,
@@ -1259,21 +1260,21 @@ class TestTemplateInstantiation:
 
     def test_substitute_vars_basic(self):
         """Basic variable substitution."""
-        result = substitute_vars("Hello ${name}!", {"name": "World"})
+        result = substitute_vars("Hello {{name}}!", {"name": "World"})
         assert result == "Hello World!"
 
     def test_substitute_vars_multiple(self):
         """Multiple variables in same string."""
         result = substitute_vars(
-            "ssh deploy@${host} 'cd /opt/${kind} && docker compose ps'",
+            "ssh deploy@{{host}} 'cd /opt/{{kind}} && docker compose ps'",
             {"host": "192.168.1.30", "kind": "infra"},
         )
         assert result == "ssh deploy@192.168.1.30 'cd /opt/infra && docker compose ps'"
 
     def test_substitute_vars_unmatched(self):
         """Unmatched variables are preserved."""
-        result = substitute_vars("${foo} and ${bar}", {"foo": "replaced"})
-        assert result == "replaced and ${bar}"
+        result = substitute_vars("{{foo}} and {{bar}}", {"foo": "replaced"})
+        assert result == "replaced and {{bar}}"
 
     def test_substitute_vars_no_vars(self):
         """String without variables passes through."""
@@ -1285,19 +1286,46 @@ class TestTemplateInstantiation:
         from lang.ast import LoopFile
 
         template = LoopFile(
-            kind="${kind}",
+            kind="{{kind}}",
             observer="hlab",
-            source='ssh deploy@${host} "cd /opt/${kind} && docker compose ps"',
-            format="ndjson",
+            source='ssh deploy@{{host}} "cd /opt/{{kind}} && docker compose ps"',
+            every="{{every}}",
+            timeout="{{timeout}}",
+            format="{{format}}",
+            env={"FOO": "{{bar}}"},
         )
-        params = {"kind": "infra", "host": "192.168.1.30"}
+        params = {
+            "kind": "infra",
+            "host": "192.168.1.30",
+            "every": "6h",
+            "timeout": "15s",
+            "format": "ndjson",
+            "bar": "baz",
+        }
 
         result = instantiate_template(template, params)
 
         assert result.kind == "infra"
         assert result.observer == "hlab"  # unchanged
         assert result.source == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
-        assert result.format == "ndjson"  # unchanged
+        assert result.every == "6h"
+        assert result.timeout == "15s"
+        assert result.format == "ndjson"
+        assert result.env == {"FOO": "baz"}
+
+    def test_invalid_every_raises_on_compile(self):
+        """Invalid every duration raises at compile time."""
+        from lang.ast import LoopFile
+
+        loop = LoopFile(
+            kind="bad.every",
+            observer="test",
+            source="echo ok",
+            every="5x",
+        )
+
+        with pytest.raises(ValueError, match=r"Invalid duration"):
+            map_loop_file(loop)
 
     def test_compile_sources_simple_paths(self, tmp_path):
         """compile_sources handles simple path entries."""
@@ -1333,8 +1361,8 @@ loops {{
         """compile_sources handles template entries."""
         template_path = tmp_path / "status.loop"
         template_path.write_text("""\
-source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps""#
-kind "${kind}"
+source #"ssh deploy@{{host}} "cd /opt/{{kind}} && docker compose ps""#
+kind "{{kind}}"
 observer "hlab"
 format "ndjson"
 """)
@@ -1374,8 +1402,8 @@ loops {{
         """compile_sources generates specs from template loop: block."""
         template_path = tmp_path / "status.loop"
         template_path.write_text("""\
-source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps""#
-kind "${kind}"
+source #"ssh deploy@{{host}} "cd /opt/{{kind}} && docker compose ps""#
+kind "{{kind}}"
 observer "hlab"
 format "ndjson"
 """)
@@ -1391,7 +1419,7 @@ sources {{
       fold {{
         containers "collect" 50
       }}
-      boundary when="${{kind}}.complete"
+      boundary when="{{{{kind}}}}.complete"
     }}
   }}
 }}
@@ -1418,6 +1446,18 @@ loops {{
         media_spec = specs["media"]
         assert media_spec.name == "media"
         assert media_spec.boundary.kind == "media.complete"
+
+    def test_invalid_format_raises_on_compile(self):
+        """Invalid format is caught at compile time, not parse time."""
+        loop = parse_loop("""\
+source "echo"
+kind "test"
+observer "test"
+format "xml"
+""")
+        assert loop.format == "xml"  # loader accepts raw string
+        with pytest.raises(ValueError, match="format must be"):
+            compile_loop(loop)
 
 
 class TestRouteWiring:
@@ -1679,7 +1719,7 @@ class TestCompileSourcesFromFile:
         loop = tmp_path / "template.loop"
         loop.write_text(
             'source #"echo \'{"v": 1}\'"#\n'
-            'kind "${kind}"\n'
+            'kind "{{kind}}"\n'
             'observer "test"\n'
             'format "json"\n'
         )
@@ -1696,7 +1736,7 @@ sources {{
       fold {{
         count "inc"
       }}
-      boundary when="${{kind}}.complete"
+      boundary when="{{{{kind}}}}.complete"
     }}
   }}
 }}
@@ -1714,7 +1754,7 @@ sources {{
         loop = tmp_path / "template.loop"
         loop.write_text(
             'source #"echo \'{"v": 1}\'"#\n'
-            'kind "${kind}"\n'
+            'kind "{{kind}}"\n'
             'observer "test"\n'
             'format "json"\n'
         )
@@ -1732,7 +1772,7 @@ sources {{
       fold {{
         count "inc"
       }}
-      boundary when="${{kind}}.complete"
+      boundary when="{{{{kind}}}}.complete"
     }}
   }}
 }}
@@ -1751,7 +1791,7 @@ sources {{
         loop = subdir / "template.loop"
         loop.write_text(
             'source "echo test"\n'
-            'kind "${kind}"\n'
+            'kind "{{kind}}"\n'
             'observer "test"\n'
         )
 
@@ -1767,7 +1807,7 @@ sources {{
       fold {{
         count "inc"
       }}
-      boundary when="${{kind}}.complete"
+      boundary when="{{{{kind}}}}.complete"
     }}
   }}
 }}

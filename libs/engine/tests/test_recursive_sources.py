@@ -187,7 +187,7 @@ class TestCollectAllSources:
         template = child_dir / "tmpl.loop"
         template.write_text(
             'source "echo test"\n'
-            'kind "${kind}"\n'
+            'kind "{{kind}}"\n'
             'observer "test"\n'
             'format "json"\n'
         )
@@ -202,7 +202,7 @@ class TestCollectAllSources:
             '      fold {\n'
             '        count "inc"\n'
             '      }\n'
-            '      boundary when="${kind}.complete"\n'
+            '      boundary when="{{kind}}.complete"\n'
             '    }\n'
             '  }\n'
             '}\n'

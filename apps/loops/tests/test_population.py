@@ -102,7 +102,7 @@ sources {
     from file "./feeds.list"
     loop {
       fold { count "inc" }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }
@@ -116,7 +116,7 @@ sources {
     with kind="media" host="192.168.1.40"
     loop {
       fold { containers "collect" 50 }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }
@@ -133,7 +133,7 @@ def _setup_file_backed(home: Path) -> Path:
     )
     (reading / "sources").mkdir()
     (reading / "sources" / "feed.loop").write_text(
-        'source "curl"\nkind "${kind}"\nobserver "feed"\n'
+        'source "curl"\nkind "{{kind}}"\nobserver "feed"\n'
     )
     return reading
 
@@ -193,12 +193,12 @@ class TestLsCommand:
             '  template "./sources/fred.loop" {\n'
             '    with kind="FEDFUNDS"\n'
             "    loop { fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete" }\n'
+            '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             '  template "./sources/bls.loop" {\n'
             '    with kind="CPI"\n'
             "    loop { fold { count \"inc\" }\n"
-            '      boundary when="${kind}.complete" }\n'
+            '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             "}\n"
             "loops { top { fold { count \"inc\" } } }\n"

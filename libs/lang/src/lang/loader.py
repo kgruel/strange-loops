@@ -15,7 +15,6 @@ from .ast import (
     BoundaryEvery,
     BoundaryWhen,
     Coerce,
-    Duration,
     Explode,
     FoldAvg,
     FoldBy,
@@ -49,8 +48,6 @@ from .ast import (
 from .errors import Location, ParseError
 
 if TYPE_CHECKING:
-    from typing import Literal
-
     from .ast import Boundary, FoldOp, ParseStep, SourceEntry, TransformOp
 
 
@@ -350,10 +347,10 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
     source: str | None = None
     kind: str | None = None
     observer: str | None = None
-    every: Duration | None = None
+    every: str | None = None
     on: Trigger | None = None
-    format_: Literal["lines", "json", "ndjson", "blob"] = "lines"
-    timeout = Duration(60000)
+    format_: str = "lines"
+    timeout: str = "60s"
     env: dict[str, str] | None = None
     parse_steps: tuple[ParseStep, ...] = ()
 
@@ -366,7 +363,7 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
         elif name == "observer":
             observer = _require_arg(node, 0, "observer string", path)
         elif name == "every":
-            every = Duration.parse(_require_arg(node, 0, "duration", path))
+            every = _require_arg(node, 0, "duration", path)
         elif name == "on":
             kinds = [str(a) for a in node.args]
             if not kinds:
@@ -376,15 +373,9 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
             else:
                 on = Trigger.multi(kinds)
         elif name == "format":
-            fmt_value = _require_arg(node, 0, "format string", path)
-            if fmt_value not in ("lines", "json", "ndjson", "blob"):
-                raise _error(
-                    f"format must be 'lines', 'json', 'ndjson', or 'blob', got {fmt_value!r}",
-                    path,
-                )
-            format_ = fmt_value  # type: ignore[assignment]
+            format_ = _require_arg(node, 0, "format string", path)
         elif name == "timeout":
-            timeout = Duration.parse(_require_arg(node, 0, "duration", path))
+            timeout = _require_arg(node, 0, "duration", path)
         elif name == "parse":
             parse_steps = _load_parse_block(node, path)
         elif name == "env":

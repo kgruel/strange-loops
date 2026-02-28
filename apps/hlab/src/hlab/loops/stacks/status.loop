@@ -1,9 +1,9 @@
 // Docker Compose status template
-// Variables: ${kind}, ${host}
+// Variables: {{kind}}, {{host}}
 
-source #"ssh deploy@${host} "cd /opt/${kind} && docker compose ps --format json""#
+source #"ssh deploy@{{host}} "cd /opt/{{kind}} && docker compose ps --format json""#
 every "30s"
-kind "${kind}"
+kind "{{kind}}"
 observer "hlab"
 format "ndjson"
 

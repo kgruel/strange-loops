@@ -56,6 +56,7 @@ class Source:
     trigger: tuple[str, ...] | None = None
     format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
+    env: dict[str, str] | None = None
 
     def _has_explode(self) -> bool:
         """Check if the parse pipeline contains explode ops."""
@@ -185,11 +186,19 @@ class Source:
                 )
             else:
                 try:
+                    import os
+
+                    proc_env = None
+                    if self.env:
+                        proc_env = os.environ.copy()
+                        proc_env.update(self.env)
+
                     proc = await asyncio.create_subprocess_shell(
                         self.command,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         limit=1024 * 1024,  # 1MB line buffer (default 64KB)
+                        env=proc_env,
                     )
 
                     if self.format == "lines":

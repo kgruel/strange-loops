@@ -7,22 +7,22 @@ name "media_audit"
 
 sources {
   template "radarr/movies.loop" {
-    with kind="movies" host="${radarr_host}" apikey="${radarr_apikey}"
+    with kind="movies" host="{{radarr_host}}" apikey="{{radarr_apikey}}"
     loop {
       fold {
         movies "collect" 10000
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 
   template "radarr/quality.loop" {
-    with kind="quality" host="${radarr_host}" apikey="${radarr_apikey}"
+    with kind="quality" host="{{radarr_host}}" apikey="{{radarr_apikey}}"
     loop {
       fold {
         quality_defs "collect" 500
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }

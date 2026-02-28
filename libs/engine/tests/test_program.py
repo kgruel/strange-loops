@@ -17,7 +17,7 @@ def test_load_vertex_program_vars_substitution(tmp_path: Path) -> None:
     loop = tmp_path / "template.loop"
     loop.write_text(
         'source #"echo \'{"v": 1}\'"#\n'
-        'kind "${kind}"\n'
+        'kind "{{kind}}"\n'
         'observer "test"\n'
         'format "json"\n'
     )
@@ -27,13 +27,13 @@ def test_load_vertex_program_vars_substitution(tmp_path: Path) -> None:
         'name "prog"\n'
         "sources {\n"
         '  template "template.loop" {\n'
-        '    with kind="a" host="${host_a}"\n'
-        '    with kind="b" host="${host_b}"\n'
+        '    with kind="a" host="{{host_a}}"\n'
+        '    with kind="b" host="{{host_b}}"\n'
         "    loop {\n"
         "      fold {\n"
         '        acc "sum" "v"\n'
         "      }\n"
-        '      boundary when="${kind}.complete"\n'
+        '      boundary when="{{kind}}.complete"\n'
         "    }\n"
         "  }\n"
         "}\n"
@@ -49,18 +49,18 @@ def test_load_vertex_program_vars_substitution(tmp_path: Path) -> None:
     # Verify the sources got the resolved host values by checking the
     # compiled source commands contain the substituted IPs
     commands = [s.command for s in program.sources if s.command]
-    # The template uses ${host} in the source command — here the loop file
+    # The template uses {{host}} in the source command — here the loop file
     # doesn't reference host in the source, so just verify compilation works.
-    # The key check: no ${host_a} or ${host_b} remain in the program.
+    # The key check: no {{host_a}} or {{host_b}} remain in the program.
     assert len(program.sources) == 2
 
 
 def test_load_vertex_program_vars_unmatched_passthrough(tmp_path: Path) -> None:
-    """Unmatched ${var} references are left as-is (for template instantiation)."""
+    """Unmatched {{var}} references are left as-is (for template instantiation)."""
     loop = tmp_path / "template.loop"
     loop.write_text(
         'source #"echo \'{"v": 1}\'"#\n'
-        'kind "${kind}"\n'
+        'kind "{{kind}}"\n'
         'observer "test"\n'
         'format "json"\n'
     )
@@ -70,12 +70,12 @@ def test_load_vertex_program_vars_unmatched_passthrough(tmp_path: Path) -> None:
         'name "prog"\n'
         "sources {\n"
         '  template "template.loop" {\n'
-        '    with kind="x" host="${unknown_var}"\n'
+        '    with kind="x" host="{{unknown_var}}"\n'
         "    loop {\n"
         "      fold {\n"
         '        acc "sum" "v"\n'
         "      }\n"
-        '      boundary when="${kind}.complete"\n'
+        '      boundary when="{{kind}}.complete"\n'
         "    }\n"
         "  }\n"
         "}\n"
@@ -91,7 +91,7 @@ def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path)
     loop = tmp_path / "template.loop"
     loop.write_text(
         'source #"echo \'{"v": 1}\'"#\n'
-        'kind "${kind}"\n'
+        'kind "{{kind}}"\n'
         'observer "test"\n'
         'format "json"\n'
     )
@@ -106,7 +106,7 @@ def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path)
         "      fold {\n"
         '        acc "sum" "v"\n'
         "      }\n"
-        '      boundary when="${kind}.complete"\n'
+        '      boundary when="{{kind}}.complete"\n'
         "    }\n"
         "  }\n"
         "}\n"
@@ -132,7 +132,7 @@ def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
     loop = tmp_path / "template.loop"
     loop.write_text(
         'source #"echo \'{"v": 1}\'"#\n'
-        'kind "${kind}"\n'
+        'kind "{{kind}}"\n'
         'observer "test"\n'
         'format "json"\n'
     )
@@ -148,7 +148,7 @@ def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
         "      fold {\n"
         '        seen "inc"\n'
         "      }\n"
-        '      boundary when="${kind}.complete"\n'
+        '      boundary when="{{kind}}.complete"\n'
         "    }\n"
         "  }\n"
         "}\n"
@@ -371,7 +371,7 @@ def test_substitute_vertex_vars_preserves_from(tmp_path: Path) -> None:
         sources=(
             TemplateSource(
                 template=Path("template.loop"),
-                params=(SourceParams(values={"kind": "${k}"}),),
+                params=(SourceParams(values={"kind": "{{k}}"}),),
                 from_=from_source,
                 loop=None,
             ),

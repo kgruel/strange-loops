@@ -6,14 +6,14 @@ store "./data/reactions.db"
 
 sources {
   template "./sources/feed.loop" {
-    with kind="rx.hn.favorite" feed_url="https://hnrss.org/favorites?id=${hn_username}&count=100"
+    with kind="rx.hn.favorite" feed_url="https://hnrss.org/favorites?id={{hn_username}}&count=100"
     loop {
       fold {
         items "by" "link"
         count "inc"
         updated "latest"
       }
-      boundary when="${kind}.complete"
+      boundary when="{{kind}}.complete"
     }
   }
 }

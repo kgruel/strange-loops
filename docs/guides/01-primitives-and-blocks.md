@@ -219,10 +219,3 @@ painted deliberately pushes complexity *up* the stack:
 
 - These types are immutable values → safe to share and cache.
 - Higher-level systems (buffers, layers, widgets) can treat rendering as pure transformation: state → blocks.
-
----
-
-## Demo output
-
-<!-- outputgen:begin name="cell_demo" --><span hidden></span>
-<!-- outputgen:end --><span hidden></span>

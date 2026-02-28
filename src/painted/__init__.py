@@ -120,18 +120,18 @@ def show(
         return
 
     from ._lens import shape_lens
-    from .fidelity import _setup_defaults
+    from .fidelity import setup_defaults
 
     # Block passthrough — already rendered
     if isinstance(data, Block):
         ctx = detect_context(zoom, OutputMode.AUTO, format)
-        _setup_defaults(ctx)
+        setup_defaults(ctx)
         print_block(data, file, use_ansi=(ctx.format == Format.ANSI))
         return
 
     # Detect output context
     ctx = detect_context(zoom, OutputMode.AUTO, format)
-    _setup_defaults(ctx)
+    setup_defaults(ctx)
 
     # JSON path — serialize directly
     if ctx.format == Format.JSON:

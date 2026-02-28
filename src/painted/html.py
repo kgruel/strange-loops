@@ -1,7 +1,7 @@
 """HTML rendering for Blocks.
 
 Renders Blocks into <pre> output suitable for docs. Mirrors the traversal
-pattern in painted.writer._write_block_ansi (row-by-row, coalescing runs
+pattern in painted.writer.write_block_ansi (row-by-row, coalescing runs
 of identical style).
 """
 
@@ -11,7 +11,10 @@ import html as _html
 
 from .block import Block
 from .cell import NAMED_COLORS, Style
-from .writer import _idx_to_rgb
+from ._color import _idx_to_rgb
+
+_BASE_FG = "var(--painted-fg, var(--text))"
+_BASE_BG = "var(--painted-bg, var(--code-bg))"
 
 
 def _color_to_css(color: str | int | None) -> str | None:
@@ -29,18 +32,18 @@ def _color_to_css(color: str | int | None) -> str | None:
 
 
 def _style_to_css(style: Style) -> str:
-    fg = style.fg
-    bg = style.bg
-    if style.reverse:
-        fg, bg = bg, fg
-
     parts: list[str] = []
-    fg_css = _color_to_css(fg)
-    bg_css = _color_to_css(bg)
-    if fg_css is not None:
-        parts.append(f"color: {fg_css}")
-    if bg_css is not None:
-        parts.append(f"background-color: {bg_css}")
+    fg_css = _color_to_css(style.fg)
+    bg_css = _color_to_css(style.bg)
+
+    if style.reverse:
+        parts.append(f"color: {bg_css if bg_css is not None else _BASE_BG}")
+        parts.append(f"background-color: {fg_css if fg_css is not None else _BASE_FG}")
+    else:
+        if fg_css is not None:
+            parts.append(f"color: {fg_css}")
+        if bg_css is not None:
+            parts.append(f"background-color: {bg_css}")
     if style.bold:
         parts.append("font-weight: bold")
     if style.italic:

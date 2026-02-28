@@ -32,6 +32,9 @@ main() {
         echo ""
         echo -e "${BOLD}=== Golden ===${NC}"
         run_uv pytest tests/golden/ -v --tb=short
+        echo ""
+        echo -e "${BOLD}=== Outputgen ===${NC}"
+        run_uv python -m tools.outputgen --check
     else
         step "Arch"
         run_uv pytest tests/unit/test_architecture_invariants.py -q --tb=line > /dev/null 2>&1 && ok || { fail; run_uv pytest tests/unit/test_architecture_invariants.py -v --tb=short; exit 1; }
@@ -44,6 +47,9 @@ main() {
 
         step "Golden"
         run_uv pytest tests/golden/ -q --tb=line > /dev/null 2>&1 && ok || { fail; run_uv pytest tests/golden/ -q --tb=short; exit 1; }
+
+        step "Outputgen"
+        run_uv python -m tools.outputgen --check > /dev/null 2>&1 && ok || { fail; run_uv python -m tools.outputgen --check; exit 1; }
     fi
 
     echo -e "\n${GREEN}All checks passed${NC}"

@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, TextIO
 
-from .writer import Writer, _write_block_ansi
+from .writer import Writer, write_block_ansi
 
 if TYPE_CHECKING:
     from .block import Block
@@ -76,7 +76,7 @@ class InPlaceRenderer:
 
     def _write_block(self, block: Block) -> None:
         """Write block content line by line with ANSI styling."""
-        _write_block_ansi(block, self._writer, self._stream)
+        write_block_ansi(block, self._writer, self._stream)
         self._stream.flush()
 
     def clear(self) -> None:

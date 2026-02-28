@@ -1,2 +1,1 @@
-"""Repo tooling (not part of the painted package)."""
-
+"""Repository tooling modules (not part of the painted package)."""

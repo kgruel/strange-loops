@@ -10,7 +10,10 @@ from typing import Literal
 
 from painted import Block, Zoom, render_html
 
-from capture import capture_demo
+if __package__ is None:  # invoked as a script: python tools/outputgen.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.capture import capture_demo
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +87,10 @@ def _generate_output(*, repo_root: Path, spec: OutputSpec) -> str:
     return _render_text_as_html(result)
 
 
+def find_outputgen_names(html_doc: str) -> list[str]:
+    return [m.group("name").strip() for m in _BEGIN_RE.finditer(html_doc)]
+
+
 def update_html(html_doc: str, *, repo_root: Path) -> tuple[str, list[str]]:
     out: list[str] = []
     updated: list[str] = []
@@ -139,7 +146,9 @@ def _iter_html_files(repo_root: Path, roots: list[str]) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="outputgen", description="Inject captured demo output into docs.")
+    ap = argparse.ArgumentParser(
+        prog="outputgen", description="Inject captured demo output into docs."
+    )
     ap.add_argument("--repo-root", type=Path, default=_repo_root())
     ap.add_argument("--roots", nargs="+", default=["site/docs"])
     mode = ap.add_mutually_exclusive_group(required=True)
@@ -155,11 +164,14 @@ def main(argv: list[str] | None = None) -> int:
 
     mismatched: list[tuple[Path, list[str]]] = []
     changed: list[Path] = []
+    seen_names: set[str] = set()
 
     for path in files:
         src = _read_text(path)
-        if _BEGIN_RE.search(src) is None:
+        names = find_outputgen_names(src)
+        if not names:
             continue
+        seen_names.update(names)
 
         if args.check:
             bad = check_html(src, repo_root=repo_root)
@@ -171,6 +183,13 @@ def main(argv: list[str] | None = None) -> int:
         if touched and updated != src:
             _write_text(path, updated)
             changed.append(path)
+
+    missing = sorted(set(MANIFEST) - seen_names)
+    if missing:
+        print("Missing outputgen sentinels for:", file=sys.stderr)
+        for name in missing:
+            print(f"  - {name}", file=sys.stderr)
+        return 1
 
     if args.check:
         if mismatched:

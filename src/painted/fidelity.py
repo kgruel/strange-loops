@@ -128,7 +128,7 @@ def detect_context(
     )
 
 
-def _setup_defaults(ctx: CliContext) -> None:
+def setup_defaults(ctx: CliContext) -> None:
     """Set ambient IconSet from resolved runtime context.
 
     Palette is never auto-set — it's a deliberate aesthetic choice.
@@ -312,7 +312,7 @@ class CliRunner(Generic[T]):
 
     def _dispatch(self, ctx: CliContext) -> int:
         """Dispatch to appropriate output mechanism."""
-        _setup_defaults(ctx)
+        setup_defaults(ctx)
 
         # Check for custom handler
         if self.handlers and ctx.mode in self.handlers:

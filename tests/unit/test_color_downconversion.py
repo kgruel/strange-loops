@@ -7,11 +7,8 @@ import io
 from painted.writer import (
     ColorDepth,
     Writer,
-    _idx_to_rgb,
-    _nearest_basic,
-    _rgb_to_256,
-    _rgb_to_basic,
 )
+from painted._color import _idx_to_rgb, _nearest_basic, _rgb_to_256, _rgb_to_basic
 
 # --- Pure color arithmetic ---
 

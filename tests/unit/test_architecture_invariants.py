@@ -224,3 +224,38 @@ def test_tui_does_not_import_views() -> None:
     painted_root = Path(__file__).resolve().parents[2] / "src" / "painted"
     for py_file in sorted((painted_root / "tui").rglob("*.py")):
         _assert_no_imports(py_file, {"painted.views"})
+
+
+def test_public_modules_do_not_import_private_symbols_from_siblings() -> None:
+    """Public modules may use internal modules, but not private sibling symbols.
+
+    Exception: `painted._color` is the shared internal for color conversions.
+    """
+    painted_root = Path(__file__).resolve().parents[2] / "src" / "painted"
+    src_root = painted_root.parent
+
+    def imported_private_symbols(py_file: Path) -> list[str]:
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        current_mod = _module_name_for_file(src_root, py_file)
+        current_pkg = current_mod.rsplit(".", 1)[0] if "." in current_mod else current_mod
+
+        bad: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            base = _resolve_relative_module(current_pkg, level=node.level, module=node.module)
+            for alias in node.names:
+                if alias.name.startswith("_") and base != "painted._color":
+                    bad.append(f"{base}:{alias.name}")
+        return bad
+
+    violations: list[str] = []
+    for py_file in sorted(painted_root.rglob("*.py")):
+        if py_file.name.startswith("_") and py_file.name != "__init__.py":
+            continue
+        for item in imported_private_symbols(py_file):
+            violations.append(f"{py_file.relative_to(src_root)} imports {item}")
+
+    assert not violations, "Public modules import private sibling symbols:\n" + "\n".join(
+        violations
+    )

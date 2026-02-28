@@ -78,17 +78,15 @@ class TestParserWiring:
         args = parser.parse_args(["export", "reading", "-o", "my.list"])
         assert args.output == "my.list"
 
-    def test_import_parser(self):
+    def test_import_removed(self):
         parser = create_parser()
-        args = parser.parse_args(["import", "reading"])
-        assert args.command == "import"
-        assert args.target == "reading"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["import", "reading"])
 
-    def test_merge_parser(self):
+    def test_merge_removed(self):
         parser = create_parser()
-        args = parser.parse_args(["merge", "reading", "external.list"])
-        assert args.command == "merge"
-        assert args.file == "external.list"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["merge", "reading", "external.list"])
 
 
 # ---------------------------------------------------------------------------
@@ -97,25 +95,12 @@ class TestParserWiring:
 
 _VERTEX_FILE_BACKED = """\
 name "reading"
+store "./data/reading.db"
 sources {
   template "./sources/feed.loop" {
     from file "./feeds.list"
     loop {
       fold { count "inc" }
-      boundary when="{{kind}}.complete"
-    }
-  }
-}
-"""
-
-_VERTEX_INLINE = """\
-name "status"
-sources {
-  template "stacks/status.loop" {
-    with kind="infra" host="192.168.1.30"
-    with kind="media" host="192.168.1.40"
-    loop {
-      fold { containers "collect" 50 }
       boundary when="{{kind}}.complete"
     }
   }
@@ -138,14 +123,6 @@ def _setup_file_backed(home: Path) -> Path:
     return reading
 
 
-def _setup_inline(home: Path) -> Path:
-    """Create an inline-populated vertex under home/status/."""
-    status = home / "status"
-    status.mkdir(parents=True)
-    (status / "status.vertex").write_text(_VERTEX_INLINE)
-    return status
-
-
 # ---------------------------------------------------------------------------
 # ls command
 # ---------------------------------------------------------------------------
@@ -163,16 +140,31 @@ class TestLsCommand:
         assert "lobsters" in captured.out
         assert "feed_url" in captured.out
 
-    def test_ls_inline(self, tmp_path, monkeypatch, capsys):
+    def test_ls_queries_store_when_present(self, tmp_path, monkeypatch, capsys):
+        """ls should be a fold over pop facts (not a read of .list rows)."""
         home = tmp_path / "home"
-        _setup_inline(home)
+        reading = _setup_file_backed(home)
+        # Start from an empty list file so bootstrap doesn't seed.
+        (reading / "feeds.list").write_text("kind feed_url\n")
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["ls", "status"])
+        result = main(
+            [
+                "emit",
+                "reading",
+                "pop.add",
+                "key=lobsters",
+                "feed_url=https://lobste.rs/rss",
+            ]
+        )
+        assert result == 0
+
+        # Corrupt the materialized view; ls should still show store state.
+        (reading / "feeds.list").write_text("kind feed_url\n")
+        result = main(["ls", "reading"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "infra" in captured.out
-        assert "media" in captured.out
+        assert "lobsters" in captured.out
 
     def test_ls_vertex_not_found(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
@@ -189,20 +181,23 @@ class TestLsCommand:
         multi.mkdir(parents=True)
         (multi / "economy.vertex").write_text(
             'name "economy"\n'
+            'store "./data/economy.db"\n'
             "sources {\n"
             '  template "./sources/fred.loop" {\n'
-            '    with kind="FEDFUNDS"\n'
+            '    from file "./fred.list"\n'
             "    loop { fold { count \"inc\" }\n"
             '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             '  template "./sources/bls.loop" {\n'
-            '    with kind="CPI"\n'
+            '    from file "./bls.list"\n'
             "    loop { fold { count \"inc\" }\n"
             '      boundary when="{{kind}}.complete" }\n'
             "  }\n"
             "}\n"
             "loops { top { fold { count \"inc\" } } }\n"
         )
+        (multi / "fred.list").write_text("kind series\nFEDFUNDS FEDFUNDS\n")
+        (multi / "bls.list").write_text("kind series\nCPI CPI\n")
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
         # Without qualifier: error
@@ -234,22 +229,10 @@ class TestAddCommand:
         )
         assert result == 0
         captured = capsys.readouterr()
-        assert "Added danluu" in captured.out
+        assert "Emitted pop.add danluu" in captured.out
 
         content = (reading / "feeds.list").read_text()
         assert "danluu" in content
-
-    def test_add_duplicate(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(
-            ["add", "reading", "lobsters", "https://other.com"]
-        )
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "already exists" in captured.err
 
     def test_add_wrong_column_count(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"
@@ -274,19 +257,6 @@ class TestAddCommand:
         content = (reading / "feeds.list").read_text()
         assert "https://example.com/rss?a=1 extra" in content
 
-    def test_add_to_inline(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        status = _setup_inline(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["add", "status", "dev", "192.168.1.50"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "Added dev" in captured.out
-
-        content = (status / "status.vertex").read_text()
-        assert 'kind="dev"' in content
-
 
 # ---------------------------------------------------------------------------
 # rm command
@@ -308,7 +278,7 @@ class TestRmCommand:
         result = main(["rm", "reading", "lobsters"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "Removed lobsters" in captured.out
+        assert "Emitted pop.rm lobsters" in captured.out
 
         content = (reading / "feeds.list").read_text()
         assert "lobsters" not in content
@@ -316,27 +286,16 @@ class TestRmCommand:
 
     def test_rm_not_found(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"
-        _setup_file_backed(home)
+        reading = _setup_file_backed(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
         result = main(["rm", "reading", "nope"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "not found" in captured.err
-
-    def test_rm_from_inline(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        status = _setup_inline(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["rm", "status", "infra"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "Removed infra" in captured.out
-
-        content = (status / "status.vertex").read_text()
-        assert "infra" not in content
-        assert "media" in content
+        assert "Emitted pop.rm nope" in captured.out
+        # No change to materialized list
+        content = (reading / "feeds.list").read_text()
+        assert "lobsters" in content
 
 
 # ---------------------------------------------------------------------------
@@ -345,101 +304,49 @@ class TestRmCommand:
 
 
 class TestExportCommand:
-    def test_export_creates_list_file(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        status = _setup_inline(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["export", "status"])
-        assert result == 0
-
-        list_path = status / "status.list"
-        assert list_path.exists()
-        content = list_path.read_text()
-        assert "infra" in content
-        assert "media" in content
-
-        # Vertex now has from file, no with
-        vertex_content = (status / "status.vertex").read_text()
-        assert "from file" in vertex_content
-        assert "with kind=" not in vertex_content
-
-    def test_export_already_file(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["export", "reading"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Already using" in captured.err
-
-
-# ---------------------------------------------------------------------------
-# import command
-# ---------------------------------------------------------------------------
-
-
-class TestImportCommand:
-    def test_import_inlines_rows(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["import", "reading"])
-        assert result == 0
-
-        vertex_content = (home / "reading" / "reading.vertex").read_text()
-        assert "from file" not in vertex_content
-        assert 'with kind="lobsters"' in vertex_content
-
-    def test_import_already_inline(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        _setup_inline(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["import", "status"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Already inline" in captured.err
-
-
-# ---------------------------------------------------------------------------
-# merge command
-# ---------------------------------------------------------------------------
-
-
-class TestMergeCommand:
-    def test_merge_adds_new_rows(self, tmp_path, monkeypatch, capsys):
+    def test_export_rematerializes_from_store(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"
         reading = _setup_file_backed(home)
+        (reading / "feeds.list").write_text("kind feed_url\n")
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        # Create external file
-        external = tmp_path / "external.list"
-        external.write_text(
-            "kind feed_url\n"
-            "lobsters https://lobste.rs/rss\n"
-            "danluu https://danluu.com/atom.xml\n"
-            "hn https://news.ycombinator.com/rss\n"
+        result = main(
+            [
+                "emit",
+                "reading",
+                "pop.add",
+                "key=lobsters",
+                "feed_url=https://lobste.rs/rss",
+            ]
         )
-
-        result = main(["merge", "reading", str(external)])
         assert result == 0
-        captured = capsys.readouterr()
-        assert "2 new rows" in captured.out
-        assert "1 duplicates skipped" in captured.out
 
+        # Corrupt view, then export should rebuild it from store.
+        (reading / "feeds.list").write_text("kind feed_url\n")
+        result = main(["export", "reading"])
+        assert result == 0
         content = (reading / "feeds.list").read_text()
-        assert "danluu" in content
-        assert "hn" in content
+        assert "lobsters" in content
 
-    def test_merge_file_not_found(self, tmp_path, monkeypatch, capsys):
+    def test_emit_pop_rm_materializes(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"
-        _setup_file_backed(home)
+        reading = _setup_file_backed(home)
+        (reading / "feeds.list").write_text("kind feed_url\n")
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["merge", "reading", "/nonexistent.list"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "not found" in captured.err
+        result = main(
+            [
+                "emit",
+                "reading",
+                "pop.add",
+                "key=lobsters",
+                "feed_url=https://lobste.rs/rss",
+            ]
+        )
+        assert result == 0
+        assert "lobsters" in (reading / "feeds.list").read_text()
+
+        result = main(["emit", "reading", "pop.rm", "key=lobsters"])
+        assert result == 0
+        content = (reading / "feeds.list").read_text()
+        assert "lobsters" not in content

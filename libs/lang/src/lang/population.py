@@ -151,6 +151,21 @@ def list_file_read(path: Path) -> tuple[list[str], list[PopulationRow]]:
     return header or [], rows
 
 
+def list_file_header(path: Path) -> list[str]:
+    """Read only the header row from a .list file.
+
+    Returns [] if no header is present.
+    """
+    if not path.exists():
+        return []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        return line.split()
+    return []
+
+
 def list_file_add(path: Path, header: list[str], row: PopulationRow) -> None:
     """Append row to .list file. Creates file with header if it doesn't exist."""
     if not path.exists():

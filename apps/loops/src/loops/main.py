@@ -550,9 +550,32 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
 def cmd_emit(args: argparse.Namespace) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     from atoms import Fact
-    from lang.population import resolve_vertex
+    from lang import parse_vertex_file
+    from lang.population import (
+        list_file_header,
+        list_file_read,
+        resolve_template,
+        resolve_vertex,
+    )
+    from loops.pop_store import (
+        POP_ADD_KIND,
+        POP_RM_KIND,
+        pop_materialize_list,
+        pop_store_has_facts,
+    )
 
-    vertex_path = resolve_vertex(args.vertex, loops_home()).resolve()
+    # Allow emit to target a specific template via vertex/template (for multi-template vertices).
+    vertex_ref = args.vertex
+    template_qualifier = None
+    if (
+        "/" in vertex_ref
+        and not vertex_ref.endswith(".vertex")
+        and not vertex_ref.startswith("./")
+        and not vertex_ref.startswith("/")
+    ):
+        vertex_ref, template_qualifier = vertex_ref.split("/", 1)
+
+    vertex_path = resolve_vertex(vertex_ref, loops_home()).resolve()
     if not vertex_path.exists():
         print(f"Error: {vertex_path} not found", file=sys.stderr)
         return 1
@@ -584,13 +607,131 @@ def cmd_emit(args: argparse.Namespace) -> int:
     try:
         from engine import SqliteStore
 
+        # Special-case: pop facts also materialize the configured .list file.
+        is_pop = args.kind in (POP_ADD_KIND, POP_RM_KIND)
+        list_path = None
+        header = None
+        template_name = None
+        include_unscoped = True
+        template = None
+
+        if is_pop:
+            ast = parse_vertex_file(vertex_path)
+
+            # Resolve template target:
+            # - prefer explicit vertex/template qualifier
+            # - else payload["template"] if provided
+            # - else allow implicit if only one template exists
+            payload_template = payload.get("template")
+            qualifier = template_qualifier or payload_template
+
+            templates = [
+                s
+                for s in (ast.sources or ())
+                if getattr(s, "template", None) is not None
+            ]
+            is_multi = len(templates) > 1
+            include_unscoped = not is_multi
+
+            if is_multi and not qualifier:
+                print(
+                    "Error: multiple templates in vertex; specify one as "
+                    "'vertex/template' or include template=... in payload",
+                    file=sys.stderr,
+                )
+                return 1
+
+            template = resolve_template(ast, qualifier)
+            template_name = template.template.stem if is_multi else None
+
+            if template.from_ is None or not hasattr(template.from_, "path"):
+                print(
+                    "Error: template has no 'from file' population configured",
+                    file=sys.stderr,
+                )
+                return 1
+
+            list_path = template.from_.path
+            if not Path(list_path).is_absolute():
+                list_path = (vertex_path.parent / list_path).resolve()
+            else:
+                list_path = Path(list_path)
+
+            header = list_file_header(list_path)
+            if not header:
+                print(
+                    f"Error: no .list header found at {list_path}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            if args.kind == POP_ADD_KIND:
+                if "key" not in payload:
+                    print("Error: pop.add requires key=...", file=sys.stderr)
+                    return 1
+                missing = [h for h in header[1:] if h not in payload]
+                if missing:
+                    print(
+                        "Error: pop.add requires all non-key columns: "
+                        + ", ".join(missing),
+                        file=sys.stderr,
+                    )
+                    return 1
+            if args.kind == POP_RM_KIND and "key" not in payload:
+                print("Error: pop.rm requires key=...", file=sys.stderr)
+                return 1
+
+            if template_name is not None:
+                if "template" in payload and payload.get("template") != template_name:
+                    print(
+                        f"Error: payload template={payload.get('template')!r} does not match "
+                        f"resolved template {template_name!r}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                payload["template"] = template_name
+
         store_path.parent.mkdir(parents=True, exist_ok=True)
         with SqliteStore(
             path=store_path,
             serialize=Fact.to_dict,
             deserialize=Fact.from_dict,
         ) as store:
+            if is_pop and list_path is not None and header is not None:
+                # If this is the first pop mutation for this template, seed the store
+                # from the existing .list to avoid clobbering on first materialization.
+                if not pop_store_has_facts(
+                    store_path,
+                    template=template_name,
+                    include_unscoped=include_unscoped,
+                ):
+                    if list_path.exists():
+                        hdr, rows = list_file_read(list_path)
+                        if hdr:
+                            for row in rows:
+                                seed_payload: dict[str, str] = {"key": row.key}
+                                if template_name is not None:
+                                    seed_payload["template"] = template_name
+                                for field in hdr[1:]:
+                                    seed_payload[field] = row.values.get(field, "")
+                                seed_fact = Fact(
+                                    kind=POP_ADD_KIND,
+                                    ts=datetime.now(timezone.utc).timestamp(),
+                                    payload=seed_payload,
+                                    observer=args.observer or "",
+                                    origin="",
+                                )
+                                store.append(seed_fact)
             store.append(fact)
+
+        if is_pop and list_path is not None and header is not None:
+            pop_materialize_list(
+                store_path=store_path,
+                list_path=list_path,
+                header=header,
+                template=template_name,
+                include_unscoped=include_unscoped,
+            )
         return 0
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -709,14 +850,11 @@ def create_parser() -> argparse.ArgumentParser:
 
     export_parser = subparsers.add_parser("export", help="Inline with -> .list file")
     export_parser.add_argument("target", help="Vertex name or vertex/template")
-    export_parser.add_argument("--output", "-o", help="Output path (default: auto)")
-
-    import_parser = subparsers.add_parser("import", help=".list file -> inline with")
-    import_parser.add_argument("target", help="Vertex name or vertex/template")
-
-    merge_parser = subparsers.add_parser("merge", help="Merge external file into population")
-    merge_parser.add_argument("target", help="Vertex name or vertex/template")
-    merge_parser.add_argument("file", help=".list file to merge from")
+    export_parser.add_argument(
+        "--output",
+        "-o",
+        help="(deprecated) ignored; export materializes configured .list",
+    )
 
     # session
     session_parser = subparsers.add_parser("session", help="Session continuity")
@@ -783,12 +921,6 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "export":
         from .commands.pop import cmd_export
         return cmd_export(args)
-    elif args.command == "import":
-        from .commands.pop import cmd_import
-        return cmd_import(args)
-    elif args.command == "merge":
-        from .commands.pop import cmd_merge
-        return cmd_merge(args)
     elif args.command == "session":
         from .commands.session import cmd_session
         return cmd_session(args)

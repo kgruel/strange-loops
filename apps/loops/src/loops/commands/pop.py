@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -29,14 +31,16 @@ def parse_target(target: str) -> tuple[str, str | None]:
 
 
 def _load(target: str):
-    """Load vertex, template, and population from target string.
+    """Load target for pop facts.
 
-    Returns (vertex, template, population, vertex_path).
+    Returns (vertex, template, list_path, header, store_path, vertex_path, is_multi).
     Raises ValueError on resolution errors.
     """
     from lang import parse_vertex_file
-    from lang.population import read_population, resolve_template, resolve_vertex
+    from lang.ast import FromFile, TemplateSource
+    from lang.population import list_file_header, resolve_template, resolve_vertex
     from loops.main import loops_home
+    from loops.main import _resolve_vertex_store_path
 
     vertex_ref, qualifier = parse_target(target)
     vertex_path = resolve_vertex(vertex_ref, loops_home())
@@ -46,48 +50,151 @@ def _load(target: str):
 
     vertex = parse_vertex_file(vertex_path)
     template = resolve_template(vertex, qualifier)
-    base_dir = vertex_path.parent
-    population = read_population(vertex, template, base_dir)
 
-    return vertex, template, population, vertex_path
+    is_multi = (
+        len(
+            [
+                s
+                for s in (vertex.sources or ())
+                if isinstance(s, TemplateSource)
+            ]
+        )
+        > 1
+    )
+
+    if not isinstance(template.from_, FromFile):
+        raise ValueError(
+            "Template population must be file-backed (missing 'from file \"...\"')"
+        )
+
+    list_path = template.from_.path
+    if not list_path.is_absolute():
+        list_path = (vertex_path.parent / list_path).resolve()
+
+    header = list_file_header(list_path)
+    store_path = _resolve_vertex_store_path(vertex_path.resolve())
+    if store_path is None:
+        raise ValueError("Vertex has no store configured")
+
+    return vertex, template, list_path, header, store_path, vertex_path, is_multi
+
+
+def _observer() -> str:
+    return os.environ.get("LOOPS_OBSERVER", "")
+
+
+def _append_fact(store_path: Path, kind: str, payload: dict, observer: str) -> None:
+    from atoms import Fact
+    from engine import SqliteStore
+
+    ts = datetime.now(timezone.utc).timestamp()
+    fact = Fact(kind=kind, ts=ts, payload=payload, observer=observer, origin="")
+
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    with SqliteStore(
+        path=store_path,
+        serialize=Fact.to_dict,
+        deserialize=Fact.from_dict,
+    ) as store:
+        store.append(fact)
+
+
+def _maybe_bootstrap_from_list(
+    *,
+    store_path: Path,
+    list_path: Path,
+    template_name: str | None,
+    include_unscoped: bool,
+    observer: str,
+) -> None:
+    """If the store has no pop facts yet, seed it from the existing .list file."""
+    from lang.population import list_file_read
+    from loops.pop_store import POP_ADD_KIND, pop_store_has_facts
+
+    if not list_path.exists():
+        return
+
+    if pop_store_has_facts(
+        store_path, template=template_name, include_unscoped=include_unscoped
+    ):
+        return
+
+    header, rows = list_file_read(list_path)
+    if not header or not rows:
+        return
+
+    for row in rows:
+        payload: dict[str, str] = {"key": row.key}
+        if template_name is not None:
+            payload["template"] = template_name
+        for field in header[1:]:
+            payload[field] = row.values.get(field, "")
+        _append_fact(store_path, POP_ADD_KIND, payload, observer)
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
-    """List population rows."""
+    """List population rows (from folded pop facts)."""
     try:
-        _vertex, _template, pop, _vpath = _load(args.target)
+        _vertex, template, list_path, header, store_path, _vpath, is_multi = (
+            _load(args.target)
+        )
     except (ValueError, Exception) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if not pop.header:
-        print(f"No population for template '{pop.template_name}'")
-        return 0
+    from lang.population import list_file_read
+    from loops.pop_store import pop_fold_rows, pop_read_facts
 
-    print("\t".join(pop.header))
-    for row in pop.rows:
-        print("\t".join(row.values.get(h, "") for h in pop.header))
+    template_name = template.template.stem if is_multi else None
+    include_unscoped = not is_multi
+
+    if not header:
+        # Legacy case: header not yet present, just read file if it exists.
+        if list_path.exists():
+            header, rows = list_file_read(list_path)
+            if header:
+                print("\t".join(header))
+                for row in rows:
+                    print("\t".join(row.values.get(h, "") for h in header))
+                return 0
+        print("No population header found", file=sys.stderr)
+        return 1
+
+    facts = pop_read_facts(store_path)
+    rows = pop_fold_rows(
+        facts,
+        header,
+        template=template_name,
+        include_unscoped=include_unscoped,
+    )
+
+    if not rows and list_path.exists() and not facts:
+        # Before first pop fact, show the current .list as a migration-friendly view.
+        _hdr, _rows = list_file_read(list_path)
+        if _hdr:
+            header, rows = _hdr, _rows
+
+    print("\t".join(header))
+    for row in rows:
+        print("\t".join(row.values.get(h, "") for h in header))
 
     return 0
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    """Add a row to the population."""
+    """Emit pop.add and materialize .list from folded state."""
     try:
-        _vertex, template, pop, vpath = _load(args.target)
+        _vertex, template, list_path, header, store_path, _vpath, is_multi = (
+            _load(args.target)
+        )
     except (ValueError, Exception) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if not pop.header:
-        print(
-            "Error: no header — add a row manually or create a .list file first",
-            file=sys.stderr,
-        )
-        return 1
-
     values_list = list(args.values)
-    header = pop.header
+    if not header:
+        print("Error: no .list header found", file=sys.stderr)
+        return 1
 
     # Last column gets remainder
     if len(values_list) > len(header):
@@ -103,171 +210,121 @@ def cmd_add(args: argparse.Namespace) -> int:
         )
         return 1
 
-    values = dict(zip(header, values_list))
     key = values_list[0]
+    payload: dict[str, str] = {"key": key}
+    if is_multi:
+        payload["template"] = template.template.stem
+    for field, value in zip(header[1:], values_list[1:]):
+        payload[field] = value
 
-    # Duplicate check
-    for row in pop.rows:
-        if row.key == key:
-            print(f"'{key}' already exists", file=sys.stderr)
-            return 1
+    observer = _observer()
+    template_name = template.template.stem if is_multi else None
+    include_unscoped = not is_multi
 
-    from lang.population import PopulationRow, kdl_insert_with_row, list_file_add
+    _maybe_bootstrap_from_list(
+        store_path=store_path,
+        list_path=list_path,
+        template_name=template_name,
+        include_unscoped=include_unscoped,
+        observer=observer,
+    )
 
-    new_row = PopulationRow(key=key, values=values)
+    from loops.pop_store import POP_ADD_KIND, pop_materialize_list
 
-    if pop.storage in ("file", "both") and pop.file_path:
-        list_file_add(pop.file_path, header, new_row)
-    else:
-        # Inline: modify KDL
-        text = vpath.read_text()
-        text = kdl_insert_with_row(text, str(template.template), values)
-        vpath.write_text(text)
+    _append_fact(store_path, POP_ADD_KIND, payload, observer)
+    pop_materialize_list(
+        store_path=store_path,
+        list_path=list_path,
+        header=header,
+        template=template_name,
+        include_unscoped=include_unscoped,
+    )
 
-    print(f"Added {key}")
+    print(f"Emitted pop.add {key}")
     return 0
 
 
 def cmd_rm(args: argparse.Namespace) -> int:
-    """Remove a row from the population."""
+    """Emit pop.rm and materialize .list from folded state."""
     try:
-        _vertex, template, pop, vpath = _load(args.target)
+        _vertex, template, list_path, header, store_path, _vpath, is_multi = (
+            _load(args.target)
+        )
     except (ValueError, Exception) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
     key = args.key
-    removed = False
-
-    from lang.population import kdl_remove_with_row, list_file_rm
-
-    # Check file first, then inline
-    if pop.file_path and pop.file_path.exists():
-        removed = list_file_rm(pop.file_path, key)
-
-    if not removed and pop.storage in ("inline", "both"):
-        try:
-            key_field = pop.header[0] if pop.header else "kind"
-            text = vpath.read_text()
-            text = kdl_remove_with_row(
-                text, str(template.template), key_field, key
-            )
-            vpath.write_text(text)
-            removed = True
-        except ValueError:
-            pass
-
-    if not removed:
-        print(f"'{key}' not found", file=sys.stderr)
+    if not header:
+        print("Error: no .list header found", file=sys.stderr)
         return 1
 
-    print(f"Removed {key}")
+    observer = _observer()
+    template_name = template.template.stem if is_multi else None
+    include_unscoped = not is_multi
+
+    _maybe_bootstrap_from_list(
+        store_path=store_path,
+        list_path=list_path,
+        template_name=template_name,
+        include_unscoped=include_unscoped,
+        observer=observer,
+    )
+
+    from loops.pop_store import POP_RM_KIND, pop_materialize_list
+
+    payload: dict[str, str] = {"key": key}
+    if is_multi:
+        payload["template"] = template.template.stem
+
+    _append_fact(store_path, POP_RM_KIND, payload, observer)
+    pop_materialize_list(
+        store_path=store_path,
+        list_path=list_path,
+        header=header,
+        template=template_name,
+        include_unscoped=include_unscoped,
+    )
+
+    print(f"Emitted pop.rm {key}")
     return 0
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    """Export inline with rows to a .list file."""
+    """Materialize .list from folded pop facts."""
     try:
-        _vertex, template, pop, vpath = _load(args.target)
+        _vertex, template, list_path, header, store_path, _vpath, is_multi = (
+            _load(args.target)
+        )
     except (ValueError, Exception) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if pop.storage == "file":
-        print("Already using .list file", file=sys.stderr)
+    if not header:
+        print("Error: no .list header found", file=sys.stderr)
         return 1
 
-    from lang.population import export_to_file, list_file_write
+    observer = _observer()
+    template_name = template.template.stem if is_multi else None
+    include_unscoped = not is_multi
 
-    base_dir = vpath.parent
-    if args.output:
-        list_path = Path(args.output)
-        if not list_path.is_absolute():
-            list_path = base_dir / list_path
-    else:
-        list_path = base_dir / f"{pop.template_name}.list"
-
-    # Compute relative path for KDL reference
-    try:
-        rel = list_path.relative_to(base_dir)
-        from_ref = f"./{rel}"
-    except ValueError:
-        from_ref = str(list_path)
-
-    # Write .list file
-    list_file_write(list_path, pop.header, pop.rows)
-
-    # Modify vertex KDL
-    text = vpath.read_text()
-    text = export_to_file(text, str(template.template), from_ref)
-    vpath.write_text(text)
-
-    print(f"Exported to {list_path}")
-    return 0
-
-
-def cmd_import(args: argparse.Namespace) -> int:
-    """Import .list file rows to inline with."""
-    try:
-        _vertex, template, pop, vpath = _load(args.target)
-    except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    if pop.storage == "inline":
-        print("Already inline", file=sys.stderr)
-        return 1
-
-    from lang.population import import_from_file
-
-    text = vpath.read_text()
-    text = import_from_file(text, str(template.template), pop.rows)
-    vpath.write_text(text)
-
-    print(f"Imported {len(pop.rows)} rows inline")
-    return 0
-
-
-def cmd_merge(args: argparse.Namespace) -> int:
-    """Merge external .list file into population."""
-    try:
-        _vertex, template, pop, vpath = _load(args.target)
-    except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from lang.population import (
-        PopulationRow,
-        kdl_insert_with_row,
-        list_file_add,
-        list_file_read,
+    _maybe_bootstrap_from_list(
+        store_path=store_path,
+        list_path=list_path,
+        template_name=template_name,
+        include_unscoped=include_unscoped,
+        observer=observer,
     )
 
-    merge_path = Path(args.file)
-    if not merge_path.exists():
-        print(f"Error: {merge_path} not found", file=sys.stderr)
-        return 1
+    from loops.pop_store import pop_materialize_list
 
-    _, merge_rows = list_file_read(merge_path)
-    existing_keys = {r.key for r in pop.rows}
+    pop_materialize_list(
+        store_path=store_path,
+        list_path=list_path,
+        header=header,
+        template=template_name,
+        include_unscoped=include_unscoped,
+    )
 
-    added = 0
-    for row in merge_rows:
-        if row.key in existing_keys:
-            continue
-
-        if pop.storage in ("file", "both") and pop.file_path:
-            list_file_add(pop.file_path, pop.header, row)
-        else:
-            text = vpath.read_text()
-            text = kdl_insert_with_row(
-                text, str(template.template), row.values
-            )
-            vpath.write_text(text)
-
-        existing_keys.add(row.key)
-        added += 1
-
-    skipped = len(merge_rows) - added
-    print(f"Merged {added} new rows ({skipped} duplicates skipped)")
+    print(f"Materialized {list_path}")
     return 0

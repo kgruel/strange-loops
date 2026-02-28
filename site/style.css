@@ -6,6 +6,7 @@
 /* --- Design Tokens --- */
 
 :root {
+  color-scheme: light;
   /* Catppuccin Latte */
   --page-bg: #eff1f5;
   --surface: #e6e9ef;
@@ -46,7 +47,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
+    color-scheme: dark;
     /* Catppuccin Mocha */
     --page-bg: #1e1e2e;
     --surface: #181825;
@@ -85,6 +87,51 @@
     --prism-decorator: #f2cdcd;
     --prism-parameter: #cdd6f4;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Catppuccin Mocha */
+  --page-bg: #1e1e2e;
+  --surface: #181825;
+  --text: #cdd6f4;
+  --text-muted: #6c7086;
+  --text-subtle: #585b70;
+  --code-bg: #181825;
+  --code-border: #313244;
+  --accent: #89b4fa;
+  --success: #a6e3a1;
+  --warning: #f9e2af;
+  --error: #f38ba8;
+  --mauve: #cba6f7;
+  --overlay: #6c7086;
+  --heading: #cdd6f4;
+  --link: #89b4fa;
+  --link-hover: #b4befe;
+  --gif-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.2);
+  --code-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  --hero-glow: 0 0 80px rgba(137, 180, 250, 0.06);
+  --divider: #313244;
+  --install-bg: #181825;
+  --kbd-bg: #313244;
+
+  /* Prism token colors — Mocha */
+  --prism-keyword: #cba6f7;
+  --prism-string: #a6e3a1;
+  --prism-function: #89b4fa;
+  --prism-comment: #6c7086;
+  --prism-number: #fab387;
+  --prism-operator: #89dceb;
+  --prism-class: #f9e2af;
+  --prism-builtin: #f5c2e7;
+  --prism-punctuation: #a6adc8;
+  --prism-boolean: #fab387;
+  --prism-decorator: #f2cdcd;
+  --prism-parameter: #cdd6f4;
 }
 
 /* --- Reset & Base --- */
@@ -149,6 +196,173 @@ code, pre, .mono {
   max-width: 960px;
   margin: 0 auto;
   padding: 0 1.5rem;
+}
+
+/* --- Top Nav --- */
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 0 0.5rem;
+}
+
+.brand {
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code",
+    "Fira Code", "Droid Sans Mono", "Source Code Pro", monospace;
+  font-weight: 800;
+  color: var(--heading);
+  letter-spacing: -0.02em;
+}
+
+.nav-links {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.nav-links a {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.nav-links a:hover {
+  color: var(--accent);
+}
+
+.nav-button {
+  border: 1px solid var(--code-border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.05s ease;
+}
+
+.nav-button:hover {
+  border-color: var(--accent);
+}
+
+.nav-button:active {
+  transform: translateY(1px);
+}
+
+.nav-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Docs Layout --- */
+
+body.docs .page-wrapper {
+  max-width: 1120px;
+}
+
+body.docs .docs-shell {
+  display: flex;
+  gap: 2.5rem;
+  padding: 2rem 0 3rem;
+  border-top: 1px solid var(--divider);
+}
+
+body.docs .docs-sidebar {
+  flex: 0 0 240px;
+  width: 240px;
+  align-self: flex-start;
+  position: sticky;
+  top: 1rem;
+  padding: 1rem 1rem 0.75rem;
+  border: 1px solid var(--code-border);
+  background: var(--surface);
+  border-radius: 12px;
+}
+
+body.docs .docs-sidebar-title {
+  font-weight: 700;
+  color: var(--heading);
+  margin-bottom: 0.75rem;
+}
+
+body.docs .docs-sidebar-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-bottom: 0.25rem;
+}
+
+body.docs .docs-sidebar-links a {
+  color: var(--text-muted);
+  padding: 0.35rem 0.45rem;
+  border-radius: 10px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+body.docs .docs-sidebar-links a:hover {
+  color: var(--text);
+  background: var(--code-bg);
+}
+
+body.docs .docs-sidebar-links a[aria-current="page"] {
+  color: var(--text);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+}
+
+body.docs .docs-content {
+  flex: 1;
+  min-width: 0;
+}
+
+body.docs .markdown h1 {
+  font-size: 2.25rem;
+  letter-spacing: -0.03em;
+  margin: 0 0 1rem;
+}
+
+body.docs .markdown h2 {
+  margin-top: 2.5rem;
+}
+
+body.docs .markdown h3 {
+  margin-top: 1.75rem;
+  font-size: 1.2rem;
+}
+
+body.docs .markdown p {
+  margin: 0.85rem 0;
+}
+
+body.docs .markdown ul,
+body.docs .markdown ol {
+  margin: 0.85rem 0 0.85rem 1.25rem;
+}
+
+body.docs .markdown li {
+  margin: 0.25rem 0;
+}
+
+body.docs .markdown hr {
+  border: 0;
+  border-top: 1px solid var(--divider);
+  margin: 2rem 0;
+}
+
+body.docs .markdown blockquote {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--divider);
+  background: var(--surface);
+  border-radius: 10px;
+}
+
+body.docs .markdown blockquote p {
+  margin: 0;
+  color: var(--text);
 }
 
 /* --- Hero Section --- */
@@ -267,6 +481,7 @@ code, pre, .mono {
 /* --- Code Blocks --- */
 
 pre[class*="language-"] {
+  position: relative;
   background: var(--code-bg);
   border: 1px solid var(--code-border);
   border-radius: 8px;
@@ -276,6 +491,35 @@ pre[class*="language-"] {
   line-height: 1.65;
   box-shadow: var(--code-shadow);
   margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  border: 1px solid var(--code-border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease, border-color 0.15s ease;
+}
+
+pre[class*="language-"]:hover .code-copy,
+pre[class*="language-"]:focus-within .code-copy {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.code-copy:hover {
+  border-color: var(--accent);
 }
 
 pre[class*="language-"] + pre[class*="language-"] {
@@ -381,6 +625,19 @@ code[class*="language-"] {
 /* --- Responsive (< 768px) --- */
 
 @media (max-width: 768px) {
+  .top-nav {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-top: 1.25rem;
+  }
+
+  .nav-links {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 1rem;
+  }
+
   .hero {
     padding: 4rem 0 3rem;
   }
@@ -419,5 +676,17 @@ code[class*="language-"] {
   .install-command {
     font-size: 1rem;
     padding: 0.75rem 1.5rem;
+  }
+
+  body.docs .docs-shell {
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.5rem 0 2.5rem;
+  }
+
+  body.docs .docs-sidebar {
+    width: 100%;
+    flex: 0 0 auto;
+    position: static;
   }
 }

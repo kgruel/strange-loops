@@ -13,6 +13,19 @@
 <body>
   <div class="page-wrapper">
 
+    <!-- ===== Top Nav ===== -->
+    <div class="top-nav">
+      <a class="brand" href="index.html">painted</a>
+      <div class="nav-links">
+        <a href="docs/quickstart.html">Quickstart</a>
+        <a href="docs/primitives.html">Primitives</a>
+        <a href="docs/composition.html">Composition</a>
+        <a href="docs/cli-harness.html">CLI harness</a>
+        <a href="docs/tui.html">TUI</a>
+      </div>
+      <button class="nav-button" id="theme-toggle" type="button" aria-label="Toggle theme">Theme</button>
+    </div>
+
     <!-- ===== Hero ===== -->
     <header class="hero">
       <h1 class="hero-title">painted</h1>
@@ -23,7 +36,7 @@
       </div>
 
       <div class="hero-code">
-        <pre><code class="language-python">from painted import show
+        <pre class="language-python"><code class="language-python">from painted import show
 show({"cpu": 67, "mem": 82, "disk": 45})</code></pre>
       </div>
 
@@ -40,7 +53,7 @@ show({"cpu": 67, "mem": 82, "disk": 45})</code></pre>
         </div>
         <div class="split">
           <div class="split-code">
-            <pre><code class="language-python">from painted import Block, Style, print_block
+            <pre class="language-python"><code class="language-python">from painted import Block, Style, print_block
 
 block = Block.text("deploy OK", Style(fg="green", bold=True))
 print_block(block)</code></pre>
@@ -59,7 +72,7 @@ print_block(block)</code></pre>
         </div>
         <div class="split split--reverse">
           <div class="split-code">
-            <pre><code class="language-python">from painted import border, join_vertical, ROUNDED
+            <pre class="language-python"><code class="language-python">from painted import border, join_vertical, ROUNDED
 
 header = Block.text(" api-gateway ", Style(bold=True, reverse=True))
 status = join_vertical(
@@ -83,7 +96,7 @@ print_block(card)</code></pre>
         </div>
         <div class="split">
           <div class="split-code">
-            <pre><code class="language-python">from painted import run_cli, CliContext, Block
+            <pre class="language-python"><code class="language-python">from painted import run_cli, CliContext, Block
 
 def render(ctx: CliContext, data: dict) -> Block:
     ...  # your render logic
@@ -92,7 +105,7 @@ def fetch() -> dict:
     return {"status": "ok", "replicas": 3}
 
 run_cli(sys.argv[1:], render=render, fetch=fetch)</code></pre>
-            <pre><code class="language-bash">myapp           # auto-detect
+            <pre class="language-bash"><code class="language-bash">myapp           # auto-detect
 myapp -q        # quiet
 myapp -v        # verbose
 myapp -i        # interactive TUI
@@ -113,7 +126,7 @@ myapp | grep ok # plain text, no ANSI</code></pre>
         </div>
         <div class="split split--reverse">
           <div class="split-code">
-            <pre><code class="language-python">import asyncio
+            <pre class="language-python"><code class="language-python">import asyncio
 from painted import Block, Style, border
 from painted.tui import Surface
 
@@ -147,11 +160,14 @@ asyncio.run(MyApp().run())</code></pre>
     <!-- ===== Footer ===== -->
     <footer class="site-footer">
       <ul class="footer-links">
+        <li><a href="docs/quickstart.html">Docs</a></li>
         <li><a href="https://github.com/kaygee/painted">GitHub</a></li>
         <li><a href="https://pypi.org/project/painted/">PyPI</a></li>
       </ul>
     </footer>
 
   </div>
+
+  <script defer src="site.js"></script>
 </body>
 </html>

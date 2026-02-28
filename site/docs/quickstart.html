@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>painted — Quickstart</title>
+  <meta name="description" content="painted documentation">
+  <link rel="stylesheet" href="../style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+</head>
+<body class="docs">
+  <div class="page-wrapper">
+    <div class="top-nav">
+      <a class="brand" href="../index.html">painted</a>
+      <div class="nav-links">
+        <a href="quickstart.html" aria-current="page">Quickstart</a>
+        <a href="primitives.html" >Primitives</a>
+        <a href="composition.html" >Composition</a>
+        <a href="cli-harness.html" >CLI harness</a>
+        <a href="tui.html" >TUI</a>
+      </div>
+      <button class="nav-button" id="theme-toggle" type="button" aria-label="Toggle theme">Theme</button>
+    </div>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="docs-sidebar-title">Docs</div>
+        <nav class="docs-sidebar-links" aria-label="Documentation">
+          <a href="quickstart.html" aria-current="page">Quickstart</a>
+          <a href="primitives.html" >Primitives and Blocks</a>
+          <a href="composition.html" >Composition Layout</a>
+          <a href="cli-harness.html" >CLI Harness Fidelity</a>
+          <a href="tui.html" >TUI Core Layers</a>
+        </nav>
+      </aside>
+
+      <main class="docs-content">
+        <article class="markdown">
+<h1>Quickstart</h1>
+<p>Five copy/paste steps: install → first <code>Block</code> → first composition → first <code>print_block</code> → first <code>run_cli</code>.</p>
+<hr>
+<h2>1) Install</h2>
+<pre class="language-bash"><code class="language-bash">pip install painted</code></pre>
+<hr>
+<h2>2) First <code>Block</code></h2>
+<p>Create a <code>Block</code> (an immutable rectangle of styled cells):</p>
+<pre class="language-python"><code class="language-python">from painted import Block, Style
+
+block = Block.text(&quot;deploy OK&quot;, Style(fg=&quot;green&quot;, bold=True))</code></pre>
+<hr>
+<h2>3) First composition</h2>
+<p>Compose blocks into a small “card” using functions like <code>join_vertical</code> and <code>border</code>:</p>
+<pre class="language-python"><code class="language-python">from painted import Block, Style, border, join_vertical, ROUNDED
+
+header = Block.text(&quot; api-gateway &quot;, Style(bold=True, reverse=True))
+status = join_vertical(
+    Block.text(&quot;  replicas: 2/3 ready&quot;, Style(fg=&quot;yellow&quot;)),
+    Block.text(&quot;  /health:  200  12ms&quot;, Style(fg=&quot;green&quot;)),
+)
+card = border(join_vertical(header, status), chars=ROUNDED)</code></pre>
+<hr>
+<h2>4) First <code>print_block</code></h2>
+<p>Print a <code>Block</code> to stdout. When stdout is a TTY, painted emits ANSI styles; when piped, it emits plain text.</p>
+<pre class="language-python"><code class="language-python">from painted import print_block
+
+print_block(card)</code></pre>
+<hr>
+<h2>5) First <code>run_cli</code></h2>
+<p>Use <code>run_cli()</code> when you want one entrypoint that can produce quiet/verbose output, JSON, and/or an interactive TUI.</p>
+<pre class="language-python"><code class="language-python">import sys
+from painted import Block, CliContext, run_cli
+
+def render(ctx: CliContext, data: dict) -&gt; Block:
+    return Block.text(f&quot;status: {data[&#x27;status&#x27;]}&quot;)
+
+def fetch() -&gt; dict:
+    return {&quot;status&quot;: &quot;ok&quot;}
+
+if __name__ == &quot;__main__&quot;:
+    run_cli(sys.argv[1:], render=render, fetch=fetch)</code></pre>
+<p>Run it:</p>
+<pre class="language-bash"><code class="language-bash">python myapp.py
+python myapp.py --json
+python myapp.py -q
+python myapp.py -v
+python myapp.py -i</code></pre>
+        </article>
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <ul class="footer-links">
+        <li><a href="../index.html">Home</a></li>
+        <li><a href="quickstart.html">Docs</a></li>
+        <li><a href="https://github.com/kaygee/painted">GitHub</a></li>
+        <li><a href="https://pypi.org/project/painted/">PyPI</a></li>
+      </ul>
+    </footer>
+  </div>
+
+  <script defer src="../site.js"></script>
+</body>
+</html>
+

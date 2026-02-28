@@ -510,6 +510,93 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
 
 
+def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
+    """Parse emit args into a payload dict.
+
+    Any KEY=VALUE tokens become payload entries. Any trailing non-key=value
+    tokens are joined with spaces into payload["message"].
+    """
+    payload: dict[str, str] = {}
+    message_parts: list[str] = []
+
+    for item in parts:
+        if "=" in item:
+            key, _, value = item.partition("=")
+            if key.isidentifier():
+                payload[key] = value
+                continue
+        message_parts.append(item)
+
+    if message_parts:
+        payload["message"] = " ".join(message_parts)
+
+    return payload
+
+
+def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
+    """Resolve store path from a vertex file. Returns None if no store configured."""
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    if ast.store is None:
+        return None
+
+    store_path = Path(ast.store)
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+    return store_path
+
+
+def cmd_emit(args: argparse.Namespace) -> int:
+    """Inject a fact directly into a vertex store (or print in --dry-run)."""
+    from atoms import Fact
+    from lang.population import resolve_vertex
+
+    vertex_path = resolve_vertex(args.vertex, loops_home()).resolve()
+    if not vertex_path.exists():
+        print(f"Error: {vertex_path} not found", file=sys.stderr)
+        return 1
+
+    payload = _parse_emit_parts(list(args.parts or []))
+    ts = datetime.now(timezone.utc).timestamp()
+    fact = Fact(
+        kind=args.kind,
+        ts=ts,
+        payload=payload,
+        observer=args.observer or "",
+        origin="",
+    )
+
+    if args.dry_run:
+        print(json.dumps(fact.to_dict(), sort_keys=True, default=str))
+        return 0
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if store_path is None:
+        print("Error: vertex has no store configured", file=sys.stderr)
+        return 1
+
+    try:
+        from engine import SqliteStore
+
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        with SqliteStore(
+            path=store_path,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as store:
+            store.append(fact)
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
@@ -586,6 +673,28 @@ def create_parser() -> argparse.ArgumentParser:
     )
     store_parser.add_argument("file", nargs="?", default=None, help=".vertex or .db file")
 
+    # emit
+    emit_parser = subparsers.add_parser(
+        "emit", help="Inject a fact into a vertex store"
+    )
+    emit_parser.add_argument("vertex", help="Vertex name or .vertex path")
+    emit_parser.add_argument("kind", help="Fact kind")
+    emit_parser.add_argument(
+        "parts",
+        nargs="*",
+        help="KEY=VALUE pairs and optional trailing message text",
+    )
+    emit_parser.add_argument(
+        "--observer",
+        default="",
+        help="Observer string (default: empty)",
+    )
+    emit_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the fact JSON without storing",
+    )
+
     # Population management
     ls_parser = subparsers.add_parser("ls", help="List template populations")
     ls_parser.add_argument("target", help="Vertex name or vertex/template")
@@ -608,6 +717,30 @@ def create_parser() -> argparse.ArgumentParser:
     merge_parser = subparsers.add_parser("merge", help="Merge external file into population")
     merge_parser.add_argument("target", help="Vertex name or vertex/template")
     merge_parser.add_argument("file", help=".list file to merge from")
+
+    # session
+    session_parser = subparsers.add_parser("session", help="Session continuity")
+    session_sub = session_parser.add_subparsers(
+        dest="session_command", required=True
+    )
+
+    start_session_p = session_sub.add_parser("start")
+    start_session_p.add_argument("--observer", default=None)
+
+    end_session_p = session_sub.add_parser("end")
+    end_session_p.add_argument("--observer", default=None)
+
+    status_session_p = session_sub.add_parser("status")
+    status_session_p.add_argument(
+        "--json", "-j", action="store_true", help="Output as JSON"
+    )
+
+    log_session_p = session_sub.add_parser("log")
+    log_session_p.add_argument("--since", default="7d", help="Lookback window (e.g. 7d, 24h)")
+    log_session_p.add_argument("--kind", help="Filter by fact kind")
+    log_session_p.add_argument(
+        "--json", "-j", action="store_true", help="Output as JSON"
+    )
 
     # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
     from cells import add_cli_args
@@ -636,6 +769,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_start(args)
     elif args.command == "store":
         return cmd_store(args)
+    elif args.command == "emit":
+        return cmd_emit(args)
     elif args.command == "ls":
         from .commands.pop import cmd_ls
         return cmd_ls(args)
@@ -654,6 +789,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "merge":
         from .commands.pop import cmd_merge
         return cmd_merge(args)
+    elif args.command == "session":
+        from .commands.session import cmd_session
+        return cmd_session(args)
     else:
         parser.print_help()
         return 1

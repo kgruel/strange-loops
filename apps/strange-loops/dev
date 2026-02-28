@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Dev harness for strange-loops. Discovers commands from scripts/*.sh.
+set -euo pipefail
+
+SCRIPTS_DIR="$(cd "$(dirname "$0")/scripts" && pwd)"
+
+show_help() {
+    echo "Usage: ./dev <command> [args...]"
+    echo ""
+    echo "Commands:"
+    for script in "$SCRIPTS_DIR"/*.sh; do
+        name=$(basename "$script" .sh)
+        desc=$(grep '^# DESC:' "$script" | head -1 | sed 's/# DESC: //')
+        printf "  %-12s %s\n" "$name" "$desc"
+    done
+}
+
+if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    show_help
+    exit 0
+fi
+
+CMD="$1"; shift
+SCRIPT="$SCRIPTS_DIR/$CMD.sh"
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "Unknown command: $CMD" >&2
+    show_help >&2
+    exit 1
+fi
+
+exec bash "$SCRIPT" "$@"

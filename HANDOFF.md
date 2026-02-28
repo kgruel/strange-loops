@@ -18,7 +18,7 @@ See `LOOPS.md` for the fundamental model. See `VOCABULARY.md` for definitions.
 - **cells** — terminal UI, separate concern
 
 **Three apps:**
-- **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store`)
+- **loops** — CLI for `.loop`/`.vertex` files (`uv run loops validate/compile/test/run/start/store/ls/add/rm`)
 - **hlab** — Homelab monitoring CLI (`uv run hlab status/alerts/media audit`)
 - **reader** — Personal reading intelligence (`uv run reader reactions/feeds`)
 
@@ -65,12 +65,44 @@ live in engine where the target runtime types are defined.
 ```bash
 uv run loops validate disk.loop          # syntax check
 uv run loops test disk.loop -i sample    # test parse pipeline
-uv run loops run disk.loop               # execute, print facts
+uv run loops run disk.loop               # execute, print facts (one round)
+uv run loops run disk.loop --daemon      # run continuously
 uv run loops compile system.vertex       # show compiled structure
 uv run loops start system.vertex         # run vertex (one round, rendered)
 uv run loops store system.vertex         # inspect persisted store contents
 uv run loops store data/store.db         # inspect .db directly
+
+# Population management (template parameter rows)
+uv run loops ls reading                  # list populations in reading vertex
+uv run loops ls economy/fred             # specific template in multi-template vertex
+uv run loops add reading lobsters https://lobste.rs/rss   # add row
+uv run loops rm reading lobsters         # remove row by key
+uv run loops export reading              # inline with → .list file
+uv run loops import reading              # .list file → inline with
+uv run loops merge reading external.list # union external rows into population
 ```
+
+### Session Continuity
+
+```bash
+loops session start                          # auto-creates vertex, emits start, shows status
+loops session start --observer human         # explicit observer
+loops session end                            # emit session.end fact
+loops session status                         # decisions, threads, tasks, changes
+loops session status --json                  # machine-readable
+loops session log                            # last 7 days
+loops session log --since 24h --kind decision
+
+# Emit structured observations during session (via existing emit command)
+loops emit session decision topic="env-passthrough" "drop env line, rely on inheritance"
+loops emit session change files="compiler.py,source.py" summary="env wiring + test coverage"
+loops emit session thread name="sigil-migration" status="resolved"
+loops emit session task name="fix/review" status="merged" summary="env fix + tests"
+```
+
+Session vertex auto-created at `LOOPS_HOME/session/session.vertex`. Store at
+`LOOPS_HOME/session/data/session.db`. Observer from `LOOPS_OBSERVER` env var
+(falls back to empty). HANDOFF.md and LOG.md remain as reference.
 
 ### hlab App
 
@@ -114,6 +146,10 @@ uv run python experiments/nested_flow/viz.py  # sibling fan-out
 # Grammar (lang — pure, no runtime deps)
 from lang import parse_loop_file, parse_vertex_file, validate
 
+# Population management (lang — pure, no runtime deps)
+from lang import resolve_vertex, resolve_template, template_name
+from lang import PopulationRow, PopulationInfo, read_population
+
 # Compiler + runtime (engine)
 from engine import compile_loop, compile_vertex, load_vertex_program
 from engine import VertexProgram, materialize_vertex, Vertex, Tick
@@ -124,10 +160,17 @@ from engine import StoreReader
 
 ## Current Focus
 
-**apps/loops** is the general-purpose CLI for the loops system (validate, test,
-run, compile, start, store). **apps/hlab** is the first domain app.
-**apps/reader** is the second domain app (personal reading intelligence).
-`experiments/homelab/` is archived predecessor — don't develop there.
+**apps/strange-loops** is the active frontier — task orchestration built on
+loops primitives. Tasks are facts, state is fold, completion is tick. Harnesses
+are Sources. See `apps/strange-loops/DESIGN.md` for architecture.
+
+**apps/loops** is the general-purpose CLI (validate, test, run, compile, start,
+store, emit, session). **apps/hlab** is the first domain app. **apps/reader**
+is the second domain app. `experiments/homelab/` is archived.
+
+**Session continuity** via `loops session start/end/status/log`. Session state
+lives at `LOOPS_HOME/session/`. HANDOFF.md and LOG.md remain as reference but
+session facts are the source of truth going forward.
 
 ### Bend Experiments (Parked)
 
@@ -144,7 +187,7 @@ apps/hlab/
 │   ├── alerts.vertex         # Prometheus alerts pipeline
 │   ├── media_audit.vertex    # Radarr media audit pipeline
 │   └── stacks/
-│       └── status.loop       # Template: ${kind}, ${host} placeholders
+│       └── status.loop       # Template: {{kind}}, {{host}} placeholders
 ├── commands/
 │   ├── status.py             # from engine import load_vertex_program
 │   ├── alerts.py             # from engine import VertexProgram, load_vertex_program
@@ -159,19 +202,50 @@ apps/reader/
 │   ├── reactions.vertex      # HN favorites via template source
 │   ├── feeds.list            # External feed population (kind + URL)
 │   └── sources/
-│       └── feed.loop         # Unified RSS/Atom template (auto-detect)
+│       └── feed.loop         # Unified RSS/Atom template (auto-detect, link normalization)
 └── src/reader/
     ├── config.py             # resolve_vars() for env-based substitution
     └── main.py               # reactions, feeds, feeds add/rm
+
+apps/loops/
+├── src/loops/
+│   ├── main.py               # CLI: validate/test/run/start/store/emit/session/ls/add/rm
+│   ├── commands/
+│   │   ├── pop.py            # Population verbs: ls, add, rm, export, import, merge
+│   │   ├── session.py        # Session continuity: start, end, status, log
+│   │   └── store.py          # Store viewer
+│   └── lenses/
+│       └── store.py          # Zoom-aware store rendering
+└── tests/
+    ├── test_cli.py           # Core CLI tests
+    ├── test_emit.py          # Emit command tests (6 tests)
+    ├── test_session.py       # Session command tests (20 tests)
+    └── test_population.py    # Population CLI integration tests (30 tests)
+
+apps/strange-loops/              # Task orchestration built on loops
+├── dev                          # Dev harness (./dev check, test, lint, fmt)
+├── scripts/                     # Dev scripts (siftd/painted pattern)
+├── src/strange_loops/
+│   ├── cli.py                   # Thin dispatcher
+│   └── commands/                # Subcommand implementations
+├── tests/
+├── CLAUDE.md                    # Dev conventions
+└── DESIGN.md                    # Architecture + fact kinds + harness interface
 ```
 
 ### What Works
 
 - **Template sources** — One .loop template instantiated with parameter table
-- **Per-stack kinds** — Template expands to N sources with ${kind} substitution
+- **Per-stack kinds** — Template expands to N sources with {{kind}} substitution
 - **`from file`** — External parameter source for templates. Population lives
   outside KDL. `feeds.list` is a header + data rows file.
+- **Population management** — `loops ls/add/rm/export/import/merge` for any
+  vertex's template populations. Auto-detects storage (file vs inline KDL).
 - **`--var` flag** — `loops run/start` accept `--var KEY=VALUE` for vertex vars
+- **`--daemon` flag** — `loops run` defaults to one round; `--daemon`/`-d` for continuous
+- **Session continuity** — `loops session start/end/status/log`. Facts as
+  structured observations, query-time fold for state. `LOOPS_OBSERVER` for
+  multi-agent tagging. Correction by re-emit (latest-per-key fold resolves).
 - **tick.name IS the stack** — No re-grouping in render
 - **Zoom rendering** — Zoom 0-3 controls detail level via cells
 - **Polling** — `every "30s"` for live updates
@@ -228,6 +302,33 @@ apps/reader/
 
 ## Resolved
 
+83. ~~Session continuity + strange-loops scaffold~~ — `loops session start/end/status/log`
+    backed by vertex store at `LOOPS_HOME/session/`. Query-time fold: latest per
+    topic/name for decisions/threads/tasks, collect for changes. `LOOPS_OBSERVER`
+    env var for multi-agent. Emit parser fix (`key.isidentifier()` gate). 20 session
+    tests. `apps/strange-loops/` scaffolded with dev harness (siftd/painted pattern),
+    CLAUDE.md, DESIGN.md. 148 loops tests, 2 strange-loops smoke tests.
+
+82. ~~Structural LoopFile AST + `{{var}}` template sigil~~ — Made LoopFile AST fields
+    (`every`, `timeout`, `format`) raw strings instead of typed values. Moved type
+    conversion (Duration.parse, format validation) from loader to compiler. Changed
+    template sigil from `${var}` to `{{var}}` to disambiguate compile-time template
+    vars from shell env vars (e.g., `${FRED_API_KEY}`). Wired dead `env` field through
+    Source → subprocess. `instantiate_template()` now substitutes ALL string fields
+    uniformly. Migrated 7 `.loop` files, 6 `.vertex` files, personal instance files,
+    and all tests. 786 tests pass (126 lang, 365 engine, 295 atoms).
+
+81. ~~Population management CLI + Atom link fix + `--rounds` default~~ — Generic
+    `loops ls/add/rm/export/import/merge` for any vertex's template populations.
+    Core primitives in `libs/lang/src/lang/population.py` (resolve vertex/template,
+    read/write .list files, KDL text manipulation, export/import transforms).
+    CLI handlers in `apps/loops/src/loops/commands/pop.py`. Auto-detects storage
+    (file-backed vs inline KDL vs both). Duplicate template stems resolved by
+    preferring file-backed template. Atom feed link normalization in `feed.loop`
+    (`.link.["+@href"] // .link`). `loops run` now defaults to `--rounds 1`;
+    `--daemon`/`-d` for continuous. 37 lang population tests, 30 CLI tests.
+    126 total lang, 122 total loops tests.
+
 80. ~~`from file` + reader app + `--var`~~ — External parameter sources for templates.
     `FromFile` dataclass in lang AST, `_load_params_file()` in engine compiler.
     Reader app with feeds/reactions vertices, unified feed.loop (RSS+Atom auto-detect),
@@ -280,12 +381,12 @@ apps/reader/
     `add_cli_args` for `-q`/`-v`/`--json`/`--plain` flags, `detect_context` for TTY-aware
     rendering, `shape_lens` for structured tick payload display. 286 atoms tests, 182 lang tests.
 
-72. ~~DSL source templates~~ — Parameterized source templates with `${var}` placeholders. Vertex
+72. ~~DSL source templates~~ — Parameterized source templates with `{{var}}` placeholders. Vertex
     declares `template:` + `with:` parameter table + optional `loop:` spec. Template instantiated
     per-row, variables substituted in source command, kind, and boundary condition. Collapsed
-    4 nearly-identical .loop files → 1 template, 4 identical loop defs → 1 spec with ${kind}.
-    Added `SourceParams`, `TemplateSource` AST types. Lexer handles ${} in identifiers. Parser
-    handles `template:`/`with:`/`loop:` blocks. Mapper has `substitute_vars()`, `compile_sources()`.
+    4 nearly-identical .loop files → 1 template, 4 identical loop defs → 1 spec with {{kind}}.
+    Added `SourceParams`, `TemplateSource` AST types. Lexer handles {{}} in identifiers. Parser
+    handles `template:`/`with:`/`loop:` blocks. Compiler has `substitute_vars()`, `compile_sources()`.
     180 lang tests. hlab produces identical output with cleaner config.
 
 71. ~~hlab fold→lens~~ — `fold_overrides` for health computation (healthy/total in tick payload),

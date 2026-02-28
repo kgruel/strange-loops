@@ -5,6 +5,150 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-28 — Session continuity + strange-loops scaffold
+
+**Session continuity via loops.** `loops session start/end/status/log` — session
+observations as facts, state via query-time fold. Auto-creates vertex at
+`LOOPS_HOME/session/session.vertex` on first `session start`. Six fact kinds:
+`decision` (by topic), `thread` (by name), `task` (by name), `change` (collect),
+`session.start`, `session.end`. `LOOPS_OBSERVER` env var for multi-agent tagging.
+20 tests. Review caught auto-create side effect on read commands — fixed to
+require explicit `session start` first.
+
+**Emit parser fix.** `_parse_emit_parts` treated message text containing `=` as
+key-value pairs. Fixed: `key.isidentifier()` gate rejects keys with spaces or
+special characters. Discovered via real usage — first session had two corrupted
+decision facts, corrected by re-emit (latest-per-key fold resolves it).
+
+**strange-loops app scaffold.** `apps/strange-loops/` — task orchestration built
+on loops primitives. Design: tasks are facts, state is fold, completion is tick.
+Harnesses are Sources (.loop files). Worktrees in-repo, gitignored. Painted for
+rendering. Dev cycle extracted from siftd + painted patterns: `./dev` dispatcher,
+`./dev check` as lint-then-test gate, `ty` + `ruff`, pytest with factory fixtures.
+CLAUDE.md + DESIGN.md with architecture, fact kinds, CLI shape.
+
+**Pattern established.** Correction by re-emit: invalidation is a new fact with
+the same key. Latest-per-key fold resolves it. Old fact stays in history.
+Retraction for keyless (collect) kinds deferred — dissolves if all observable
+kinds are keyed.
+
+---
+
+## 2026-02-27 — Structural LoopFile AST + `{{var}}` template sigil
+
+**The change.** Two-phase migration: (1) make LoopFile AST structural (raw strings
+for `every`, `timeout`, `format`), deferring type conversion to compile time;
+(2) switch template sigil from `${var}` to `{{var}}` to disambiguate compile-time
+template vars from shell env vars.
+
+**Why it matters.** `${var}` was overloaded — it meant both "compile-time template
+var" and "shell env var." This caused silent failures (e.g., `${FRED_API_KEY}`
+treated as unresolved template var). The structural AST change enables template
+substitution on ALL string fields uniformly — previously, only already-string
+fields (`kind`, `source`) could contain template vars; `every` and `timeout` were
+parsed to `Duration` at load time, blocking `{{every}}` as a template var.
+
+**What changed:**
+
+1. **AST raw strings** — `libs/lang/src/lang/ast.py`: `every: Duration | None` →
+   `every: str | None`, `timeout: Duration` → `timeout: str = "60s"`,
+   `format: Literal[...]` → `format: str = "lines"`.
+
+2. **Loader simplified** — `libs/lang/src/lang/loader.py`: removed `Duration.parse()`
+   and format validation from `_load_loop_file()`. Loader produces raw AST strings.
+
+3. **Compiler gains type conversion** — `libs/engine/src/engine/compiler.py`:
+   - Sigil regex: `\$\{(\w+)\}` → `\{\{(\w+)\}\}`
+   - `instantiate_template()` now substitutes ALL string fields uniformly (kind,
+     observer, source, every, format, timeout, env)
+   - `map_loop_file()` does format validation + `Duration.parse()` (moved from loader)
+
+4. **Source `env` field** — `libs/atoms/src/atoms/source.py`: added
+   `env: dict[str, str] | None = None`, wired to `os.environ.copy()` merge →
+   `create_subprocess_shell(env=...)`. Enables `env FRED_API_KEY="${FRED_API_KEY}"`
+   in `.loop` files (shell var passed through without template substitution).
+
+5. **DSL file migration** — 7 `.loop` files, 6 `.vertex` files, personal instance
+   files (`~/.config/loops/economy/`, `~/.config/loops/reading/`). All `${var}` →
+   `{{var}}` for template vars. `${FRED_API_KEY}` kept as shell var.
+
+6. **Test updates** — All `${var}` → `{{var}}` in test strings. Duration assertions
+   → string assertions. `test_invalid_format` moved from loader to compiler tests.
+   786 tests pass (126 lang, 365 engine, 295 atoms).
+
+**Design principle: two-phase pipeline.** Loader produces raw AST (strings).
+Compiler converts to runtime types. This means ANY string field can be a template
+target — the general form, not just the fields we needed today.
+
+**Review subtask dispatched** (`review/sigil-migration`) to sweep for remaining
+`${var}` refs, verify env wiring edge cases, and check test coverage gaps.
+
+---
+
+## 2026-02-27 — Population management CLI + Atom link fix
+
+**The feature.** Generic population verbs on the `loops` CLI so any vertex's
+template populations can be listed, grown, and shrunk without editing files by
+hand. Directly enables the personal instance workflow:
+`loops add reading lobsters https://lobste.rs/rss`.
+
+**What was built:**
+
+1. **`libs/lang/src/lang/population.py`** — Core primitives, no CLI dependency.
+   - `PopulationRow`, `PopulationInfo` data types
+   - `resolve_vertex()` — name → `LOOPS_HOME/name/name.vertex`
+   - `resolve_template()` — find target template, qualifier optional for single
+     templates, required for multi-template vertices
+   - `.list` file ops: `list_file_read/add/rm/write` — generalized from reader's
+     hardcoded `cmd_feeds_add`/`cmd_feeds_rm`
+   - `read_population()` — merges file rows + inline rows
+   - KDL text manipulation: `_find_template_block()` (Path comparison for `./`
+     normalization), `kdl_insert_with_row()`, `kdl_remove_with_row()`
+   - Transforms: `export_to_file()` (inline → .list), `import_from_file()` (file → inline)
+
+2. **`apps/loops/src/loops/commands/pop.py`** — CLI handlers.
+   - `parse_target()`: `economy/fred` → `('economy', 'fred')`, handles `.vertex`
+     and `./` paths
+   - Six commands: `cmd_ls`, `cmd_add`, `cmd_rm`, `cmd_export`, `cmd_import`, `cmd_merge`
+   - Storage auto-detection: `add`/`rm` check `from file` → mutate file, else
+     mutate KDL inline
+
+3. **`apps/loops/src/loops/main.py`** — Six subcommands wired into parser + dispatch.
+
+**Bugs found and fixed:**
+
+1. **Duplicate template stem resolution.** The reading vertex has TWO template
+   sources both using `feed.loop` (subscribed feeds via `from file` + HN reactions
+   via inline `with`). `resolve_template()` couldn't disambiguate.
+   Fix: prefer the file-backed template when multiple share the same stem.
+
+2. **Atom feed `unhashable type: 'dict'`.** Atom feeds (simonwillison.net) return
+   `link` as `{"+@href": "...", "+@rel": "alternate"}` instead of a string. The
+   fold `items "by" "link"` tried to use this dict as a dict key.
+   Fix: `.link = (.link.["+@href"] // .link)` in the yq expression — extracts href
+   from Atom's link object, falls back to RSS's plain string.
+
+3. **`loops run` daemon default confusing.** Running `loops run` would run forever
+   with no output indication it was a daemon. Changed `--rounds` default to `1`.
+   Added `--daemon`/`-d` flag for continuous operation.
+
+**Tests:** 37 new lang population tests, 30 new CLI integration tests.
+126 total lang, 122 total loops, 364 engine tests pass.
+
+**UX:**
+```bash
+loops ls reading                       # list populations
+loops add reading lobsters https://lobste.rs/rss
+loops rm reading lobsters
+loops export reading                   # inline → .list file
+loops import reading                   # .list → inline
+loops merge reading external.list      # union rows
+loops run disk.loop                    # one round (new default)
+loops run disk.loop --daemon           # continuous
+```
+
+---
+
 ## 2026-02-24 — Bend-native reader + vertex-as-compilation-target
 
 **The arc.** Three experiments pushing the loops compute model onto interaction
@@ -340,8 +484,9 @@ former.
 ## 2026-02-03 — DSL source templates
 
 **The feature.** Parameterized source templates. A vertex declares a parameter
-table; a loop file becomes a template with `${var}` placeholders. The loop spec
-(fold + boundary) is also defined once alongside the template.
+table; a loop file becomes a template with `{{var}}` placeholders (originally
+`${var}`, migrated in the 2026-02-27 sigil change). The loop spec (fold +
+boundary) is also defined once alongside the template.
 
 **Before (4 files, 35 lines in vertex):**
 ```
@@ -354,7 +499,7 @@ table; a loop file becomes a template with `${var}` placeholders. The loop spec
 
 **After (2 files, 25 lines in vertex):**
 ```
-├── stacks/status.loop      # source: ssh deploy@${host} "cd /opt/${kind}..."
+├── stacks/status.loop      # source: ssh deploy@{{host}} "cd /opt/{{kind}}..."
 └── status.vertex           # 1 template source with parameter table + 1 loop spec
 ```
 
@@ -370,7 +515,7 @@ sources:
     loop:
       fold:
         containers: collect 50
-      boundary: when ${kind}.complete
+      boundary: when {{kind}}.complete
 ```
 
 **Implementation:**
@@ -386,7 +531,7 @@ sources:
    `parse_with_block()` for parameter tables. `loops:` now optional when
    template sources provide loop specs.
 
-4. **Mapper** — `substitute_vars()` replaces `${var}` with values.
+4. **Compiler** — `substitute_vars()` replaces `{{var}}` with values.
    `instantiate_template()` creates LoopFile with substituted variables.
    `compile_sources()` returns `(sources, specs)` — sources for the runner,
    specs generated from template loop blocks.

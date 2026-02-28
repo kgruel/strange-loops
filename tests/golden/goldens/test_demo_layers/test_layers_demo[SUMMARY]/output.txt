@@ -1,0 +1,18 @@
+✓ help blocks confirm
+  keys: enter -> ? -> y -> escape -> y -> q
+  actions: Push(confirm) -> Push(help) -> Stay -> Pop(None) -> Pop('api-gateway') -> Quit
+  stack: [base(cursor=0:api-gateway)]
+
+✓ cancel confirm
+  keys: j -> enter -> n -> q
+  actions: Stay -> Push(confirm) -> Pop(None) -> Quit
+  stack: [base(cursor=1:auth-service)]
+
+✓ base never pops
+  keys: x -> q
+  actions: Pop('base-pop') -> Quit
+  stack: [base(cursor=0:api-gateway)]
+
+✓ layers demo: 3 scenarios
+actions: Stay=2 Push=3 Pop=4 Quit=3
+invariants: base_never_pops ✓

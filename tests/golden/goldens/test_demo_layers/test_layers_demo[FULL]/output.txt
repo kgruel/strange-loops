@@ -1,0 +1,105 @@
+╭─ ✓ help blocks confirm ──────────────────────────────────────────────────────╮
+│keys: enter -> ? -> y -> escape -> y -> q                                     │
+│                                                                              │
+│steps:                                                                        │
+│[00] key=enter   handled_by=base    action=Push(confirm)                      │
+│[01] key=?       handled_by=confirm action=Push(help)                         │
+│[02] key=y       handled_by=help    action=Stay                               │
+│[03] key=escape  handled_by=help    action=Pop(None)                          │
+│[04] key=y       handled_by=confirm action=Pop('api-gateway')                 │
+│[05] key=q       handled_by=base    action=Quit                               │
+│                                                                              │
+│render order @ step 01 (after '?'):                                           │
+│  [after base]                                                                │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after base+confirm]                                                        │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  au+ CONFIRM -------------------------+                                      │
+│  wo|Deploy api-gateway?               |                                      │
+│  sc|                                  |                                      │
+│  me|y=yes  n=no  ?=help               |                                      │
+│    +----------------------------------+                                      │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after base+confirm+help]                                                   │
+│services                                                                      │
+│> api-gatew+ HELP ------------------------+                                   │
+│  au+ CONFI|confirm keys:                 |                                   │
+│  wo|Deploy|  y confirm                   |                                   │
+│  sc|      |  n cancel                    |                                   │
+│  me|y=yes |  q quit                      |                                   │
+│    +------+------------------------------+                                   │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ ✓ cancel confirm ───────────────────────────────────────────────────────────╮
+│keys: j -> enter -> n -> q                                                    │
+│                                                                              │
+│steps:                                                                        │
+│[00] key=j       handled_by=base    action=Stay                               │
+│[01] key=enter   handled_by=base    action=Push(confirm)                      │
+│[02] key=n       handled_by=confirm action=Pop(None)                          │
+│[03] key=q       handled_by=base    action=Quit                               │
+│                                                                              │
+│render order @ step 01 (after 'enter'):                                       │
+│  [after base]                                                                │
+│services                                                                      │
+│  api-gateway                                                                 │
+│> auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after base+confirm]                                                        │
+│services                                                                      │
+│  api-gateway                                                                 │
+│> au+ CONFIRM -------------------------+                                      │
+│  wo|Deploy auth-service?              |                                      │
+│  sc|                                  |                                      │
+│  me|y=yes  n=no  ?=help               |                                      │
+│    +----------------------------------+                                      │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ ✓ base never pops ──────────────────────────────────────────────────────────╮
+│keys: x -> q                                                                  │
+│                                                                              │
+│steps:                                                                        │
+│[00] key=x       handled_by=base    action=Pop('base-pop')                    │
+│[01] key=q       handled_by=base    action=Quit                               │
+│                                                                              │
+│render order @ step 00 (after 'x'):                                           │
+│  [after base]                                                                │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ layers demo: 3 scenarios
+actions: Stay=2 Push=3 Pop=4 Quit=3
+invariants: base_never_pops ✓

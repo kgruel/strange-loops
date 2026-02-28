@@ -1,0 +1,179 @@
+╭─ ✓ help blocks confirm ──────────────────────────────────────────────────────╮
+│keys: enter -> ? -> y -> escape -> y -> q                                     │
+│                                                                              │
+│00 key=enter   top=base    action=Push(confirm)  [base(cursor=0:api-gateway)] │
+│01 key=?       top=confirm action=Push(help)     [base(cursor=0:api-gateway), │
+│02 key=y       top=help    action=Stay           [base(cursor=0:api-gateway), │
+│03 key=escape  top=help    action=Pop(None)      [base(cursor=0:api-gateway), │
+│04 key=y       top=confirm action=Pop('api-gateway') [base(cursor=0:api-gatewa│
+│05 key=q       top=base    action=Quit           [base(cursor=0:api-gateway)] │
+│                                                                              │
+│frames:                                                                       │
+│  [initial]                                                                   │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'enter' / Push(confirm)]                                             │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  au+ CONFIRM -------------------------+                                      │
+│  wo|Deploy api-gateway?               |                                      │
+│  sc|                                  |                                      │
+│  me|y=yes  n=no  ?=help               |                                      │
+│    +----------------------------------+                                      │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after '?' / Push(help)]                                                    │
+│services                                                                      │
+│> api-gatew+ HELP ------------------------+                                   │
+│  au+ CONFI|confirm keys:                 |                                   │
+│  wo|Deploy|  y confirm                   |                                   │
+│  sc|      |  n cancel                    |                                   │
+│  me|y=yes |  q quit                      |                                   │
+│    +------+------------------------------+                                   │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'escape' / Pop(None)]                                                │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  au+ CONFIRM -------------------------+                                      │
+│  wo|Deploy api-gateway?               |                                      │
+│  sc|                                  |                                      │
+│  me|y=yes  n=no  ?=help               |                                      │
+│    +----------------------------------+                                      │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'y' / Pop('api-gateway')]                                            │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│queued deploy: api-gateway                                                    │
+│  [after 'q' / Quit]                                                          │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│queued deploy: api-gateway                                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ ✓ cancel confirm ───────────────────────────────────────────────────────────╮
+│keys: j -> enter -> n -> q                                                    │
+│                                                                              │
+│00 key=j       top=base    action=Stay           [base(cursor=0:api-gateway)] │
+│01 key=enter   top=base    action=Push(confirm)  [base(cursor=1:auth-service)]│
+│02 key=n       top=confirm action=Pop(None)      [base(cursor=1:auth-service),│
+│03 key=q       top=base    action=Quit           [base(cursor=1:auth-service)]│
+│                                                                              │
+│frames:                                                                       │
+│  [initial]                                                                   │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'enter' / Push(confirm)]                                             │
+│services                                                                      │
+│  api-gateway                                                                 │
+│> au+ CONFIRM -------------------------+                                      │
+│  wo|Deploy auth-service?              |                                      │
+│  sc|                                  |                                      │
+│  me|y=yes  n=no  ?=help               |                                      │
+│    +----------------------------------+                                      │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'n' / Pop(None)]                                                     │
+│services                                                                      │
+│  api-gateway                                                                 │
+│> auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│deploy canceled                                                               │
+│  [after 'q' / Quit]                                                          │
+│services                                                                      │
+│  api-gateway                                                                 │
+│> auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│deploy canceled                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ ✓ base never pops ──────────────────────────────────────────────────────────╮
+│keys: x -> q                                                                  │
+│                                                                              │
+│00 key=x       top=base    action=Pop('base-pop') [base(cursor=0:api-gateway)]│
+│01 key=q       top=base    action=Quit           [base(cursor=0:api-gateway)] │
+│                                                                              │
+│frames:                                                                       │
+│  [initial]                                                                   │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'x' / Pop('base-pop')]                                               │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+│  [after 'q' / Quit]                                                          │
+│services                                                                      │
+│> api-gateway                                                                 │
+│  auth-service                                                                │
+│  worker                                                                      │
+│  scheduler                                                                   │
+│  metrics                                                                     │
+│                                                                              │
+│                                                                              │
+│enter=confirm  ?=help  x=pop(base)  q=quit                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ layers demo: 3 scenarios
+actions: Stay=2 Push=3 Pop=4 Quit=3
+invariants: base_never_pops ✓

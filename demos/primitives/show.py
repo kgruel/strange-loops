@@ -16,34 +16,47 @@ Run: uv run demos/primitives/show.py
 
 from painted import show
 
-# --- Scalars: print directly ---
+def demo_scalars() -> None:
+    show("deploy complete")
+    show(42)
+    show(True)
+    show()
 
-show("deploy complete")
-show(42)
-show(True)
-show()
 
-# --- Dict: key-value rendering ---
+def demo_dict() -> None:
+    show({"host": "prod-1", "status": "healthy", "uptime": "14d 3h", "cpu": 0.45})
+    show()
 
-show({"host": "prod-1", "status": "healthy", "uptime": "14d 3h", "cpu": 0.45})
-show()
 
-# --- List: item rendering ---
+def demo_list() -> None:
+    show(["api", "worker", "scheduler", "cache"])
+    show()
 
-show(["api", "worker", "scheduler", "cache"])
-show()
 
-# --- Nested: tree rendering ---
+def demo_nested() -> None:
+    show(
+        {
+            "cluster": {
+                "prod-1": {"status": "healthy", "cpu": 0.45},
+                "prod-2": {"status": "degraded", "cpu": 0.91},
+            },
+            "version": "2.4.1",
+        }
+    )
+    show()
 
-show({
-    "cluster": {
-        "prod-1": {"status": "healthy", "cpu": 0.45},
-        "prod-2": {"status": "degraded", "cpu": 0.91},
-    },
-    "version": "2.4.1",
-})
-show()
 
-# --- Numeric: chart rendering ---
+def demo_numeric() -> None:
+    show([3, 7, 2, 9, 5, 8, 1, 6, 4, 10, 3, 7])
 
-show([3, 7, 2, 9, 5, 8, 1, 6, 4, 10, 3, 7])
+
+def demo() -> None:
+    demo_scalars()
+    demo_dict()
+    demo_list()
+    demo_nested()
+    demo_numeric()
+
+
+if __name__ == "__main__":
+    demo()

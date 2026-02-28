@@ -5,8 +5,8 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from cells import Zoom
-from cells.components.list_view import ListState
+from painted import Zoom
+from painted.views import ListState
 from loops.commands.store import _bucket_timestamps, _sparkline_str
 from loops.lenses.store import store_view, _relative_time
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
@@ -363,7 +363,7 @@ class TestFidelityState:
             tick_name="health.check",
             since=tick_info["latest_since"],
             until=tick_info["latest_ts"],
-            cursor=ListState(item_count=len(facts)),
+            cursor=ListState().with_count(len(facts)),
         )
         state = replace(state, focus="fidelity", fidelity=fid)
 
@@ -379,7 +379,7 @@ class TestFidelityState:
             tick_name="health.check",
             since=1000.0,
             until=2000.0,
-            cursor=ListState(item_count=len(facts)),
+            cursor=ListState().with_count(len(facts)),
         )
 
         # Toggle to filtered (cpu.metric — kind at cursor 0)
@@ -389,7 +389,7 @@ class TestFidelityState:
             facts=filtered,
             filtered=True,
             filter_kind="cpu.metric",
-            cursor=ListState(item_count=len(filtered)),
+            cursor=ListState().with_count(len(filtered)),
         )
 
         assert fid.filtered is True
@@ -405,7 +405,7 @@ class TestFidelityState:
             tick_name="health.check",
             since=1000.0,
             until=2000.0,
-            cursor=ListState(item_count=len(filtered)),
+            cursor=ListState().with_count(len(filtered)),
             filtered=True,
             filter_kind="cpu.metric",
         )
@@ -416,7 +416,7 @@ class TestFidelityState:
             facts=all_facts,
             filtered=False,
             filter_kind=None,
-            cursor=ListState(item_count=len(all_facts)),
+            cursor=ListState().with_count(len(all_facts)),
         )
 
         assert fid.filtered is False
@@ -431,7 +431,7 @@ class TestFidelityState:
             tick_name="health.check",
             since=1000.0,
             until=2000.0,
-            cursor=ListState(item_count=len(facts)),
+            cursor=ListState().with_count(len(facts)),
         )
         state = replace(state, focus="fidelity", fidelity=fid)
 
@@ -448,7 +448,7 @@ class TestFidelityState:
             tick_name="health.check",
             since=1000.0,
             until=2000.0,
-            cursor=ListState(item_count=5),
+            cursor=ListState().with_count(5),
         )
 
         # Move down
@@ -462,9 +462,9 @@ class TestFidelityState:
         assert cursor.selected == 1
 
         # Clamp at bounds
-        at_top = ListState(item_count=5, selected=0).move_up()
+        at_top = ListState().with_count(5).move_to(0).move_up()
         assert at_top.selected == 0
-        at_bottom = ListState(item_count=5, selected=4).move_down()
+        at_bottom = ListState().with_count(5).move_to(4).move_down()
         assert at_bottom.selected == 4
 
 

@@ -6,12 +6,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cells import Block, Style, join_horizontal, join_vertical, pad, border, ROUNDED
-from cells.components.data_explorer import DataExplorerState, data_explorer
-from cells.components.list_view import ListState, list_view
-from cells.lens import shape_lens
-from cells.span import Line, Span
-from cells.tui import Surface
+from painted import Block, Style, join_horizontal, join_vertical, pad, border, ROUNDED
+from painted.views import (
+    DataExplorerState,
+    data_explorer,
+    ListState,
+    list_view,
+    shape_lens,
+)
+from painted.span import Line, Span
+from painted.tui import Surface
 
 
 @dataclass(frozen=True)
@@ -49,7 +53,7 @@ class StoreExplorerState:
         return StoreExplorerState(
             summary=summary,
             tick_names=tick_names,
-            cursor=ListState(item_count=len(tick_names)),
+            cursor=ListState().with_count(len(tick_names)),
         )
 
     @property
@@ -232,7 +236,7 @@ class StoreExplorerApp(Surface):
                 tick_name=tick_name,
                 since=since_ts,
                 until=until_ts,
-                cursor=ListState(item_count=len(facts)),
+                cursor=ListState().with_count(len(facts)),
             ),
         )
         self.mark_dirty()
@@ -266,7 +270,7 @@ class StoreExplorerApp(Surface):
                         facts=filtered,
                         filtered=True,
                         filter_kind=kind,
-                        cursor=ListState(item_count=len(filtered)),
+                        cursor=ListState().with_count(len(filtered)),
                     ),
                 )
             else:
@@ -279,7 +283,7 @@ class StoreExplorerApp(Surface):
                         facts=all_facts,
                         filtered=False,
                         filter_kind=None,
-                        cursor=ListState(item_count=len(all_facts)),
+                        cursor=ListState().with_count(len(all_facts)),
                     ),
                 )
             self.mark_dirty()

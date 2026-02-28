@@ -434,7 +434,7 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
 def cmd_store(args: argparse.Namespace) -> int:
     """Inspect store contents."""
-    from cells import (
+    from painted import (
         Format,
         OutputMode,
         detect_context,
@@ -486,7 +486,7 @@ def cmd_store(args: argparse.Namespace) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Run a .vertex file (start sources and vertex)."""
-    from cells import (
+    from painted import (
         Zoom,
         Format,
         detect_context,
@@ -498,7 +498,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         print_block,
         join_vertical,
     )
-    from cells.lens import shape_lens
+    from painted.views import shape_lens
     from engine import load_vertex_program
 
     resolved = _resolve_vertex_path(args.file)
@@ -953,7 +953,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # Add cells fidelity args: -q, -v/-vv, --json, --plain, --static/--live/-i
-    from cells import add_cli_args
+    from painted import add_cli_args
     add_cli_args(start_parser)
     add_cli_args(store_parser)
 

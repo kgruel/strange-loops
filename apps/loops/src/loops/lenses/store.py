@@ -2,9 +2,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
-from cells import Block, Style, Zoom, join_vertical
-from cells.lens import shape_lens
+from painted import Block, Style, Zoom, join_vertical
+from painted.views import shape_lens as painted_shape_lens
+
+
+def _shape_lens(content: Any, *, zoom: int, width: int) -> Block:
+    """Compatibility wrapper: avoid painted auto-chart for labeled numeric dicts."""
+    if (
+        isinstance(content, dict)
+        and content
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in content.values())
+    ):
+        content = {k: str(v) for k, v in content.items()}
+    return painted_shape_lens(content, zoom=zoom, width=width)
 
 
 def store_view(data: dict, zoom: Zoom, width: int) -> Block:
@@ -95,7 +107,7 @@ def _render_detailed(data: dict, width: int) -> Block:
 
         payload = info.get("latest_payload")
         if payload:
-            body = shape_lens(payload, zoom=1, width=width - 2)
+            body = _shape_lens(payload, zoom=1, width=width - 2)
             rows.append(body)
         rows.append(Block.empty(width, 1))
 
@@ -137,7 +149,7 @@ def _render_full(data: dict, width: int) -> Block:
 
         payload = info.get("latest_payload")
         if payload:
-            body = shape_lens(payload, zoom=2, width=width - 2)
+            body = _shape_lens(payload, zoom=2, width=width - 2)
             rows.append(body)
         rows.append(Block.empty(width, 1))
 
@@ -154,7 +166,7 @@ def _render_full(data: dict, width: int) -> Block:
         recent = info.get("recent", [])
         if recent:
             for payload in recent[:3]:
-                body = shape_lens(payload, zoom=2, width=width - 2)
+                body = _shape_lens(payload, zoom=2, width=width - 2)
                 rows.append(body)
         rows.append(Block.empty(width, 1))
 

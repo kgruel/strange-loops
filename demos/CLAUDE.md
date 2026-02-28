@@ -41,6 +41,7 @@ patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
   hit_testing.py    Hit testing: Block.id -> composition -> Buffer.hit()   ✓
   fidelity.py       CLI harness: -q → default → -v → -i       ✓
+  responsive.py     Responsive layout: join_responsive + breakpoints      ✓
   live.py            Live streaming: fetch_stream, spinners, --live  ✓
   focus.py          Focus + Cursor + Search: navigation vs capture        ✓
   testing.py        Replay testing: emit capture, observation traces      ✓

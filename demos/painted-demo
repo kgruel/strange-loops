@@ -11,6 +11,7 @@ case "$cmd" in
   rendering)   exec uv run python demos/patterns/rendering.py "$@" ;;
   hit-testing) exec uv run python demos/patterns/hit_testing.py "$@" ;;
   fidelity)    exec uv run python demos/patterns/fidelity.py "$@" ;;
+  responsive)  exec uv run python demos/patterns/responsive.py "$@" ;;
   live)        exec uv run python demos/patterns/live.py "$@" ;;
   focus)       exec uv run python demos/patterns/focus.py "$@" ;;
   profiler)    exec uv run python demos/patterns/profiler.py "$@" ;;

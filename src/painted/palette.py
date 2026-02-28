@@ -9,13 +9,18 @@ Usage:
     p = current_palette()
     fill_style = p.accent.merge(Style(bold=True))
 
-    # Override ambient palette
+    # Override ambient palette (setter)
     use_palette(MONO_PALETTE)
+
+    # Scoped override (context manager)
+    with use_palette(MONO_PALETTE):
+        ...
 """
 
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 
 from .cell import Style
@@ -61,16 +66,41 @@ MONO_PALETTE = Palette(
 _palette: ContextVar[Palette] = ContextVar("palette", default=DEFAULT_PALETTE)
 
 
+class _PaletteOverride(AbstractContextManager[None]):
+    def __init__(self, token: Token[Palette]) -> None:
+        self._token = token
+        self._active = True
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if self._active:
+            _palette.reset(self._token)
+            self._active = False
+        return False
+
+
 def current_palette() -> Palette:
     """Get the ambient palette."""
 
     return _palette.get()
 
 
-def use_palette(palette: Palette) -> None:
-    """Set the ambient palette for the current context."""
+def use_palette(palette: Palette) -> AbstractContextManager[None]:
+    """Set the ambient palette for the current context.
 
-    _palette.set(palette)
+    The palette is set immediately (setter semantics) and the return value can be
+    used as a context manager for scoped overrides:
+
+        use_palette(MONO_PALETTE)  # global / ambient until changed again
+
+        with use_palette(MONO_PALETTE):
+            ...  # restored on exit
+    """
+
+    token = _palette.set(palette)
+    return _PaletteOverride(token)
 
 
 def reset_palette() -> None:

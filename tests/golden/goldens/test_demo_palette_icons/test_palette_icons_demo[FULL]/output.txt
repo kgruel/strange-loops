@@ -1,0 +1,130 @@
+  same dashboard, three icon sets
+
+╭─ UNICODE ───────────────────────────╮  ╭─ ASCII ─────────────────────────────╮
+│⠋ rolling update                     │  │- rolling update                     │
+│███████████████████░░░░░░░░░░░  62%  │  │###################-----------  62%  │
+│                                     │  │                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │  │  ! api-gateway  3/3 ready  1200ms   │
+│  ✓ worker       5/5 ready  90ms     │  │  [x] worker       5/5 ready  90ms   │
+│  ✗ scheduler    0/1 ready  —        │  │  [!] scheduler    0/1 ready  —      │
+│  ✓ metrics      1/1 ready  140ms    │  │  [x] metrics      1/1 ready  140ms  │
+│                                     │  │                                     │
+│  metrics                            │  │  metrics                            │
+│▅▇▃▁█                                │  │^#-_@                                │
+│                                     │  │                                     │
+│  tree                               │  │  tree                               │
+│root                                 │  │root                                 │
+│├─ cluster [2]                       │  │+-- cluster [2]                      │
+│└─ build [2]                         │  │`-- build [2]                        │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
+
+╭─ CUSTOM ────────────────────────────╮
+│. rolling update                     │
+│===================...........  62%  │
+│                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │
+│  OK worker       5/5 ready  90ms    │
+│  XX scheduler    0/1 ready  —       │
+│  OK metrics      1/1 ready  140ms   │
+│                                     │
+│  metrics                            │
+│46207                                │
+│                                     │
+│  tree                               │
+│root                                 │
+│>- cluster [2]                       │
+│`- build [2]                         │
+╰─────────────────────────────────────╯
+
+
+  palette × icons
+
+╭─ DEFAULT/UNICODE ───────────────────╮  ╭─ DEFAULT/ASCII ─────────────────────╮
+│⠋ rolling update                     │  │- rolling update                     │
+│███████████████████░░░░░░░░░░░  62%  │  │###################-----------  62%  │
+│                                     │  │                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │  │  ! api-gateway  3/3 ready  1200ms   │
+│  ✓ worker       5/5 ready  90ms     │  │  [x] worker       5/5 ready  90ms   │
+│  ✗ scheduler    0/1 ready  —        │  │  [!] scheduler    0/1 ready  —      │
+│  ✓ metrics      1/1 ready  140ms    │  │  [x] metrics      1/1 ready  140ms  │
+│                                     │  │                                     │
+│  metrics                            │  │  metrics                            │
+│▅▇▃▁█                                │  │^#-_@                                │
+│                                     │  │                                     │
+│  tree                               │  │  tree                               │
+│root                                 │  │root                                 │
+│├─ cluster [2]                       │  │+-- cluster [2]                      │
+│└─ build [2]                         │  │`-- build [2]                        │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
+
+╭─ DEFAULT/CUSTOM ────────────────────╮  ╭─ NORD/UNICODE ──────────────────────╮
+│. rolling update                     │  │⠋ rolling update                     │
+│===================...........  62%  │  │███████████████████░░░░░░░░░░░  62%  │
+│                                     │  │                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │  │  ⚠ api-gateway  3/3 ready  1200ms   │
+│  OK worker       5/5 ready  90ms    │  │  ✓ worker       5/5 ready  90ms     │
+│  XX scheduler    0/1 ready  —       │  │  ✗ scheduler    0/1 ready  —        │
+│  OK metrics      1/1 ready  140ms   │  │  ✓ metrics      1/1 ready  140ms    │
+│                                     │  │                                     │
+│  metrics                            │  │  metrics                            │
+│46207                                │  │▅▇▃▁█                                │
+│                                     │  │                                     │
+│  tree                               │  │  tree                               │
+│root                                 │  │root                                 │
+│>- cluster [2]                       │  │├─ cluster [2]                       │
+│`- build [2]                         │  │└─ build [2]                         │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
+
+╭─ NORD/ASCII ────────────────────────╮  ╭─ NORD/CUSTOM ───────────────────────╮
+│- rolling update                     │  │. rolling update                     │
+│###################-----------  62%  │  │===================...........  62%  │
+│                                     │  │                                     │
+│  ! api-gateway  3/3 ready  1200ms   │  │  ⚠ api-gateway  3/3 ready  1200ms   │
+│  [x] worker       5/5 ready  90ms   │  │  OK worker       5/5 ready  90ms    │
+│  [!] scheduler    0/1 ready  —      │  │  XX scheduler    0/1 ready  —       │
+│  [x] metrics      1/1 ready  140ms  │  │  OK metrics      1/1 ready  140ms   │
+│                                     │  │                                     │
+│  metrics                            │  │  metrics                            │
+│^#-_@                                │  │46207                                │
+│                                     │  │                                     │
+│  tree                               │  │  tree                               │
+│root                                 │  │root                                 │
+│+-- cluster [2]                      │  │>- cluster [2]                       │
+│`-- build [2]                        │  │`- build [2]                         │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
+
+╭─ MONO/UNICODE ──────────────────────╮  ╭─ MONO/ASCII ────────────────────────╮
+│⠋ rolling update                     │  │- rolling update                     │
+│███████████████████░░░░░░░░░░░  62%  │  │###################-----------  62%  │
+│                                     │  │                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │  │  ! api-gateway  3/3 ready  1200ms   │
+│  ✓ worker       5/5 ready  90ms     │  │  [x] worker       5/5 ready  90ms   │
+│  ✗ scheduler    0/1 ready  —        │  │  [!] scheduler    0/1 ready  —      │
+│  ✓ metrics      1/1 ready  140ms    │  │  [x] metrics      1/1 ready  140ms  │
+│                                     │  │                                     │
+│  metrics                            │  │  metrics                            │
+│▅▇▃▁█                                │  │^#-_@                                │
+│                                     │  │                                     │
+│  tree                               │  │  tree                               │
+│root                                 │  │root                                 │
+│├─ cluster [2]                       │  │+-- cluster [2]                      │
+│└─ build [2]                         │  │`-- build [2]                        │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
+
+╭─ MONO/CUSTOM ───────────────────────╮
+│. rolling update                     │
+│===================...........  62%  │
+│                                     │
+│  ⚠ api-gateway  3/3 ready  1200ms   │
+│  OK worker       5/5 ready  90ms    │
+│  XX scheduler    0/1 ready  —       │
+│  OK metrics      1/1 ready  140ms   │
+│                                     │
+│  metrics                            │
+│46207                                │
+│                                     │
+│  tree                               │
+│root                                 │
+│>- cluster [2]                       │
+│`- build [2]                         │
+╰─────────────────────────────────────╯

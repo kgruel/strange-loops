@@ -7,12 +7,17 @@ Usage:
 
     icons = current_icons()
     fill = icons.progress_fill
+
+    # Scoped override (context manager)
+    with use_icons(ASCII_ICONS):
+        ...
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
 
@@ -72,16 +77,41 @@ _DEFAULT_ICONS = IconSet()
 _icons: ContextVar[IconSet] = ContextVar("icons", default=_DEFAULT_ICONS)
 
 
+class _IconsOverride(AbstractContextManager[None]):
+    def __init__(self, token: Token[IconSet]) -> None:
+        self._token = token
+        self._active = True
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if self._active:
+            _icons.reset(self._token)
+            self._active = False
+        return False
+
+
 def current_icons() -> IconSet:
     """Get the ambient icon set."""
 
     return _icons.get()
 
 
-def use_icons(icons: IconSet) -> None:
-    """Set the ambient icon set for the current context."""
+def use_icons(icons: IconSet) -> AbstractContextManager[None]:
+    """Set the ambient icon set for the current context.
 
-    _icons.set(icons)
+    The icon set is set immediately (setter semantics) and the return value can be
+    used as a context manager for scoped overrides:
+
+        use_icons(ASCII_ICONS)  # global / ambient until changed again
+
+        with use_icons(ASCII_ICONS):
+            ...  # restored on exit
+    """
+
+    token = _icons.set(icons)
+    return _IconsOverride(token)
 
 
 def reset_icons() -> None:

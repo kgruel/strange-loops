@@ -128,6 +128,7 @@ tests/golden/
   test_demo_rendering.py # rendering.py (lens API, custom lens, palette)
   test_demo_profiler.py  # profiler.py (frame cost, flame graph, emissions)
   test_demo_help.py      # help.py (HelpData, zoom-aware help rendering)
+  test_demo_palette_icons.py # palette_icons.py (ambient Palette + IconSet)
   goldens/               # committed expected output
     test_demo_testing/
     test_demo_live/
@@ -135,4 +136,5 @@ tests/golden/
     test_demo_rendering/
     test_demo_profiler/
     test_demo_help/
+    test_demo_palette_icons/
 ```

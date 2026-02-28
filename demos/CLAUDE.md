@@ -60,6 +60,7 @@ primitives/
 
 patterns/
   rendering.py      Rendering patterns: --explicit, --custom, --palette   ✓
+  palette_icons.py  Ambient config: Palette + IconSet switching           ✓
   hit_testing.py    Hit testing: Block.id -> composition -> Buffer.hit()   ✓
   fidelity.py       CLI harness: -q → default → -v → -vv      ✓
   responsive.py     Responsive layout: join_responsive + breakpoints (-i) ✓

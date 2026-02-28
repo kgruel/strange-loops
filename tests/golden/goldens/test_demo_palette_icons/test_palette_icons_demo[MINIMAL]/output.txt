@@ -1,0 +1,3 @@
+  palette roles
+
+ success   warning   error   accent   muted

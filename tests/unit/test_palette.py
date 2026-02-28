@@ -8,6 +8,7 @@ from painted.cell import Style
 from painted.palette import (
     DEFAULT_PALETTE,
     MONO_PALETTE,
+    NORD_PALETTE,
     Palette,
     current_palette,
     reset_palette,
@@ -53,6 +54,17 @@ def test_use_palette_sets_context():
     reset_palette()
     use_palette(MONO_PALETTE)
     assert current_palette() is MONO_PALETTE
+    reset_palette()
+
+
+def test_use_palette_context_manager_restores_previous():
+    reset_palette()
+    use_palette(NORD_PALETTE)
+
+    with use_palette(MONO_PALETTE):
+        assert current_palette() is MONO_PALETTE
+
+    assert current_palette() is NORD_PALETTE
     reset_palette()
 
 

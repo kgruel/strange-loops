@@ -60,6 +60,17 @@ def test_use_icons_sets_context():
     reset_icons()
 
 
+def test_use_icons_context_manager_restores_previous():
+    reset_icons()
+    use_icons(ASCII_ICONS)
+
+    with use_icons(IconSet()):
+        assert current_icons().check == "✓"
+
+    assert current_icons() is ASCII_ICONS
+    reset_icons()
+
+
 def test_reset_icons_restores_default():
     use_icons(ASCII_ICONS)
     reset_icons()

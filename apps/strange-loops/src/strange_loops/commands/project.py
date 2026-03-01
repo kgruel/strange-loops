@@ -71,8 +71,13 @@ def cmd_project_emit(args: argparse.Namespace) -> int:
     obs = observer(args)
     emit_fact(sp, kind, obs, payload)
 
+    from painted import show
+    from painted.block import Block
+    from painted.palette import current_palette
+
     summary = " ".join(f"{k}={v}" for k, v in payload.items())
-    print(f"[{kind}] {summary}")
+    p = current_palette()
+    show(Block.text(f"[{kind}] {summary}", p.success), file=sys.stdout)
     return 0
 
 

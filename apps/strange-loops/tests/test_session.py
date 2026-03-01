@@ -11,8 +11,7 @@ from engine import SqliteStore
 from strange_loops.cli import main
 
 
-def _read_all_facts(db_path: Path) -> list[dict]:
-    """Read all facts from a store as dicts."""
+def _read_all(db_path: Path) -> list[dict]:
     with SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict) as store:
         return [Fact.to_dict(f) for f in store.since(0)]
 
@@ -26,7 +25,7 @@ class TestSessionStart:
         db = workspace / "data" / "tasks.db"
         assert db.exists()
 
-        facts = _read_all_facts(db)
+        facts = _read_all(db)
         assert len(facts) == 1
         assert facts[0]["kind"] == "session.start"
 
@@ -35,7 +34,7 @@ class TestSessionStart:
         main(["session", "start"])
         main(["session", "start"])
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         assert len(facts) == 2
         assert all(f["kind"] == "session.start" for f in facts)
 
@@ -43,7 +42,7 @@ class TestSessionStart:
         monkeypatch.chdir(workspace)
         main(["session", "start", "--observer", "alice"])
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         assert facts[0]["observer"] == "alice"
 
     def test_observer_env_strange_loops(self, workspace: Path, monkeypatch):
@@ -51,7 +50,7 @@ class TestSessionStart:
         monkeypatch.setenv("STRANGE_LOOPS_OBSERVER", "bob")
         main(["session", "start"])
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         assert facts[0]["observer"] == "bob"
 
     def test_observer_env_loops_fallback(self, workspace: Path, monkeypatch):
@@ -60,7 +59,7 @@ class TestSessionStart:
         monkeypatch.setenv("LOOPS_OBSERVER", "carol")
         main(["session", "start"])
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         assert facts[0]["observer"] == "carol"
 
     def test_strange_loops_observer_takes_precedence(self, workspace: Path, monkeypatch):
@@ -69,7 +68,7 @@ class TestSessionStart:
         monkeypatch.setenv("LOOPS_OBSERVER", "carol")
         main(["session", "start"])
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         assert facts[0]["observer"] == "bob"
 
 
@@ -80,7 +79,7 @@ class TestSessionEnd:
         rc = main(["session", "end"])
         assert rc == 0
 
-        facts = _read_all_facts(workspace / "data" / "tasks.db")
+        facts = _read_all(workspace / "data" / "tasks.db")
         kinds = [f["kind"] for f in facts]
         assert "session.start" in kinds
         assert "session.end" in kinds

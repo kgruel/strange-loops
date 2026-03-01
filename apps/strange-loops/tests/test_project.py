@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -126,8 +127,6 @@ class TestProjectStatus:
 
     def test_filters_resolved_threads(self, project_store: Path):
         emit_fact(project_store, "thread", "", {"name": "design", "status": "open"})
-        import time
-
         time.sleep(0.01)
         emit_fact(project_store, "thread", "", {"name": "design", "status": "resolved"})
         args = _ns(json=True)
@@ -157,8 +156,6 @@ class TestProjectStatus:
 
     def test_latest_per_group_wins(self, project_store: Path, capsys):
         emit_fact(project_store, "decision", "", {"topic": "auth", "message": "v1"})
-        import time
-
         time.sleep(0.01)
         emit_fact(project_store, "decision", "", {"topic": "auth", "message": "v2"})
         args = _ns(json=True)
@@ -171,8 +168,6 @@ class TestProjectStatus:
 class TestProjectLog:
     def test_shows_facts_chronologically(self, project_store: Path, capsys):
         emit_fact(project_store, "decision", "", {"topic": "a", "message": "first"})
-        import time
-
         time.sleep(0.01)
         emit_fact(project_store, "thread", "", {"name": "b", "message": "second"})
         args = _ns()

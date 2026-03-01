@@ -17,6 +17,12 @@ def test_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     - DETAILED: full result dicts
     - FULL: + skip count, total
     """
+    # Warning state (e.g. no parse pipeline defined)
+    if data.get("warning"):
+        return Block.text(
+            f"Warning: {data['warning']}", Style(dim=True), width=width,
+        )
+
     results = data.get("results", [])
     skipped = data.get("skipped", 0)
     total = len(results)

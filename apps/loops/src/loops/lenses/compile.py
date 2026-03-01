@@ -17,7 +17,7 @@ def compile_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     - MINIMAL: summary counts
     - SUMMARY: names + field names + boundary kinds + routes
     - DETAILED: + parse op details, fold definitions
-    - FULL: full AST repr
+    - FULL: + source file path, raw repr of ops/folds
     """
     file_type = data.get("type", "unknown")
 
@@ -45,6 +45,11 @@ def _render_loop(data: dict, zoom: Zoom, width: int) -> Block:
     rows: list[Block] = []
 
     rows.append(Block.text(f"Source: {name}", header_style, width=width))
+
+    if zoom == Zoom.FULL:
+        source_path = data.get("source_path")
+        if source_path:
+            rows.append(Block.text(f"  path: {source_path}", dim_style, width=width))
 
     if zoom >= Zoom.SUMMARY:
         rows.append(Block.text(f"  command: {data.get('command', '?')}", Style(), width=width))
@@ -84,6 +89,12 @@ def _render_vertex(data: dict, zoom: Zoom, width: int) -> Block:
     rows: list[Block] = []
 
     rows.append(Block.text(f"Vertex: {name}", header_style, width=width))
+
+    if zoom == Zoom.FULL:
+        source_path = data.get("source_path")
+        if source_path:
+            rows.append(Block.text(f"  path: {source_path}", dim_style, width=width))
+
     if data.get("store"):
         rows.append(Block.text(f"  store: {data['store']}", Style(), width=width))
     if data.get("discover"):

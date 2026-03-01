@@ -263,9 +263,6 @@ def _run_test(argv: list[str]) -> int:
         return {"results": results, "skipped": skipped}
 
     def render(ctx, data):
-        if data.get("warning"):
-            from painted import Block, Style
-            return Block.text(f"Warning: {data['warning']}", Style(dim=True))
         return test_view(data, ctx.zoom, ctx.width)
 
     return run_cli(
@@ -483,6 +480,7 @@ def _run_compile(argv: list[str]) -> int:
         return 1
 
     def fetch():
+        abs_path = str(path.resolve())
         if path.suffix == ".loop":
             ast = parse_loop_file(path)
             validate(ast)
@@ -490,6 +488,7 @@ def _run_compile(argv: list[str]) -> int:
             data: dict = {
                 "type": "loop",
                 "name": path.name,
+                "source_path": abs_path,
                 "command": source.command,
                 "kind": source.kind,
                 "observer": source.observer,
@@ -510,6 +509,7 @@ def _run_compile(argv: list[str]) -> int:
             data = {
                 "type": "vertex",
                 "name": ast.name,
+                "source_path": abs_path,
                 "store": ast.store,
                 "discover": ast.discover,
                 "emit": ast.emit,
@@ -853,16 +853,20 @@ def cmd_emit(args: argparse.Namespace) -> int:
 def _run_status(argv: list[str]) -> int:
     """Run status command via painted CLI harness."""
     from painted import run_cli
-    from .commands.session import _resolve_local_store, fetch_status, render_status
+    from .commands.session import _resolve_local_store, fetch_status
+    from .lenses.status import status_view
 
     def fetch():
         store_path = _resolve_local_store()
         return fetch_status(store_path)
 
+    def render(ctx, data):
+        return status_view(data, ctx.zoom, ctx.width)
+
     return run_cli(
         argv,
         fetch=fetch,
-        render=render_status,
+        render=render,
         prog="loops status",
         description="Show local store status",
     )
@@ -871,7 +875,8 @@ def _run_status(argv: list[str]) -> int:
 def _run_log(argv: list[str]) -> int:
     """Run log command via painted CLI harness."""
     from painted import run_cli
-    from .commands.session import _resolve_local_store, fetch_log, render_log
+    from .commands.session import _resolve_local_store, fetch_log
+    from .lenses.log import log_view
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--since", default="7d")
@@ -882,10 +887,13 @@ def _run_log(argv: list[str]) -> int:
         store_path = _resolve_local_store()
         return fetch_log(store_path, known.since, known.kind)
 
+    def render(ctx, data):
+        return log_view(data, ctx.zoom, ctx.width)
+
     return run_cli(
         rest,
         fetch=fetch,
-        render=render_log,
+        render=render,
         prog="loops log",
         description="Show recent facts",
     )

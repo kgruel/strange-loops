@@ -1,1 +1,11 @@
 
+  same card, three palettes
+
+  DEFAULT                       NORD                          MONO
+
+╭─ Services ───────────────╮  ╭─ Services ───────────────╮  ╭─ Services ───────────────╮
+│   api-gateway  2/3 ready │  │   api-gateway  2/3 ready │  │   api-gateway  2/3 ready │
+│   worker       5/5 ready │  │   worker       5/5 ready │  │   worker       5/5 ready │
+│   scheduler    0/1 ready │  │   scheduler    0/1 ready │  │   scheduler    0/1 ready │
+│   queue: 142 pending     │  │   queue: 142 pending     │  │   queue: 142 pending     │
+╰──────────────────────────╯  ╰──────────────────────────╯  ╰──────────────────────────╯

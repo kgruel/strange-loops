@@ -35,6 +35,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.icon_set import current_icons
@@ -190,7 +191,7 @@ def _counts(checks: tuple[ServiceCheck, ...]) -> dict[Status, int]:
 # --- Zoom renderers ---
 
 
-def _render_minimal(report: HealthReport) -> Block:
+def _render_minimal(report: HealthReport, width: int) -> Block:
     """Zoom 0: one-line status counts."""
     ct = _counts(report.checks)
     p = current_palette()
@@ -203,10 +204,11 @@ def _render_minimal(report: HealthReport) -> Block:
         parts.append(Block.text(f"  {ct[Status.DEGRADED]} degraded", p.warning))
     if ct[Status.DOWN]:
         parts.append(Block.text(f"  {ct[Status.DOWN]} down", p.error))
-    return join_horizontal(*parts) if parts else Block.text("no checks", Style())
+    result = join_horizontal(*parts) if parts else Block.text("no checks", Style())
+    return truncate(result, width)
 
 
-def _render_summary(report: HealthReport) -> Block:
+def _render_summary(report: HealthReport, width: int) -> Block:
     """Zoom 1: service list with status icons."""
     rows: list[Block] = []
     for check in report.checks:
@@ -218,10 +220,10 @@ def _render_summary(report: HealthReport) -> Block:
             rows.append(join_horizontal(icon, name, host, latency))
         else:
             rows.append(join_horizontal(icon, name, host))
-    return join_vertical(*rows)
+    return truncate(join_vertical(*rows), width)
 
 
-def _render_detailed(report: HealthReport) -> Block:
+def _render_detailed(report: HealthReport, width: int) -> Block:
     """Zoom 2: service list + detail + footer."""
     rows: list[Block] = []
     for check in report.checks:
@@ -252,7 +254,7 @@ def _render_detailed(report: HealthReport) -> Block:
 
     rows.append(Block.text("", Style()))
     rows.append(Block.text(f"{footer_text}{elapsed}", p.muted))
-    return join_vertical(*rows)
+    return truncate(join_vertical(*rows), width)
 
 
 def _render_full(report: HealthReport, width: int) -> Block:
@@ -305,12 +307,12 @@ def _render_full(report: HealthReport, width: int) -> Block:
 
 def _render(ctx: CliContext, report: HealthReport) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return _render_minimal(report)
+        return _render_minimal(report, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return _render_summary(report)
+        return _render_summary(report, ctx.width)
     if ctx.zoom == Zoom.FULL:
         return _render_full(report, ctx.width)
-    return _render_detailed(report)
+    return _render_detailed(report, ctx.width)
 
 
 # --- Entry point ---

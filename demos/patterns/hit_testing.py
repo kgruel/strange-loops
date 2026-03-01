@@ -32,6 +32,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.palette import current_palette
@@ -302,16 +303,16 @@ def _composition_trace(data: HitTestData, *, width: int) -> Block:
     return inner
 
 
-def _render_minimal(data: HitTestData) -> Block:
+def _render_minimal(data: HitTestData, width: int) -> Block:
     p = current_palette()
-    return Block.text(
+    return truncate(Block.text(
         f"grid {data.grid.width}x{data.grid.height}  cells {data.total_cells}  ids {data.cells_with_id}  unique {len(data.unique_ids)}",
         p.accent,
-    )
+    ), width)
 
 
-def _render_summary(data: HitTestData) -> Block:
-    return join_vertical(
+def _render_summary(data: HitTestData, width: int) -> Block:
+    return truncate(join_vertical(
         _spacer(),
         _header("service dashboard (visual layer)"),
         _spacer(),
@@ -320,27 +321,27 @@ def _render_summary(data: HitTestData) -> Block:
         _header("hit probes: Buffer.hit(x, y)"),
         _spacer(),
         _probes_block(data.probes),
-    )
+    ), width)
 
 
-def _render_detailed(data: HitTestData) -> Block:
+def _render_detailed(data: HitTestData, width: int) -> Block:
     p = current_palette()
-    return join_vertical(
-        _render_summary(data),
+    return truncate(join_vertical(
+        _render_summary(data, width),
         _spacer(),
         _header("provenance map (id layer)"),
         _spacer(),
         border(_provenance_map(data.grid), chars=ROUNDED, style=p.muted),
         _spacer(),
         _legend(),
-    )
+    ), width)
 
 
-def _render_full(ctx: CliContext, data: HitTestData) -> Block:
+def _render_full(data: HitTestData, width: int) -> Block:
     p = current_palette()
-    summary = _render_summary(data)
-    detailed = _render_detailed(data)
-    trace_inner = _composition_trace(data, width=ctx.width)
+    summary = _render_summary(data, width)
+    detailed = _render_detailed(data, width)
+    trace_inner = _composition_trace(data, width=width)
 
     dashboard = border(summary, title="zoom 1", chars=ROUNDED, style=p.muted)
     provenance = border(detailed, title="zoom 2", chars=ROUNDED, style=p.muted)
@@ -350,12 +351,12 @@ def _render_full(ctx: CliContext, data: HitTestData) -> Block:
 
 def _render(ctx: CliContext, data: HitTestData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return _render_minimal(data)
+        return _render_minimal(data, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return _render_summary(data)
+        return _render_summary(data, ctx.width)
     if ctx.zoom == Zoom.FULL:
-        return _render_full(ctx, data)
-    return _render_detailed(data)
+        return _render_full(data, ctx.width)
+    return _render_detailed(data, ctx.width)
 
 
 def _fetch() -> HitTestData:

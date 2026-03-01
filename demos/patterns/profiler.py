@@ -30,6 +30,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.views import chart_lens, flame_lens, profile, tree_lens
@@ -281,19 +282,20 @@ def _fetch() -> ProfileData:
 # --- Zoom 0: one-line summary ---
 
 
-def render_minimal(data: ProfileData) -> Block:
+def render_minimal(data: ProfileData, width: int) -> Block:
     """Single-line profiling summary."""
-    return Block.text(
+    result = Block.text(
         f"{data.frame_count} frames, {data.total_writes} writes, "
         f"avg {data.avg_writes:.0f}/frame",
         Style(),
     )
+    return truncate(result, width)
 
 
 # --- Zoom 1: emission traces ---
 
 
-def render_summary(data: ProfileData) -> Block:
+def render_summary(data: ProfileData, width: int) -> Block:
     """Scenario overview with emission counts."""
     p = current_palette()
     rows: list[Block] = [
@@ -325,7 +327,7 @@ def render_summary(data: ProfileData) -> Block:
         style = p.accent if not es.kind.startswith("ui.") else Style(dim=True)
         rows.append(Block.text(f"  {es.count:>3}x  {es.kind}", style))
 
-    return join_vertical(*rows)
+    return truncate(join_vertical(*rows), width)
 
 
 # --- Zoom 2: frame chart + flame graph ---
@@ -446,9 +448,9 @@ def render_full(data: ProfileData, width: int) -> Block:
 
 def _render(ctx: CliContext, data: ProfileData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return render_minimal(data)
+        return render_minimal(data, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return render_summary(data)
+        return render_summary(data, ctx.width)
     if ctx.zoom == Zoom.FULL:
         return render_full(data, ctx.width)
     return render_detailed(data, ctx.width)

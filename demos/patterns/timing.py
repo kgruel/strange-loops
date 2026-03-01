@@ -31,6 +31,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted._timer import FrameTimer
@@ -248,19 +249,20 @@ def _fetch() -> TimingData:
 # --- Zoom 0: one-line summary ---
 
 
-def render_minimal(data: TimingData) -> Block:
+def render_minimal(data: TimingData, width: int) -> Block:
     """Single-line timing summary."""
-    return Block.text(
+    result = Block.text(
         f"{data.frame_count} frames, avg {data.avg_total_ms:.2f}ms/frame, "
         f"max {data.max_total_ms:.2f}ms",
         Style(),
     )
+    return truncate(result, width)
 
 
 # --- Zoom 1: phase breakdown ---
 
 
-def render_summary(data: TimingData) -> Block:
+def render_summary(data: TimingData, width: int) -> Block:
     """Phase averages + frame total sparkline."""
     p = current_palette()
     rows: list[Block] = [
@@ -281,10 +283,10 @@ def render_summary(data: TimingData) -> Block:
 
     rows.append(Block.text("", Style()))
     rows.append(Block.text("Frame totals:", Style(dim=True)))
-    sparkline = chart_lens(list(data.frame_totals), 1, 60)
+    sparkline = chart_lens(list(data.frame_totals), 1, min(60, width - 2))
     rows.append(sparkline)
 
-    return join_vertical(*rows)
+    return truncate(join_vertical(*rows), width)
 
 
 # --- Zoom 2: charts + flame ---
@@ -375,9 +377,9 @@ def render_full(data: TimingData, width: int) -> Block:
 
 def _render(ctx: CliContext, data: TimingData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return render_minimal(data)
+        return render_minimal(data, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return render_summary(data)
+        return render_summary(data, ctx.width)
     if ctx.zoom == Zoom.FULL:
         return render_full(data, ctx.width)
     return render_detailed(data, ctx.width)

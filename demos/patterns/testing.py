@@ -30,6 +30,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.icon_set import current_icons
@@ -204,7 +205,7 @@ def _check_block(description: str, passed: bool) -> Block:
     return Block.text(f"  {icon} {description}", style)
 
 
-def _render_minimal(results: list[ScenarioResult]) -> Block:
+def _render_minimal(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     total = len(results)
@@ -212,10 +213,10 @@ def _render_minimal(results: list[ScenarioResult]) -> Block:
     all_passed = passed == total
     icon = icons.check if all_passed else icons.cross
     style = p.success if all_passed else p.error
-    return Block.text(f"{icon} {passed}/{total} scenarios passed", style)
+    return truncate(Block.text(f"{icon} {passed}/{total} scenarios passed", style), width)
 
 
-def _render_summary(results: list[ScenarioResult]) -> Block:
+def _render_summary(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     sections: list[Block] = []
@@ -241,12 +242,12 @@ def _render_summary(results: list[ScenarioResult]) -> Block:
 
     total = len(results)
     passed = sum(1 for r in results if r.passed)
-    footer = _render_minimal(results)
+    footer = _render_minimal(results, width)
 
-    return join_vertical(*sections, footer)
+    return truncate(join_vertical(*sections, footer), width)
 
 
-def _render_detailed(results: list[ScenarioResult]) -> Block:
+def _render_detailed(results: list[ScenarioResult], width: int) -> Block:
     """Summary + frame text snapshots at key moments."""
     p = current_palette()
     icons = current_icons()
@@ -287,8 +288,8 @@ def _render_detailed(results: list[ScenarioResult]) -> Block:
             Block.text("", Style()),
         ))
 
-    footer = _render_minimal(results)
-    return join_vertical(*sections, footer)
+    footer = _render_minimal(results, width)
+    return truncate(join_vertical(*sections, footer), width)
 
 
 def _render_full(results: list[ScenarioResult], width: int) -> Block:
@@ -338,7 +339,7 @@ def _render_full(results: list[ScenarioResult], width: int) -> Block:
         sections.append(border(pad(inner, right=max(0, min(60, width - 4) - inner.width)), title=title, chars=ROUNDED))
         sections.append(Block.text("", Style()))
 
-    footer = _render_minimal(results)
+    footer = _render_minimal(results, width)
     return join_vertical(*sections, footer)
 
 
@@ -347,12 +348,12 @@ def _render_full(results: list[ScenarioResult], width: int) -> Block:
 
 def _render(ctx: CliContext, results: list[ScenarioResult]) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return _render_minimal(results)
+        return _render_minimal(results, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return _render_summary(results)
+        return _render_summary(results, ctx.width)
     if ctx.zoom == Zoom.FULL:
         return _render_full(results, ctx.width)
-    return _render_detailed(results)
+    return _render_detailed(results, ctx.width)
 
 
 def _fetch() -> list[ScenarioResult]:

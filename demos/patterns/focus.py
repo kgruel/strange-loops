@@ -32,6 +32,7 @@ from painted import (
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.icon_set import current_icons
@@ -466,7 +467,7 @@ def _check_block(description: str, passed: bool) -> Block:
     return Block.text(f"  {icon} {description}", style)
 
 
-def _render_minimal(results: list[ScenarioResult]) -> Block:
+def _render_minimal(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     total = len(results)
@@ -474,7 +475,7 @@ def _render_minimal(results: list[ScenarioResult]) -> Block:
     all_ok = passed == total
     icon = icons.check if all_ok else icons.cross
     style = p.success if all_ok else p.error
-    return Block.text(f"{icon} focus demo: {passed}/{total} scenarios", style)
+    return truncate(Block.text(f"{icon} focus demo: {passed}/{total} scenarios", style), width)
 
 
 def _key_frames(result: ScenarioResult) -> list[tuple[str, object]]:
@@ -510,7 +511,7 @@ def _frame_block(frame: object, *, width: int, max_lines: int) -> Block:
     return join_vertical(*rows)
 
 
-def _render_summary(results: list[ScenarioResult]) -> Block:
+def _render_summary(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     sections: list[Block] = []
@@ -527,15 +528,15 @@ def _render_summary(results: list[ScenarioResult]) -> Block:
 
         sections.append(join_vertical(header, keys_line, trace, checks, Block.text("", Style())))
 
-    return join_vertical(*sections, _render_minimal(results))
+    return truncate(join_vertical(*sections, _render_minimal(results, width)), width)
 
 
-def _render_detailed(ctx: CliContext, results: list[ScenarioResult]) -> Block:
+def _render_detailed(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     sections: list[Block] = []
-    snap_w = max(20, min(ctx.width - 6, 96))
-    snap_lines = 10 if ctx.zoom == Zoom.DETAILED else 16
+    snap_w = max(20, min(width - 6, 96))
+    snap_lines = 10
 
     for r in results:
         icon = icons.check if r.passed else icons.cross
@@ -552,14 +553,14 @@ def _render_detailed(ctx: CliContext, results: list[ScenarioResult]) -> Block:
 
         sections.append(join_vertical(header, keys_line, trace, Block.text("", Style()), *frames))
 
-    return join_vertical(*sections, _render_minimal(results))
+    return truncate(join_vertical(*sections, _render_minimal(results, width)), width)
 
 
-def _render_full(ctx: CliContext, results: list[ScenarioResult]) -> Block:
+def _render_full(results: list[ScenarioResult], width: int) -> Block:
     p = current_palette()
     icons = current_icons()
     sections: list[Block] = []
-    snap_w = max(20, min(ctx.width - 6, 120))
+    snap_w = max(20, min(width - 6, 120))
 
     for r in results:
         icon = icons.check if r.passed else icons.cross
@@ -588,17 +589,17 @@ def _render_full(ctx: CliContext, results: list[ScenarioResult]) -> Block:
         sections.append(border(pad(inner, right=max(0, snap_w - inner.width)), chars=ROUNDED, title=title, style=p.muted))
         sections.append(Block.text("", Style()))
 
-    return join_vertical(*sections, _render_minimal(results))
+    return join_vertical(*sections, _render_minimal(results, width))
 
 
 def _render(ctx: CliContext, results: list[ScenarioResult]) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return _render_minimal(results)
+        return _render_minimal(results, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
-        return _render_summary(results)
+        return _render_summary(results, ctx.width)
     if ctx.zoom == Zoom.FULL:
-        return _render_full(ctx, results)
-    return _render_detailed(ctx, results)
+        return _render_full(results, ctx.width)
+    return _render_detailed(results, ctx.width)
 
 
 def _fetch() -> list[ScenarioResult]:

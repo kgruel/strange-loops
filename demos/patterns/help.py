@@ -29,9 +29,11 @@ from painted import (
     Zoom,
     border,
     join_horizontal,
+    join_responsive,
     join_vertical,
     pad,
     run_cli,
+    truncate,
     ROUNDED,
 )
 from painted.fidelity import (
@@ -92,12 +94,12 @@ SAMPLE_HELP = HelpData(
 # --- Render functions ---
 
 
-def render_minimal(data: HelpData) -> Block:
+def render_minimal(data: HelpData, width: int) -> Block:
     """One-line: program name + flag count."""
     flag_count = sum(len(g.flags) for g in data.groups)
     group_names = ", ".join(g.name.lower() for g in data.groups if g.flags)
     desc = f" — {data.description}" if data.description else ""
-    return Block.text(f"{data.prog}{desc} ({flag_count} flags: {group_names})", Style())
+    return truncate(Block.text(f"{data.prog}{desc} ({flag_count} flags: {group_names})", Style()), width)
 
 
 def render_summary(data: HelpData, width: int) -> Block:
@@ -156,7 +158,7 @@ def _fetch() -> HelpData:
 
 def _render(ctx: CliContext, data: HelpData) -> Block:
     if ctx.zoom == Zoom.MINIMAL:
-        return render_minimal(data)
+        return render_minimal(data, ctx.width)
     if ctx.zoom == Zoom.SUMMARY:
         return render_summary(data, ctx.width)
     if ctx.zoom == Zoom.FULL:

@@ -1,0 +1,5 @@
+  fs: /dev/disk1
+  fs: /dev/disk2
+  fs: /dev/disk3
+
+--- 3 parsed, 1 skipped ---

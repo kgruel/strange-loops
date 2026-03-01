@@ -1,0 +1,4 @@
+  [disk] fs=/dev/sda1, pct=42%, mount=/
+  [memory] used_mb=4096, total_mb=16384
+
+--- 2 facts ---

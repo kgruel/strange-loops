@@ -1,0 +1,9 @@
+  [2023-11-14T22:13:20+00:00] tick: disk
+    fs: /dev/sda1
+    pct: 42%
+    mount: /
+  [2023-11-14T22:14:20+00:00] tick: memory
+    used_mb: 4096
+    total_mb: 16384
+
+--- 2 ticks ---

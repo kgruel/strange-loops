@@ -1,0 +1,7 @@
+Source: disk.loop
+  command: df -h
+  kind: disk
+  observer: system-monitor
+  every: 60s
+  format: columns
+  parse: 3 ops

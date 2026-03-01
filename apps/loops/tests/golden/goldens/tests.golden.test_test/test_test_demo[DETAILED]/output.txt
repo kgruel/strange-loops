@@ -1,0 +1,5 @@
+  {'fs': '/dev/disk1', 'pct': '27%', 'mount': '/'}
+  {'fs': '/dev/disk2', 'pct': '65%', 'mount': '/data'}
+  {'fs': '/dev/disk3', 'pct': '91%', 'mount': '/backup'}
+
+--- 3 parsed, 1 skipped ---

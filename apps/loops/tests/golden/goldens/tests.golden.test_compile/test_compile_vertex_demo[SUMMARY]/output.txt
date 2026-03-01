@@ -1,0 +1,19 @@
+Vertex: system-monitor
+  store: system.db
+  discover: ./loops/
+  emit: True
+
+Loops (2):
+
+  disk:
+    state_fields: ['fs', 'pct', 'mount']
+    folds: 2
+    boundary: {'kind': 'threshold', 'field': 'pct', 'value': '90%'}
+
+  memory:
+    state_fields: ['used_mb', 'total_mb']
+    folds: 1
+
+Routes:
+  disk -> disk
+  memory -> memory

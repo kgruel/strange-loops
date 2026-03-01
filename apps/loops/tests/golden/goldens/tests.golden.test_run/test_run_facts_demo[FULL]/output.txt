@@ -1,0 +1,6 @@
+  [disk] {'fs': '/dev/sda1', 'pct': '42%', 'mount': '/'}
+    ts=1700000000.0 observer=system-monitor origin=disk.loop
+  [memory] {'used_mb': 4096, 'total_mb': 16384}
+    ts=1700000060.0 observer=system-monitor origin=memory.loop
+
+--- 2 facts ---

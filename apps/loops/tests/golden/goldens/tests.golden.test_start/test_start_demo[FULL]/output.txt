@@ -1,0 +1,8 @@
+[disk]
+fs:    /dev/sda1
+pct:   42%
+mount: /
+
+[memory]
+[3 values, 4096–1.638e+04]
+▁█▅

@@ -1,0 +1,4 @@
+  [disk]
+  [memory]
+
+--- 2 facts ---

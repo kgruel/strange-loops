@@ -1,0 +1,20 @@
+[disk] 8 ticks, fresh 5m ago
+fs:    /dev/sda1
+pct:   42%
+mount: /
+
+[memory] 4 ticks, fresh 5m ago
+used_mb:  4096
+total_mb: 16384
+
+[disk] 20 facts, fresh 5m ago
+fs:    /dev/sda1
+pct:   42%
+mount: /
+fs:    /dev/sda2
+pct:   78%
+mount: /data
+
+[memory] 22 facts, fresh 5m ago
+used_mb:  4096
+total_mb: 16384

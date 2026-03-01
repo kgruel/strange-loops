@@ -1,0 +1,5 @@
+[disk]
+fs: /dev/sda1, pct: 42%, mount: /
+
+[memory]
+▁█▅

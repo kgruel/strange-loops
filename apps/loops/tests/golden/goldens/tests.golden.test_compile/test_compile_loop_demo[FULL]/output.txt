@@ -1,0 +1,10 @@
+Source: disk.loop
+  command: df -h
+  kind: disk
+  observer: system-monitor
+  every: 60s
+  format: columns
+  parse: 3 ops
+    1. {'op': 'skip_header', 'lines': 1}
+    2. {'op': 'split', 'delimiter': '\\s+'}
+    3. {'op': 'pick', 'fields': ['fs', 'pct', 'mount']}

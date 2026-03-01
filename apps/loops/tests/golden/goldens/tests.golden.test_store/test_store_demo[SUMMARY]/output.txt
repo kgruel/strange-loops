@@ -1,0 +1,5 @@
+Ticks
+disk     ▁▂▃▅▇█▅▃     8    5m ago  fs, pct, mount
+memory   ▁▃▅▇     4    5m ago  used_mb, total_mb
+
+42 facts across 2 kinds: disk, memory

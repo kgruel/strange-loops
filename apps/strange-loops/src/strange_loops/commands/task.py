@@ -1,11 +1,15 @@
-"""Task commands — create, assign, send, monitor, merge, close."""
+"""Task commands — create, assign, send, monitor, merge, close, log, stop."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,7 +18,15 @@ if TYPE_CHECKING:
 
 from strange_loops import harness, worktree
 from strange_loops.lifecycle import fold_all_tasks, fold_task_state
-from strange_loops.store import emit_fact, observer, require_store, store_path
+from strange_loops.store import (
+    emit_fact,
+    observer,
+    parse_duration,
+    render_log,
+    render_log_entry,
+    require_store,
+    store_path,
+)
 
 
 def _render_task(state: dict) -> "Block":
@@ -518,6 +530,201 @@ def cmd_task_close(args: argparse.Namespace) -> int:
     return 0
 
 
+def _filter_task_facts(facts: list[dict], name: str) -> list[dict]:
+    """Filter facts belonging to a specific task.
+
+    Matches payload["name"] == name (task.* facts) or
+    payload["task"] == name (worker.* facts).
+    """
+    result = []
+    for f in facts:
+        payload = f.get("payload", {})
+        if payload.get("name") == name or payload.get("task") == name:
+            result.append(f)
+    return result
+
+
+def cmd_task_log(args: argparse.Namespace) -> int:
+    """Show log for a specific task — filtered time-range query."""
+    sp = store_path()
+    try:
+        require_store(sp)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    from engine import StoreReader
+
+    name = args.name
+
+    with StoreReader(sp) as reader:
+        try:
+            _require_task(reader, name)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+    try:
+        duration_secs = parse_duration(getattr(args, "since", "7d"))
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    kind = getattr(args, "kind", None)
+    use_json = getattr(args, "json", False)
+    follow = getattr(args, "follow", False)
+
+    if follow:
+        return _follow_task_log(sp, name, kind, use_json)
+
+    now = datetime.now(timezone.utc)
+    since_ts = now.timestamp() - duration_secs
+
+    with StoreReader(sp) as reader:
+        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+
+    facts = _filter_task_facts(facts, name)
+    facts.sort(key=lambda f: f["ts"])
+
+    if use_json:
+        for f in facts:
+            f_out = dict(f)
+            if isinstance(f_out["ts"], datetime):
+                f_out["ts"] = f_out["ts"].isoformat()
+            print(json.dumps(f_out, default=str), flush=True)
+        return 0
+
+    render_log(facts)
+    return 0
+
+
+def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> int:
+    """Follow task log — poll for new facts, print as they arrive."""
+    from engine import StoreReader
+
+    last_ts = 0.0
+
+    try:
+        while True:
+            with StoreReader(sp) as reader:
+                facts = reader.facts_between(last_ts, float("inf"), kind=kind)
+
+            facts = _filter_task_facts(facts, name)
+            facts.sort(key=lambda f: f["ts"])
+
+            for f in facts:
+                ts = f["ts"]
+                ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+                if ts_val <= last_ts:
+                    continue
+                last_ts = ts_val
+
+                if use_json:
+                    f_out = dict(f)
+                    if isinstance(f_out["ts"], datetime):
+                        f_out["ts"] = f_out["ts"].isoformat()
+                    print(json.dumps(f_out, default=str), flush=True)
+                else:
+                    render_log_entry(f)
+
+            time.sleep(2)
+    except KeyboardInterrupt:
+        return 0
+
+
+def cmd_task_stop(args: argparse.Namespace) -> int:
+    """Stop a running task worker."""
+    sp = store_path()
+    try:
+        require_store(sp)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    from engine import StoreReader
+
+    name = args.name
+
+    with StoreReader(sp) as reader:
+        try:
+            state = _require_task(reader, name)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+    status = state.get("status", "")
+    if status not in ("working", "assigned"):
+        print(
+            f"Error: Task '{name}' is not running (status: {status}).",
+            file=sys.stderr,
+        )
+        return 1
+
+    pid = state.get("pid")
+    if pid is None:
+        print(f"Error: No worker PID recorded for task '{name}'.", file=sys.stderr)
+        return 1
+
+    # Check if process is still alive
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        # Already exited — just emit the stage fact
+        obs = observer(args)
+        emit_fact(sp, "task.stage", obs, {"name": name, "status": "stopped"})
+
+        from painted import show
+        from painted.block import Block
+        from painted.palette import current_palette
+
+        p = current_palette()
+        show(
+            Block.text(f"Worker for '{name}' already exited (pid {pid}).", p.muted),
+            file=sys.stdout,
+        )
+        return 0
+    except PermissionError:
+        print(f"Error: No permission to signal worker (pid {pid}).", file=sys.stderr)
+        return 1
+
+    # Kill the process group (spawn uses start_new_session=True → PID == PGID)
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # Raced with exit
+
+    # Poll for exit (200ms × 10 = 2s)
+    alive = True
+    for _ in range(10):
+        time.sleep(0.2)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            alive = False
+            break
+        except PermissionError:
+            alive = False
+            break
+
+    # Escalate to SIGKILL if still alive
+    if alive:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    obs = observer(args)
+    emit_fact(sp, "task.stage", obs, {"name": name, "status": "stopped"})
+
+    from painted import show
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+    show(Block.text(f"Task '{name}' stopped (pid {pid}).", p.success), file=sys.stdout)
+    return 0
+
+
 def cmd_task(args: argparse.Namespace) -> int:
     """Dispatch task subcommands."""
     dispatch = {
@@ -530,13 +737,15 @@ def cmd_task(args: argparse.Namespace) -> int:
         "diff": cmd_task_diff,
         "merge": cmd_task_merge,
         "close": cmd_task_close,
+        "log": cmd_task_log,
+        "stop": cmd_task_stop,
     }
     cmd = getattr(args, "task_command", None)
     handler = dispatch.get(cmd)
     if handler:
         return handler(args)
     print(
-        "Usage: strange-loops task {create|assign|send|run|status|list|diff|merge|close}",
+        "Usage: strange-loops task {create|assign|send|run|status|list|diff|merge|close|log|stop}",
         file=sys.stderr,
     )
     return 1

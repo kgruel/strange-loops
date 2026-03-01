@@ -153,6 +153,18 @@ List all tasks
 |----------|-------------|----------|
 | `--json` | JSON output (default: `False`) |  |
 
+### `log`
+
+Show task log
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `name` | Task name | required |
+| `--since` | Time range (e.g. 7d, 24h) (default: `7d`) |  |
+| `--kind` | Filter by fact kind |  |
+| `--json` | JSONL output (default: `False`) |  |
+| `--follow` | Follow new facts (default: `False`) |  |
+
 ### `merge`
 
 Squash merge task branch
@@ -194,6 +206,15 @@ Show task status
 |----------|-------------|----------|
 | `name` | Task name (omit for all) |  |
 | `--json` | JSON output (default: `False`) |  |
+
+### `stop`
+
+Stop a running task worker
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `name` | Task name | required |
+| `--observer` | Observer identity |  |
 
 ## `version`
 

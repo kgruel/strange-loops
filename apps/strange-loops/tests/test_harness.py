@@ -145,3 +145,17 @@ class TestSpawn:
 
         facts = _read_all(db)
         assert any(f["kind"] == "worker.output.complete" for f in facts)
+
+    def test_emits_worker_started(self, tmp_path: Path):
+        db = tmp_path / "data" / "tasks.db"
+        wt = tmp_path / "workdir"
+        wt.mkdir()
+
+        pid = spawn(db, "test-task", wt, "echo hi", "shell", "tester")
+
+        # worker.started is emitted synchronously before return
+        facts = _read_all(db)
+        started = [f for f in facts if f["kind"] == "worker.started"]
+        assert len(started) == 1
+        assert started[0]["payload"]["task"] == "test-task"
+        assert started[0]["payload"]["pid"] == pid

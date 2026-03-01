@@ -188,9 +188,11 @@ strange-loops task send NAME "shell command"
 strange-loops task run NAME --description "prompt" [--harness shell] [--title T] [--base B]
 strange-loops task status [NAME] [--json]
 strange-loops task list [--json]
+strange-loops task log NAME [--since 7d] [--kind KIND] [--json] [--follow]
 strange-loops task diff NAME
 strange-loops task merge NAME [--force]
 strange-loops task close NAME
+strange-loops task stop NAME [--observer NAME]
 
 # Dashboard
 strange-loops dashboard [--live] [-q] [--json]
@@ -203,8 +205,6 @@ strange-loops project log [--since 7d] [--kind KIND] [--json]
 
 ## What's NOT built yet
 
-- No per-task log — `session log` filters by kind but not by task name
-- No worker cancellation — once spawned, no `task stop` command
 - No Claude/Codex harnesses — shell only (others are just different commands)
 - No TUI Surface — static painted blocks + live repaint only
 - No automatic stage advancement — explicit CLI commands

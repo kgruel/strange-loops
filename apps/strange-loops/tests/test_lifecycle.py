@@ -44,7 +44,8 @@ class TestVertexParsesAndCompiles:
         assert "task.merged" in compiled.specs
         assert "worker.output" in compiled.specs
         assert "worker.output.complete" in compiled.specs
-        assert len(compiled.specs) == 7
+        assert "worker.started" in compiled.specs
+        assert len(compiled.specs) == 8
 
     def test_specs_have_correct_folds(self):
         from atoms import Collect, Upsert
@@ -62,6 +63,12 @@ class TestVertexParsesAndCompiles:
             assert len(spec.folds) == 1
             assert isinstance(spec.folds[0], Upsert)
             assert spec.folds[0].key == "name"
+
+        # worker.started uses Upsert keyed by "task"
+        spec = compiled.specs["worker.started"]
+        assert len(spec.folds) == 1
+        assert isinstance(spec.folds[0], Upsert)
+        assert spec.folds[0].key == "task"
 
         # worker.output uses Collect
         spec = compiled.specs["worker.output"]
@@ -242,6 +249,21 @@ class TestFoldTaskState:
 
         assert state["worker"] == "error"
         assert state["exit_code"] == 1
+
+    def test_fold_worker_pid(self, tmp_path: Path):
+        db = tmp_path / "data" / "tasks.db"
+        _emit(
+            db,
+            "task.created",
+            "a",
+            {"name": "t1", "title": "", "base_branch": "main", "description": ""},
+        )
+        _emit(db, "worker.started", "a", {"task": "t1", "pid": 12345})
+
+        with StoreReader(db) as reader:
+            state = fold_task_state(reader, "t1")
+
+        assert state["pid"] == 12345
 
     def test_unknown_task_returns_none(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"

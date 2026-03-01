@@ -288,3 +288,142 @@ class TestTaskClose:
         rc = main(["task", "close", "nonexistent"])
         assert rc == 1
         assert "not found" in capsys.readouterr().err.lower()
+
+
+class TestTaskLog:
+    def test_shows_task_facts(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "log-test", "--base", "main", "--title", "Log test"])
+        main(["task", "assign", "log-test"])
+        capsys.readouterr()
+
+        rc = main(["task", "log", "log-test"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "log-test" in out
+
+    def test_json_output(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "log-json", "--base", "main"])
+        main(["task", "assign", "log-json"])
+        capsys.readouterr()
+
+        rc = main(["task", "log", "log-json", "--json"])
+        assert rc == 0
+
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+        assert len(lines) >= 2  # at least created + assigned
+        assert all(
+            f["payload"].get("name") == "log-json" or f["payload"].get("task") == "log-json"
+            for f in lines
+        )
+
+    def test_filters_other_tasks(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "task-a", "--base", "main"])
+        main(["task", "create", "task-b", "--base", "main"])
+        capsys.readouterr()
+
+        rc = main(["task", "log", "task-a", "--json"])
+        assert rc == 0
+
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+        # Should only contain task-a facts
+        assert all(f["payload"].get("name") == "task-a" for f in lines)
+
+    def test_errors_without_task(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["session", "start"])
+        capsys.readouterr()
+
+        rc = main(["task", "log", "nonexistent"])
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
+    def test_kind_filter(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "kind-test", "--base", "main"])
+        main(["task", "assign", "kind-test"])
+        capsys.readouterr()
+
+        rc = main(["task", "log", "kind-test", "--kind", "task.assigned", "--json"])
+        assert rc == 0
+
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+        assert len(lines) == 1
+        assert lines[0]["kind"] == "task.assigned"
+
+
+class TestTaskStop:
+    def test_stops_running_worker(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "stop-test", "--base", "main"])
+        main(["task", "assign", "stop-test"])
+        main(["task", "send", "stop-test", "sleep 60"])
+        capsys.readouterr()
+
+        # Wait for worker.started to appear
+        db = git_repo / "data" / "tasks.db"
+        for _ in range(50):
+            time.sleep(0.1)
+            facts = _read_all(db)
+            if any(f["kind"] == "worker.started" for f in facts):
+                break
+
+        rc = main(["task", "stop", "stop-test"])
+        assert rc == 0
+
+        out = capsys.readouterr().out
+        assert "stopped" in out.lower()
+
+        # Verify stage fact emitted
+        facts = _read_all(db)
+        stage_facts = [f for f in facts if f["kind"] == "task.stage"]
+        assert any(f["payload"]["status"] == "stopped" for f in stage_facts)
+
+    def test_handles_already_exited(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "exited-test", "--base", "main"])
+        main(["task", "assign", "exited-test"])
+        main(["task", "send", "exited-test", "echo fast"])
+        capsys.readouterr()
+
+        # Wait for worker to finish naturally
+        db = git_repo / "data" / "tasks.db"
+        for _ in range(50):
+            time.sleep(0.1)
+            facts = _read_all(db)
+            if any(f["kind"] == "worker.output.complete" for f in facts):
+                break
+
+        # Task status is now "completed" (set by harness on success),
+        # so stop should reject. But we need the task in "working" status.
+        # The harness advances to "completed" stage, so stop won't apply.
+        # Instead, test the "not running" error path.
+        rc = main(["task", "stop", "exited-test"])
+        assert rc == 1
+        assert "not running" in capsys.readouterr().err.lower()
+
+    def test_errors_without_task(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["session", "start"])
+        capsys.readouterr()
+
+        rc = main(["task", "stop", "nonexistent"])
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err.lower()
+
+    def test_errors_wrong_status(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        main(["task", "create", "status-test", "--base", "main"])
+        capsys.readouterr()
+
+        rc = main(["task", "stop", "status-test"])
+        assert rc == 1
+        assert "not running" in capsys.readouterr().err.lower()

@@ -83,6 +83,17 @@ def create_parser() -> argparse.ArgumentParser:
     close_p.add_argument("name", help="Task name")
     close_p.add_argument("--observer", help="Observer identity")
 
+    tlog_p = task_sub.add_parser("log", help="Show task log")
+    tlog_p.add_argument("name", help="Task name")
+    tlog_p.add_argument("--since", default="7d", help="Time range (e.g. 7d, 24h)")
+    tlog_p.add_argument("--kind", help="Filter by fact kind")
+    tlog_p.add_argument("--json", action="store_true", help="JSONL output")
+    tlog_p.add_argument("--follow", action="store_true", help="Follow new facts")
+
+    stop_p = task_sub.add_parser("stop", help="Stop a running task worker")
+    stop_p.add_argument("name", help="Task name")
+    stop_p.add_argument("--observer", help="Observer identity")
+
     # note
     note_p = subparsers.add_parser("note", help="Emit a session note")
     note_p.add_argument("message", nargs="+", help="Note text")

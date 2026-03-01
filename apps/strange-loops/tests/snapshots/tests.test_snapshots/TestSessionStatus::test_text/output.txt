@@ -1,7 +1,8 @@
-Session — 8 facts
+Session — 9 facts
   session.start: 1  latest Jan 15 10:00
   task.assigned: 2  latest Jan 15 10:06
   task.created: 2  latest Jan 15 10:05
   task.stage: 1  latest Jan 15 10:03
   worker.output: 1  latest Jan 15 10:03
   worker.output.complete: 1  latest Jan 15 10:04
+  worker.started: 1  latest Jan 15 10:03

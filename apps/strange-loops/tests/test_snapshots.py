@@ -29,6 +29,7 @@ _TS_OFFSETS = {
     "task_alpha_created": 60,
     "task_alpha_assigned": 120,
     "task_alpha_working": 180,
+    "task_alpha_worker_started": 190,
     "task_alpha_worker_output": 200,
     "task_alpha_worker_complete": 240,
     "task_beta_created": 300,
@@ -159,6 +160,17 @@ def task_store(tmp_path: Path, monkeypatch) -> Path:
 
     _emit(
         db,
+        "worker.started",
+        "shell",
+        {
+            "task": "alpha",
+            "pid": 99999,
+        },
+        _ts("task_alpha_worker_started"),
+    )
+
+    _emit(
+        db,
         "worker.output",
         "shell",
         {
@@ -269,12 +281,13 @@ class TestSessionStatus:
         assert rc == 0
         data = json.loads(capsys.readouterr().out)
 
-        assert data["facts"]["total"] == 8
+        assert data["facts"]["total"] == 9
         kinds = data["facts"]["kinds"]
         assert kinds["session.start"]["count"] == 1
         assert kinds["task.created"]["count"] == 2
         assert kinds["task.assigned"]["count"] == 2
         assert kinds["task.stage"]["count"] == 1
+        assert kinds["worker.started"]["count"] == 1
         assert kinds["worker.output"]["count"] == 1
         assert kinds["worker.output.complete"]["count"] == 1
         assert data["ticks"]["total"] == 0
@@ -295,7 +308,7 @@ class TestSessionLog:
             json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
         ]
 
-        assert len(lines) == 8
+        assert len(lines) == 9
         assert lines[0]["kind"] == "session.start"
         assert lines[0]["observer"] == "alice"
         assert lines[1]["kind"] == "task.created"
@@ -323,6 +336,7 @@ class TestTaskStatus:
         assert data["base_branch"] == "main"
         assert data["status"] == "working"
         assert data["harness"] == "shell"
+        assert data["pid"] == 99999
         assert data["exit_code"] == 0
 
     def test_all_text(self, task_store: Path, golden: Golden, capsys):
@@ -360,6 +374,39 @@ class TestTaskList:
         assert len(data) == 2
         assert data[0]["name"] == "alpha"
         assert data[1]["name"] == "beta"
+
+
+class TestTaskLog:
+    def test_text(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--since", "1h"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_json(self, task_store: Path, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--since", "1h", "--json"])
+        assert rc == 0
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+
+        # alpha has: task.created, task.assigned, task.stage, worker.started,
+        # worker.output, worker.output.complete
+        assert len(lines) == 6
+        assert lines[0]["kind"] == "task.created"
+        assert lines[0]["payload"]["name"] == "alpha"
+        assert lines[-1]["kind"] == "worker.output.complete"
+
+    def test_kind_filter_json(self, task_store: Path, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--kind", "task.stage", "--json"])
+        assert rc == 0
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+        assert len(lines) == 1
+        assert lines[0]["kind"] == "task.stage"
 
 
 # -- Snapshot tests: Project --
@@ -429,6 +476,7 @@ def _freeze_now(monkeypatch) -> None:
     """Monkeypatch datetime.now to return a fixed time for log --since calculations."""
     import strange_loops.commands.session as session_mod
     import strange_loops.commands.project as project_mod
+    import strange_loops.commands.task as task_mod
 
     frozen = _frozen_now()
 
@@ -439,3 +487,4 @@ def _freeze_now(monkeypatch) -> None:
 
     monkeypatch.setattr(session_mod, "datetime", FrozenDatetime)
     monkeypatch.setattr(project_mod, "datetime", FrozenDatetime)
+    monkeypatch.setattr(task_mod, "datetime", FrozenDatetime)

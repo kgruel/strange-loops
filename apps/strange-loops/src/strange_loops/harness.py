@@ -125,6 +125,7 @@ def spawn(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    emit_fact(path, "worker.started", obs, {"task": task_name, "pid": proc.pid})
     return proc.pid
 
 

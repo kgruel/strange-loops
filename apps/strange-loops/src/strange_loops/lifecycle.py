@@ -80,6 +80,11 @@ def _extract_task(states: dict[str, dict], name: str) -> dict | None:
     else:
         result["status"] = "created"
 
+    # Worker PID from worker.started
+    ws = states.get("worker.started", {}).get("items", {}).get(name)
+    if ws:
+        result["pid"] = ws.get("pid")
+
     # Worker status from worker.output.complete (replaces PID liveness)
     woc = states.get("worker.output.complete", {}).get("items", {}).get(name)
     if woc:

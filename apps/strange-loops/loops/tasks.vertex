@@ -32,6 +32,12 @@ loops {
     }
   }
 
+  worker.started {
+    fold {
+      items "by" "task"
+    }
+  }
+
   worker.output {
     fold {
       output "collect" 10000

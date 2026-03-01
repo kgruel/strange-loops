@@ -631,6 +631,19 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     return store_path
 
 
+def _resolve_named_store(name: str) -> Path:
+    """Resolve a vertex name to its store path via resolve_vertex + store extraction."""
+    from lang.population import resolve_vertex
+
+    vertex_path = resolve_vertex(name, loops_home()).resolve()
+    if not vertex_path.exists():
+        raise FileNotFoundError(f"Vertex not found: {vertex_path}")
+    store_path = _resolve_vertex_store_path(vertex_path)
+    if store_path is None:
+        raise FileNotFoundError(f"Vertex '{name}' has no store configured")
+    return store_path
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     from atoms import Fact
@@ -856,15 +869,23 @@ def _run_status(argv: list[str]) -> int:
     from .commands.session import _resolve_local_store, fetch_status
     from .lenses.status import status_view
 
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("vertex", nargs="?", default=None)
+    pre.add_argument("--kind", default=None)
+    known, rest = pre.parse_known_args(argv)
+
     def fetch():
-        store_path = _resolve_local_store()
-        return fetch_status(store_path)
+        if known.vertex is not None:
+            store_path = _resolve_named_store(known.vertex)
+        else:
+            store_path = _resolve_local_store()
+        return fetch_status(store_path, kind=known.kind)
 
     def render(ctx, data):
         return status_view(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        argv,
+        rest,
         fetch=fetch,
         render=render,
         prog="loops status",
@@ -879,12 +900,16 @@ def _run_log(argv: list[str]) -> int:
     from .lenses.log import log_view
 
     pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--since", default="7d")
     pre.add_argument("--kind", default=None)
     known, rest = pre.parse_known_args(argv)
 
     def fetch():
-        store_path = _resolve_local_store()
+        if known.vertex is not None:
+            store_path = _resolve_named_store(known.vertex)
+        else:
+            store_path = _resolve_local_store()
         return fetch_log(store_path, known.since, known.kind)
 
     def render(ctx, data):
@@ -908,19 +933,27 @@ def _run_store(argv: list[str]) -> int:
     known, rest = pre.parse_known_args(argv)
     file_arg = known.file
 
+    def _resolve_store_target() -> Path:
+        """Resolve file arg: vertex name, path, or LOOPS_HOME/root.vertex fallback."""
+        if file_arg is not None:
+            p = Path(file_arg)
+            # If it looks like a path (has extension or path separators), use directly
+            if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
+                return p
+            # Otherwise treat as vertex name
+            from lang.population import resolve_vertex
+            return resolve_vertex(file_arg, loops_home())
+        root = loops_home() / "root.vertex"
+        if not root.exists():
+            raise FileNotFoundError(
+                f"{root} not found. Run 'loops init' first."
+            )
+        return root
+
     def fetch():
         from .commands.store import make_fetcher
 
-        if file_arg is not None:
-            path = Path(file_arg)
-        else:
-            root = loops_home() / "root.vertex"
-            if not root.exists():
-                raise FileNotFoundError(
-                    f"{root} not found. Run 'loops init' first."
-                )
-            path = root
-        path = path.resolve()
+        path = _resolve_store_target().resolve()
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
         return make_fetcher(path, zoom=3)()
@@ -933,10 +966,7 @@ def _run_store(argv: list[str]) -> int:
     def handle_interactive(ctx):
         from .tui import StoreExplorerApp
 
-        if file_arg is not None:
-            path = Path(file_arg).resolve()
-        else:
-            path = (loops_home() / "root.vertex").resolve()
+        path = _resolve_store_target().resolve()
         app = StoreExplorerApp(path)
         asyncio.run(app.run())
         return 0

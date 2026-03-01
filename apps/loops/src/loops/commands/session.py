@@ -96,21 +96,27 @@ def _format_date(ts) -> str:
     return f"{dt.strftime('%b')} {dt.day}"
 
 
-def fetch_status(store_path: Path) -> dict:
-    """Fetch status data from store. Returns dict suitable for JSON serialization."""
+def fetch_status(store_path: Path, kind: str | None = None) -> dict:
+    """Fetch status data from store. Returns dict suitable for JSON serialization.
+
+    When *kind* is given, only that section is populated (e.g. kind="task"
+    returns tasks only, other sections empty).
+    """
     from engine import StoreReader
 
     if not store_path.exists():
         return {"decisions": [], "threads": [], "tasks": [], "changes": []}
 
+    active = {kind} if kind else {"decision", "thread", "task", "change"}
+
     with StoreReader(store_path) as reader:
-        decisions_raw = _latest_by_group(reader, "decision", "topic")
-        threads_raw = _latest_by_group(reader, "thread", "name")
+        decisions_raw = _latest_by_group(reader, "decision", "topic") if "decision" in active else []
+        threads_raw = _latest_by_group(reader, "thread", "name") if "thread" in active else []
         threads_raw = [
             t for t in threads_raw if t["payload"].get("status") != "resolved"
         ]
-        tasks_raw = _latest_by_group(reader, "task", "name")
-        changes_raw = reader.recent_facts("change", 10)
+        tasks_raw = _latest_by_group(reader, "task", "name") if "task" in active else []
+        changes_raw = reader.recent_facts("change", 10) if "change" in active else []
 
     def _ts(ts):
         return ts.isoformat() if isinstance(ts, datetime) else ts

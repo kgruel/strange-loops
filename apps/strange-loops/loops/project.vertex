@@ -19,4 +19,10 @@ loops {
       items "by" "name"
     }
   }
+
+  completion {
+    fold {
+      items "by" "task"
+    }
+  }
 }

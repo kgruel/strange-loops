@@ -151,7 +151,8 @@ class TestProjectVertexCompiles:
         assert "decision" in compiled.specs
         assert "thread" in compiled.specs
         assert "plan" in compiled.specs
-        assert len(compiled.specs) == 3
+        assert "completion" in compiled.specs
+        assert len(compiled.specs) == 4
 
     def test_project_specs_have_correct_folds(self):
         from atoms import Upsert

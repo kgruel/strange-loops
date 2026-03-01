@@ -149,6 +149,53 @@ class TestRecentFacts:
             assert reader.recent_facts("nonexistent", 5) == []
 
 
+class TestTicksBetween:
+    def test_returns_ticks_in_range(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ticks = reader.ticks_between(900.0, 1600.0)
+            assert len(ticks) == 2
+            names = [t.name for t in ticks]
+            assert "scrape" in names
+            assert "health" in names
+
+    def test_filters_by_name(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ticks = reader.ticks_between(0, float("inf"), name="scrape")
+            assert len(ticks) == 2
+            assert all(t.name == "scrape" for t in ticks)
+
+    def test_name_and_range_combined(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ticks = reader.ticks_between(1500.0, 2500.0, name="scrape")
+            assert len(ticks) == 1
+            assert ticks[0].payload == {"n": 2}
+
+    def test_empty_range(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ticks = reader.ticks_between(5000.0, 6000.0)
+            assert ticks == []
+
+    def test_unknown_name(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ticks = reader.ticks_between(0, float("inf"), name="nonexistent")
+            assert ticks == []
+
+    def test_ordered_by_ts(self, tmp_db: Path):
+        conn = sqlite3.connect(str(tmp_db))
+        for ts in [300.0, 100.0, 200.0]:
+            conn.execute(
+                "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
+                ("x", ts, None, "v", json.dumps({"t": ts})),
+            )
+        conn.commit()
+        conn.close()
+
+        with StoreReader(tmp_db) as reader:
+            ticks = reader.ticks_between(0, 500.0)
+            timestamps = [t.ts.timestamp() for t in ticks]
+            assert timestamps == sorted(timestamps)
+
+
 class TestFileNotFound:
     def test_file_not_found(self, tmp_path: Path):
         with pytest.raises(FileNotFoundError):

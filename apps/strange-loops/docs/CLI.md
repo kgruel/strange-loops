@@ -36,6 +36,14 @@ Emit a session note
 
 Project coordination surface
 
+### `bridge`
+
+Bridge task ticks to project completions
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `--observer` | Observer identity |  |
+
 ### `emit`
 
 Emit a project fact

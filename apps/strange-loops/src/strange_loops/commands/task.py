@@ -21,10 +21,12 @@ from strange_loops.lifecycle import fold_all_tasks, fold_task_state
 from strange_loops.store import (
     emit_fact,
     filter_task_facts as _filter_task_facts,
+    filter_task_ticks as _filter_task_ticks,
     observer,
     parse_duration,
-    render_log,
+    render_log_with_ticks,
     render_log_entry,
+    render_tick_entry,
     require_store,
     store_path,
 )
@@ -569,24 +571,48 @@ def cmd_task_log(args: argparse.Namespace) -> int:
 
     with StoreReader(sp) as reader:
         facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+        ticks = reader.ticks_between(since_ts, now.timestamp())
 
     facts = _filter_task_facts(facts, name)
+    ticks = _filter_task_ticks(ticks, name)
     facts.sort(key=lambda f: f["ts"])
 
     if use_json:
+        # Interleave facts and ticks chronologically
+        entries: list[tuple[float, str, object]] = []
         for f in facts:
-            f_out = dict(f)
-            if isinstance(f_out["ts"], datetime):
-                f_out["ts"] = f_out["ts"].isoformat()
-            print(json.dumps(f_out, default=str), flush=True)
+            ts = f["ts"]
+            ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+            entries.append((ts_val, "fact", f))
+        for t in ticks:
+            ts = t.ts
+            ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+            entries.append((ts_val, "tick", t))
+        entries.sort(key=lambda e: e[0])
+
+        for _, entry_type, item in entries:
+            if entry_type == "fact":
+                f_out = dict(item)
+                if isinstance(f_out["ts"], datetime):
+                    f_out["ts"] = f_out["ts"].isoformat()
+                print(json.dumps(f_out, default=str), flush=True)
+            else:
+                t_out = {
+                    "type": "tick",
+                    "name": item.name,
+                    "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
+                    "payload": item.payload,
+                    "origin": item.origin,
+                }
+                print(json.dumps(t_out, default=str), flush=True)
         return 0
 
-    render_log(facts)
+    render_log_with_ticks(facts, ticks)
     return 0
 
 
 def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> int:
-    """Follow task log — poll for new facts, print as they arrive."""
+    """Follow task log — poll for new facts and ticks, print as they arrive."""
     from engine import StoreReader
 
     last_ts = 0.0
@@ -595,24 +621,48 @@ def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> i
         while True:
             with StoreReader(sp) as reader:
                 facts = reader.facts_between(last_ts, float("inf"), kind=kind)
+                ticks = reader.ticks_between(last_ts, float("inf"))
 
             facts = _filter_task_facts(facts, name)
-            facts.sort(key=lambda f: f["ts"])
+            ticks = _filter_task_ticks(ticks, name)
 
+            # Build unified timeline
+            entries: list[tuple[float, str, object]] = []
             for f in facts:
                 ts = f["ts"]
                 ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+                entries.append((ts_val, "fact", f))
+            for t in ticks:
+                ts = t.ts
+                ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+                entries.append((ts_val, "tick", t))
+            entries.sort(key=lambda e: e[0])
+
+            for ts_val, entry_type, item in entries:
                 if ts_val <= last_ts:
                     continue
                 last_ts = ts_val
 
-                if use_json:
-                    f_out = dict(f)
-                    if isinstance(f_out["ts"], datetime):
-                        f_out["ts"] = f_out["ts"].isoformat()
-                    print(json.dumps(f_out, default=str), flush=True)
+                if entry_type == "fact":
+                    if use_json:
+                        f_out = dict(item)
+                        if isinstance(f_out["ts"], datetime):
+                            f_out["ts"] = f_out["ts"].isoformat()
+                        print(json.dumps(f_out, default=str), flush=True)
+                    else:
+                        render_log_entry(item)
                 else:
-                    render_log_entry(f)
+                    if use_json:
+                        t_out = {
+                            "type": "tick",
+                            "name": item.name,
+                            "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
+                            "payload": item.payload,
+                            "origin": item.origin,
+                        }
+                        print(json.dumps(t_out, default=str), flush=True)
+                    else:
+                        render_tick_entry(item)
 
             time.sleep(2)
     except KeyboardInterrupt:

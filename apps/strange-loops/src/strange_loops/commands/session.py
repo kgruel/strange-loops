@@ -13,7 +13,7 @@ from strange_loops.store import (
     emit_fact,
     observer,
     parse_duration,
-    render_log,
+    render_log_with_ticks,
     require_store,
     store_path,
 )
@@ -128,18 +128,41 @@ def cmd_session_log(args: argparse.Namespace) -> int:
 
     with StoreReader(sp) as reader:
         facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+        ticks = reader.ticks_between(since_ts, now.timestamp())
 
     facts.sort(key=lambda f: f["ts"])
 
     if use_json:
+        # Interleave facts and ticks chronologically
+        entries: list[tuple[float, str, object]] = []
         for f in facts:
-            f_out = dict(f)
-            if isinstance(f_out["ts"], datetime):
-                f_out["ts"] = f_out["ts"].isoformat()
-            print(json.dumps(f_out, default=str))
+            ts = f["ts"]
+            ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+            entries.append((ts_val, "fact", f))
+        for t in ticks:
+            ts = t.ts
+            ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+            entries.append((ts_val, "tick", t))
+        entries.sort(key=lambda e: e[0])
+
+        for _, entry_type, item in entries:
+            if entry_type == "fact":
+                f_out = dict(item)
+                if isinstance(f_out["ts"], datetime):
+                    f_out["ts"] = f_out["ts"].isoformat()
+                print(json.dumps(f_out, default=str))
+            else:
+                t_out = {
+                    "type": "tick",
+                    "name": item.name,
+                    "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
+                    "payload": item.payload,
+                    "origin": item.origin,
+                }
+                print(json.dumps(t_out, default=str))
         return 0
 
-    render_log(facts)
+    render_log_with_ticks(facts, ticks)
     return 0
 
 

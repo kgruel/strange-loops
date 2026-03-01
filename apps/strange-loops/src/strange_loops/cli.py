@@ -119,6 +119,9 @@ def create_parser() -> argparse.ArgumentParser:
     plog_p.add_argument("--kind", help="Filter by fact kind")
     plog_p.add_argument("--json", action="store_true", help="JSONL output")
 
+    bridge_p = project_sub.add_parser("bridge", help="Bridge task ticks to project completions")
+    bridge_p.add_argument("--observer", help="Observer identity")
+
     return parser
 
 

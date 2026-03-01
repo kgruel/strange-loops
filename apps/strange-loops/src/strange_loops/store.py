@@ -135,6 +135,87 @@ def filter_task_facts(facts: list[dict], name: str) -> list[dict]:
     return result
 
 
+def render_tick_entry(tick) -> None:
+    """Render a single tick as a styled line via painted.
+
+    Styled with accent (not muted) to visually mark a boundary crossing.
+    """
+    from painted import show
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+    ts = tick.ts
+    if isinstance(ts, datetime):
+        dt = ts
+    else:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+
+    time_str = format_ts(dt)
+    name = tick.name
+    payload = tick.payload if isinstance(tick.payload, dict) else {}
+
+    parts = [f"{k}={v}" for k, v in payload.items() if v is not None and v != ""]
+    summary = " ".join(parts)
+
+    text = f"  {time_str} ⚡ [{name}] {summary}" if summary else f"  {time_str} ⚡ [{name}]"
+    show(Block.text(text, p.accent), file=sys.stdout)
+
+
+def filter_task_ticks(ticks: list, name: str) -> list:
+    """Filter ticks belonging to a specific task.
+
+    Matches payload["task"] == name.
+    """
+    result = []
+    for t in ticks:
+        payload = t.payload if isinstance(t.payload, dict) else {}
+        if payload.get("task") == name:
+            result.append(t)
+    return result
+
+
+def render_log_with_ticks(facts: list[dict], ticks: list) -> None:
+    """Render facts and ticks interleaved chronologically with date grouping."""
+    from painted import show
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    if not facts and not ticks:
+        p = current_palette()
+        show(Block.text("No facts in the given time range.", p.muted), file=sys.stdout)
+        return
+
+    # Build unified timeline: (ts, type, item)
+    entries: list[tuple[float, str, object]] = []
+    for f in facts:
+        ts = f["ts"]
+        ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+        entries.append((ts_val, "fact", f))
+    for t in ticks:
+        ts = t.ts
+        ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+        entries.append((ts_val, "tick", t))
+
+    entries.sort(key=lambda e: e[0])
+
+    current_date = None
+    for ts_val, entry_type, item in entries:
+        dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
+        date_str = format_date(dt)
+        if date_str != current_date:
+            if current_date is not None:
+                print()
+            p = current_palette()
+            show(Block.text(f"{date_str}:", p.accent), file=sys.stdout)
+            current_date = date_str
+
+        if entry_type == "fact":
+            render_log_entry(item)
+        else:
+            render_tick_entry(item)
+
+
 def render_log(facts: list[dict]) -> None:
     """Render facts as a date-grouped chronological log."""
     from painted import show

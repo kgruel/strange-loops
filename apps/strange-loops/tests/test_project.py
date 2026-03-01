@@ -15,11 +15,12 @@ from engine import SqliteStore
 from strange_loops.commands.project import (
     _latest_by_group,
     _parse_emit_parts,
+    cmd_project_bridge,
     cmd_project_emit,
     cmd_project_log,
     cmd_project_status,
 )
-from strange_loops.store import emit_fact
+from strange_loops.store import emit_fact, emit_tick
 
 
 def _read_all(db_path: Path) -> list[dict]:
@@ -232,3 +233,132 @@ class TestLatestByGroup:
         ]
         result = _latest_by_group(facts, "decision", "topic")
         assert len(result) == 0
+
+
+@pytest.fixture
+def task_store(tmp_path: Path, monkeypatch):
+    """Monkeypatch store_path to return a temp task store."""
+    db = tmp_path / "data" / "tasks.db"
+    monkeypatch.setattr("strange_loops.commands.project.store_path", lambda: db)
+    return db
+
+
+class TestProjectBridge:
+    def test_bridges_ticks_to_completions(self, project_store: Path, task_store: Path, capsys):
+        # Emit a task.tick into the task store
+        emit_tick(
+            task_store,
+            "task.tick",
+            {"task": "my-task", "status": "completed", "exit_code": 0},
+            origin="tasks",
+        )
+        args = _ns()
+        rc = cmd_project_bridge(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Bridged 1" in out
+        assert "my-task" in out
+
+        # Verify completion fact landed in project store
+        facts = _read_all(project_store)
+        completions = [f for f in facts if f["kind"] == "completion"]
+        assert len(completions) == 1
+        assert completions[0]["payload"]["task"] == "my-task"
+
+    def test_idempotent(self, project_store: Path, task_store: Path, capsys):
+        emit_tick(
+            task_store,
+            "task.tick",
+            {"task": "t1", "status": "completed", "exit_code": 0},
+            origin="tasks",
+        )
+        args = _ns()
+        cmd_project_bridge(args)
+        capsys.readouterr()  # clear
+
+        # Second run should report all bridged
+        rc = cmd_project_bridge(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "already bridged" in out
+
+    def test_bridges_multiple(self, project_store: Path, task_store: Path, capsys):
+        for name in ["a", "b", "c"]:
+            emit_tick(
+                task_store,
+                "task.tick",
+                {"task": name, "status": "completed", "exit_code": 0},
+                origin="tasks",
+            )
+        args = _ns()
+        rc = cmd_project_bridge(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Bridged 3" in out
+
+    def test_latest_tick_wins(self, project_store: Path, task_store: Path, capsys):
+        emit_tick(
+            task_store,
+            "task.tick",
+            {"task": "x", "status": "errored", "exit_code": 1},
+            origin="tasks",
+        )
+        time.sleep(0.01)
+        emit_tick(
+            task_store,
+            "task.tick",
+            {"task": "x", "status": "completed", "exit_code": 0},
+            origin="tasks",
+        )
+        args = _ns()
+        cmd_project_bridge(args)
+
+        facts = _read_all(project_store)
+        completions = [f for f in facts if f["kind"] == "completion"]
+        assert len(completions) == 1
+        assert completions[0]["payload"]["status"] == "completed"
+
+    def test_no_ticks_message(self, project_store: Path, task_store: Path, capsys):
+        # Create an empty task store (just needs the schema)
+        task_store.parent.mkdir(parents=True, exist_ok=True)
+        with SqliteStore(path=task_store, serialize=Fact.to_dict, deserialize=Fact.from_dict) as _:
+            pass
+        args = _ns()
+        rc = cmd_project_bridge(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No task.tick" in out
+
+    def test_errors_without_task_store(self, project_store: Path, task_store: Path, capsys):
+        args = _ns()
+        rc = cmd_project_bridge(args)
+        assert rc == 1
+        assert "No task data" in capsys.readouterr().err
+
+
+class TestProjectStatusCompletions:
+    def test_completions_in_text_output(self, project_store: Path, capsys):
+        emit_fact(
+            project_store,
+            "completion",
+            "",
+            {"task": "my-task", "status": "completed", "exit_code": 0},
+        )
+        args = _ns()
+        rc = cmd_project_status(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Completions" in out
+        assert "my-task" in out
+
+    def test_completions_in_json_output(self, project_store: Path, capsys):
+        emit_fact(
+            project_store, "completion", "", {"task": "t1", "status": "completed", "exit_code": 0}
+        )
+        args = _ns(json=True)
+        rc = cmd_project_status(args)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert "completions" in data
+        assert "t1" in data["completions"]
+        assert data["completions"]["t1"]["status"] == "completed"

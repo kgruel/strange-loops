@@ -102,6 +102,32 @@ class StoreReader:
             for r in rows
         ]
 
+    def ticks_between(
+        self,
+        since_ts: float,
+        until_ts: float,
+        name: str | None = None,
+    ) -> list[Tick]:
+        """Ticks within a time range, optionally filtered by name."""
+        if name is not None:
+            rows = self._conn.execute(
+                "SELECT name, ts, since, origin, payload FROM ticks "
+                "WHERE ts >= ? AND ts <= ? AND name = ? ORDER BY ts",
+                (since_ts, until_ts, name),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT name, ts, since, origin, payload FROM ticks "
+                "WHERE ts >= ? AND ts <= ? ORDER BY ts",
+                (since_ts, until_ts),
+            ).fetchall()
+        return [
+            Tick.from_dict(
+                {"name": r[0], "ts": r[1], "since": r[2], "origin": r[3], "payload": json.loads(r[4])}
+            )
+            for r in rows
+        ]
+
     @property
     def freshness(self) -> datetime | None:
         """Timestamp of the most recent fact, or None if store is empty."""

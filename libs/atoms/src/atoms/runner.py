@@ -38,6 +38,7 @@ class Runner:
         vertex: Vertex,
         *,
         on_error: Callable[[Fact], None] | None = None,
+        yield_every: int = 64,
     ) -> None:
         self._vertex = vertex
         self._sources: list[SourceProtocol] = []
@@ -46,6 +47,7 @@ class Runner:
         self._running = False
         self._triggered: dict[str, list[SourceProtocol]] = {}
         self._on_error = on_error
+        self._yield_every = yield_every
 
     def add(self, source: SourceProtocol) -> None:
         """Register a source to be run."""
@@ -54,12 +56,16 @@ class Runner:
     async def _consume_source(self, source: SourceProtocol, grant: Grant | None = None) -> None:
         """Consume a source's stream and route facts to the vertex."""
         try:
+            count = 0
             async for fact in source.stream():
                 if fact.kind == "source.error" and self._on_error is not None:
                     self._on_error(fact)
                 tick = self._vertex.receive(fact, grant)
                 if tick is not None:
                     await self._tick_queue.put(tick)
+                count += 1
+                if self._yield_every and count % self._yield_every == 0:
+                    await asyncio.sleep(0)
         except asyncio.CancelledError:
             pass
         except Exception as e:

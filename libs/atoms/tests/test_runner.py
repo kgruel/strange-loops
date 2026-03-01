@@ -161,6 +161,49 @@ class TestRunner:
 
         assert ticks == []
 
+    async def test_burst_source_yields_to_other_sources(self):
+        """A burst source yields to the event loop, allowing other sources to interleave."""
+        vertex = Vertex("test-vertex")
+        received: list[str] = []
+
+        def track_a(s, p):
+            received.append("a")
+            return s + 1
+
+        def track_b(s, p):
+            received.append("b")
+            return s + 1
+
+        vertex.register("burst", 0, track_a)
+        vertex.register("small", 0, track_b)
+
+        # Burst source: 200 facts, no delays (saturates the loop)
+        burst = MockSource(
+            observer="burst",
+            facts=[Fact.of("burst", "burst") for _ in range(200)],
+        )
+        # Small source: 5 facts, no delays
+        small = MockSource(
+            observer="small",
+            facts=[Fact.of("small", "small") for _ in range(5)],
+        )
+
+        runner = Runner(vertex, yield_every=32)
+        runner.add(burst)
+        runner.add(small)
+
+        async for _ in runner.run():
+            pass
+
+        assert vertex.state("burst") == 200
+        assert vertex.state("small") == 5
+
+        # The small source's facts should appear interleaved, not all after
+        # the burst. Find the position of the last "b" — it should appear
+        # before all 200 "a"s have been processed.
+        last_b = max(i for i, v in enumerate(received) if v == "b")
+        assert last_b < len(received) - 1, "small source facts all came after burst (no interleaving)"
+
     async def test_source_yielding_no_facts(self):
         """Source that yields nothing still completes."""
         vertex = Vertex("test-vertex")

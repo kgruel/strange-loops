@@ -28,31 +28,28 @@ class MinimalApp(Surface):
         self.color_idx = 0
         self.message = "Arrow keys move, 'c' changes color, 'q' quits"
 
-    def layout(self, width: int, height: int) -> None:
-        """Called on startup and resize."""
-        self.term_width = width
-        self.term_height = height
-
     def render(self) -> None:
         """Called each frame. Paint into self._buf."""
+        buf = self._buf
         # Clear with background
-        self._buf.fill(0, 0, self._buf.width, self._buf.height, "·", Style(dim=True))
+        buf.fill(0, 0, buf.width, buf.height, "·", Style(dim=True))
 
         # Status bar at top
-        status = f" {self.term_width}x{self.term_height} | pos=({self.x},{self.y}) "
-        self._buf.put_text(0, 0, status, Style(fg="black", bg="white"))
+        status = f" {buf.width}x{buf.height} | pos=({self.x},{self.y}) "
+        buf.put_text(0, 0, status, Style(fg="black", bg="white"))
 
         # Movable box
         color = COLORS[self.color_idx]
         content = Block.text(f" {color} ", Style(fg=color, bold=True))
         box = border(content, style=Style(fg=color))
-        box.paint(self._buf, self.x, self.y)
+        box.paint(buf, self.x, self.y)
 
         # Instructions at bottom
-        self._buf.put_text(0, self._buf.height - 1, self.message, Style(dim=True))
+        buf.put_text(0, buf.height - 1, self.message, Style(dim=True))
 
     def on_key(self, key: str) -> None:
         """Handle keyboard input. Keys are named strings."""
+        buf = self._buf
         if key == "q":
             self.quit()
         elif key == "c":
@@ -60,12 +57,16 @@ class MinimalApp(Surface):
         elif key == "up":
             self.y = max(1, self.y - 1)
         elif key == "down":
-            self.y = min(self.term_height - 5, self.y + 1)
+            self.y = min(buf.height - 5, self.y + 1)
         elif key == "right":
-            self.x = min(self.term_width - 10, self.x + 1)
+            self.x = min(buf.width - 10, self.x + 1)
         elif key == "left":
             self.x = max(0, self.x - 1)
 
 
+async def main():
+    await MinimalApp().run()
+
+
 if __name__ == "__main__":
-    asyncio.run(MinimalApp().run())
+    asyncio.run(main())

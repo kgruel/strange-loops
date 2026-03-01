@@ -12,7 +12,7 @@ Tab to switch focus, arrow keys to interact, type in text field, 'q' to quit.
 """
 
 import asyncio
-from painted import Cursor, Style, Line, Span, border
+from painted import Line, Style, border
 from painted.tui import Surface, Focus, ring_next
 from painted.views import (
     SpinnerState, spinner,
@@ -38,7 +38,7 @@ class WidgetsApp(Surface):
             Line.plain("Date", Style(fg="green")),
             Line.plain("Elderberry", Style(fg="cyan")),
         ]
-        self.list_state = ListState(cursor=Cursor(count=len(self.list_items)))
+        self.list_state = ListState().with_count(len(self.list_items))
 
         self.text_state = TextInputState(text="Edit me", cursor=7)
 
@@ -157,5 +157,9 @@ class WidgetsApp(Surface):
                 self.text_state = self.text_state.insert(key)
 
 
+async def main() -> None:
+    await WidgetsApp().run()
+
+
 if __name__ == "__main__":
-    asyncio.run(WidgetsApp().run())
+    asyncio.run(main())

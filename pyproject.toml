@@ -20,6 +20,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+painted = "painted.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/kylegruel/painted"
 Repository = "https://github.com/kylegruel/painted"

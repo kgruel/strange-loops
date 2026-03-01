@@ -18,8 +18,9 @@ case "$cmd" in
   # primitives
   show)        exec uv run python demos/primitives/show.py "$@" ;;
   # apps
+  minimal)     exec uv run python demos/apps/minimal.py "$@" ;;
   widgets)     exec uv run python demos/apps/widgets.py "$@" ;;
   big-text)    exec uv run python demos/apps/big_text.py "$@" ;;
   tour)        exec uv run python demos/tour.py "$@" ;;
-  *)           echo "Unknown demo: $cmd"; echo "Available: rendering hit-testing fidelity live focus profiler widgets big-text tour"; exit 1 ;;
+  *)           echo "Unknown demo: $cmd"; echo "Available: rendering hit-testing fidelity live focus profiler minimal widgets big-text tour"; exit 1 ;;
 esac

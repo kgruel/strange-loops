@@ -30,22 +30,33 @@ uv run --package strange-loops pytest apps/strange-loops/tests
 
 ```
 src/strange_loops/
-  cli.py              # Thin dispatcher — argparse, lazy imports
+  cli.py              # Thin dispatcher — argparse, lazy imports, note command
   store.py            # Shared store helpers (observer, emit_fact, require_store)
   worktree.py         # Git worktree operations (create, remove, list, diff)
   harness.py          # Shell harness runner (spawn detached, capture output as facts)
+  lifecycle.py        # Query-time fold — compiled vertex spec for task state
   commands/
     session.py        # Session lifecycle (start, end, status, log)
-    task.py           # Task lifecycle (create, assign, send, status, list, diff, merge, close)
+    task.py           # Task lifecycle (create, assign, send, run, status, list, diff, merge, close)
+    dashboard.py      # Dashboard — fetch/render/fetch_stream wired through painted run_cli
+    project.py        # Project coordination (emit, status, log)
 tests/
-  conftest.py         # Shared fixtures (home, workspace)
+  conftest.py         # Shared fixtures (home, workspace, git_repo)
   test_smoke.py       # Import + entry point smoke test
   test_store.py       # Store helpers
-  test_session.py     # Session commands (16 tests)
-  test_task.py        # Task commands end to end (14 tests)
-  test_worktree.py    # Git worktree operations against real repos (8 tests)
-  test_harness.py     # Harness runner (5 tests)
+  test_session.py     # Session commands
+  test_task.py        # Task commands end to end
+  test_dashboard.py   # Dashboard helpers + CLI integration
+  test_project.py     # Project commands
+  test_snapshots.py   # Golden-file tests (text output) + direct assertions (JSON output)
+  test_worktree.py    # Git worktree operations against real repos
+  test_harness.py     # Harness runner
+  test_lifecycle.py   # Vertex spec compilation + fold
+  snapshots/          # Golden files for text CLI output (visual rendering only)
+docs/
+  CLI.md              # Auto-generated from argparse (run scripts/gen_cli_docs.py)
 scripts/
+  gen_cli_docs.py     # Generate docs/CLI.md from argparse definitions
   lib/dev.sh          # Shared helpers (logging, paths, run_uv)
   check.sh            # CI gate: lint → test
   lint.sh             # ty + ruff
@@ -58,11 +69,53 @@ scripts/
 - `atoms`, `engine`, `lang` — loops monorepo libs (workspace)
 - `painted` — terminal rendering (path dep to ~/Code/painted)
 
+## Session Narration
+
+No HANDOFF.md or LOG.md for this project. The project loop is the
+continuity mechanism. The session log is the handoff.
+
+**During work — emit notes as you go:**
+
+```bash
+strange-loops note "observation about X" --observer claude
+```
+
+Notes are `session.note` facts in the task store. They show up in
+`session log` and filter with `--kind session.note`.
+
+**For durable decisions, threads, plans:**
+
+```bash
+strange-loops project emit decision topic=X "rationale for choosing Y"
+strange-loops project emit thread name=X status=open "what we're investigating"
+strange-loops project emit thread name=X status=resolved "outcome"
+strange-loops project emit plan name=X status=next "what we're doing next"
+```
+
+**At session boundaries:**
+
+```bash
+strange-loops project status        # review decisions, open threads, plans
+strange-loops session log --since 1h  # review recent activity
+```
+
+The project vertex carries forward across sessions. `project status` is
+the first thing to read when resuming work.
+
+**This applies to workers too.** Workers running in subtask worktrees share
+the same CLAUDE.md. Emit notes for significant observations. Use project
+emit for decisions that affect the broader project.
+
 ## Conventions
 
 - CLI is thin dispatcher. Logic lives in `commands/` submodules.
+- `note` is inline in cli.py — too small for its own module.
+- Dashboard delegates to painted `run_cli` (bypasses argparse for mode/zoom).
 - Tests mirror src structure. Factories over mocks.
 - `./dev check` must pass before commit.
+- Snapshot tests: text goldens for visual output, direct assertions for JSON.
+  Run `--update-goldens` to regenerate text snapshots after intentional changes.
+- Regenerate CLI.md after argparse changes: `uv run --package strange-loops python scripts/gen_cli_docs.py`
 - Harness implementations are pluggable — implement the interface, not the backend.
 - Tasks are facts. State is fold. Completion is tick.
 
@@ -75,22 +128,24 @@ This is the skeleton for all task commands. Session commands use the same shape 
 
 ### Query-time fold
 
-No compile-time Spec/Vertex machinery yet. State is derived at read time:
-pull all facts → filter by task name → group by kind → keep latest per kind.
-`_task_state()` in task.py is the fold. Same pattern as loops session.
+State is derived at read time via compiled vertex spec:
+pull all facts → filter by task name → apply spec fold → derive state.
+`fold_task_state()` and `fold_all_tasks()` in lifecycle.py.
 
 ### Store sharing
 
-One store (`./data/tasks.db`), one fact stream. Session facts and task facts
-coexist. The kind prefix (`session.`, `task.`, `worker.`) is the namespace.
+Two stores, two concerns:
+- `./data/tasks.db` — session + task + worker facts (the task loop)
+- `./data/project.db` — decision + thread + plan facts (the project loop)
+
+Kind prefix (`session.`, `task.`, `worker.`) is the namespace within the task store.
 `session log --kind worker.output` queries across concerns.
 
 ### Async worker model
 
-`task send` spawns a detached process (`start_new_session=True`) and returns
-immediately. The harness process writes to the same SQLite store in WAL mode.
-No IPC, no sockets — shared store is the coordination channel. PID liveness
-checked via `os.kill(pid, 0)` at query time.
+`task send` / `task run` spawns a detached process (`start_new_session=True`)
+and returns immediately. The harness process writes to the same SQLite store
+in WAL mode. No IPC, no sockets — shared store is the coordination channel.
 
 ### Payload rendering
 
@@ -109,8 +164,12 @@ whitelist. Observer shown when present. Chronological order (oldest first)
 | Task registry | Vertex + SqliteStore |
 | Progress | Facts (queryable) |
 | Stage | Fact kind with status payload |
+| Session note | Fact with kind session.note |
+| Project decision | Fact with kind decision, grouped by topic |
 
 ## CLI Reference
+
+See `docs/CLI.md` for the full auto-generated reference. Key commands:
 
 ```bash
 # Session
@@ -119,23 +178,34 @@ strange-loops session end [--observer NAME]
 strange-loops session status [--json]
 strange-loops session log [--since 7d] [--kind KIND] [--json]
 
+# Notes
+strange-loops note "message" [--observer NAME]
+
 # Task lifecycle
 strange-loops task create NAME [--title T] [--base BRANCH] [--description D]
 strange-loops task assign NAME [--harness shell]
 strange-loops task send NAME "shell command"
+strange-loops task run NAME --description "prompt" [--harness shell] [--title T] [--base B]
 strange-loops task status [NAME] [--json]
 strange-loops task list [--json]
 strange-loops task diff NAME
 strange-loops task merge NAME [--force]
 strange-loops task close NAME
+
+# Dashboard
+strange-loops dashboard [--live] [-q] [--json]
+
+# Project
+strange-loops project emit KIND [KEY=VALUE...] [message]
+strange-loops project status [--json]
+strange-loops project log [--since 7d] [--kind KIND] [--json]
 ```
 
 ## What's NOT built yet
 
+- No per-task log — `session log` filters by kind but not by task name
+- No worker cancellation — once spawned, no `task stop` command
 - No Claude/Codex harnesses — shell only (others are just different commands)
-- No .vertex file — store path is a constant, fold is query-time
-- No TUI Surface — static painted blocks only
+- No TUI Surface — static painted blocks + live repaint only
 - No automatic stage advancement — explicit CLI commands
 - No peer-to-peer worker communication — hub-and-spoke only
-- No `task.progress` facts — worker output is the progress for now
-- Status doesn't auto-advance on worker.stopped — check `worker` field or advance manually

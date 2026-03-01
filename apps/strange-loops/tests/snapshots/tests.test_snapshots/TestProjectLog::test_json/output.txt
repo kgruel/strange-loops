@@ -1,3 +1,0 @@
-{"kind": "decision", "ts": "2025-01-15 10:06:40+00:00", "observer": "alice", "origin": "", "payload": {"topic": "auth", "message": "Use JWT with refresh tokens"}}
-{"kind": "thread", "ts": "2025-01-15 10:07:30+00:00", "observer": "bob", "origin": "", "payload": {"name": "api-design", "status": "open", "message": "REST vs GraphQL for v2"}}
-{"kind": "plan", "ts": "2025-01-15 10:08:20+00:00", "observer": "alice", "origin": "", "payload": {"name": "next-sprint", "status": "active"}}

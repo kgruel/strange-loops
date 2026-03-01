@@ -10,12 +10,27 @@ Task orchestration built on loops
 
 ## Commands
 
+- [`dashboard`](#dashboard) — Task dashboard
+- [`note`](#note) — Emit a session note
 - [`project`](#project) — Project coordination surface
 - [`session`](#session) — Session lifecycle
 - [`task`](#task) — Task lifecycle
 - [`version`](#version) — Show version
 
 ---
+
+## `dashboard`
+
+Task dashboard
+
+## `note`
+
+Emit a session note
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `message` | Note text | required |
+| `--observer` | Observer identity |  |
 
 ## `project`
 
@@ -146,6 +161,19 @@ Squash merge task branch
 |----------|-------------|----------|
 | `name` | Task name | required |
 | `--force` | Merge even with uncommitted changes (default: `False`) |  |
+| `--observer` | Observer identity |  |
+
+### `run`
+
+Create, assign, and send in one step
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `name` | Task name (branch, worktree, fact key) | required |
+| `--description` | Work specification / prompt for harness | required |
+| `--harness` | Harness .loop file (default: shell) (default: `shell`) |  |
+| `--title` | Human-readable title (default: name) |  |
+| `--base` | Base branch (default: current branch) |  |
 | `--observer` | Observer identity |  |
 
 ### `send`

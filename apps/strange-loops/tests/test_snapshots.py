@@ -264,13 +264,20 @@ class TestSessionStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_json(self, task_store: Path, golden: Golden, capsys):
+    def test_json(self, task_store: Path, capsys):
         rc = main(["session", "status", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
-        assert "facts" in data
-        golden.assert_match(json.dumps(data, indent=2, default=str) + "\n")
+        data = json.loads(capsys.readouterr().out)
+
+        assert data["facts"]["total"] == 8
+        kinds = data["facts"]["kinds"]
+        assert kinds["session.start"]["count"] == 1
+        assert kinds["task.created"]["count"] == 2
+        assert kinds["task.assigned"]["count"] == 2
+        assert kinds["task.stage"]["count"] == 1
+        assert kinds["worker.output"]["count"] == 1
+        assert kinds["worker.output.complete"]["count"] == 1
+        assert data["ticks"]["total"] == 0
 
 
 class TestSessionLog:
@@ -280,15 +287,21 @@ class TestSessionLog:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_json(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+    def test_json(self, task_store: Path, capsys, monkeypatch):
         _freeze_now(monkeypatch)
         rc = main(["session", "log", "--since", "1h", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out.strip()
-        lines = [line for line in out.split("\n") if line.strip()]
-        for line in lines:
-            json.loads(line)
-        golden.assert_match("\n".join(lines) + "\n")
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+
+        assert len(lines) == 8
+        assert lines[0]["kind"] == "session.start"
+        assert lines[0]["observer"] == "alice"
+        assert lines[1]["kind"] == "task.created"
+        assert lines[1]["payload"]["name"] == "alpha"
+        assert lines[-1]["kind"] == "task.assigned"
+        assert lines[-1]["payload"]["name"] == "beta"
 
 
 # -- Snapshot tests: Task --
@@ -300,26 +313,36 @@ class TestTaskStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_single_json(self, task_store: Path, golden: Golden, capsys):
+    def test_single_json(self, task_store: Path, capsys):
         rc = main(["task", "status", "alpha", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
+        data = json.loads(capsys.readouterr().out)
+
         assert data["name"] == "alpha"
-        golden.assert_match(json.dumps(data, indent=2, default=str) + "\n")
+        assert data["title"] == "Implement auth module"
+        assert data["base_branch"] == "main"
+        assert data["status"] == "working"
+        assert data["harness"] == "shell"
+        assert data["exit_code"] == 0
 
     def test_all_text(self, task_store: Path, golden: Golden, capsys):
         rc = main(["task", "status"])
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_all_json(self, task_store: Path, golden: Golden, capsys):
+    def test_all_json(self, task_store: Path, capsys):
         rc = main(["task", "status", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
+        data = json.loads(capsys.readouterr().out)
+
         assert isinstance(data, list)
-        golden.assert_match(json.dumps(data, indent=2, default=str) + "\n")
+        assert len(data) == 2
+        names = {t["name"] for t in data}
+        assert names == {"alpha", "beta"}
+        alpha = next(t for t in data if t["name"] == "alpha")
+        assert alpha["status"] == "working"
+        beta = next(t for t in data if t["name"] == "beta")
+        assert beta["status"] == "assigned"
 
 
 class TestTaskList:
@@ -328,13 +351,15 @@ class TestTaskList:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_json(self, task_store: Path, golden: Golden, capsys):
+    def test_json(self, task_store: Path, capsys):
         rc = main(["task", "list", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
+        data = json.loads(capsys.readouterr().out)
+
         assert isinstance(data, list)
-        golden.assert_match(json.dumps(data, indent=2, default=str) + "\n")
+        assert len(data) == 2
+        assert data[0]["name"] == "alpha"
+        assert data[1]["name"] == "beta"
 
 
 # -- Snapshot tests: Project --
@@ -346,13 +371,18 @@ class TestProjectStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
-    def test_json(self, task_store: Path, project_store: Path, golden: Golden, capsys):
+    def test_json(self, task_store: Path, project_store: Path, capsys):
         rc = main(["project", "status", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
-        assert "decisions" in data
-        golden.assert_match(json.dumps(data, indent=2, default=str) + "\n")
+        data = json.loads(capsys.readouterr().out)
+
+        assert data["total"] == 3
+        assert "auth" in data["decisions"]
+        assert data["decisions"]["auth"]["message"] == "Use JWT with refresh tokens"
+        assert "api-design" in data["threads"]
+        assert data["threads"]["api-design"]["status"] == "open"
+        assert "next-sprint" in data["plans"]
+        assert data["plans"]["next-sprint"]["status"] == "active"
 
 
 class TestProjectLog:
@@ -373,18 +403,23 @@ class TestProjectLog:
         self,
         task_store: Path,
         project_store: Path,
-        golden: Golden,
         capsys,
         monkeypatch,
     ):
         _freeze_now(monkeypatch)
         rc = main(["project", "log", "--since", "1h", "--json"])
         assert rc == 0
-        out = capsys.readouterr().out.strip()
-        lines = [line for line in out.split("\n") if line.strip()]
-        for line in lines:
-            json.loads(line)
-        golden.assert_match("\n".join(lines) + "\n")
+        lines = [
+            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
+        ]
+
+        assert len(lines) == 3
+        assert lines[0]["kind"] == "decision"
+        assert lines[0]["payload"]["topic"] == "auth"
+        assert lines[1]["kind"] == "thread"
+        assert lines[1]["payload"]["name"] == "api-design"
+        assert lines[2]["kind"] == "plan"
+        assert lines[2]["payload"]["name"] == "next-sprint"
 
 
 # -- Helpers --

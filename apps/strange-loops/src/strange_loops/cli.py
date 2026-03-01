@@ -83,6 +83,11 @@ def create_parser() -> argparse.ArgumentParser:
     close_p.add_argument("name", help="Task name")
     close_p.add_argument("--observer", help="Observer identity")
 
+    # note
+    note_p = subparsers.add_parser("note", help="Emit a session note")
+    note_p.add_argument("message", nargs="+", help="Note text")
+    note_p.add_argument("--observer", help="Observer identity")
+
     # dashboard — arg parsing delegated to painted run_cli
     subparsers.add_parser("dashboard", help="Task dashboard")
 
@@ -132,6 +137,22 @@ def main(argv: list[str] | None = None) -> int:
         from strange_loops.commands.task import cmd_task
 
         return cmd_task(args)
+
+    if args.command == "note":
+        from strange_loops.store import emit_fact, observer, store_path
+
+        sp = store_path()
+        obs = observer(args)
+        message = " ".join(args.message)
+        emit_fact(sp, "session.note", obs, {"message": message})
+
+        from painted import show
+        from painted.block import Block
+        from painted.palette import current_palette
+
+        p = current_palette()
+        show(Block.text(f"[note] {message}", p.muted), file=sys.stdout)
+        return 0
 
     if args.command == "project":
         from strange_loops.commands.project import cmd_project

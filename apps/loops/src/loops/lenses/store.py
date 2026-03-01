@@ -1,271 +1,271 @@
-"""Store lens — zoom-based rendering for store inspection."""
+"""Store lens — fidelity-based rendering for store inspection.
+
+Four fidelity levels:
+- MINIMAL: one-liner count summary with fact time range
+- SUMMARY: kind table with sparkline + count + freshness + content gist
+- DETAILED: per-kind sections with recent content, counts as metadata
+- FULL: bordered card, topline summary, kind sections sorted by recency
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical
-from painted.views import shape_lens as painted_shape_lens
+from painted import Block, Style, Zoom, border, join_vertical, ROUNDED
 
-
-def _shape_lens(content: Any, *, zoom: int, width: int) -> Block:
-    """Compatibility wrapper: avoid painted auto-chart for labeled numeric dicts."""
-    if (
-        isinstance(content, dict)
-        and content
-        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in content.values())
-    ):
-        content = {k: str(v) for k, v in content.items()}
-    return painted_shape_lens(content, zoom=zoom, width=width)
+from ..palette import DEFAULT_PALETTE, LoopsPalette
+from .gist import content_gist
 
 
-def store_view(data: dict, zoom: Zoom, width: int) -> Block:
-    """Render store summary at the given zoom level.
-
-    Zoom levels:
-    - MINIMAL: ticks-first one-liner
-    - SUMMARY: tick table with sparkline + count + freshness + payload keys
-    - DETAILED: per-tick section with latest payload at zoom 1
-    - FULL: tick payloads at zoom 2 + recent fact payloads
-    """
+def store_view(
+    data: dict,
+    zoom: Zoom,
+    width: int,
+    palette: LoopsPalette | None = None,
+) -> Block:
+    """Render store summary at the given fidelity level."""
+    p = palette or DEFAULT_PALETTE
     if zoom == Zoom.MINIMAL:
-        return _render_minimal(data, width)
+        return _render_minimal(data, width, p)
     if zoom == Zoom.SUMMARY:
-        return _render_summary(data, width)
+        return _render_summary(data, width, p)
     if zoom == Zoom.DETAILED:
-        return _render_detailed(data, width)
-    return _render_full(data, width)
+        return _render_detailed(data, width, p)
+    return _render_full(data, width, p)
 
 
-def _render_minimal(data: dict, width: int) -> Block:
-    """One-line: '3 boundaries, 36 ticks, 200 facts | fresh 5m ago'."""
+# ---------------------------------------------------------------------------
+# MINIMAL — one-liner
+# ---------------------------------------------------------------------------
+
+
+def _render_minimal(data: dict, width: int, p: LoopsPalette) -> Block:
+    """One-line: '5 kinds · 69 facts · Feb 28 – Mar 1 · fresh 6h ago'."""
     facts_total = data["facts"]["total"]
-    ticks_total = data["ticks"]["total"]
-    kinds = len(data["facts"].get("kinds", {}))
+    fact_kinds = data["facts"].get("kinds", {})
+    kind_count = len(fact_kinds)
 
     # Format fact count
-    if facts_total >= 1000:
-        facts_str = f"{facts_total / 1000:.1f}k"
-    else:
-        facts_str = str(facts_total)
+    facts_str = _format_count(facts_total)
 
-    parts = [f"{kinds} boundaries, {ticks_total} ticks, {facts_str} facts"]
+    parts = [f"{kind_count} kinds", f"{facts_str} facts"]
+
+    # Time range from earliest/latest across all kinds
+    time_range = _time_range(fact_kinds)
+    if time_range:
+        parts.append(time_range)
 
     freshness = data.get("freshness")
     if freshness is not None:
         parts.append(f"fresh {_relative_time(freshness)}")
 
-    text = " | ".join(parts)
-    return Block.text(text, Style(), width=width)
+    text = " · ".join(parts)
+    return Block.text(text, p.metadata, width=width)
 
 
-def _render_summary(data: dict, width: int) -> Block:
-    """Ticks-first table with sparkline + count + freshness + payload keys.
+# ---------------------------------------------------------------------------
+# SUMMARY — kind table with content gist
+# ---------------------------------------------------------------------------
 
-    When no ticks exist, promotes fact kind table to primary view.
-    """
-    rows: list[Block] = []
-    header_style = Style(bold=True)
-    dim_style = Style(dim=True)
 
-    tick_names = data["ticks"].get("names", {})
+def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
+    """Kind table: name + sparkline + count + freshness + latest content gist."""
     fact_kinds = data["facts"].get("kinds", {})
-    facts_total = data["facts"]["total"]
-    kind_count = len(fact_kinds)
 
-    if tick_names:
-        # Ticks section — primary
-        rows.append(Block.text("Ticks", header_style, width=width))
-        rows.append(_tick_table(tick_names, width))
-        rows.append(Block.empty(width, 1))
+    if not fact_kinds:
+        return Block.text("(empty store)", p.metadata, width=width)
 
-        # Facts footer — secondary
-        if kind_count > 0:
-            kind_list = ", ".join(list(fact_kinds.keys())[:5])
-            if kind_count > 5:
-                kind_list += f" (+{kind_count - 5})"
-            footer = f"{facts_total} facts across {kind_count} kinds: {kind_list}"
-            rows.append(Block.text(footer, dim_style, width=width))
-    elif kind_count > 0:
-        # No ticks — promote fact kind table to primary
-        rows.append(Block.text("Facts", header_style, width=width))
-        rows.append(_kind_table(fact_kinds, width, show_sample=True))
-    else:
-        return Block.text("(empty store)", dim_style, width=width)
-
-    return join_vertical(*rows)
-
-
-def _render_detailed(data: dict, width: int) -> Block:
-    """Per-tick section with header + latest payload via shape_lens at zoom 1."""
     rows: list[Block] = []
-    header_style = Style(bold=True)
-    dim_style = Style(dim=True)
 
-    # Tick sections
+    # Compute column widths
+    max_name = max(len(str(k)) for k in fact_kinds) if fact_kinds else 10
+    name_col = min(max_name + 2, width // 3)
+
+    # Sparkline data lives in ticks, but we render facts-first
+    # Get sparklines from ticks if available, keyed by name
     tick_names = data["ticks"].get("names", {})
-    for name, info in tick_names.items():
-        count = info["count"]
-        fresh = _relative_time(info["latest"]) if "latest" in info else "?"
-        rows.append(Block.text(
-            f"[{name}] {count} ticks, fresh {fresh}",
-            header_style, width=width,
-        ))
+    tick_sparklines = {name: info.get("sparkline", "") for name, info in tick_names.items()}
 
-        payload = info.get("latest_payload")
-        if payload:
-            body = _shape_lens(payload, zoom=1, width=width - 2)
-            rows.append(body)
-        rows.append(Block.empty(width, 1))
-
-    # Fact summary
-    fact_kinds = data["facts"].get("kinds", {})
-    if fact_kinds:
-        rows.append(Block.text("Facts", header_style, width=width))
-        rows.append(_kind_table(fact_kinds, width, show_sample=True))
-
-    if not rows:
-        return Block.text("(empty store)", dim_style, width=width)
-
-    # Remove trailing empty
-    while rows and rows[-1].height == 1:
-        text = "".join(c.char for c in rows[-1].row(0)).strip()
-        if text == "":
-            rows.pop()
-        else:
-            break
-
-    return join_vertical(*rows)
-
-
-def _render_full(data: dict, width: int) -> Block:
-    """Tick payloads at zoom 2 + recent fact payloads per kind."""
-    rows: list[Block] = []
-    header_style = Style(bold=True)
-    dim_style = Style(dim=True)
-
-    # Tick sections with full payloads
-    tick_names = data["ticks"].get("names", {})
-    for name, info in tick_names.items():
-        count = info["count"]
-        fresh = _relative_time(info["latest"]) if "latest" in info else "?"
-        rows.append(Block.text(
-            f"[{name}] {count} ticks, fresh {fresh}",
-            header_style, width=width,
-        ))
-
-        payload = info.get("latest_payload")
-        if payload:
-            body = _shape_lens(payload, zoom=2, width=width - 2)
-            rows.append(body)
-        rows.append(Block.empty(width, 1))
-
-    # Fact sections with recent payloads
-    fact_kinds = data["facts"].get("kinds", {})
     for kind, info in fact_kinds.items():
         count = info["count"]
-        fresh = _relative_time(info["latest"]) if "latest" in info else "?"
-        rows.append(Block.text(
-            f"[{kind}] {count} facts, fresh {fresh}",
-            header_style, width=width,
-        ))
+        freshness_dt = info.get("latest")
+        fresh_str = _relative_time(freshness_dt) if freshness_dt else ""
+        sparkline = tick_sparklines.get(kind, "")
 
+        # Kind name — colored
+        kind_style = p.kind_style(kind)
+        name_text = str(kind).ljust(name_col)[:name_col]
+
+        # Stats — metadata styled
+        count_str = _format_count(count)
+        stats = f" {sparkline}  {count_str:>5}  {fresh_str:>8}"
+
+        # Content gist from latest payload
+        gist = ""
+        sample = info.get("sample_payload")
+        if isinstance(sample, dict):
+            used = len(name_text) + len(stats) + 2
+            remaining = width - used
+            if remaining > 15:
+                gist = content_gist(kind, sample, remaining)
+
+        # Build composite line with styled segments
+        # For now: kind name in kind color, rest in metadata
+        line = name_text + stats
+        if gist:
+            line += "  " + gist
+        line = line[:width]
+
+        # Apply kind color to the name portion only via a full-line block
+        # (Block.text is single-style; for multi-style we'd need Span/Line)
+        # Pragmatic: use kind_style for the whole row — the gist is the content
+        rows.append(Block.text(line, kind_style, width=width))
+
+    return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
+# DETAILED — per-kind sections with recent content
+# ---------------------------------------------------------------------------
+
+
+def _render_detailed(data: dict, width: int, p: LoopsPalette) -> Block:
+    """Per-kind sections with last 3 items, counts as header metadata."""
+    fact_kinds = data["facts"].get("kinds", {})
+
+    if not fact_kinds:
+        return Block.text("(empty store)", p.metadata, width=width)
+
+    rows: list[Block] = []
+
+    for kind, info in fact_kinds.items():
+        count = info["count"]
+        freshness_dt = info.get("latest")
+        fresh_str = _relative_time(freshness_dt) if freshness_dt else ""
+        count_str = _format_count(count)
+
+        # Section header: kind name + count + freshness
+        header = f"{kind} ({count_str})  {fresh_str}"
+        kind_style = p.kind_style(kind)
+        rows.append(Block.text(header, Style(bold=True, fg=kind_style.fg), width=width))
+
+        # Recent items as content gists
         recent = info.get("recent", [])
         if recent:
             for payload in recent[:3]:
-                body = _shape_lens(payload, zoom=2, width=width - 2)
-                rows.append(body)
+                if isinstance(payload, dict):
+                    gist = content_gist(kind, payload, width - 4)
+                    rows.append(Block.text(f"  {gist}", p.content, width=width))
+        elif info.get("sample_payload"):
+            gist = content_gist(kind, info["sample_payload"], width - 4)
+            rows.append(Block.text(f"  {gist}", p.content, width=width))
+
         rows.append(Block.empty(width, 1))
 
-    if not rows:
-        return Block.text("(empty store)", dim_style, width=width)
-
     # Remove trailing empty
-    while rows and rows[-1].height == 1:
-        text = "".join(c.char for c in rows[-1].row(0)).strip()
-        if text == "":
-            rows.pop()
+    _strip_trailing_empty(rows)
+
+    return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
+# FULL — bordered card with topline and kind sections
+# ---------------------------------------------------------------------------
+
+
+def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
+    """Bordered card: topline summary, kind sections sorted by recency."""
+    fact_kinds = data["facts"].get("kinds", {})
+
+    if not fact_kinds:
+        return Block.text("(empty store)", p.metadata, width=width)
+
+    # Inner width (border takes 2 chars)
+    inner_w = width - 2
+
+    rows: list[Block] = []
+
+    # Sort kinds by latest activity (most recent first)
+    _epoch_min = datetime.min.replace(tzinfo=timezone.utc)
+    sorted_kinds = sorted(
+        fact_kinds.items(),
+        key=lambda kv: _ensure_utc(kv[1]["latest"]) if isinstance(kv[1].get("latest"), datetime) else _epoch_min,
+        reverse=True,
+    )
+
+    for i, (kind, info) in enumerate(sorted_kinds):
+        count = info["count"]
+        freshness_dt = info.get("latest")
+        fresh_str = _relative_time(freshness_dt) if freshness_dt else "never"
+        count_str = _format_count(count)
+        kind_style = p.kind_style(kind)
+
+        # Kind header: name left, count + freshness right
+        right = f"{count_str} · {fresh_str}"
+        left = kind
+        # Fill with dots between left and right
+        fill_len = inner_w - len(left) - len(right) - 2
+        if fill_len > 2:
+            fill = " " + "·" * fill_len + " "
         else:
-            break
+            fill = "  "
+        header_line = left + fill + right
+        rows.append(Block.text(
+            header_line,
+            Style(bold=True, fg=kind_style.fg),
+            width=inner_w,
+        ))
 
-    return join_vertical(*rows)
+        # Content: latest items
+        recent = info.get("recent", [])
+        if recent:
+            for payload in recent[:3]:
+                if isinstance(payload, dict):
+                    gist = content_gist(kind, payload, inner_w - 2)
+                    rows.append(Block.text(f"  {gist}", p.content, width=inner_w))
+        elif info.get("sample_payload"):
+            gist = content_gist(kind, info["sample_payload"], inner_w - 2)
+            rows.append(Block.text(f"  {gist}", p.content, width=inner_w))
+        else:
+            rows.append(Block.text("  (no data yet)", p.metadata, width=inner_w))
 
+        # Separator between kinds (not after last)
+        if i < len(sorted_kinds) - 1:
+            rows.append(Block.empty(inner_w, 1))
 
-def _tick_table(ticks: dict, width: int) -> Block:
-    """Render a tick name -> sparkline + count + freshness + payload keys table."""
-    if not ticks:
-        return Block.empty(width, 1)
+    inner = join_vertical(*rows)
 
-    rows: list[Block] = []
-    dim_style = Style(dim=True)
+    # Topline summary as border title
+    facts_total = data["facts"]["total"]
+    kind_count = len(fact_kinds)
+    freshness = data.get("freshness")
+    title_parts = [f"{kind_count} kinds", f"{_format_count(facts_total)} facts"]
+    if freshness is not None:
+        title_parts.append(f"fresh {_relative_time(freshness)}")
+    title = " · ".join(title_parts)
 
-    max_name = max(len(str(k)) for k in ticks)
-    name_col = min(max_name + 2, width // 3)
-
-    for name, info in ticks.items():
-        count = info["count"]
-        fresh = _relative_time(info["latest"]) if "latest" in info else ""
-        sparkline = info.get("sparkline", "")
-        payload_keys = info.get("payload_keys", [])
-
-        name_text = str(name).ljust(name_col)[:name_col]
-        stats = f" {sparkline}  {count:>4}  {fresh:>8}"
-
-        line = name_text + stats
-
-        # Append payload key names if available
-        if payload_keys:
-            remaining = width - len(line) - 2
-            if remaining > 10:
-                keys_str = ", ".join(payload_keys[:4])
-                if len(payload_keys) > 4:
-                    keys_str += ", \u2026"
-                if len(keys_str) > remaining:
-                    keys_str = keys_str[:remaining - 1] + "\u2026"
-                line += "  " + keys_str
-
-        line = line[:width]
-        rows.append(Block.text(line, dim_style, width=width))
-
-    return join_vertical(*rows)
+    return border(inner, ROUNDED, p.chrome, title=title, title_style=p.header)
 
 
-def _kind_table(kinds: dict, width: int, *, show_sample: bool) -> Block:
-    """Render a kind -> stats table."""
-    if not kinds:
-        return Block.empty(width, 1)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    rows: list[Block] = []
-    dim_style = Style(dim=True)
 
-    # Calculate column widths
-    max_name = max(len(str(k)) for k in kinds)
-    name_col = min(max_name + 2, width // 3)
+def _format_count(n: int) -> str:
+    """Human-friendly count: 1703 -> '1.7k', 42 -> '42'."""
+    if n >= 10_000:
+        return f"{n // 1000}k"
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
 
-    for name, info in kinds.items():
-        count = info["count"]
-        fresh = _relative_time(info["latest"]) if "latest" in info else ""
 
-        # Build line: name  count  freshness  [sample gist]
-        name_text = str(name).ljust(name_col)[:name_col]
-        stats = f"{count:>6}  {fresh:>8}"
-
-        line = name_text + stats
-
-        # Append sample payload gist if available
-        if show_sample and "sample_payload" in info:
-            sample = info["sample_payload"]
-            remaining = width - len(line) - 2
-            if remaining > 10 and isinstance(sample, dict):
-                gist_keys = ", ".join(list(sample.keys())[:4])
-                if len(gist_keys) > remaining:
-                    gist_keys = gist_keys[:remaining - 1] + "\u2026"
-                line += "  " + gist_keys
-
-        line = line[:width]
-        rows.append(Block.text(line, dim_style, width=width))
-
-    return join_vertical(*rows)
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalize to UTC — assume naive datetimes are UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _relative_time(dt: datetime) -> str:
@@ -273,7 +273,7 @@ def _relative_time(dt: datetime) -> str:
     if not isinstance(dt, datetime):
         return "?"
     now = datetime.now(timezone.utc)
-    delta = now - dt
+    delta = now - _ensure_utc(dt)
     seconds = int(delta.total_seconds())
 
     if seconds < 0:
@@ -288,3 +288,39 @@ def _relative_time(dt: datetime) -> str:
         return f"{hours}h ago"
     days = hours // 24
     return f"{days}d ago"
+
+
+def _time_range(kinds: dict) -> str:
+    """Format time range across all kinds: 'Feb 28 – Mar 1'."""
+    earliest = None
+    latest = None
+    for info in kinds.values():
+        e = info.get("earliest")
+        l = info.get("latest")
+        if isinstance(e, datetime):
+            e = _ensure_utc(e)
+            if earliest is None or e < earliest:
+                earliest = e
+        if isinstance(l, datetime):
+            l = _ensure_utc(l)
+            if latest is None or l > latest:
+                latest = l
+
+    if earliest is None or latest is None:
+        return ""
+
+    start = earliest.strftime("%b %d")
+    end = latest.strftime("%b %d")
+    if start == end:
+        return start
+    return f"{start} – {end}"
+
+
+def _strip_trailing_empty(rows: list[Block]) -> None:
+    """Remove trailing empty/whitespace-only rows in place."""
+    while rows and rows[-1].height == 1:
+        text = "".join(c.char for c in rows[-1].row(0)).strip()
+        if text == "":
+            rows.pop()
+        else:
+            break

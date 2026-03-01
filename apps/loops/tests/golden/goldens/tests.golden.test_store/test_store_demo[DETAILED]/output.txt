@@ -1,9 +1,6 @@
-[disk] 8 ticks, fresh 5m ago
-fs: /dev/sda1, pct: 42%, mount: /
+disk (20)  5m ago
+  /dev/sda1
+  /dev/sda2
 
-[memory] 4 ticks, fresh 5m ago
-used_mb: 4096, total_mb: 16384
-
-Facts
-disk        20    5m ago  fs, pct, mount
-memory      22    5m ago  used_mb, total_mb
+memory (22)  5m ago
+  {'used_mb': 4096, 'total_mb': 16384}

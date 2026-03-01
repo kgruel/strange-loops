@@ -80,17 +80,16 @@ class TestMinimal:
         data = _make_summary()
         block = store_view(data, Zoom.MINIMAL, 80)
         text = _block_to_text(block)
-        assert "3 boundaries" in text
-        assert "15 ticks" in text
+        assert "3 kinds" in text
         assert "6.5k facts" in text or "6462" in text or "6.4k" in text
 
-    def test_ticks_before_facts(self):
+    def test_kinds_before_facts(self):
         data = _make_summary()
         block = store_view(data, Zoom.MINIMAL, 80)
         text = _block_to_text(block)
-        tick_pos = text.index("ticks")
+        kinds_pos = text.index("kinds")
         fact_pos = text.index("facts")
-        assert tick_pos < fact_pos
+        assert kinds_pos < fact_pos
 
     def test_shows_freshness(self):
         data = _make_summary()
@@ -106,46 +105,32 @@ class TestMinimal:
 
 
 class TestSummary:
-    def test_shows_ticks_header(self):
+    def test_shows_kind_names(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
-        assert "Ticks" in text
+        assert "hn.story" in text
+        assert "rss.item" in text
 
-    def test_shows_tick_names(self):
+    def test_shows_counts(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
-        assert "podcast.huberman" in text
-        assert "hn.top" in text
+        assert "3.2k" in text  # hn.story count
+        assert "2.8k" in text  # rss.item count
 
-    def test_shows_sparkline(self):
+    def test_shows_content_gist(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
-        # Sparkline chars should be present
-        assert "▃" in text or "▅" in text or "▇" in text
+        # Content gist from sample_payload title field
+        assert "Show HN" in text or "Episode 42" in text
 
-    def test_shows_payload_keys(self):
+    def test_shows_freshness(self):
         data = _make_summary()
         block = store_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
-        assert "episode_count" in text or "story_count" in text
-
-    def test_shows_fact_footer(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "6462 facts" in text
-        assert "3 kinds" in text
-
-    def test_no_facts_section_header(self):
-        """SUMMARY should not have a 'Facts' header — just a footer line."""
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        # "Facts" as a standalone header line should not appear
-        assert "Facts\n" not in text.replace(" ", "")
+        assert "ago" in text
 
     def test_non_empty(self):
         data = _make_summary()
@@ -154,18 +139,25 @@ class TestSummary:
 
 
 class TestDetailed:
-    def test_shows_tick_sections(self):
+    def test_shows_kind_sections(self):
         data = _make_summary()
         block = store_view(data, Zoom.DETAILED, 80)
         text = _block_to_text(block)
-        assert "podcast.huberman" in text
-        assert "hn.top" in text
+        assert "hn.story" in text
+        assert "rss.item" in text
 
-    def test_shows_tick_counts(self):
+    def test_shows_kind_counts(self):
         data = _make_summary()
         block = store_view(data, Zoom.DETAILED, 80)
         text = _block_to_text(block)
-        assert "8 ticks" in text
+        assert "3.2k" in text  # hn.story count
+
+    def test_shows_content_gist(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.DETAILED, 80)
+        text = _block_to_text(block)
+        # sample_payload gist appears under kind section
+        assert "Show HN" in text or "Episode 42" in text
 
     def test_non_empty(self):
         data = _make_summary()
@@ -174,11 +166,26 @@ class TestDetailed:
 
 
 class TestFull:
-    def test_shows_tick_payloads(self):
+    def test_shows_content_gist(self):
         data = _make_summary()
         block = store_view(data, Zoom.FULL, 80)
         text = _block_to_text(block)
-        assert "episode_count" in text or "story_count" in text
+        # Content gist from sample_payload
+        assert "Show HN" in text or "Episode 42" in text
+
+    def test_has_border(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.FULL, 80)
+        text = _block_to_text(block)
+        # ROUNDED border chars
+        assert "╭" in text or "│" in text
+
+    def test_shows_topline_summary(self):
+        data = _make_summary()
+        block = store_view(data, Zoom.FULL, 80)
+        text = _block_to_text(block)
+        assert "3 kinds" in text
+        assert "facts" in text
 
     def test_non_empty(self):
         data = _make_summary()

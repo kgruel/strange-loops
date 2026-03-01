@@ -44,11 +44,8 @@ Session log — chronological facts.
 Store inspection — ticks, facts, freshness.
 
 ```
-Ticks                                                                           
-disk     ▁▂▃▅▇█▅▃     8    5m ago  fs, pct, mount                               
-memory   ▁▃▅▇     4    5m ago  used_mb, total_mb                                
-                                                                                
-42 facts across 2 kinds: disk, memory
+disk     ▁▂▃▅▇█▅▃     20    5m ago  /dev/sda1                                   
+memory   ▁▃▅▇     22    5m ago  {'used_mb': 4096, 'total_mb': 16384}
 ```
 
 ## `start`

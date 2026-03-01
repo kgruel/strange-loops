@@ -5,6 +5,48 @@ live in `experiments/LOG.md`.
 
 ---
 
+## 2026-02-28 — Full Painted rendering + golden tests + store targeting
+
+**Three parallel subtasks, merged sequentially.** Completed the full Painted
+rendering migration for the loops CLI. Every user-facing output now goes through
+either `run_cli` (display commands) or `show(Block.text())` (action commands).
+
+**Golden snapshot tests (subtask 1).** 45 parametrized tests covering all 9
+display commands × 4 zoom levels. Infrastructure: `Golden` dataclass in
+`tests/golden/conftest.py`, deterministic fixtures with fixed timestamps in
+`fixtures.py`, `block_to_text` helper. Auto-generated `apps/loops/docs/CLI.md`
+from the same fixtures via `test_cli_docs.py` (regenerated with `--update-goldens`).
+
+**Consistency fixes (subtask 2).** Extracted `render_status`/`render_log` from
+`commands/session.py` into dedicated `lenses/status.py` and `lenses/log.py` —
+unified to standard `(data, zoom, width) -> Block` signature. Added distinct FULL
+zoom level to `compile` (source path + repr of ops) and `validate` (resolved
+absolute paths). Moved test warning handling from `_run_test` render closure into
+the `test` lens itself. session.py now purely data: `fetch_status`, `fetch_log`,
+`_resolve_local_store`, emit helpers.
+
+**Store targeting (subtask 3).** New `_resolve_named_store(name)` in main.py
+composes `resolve_vertex()` from `lang.population` with `_resolve_vertex_store_path()`.
+`loops status meta`, `loops log meta --kind task`, `loops store meta` all resolve
+vertex by name. Added `--kind` flag to `_run_status` via pre-parser.
+
+**Merge sequence and fixes.** Golden tests merged first (146 → 191 tests).
+Consistency merged second — required import fixes in 3 golden test files
+(`test_status.py`, `test_log.py`, `test_cli_docs.py`) since rendering moved from
+`commands/session` to `lenses/`. Goldens regenerated. Store targeting merged last,
+clean. All worktree workers hit stale Painted venv issue (relative path dep
+`painted = { path = "../../../painted" }` doesn't resolve from `~/.subtask/workspaces/`).
+Workaround: verify worker test claims against actual baseline, merge and test on main.
+
+**Painted help investigation.** Identified that `run_cli --help` suppresses
+command-specific args (`--help` intercepted before argparse, `_build_help_data()`
+hardcodes only rendering flags). Opened subtask in painted project: command help
+primary/prominent, rendering flags secondary/dim, zoom-aware help display.
+
+**Tests:** 191 passed (146 original + 45 golden).
+
+---
+
 ## 2026-02-28 — Session dissolution + cells→painted migration + run_cli harness
 
 **Three interconnected changes in one arc.** Session dissolution (dissolve

@@ -174,14 +174,11 @@ Next: orchestrator skill (drive the lifecycle with judgment, not just wrapping
 CLI commands) and Claude/Codex harnesses (different commands, same fact pipeline).
 See `apps/strange-loops/DESIGN.md` for architecture.
 
-**apps/loops** is the general-purpose CLI (validate, test, run, compile, start,
-store, status, log, emit). **apps/hlab** is the first domain app. **apps/reader**
-is the second domain app. `experiments/homelab/` is archived.
-
-**Display commands through painted run_cli.** `status`, `log`, and `store` are
-now routed through painted's `run_cli` harness (per-subcommand pattern). Each
-has `fetch() -> data` + `render(ctx, data) -> Block`. Next: extend to `start`
-command, then evaluate remaining commands.
+**apps/loops** — full Painted rendering. All 9 display commands through `run_cli`
+with zoom-aware lenses, all 5 action commands through `show(Block.text())`. Zero
+raw `print()`. 45 golden snapshot tests lock output at all 4 zoom levels.
+Auto-generated `apps/loops/docs/CLI.md`. Store targeting: `loops status meta`,
+`loops log meta --kind task`, `loops store meta`. 191 tests.
 
 **Meta-discussion workspace** at `~/Documents/meta-discussion/` — cross-project
 analysis of development patterns (test layers, dev harness, dissolution method,
@@ -227,15 +224,29 @@ apps/loops/
 │   ├── main.py               # CLI: validate/test/run/start/store/status/log/emit/ls/add/rm
 │   ├── commands/
 │   │   ├── pop.py            # Population verbs: ls, add, rm, export, import, merge
-│   │   ├── session.py        # Local store: fetch/render for status + log (via run_cli)
+│   │   ├── session.py        # Local store: fetch_status, fetch_log, emit helpers
 │   │   └── store.py          # Store viewer: fetch/render for store (via run_cli)
-│   └── lenses/
-│       └── store.py          # Zoom-aware store rendering
+│   └── lenses/               # Zoom-aware rendering (data, zoom, width) -> Block
+│       ├── status.py         # Session status: decisions, threads, tasks, changes
+│       ├── log.py            # Session log: chronological facts
+│       ├── store.py          # Store inspection: ticks, facts, freshness
+│       ├── start.py          # Vertex results: per-tick payloads
+│       ├── compile.py        # AST structure: loops, sources, routes
+│       ├── validate.py       # Validation results: per-file pass/fail
+│       ├── test.py           # Test results: parse pipeline output
+│       ├── run.py            # Streaming: facts and ticks
+│       └── pop.py            # Population table: template rows
+├── docs/
+│   └── CLI.md                # Auto-generated from golden test fixtures
 └── tests/
     ├── test_cli.py           # Core CLI tests
     ├── test_emit.py          # Emit command tests (6 tests)
     ├── test_session.py       # Session command tests (20 tests)
-    └── test_population.py    # Population CLI integration tests (30 tests)
+    ├── test_population.py    # Population CLI integration tests (30 tests)
+    └── golden/               # Snapshot tests: every command × every zoom level
+        ├── conftest.py       # Golden fixture + --update-goldens flag
+        ├── fixtures.py       # Deterministic sample data (fixed timestamps)
+        └── test_*.py         # 9 test files, 45 parametrized tests
 
 apps/strange-loops/              # Task orchestration built on loops
 ├── dev                          # Dev harness (./dev check, test, lint, fmt)
@@ -269,16 +280,18 @@ apps/strange-loops/              # Task orchestration built on loops
 - **tick.name IS the stack** — No re-grouping in render
 - **Zoom rendering** — Zoom 0-3 controls detail level via painted
 - **Polling** — `every "30s"` for live updates
-- **run_cli harness** — Display commands (status, log, store) route through
-  painted's `run_cli` for automatic zoom/mode/format resolution, JSON output,
-  and styled error blocks
+- **run_cli harness** — All 9 display commands route through painted's `run_cli`
+  with zoom-aware lenses. Action commands use `show(Block.text())`. Zero raw `print()`.
+- **Store targeting** — `loops status meta`, `loops log meta --kind task`,
+  `loops store meta` — vertex name resolution for query commands
+- **Golden tests** — 45 snapshot tests lock output at all 4 zoom levels.
+  Auto-generated `apps/loops/docs/CLI.md` from fixtures.
 
 ## Next Steps
 
-1. **Extend run_cli to `start` command** — `loops start` already renders via
-   painted but doesn't go through `run_cli`. Wrap it to gain automatic
-   zoom/mode/format resolution and consistent error handling. The
-   `handlers={OutputMode.INTERACTIVE: ...}` pattern already proven in `store`.
+1. **Painted help augmentation** — `run_cli --help` currently suppresses
+   command-specific args. Open subtask in painted to fix: command help
+   primary/prominent, rendering flags secondary/dim, zoom-aware help display.
 2. **Self-feeding detection** — `Fact.origin` now distinguishes external
    observations (`origin=""`) from derived facts. Build a query or fold that
    computes exhaust ratio: "what fraction of this loop's input is its own
@@ -337,6 +350,17 @@ apps/strange-loops/              # Task orchestration built on loops
   no safeguard logic exists yet. Becomes urgent when LLM-as-peer is implemented.
 
 ## Resolved
+
+86. ~~Full Painted rendering + golden tests + store targeting~~ — All 9 display
+    commands through `run_cli` with zoom-aware lenses (`lenses/` directory: status,
+    log, store, start, compile, validate, test, run, pop). All 5 action commands
+    through `show(Block.text())`. Zero raw `print()`. 45 golden snapshot tests
+    (every command × 4 zoom levels) with `--update-goldens` regeneration.
+    Auto-generated `apps/loops/docs/CLI.md` from fixtures. Store targeting:
+    `_resolve_named_store()` composes `resolve_vertex()` + vertex store path
+    extraction. `--kind` filter on status. Consistency pass: extracted status/log
+    rendering from session.py to dedicated lenses, added FULL zoom to compile/validate,
+    moved test warning into lens. 191 tests (146 + 45 golden).
 
 85. ~~Session dissolution + cells→painted + run_cli harness~~ — Dissolved `loops session`
     subcommand group. `status`/`log` promoted to top-level, work on any local store via

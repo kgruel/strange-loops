@@ -258,7 +258,11 @@ def _render(ctx: CliContext, state: DashboardState) -> Block:
 
     if ctx.zoom == Zoom.MINIMAL:
         return _render_minimal(state, ctx.width)
-    return _render_summary(state, ctx.width)
+    if ctx.zoom == Zoom.SUMMARY:
+        return _render_summary(state, ctx.width)
+    if ctx.zoom == Zoom.DETAILED:
+        return _render_detailed(state, ctx.width)
+    return _render_full(state, ctx.width)
 
 
 def _render_minimal(state: DashboardState, width: int) -> Block:
@@ -279,26 +283,44 @@ def _render_minimal(state: DashboardState, width: int) -> Block:
     return truncate(Block.text(", ".join(parts), p.muted), width)
 
 
-def _render_summary(state: DashboardState, width: int) -> Block:
-    """Zoom 1+: columnar table view."""
+_CLOSED_STATUSES = {"closed"}
+
+# Column width for closed task name alignment
+_COL_CLOSED_NAME = 22
+
+
+def _sort_recent_first(tasks: list[TaskRow]) -> list[TaskRow]:
+    """Sort tasks by activity, most recent first. No-activity sorts last."""
+    from datetime import datetime, timezone
+
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return sorted(tasks, key=lambda t: t.activity or epoch, reverse=True)
+
+
+def _separator(p) -> "Block":
+    """Horizontal rule spanning the table width."""
+    from painted.block import Block
+
+    total_width = _COL_TASK + _COL_STATUS + _COL_CHANGES + _COL_ACTIVITY
+    return Block.text("  " + "\u2500" * (total_width - 2), p.muted)
+
+
+def _render_task_table(
+    tasks: list[TaskRow],
+    blocks: list["Block"],
+    p,
+    *,
+    show_metadata: bool = False,
+    row_gap: bool = False,
+) -> None:
+    """Render tasks as a columnar table. Mutates blocks list."""
     from painted import Style
     from painted.block import Block
-    from painted.compose import join_horizontal, join_vertical
-    from painted.palette import current_palette
+    from painted.compose import join_horizontal
 
-    p = current_palette()
-    blocks: list[Block] = []
+    if not tasks:
+        return
 
-    # Project header
-    if state.project:
-        blocks.append(Block.text(_project_header(state.project), p.accent))
-        blocks.append(Block.text("", p.muted, width=1))
-
-    if not state.tasks:
-        blocks.append(Block.text("No tasks.", p.muted))
-        return join_vertical(*blocks)
-
-    # Column header
     header_style = Style(bold=True)
     header = join_horizontal(
         Block.text("  Task", header_style, width=_COL_TASK),
@@ -307,26 +329,124 @@ def _render_summary(state: DashboardState, width: int) -> Block:
         Block.text("Activity", header_style, width=_COL_ACTIVITY),
     )
     blocks.append(header)
+    blocks.append(_separator(p))
 
-    # Separator
-    total_width = _COL_TASK + _COL_STATUS + _COL_CHANGES + _COL_ACTIVITY
-    blocks.append(Block.text("  " + "\u2500" * (total_width - 2), p.muted))
-
-    # Task rows
-    for task in state.tasks:
-        style = _status_style(task.status, p)
+    for task in tasks:
+        name_style = p.muted if task.status in _CLOSED_STATUSES else p.accent
+        status_style = _status_style(task.status, p)
         activity = _relative_time(task.activity)
 
-        row1 = join_horizontal(
-            Block.text(f"  {task.name}", p.accent, width=_COL_TASK),
-            Block.text(task.status, style, width=_COL_STATUS),
+        row = join_horizontal(
+            Block.text(f"  {task.name}", name_style, width=_COL_TASK),
+            Block.text(task.status, status_style, width=_COL_STATUS),
             Block.text(task.changes, p.muted, width=_COL_CHANGES),
             Block.text(activity, p.muted, width=_COL_ACTIVITY),
         )
-        blocks.append(row1)
+        blocks.append(row)
 
         if task.title:
-            blocks.append(Block.text(f"  \u2514 {task.title}", p.muted))
+            title_style = p.muted if task.status in _CLOSED_STATUSES else p.muted
+            blocks.append(Block.text(f"  \u2514 {task.title}", title_style))
+        if show_metadata and task.worktree:
+            blocks.append(Block.text(f"    worktree: {task.worktree}", p.muted))
+        if row_gap:
+            blocks.append(Block.text("", p.muted, width=1))
+
+
+def _render_summary(state: DashboardState, width: int) -> Block:
+    """Zoom 1 (default): table for visible tasks, closed collapsed."""
+    from painted.block import Block
+    from painted.compose import join_vertical
+    from painted.palette import current_palette
+
+    p = current_palette()
+    blocks: list[Block] = []
+
+    if state.project:
+        blocks.append(Block.text(_project_header(state.project), p.accent))
+        blocks.append(Block.text("", p.muted, width=1))
+
+    visible = _sort_recent_first(
+        [t for t in state.tasks if t.status not in _CLOSED_STATUSES]
+    )
+    closed = [t for t in state.tasks if t.status in _CLOSED_STATUSES]
+
+    if not visible and not closed:
+        blocks.append(Block.text("No tasks.", p.muted))
+        return join_vertical(*blocks)
+
+    _render_task_table(visible, blocks, p)
+
+    if closed:
+        blocks.append(_separator(p))
+        blocks.append(Block.text(f"  {len(closed)} closed", p.muted))
+
+    return join_vertical(*blocks)
+
+
+def _render_detailed(state: DashboardState, width: int) -> Block:
+    """Zoom 2 (-v): table with metadata, closed listed individually."""
+    from painted.block import Block
+    from painted.compose import join_horizontal, join_vertical
+    from painted.palette import current_palette
+
+    p = current_palette()
+    blocks: list[Block] = []
+
+    if state.project:
+        blocks.append(Block.text(_project_header(state.project), p.accent))
+        blocks.append(Block.text("", p.muted, width=1))
+
+    visible = _sort_recent_first(
+        [t for t in state.tasks if t.status not in _CLOSED_STATUSES]
+    )
+    closed = _sort_recent_first(
+        [t for t in state.tasks if t.status in _CLOSED_STATUSES]
+    )
+
+    if not visible and not closed:
+        blocks.append(Block.text("No tasks.", p.muted))
+        return join_vertical(*blocks)
+
+    _render_task_table(visible, blocks, p, show_metadata=True)
+
+    if closed:
+        blocks.append(_separator(p))
+        for task in closed:
+            activity = _relative_time(task.activity)
+            row = join_horizontal(
+                Block.text(f"  {task.name}", p.muted, width=_COL_CLOSED_NAME),
+                Block.text(activity, p.muted),
+            )
+            blocks.append(row)
+
+    return join_vertical(*blocks)
+
+
+def _render_full(state: DashboardState, width: int) -> Block:
+    """Zoom 3 (-vv): all tasks in table with metadata + store stats."""
+    from painted.block import Block
+    from painted.compose import join_vertical
+    from painted.palette import current_palette
+
+    p = current_palette()
+    blocks: list[Block] = []
+
+    if state.project:
+        blocks.append(Block.text(_project_header(state.project), p.accent))
+        blocks.append(Block.text("", p.muted, width=1))
+
+    all_tasks = _sort_recent_first(list(state.tasks))
+
+    if not all_tasks:
+        blocks.append(Block.text("No tasks.", p.muted))
+        return join_vertical(*blocks)
+
+    _render_task_table(all_tasks, blocks, p, show_metadata=True, row_gap=True)
+
+    blocks.append(Block.text(f"  Task store: {state.fact_total} facts", p.muted))
+    if state.project:
+        blocks.append(Block.text(f"  Project store: {state.project.total} facts", p.muted))
 
     return join_vertical(*blocks)
 
@@ -335,11 +455,20 @@ def _render_summary(state: DashboardState, width: int) -> Block:
 
 
 def run_dashboard(argv: list[str]) -> int:
-    """Entry point — delegates to painted run_cli."""
+    """Entry point — delegates to painted run_cli.
+
+    Default is static (print and quit). Pass --live for persistent view.
+    """
     from painted import run_cli
 
+    # Default to static — dashboard is a status command, not a TUI.
+    # --live must be explicit.
+    effective = list(argv)
+    if "--live" not in effective and "--static" not in effective:
+        effective.append("--static")
+
     return run_cli(
-        argv,
+        effective,
         render=_render,
         fetch=_fetch,
         fetch_stream=_fetch_stream,

@@ -147,6 +147,35 @@ Kind prefix (`session.`, `task.`, `worker.`) is the namespace within the task st
 and returns immediately. The harness process writes to the same SQLite store
 in WAL mode. No IPC, no sockets — shared store is the coordination channel.
 
+### Running a task end to end
+
+```bash
+# One-shot: create + assign worktree + spawn harness
+strange-loops task run tui-design \
+  --title "Design TUI layout" \
+  --harness sonnet \
+  --description "Research painted primitives and design a persistent dashboard TUI"
+
+# Watch live (polls every 2s, Ctrl-C to stop)
+strange-loops task log tui-design --follow
+
+# Review what the worker produced
+strange-loops task diff tui-design
+
+# Merge, then close
+strange-loops task merge tui-design
+strange-loops task close tui-design
+```
+
+Available harnesses (in `loops/harnesses/`):
+- `shell` — runs `{{command}}` raw. Use with `task send`.
+- `sonnet` — `claude -p` with sonnet, 25 turns, text output. Use with `task run`.
+- `codex`, `gemini-flash` — same pattern, different models.
+
+Mechanics: harness captures worker stdout line-by-line as `worker.output`
+facts. On exit, emits `worker.output.complete` + `task.stage` + `task.tick`.
+Worker runs in a git worktree at `.worktrees/<name>/` (full monorepo copy).
+
 ### Payload rendering
 
 Log renderer iterates all payload keys (`k=v` pairs), not a hardcoded
@@ -205,7 +234,7 @@ strange-loops project log [--since 7d] [--kind KIND] [--json]
 
 ## What's NOT built yet
 
-- No Claude/Codex harnesses — shell only (others are just different commands)
+- Harness visibility is final-output only — `claude -p --output-format text` shows result, not intermediate research
 - No TUI Surface — static painted blocks + live repaint only
 - No automatic stage advancement — explicit CLI commands
 - No peer-to-peer worker communication — hub-and-spoke only

@@ -1,0 +1,4 @@
+source #"env CLAUDECODE= claude -p --model opus --output-format text --allowedTools 'Bash,Read,Edit,Write,Glob,Grep,Notebook' --max-turns 200 {{prompt}}"#
+kind "worker.output"
+observer "opus"
+format "lines"

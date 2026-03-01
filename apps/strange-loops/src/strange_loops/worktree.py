@@ -94,7 +94,14 @@ def diff_stat(worktree_path: Path) -> str:
 
 
 def diff_full(worktree_path: Path) -> str:
-    """Run git diff in a worktree, return full diff output."""
+    """Run git diff in a worktree, return full diff output.
+
+    Combines unstaged changes, staged changes, and untracked files.
+    Untracked files are rendered as pseudo-diffs (new file mode).
+    """
+    parts = []
+
+    # Unstaged changes to tracked files
     result = subprocess.run(
         ["git", "diff"],
         cwd=worktree_path,
@@ -102,7 +109,60 @@ def diff_full(worktree_path: Path) -> str:
         capture_output=True,
         text=True,
     )
-    return result.stdout
+    if result.stdout:
+        parts.append(result.stdout)
+
+    # Staged changes
+    result = subprocess.run(
+        ["git", "diff", "--cached"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        parts.append(result.stdout)
+
+    # Untracked files as pseudo-diff entries
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for line in status_result.stdout.splitlines():
+        if not line.startswith("?? "):
+            continue
+        entry = line[3:]
+        entry_path = worktree_path / entry
+
+        if entry_path.is_file():
+            files: list[Path] = [entry_path]
+        elif entry_path.is_dir():
+            files = sorted(f for f in entry_path.rglob("*") if f.is_file())
+        else:
+            continue
+
+        for f in files:
+            rel = f.relative_to(worktree_path)
+            try:
+                content = f.read_text()
+            except (UnicodeDecodeError, PermissionError):
+                continue
+            lines = content.splitlines()
+            count = len(lines)
+            pseudo_diff = (
+                f"diff --git a/{rel} b/{rel}\n"
+                f"new file mode 100644\n"
+                f"--- /dev/null\n"
+                f"+++ b/{rel}\n"
+                f"@@ -0,0 +1,{count} @@\n"
+            )
+            pseudo_diff += "\n".join(f"+{l}" for l in lines) + "\n"
+            parts.append(pseudo_diff)
+
+    return "".join(parts)
 
 
 def current_branch(repo_root: Path) -> str:

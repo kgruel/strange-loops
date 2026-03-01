@@ -5,38 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from strange_loops import worktree
-
-
-@pytest.fixture
-def git_repo(tmp_path: Path) -> Path:
-    """Create a minimal git repo with an initial commit."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    (repo / "README.md").write_text("# Test\n")
-    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "init"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    return repo
 
 
 class TestCreate:
@@ -92,6 +61,44 @@ class TestDiffStat:
         (wt_path / "README.md").write_text("# Modified\n")
         stat = worktree.diff_stat(wt_path)
         assert "README.md" in stat
+
+
+class TestDiffFull:
+    def test_includes_unstaged_changes(self, git_repo: Path):
+        wt_path = worktree.create(git_repo, "diff-a", "main")
+        (wt_path / "README.md").write_text("# Modified\n")
+        diff = worktree.diff_full(wt_path)
+        assert "README.md" in diff
+        assert "+# Modified" in diff
+
+    def test_includes_staged_changes(self, git_repo: Path):
+        wt_path = worktree.create(git_repo, "diff-b", "main")
+        (wt_path / "staged.txt").write_text("staged content\n")
+        subprocess.run(["git", "add", "staged.txt"], cwd=wt_path, check=True, capture_output=True)
+        diff = worktree.diff_full(wt_path)
+        assert "staged.txt" in diff
+        assert "+staged content" in diff
+
+    def test_includes_untracked_file(self, git_repo: Path):
+        wt_path = worktree.create(git_repo, "diff-c", "main")
+        (wt_path / "new_doc.md").write_text("# New Doc\nSome content\n")
+        diff = worktree.diff_full(wt_path)
+        assert "new_doc.md" in diff
+        assert "+# New Doc" in diff
+        assert "+Some content" in diff
+
+    def test_includes_untracked_in_new_dir(self, git_repo: Path):
+        wt_path = worktree.create(git_repo, "diff-d", "main")
+        (wt_path / "docs").mkdir()
+        (wt_path / "docs" / "TUI.md").write_text("# TUI Design\n")
+        diff = worktree.diff_full(wt_path)
+        assert "TUI.md" in diff
+        assert "+# TUI Design" in diff
+
+    def test_empty_when_no_changes(self, git_repo: Path):
+        wt_path = worktree.create(git_repo, "diff-e", "main")
+        diff = worktree.diff_full(wt_path)
+        assert diff == ""
 
 
 class TestCurrentBranch:

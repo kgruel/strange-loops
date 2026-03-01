@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 
@@ -107,6 +108,56 @@ class TestRunHarness:
         assert "error" in complete["payload"]
 
 
+class TestAutoCommit:
+    def test_commits_on_success(self, tmp_path: Path, git_repo: Path):
+        """Successful harness run auto-commits any changes in the worktree."""
+        db = tmp_path / "data" / "tasks.db"
+        (git_repo / "worker_output.txt").write_text("result\n")
+
+        run_harness(db, "auto-commit-task", git_repo, "true", "shell", "tester")
+
+        log = subprocess.run(
+            ["git", "log", "--oneline"], cwd=git_repo, capture_output=True, text=True
+        )
+        assert "task(auto-commit-task): worker output" in log.stdout
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=git_repo, capture_output=True, text=True
+        )
+        assert status.stdout.strip() == ""
+
+    def test_no_commit_on_failure(self, tmp_path: Path, git_repo: Path):
+        """Failed harness run does not auto-commit partial work."""
+        db = tmp_path / "data" / "tasks.db"
+        (git_repo / "partial_output.txt").write_text("partial\n")
+
+        run_harness(db, "fail-task", git_repo, "false", "shell", "tester")
+
+        log = subprocess.run(
+            ["git", "log", "--oneline"], cwd=git_repo, capture_output=True, text=True
+        )
+        assert "task(fail-task): worker output" not in log.stdout
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=git_repo, capture_output=True, text=True
+        )
+        assert "partial_output.txt" in status.stdout
+
+    def test_silent_when_nothing_to_commit(self, tmp_path: Path, git_repo: Path):
+        """Successful run with no new changes doesn't fail."""
+        db = tmp_path / "data" / "tasks.db"
+
+        code = run_harness(db, "clean-task", git_repo, "true", "shell", "tester")
+        assert code == 0
+
+        log = subprocess.run(
+            ["git", "log", "--oneline"], cwd=git_repo, capture_output=True, text=True
+        )
+        lines = log.stdout.strip().splitlines()
+        assert len(lines) == 1
+        assert "init" in lines[0]
+
+
 class TestEachLoopParses:
     """Verify all .loop files in harnesses/ parse without error."""
 
@@ -115,7 +166,7 @@ class TestEachLoopParses:
 
         harness_dir = Path(__file__).resolve().parent.parent / "loops" / "harnesses"
         loop_files = sorted(harness_dir.glob("*.loop"))
-        assert len(loop_files) >= 4, f"Expected at least 4 .loop files, found {len(loop_files)}"
+        assert len(loop_files) >= 5, f"Expected at least 5 .loop files, found {len(loop_files)}"
 
         for loop_path in loop_files:
             loop = parse_loop_file(loop_path)

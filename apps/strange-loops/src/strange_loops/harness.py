@@ -75,20 +75,37 @@ def run_harness(
     )
 
     assert proc.stdout is not None
+    last_line = ""
     for line in proc.stdout:
         line = line.rstrip("\n")
+        last_line = line
         emit_fact(path, "worker.output", obs, {"task": task_name, "line": line})
 
     exit_code = proc.wait()
 
-    status = "ok" if exit_code == 0 else "error"
+    # Auto-commit any changes in the worktree on success (before tick)
+    if exit_code == 0:
+        subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"task({task_name}): worker output"],
+            cwd=worktree,
+            capture_output=True,
+        )
+        # Failures (nothing to commit, not a git repo, no user config) are silently ignored
+
+    # Detect max-turns exhaustion: claude -p exits 0 but prints the message
+    exhausted = exit_code == 0 and "max turns" in last_line.lower()
+
+    status = "exhausted" if exhausted else ("ok" if exit_code == 0 else "error")
     complete_payload: dict = {"task": task_name, "status": status, "returncode": exit_code}
     if exit_code != 0:
         complete_payload["error"] = f"Process exited with code {exit_code}"
+    if exhausted:
+        complete_payload["error"] = "Worker reached max turns limit"
     emit_fact(path, "worker.output.complete", obs, complete_payload)
 
     # Advance task stage and emit tick (boundary crossing)
-    stage = "completed" if exit_code == 0 else "errored"
+    stage = "exhausted" if exhausted else ("completed" if exit_code == 0 else "errored")
     emit_fact(path, "task.stage", obs, {"name": task_name, "status": stage})
     emit_tick(
         path,

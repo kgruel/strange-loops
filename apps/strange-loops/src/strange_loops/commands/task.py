@@ -20,6 +20,7 @@ from strange_loops import harness, worktree
 from strange_loops.lifecycle import fold_all_tasks, fold_task_state
 from strange_loops.store import (
     emit_fact,
+    filter_task_facts as _filter_task_facts,
     observer,
     parse_duration,
     render_log,
@@ -528,20 +529,6 @@ def cmd_task_close(args: argparse.Namespace) -> int:
     p = current_palette()
     show(Block.text(f"Task '{name}' closed.", p.success), file=sys.stdout)
     return 0
-
-
-def _filter_task_facts(facts: list[dict], name: str) -> list[dict]:
-    """Filter facts belonging to a specific task.
-
-    Matches payload["name"] == name (task.* facts) or
-    payload["task"] == name (worker.* facts).
-    """
-    result = []
-    for f in facts:
-        payload = f.get("payload", {})
-        if payload.get("name") == name or payload.get("task") == name:
-            result.append(f)
-    return result
 
 
 def cmd_task_log(args: argparse.Namespace) -> int:

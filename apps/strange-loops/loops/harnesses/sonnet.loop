@@ -1,4 +1,4 @@
-source #"env CLAUDECODE= claude -p --model sonnet --output-format text --allowedTools 'Bash,Read,Edit,Write,Glob,Grep' --max-turns 25 {{prompt}}"#
+source #"env CLAUDECODE= claude -p --model sonnet --output-format text --allowedTools 'Bash,Read,Edit,Write,Glob,Grep' --max-turns 50 {{prompt}}"#
 kind "worker.output"
 observer "sonnet"
 format "lines"

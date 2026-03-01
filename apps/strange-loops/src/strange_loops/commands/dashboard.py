@@ -77,6 +77,8 @@ def _status_style(status: str, palette):
         return palette.warning
     if status in ("errored",):
         return palette.error
+    if status in ("exhausted",):
+        return palette.warning  # TODO: needs its own semantic token (amber/yellow)
     # created, closed, unknown
     return palette.muted
 

@@ -121,6 +121,20 @@ def render_log_entry(fact: dict) -> None:
     show(Block.text(text, p.muted), file=sys.stdout)
 
 
+def filter_task_facts(facts: list[dict], name: str) -> list[dict]:
+    """Filter facts belonging to a specific task.
+
+    Matches payload["name"] == name (task.* facts) or
+    payload["task"] == name (worker.* facts).
+    """
+    result = []
+    for f in facts:
+        payload = f.get("payload", {})
+        if payload.get("name") == name or payload.get("task") == name:
+            result.append(f)
+    return result
+
+
 def render_log(facts: list[dict]) -> None:
     """Render facts as a date-grouped chronological log."""
     from painted import show

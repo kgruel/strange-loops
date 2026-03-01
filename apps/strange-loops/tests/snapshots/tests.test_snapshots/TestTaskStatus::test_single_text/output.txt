@@ -1,0 +1,5 @@
+  alpha  [working]  Implement auth module
+    harness: shell
+    worktree: /tmp/worktrees/alpha
+    worker: stopped exit=0
+    base: main

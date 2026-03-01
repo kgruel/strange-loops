@@ -1,0 +1,22 @@
+{
+  "total": 3,
+  "decisions": {
+    "auth": {
+      "topic": "auth",
+      "message": "Use JWT with refresh tokens"
+    }
+  },
+  "threads": {
+    "api-design": {
+      "name": "api-design",
+      "status": "open",
+      "message": "REST vs GraphQL for v2"
+    }
+  },
+  "plans": {
+    "next-sprint": {
+      "name": "next-sprint",
+      "status": "active"
+    }
+  }
+}

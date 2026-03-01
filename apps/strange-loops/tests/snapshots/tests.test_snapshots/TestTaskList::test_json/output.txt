@@ -1,0 +1,22 @@
+[
+  {
+    "name": "alpha",
+    "title": "Implement auth module",
+    "base_branch": "main",
+    "description": "Add JWT authentication",
+    "harness": "shell",
+    "worktree": "/tmp/worktrees/alpha",
+    "status": "working",
+    "worker": "stopped",
+    "exit_code": 0
+  },
+  {
+    "name": "beta",
+    "title": "Fix pagination bug",
+    "base_branch": "main",
+    "description": "",
+    "harness": "shell",
+    "worktree": "/tmp/worktrees/beta",
+    "status": "assigned"
+  }
+]

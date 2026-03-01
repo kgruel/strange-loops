@@ -1,0 +1,4 @@
+2025-01-15:
+  10:06 [decision] (alice) topic=auth message=Use JWT with refresh tokens
+  10:07 [thread] (bob) name=api-design status=open message=REST vs GraphQL for v2
+  10:08 [plan] (alice) name=next-sprint status=active

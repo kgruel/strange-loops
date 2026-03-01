@@ -7,6 +7,15 @@ from pathlib import Path
 import pytest
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="Regenerate golden files instead of comparing against them",
+    )
+
+
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
     """Isolated LOOPS_HOME directory."""

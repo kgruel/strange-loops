@@ -7,8 +7,11 @@ render() fills them. Content never dictates geometry — regions do.
 Scans real filesystem data on startup.
 
 Keys:
-  ↑/↓  select volume
-  q    quit
+  ↑/↓        navigate (volumes or directories)
+  enter      drill into directory
+  backspace  go back up
+  tab        switch focus (volumes / directories)
+  q          quit
 
 Run: uv run python demos/examples/disk.py
 """
@@ -54,6 +57,7 @@ def _put(view: BufferView, x: int, y: int, text: str, style: Style) -> None:
 class DirEntry:
     name: str
     size_bytes: int
+    is_dir: bool = False
     children: tuple["DirEntry", ...] = ()
 
     @property
@@ -139,7 +143,7 @@ def _scan_entries(path: str, depth: int) -> tuple[DirEntry, ...]:
                 if e.is_dir():
                     size = _dir_size(e.path, max_depth=_SIZE_DEPTH)
                     children = _scan_entries(e.path, depth - 1) if depth > 1 else ()
-                    entries.append(DirEntry(e.name, size, children))
+                    entries.append(DirEntry(e.name, size, is_dir=True, children=children))
                 elif e.is_file():
                     entries.append(DirEntry(e.name, e.stat().st_size))
             except (PermissionError, OSError):
@@ -190,7 +194,8 @@ def _usage_color(pct: float) -> str:
 
 
 def _render_volume_list(
-    view: BufferView, volumes: tuple[Volume, ...], selected: int
+    view: BufferView, volumes: tuple[Volume, ...], selected: int,
+    *, focused: bool = True,
 ) -> None:
     """Render the volume list into a fixed-size BufferView."""
     w = view.width
@@ -208,24 +213,24 @@ def _render_volume_list(
         mount_w = max(4, w - 2 - 1 - 6 - 1 - bar_w)
         mount = vol.mount[:mount_w].ljust(mount_w)
 
-        _put(view, 0, idx, f"{marker} {mount} {pct_s} ", Style(bold=is_sel))
+        _put(view, 0, idx, f"{marker} {mount} {pct_s} ", Style(bold=is_sel and focused))
 
         bar_x = 2 + mount_w + 1 + 6 + 1
         bar = progress_bar(
             ProgressState(value=vol.used_bytes / vol.total_bytes if vol.total_bytes else 0.0),
             width=min(bar_w, w - bar_x),
-            filled_style=Style(fg=color, bold=is_sel),
+            filled_style=Style(fg=color, bold=is_sel and focused),
             empty_style=Style(dim=True),
         )
         bar.paint(view, bar_x, idx)
 
 
-def _render_detail_header(view: BufferView, vol: Volume) -> None:
+def _render_detail_header(view: BufferView, vol: Volume, breadcrumb: str) -> None:
     """Render the volume summary into a fixed-size BufferView."""
     w = view.width
     color = _usage_color(vol.used_percent)
 
-    _put(view, 1, 0, vol.mount, Style(fg=color, bold=True))
+    _put(view, 1, 0, breadcrumb, Style(fg=color, bold=True))
 
     bar_w = max(4, min(24, w - 10))
     bar = progress_bar(
@@ -242,38 +247,44 @@ def _render_detail_header(view: BufferView, vol: Volume) -> None:
     _put(view, 1, 3, summary, Style(dim=True))
 
 
-def _render_dir_table(view: BufferView, vol: Volume) -> None:
+def _render_dir_table(
+    view: BufferView, entries: tuple[DirEntry, ...], parent_bytes: int,
+    selected: int, *, focused: bool = True,
+) -> None:
     """Render the directory breakdown into a fixed-size BufferView."""
     w = view.width
-    bar_w = max(4, min(16, w - 22))
-    sorted_entries = sorted(vol.entries, key=lambda e: e.size_bytes, reverse=True)
+    bar_w = max(4, min(16, w - 24))
 
     y = 0
-    for entry in sorted_entries[:6]:
+    for idx, entry in enumerate(entries):
         if y >= view.height:
             break
-        _render_dir_row(view, y, entry, vol.used_bytes, bar_w, w, indent=0)
+        is_sel = idx == selected
+        if is_sel:
+            style = Style(bold=True, fg="cyan") if focused else Style(dim=True)
+            _put(view, 0, y, ">", style)
+        _render_dir_row(view, y, entry, parent_bytes, bar_w, w, indent=0, x_offset=2)
         y += 1
         if entry.children:
             for child in sorted(entry.children, key=lambda e: e.size_bytes, reverse=True)[:3]:
                 if y >= view.height:
                     break
-                _render_dir_row(view, y, child, entry.size_bytes, bar_w, w, indent=1)
+                _render_dir_row(view, y, child, entry.size_bytes, bar_w, w, indent=1, x_offset=2)
                 y += 1
 
 
 def _render_dir_row(
     view: BufferView, y: int, entry: DirEntry, parent_bytes: int,
-    bar_w: int, total_w: int, *, indent: int,
+    bar_w: int, total_w: int, *, indent: int, x_offset: int = 0,
 ) -> None:
     pct = min(1.0, entry.size_bytes / parent_bytes) if parent_bytes > 0 else 0.0
     size_s = entry.size_human.rjust(6)
     pct_s = f"{pct * 100:5.1f}%"
     prefix = "  " * indent
-    name_x = 6 + 1 + bar_w + 1 + 6 + 1 + len(prefix)
+    name_x = x_offset + 6 + 1 + bar_w + 1 + 6 + 1 + len(prefix)
     name_w = max(0, total_w - name_x)
 
-    _put(view, 0, y, size_s, Style(bold=indent == 0))
+    _put(view, x_offset, y, size_s, Style(bold=indent == 0))
 
     bar = progress_bar(
         ProgressState(value=pct),
@@ -281,9 +292,9 @@ def _render_dir_row(
         filled_style=Style(fg="cyan" if pct < 0.2 else "yellow"),
         empty_style=Style(dim=True),
     )
-    bar.paint(view, 7, y)
+    bar.paint(view, x_offset + 7, y)
 
-    _put(view, 7 + bar_w + 1, y, pct_s, Style(dim=True))
+    _put(view, x_offset + 7 + bar_w + 1, y, pct_s, Style(dim=True))
     _put(view, name_x, y, (prefix + entry.name)[:name_w], Style(dim=indent > 0))
 
 
@@ -297,6 +308,12 @@ class DiskApp(Surface):
         super().__init__()
         self.volumes = volumes
         self.selected = 0
+        self.focus = "volumes"  # "volumes" or "dirs"
+        self.nav_stack: list[str] = []  # relative path components from mount
+        self.dir_selected = 0
+        self.current_entries: tuple[DirEntry, ...] = ()
+        if volumes:
+            self.current_entries = volumes[0].entries
 
         # Regions computed in layout()
         self.header_r = Region(0, 0, 0, 0)
@@ -305,6 +322,30 @@ class DiskApp(Surface):
         self.dir_table_r = Region(0, 0, 0, 0)
         self.footer_r = Region(0, 0, 0, 0)
         self.sep_x = 0
+
+    def _current_vol(self) -> Volume:
+        return self.volumes[max(0, min(self.selected, len(self.volumes) - 1))]
+
+    def _current_path(self) -> str:
+        vol = self._current_vol()
+        if not self.nav_stack:
+            return vol.mount
+        return os.path.join(vol.mount, *self.nav_stack)
+
+    def _breadcrumb(self) -> str:
+        vol = self._current_vol()
+        if not self.nav_stack:
+            return vol.mount
+        parts = [vol.mount] + list(self.nav_stack)
+        return " > ".join(parts)
+
+    def _sync_entries(self) -> None:
+        """Refresh directory entries for the current navigation path."""
+        if not self.nav_stack:
+            self.current_entries = self._current_vol().entries
+        else:
+            self.current_entries = _scan_entries(self._current_path(), depth=2)
+        self.dir_selected = 0
 
     def layout(self, width: int, height: int) -> None:
         # Fixed split: left list, right detail.
@@ -343,35 +384,81 @@ class DiskApp(Surface):
         # Header
         hv = self.header_r.view(buf)
         _put(hv, 1, 0, "Disk Space", Style(bold=True))
-        _put(hv, 13, 0, "↑/↓ select  q quit", Style(dim=True))
+        _put(hv, 13, 0, "↑↓ nav  ⏎ enter  ⌫ back  tab focus  q quit", Style(dim=True))
 
         # Volume list
         lv = self.list_r.view(buf)
-        _render_volume_list(lv, self.volumes, self.selected)
+        _render_volume_list(lv, self.volumes, self.selected, focused=self.focus == "volumes")
 
         # Detail (right side)
-        vol = self.volumes[max(0, min(self.selected, len(self.volumes) - 1))]
-        _render_detail_header(self.detail_header_r.view(buf), vol)
+        vol = self._current_vol()
+        _render_detail_header(self.detail_header_r.view(buf), vol, self._breadcrumb())
 
         # Directory label
         dir_label_y = self.dir_table_r.y - 1
         if 0 <= dir_label_y < buf.height:
-            buf.put_text(self.sep_x + 2, dir_label_y, "Directories", Style(dim=True))
+            label = "Directories"
+            if self.nav_stack:
+                label = self.nav_stack[-1]
+            buf.put_text(self.sep_x + 2, dir_label_y, label, Style(dim=True))
 
-        _render_dir_table(self.dir_table_r.view(buf), vol)
+        # Directory table
+        parent_bytes = vol.used_bytes if not self.nav_stack else (
+            sum(e.size_bytes for e in self.current_entries) or 1
+        )
+        _render_dir_table(
+            self.dir_table_r.view(buf),
+            self.current_entries,
+            parent_bytes,
+            self.dir_selected,
+            focused=self.focus == "dirs",
+        )
 
         # Footer
         fv = self.footer_r.view(buf)
-        _put(fv, 1, 0, f" {self.selected + 1}/{len(self.volumes)} ", Style(dim=True))
+        vol_info = f" {self.selected + 1}/{len(self.volumes)} "
+        if self.nav_stack:
+            vol_info += f" depth:{len(self.nav_stack)} "
+        _put(fv, 1, 0, vol_info, Style(dim=True))
 
     def on_key(self, key: str) -> None:
         if key == "q":
             self.quit()
             return
-        if key == "up":
-            self.selected = max(0, self.selected - 1)
-        elif key == "down":
-            self.selected = min(len(self.volumes) - 1, self.selected + 1)
+        if key == "tab":
+            self.focus = "dirs" if self.focus == "volumes" else "volumes"
+            return
+
+        if self.focus == "volumes":
+            old = self.selected
+            if key == "up":
+                self.selected = max(0, self.selected - 1)
+            elif key == "down":
+                self.selected = min(len(self.volumes) - 1, self.selected + 1)
+            if self.selected != old:
+                self.nav_stack.clear()
+                self._sync_entries()
+        elif self.focus == "dirs":
+            if key == "up":
+                self.dir_selected = max(0, self.dir_selected - 1)
+            elif key == "down":
+                if self.current_entries:
+                    self.dir_selected = min(
+                        len(self.current_entries) - 1, self.dir_selected + 1
+                    )
+            elif key == "enter":
+                if (
+                    self.current_entries
+                    and self.dir_selected < len(self.current_entries)
+                ):
+                    entry = self.current_entries[self.dir_selected]
+                    if entry.is_dir:
+                        self.nav_stack.append(entry.name)
+                        self._sync_entries()
+            elif key == "backspace":
+                if self.nav_stack:
+                    self.nav_stack.pop()
+                    self._sync_entries()
 
 
 async def main() -> None:

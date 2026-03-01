@@ -1,0 +1,19 @@
+name "telegram"
+store "./data/telegram.db"
+
+sources {
+  include "./telegram.loop"
+}
+
+loops {
+  telegram.message {
+    fold {
+      items "by" "chat_id"
+      count "inc"
+      latest "latest"
+    }
+    boundary when="telegram.message.complete"
+  }
+}
+
+emit "telegram.digest"

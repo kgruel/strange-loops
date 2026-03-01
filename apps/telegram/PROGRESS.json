@@ -1,0 +1,7 @@
+[
+    {"step": "Create package structure (pyproject.toml, src layout)", "done": true},
+    {"step": "Implement telegram-poll CLI (polling, cursor, NDJSON output)", "done": true},
+    {"step": "Create telegram.loop and telegram.vertex configs", "done": true},
+    {"step": "Write README with setup instructions", "done": true},
+    {"step": "Verify uv resolves the package", "done": true}
+]

@@ -1,0 +1,6 @@
+// Telegram message archiver — polls all chats via MTProto
+source "telegram-poll --config ./config.json --cursor ./data/cursor.json --session ./data/telegram"
+every "5m"
+kind "telegram.message"
+observer "telegram"
+format "ndjson"

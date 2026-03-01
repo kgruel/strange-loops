@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from ._sparkline_core import sparkline_text
 from ._text_width import display_width, truncate, truncate_ellipsis
 from .block import Block
-from .cell import Style
+from .cell import EMPTY_CELL, Style
 from .compose import join_horizontal, join_vertical
 
 if TYPE_CHECKING:
@@ -487,6 +487,9 @@ def _tree_render_children_themed(
                 # Add content (truncated if needed)
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
+                # Pad to full width
+                while len(row_cells) < width:
+                    row_cells.append(EMPTY_CELL)
                 rows.append(Block([row_cells], width))
             else:
                 # Default formatting
@@ -509,6 +512,9 @@ def _tree_render_children_themed(
                 )
                 for cell in content_block.row(0)[:content_width]:
                     row_cells.append(cell)
+                # Pad to full width
+                while len(row_cells) < width:
+                    row_cells.append(EMPTY_CELL)
                 rows.append(Block([row_cells], width))
             else:
                 row_text = branch_prefix + _truncate_ellipsis(key, content_width)

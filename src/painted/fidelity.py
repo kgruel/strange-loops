@@ -132,14 +132,24 @@ class HelpArg:
 # =============================================================================
 
 
-def resolve_mode(requested: OutputMode, is_tty: bool, is_pipe: bool) -> OutputMode:
-    """Resolve AUTO to concrete mode."""
+def resolve_mode(
+    requested: OutputMode,
+    is_tty: bool,
+    is_pipe: bool,
+    default_mode: OutputMode = OutputMode.LIVE,
+) -> OutputMode:
+    """Resolve AUTO to concrete mode.
+
+    When requested is AUTO, pipes always get STATIC. TTYs get default_mode
+    (LIVE by default, but callers can override to STATIC for run-and-exit
+    commands that support --live as opt-in).
+    """
     if requested != OutputMode.AUTO:
         return requested
     if is_pipe:
         return OutputMode.STATIC
     if is_tty:
-        return OutputMode.LIVE
+        return default_mode
     return OutputMode.STATIC
 
 
@@ -158,12 +168,13 @@ def detect_context(
     zoom: Zoom,
     mode: OutputMode,
     fmt: Format,
+    default_mode: OutputMode = OutputMode.LIVE,
 ) -> CliContext:
     """Detect and resolve full runtime context."""
     is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
     is_pipe = not is_tty
 
-    resolved_mode = resolve_mode(mode, is_tty, is_pipe)
+    resolved_mode = resolve_mode(mode, is_tty, is_pipe, default_mode)
     resolved_format = resolve_format(fmt, is_tty, resolved_mode)
 
     size = shutil.get_terminal_size()
@@ -401,22 +412,22 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
 
     # Render secondary groups
     if secondary:
-        if zoom <= Zoom.SUMMARY:
+        if zoom <= Zoom.MINIMAL:
             # Compact: single dim line listing all flags
             flag_names: list[str] = []
             for group in secondary:
                 for flag in group.flags:
                     flag_names.append(flag.short or flag.long or "")
             compact = "  " + "  ".join(flag_names)
-            if zoom >= Zoom.SUMMARY:
-                compact += "  (--help -v for details)"
             rows.append(Block.text(compact, dim))
             rows.append(Block.text("", normal))
         else:
-            # Full rendering, dim
+            # Full rendering, dim at SUMMARY/DETAILED, normal at FULL
             dim_bold = Style(bold=True, dim=True) if use_ansi else normal
+            sec_style = dim if zoom < Zoom.FULL else normal
+            sec_header = dim_bold if zoom < Zoom.FULL else bold
             for group in secondary:
-                _render_group(group, dim, dim_bold)
+                _render_group(group, sec_style, sec_header)
 
     # Interaction rules at DETAILED+
     if zoom >= Zoom.DETAILED:
@@ -588,6 +599,7 @@ class CliRunner(Generic[T]):
 
     # Defaults
     default_zoom: Zoom = Zoom.SUMMARY
+    default_mode: OutputMode = OutputMode.LIVE
 
     # Optional: description for help
     description: str | None = None
@@ -637,7 +649,7 @@ class CliRunner(Generic[T]):
         if mode == OutputMode.AUTO and (fmt in (Format.JSON, Format.PLAIN) or zoom == Zoom.MINIMAL):
             mode = OutputMode.STATIC
 
-        ctx = detect_context(zoom, mode, fmt)
+        ctx = detect_context(zoom, mode, fmt, self.default_mode)
 
         return self._dispatch(ctx)
 
@@ -740,6 +752,9 @@ class CliRunner(Generic[T]):
                                 renderer.finalize()
                                 return 2
                             renderer.render(block)
+                    except (KeyboardInterrupt, asyncio.CancelledError):
+                        renderer.finalize()
+                        return 0
                     except Exception as exc:
                         renderer.render(self._fetch_error_block(ctx, exc))
                         renderer.finalize()
@@ -748,7 +763,10 @@ class CliRunner(Generic[T]):
                     renderer.finalize()
                     return 0
 
-            return asyncio.run(stream())
+            try:
+                return asyncio.run(stream())
+            except KeyboardInterrupt:
+                return 0
 
         # No streaming: just fetch and render
         try:
@@ -812,6 +830,7 @@ def run_cli(
     fetch_stream: Callable[[], AsyncIterator[T]] | None = None,
     handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None,
     default_zoom: Zoom = Zoom.SUMMARY,
+    default_mode: OutputMode = OutputMode.LIVE,
     description: str | None = None,
     prog: str | None = None,
     add_args: Callable[[argparse.ArgumentParser], None] | None = None,
@@ -826,6 +845,7 @@ def run_cli(
         fetch_stream: Optional async iterator for streaming updates
         handlers: Custom handlers for specific output modes
         default_zoom: Default zoom level (SUMMARY)
+        default_mode: Default mode for TTY when AUTO (LIVE)
         description: Help text description
         prog: Program name
         add_args: Callback to add custom arguments
@@ -840,6 +860,7 @@ def run_cli(
         fetch_stream=fetch_stream,
         handlers=handlers,  # type: ignore[arg-type]
         default_zoom=default_zoom,
+        default_mode=default_mode,
         description=description,
         prog=prog,
         add_args=add_args,

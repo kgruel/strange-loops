@@ -127,12 +127,24 @@ class TestResolveMode:
         )
 
     def test_auto_tty_gives_live(self):
-        """AUTO resolves to LIVE for TTY."""
+        """AUTO resolves to LIVE for TTY (default)."""
         assert resolve_mode(OutputMode.AUTO, is_tty=True, is_pipe=False) == OutputMode.LIVE
 
     def test_auto_pipe_gives_static(self):
         """AUTO resolves to STATIC for pipe."""
         assert resolve_mode(OutputMode.AUTO, is_tty=False, is_pipe=True) == OutputMode.STATIC
+
+    def test_auto_tty_with_default_mode_static(self):
+        """AUTO on TTY respects default_mode override."""
+        assert resolve_mode(
+            OutputMode.AUTO, is_tty=True, is_pipe=False, default_mode=OutputMode.STATIC
+        ) == OutputMode.STATIC
+
+    def test_auto_pipe_ignores_default_mode(self):
+        """Pipe always gets STATIC regardless of default_mode."""
+        assert resolve_mode(
+            OutputMode.AUTO, is_tty=False, is_pipe=True, default_mode=OutputMode.LIVE
+        ) == OutputMode.STATIC
 
 
 # =============================================================================
@@ -616,8 +628,8 @@ class TestRenderHelpAugmentation:
             lines.append("".join(cell.char for cell in block.row(y)).rstrip())
         return "\n".join(lines)
 
-    def test_secondary_compact_at_summary(self):
-        """Secondary groups collapse to a compact dim line at SUMMARY zoom."""
+    def test_secondary_compact_at_minimal(self):
+        """Secondary groups collapse to a compact dim line at MINIMAL zoom."""
         data = HelpData(
             prog="myapp",
             description="A test app",
@@ -636,21 +648,43 @@ class TestRenderHelpAugmentation:
                 ),
             ),
         )
-        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        block = _render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
         text = self._block_text(block)
 
         # Command arg should be present
         assert "vertex" in text
+
+        # Secondary flags in compact line (no descriptions)
+        assert "-q" in text
+        assert "-h" in text
+
+        # Secondary group headers should NOT appear at MINIMAL
+        assert "Zoom" not in text
+
+    def test_secondary_dim_at_summary(self):
+        """Secondary groups render fully but dim at SUMMARY zoom."""
+        data = HelpData(
+            prog="myapp",
+            description="A test app",
+            groups=(
+                HelpGroup(name="", flags=(HelpFlag(None, "vertex", "Vertex name"),)),
+                HelpGroup(
+                    name="Zoom",
+                    flags=(HelpFlag("-q", "--quiet", "Minimal"),),
+                    secondary=True,
+                ),
+            ),
+        )
+        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # Command arg present
+        assert "vertex" in text
         assert "Vertex name" in text
 
-        # Secondary flags should appear in compact line
-        assert "-q" in text
-        assert "-v" in text
-        assert "-h" in text
-        assert "--help -v for details" in text
-
-        # Secondary group headers should NOT appear at SUMMARY
-        assert "Zoom" not in text.split("\n")[3:]  # not as a header
+        # Secondary group expanded with header and descriptions
+        assert "Zoom" in text
+        assert "Minimal" in text
 
     def test_secondary_expanded_at_detailed(self):
         """Secondary groups expand fully at DETAILED zoom, with group headers."""

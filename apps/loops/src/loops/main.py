@@ -963,6 +963,16 @@ def _run_store(argv: list[str]) -> int:
 
         return store_view(data, ctx.zoom, ctx.width)
 
+    async def fetch_stream():
+        import asyncio
+
+        while True:
+            try:
+                yield fetch()
+            except FileNotFoundError:
+                pass
+            await asyncio.sleep(2.0)
+
     def handle_interactive(ctx):
         from .tui import StoreExplorerApp
 
@@ -974,8 +984,10 @@ def _run_store(argv: list[str]) -> int:
     return run_cli(
         rest,
         fetch=fetch,
+        fetch_stream=fetch_stream,
         render=render,
         handlers={OutputMode.INTERACTIVE: handle_interactive},
+        default_mode=OutputMode.STATIC,
         prog="loops store",
         description="Inspect store contents",
     )

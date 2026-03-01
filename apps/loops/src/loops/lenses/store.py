@@ -60,30 +60,37 @@ def _render_minimal(data: dict, width: int) -> Block:
 
 
 def _render_summary(data: dict, width: int) -> Block:
-    """Ticks-first table with sparkline + count + freshness + payload keys."""
+    """Ticks-first table with sparkline + count + freshness + payload keys.
+
+    When no ticks exist, promotes fact kind table to primary view.
+    """
     rows: list[Block] = []
     header_style = Style(bold=True)
     dim_style = Style(dim=True)
 
-    # Ticks section — primary
     tick_names = data["ticks"].get("names", {})
+    fact_kinds = data["facts"].get("kinds", {})
+    facts_total = data["facts"]["total"]
+    kind_count = len(fact_kinds)
+
     if tick_names:
+        # Ticks section — primary
         rows.append(Block.text("Ticks", header_style, width=width))
         rows.append(_tick_table(tick_names, width))
         rows.append(Block.empty(width, 1))
 
-    # Facts footer — secondary
-    fact_kinds = data["facts"].get("kinds", {})
-    facts_total = data["facts"]["total"]
-    kind_count = len(fact_kinds)
-    if kind_count > 0:
-        kind_list = ", ".join(list(fact_kinds.keys())[:5])
-        if kind_count > 5:
-            kind_list += f" (+{kind_count - 5})"
-        footer = f"{facts_total} facts across {kind_count} kinds: {kind_list}"
-        rows.append(Block.text(footer, dim_style, width=width))
-
-    if not rows:
+        # Facts footer — secondary
+        if kind_count > 0:
+            kind_list = ", ".join(list(fact_kinds.keys())[:5])
+            if kind_count > 5:
+                kind_list += f" (+{kind_count - 5})"
+            footer = f"{facts_total} facts across {kind_count} kinds: {kind_list}"
+            rows.append(Block.text(footer, dim_style, width=width))
+    elif kind_count > 0:
+        # No ticks — promote fact kind table to primary
+        rows.append(Block.text("Facts", header_style, width=width))
+        rows.append(_kind_table(fact_kinds, width, show_sample=True))
+    else:
         return Block.text("(empty store)", dim_style, width=width)
 
     return join_vertical(*rows)

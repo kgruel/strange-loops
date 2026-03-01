@@ -1,0 +1,19 @@
+name "discord"
+store "./data/discord.db"
+
+sources {
+  include "./discord.loop"
+}
+
+loops {
+  discord.message {
+    fold {
+      items "by" "channel_id"
+      count "inc"
+      latest "latest"
+    }
+    boundary when="discord.message.complete"
+  }
+}
+
+emit "discord.digest"

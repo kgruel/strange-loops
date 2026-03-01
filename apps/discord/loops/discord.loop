@@ -1,0 +1,6 @@
+// Discord message archiver — polls all channels via DiscordChatExporter CLI
+source "discord-poll --config ./config.json --cursor ./data/cursor.json"
+every "5m"
+kind "discord.message"
+observer "discord"
+format "ndjson"

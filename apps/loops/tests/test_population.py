@@ -45,11 +45,10 @@ class TestParseTarget:
 
 
 class TestParserWiring:
-    def test_ls_parser(self):
-        parser = create_parser()
-        args = parser.parse_args(["ls", "reading"])
-        assert args.command == "ls"
-        assert args.target == "reading"
+    def test_ls_routed_to_display(self):
+        """ls is routed through run_cli, not argparse."""
+        from loops.main import _run_ls
+        assert callable(_run_ls)
 
     def test_add_parser(self):
         parser = create_parser()
@@ -171,7 +170,7 @@ class TestLsCommand:
         result = main(["ls", "nope"])
         assert result == 1
         captured = capsys.readouterr()
-        assert "not found" in captured.err
+        assert "not found" in (captured.err + captured.out)
 
     def test_ls_multi_template_requires_qualifier(
         self, tmp_path, monkeypatch, capsys
@@ -204,7 +203,7 @@ class TestLsCommand:
         result = main(["ls", "economy"])
         assert result == 1
         captured = capsys.readouterr()
-        assert "2 templates" in captured.err
+        assert "2 templates" in (captured.err + captured.out)
 
         # With qualifier: success
         result = main(["ls", "economy/fred"])

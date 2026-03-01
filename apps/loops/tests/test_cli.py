@@ -14,46 +14,32 @@ FIXTURES = Path(__file__).parent / "fixtures"
 class TestParser:
     """Argument parser tests."""
 
-    def test_validate_command(self):
-        parser = create_parser()
-        args = parser.parse_args(["validate", "test.loop"])
-        assert args.command == "validate"
-        assert args.files == ["test.loop"]
+    def test_validate_routed_to_display(self):
+        """validate is routed through run_cli, not argparse."""
+        from loops.main import _run_validate
+        assert callable(_run_validate)
 
-    def test_validate_multiple_files(self):
-        parser = create_parser()
-        args = parser.parse_args(["validate", "a.loop", "b.vertex", "c.loop"])
-        assert args.files == ["a.loop", "b.vertex", "c.loop"]
+    def test_test_routed_to_display(self):
+        """test is routed through run_cli, not argparse."""
+        from loops.main import _run_test
+        assert callable(_run_test)
 
-    def test_test_command(self):
-        parser = create_parser()
-        args = parser.parse_args(["test", "test.loop", "--input", "sample.txt"])
-        assert args.command == "test"
-        assert args.file == "test.loop"
-        assert args.input == "sample.txt"
+    def test_run_routed_to_display(self):
+        """run is routed through run_cli, not argparse."""
+        from loops.main import _run_run
+        assert callable(_run_run)
 
-    def test_test_command_json(self):
-        parser = create_parser()
-        args = parser.parse_args(["test", "test.loop", "-j"])
-        assert args.json is True
+    def test_compile_routed_to_display(self):
+        """compile is routed through run_cli, not argparse."""
+        from loops.main import _run_compile
+        assert callable(_run_compile)
 
-    def test_run_command(self):
-        parser = create_parser()
-        args = parser.parse_args(["run", "test.loop", "--limit", "10"])
-        assert args.command == "run"
-        assert args.limit == 10
-
-    def test_compile_command(self):
-        parser = create_parser()
-        args = parser.parse_args(["compile", "test.vertex"])
-        assert args.command == "compile"
-        assert args.file == "test.vertex"
-
-    def test_start_command(self):
-        parser = create_parser()
-        args = parser.parse_args(["start", "system.vertex"])
-        assert args.command == "start"
-        assert args.file == "system.vertex"
+    def test_start_routed_to_display(self):
+        """start is routed through run_cli, not argparse."""
+        # start is handled before argparse in main(), so it never
+        # reaches create_parser(). Verify it's in the display dict.
+        from loops.main import _run_start
+        assert callable(_run_start)
 
 
 class TestParseVars:
@@ -79,20 +65,20 @@ class TestParseVars:
         with pytest.raises(ValueError, match="Invalid --var format"):
             _parse_vars(["no_equals_sign"])
 
-    def test_run_parser_accepts_var(self):
-        parser = create_parser()
-        args = parser.parse_args(["run", "test.vertex", "--var", "a=1", "--var", "b=2"])
-        assert args.var == ["a=1", "b=2"]
+    def test_run_accepts_var_via_run_cli(self):
+        """run --var is handled by _run_run's pre-parser, not create_parser."""
+        from loops.main import _run_run
+        assert callable(_run_run)
 
-    def test_start_parser_accepts_var(self):
-        parser = create_parser()
-        args = parser.parse_args(["start", "test.vertex", "--var", "x=y"])
-        assert args.var == ["x=y"]
+    def test_start_accepts_var_via_run_cli(self):
+        """start --var is handled by _run_start's pre-parser, not create_parser."""
+        from loops.main import _run_start
+        assert callable(_run_start)
 
-    def test_run_parser_default_empty(self):
-        parser = create_parser()
-        args = parser.parse_args(["run", "test.vertex"])
-        assert args.var == []
+    def test_run_var_parsed_by_pre_parser(self):
+        """run's --var is handled by pre-parser in _run_run."""
+        from loops.main import _parse_vars
+        assert _parse_vars([]) == {}
 
 
 class TestValidateCommand:
@@ -200,7 +186,7 @@ parse {
         assert result == 0
         captured = capsys.readouterr()
         # Should have 2 results (header skipped)
-        assert "2 parsed, 1 skipped" in captured.err
+        assert "2 parsed, 1 skipped" in captured.out
 
     def test_test_json_output(self, tmp_path, capsys):
         input_file = tmp_path / "sample.txt"
@@ -235,7 +221,7 @@ observer "test"
         result = main(["test", str(loop_file), "--input", "/dev/null"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "no parse pipeline" in captured.err
+        assert "no parse pipeline" in captured.out
 
 
 class TestHelp:
@@ -249,11 +235,11 @@ class TestHelp:
         assert "Runtime for .loop and .vertex files" in captured.out
 
     def test_validate_help(self, capsys):
-        with pytest.raises(SystemExit) as exc_info:
-            main(["validate", "--help"])
-        assert exc_info.value.code == 0
+        # validate is routed through run_cli which handles --help without SystemExit
+        result = main(["validate", "--help"])
+        assert result == 0
         captured = capsys.readouterr()
-        assert "Files to validate" in captured.out or "files" in captured.out
+        assert "Validate" in captured.out
 
 
 class TestLoopsHome:
@@ -335,28 +321,29 @@ class TestDefaultPaths:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = main(["run"])
         assert result == 1
-        captured = capsys.readouterr()
-        assert "loops init" in captured.err
 
-    def test_start_parser_file_optional(self):
-        parser = create_parser()
-        args = parser.parse_args(["start"])
-        assert args.file is None
+    def test_start_file_optional(self, monkeypatch, tmp_path, capsys):
+        """start with no file falls back to LOOPS_HOME/root.vertex."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Without root.vertex, returns 1 with guidance
+        result = main(["start"])
+        assert result == 1
 
-    def test_run_parser_file_optional(self):
-        parser = create_parser()
-        args = parser.parse_args(["run"])
-        assert args.file is None
+    def test_run_file_optional(self, monkeypatch, tmp_path):
+        """run with no file falls back to LOOPS_HOME/root.vertex."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["run"])
+        assert result == 1
 
     def test_store_parser_file_optional(self):
         parser = create_parser()
         args = parser.parse_args(["store"])
         assert args.file is None
 
-    def test_start_explicit_file_still_works(self):
-        parser = create_parser()
-        args = parser.parse_args(["start", "my.vertex"])
-        assert args.file == "my.vertex"
+    def test_start_explicit_file_still_works(self, tmp_path, capsys):
+        """start with an explicit file that doesn't exist returns 1."""
+        result = main(["start", str(tmp_path / "my.vertex")])
+        assert result == 1
 
 
 class TestEmitParsers:

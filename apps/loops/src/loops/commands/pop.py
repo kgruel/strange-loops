@@ -132,15 +132,14 @@ def _maybe_bootstrap_from_list(
         _append_fact(store_path, POP_ADD_KIND, payload, observer)
 
 
-def cmd_ls(args: argparse.Namespace) -> int:
-    """List population rows (from folded pop facts)."""
+def fetch_ls(target: str) -> dict:
+    """Fetch population data for ls command. Returns {header, rows}."""
     try:
         _vertex, template, list_path, header, store_path, _vpath, is_multi = (
-            _load(args.target)
+            _load(target)
         )
     except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+        raise ValueError(str(e))
 
     from lang.population import list_file_read
     from loops.pop_store import pop_fold_rows, pop_read_facts
@@ -153,12 +152,11 @@ def cmd_ls(args: argparse.Namespace) -> int:
         if list_path.exists():
             header, rows = list_file_read(list_path)
             if header:
-                print("\t".join(header))
-                for row in rows:
-                    print("\t".join(row.values.get(h, "") for h in header))
-                return 0
-        print("No population header found", file=sys.stderr)
-        return 1
+                return {
+                    "header": header,
+                    "rows": [row.values for row in rows],
+                }
+        return {"header": [], "rows": []}
 
     facts = pop_read_facts(store_path)
     rows = pop_fold_rows(
@@ -174,26 +172,34 @@ def cmd_ls(args: argparse.Namespace) -> int:
         if _hdr:
             header, rows = _hdr, _rows
 
-    print("\t".join(header))
-    for row in rows:
-        print("\t".join(row.values.get(h, "") for h in header))
-
-    return 0
+    return {
+        "header": header,
+        "rows": [
+            {h: row.values.get(h, "") for h in header}
+            if hasattr(row, "values") else row
+            for row in rows
+        ],
+    }
 
 
 def cmd_add(args: argparse.Namespace) -> int:
     """Emit pop.add and materialize .list from folded state."""
+    from painted import show, Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+
     try:
         _vertex, template, list_path, header, store_path, _vpath, is_multi = (
             _load(args.target)
         )
     except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
     values_list = list(args.values)
     if not header:
-        print("Error: no .list header found", file=sys.stderr)
+        show(Block.text("Error: no .list header found", p.error), file=sys.stderr)
         return 1
 
     # Last column gets remainder
@@ -203,11 +209,11 @@ def cmd_add(args: argparse.Namespace) -> int:
         values_list = head + [tail]
 
     if len(values_list) != len(header):
-        print(
+        show(Block.text(
             f"Error: expected {len(header)} values ({', '.join(header)}), "
             f"got {len(values_list)}",
-            file=sys.stderr,
-        )
+            p.error,
+        ), file=sys.stderr)
         return 1
 
     key = values_list[0]
@@ -240,23 +246,28 @@ def cmd_add(args: argparse.Namespace) -> int:
         include_unscoped=include_unscoped,
     )
 
-    print(f"Emitted pop.add {key}")
+    show(Block.text(f"Emitted pop.add {key}", p.success), file=sys.stdout)
     return 0
 
 
 def cmd_rm(args: argparse.Namespace) -> int:
     """Emit pop.rm and materialize .list from folded state."""
+    from painted import show, Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+
     try:
         _vertex, template, list_path, header, store_path, _vpath, is_multi = (
             _load(args.target)
         )
     except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
     key = args.key
     if not header:
-        print("Error: no .list header found", file=sys.stderr)
+        show(Block.text("Error: no .list header found", p.error), file=sys.stderr)
         return 1
 
     observer = _observer()
@@ -286,22 +297,27 @@ def cmd_rm(args: argparse.Namespace) -> int:
         include_unscoped=include_unscoped,
     )
 
-    print(f"Emitted pop.rm {key}")
+    show(Block.text(f"Emitted pop.rm {key}", p.success), file=sys.stdout)
     return 0
 
 
 def cmd_export(args: argparse.Namespace) -> int:
     """Materialize .list from folded pop facts."""
+    from painted import show, Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+
     try:
         _vertex, template, list_path, header, store_path, _vpath, is_multi = (
             _load(args.target)
         )
     except (ValueError, Exception) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
     if not header:
-        print("Error: no .list header found", file=sys.stderr)
+        show(Block.text("Error: no .list header found", p.error), file=sys.stderr)
         return 1
 
     observer = _observer()
@@ -326,5 +342,5 @@ def cmd_export(args: argparse.Namespace) -> int:
         include_unscoped=include_unscoped,
     )
 
-    print(f"Materialized {list_path}")
+    show(Block.text(f"Materialized {list_path}", p.success), file=sys.stdout)
     return 0

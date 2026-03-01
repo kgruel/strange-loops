@@ -1,0 +1,6 @@
+[
+    {"step": "Add cmd_task_run to commands/task.py (compose create+assign+send)", "done": true},
+    {"step": "Add run subparser to cli.py with --description, --harness, --title, --base, --observer", "done": true},
+    {"step": "Add TestTaskRun tests (lifecycle, defaults, harness, description-as-prompt)", "done": true},
+    {"step": "Run ./dev check — all 120 tests pass, lint clean", "done": true}
+]

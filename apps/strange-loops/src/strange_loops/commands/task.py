@@ -413,6 +413,71 @@ def cmd_task_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_task_run(args: argparse.Namespace) -> int:
+    """Run a task: create → assign → send in one invocation."""
+    sp = store_path()
+    obs = observer(args)
+
+    name = args.name
+    title = getattr(args, "title", None) or name
+    base = getattr(args, "base", None)
+    description = args.description
+    harness_type = getattr(args, "harness", "shell")
+
+    if not base:
+        try:
+            base = worktree.current_branch(Path.cwd())
+        except subprocess.CalledProcessError:
+            base = "main"
+
+    # 1. task.created
+    emit_fact(
+        sp,
+        "task.created",
+        obs,
+        {
+            "name": name,
+            "title": title,
+            "base_branch": base,
+            "description": description,
+        },
+    )
+
+    # 2. worktree
+    repo_root = Path.cwd()
+    try:
+        wt_path = worktree.create(repo_root, name, base)
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating worktree: {e.stderr or e}", file=sys.stderr)
+        return 1
+
+    # 3. task.assigned
+    emit_fact(
+        sp,
+        "task.assigned",
+        obs,
+        {
+            "name": name,
+            "harness": harness_type,
+            "worktree": str(wt_path),
+        },
+    )
+
+    # 4. task.stage → working
+    emit_fact(sp, "task.stage", obs, {"name": name, "status": "working"})
+
+    # 5. spawn harness
+    pid = harness.spawn(sp, name, wt_path, description, harness_type, obs)
+
+    from painted import show
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+    show(Block.text(f"Task '{name}' running (pid {pid})", p.success), file=sys.stdout)
+    return 0
+
+
 def cmd_task_close(args: argparse.Namespace) -> int:
     """Close a task: remove worktree, emit stage fact."""
     sp = store_path()
@@ -459,6 +524,7 @@ def cmd_task(args: argparse.Namespace) -> int:
         "create": cmd_task_create,
         "assign": cmd_task_assign,
         "send": cmd_task_send,
+        "run": cmd_task_run,
         "status": cmd_task_status,
         "list": cmd_task_list,
         "diff": cmd_task_diff,
@@ -470,7 +536,7 @@ def cmd_task(args: argparse.Namespace) -> int:
     if handler:
         return handler(args)
     print(
-        "Usage: strange-loops task {create|assign|send|status|list|diff|merge|close}",
+        "Usage: strange-loops task {create|assign|send|run|status|list|diff|merge|close}",
         file=sys.stderr,
     )
     return 1

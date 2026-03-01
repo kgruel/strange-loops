@@ -202,6 +202,70 @@ class TestTaskList:
         assert len(data) >= 1
 
 
+class TestTaskRun:
+    def test_full_lifecycle(self, git_repo: Path, monkeypatch, capsys):
+        monkeypatch.chdir(git_repo)
+        rc = main(["task", "run", "build-api", "--description", "echo hello"])
+        assert rc == 0
+
+        out = capsys.readouterr().out
+        assert "pid" in out.lower()
+
+        # Verify all 3 facts emitted synchronously
+        db = git_repo / "data" / "tasks.db"
+        facts = _read_all(db)
+        kinds = [f["kind"] for f in facts]
+        assert "task.created" in kinds
+        assert "task.assigned" in kinds
+        assert "task.stage" in kinds
+
+        stage = [f for f in facts if f["kind"] == "task.stage"]
+        assert stage[0]["payload"]["status"] == "working"
+
+        # Worktree exists
+        wt_path = git_repo / ".worktrees" / "build-api"
+        assert wt_path.exists()
+
+    def test_defaults(self, git_repo: Path, monkeypatch):
+        monkeypatch.chdir(git_repo)
+        rc = main(["task", "run", "defaults-test", "--description", "echo hi"])
+        assert rc == 0
+
+        db = git_repo / "data" / "tasks.db"
+        facts = _read_all(db)
+        created = [f for f in facts if f["kind"] == "task.created"][0]
+        # title defaults to name
+        assert created["payload"]["title"] == "defaults-test"
+        # base defaults to current branch (main)
+        assert created["payload"]["base_branch"] == "main"
+
+    def test_harness_in_assigned_fact(self, git_repo: Path, monkeypatch):
+        monkeypatch.chdir(git_repo)
+        rc = main(["task", "run", "harness-test", "--description", "echo ok", "--harness", "shell"])
+        assert rc == 0
+
+        db = git_repo / "data" / "tasks.db"
+        facts = _read_all(db)
+        assigned = [f for f in facts if f["kind"] == "task.assigned"][0]
+        assert assigned["payload"]["harness"] == "shell"
+
+    def test_description_as_prompt(self, git_repo: Path, monkeypatch):
+        monkeypatch.chdir(git_repo)
+        rc = main(["task", "run", "prompt-test", "--description", "echo prompt-output"])
+        assert rc == 0
+
+        db = git_repo / "data" / "tasks.db"
+        # Wait for worker to complete
+        for _ in range(50):
+            time.sleep(0.1)
+            facts = _read_all(db)
+            if any(f["kind"] == "worker.output.complete" for f in facts):
+                break
+
+        facts = _read_all(db)
+        assert any(f["kind"] == "worker.output.complete" for f in facts)
+
+
 class TestTaskClose:
     def test_closes_task(self, git_repo: Path, monkeypatch, capsys):
         monkeypatch.chdir(git_repo)

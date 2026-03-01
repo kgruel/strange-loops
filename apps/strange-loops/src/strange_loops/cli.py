@@ -54,6 +54,16 @@ def create_parser() -> argparse.ArgumentParser:
     send_p.add_argument("shell_command", help="Shell command to run in worktree")
     send_p.add_argument("--observer", help="Observer identity")
 
+    run_p = task_sub.add_parser("run", help="Create, assign, and send in one step")
+    run_p.add_argument("name", help="Task name (branch, worktree, fact key)")
+    run_p.add_argument(
+        "--description", required=True, help="Work specification / prompt for harness"
+    )
+    run_p.add_argument("--harness", default="shell", help="Harness .loop file (default: shell)")
+    run_p.add_argument("--title", help="Human-readable title (default: name)")
+    run_p.add_argument("--base", help="Base branch (default: current branch)")
+    run_p.add_argument("--observer", help="Observer identity")
+
     tstatus_p = task_sub.add_parser("status", help="Show task status")
     tstatus_p.add_argument("name", nargs="?", help="Task name (omit for all)")
     tstatus_p.add_argument("--json", action="store_true", help="JSON output")

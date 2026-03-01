@@ -11,6 +11,7 @@ Keys:
   enter      drill into directory
   backspace  go back up
   tab        switch focus (volumes / directories)
+  v          cycle view (tree / bars / chart / flame)
   q          quit
 
 Run: uv run python demos/examples/disk.py
@@ -23,11 +24,11 @@ import os
 import shutil
 from dataclasses import dataclass
 
-from painted import Style
+from painted import Block, Style
 from painted.buffer import BufferView
 from painted.region import Region
 from painted.tui import Surface
-from painted.views import ProgressState, progress_bar
+from painted.views import ProgressState, chart_lens, flame_lens, progress_bar, tree_lens
 
 
 def _human_size(n: int) -> str:
@@ -299,6 +300,71 @@ def _render_dir_row(
 
 
 # ---------------------------------------------------------------------------
+# View modes — lens-based rendering of directory entries
+# ---------------------------------------------------------------------------
+
+_VIEW_MODES = ("tree", "bars", "chart", "flame")
+
+
+def _entries_to_tree(entries: tuple[DirEntry, ...]) -> dict[str, object]:
+    """Convert DirEntry list to nested dict for tree_lens."""
+    result: dict[str, object] = {}
+    for e in entries:
+        if e.children:
+            result[e.name] = _entries_to_tree(e.children)
+        else:
+            result[e.name] = e.size_bytes
+    return result
+
+
+def _tree_node_renderer(key: str, value: object, depth: int) -> Block:
+    """Show entry name with human-readable size."""
+    if isinstance(value, dict):
+        total = sum(v for v in value.values() if isinstance(v, (int, float)))
+        return Block.text(f"{key}  {_human_size(int(total))}", Style())
+    if isinstance(value, (int, float)):
+        return Block.text(f"{key}  {_human_size(int(value))}", Style())
+    return Block.text(key, Style())
+
+
+def _entries_to_chart(entries: tuple[DirEntry, ...]) -> dict[str, float]:
+    """Convert DirEntry list to {name: size} for chart_lens."""
+    return {e.name: float(e.size_bytes) for e in entries[:20]}
+
+
+def _entries_to_flame(entries: tuple[DirEntry, ...]) -> dict[str, object]:
+    """Convert DirEntry list to nested dict for flame_lens."""
+    result: dict[str, object] = {}
+    for e in entries:
+        if e.children:
+            result[e.name] = {c.name: c.size_bytes for c in e.children}
+        else:
+            result[e.name] = e.size_bytes
+    return result
+
+
+def _render_lens_view(
+    view: BufferView,
+    entries: tuple[DirEntry, ...],
+    mode: str,
+) -> None:
+    """Render entries using a lens into the given BufferView."""
+    w, h = view.width, view.height
+    if not entries or w <= 0 or h <= 0:
+        return
+    if mode == "tree":
+        data = _entries_to_tree(entries)
+        block = tree_lens(data, zoom=3, width=w, node_renderer=_tree_node_renderer)
+    elif mode == "chart":
+        data = _entries_to_chart(entries)
+        block = chart_lens(data, zoom=3, width=w)
+    else:  # flame
+        data = _entries_to_flame(entries)
+        block = flame_lens(data, zoom=2, width=w)
+    block.paint(view, 0, 0)
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -311,6 +377,7 @@ class DiskApp(Surface):
         self.focus = "volumes"  # "volumes" or "dirs"
         self.nav_stack: list[str] = []  # relative path components from mount
         self.dir_selected = 0
+        self.view_mode = 0  # index into _VIEW_MODES
         self.current_entries: tuple[DirEntry, ...] = ()
         if volumes:
             self.current_entries = volumes[0].entries
@@ -384,7 +451,7 @@ class DiskApp(Surface):
         # Header
         hv = self.header_r.view(buf)
         _put(hv, 1, 0, "Disk Space", Style(bold=True))
-        _put(hv, 13, 0, "↑↓ nav  ⏎ enter  ⌫ back  tab focus  q quit", Style(dim=True))
+        _put(hv, 13, 0, "↑↓ nav  ⏎ enter  ⌫ back  tab focus  v view  q quit", Style(dim=True))
 
         # Volume list
         lv = self.list_r.view(buf)
@@ -402,17 +469,25 @@ class DiskApp(Surface):
                 label = self.nav_stack[-1]
             buf.put_text(self.sep_x + 2, dir_label_y, label, Style(dim=True))
 
-        # Directory table
-        parent_bytes = vol.used_bytes if not self.nav_stack else (
-            sum(e.size_bytes for e in self.current_entries) or 1
-        )
-        _render_dir_table(
-            self.dir_table_r.view(buf),
-            self.current_entries,
-            parent_bytes,
-            self.dir_selected,
-            focused=self.focus == "dirs",
-        )
+        # Directory table / lens view
+        mode = _VIEW_MODES[self.view_mode]
+        if mode == "bars":
+            parent_bytes = vol.used_bytes if not self.nav_stack else (
+                sum(e.size_bytes for e in self.current_entries) or 1
+            )
+            _render_dir_table(
+                self.dir_table_r.view(buf),
+                self.current_entries,
+                parent_bytes,
+                self.dir_selected,
+                focused=self.focus == "dirs",
+            )
+        else:
+            _render_lens_view(
+                self.dir_table_r.view(buf),
+                self.current_entries,
+                mode,
+            )
 
         # Footer
         fv = self.footer_r.view(buf)
@@ -420,6 +495,8 @@ class DiskApp(Surface):
         if self.nav_stack:
             vol_info += f" depth:{len(self.nav_stack)} "
         _put(fv, 1, 0, vol_info, Style(dim=True))
+        view_label = f"[{mode}]"
+        _put(fv, fv.width - len(view_label) - 1, 0, view_label, Style(fg="cyan"))
 
     def on_key(self, key: str) -> None:
         if key == "q":
@@ -427,6 +504,9 @@ class DiskApp(Surface):
             return
         if key == "tab":
             self.focus = "dirs" if self.focus == "volumes" else "volumes"
+            return
+        if key == "v":
+            self.view_mode = (self.view_mode + 1) % len(_VIEW_MODES)
             return
 
         if self.focus == "volumes":

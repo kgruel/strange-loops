@@ -276,7 +276,7 @@ class Writer:
 
 def print_block(
     block: Block,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
     *,
     use_ansi: bool | None = None,
 ) -> None:
@@ -288,9 +288,11 @@ def print_block(
 
     Args:
         block: The Block to print.
-        stream: Output stream (defaults to stdout).
+        stream: Output stream (defaults to sys.stdout, resolved at call time).
         use_ansi: Whether to include ANSI escape codes (default: auto-detect).
     """
+    if stream is None:
+        stream = sys.stdout
     if use_ansi is None:
         use_ansi = hasattr(stream, "isatty") and stream.isatty()
     if use_ansi:

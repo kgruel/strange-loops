@@ -70,6 +70,7 @@ def list_view(
     items: list[Line],
     visible_height: int,
     *,
+    width: int | None = None,
     selected_style: Style = Style(reverse=True),
     cursor_char: str = "▸",
 ) -> Block:
@@ -86,6 +87,8 @@ def list_view(
 
     # Find max width across visible items (+ 2 for cursor prefix)
     max_width = max((items[i].width for i in range(start, end)), default=0) + 2
+    if width is not None:
+        max_width = min(max_width, width)
 
     # Paint into a temporary buffer
     buf = Buffer(max_width, visible_height)

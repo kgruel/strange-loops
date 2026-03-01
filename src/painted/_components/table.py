@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from ..block import Block
 from ..buffer import Buffer
 from ..cell import Style
-from ..compose import Align
+from ..compose import Align, truncate
 from ..cursor import Cursor
 from ..span import Line, Span
 from ..viewport import Viewport
@@ -102,6 +102,7 @@ def table(
     rows: list[list[Line]],
     visible_height: int,
     *,
+    width: int | None = None,
     header_style: Style = Style(bold=True),
     selected_style: Style = Style(reverse=True),
     separator: str = "│",
@@ -171,4 +172,7 @@ def table(
         row = [buf.get(x, y) for x in range(total_width)]
         block_rows.append(row)
 
-    return Block(block_rows, total_width)
+    result = Block(block_rows, total_width)
+    if width is not None and result.width > width:
+        result = truncate(result, width)
+    return result

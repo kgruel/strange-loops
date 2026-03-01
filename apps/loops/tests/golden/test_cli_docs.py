@@ -10,8 +10,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from painted import Zoom
-from painted.fidelity import Format, OutputMode
-from painted import CliContext
 
 from loops.lenses.validate import validate_view
 from loops.lenses.test import test_view as _test_view
@@ -20,7 +18,8 @@ from loops.lenses.compile import compile_view
 from loops.lenses.start import start_view
 from loops.lenses.store import store_view
 from loops.lenses.pop import pop_view
-from loops.commands.session import render_status, render_log
+from loops.lenses.status import status_view
+from loops.lenses.log import log_view
 
 from .fixtures import (
     SAMPLE_STATUS,
@@ -46,13 +45,6 @@ ZOOM = Zoom.SUMMARY
 WIDTH = 80
 
 
-def _ctx() -> CliContext:
-    return CliContext(
-        zoom=ZOOM, mode=OutputMode.STATIC, format=Format.PLAIN,
-        is_tty=False, width=WIDTH, height=24,
-    )
-
-
 _COMMANDS: list[tuple[str, str, str]] = []
 
 
@@ -61,18 +53,17 @@ def _render_all() -> list[tuple[str, str, str]]:
     if _COMMANDS:
         return _COMMANDS
 
-    ctx = _ctx()
     entries: list[tuple[str, str, str]] = []
 
     entries.append((
         "status",
         "Session status — decisions, threads, tasks, changes.",
-        block_to_text(render_status(ctx, SAMPLE_STATUS)),
+        block_to_text(status_view(SAMPLE_STATUS, ZOOM, WIDTH)),
     ))
     entries.append((
         "log",
         "Session log — chronological facts.",
-        block_to_text(render_log(ctx, SAMPLE_LOG)),
+        block_to_text(log_view(SAMPLE_LOG, ZOOM, WIDTH)),
     ))
 
     with patch("loops.lenses.store._relative_time", _frozen_relative_time):

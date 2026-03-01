@@ -1,5 +1,5 @@
 2025-01-15:
-  10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for atomic writes.
+  10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for
   09:30 [task] implement fold [in-progress] Wire up Spec.apply.
            Wire up Spec.apply.
 

@@ -12,8 +12,8 @@ _USAGE = join_vertical(
     Block.text("painted — Terminal UI framework", Style(bold=True)),
     Block.text(" ", _PLAIN),
     Block.text("Commands", Style(bold=True)),
-    Block.text("  demo list [flags]          List available demos", _PLAIN),
-    Block.text("  demo run <name> [flags]    Run a demo by name", _PLAIN),
+    Block.text("  demos [flags]              List available demos", _PLAIN),
+    Block.text("  demos <name> [flags]       Run a demo by name", _PLAIN),
     Block.text(" ", _PLAIN),
     Block.text("  tour [flags]               Interactive tour", _PLAIN),
     Block.text(" ", _PLAIN),
@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
 
     command = args[0]
 
-    if command == "demo":
+    if command in ("demos", "demo"):
         return _demo_dispatch(args[1:])
 
     if command == "tour":
@@ -44,23 +44,25 @@ def main(argv: list[str] | None = None) -> int:
 def _demo_dispatch(args: list[str]) -> int:
     from painted._demo_cli import list_demos, run_demo
 
-    if not args:
-        print_block(Block.text("Usage: painted demo <list|run> [flags]", Style(dim=True)))
-        return 1
+    # No args or flags only → list demos
+    if not args or args[0].startswith("-"):
+        return list_demos(args)
 
     sub = args[0]
 
+    # Explicit "list" subcommand
     if sub == "list":
         return list_demos(args[1:])
 
+    # Legacy "run" subcommand
     if sub == "run":
         if len(args) < 2:
-            print_block(Block.text("Usage: painted demo run <name> [flags]", Style(dim=True)))
+            print_block(Block.text("Usage: painted demos <name> [flags]", Style(dim=True)))
             return 1
         return run_demo(args[1], args[2:])
 
-    print_block(Block.text(f"Unknown demo command: {sub}", Style(fg="red")))
-    return 1
+    # Otherwise, first arg is a demo name
+    return run_demo(sub, args[1:])
 
 
 def _tour_dispatch(args: list[str]) -> int:

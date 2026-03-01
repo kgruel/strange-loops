@@ -178,7 +178,7 @@ def list_demos(args: list[str]) -> int:
         render=render_demo_list,
         fetch=discover_demos,
         description="List available painted demos",
-        prog="painted demo list",
+        prog="painted demos",
     )
 
 

@@ -1,0 +1,32 @@
+Tasks — 2 total
+
+  alpha  [working]  Implement auth module
+    harness: shell
+    worktree: /tmp/worktrees/alpha
+    worker: stopped exit=0 pid=99999
+    base: main
+    description: Add JWT authentication
+    ---
+    base_branch: main
+    description: Add JWT authentication
+    exit_code: 0
+    harness: shell
+    name: alpha
+    pid: 99999
+    status: working
+    title: Implement auth module
+    worker: stopped
+    worktree: /tmp/worktrees/alpha
+
+  beta  [assigned]  Fix pagination bug
+    harness: shell
+    worktree: /tmp/worktrees/beta
+    base: main
+    ---
+    base_branch: main
+    description:
+    harness: shell
+    name: beta
+    status: assigned
+    title: Fix pagination bug
+    worktree: /tmp/worktrees/beta

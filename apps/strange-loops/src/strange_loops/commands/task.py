@@ -32,16 +32,30 @@ from strange_loops.store import (
 )
 
 
-def render_task(state: dict) -> "Block":
-    """Render a single task as a painted block."""
+def render_task(state: dict, zoom=None) -> "Block":
+    """Render a single task as a painted block — zoom-aware.
+
+    MINIMAL: `name [status]`
+    SUMMARY: name+status+title header, harness, worktree, worker, base
+    DETAILED: + description, + pid on worker line
+    FULL: + raw state dict dump below separator
+    """
+    from painted import Zoom
     from painted.block import Block
     from painted.compose import join_vertical
     from painted.palette import current_palette
+
+    if zoom is None:
+        zoom = Zoom.SUMMARY
 
     p = current_palette()
     name = state["name"]
     status = state.get("status", "unknown")
     title = state.get("title", "")
+
+    if zoom == Zoom.MINIMAL:
+        text = f"  {name} [{status}]"
+        return Block.text(text, p.accent)
 
     header_text = f"  {name}  [{status}]"
     if title:
@@ -57,27 +71,55 @@ def render_task(state: dict) -> "Block":
         worker_info = f"    worker: {state['worker']}"
         if state.get("exit_code") is not None:
             worker_info += f" exit={state['exit_code']}"
+        if zoom >= Zoom.DETAILED and state.get("pid") is not None:
+            worker_info += f" pid={state['pid']}"
         lines.append(Block.text(worker_info, p.muted))
     if state.get("base_branch"):
         lines.append(Block.text(f"    base: {state['base_branch']}", p.muted))
 
+    if zoom >= Zoom.DETAILED and state.get("description"):
+        lines.append(Block.text(f"    description: {state['description']}", p.muted))
+
+    if zoom >= Zoom.FULL:
+        lines.append(Block.text("    ---", p.muted))
+        for k, v in sorted(state.items()):
+            lines.append(Block.text(f"    {k}: {v}", p.muted))
+
     return join_vertical(*lines)
 
 
-def render_task_list(tasks: list[dict]) -> "Block":
-    """Render all tasks as a painted block."""
+def render_task_list(tasks: list[dict], zoom=None) -> "Block":
+    """Render all tasks as a painted block — zoom-aware.
+
+    MINIMAL: `N tasks, M working, K closed`
+    SUMMARY/DETAILED/FULL: header + each task at corresponding zoom.
+    """
+    from painted import Zoom
     from painted.block import Block
     from painted.compose import join_vertical
     from painted.palette import current_palette
+
+    if zoom is None:
+        zoom = Zoom.SUMMARY
 
     p = current_palette()
     if not tasks:
         return Block.text("No tasks.", p.muted)
 
+    if zoom == Zoom.MINIMAL:
+        counts: dict[str, int] = {}
+        for t in tasks:
+            s = t.get("status", "unknown")
+            counts[s] = counts.get(s, 0) + 1
+        parts = [f"{len(tasks)} tasks"]
+        for status, n in sorted(counts.items()):
+            parts.append(f"{n} {status}")
+        return Block.text(", ".join(parts), p.muted)
+
     header = Block.text(f"Tasks — {len(tasks)} total", p.accent)
     blocks = [header]
     for t in tasks:
-        blocks.append(render_task(t))
+        blocks.append(render_task(t, zoom))
 
     return join_vertical(*blocks, gap=1)
 

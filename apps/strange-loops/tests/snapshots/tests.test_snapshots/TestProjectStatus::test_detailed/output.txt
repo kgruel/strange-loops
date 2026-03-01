@@ -1,0 +1,10 @@
+Project — 3 facts
+
+Decisions (1):
+  auth: Use JWT with refresh tokens (Jan 15) [alice]
+
+Open Threads (1):
+  api-design: REST vs GraphQL for v2 (Jan 15) [bob]
+
+Plans (1):
+  next-sprint: active (Jan 15) [alice]

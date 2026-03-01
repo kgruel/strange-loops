@@ -1,0 +1,17 @@
+2025-01-15:
+  10:00 [session.start] (alice)
+  10:01 [task.created] (alice) name=alpha title=Implement auth module
+      base_branch=main
+      description=Add JWT authentication
+  10:02 [task.assigned] (alice) name=alpha harness=shell
+      worktree=/tmp/worktrees/alpha
+  10:03 [task.stage] (alice) name=alpha status=working
+  10:03 [worker.started] (shell) task=alpha pid=99999
+  10:03 [worker.output] (shell) task=alpha
+      output=running tests...
+all 42 tests passed
+  10:04 [worker.output.complete] (shell) task=alpha status=ok returncode=0
+  10:05 [task.created] (bob) name=beta title=Fix pagination bug
+      base_branch=main
+  10:06 [task.assigned] (bob) name=beta harness=shell
+      worktree=/tmp/worktrees/beta

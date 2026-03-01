@@ -1,0 +1,13 @@
+Tasks — 2 total
+
+  alpha  [working]  Implement auth module
+    harness: shell
+    worktree: /tmp/worktrees/alpha
+    worker: stopped exit=0 pid=99999
+    base: main
+    description: Add JWT authentication
+
+  beta  [assigned]  Fix pagination bug
+    harness: shell
+    worktree: /tmp/worktrees/beta
+    base: main

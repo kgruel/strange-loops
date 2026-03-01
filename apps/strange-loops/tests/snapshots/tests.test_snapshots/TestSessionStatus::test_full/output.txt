@@ -1,0 +1,8 @@
+Session — 9 facts
+  session.start: 1  latest 2025-01-15T10:00:00Z
+  task.assigned: 2  latest 2025-01-15T10:06:00Z  earliest 2025-01-15T10:02:00Z
+  task.created: 2  latest 2025-01-15T10:05:00Z  earliest 2025-01-15T10:01:00Z
+  task.stage: 1  latest 2025-01-15T10:03:00Z
+  worker.output: 1  latest 2025-01-15T10:03:20Z
+  worker.output.complete: 1  latest 2025-01-15T10:04:00Z
+  worker.started: 1  latest 2025-01-15T10:03:10Z

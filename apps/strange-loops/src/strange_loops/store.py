@@ -250,7 +250,7 @@ def log_block(facts: list[dict], ticks: list[dict] | None = None) -> "Block":
         date_str = format_date(dt)
         if date_str != current_date:
             if current_date is not None:
-                blocks.append(Block.text(""))
+                blocks.append(Block.text("", p.muted))
             p = current_palette()
             blocks.append(Block.text(f"{date_str}:", p.accent))
             current_date = date_str
@@ -259,6 +259,181 @@ def log_block(facts: list[dict], ticks: list[dict] | None = None) -> "Block":
             blocks.append(fact_line(item))
         else:
             blocks.append(tick_line(item))
+
+    return join_vertical(*blocks)
+
+
+def format_ts_iso(dt: datetime) -> str:
+    """Format datetime as ISO 8601 for FULL zoom display."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_secondary(key: str, value) -> bool:
+    """Whether a payload field should be shown on continuation lines at DETAILED+.
+
+    Secondary: description, worktree, output, message, base_branch, or any value >40 chars.
+    """
+    if key in ("description", "worktree", "output", "message", "base_branch"):
+        return True
+    return isinstance(value, str) and len(value) > 40
+
+
+def fact_line_zoom(fact: dict, zoom) -> "list[Block]":
+    """Render a fact as one or more Blocks depending on zoom level.
+
+    SUMMARY: delegates to fact_line() — single line.
+    DETAILED: primary line + secondary fields on indented continuation lines.
+    FULL: ISO timestamp, each payload field on its own indented line.
+    """
+    from painted import Zoom
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    if zoom <= Zoom.SUMMARY:
+        return [fact_line(fact)]
+
+    p = current_palette()
+    ts = fact["ts"]
+    if isinstance(ts, datetime):
+        dt = ts
+    else:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+
+    kind = fact["kind"]
+    obs = fact.get("observer", "")
+    payload = fact["payload"]
+    who = f" ({obs})" if obs else ""
+
+    if zoom == Zoom.FULL:
+        # ISO timestamp, kind + observer on primary line, each field on own line
+        time_str = format_ts_iso(dt)
+        lines: list[Block] = [Block.text(f"  {time_str} [{kind}]{who}", p.muted)]
+        for k, v in payload.items():
+            if v is not None and v != "":
+                lines.append(Block.text(f"      {k}={v}", p.muted))
+        origin = fact.get("origin", "")
+        if origin:
+            lines.append(Block.text(f"      origin={origin}", p.muted))
+        return lines
+
+    # DETAILED: primary fields inline, secondary on continuation lines
+    primary_parts = []
+    secondary: list[tuple[str, str]] = []
+    for k, v in payload.items():
+        if v is None or v == "":
+            continue
+        if _is_secondary(k, v):
+            secondary.append((k, str(v)))
+        else:
+            primary_parts.append(f"{k}={v}")
+
+    time_str = format_ts(dt)
+    summary = " ".join(primary_parts)
+    text = f"  {time_str} [{kind}]{who} {summary}" if summary else f"  {time_str} [{kind}]{who}"
+    lines = [Block.text(text, p.muted)]
+    for k, v in secondary:
+        lines.append(Block.text(f"      {k}={v}", p.muted))
+    return lines
+
+
+def tick_line_zoom(tick: dict, zoom) -> "list[Block]":
+    """Render a tick as one or more Blocks depending on zoom level.
+
+    SUMMARY: delegates to tick_line() — single line.
+    DETAILED: + origin if present.
+    FULL: ISO timestamp, all payload fields individually.
+    """
+    from painted import Zoom
+    from painted.block import Block
+    from painted.palette import current_palette
+
+    if zoom <= Zoom.SUMMARY:
+        return [tick_line(tick)]
+
+    p = current_palette()
+    ts = tick["ts"]
+    if isinstance(ts, datetime):
+        dt = ts
+    else:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+
+    payload = tick.get("payload", {}) if isinstance(tick.get("payload"), dict) else {}
+    origin = tick.get("origin", "")
+
+    if zoom == Zoom.FULL:
+        time_str = format_ts_iso(dt)
+        name = tick.get("name", "")
+        lines: list[Block] = [Block.text(f"  {time_str} ⚡ {name}", p.accent)]
+        for k, v in payload.items():
+            if v is not None and v != "":
+                lines.append(Block.text(f"      {k}={v}", p.muted))
+        if origin:
+            lines.append(Block.text(f"      origin={origin}", p.muted))
+        return lines
+
+    # DETAILED: normal tick line + origin continuation
+    lines = [tick_line(tick)]
+    if origin:
+        lines.append(Block.text(f"      origin={origin}", p.muted))
+    return lines
+
+
+def log_block_zoom(facts: list[dict], ticks: list[dict] | None, zoom) -> "Block":
+    """Render facts and ticks with zoom-aware detail.
+
+    MINIMAL: kind counts one-liner.
+    SUMMARY/DETAILED/FULL: date-grouped timeline using fact_line_zoom/tick_line_zoom.
+    """
+    from painted import Zoom
+    from painted.block import Block
+    from painted.compose import join_vertical
+    from painted.palette import current_palette
+
+    ticks = ticks or []
+    p = current_palette()
+
+    if not facts and not ticks:
+        return Block.text("No facts in the given time range.", p.muted)
+
+    if zoom == Zoom.MINIMAL:
+        # Count facts by kind, one-liner
+        counts: dict[str, int] = {}
+        for f in facts:
+            kind = f["kind"]
+            counts[kind] = counts.get(kind, 0) + 1
+        for t in ticks:
+            counts["tick"] = counts.get("tick", 0) + 1
+        parts = [f"{n} {k}" for k, n in sorted(counts.items())]
+        return Block.text(", ".join(parts), p.muted)
+
+    # SUMMARY/DETAILED/FULL — date-grouped timeline
+    entries: list[tuple[float, str, dict]] = []
+    for f in facts:
+        ts = f["ts"]
+        ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+        entries.append((ts_val, "fact", f))
+    for t in ticks:
+        ts = t["ts"]
+        ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
+        entries.append((ts_val, "tick", t))
+
+    entries.sort(key=lambda e: e[0])
+
+    blocks: list[Block] = []
+    current_date = None
+    for ts_val, entry_type, item in entries:
+        dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
+        date_str = format_date(dt)
+        if date_str != current_date:
+            if current_date is not None:
+                blocks.append(Block.text("", p.muted))
+            blocks.append(Block.text(f"{date_str}:", p.accent))
+            current_date = date_str
+
+        if entry_type == "fact":
+            blocks.extend(fact_line_zoom(item, zoom))
+        else:
+            blocks.extend(tick_line_zoom(item, zoom))
 
     return join_vertical(*blocks)
 

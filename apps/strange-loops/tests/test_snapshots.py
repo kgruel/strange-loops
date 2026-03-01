@@ -276,6 +276,21 @@ class TestSessionStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
+    def test_minimal(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["session", "status", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_detailed(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["session", "status", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_full(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["session", "status", "-vv"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
     def test_json(self, task_store: Path, capsys):
         rc = main(["session", "status", "--json"])
         assert rc == 0
@@ -297,6 +312,24 @@ class TestSessionLog:
     def test_text(self, task_store: Path, golden: Golden, capsys, monkeypatch):
         _freeze_now(monkeypatch)
         rc = main(["session", "log", "--since", "1h"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_minimal(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["session", "log", "--since", "1h", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_detailed(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["session", "log", "--since", "1h", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_full(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["session", "log", "--since", "1h", "-vv"])
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
@@ -325,6 +358,21 @@ class TestTaskStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
+    def test_single_minimal(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "alpha", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_single_detailed(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "alpha", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_single_full(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "alpha", "-vv"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
     def test_single_json(self, task_store: Path, capsys):
         rc = main(["task", "status", "alpha", "--json"])
         assert rc == 0
@@ -340,6 +388,21 @@ class TestTaskStatus:
 
     def test_all_text(self, task_store: Path, golden: Golden, capsys):
         rc = main(["task", "status"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_all_minimal(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_all_detailed(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_all_full(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "status", "-vv"])
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
@@ -364,6 +427,11 @@ class TestTaskList:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
+    def test_minimal(self, task_store: Path, golden: Golden, capsys):
+        rc = main(["task", "list", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
     def test_json(self, task_store: Path, capsys):
         rc = main(["task", "list", "--json"])
         assert rc == 0
@@ -379,6 +447,24 @@ class TestTaskLog:
     def test_text(self, task_store: Path, golden: Golden, capsys, monkeypatch):
         _freeze_now(monkeypatch)
         rc = main(["task", "log", "alpha", "--since", "1h"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_minimal(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--since", "1h", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_detailed(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--since", "1h", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_full(self, task_store: Path, golden: Golden, capsys, monkeypatch):
+        _freeze_now(monkeypatch)
+        rc = main(["task", "log", "alpha", "--since", "1h", "-vv"])
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
@@ -415,6 +501,21 @@ class TestProjectStatus:
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 
+    def test_minimal(self, task_store: Path, project_store: Path, golden: Golden, capsys):
+        rc = main(["project", "status", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_detailed(self, task_store: Path, project_store: Path, golden: Golden, capsys):
+        rc = main(["project", "status", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_full(self, task_store: Path, project_store: Path, golden: Golden, capsys):
+        rc = main(["project", "status", "-vv"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
     def test_json(self, task_store: Path, project_store: Path, capsys):
         rc = main(["project", "status", "--json"])
         assert rc == 0
@@ -440,6 +541,45 @@ class TestProjectLog:
     ):
         _freeze_now(monkeypatch)
         rc = main(["project", "log", "--since", "1h"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_minimal(
+        self,
+        task_store: Path,
+        project_store: Path,
+        golden: Golden,
+        capsys,
+        monkeypatch,
+    ):
+        _freeze_now(monkeypatch)
+        rc = main(["project", "log", "--since", "1h", "-q"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_detailed(
+        self,
+        task_store: Path,
+        project_store: Path,
+        golden: Golden,
+        capsys,
+        monkeypatch,
+    ):
+        _freeze_now(monkeypatch)
+        rc = main(["project", "log", "--since", "1h", "-v"])
+        assert rc == 0
+        golden.assert_match(capsys.readouterr().out)
+
+    def test_full(
+        self,
+        task_store: Path,
+        project_store: Path,
+        golden: Golden,
+        capsys,
+        monkeypatch,
+    ):
+        _freeze_now(monkeypatch)
+        rc = main(["project", "log", "--since", "1h", "-vv"])
         assert rc == 0
         golden.assert_match(capsys.readouterr().out)
 

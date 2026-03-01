@@ -9,10 +9,19 @@ import pytest
 from painted import Block, Style
 from painted.fidelity import (
     CliContext,
+    CliRunner,
     Format,
+    HelpArg,
+    HelpData,
+    HelpFlag,
+    HelpGroup,
     OutputMode,
     # New API
     Zoom,
+    _build_help_data,
+    _extract_add_args_flags,
+    _help_args_to_flags,
+    _render_help,
     add_cli_args,
     parse_format,
     parse_mode,
@@ -455,3 +464,325 @@ class TestCliRunner:
         assert "KeyError" in captured.out
         assert "kaboom" in captured.out
         assert "Traceback" not in captured.out
+
+
+# =============================================================================
+# HelpArg and help augmentation tests
+# =============================================================================
+
+
+class TestHelpArg:
+    """Tests for HelpArg dataclass."""
+
+    def test_frozen(self):
+        arg = HelpArg(name="--since", description="Time range")
+        with pytest.raises(AttributeError):
+            arg.name = "--other"  # type: ignore
+
+    def test_defaults(self):
+        arg = HelpArg(name="vertex")
+        assert arg.description == ""
+        assert arg.default is None
+        assert arg.positional is False
+
+
+class TestHelpArgsToFlags:
+    """Tests for _help_args_to_flags conversion."""
+
+    def test_positional_arg(self):
+        flags = _help_args_to_flags([HelpArg("vertex", "Vertex name", positional=True)])
+        assert len(flags) == 1
+        assert flags[0].short is None
+        assert flags[0].long == "vertex"
+        assert flags[0].description == "Vertex name"
+
+    def test_optional_arg(self):
+        flags = _help_args_to_flags([HelpArg("--since", "Time range")])
+        assert flags[0].long == "--since"
+        assert flags[0].description == "Time range"
+
+    def test_default_appended(self):
+        flags = _help_args_to_flags([HelpArg("--since", "Time range", default="7d")])
+        assert "(default: 7d)" in flags[0].description
+
+    def test_default_only_no_description(self):
+        flags = _help_args_to_flags([HelpArg("--since", default="7d")])
+        assert flags[0].description == "(default: 7d)"
+
+
+class TestExtractAddArgsFlags:
+    """Tests for _extract_add_args_flags introspection."""
+
+    def test_extracts_positional(self):
+        def add_args(parser):
+            parser.add_argument("name", help="The name")
+
+        flags = _extract_add_args_flags(add_args)
+        assert len(flags) == 1
+        assert flags[0].long == "name"
+        assert flags[0].description == "The name"
+
+    def test_extracts_optional(self):
+        def add_args(parser):
+            parser.add_argument("-k", "--kind", help="Filter by kind")
+
+        flags = _extract_add_args_flags(add_args)
+        assert len(flags) == 1
+        assert flags[0].short == "-k"
+        assert flags[0].long == "--kind"
+        assert flags[0].description == "Filter by kind"
+
+    def test_skips_suppressed(self):
+        def add_args(parser):
+            parser.add_argument("--internal", help=argparse.SUPPRESS)
+            parser.add_argument("--visible", help="Shown")
+
+        flags = _extract_add_args_flags(add_args)
+        assert len(flags) == 1
+        assert flags[0].long == "--visible"
+
+
+class TestBuildHelpDataAugmentation:
+    """Tests for _build_help_data including command args."""
+
+    def test_no_command_args_no_secondary(self):
+        """Without help_args/add_args, all groups are non-secondary (backward compat)."""
+        runner = CliRunner(
+            render=lambda ctx, data: Block.text("x", Style()),
+            fetch=lambda: "ok",
+            prog="test",
+        )
+        data = _build_help_data(runner)
+        for group in data.groups:
+            assert group.secondary is False
+
+    def test_help_args_creates_command_group(self):
+        """help_args appear as a primary group, rendering opts become secondary."""
+        runner = CliRunner(
+            render=lambda ctx, data: Block.text("x", Style()),
+            fetch=lambda: "ok",
+            prog="test",
+            help_args=[
+                HelpArg("vertex", "Vertex name", positional=True),
+                HelpArg("--since", "Time range", default="7d"),
+            ],
+        )
+        data = _build_help_data(runner)
+
+        # First group is command args (non-secondary, no name)
+        assert data.groups[0].secondary is False
+        assert data.groups[0].name == ""
+        assert len(data.groups[0].flags) == 2
+        assert data.groups[0].flags[0].long == "vertex"
+        assert data.groups[0].flags[1].long == "--since"
+
+        # Remaining groups are secondary
+        for group in data.groups[1:]:
+            assert group.secondary is True
+
+    def test_add_args_creates_command_group(self):
+        """add_args are introspected into a primary command group."""
+
+        def add_args(parser):
+            parser.add_argument("file", help="Input file")
+            parser.add_argument("--format", help="Output format")
+
+        runner = CliRunner(
+            render=lambda ctx, data: Block.text("x", Style()),
+            fetch=lambda: "ok",
+            prog="test",
+            add_args=add_args,
+        )
+        data = _build_help_data(runner)
+
+        # First group is command args
+        assert data.groups[0].secondary is False
+        assert data.groups[0].name == ""
+        assert len(data.groups[0].flags) == 2
+
+        # Remaining groups are secondary
+        for group in data.groups[1:]:
+            assert group.secondary is True
+
+
+class TestRenderHelpAugmentation:
+    """Tests for _render_help with primary/secondary hierarchy."""
+
+    @staticmethod
+    def _block_text(block: Block) -> str:
+        """Extract all text from a block."""
+        lines = []
+        for y in range(block.height):
+            lines.append("".join(cell.char for cell in block.row(y)).rstrip())
+        return "\n".join(lines)
+
+    def test_secondary_compact_at_summary(self):
+        """Secondary groups collapse to a compact dim line at SUMMARY zoom."""
+        data = HelpData(
+            prog="myapp",
+            description="A test app",
+            groups=(
+                HelpGroup(name="", flags=(HelpFlag(None, "vertex", "Vertex name"),)),
+                HelpGroup(
+                    name="Zoom",
+                    flags=(
+                        HelpFlag("-q", "--quiet", "Minimal"),
+                        HelpFlag("-v", "--verbose", "Verbose"),
+                    ),
+                    secondary=True,
+                ),
+                HelpGroup(
+                    name="Help", flags=(HelpFlag("-h", "--help", "Show help"),), secondary=True
+                ),
+            ),
+        )
+        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # Command arg should be present
+        assert "vertex" in text
+        assert "Vertex name" in text
+
+        # Secondary flags should appear in compact line
+        assert "-q" in text
+        assert "-v" in text
+        assert "-h" in text
+        assert "--help -v for details" in text
+
+        # Secondary group headers should NOT appear at SUMMARY
+        assert "Zoom" not in text.split("\n")[3:]  # not as a header
+
+    def test_secondary_expanded_at_detailed(self):
+        """Secondary groups expand fully at DETAILED zoom, with group headers."""
+        data = HelpData(
+            prog="myapp",
+            description=None,
+            groups=(
+                HelpGroup(name="", flags=(HelpFlag(None, "vertex", "Vertex name"),)),
+                HelpGroup(
+                    name="Zoom",
+                    hint="(what to show)",
+                    flags=(HelpFlag("-q", "--quiet", "Minimal"),),
+                    secondary=True,
+                ),
+            ),
+        )
+        block = _render_help(data, Zoom.DETAILED, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # Command arg present
+        assert "vertex" in text
+
+        # Secondary group header present at DETAILED
+        assert "Zoom (what to show)" in text
+        assert "Minimal" in text
+
+    def test_no_secondary_renders_as_before(self):
+        """Without secondary groups, rendering is unchanged."""
+        data = HelpData(
+            prog="deploy",
+            description="Ship services",
+            groups=(
+                HelpGroup(
+                    name="Zoom",
+                    hint="(what to show)",
+                    flags=(
+                        HelpFlag("-q", "--quiet", "Minimal output"),
+                        HelpFlag("-v", "--verbose", "Detailed (-v) or full (-vv)"),
+                    ),
+                ),
+                HelpGroup(name="Help", flags=(HelpFlag("-h", "--help", "Show this help"),)),
+            ),
+        )
+        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # All groups rendered fully (not collapsed)
+        assert "Zoom (what to show)" in text
+        assert "-q, --quiet" in text
+        assert "Help" in text
+        assert "-h, --help" in text
+
+        # No "details" hint (that's only for secondary compact)
+        assert "--help -v for details" not in text
+
+
+class TestRunCliHelp:
+    """Integration tests for --help with command args."""
+
+    @staticmethod
+    def _patch_print_block_to_current_stdout(monkeypatch):
+        from painted import writer as writer_mod
+
+        real_print_block = writer_mod.print_block
+
+        def print_block(block, stream=None, *, use_ansi=None):
+            return real_print_block(block, sys.stdout, use_ansi=use_ansi)
+
+        monkeypatch.setattr(writer_mod, "print_block", print_block)
+
+    def test_help_with_help_args_shows_command_args(self, capsys, monkeypatch):
+        """--help with help_args shows command args prominently."""
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        self._patch_print_block_to_current_stdout(monkeypatch)
+
+        result = run_cli(
+            ["--help"],
+            render=lambda ctx, data: Block.text("unused", Style()),
+            fetch=lambda: "ok",
+            prog="myapp",
+            description="My application",
+            help_args=[
+                HelpArg("vertex", "Vertex name", positional=True),
+                HelpArg("--since", "Time range", default="7d"),
+            ],
+        )
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "vertex" in captured.out
+        assert "Vertex name" in captured.out
+        assert "--since" in captured.out
+        assert "(default: 7d)" in captured.out
+        assert "myapp" in captured.out
+
+    def test_help_with_add_args_shows_command_args(self, capsys, monkeypatch):
+        """--help with add_args shows registered args."""
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        self._patch_print_block_to_current_stdout(monkeypatch)
+
+        def add_args(parser):
+            parser.add_argument("file", help="Input file")
+            parser.add_argument("--format", help="Output format")
+
+        result = run_cli(
+            ["--help"],
+            render=lambda ctx, data: Block.text("unused", Style()),
+            fetch=lambda: "ok",
+            prog="myapp",
+            add_args=add_args,
+        )
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "file" in captured.out
+        assert "Input file" in captured.out
+        assert "--format" in captured.out
+
+    def test_help_without_command_args_unchanged(self, capsys, monkeypatch):
+        """--help without help_args/add_args shows rendering options as before."""
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        self._patch_print_block_to_current_stdout(monkeypatch)
+
+        result = run_cli(
+            ["--help"],
+            render=lambda ctx, data: Block.text("unused", Style()),
+            fetch=lambda: "ok",
+            prog="myapp",
+        )
+
+        assert result == 0
+        captured = capsys.readouterr()
+        # Rendering groups shown with headers (not collapsed)
+        assert "Zoom" in captured.out
+        assert "-q, --quiet" in captured.out

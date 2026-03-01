@@ -101,6 +101,7 @@ class HelpGroup:
     hint: str | None = None  # "(what to show)" — after name at SUMMARY+
     detail: str | None = None  # longer description at DETAILED+
     flags: tuple[HelpFlag, ...] = ()
+    secondary: bool = False  # dim and compact at SUMMARY when command args present
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,20 @@ class HelpData:
     prog: str | None
     description: str | None
     groups: tuple[HelpGroup, ...]
+
+
+@dataclass(frozen=True)
+class HelpArg:
+    """Describes a command argument for help rendering.
+
+    For commands that pre-parse their own args before calling run_cli,
+    use this to describe those args so they appear in --help output.
+    """
+
+    name: str  # "--since" or "vertex"
+    description: str = ""
+    default: str | None = None
+    positional: bool = False
 
 
 # =============================================================================
@@ -180,8 +195,58 @@ def setup_defaults(ctx: CliContext) -> None:
 # =============================================================================
 
 
+def _help_args_to_flags(help_args: list[HelpArg]) -> tuple[HelpFlag, ...]:
+    """Convert HelpArgs to HelpFlags for rendering."""
+    flags: list[HelpFlag] = []
+    for arg in help_args:
+        desc = arg.description
+        if arg.default is not None:
+            suffix = f"(default: {arg.default})"
+            desc = f"{desc} {suffix}" if desc else suffix
+        flags.append(HelpFlag(short=None, long=arg.name, description=desc))
+    return tuple(flags)
+
+
+def _extract_add_args_flags(
+    add_args_fn: Callable[[argparse.ArgumentParser], None],
+) -> tuple[HelpFlag, ...]:
+    """Extract help flags from an add_args callback by introspecting a temp parser."""
+    parser = argparse.ArgumentParser(add_help=False)
+    add_args_fn(parser)
+    flags: list[HelpFlag] = []
+    for action in parser._actions:
+        if isinstance(action, argparse._HelpAction):
+            continue
+        if action.help is argparse.SUPPRESS:
+            continue
+        if not action.option_strings:  # positional
+            desc = action.help or ""
+            flags.append(HelpFlag(short=None, long=action.dest, description=desc))
+        else:
+            short = None
+            long = None
+            for s in action.option_strings:
+                if s.startswith("--"):
+                    long = s
+                elif s.startswith("-"):
+                    short = s
+            desc = action.help or ""
+            flags.append(HelpFlag(short=short, long=long, description=desc))
+    return tuple(flags)
+
+
 def _build_help_data(runner: CliRunner[T]) -> HelpData:
     """Construct help data from a CliRunner's config."""
+    # Command args (primary) — from help_args and/or add_args
+    command_flags: list[HelpFlag] = []
+    if runner.help_args is not None:
+        command_flags.extend(_help_args_to_flags(runner.help_args))
+    if runner.add_args is not None:
+        command_flags.extend(_extract_add_args_flags(runner.add_args))
+
+    has_command_args = len(command_flags) > 0
+    secondary = has_command_args  # rendering opts subordinate when command has its own args
+
     # Zoom group — always present
     zoom_flags = (
         HelpFlag("-q", "--quiet", "Minimal output"),
@@ -192,6 +257,7 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
         hint="(what to show)",
         detail="Controls how much detail is rendered. Stackable: -v for detailed, -vv for full.",
         flags=zoom_flags,
+        secondary=secondary,
     )
 
     # Mode group — filtered by capability (same logic as add_cli_args)
@@ -215,6 +281,7 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
             hint="(how to deliver)",
             detail="Delivery mechanism. AUTO selects LIVE for TTY, STATIC for pipes.",
             flags=tuple(mode_flags),
+            secondary=secondary,
         )
 
     # Format group — always present
@@ -229,13 +296,17 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
         hint="(serialization)",
         detail="Output serialization. ANSI is default for TTY, PLAIN for pipes.",
         flags=format_flags,
+        secondary=secondary,
     )
 
     # Help flag itself
     help_flags = (HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),)
-    help_group = HelpGroup(name="Help", flags=help_flags)
+    help_group = HelpGroup(name="Help", flags=help_flags, secondary=secondary)
 
-    groups: list[HelpGroup] = [zoom_group]
+    groups: list[HelpGroup] = []
+    if command_flags:
+        groups.append(HelpGroup(name="", flags=tuple(command_flags)))
+    groups.append(zoom_group)
     if mode_group is not None:
         groups.append(mode_group)
     groups.append(format_group)
@@ -249,12 +320,20 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
 
 
 def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Block:
-    """Render help data as a composed Block."""
+    """Render help data as a composed Block.
+
+    Groups with secondary=True are rendered dim and collapsed to a compact
+    single line at SUMMARY zoom. At DETAILED+, they expand fully but stay dim.
+    Groups with secondary=False render at normal weight (backward-compatible).
+    """
     from .block import Block
     from .cell import Style
     from .compose import join_vertical, pad
 
     rows: list[Block] = []
+    dim = Style(dim=True) if use_ansi else Style()
+    bold = Style(bold=True) if use_ansi else Style()
+    normal = Style()
 
     # Header: prog + description
     if data.prog or data.description:
@@ -267,8 +346,12 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
             first_line = desc.strip().split("\n")[0].strip()
             parts.append(first_line)
         header = " — ".join(parts) if len(parts) > 1 else parts[0]
-        rows.append(Block.text(header, Style(bold=True) if use_ansi else Style()))
-        rows.append(Block.text("", Style()))
+        rows.append(Block.text(header, bold))
+        rows.append(Block.text("", normal))
+
+    # Separate primary and secondary groups
+    primary = [g for g in data.groups if not g.secondary]
+    secondary = [g for g in data.groups if g.secondary]
 
     # Flag column width: find widest flag string for alignment
     flag_strs: list[str] = []
@@ -282,49 +365,58 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
             flag_strs.append(", ".join(parts_f))
     col_width = max((len(s) for s in flag_strs), default=10) + 2  # padding
 
-    for group in data.groups:
-        # Group name + hint
-        group_label = group.name
-        if group.hint:
-            group_label += f" {group.hint}"
-        rows.append(
-            Block.text(
-                group_label,
-                Style(bold=True) if use_ansi else Style(),
-            )
-        )
+    def _render_group(group: HelpGroup, style: Style, header_style: Style) -> None:
+        """Render a single group into rows."""
+        if group.name:
+            group_label = group.name
+            if group.hint:
+                group_label += f" {group.hint}"
+            rows.append(Block.text(group_label, header_style))
 
         # Group detail at DETAILED+
         if zoom >= Zoom.DETAILED and group.detail:
-            rows.append(
-                Block.text(
-                    f"  {group.detail}",
-                    Style(dim=True) if use_ansi else Style(),
-                )
-            )
+            rows.append(Block.text(f"  {group.detail}", dim))
 
         # Flags
         for flag in group.flags:
-            parts_f = []
+            parts_f: list[str] = []
             if flag.short:
                 parts_f.append(flag.short)
             if flag.long:
                 parts_f.append(flag.long)
             flag_str = ", ".join(parts_f)
             line = f"  {flag_str:<{col_width}}{flag.description}"
-            rows.append(Block.text(line, Style()))
+            rows.append(Block.text(line, style))
 
             # Flag detail at DETAILED+
             if zoom >= Zoom.DETAILED and flag.detail:
                 detail_indent = "  " + " " * col_width
-                rows.append(
-                    Block.text(
-                        f"{detail_indent}{flag.detail}",
-                        Style(dim=True) if use_ansi else Style(),
-                    )
-                )
+                rows.append(Block.text(f"{detail_indent}{flag.detail}", dim))
 
-        rows.append(Block.text("", Style()))
+        rows.append(Block.text("", normal))
+
+    # Render primary groups
+    for group in primary:
+        _render_group(group, normal, bold)
+
+    # Render secondary groups
+    if secondary:
+        if zoom <= Zoom.SUMMARY:
+            # Compact: single dim line listing all flags
+            flag_names: list[str] = []
+            for group in secondary:
+                for flag in group.flags:
+                    flag_names.append(flag.short or flag.long or "")
+            compact = "  " + "  ".join(flag_names)
+            if zoom >= Zoom.SUMMARY:
+                compact += "  (--help -v for details)"
+            rows.append(Block.text(compact, dim))
+            rows.append(Block.text("", normal))
+        else:
+            # Full rendering, dim
+            dim_bold = Style(bold=True, dim=True) if use_ansi else normal
+            for group in secondary:
+                _render_group(group, dim, dim_bold)
 
     # Interaction rules at DETAILED+
     if zoom >= Zoom.DETAILED:
@@ -334,15 +426,10 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
             "-q (minimal zoom) implies --static.",
             "AUTO mode selects LIVE for TTY, STATIC for pipes.",
         ]
-        rows.append(
-            Block.text(
-                rules_header,
-                Style(bold=True) if use_ansi else Style(),
-            )
-        )
+        rows.append(Block.text(rules_header, bold))
         for rule in rules:
-            rows.append(Block.text(f"  {rule}", Style(dim=True) if use_ansi else Style()))
-        rows.append(Block.text("", Style()))
+            rows.append(Block.text(f"  {rule}", dim))
+        rows.append(Block.text("", normal))
 
     return join_vertical(*rows)
 
@@ -510,6 +597,9 @@ class CliRunner(Generic[T]):
 
     # Optional: callback to add custom args
     add_args: Callable[[argparse.ArgumentParser], None] | None = None
+
+    # Optional: describe pre-parsed args for help rendering
+    help_args: list[HelpArg] | None = None
 
     def run(self, args: list[str]) -> int:
         """Parse args, resolve context, dispatch."""
@@ -725,6 +815,7 @@ def run_cli(
     description: str | None = None,
     prog: str | None = None,
     add_args: Callable[[argparse.ArgumentParser], None] | None = None,
+    help_args: list[HelpArg] | None = None,
 ) -> int:
     """Run a CLI tool with zoom/mode/format handling.
 
@@ -738,6 +829,7 @@ def run_cli(
         description: Help text description
         prog: Program name
         add_args: Callback to add custom arguments
+        help_args: Describe pre-parsed args for help rendering
 
     Returns:
         Exit code (0 for success)
@@ -751,4 +843,5 @@ def run_cli(
         description=description,
         prog=prog,
         add_args=add_args,
+        help_args=help_args,
     ).run(args)

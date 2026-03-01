@@ -64,8 +64,9 @@ def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
         lines.append(Block.text(line, p.muted))
 
     if zoom >= Zoom.DETAILED and tick_total > 0:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Ticks — {tick_total}", p.accent))
+        # Build ticks section as a separate group, join with gap
+        facts_section = join_vertical(*lines)
+        tick_lines: list[Block] = [Block.text(f"Ticks — {tick_total}", p.accent)]
         tick_kinds = ticks_info.get("names", {})
         for kind, info in sorted(tick_kinds.items()):
             count = info["count"]
@@ -76,7 +77,8 @@ def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
                 age = f"latest {latest.strftime('%b %d %H:%M')}"
             else:
                 age = ""
-            lines.append(Block.text(f"  {kind}: {count}  {age}", p.muted))
+            tick_lines.append(Block.text(f"  {kind}: {count}  {age}", p.muted))
+        return join_vertical(facts_section, join_vertical(*tick_lines), gap=1)
 
     return join_vertical(*lines)
 

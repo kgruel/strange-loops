@@ -243,24 +243,29 @@ def log_block(facts: list[dict], ticks: list[dict] | None = None) -> "Block":
 
     entries.sort(key=lambda e: e[0])
 
-    blocks: list[Block] = []
+    p = current_palette()
+    # Group by date, then join groups with gap=1
+    date_groups: list[Block] = []
+    current_group: list[Block] = []
     current_date = None
     for ts_val, entry_type, item in entries:
         dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
         date_str = format_date(dt)
         if date_str != current_date:
-            if current_date is not None:
-                blocks.append(Block.text("", p.muted))
-            p = current_palette()
-            blocks.append(Block.text(f"{date_str}:", p.accent))
+            if current_group:
+                date_groups.append(join_vertical(*current_group))
+            current_group = [Block.text(f"{date_str}:", p.accent)]
             current_date = date_str
 
         if entry_type == "fact":
-            blocks.append(fact_line(item))
+            current_group.append(fact_line(item))
         else:
-            blocks.append(tick_line(item))
+            current_group.append(tick_line(item))
 
-    return join_vertical(*blocks)
+    if current_group:
+        date_groups.append(join_vertical(*current_group))
+
+    return join_vertical(*date_groups, gap=1)
 
 
 def format_ts_iso(dt: datetime) -> str:
@@ -419,23 +424,28 @@ def log_block_zoom(facts: list[dict], ticks: list[dict] | None, zoom) -> "Block"
 
     entries.sort(key=lambda e: e[0])
 
-    blocks: list[Block] = []
+    # Group by date, then join groups with gap=1
+    date_groups: list[Block] = []
+    current_group: list[Block] = []
     current_date = None
     for ts_val, entry_type, item in entries:
         dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
         date_str = format_date(dt)
         if date_str != current_date:
-            if current_date is not None:
-                blocks.append(Block.text("", p.muted))
-            blocks.append(Block.text(f"{date_str}:", p.accent))
+            if current_group:
+                date_groups.append(join_vertical(*current_group))
+            current_group = [Block.text(f"{date_str}:", p.accent)]
             current_date = date_str
 
         if entry_type == "fact":
-            blocks.extend(fact_line_zoom(item, zoom))
+            current_group.extend(fact_line_zoom(item, zoom))
         else:
-            blocks.extend(tick_line_zoom(item, zoom))
+            current_group.extend(tick_line_zoom(item, zoom))
 
-    return join_vertical(*blocks)
+    if current_group:
+        date_groups.append(join_vertical(*current_group))
+
+    return join_vertical(*date_groups, gap=1)
 
 
 def print_fact_line(fact: dict) -> None:

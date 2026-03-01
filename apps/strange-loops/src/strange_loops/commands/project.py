@@ -170,11 +170,10 @@ def cmd_project_status(args: argparse.Namespace) -> int:
     from painted.palette import current_palette
 
     p = current_palette()
-    lines: list[Block] = [Block.text(f"Project — {total} facts", p.accent)]
+    sections: list[Block] = [Block.text(f"Project — {total} facts", p.accent)]
 
     if decisions:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Decisions ({len(decisions)}):", p.accent))
+        dec_lines: list[Block] = [Block.text(f"Decisions ({len(decisions)}):", p.accent)]
         for topic, f in sorted(decisions.items()):
             dt = (
                 f["ts"]
@@ -183,11 +182,11 @@ def cmd_project_status(args: argparse.Namespace) -> int:
             )
             msg = f["payload"].get("message", "")
             label = f"  {topic}: {msg}" if msg else f"  {topic}"
-            lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+            dec_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+        sections.append(join_vertical(*dec_lines))
 
     if open_threads:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Open Threads ({len(open_threads)}):", p.accent))
+        thr_lines: list[Block] = [Block.text(f"Open Threads ({len(open_threads)}):", p.accent)]
         for name, f in sorted(open_threads.items()):
             dt = (
                 f["ts"]
@@ -198,11 +197,11 @@ def cmd_project_status(args: argparse.Namespace) -> int:
             status = f["payload"].get("status", "")
             detail = msg or status
             label = f"  {name}: {detail}" if detail else f"  {name}"
-            lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+            thr_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+        sections.append(join_vertical(*thr_lines))
 
     if plans:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Plans ({len(plans)}):", p.accent))
+        plan_lines: list[Block] = [Block.text(f"Plans ({len(plans)}):", p.accent)]
         for name, f in sorted(plans.items()):
             dt = (
                 f["ts"]
@@ -211,11 +210,11 @@ def cmd_project_status(args: argparse.Namespace) -> int:
             )
             status = f["payload"].get("status", "")
             label = f"  {name}: {status}" if status else f"  {name}"
-            lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+            plan_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+        sections.append(join_vertical(*plan_lines))
 
     if completions:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Completions ({len(completions)}):", p.accent))
+        comp_lines: list[Block] = [Block.text(f"Completions ({len(completions)}):", p.accent)]
         for task_name, f in sorted(completions.items()):
             dt = (
                 f["ts"]
@@ -226,9 +225,10 @@ def cmd_project_status(args: argparse.Namespace) -> int:
             exit_code = f["payload"].get("exit_code", "")
             detail = f"{status} exit={exit_code}" if exit_code != "" else status
             label = f"  {task_name}: {detail}" if detail else f"  {task_name}"
-            lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+            comp_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
+        sections.append(join_vertical(*comp_lines))
 
-    show(join_vertical(*lines), file=sys.stdout)
+    show(join_vertical(*sections, gap=1), file=sys.stdout)
     return 0
 
 

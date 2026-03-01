@@ -45,41 +45,46 @@ def project_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
             parts.append(f"{len(completions)} completions")
         return Block.text(", ".join(parts), p.muted)
 
-    lines: list[Block] = [Block.text(f"Project — {total} facts", p.accent)]
+    # Build sections, then join with gap=1
+    sections: list[Block] = [Block.text(f"Project — {total} facts", p.accent)]
 
     if decisions:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Decisions ({len(decisions)}):", p.accent))
+        dec_lines: list[Block] = [Block.text(f"Decisions ({len(decisions)}):", p.accent)]
         for topic, f in sorted(decisions.items()):
-            lines.extend(_render_project_item(f, topic, "message", zoom, p))
+            dec_lines.extend(_render_project_item(f, topic, "message", zoom, p))
+        sections.append(join_vertical(*dec_lines))
 
     if threads:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Open Threads ({len(threads)}):", p.accent))
+        thr_lines: list[Block] = [Block.text(f"Open Threads ({len(threads)}):", p.accent)]
         for name, f in sorted(threads.items()):
             payload = f["payload"]
             msg = payload.get("message", "")
             status = payload.get("status", "")
             detail = msg or status
-            lines.extend(_render_project_item(f, name, detail, zoom, p, is_detail_field=True))
+            thr_lines.extend(_render_project_item(f, name, detail, zoom, p, is_detail_field=True))
+        sections.append(join_vertical(*thr_lines))
 
     if plans:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Plans ({len(plans)}):", p.accent))
+        plan_lines: list[Block] = [Block.text(f"Plans ({len(plans)}):", p.accent)]
         for name, f in sorted(plans.items()):
             status = f["payload"].get("status", "")
-            lines.extend(_render_project_item(f, name, status, zoom, p, is_detail_field=True))
+            plan_lines.extend(
+                _render_project_item(f, name, status, zoom, p, is_detail_field=True)
+            )
+        sections.append(join_vertical(*plan_lines))
 
     if completions:
-        lines.append(Block.text("", p.muted))
-        lines.append(Block.text(f"Completions ({len(completions)}):", p.accent))
+        comp_lines: list[Block] = [Block.text(f"Completions ({len(completions)}):", p.accent)]
         for task_name, f in sorted(completions.items()):
             status = f["payload"].get("status", "")
             exit_code = f["payload"].get("exit_code", "")
             detail = f"{status} exit={exit_code}" if exit_code != "" else status
-            lines.extend(_render_project_item(f, task_name, detail, zoom, p, is_detail_field=True))
+            comp_lines.extend(
+                _render_project_item(f, task_name, detail, zoom, p, is_detail_field=True)
+            )
+        sections.append(join_vertical(*comp_lines))
 
-    return join_vertical(*lines)
+    return join_vertical(*sections, gap=1)
 
 
 def _render_project_item(

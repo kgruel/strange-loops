@@ -73,6 +73,9 @@ def create_parser() -> argparse.ArgumentParser:
     close_p.add_argument("name", help="Task name")
     close_p.add_argument("--observer", help="Observer identity")
 
+    # dashboard — arg parsing delegated to painted run_cli
+    subparsers.add_parser("dashboard", help="Task dashboard")
+
     # project
     project_parser = subparsers.add_parser("project", help="Project coordination surface")
     project_sub = project_parser.add_subparsers(dest="project_command", required=True)
@@ -94,6 +97,15 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Dashboard delegates to painted's run_cli for arg parsing + mode handling
+    if argv and argv[0] == "dashboard":
+        from strange_loops.commands.dashboard import run_dashboard
+
+        return run_dashboard(argv[1:])
+
     parser = create_parser()
     args = parser.parse_args(argv)
 

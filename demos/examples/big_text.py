@@ -7,7 +7,7 @@ Features:
 - Rainbow color cycling
 - Multiple demo modes
 
-Run: uv run python demos/apps/big_text.py
+Run: uv run python demos/examples/big_text.py
 Keys: 1-4 modes, s=size, f=format, q=quit
 """
 
@@ -203,5 +203,9 @@ class BigTextDemo(Surface):
             )
 
 
+async def main() -> None:
+    await BigTextDemo().run()
+
+
 if __name__ == "__main__":
-    asyncio.run(BigTextDemo().run())
+    asyncio.run(main())

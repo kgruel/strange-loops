@@ -29,6 +29,7 @@ Three tiers, distinguished by where state lives and how you test them.
 | **Primitive** | Type API | None | `function() → stdout capture` |
 | **Pattern** | Workflow | Data only | `_render(ctx, data) → Block` |
 | **App** | Interaction | Mutable (Surface) | `TestSurface(keys) → frames` |
+| **Example** | Real app | Mutable (Surface) | `TestSurface(keys) → frames` |
 
 **Primitives** teach a single type or composition. No `main()`, no CLI flags.
 Output via `print_block` / `show`. The output is the lesson.
@@ -42,6 +43,10 @@ or its own render pipeline, it's an app.
 **Apps** have their own state machines: selection, navigation, modal layers.
 `surface.render()` owns the layout. Tested via `TestSurface` replay: send keys,
 assert on captured frames and emissions.
+
+**Examples** are miniature applications that show what you can build, not teach
+individual concepts. They use the full API freely — the experience is the lesson,
+the code is reference material. Same test shape as apps (TestSurface).
 
 The test shape *is* the boundary. If you can test the full lesson by calling
 `_render(ctx, data)`, it's a pattern. If you need to send keys and inspect
@@ -72,6 +77,12 @@ patterns/
 
 apps/
   (not yet graduated to golden tests — needs TestSurface integration)
+
+examples/
+  disk.py           Real filesystem disk usage visualization    ✓
+  big_text.py       Block character rendering (multiple sizes)
+  lenses.py         Tree and chart data visualization
+  theme_carnival.py Interactive palette explorer
 ```
 
 Old stepping stones (`block.py`, `buffer.py`, `buffer_view.py`) deleted —

@@ -31,7 +31,7 @@ class DemoEntry:
 
 _CACHE: list[DemoEntry] | None = None
 
-_GROUPS = ("primitives", "patterns", "apps")
+_GROUPS = ("primitives", "patterns", "apps", "examples")
 
 
 def _find_demos_root() -> Path | None:

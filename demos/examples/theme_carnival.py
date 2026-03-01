@@ -4,7 +4,7 @@
 A demo showcasing runtime palette switching. `Palette` is a small set of
 semantic Style roles used by view components (progress bar, sparkline, etc.).
 
-Run: `uv run python demos/apps/theme_carnival.py`
+Run: `uv run python demos/examples/theme_carnival.py`
 Keys: 1-3 jump to palette, ←/→ cycle, ↑/↓ scroll, q quit
 Mouse: scroll wheel to scroll
 """
@@ -256,6 +256,10 @@ class PaletteCarnival(Surface):
             self.viewport = self.viewport.scroll(event.scroll_delta)
 
 
+async def main() -> None:
+    await PaletteCarnival().run()
+
+
 if __name__ == "__main__":
-    asyncio.run(PaletteCarnival().run())
+    asyncio.run(main())
 

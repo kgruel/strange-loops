@@ -15,5 +15,8 @@ uv.lock
 .obsidian/
 .DS_Store
 /data/
+*.db
+*.db-shm
+*.db-wal
 *.gif
 *.tape

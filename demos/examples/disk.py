@@ -22,9 +22,13 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import threading
+import time
 from dataclasses import dataclass
 
 from painted import Block, Style
+from painted._components.spinner import SpinnerState
+from painted.inplace import InPlaceRenderer
 from painted.buffer import BufferView
 from painted.region import Region
 from painted.tui import Surface
@@ -303,7 +307,7 @@ def _render_dir_row(
 # View modes — lens-based rendering of directory entries
 # ---------------------------------------------------------------------------
 
-_VIEW_MODES = ("tree", "bars", "chart", "flame")
+_VIEW_MODES = ("bars", "tree", "chart", "flame")
 
 
 def _entries_to_tree(entries: tuple[DirEntry, ...]) -> dict[str, object]:
@@ -365,6 +369,109 @@ def _render_lens_view(
 
 
 # ---------------------------------------------------------------------------
+# Interactive tree view
+# ---------------------------------------------------------------------------
+
+# Row tuple: (entry, depth, path, is_expanded, is_last)
+type TreeRow = tuple[DirEntry, int, tuple[str, ...], bool, bool]
+
+
+def _flatten_tree(
+    entries: tuple[DirEntry, ...],
+    expanded: set[tuple[str, ...]],
+    lazy_children: dict[tuple[str, ...], tuple[DirEntry, ...]] | None = None,
+    path_prefix: tuple[str, ...] = (),
+) -> list[TreeRow]:
+    """Depth-first flatten of entries respecting expanded set.
+
+    Children come from lazy_children (on-demand scans) first, then
+    entry.children (pre-scanned). Any directory is expandable.
+    """
+    rows: list[TreeRow] = []
+    for i, entry in enumerate(entries):
+        path = (*path_prefix, entry.name)
+        is_last = i == len(entries) - 1
+        is_expanded = path in expanded and entry.is_dir
+        rows.append((entry, len(path_prefix), path, is_expanded, is_last))
+        if is_expanded:
+            children = (
+                (lazy_children or {}).get(path)
+                or entry.children
+            )
+            if children:
+                sorted_children = tuple(
+                    sorted(children, key=lambda e: e.size_bytes, reverse=True)
+                )
+                rows.extend(_flatten_tree(sorted_children, expanded, lazy_children, path))
+    return rows
+
+
+def _render_tree_view(
+    view: BufferView,
+    rows: list[TreeRow],
+    selected: int,
+    *,
+    focused: bool = True,
+) -> None:
+    """Render flattened tree rows into a BufferView."""
+    w = view.width
+    if not rows or w <= 0:
+        return
+
+    # Track which depths have a continuing vertical line
+    # (ancestor is not the last sibling at that depth)
+    continuing: set[int] = set()
+
+    for idx, (entry, depth, _path, is_expanded, is_last) in enumerate(rows):
+        if idx >= view.height:
+            break
+        is_sel = idx == selected
+
+        # Cursor marker
+        if is_sel:
+            style = Style(bold=True, fg="cyan") if focused else Style(dim=True)
+            _put(view, 0, idx, ">", style)
+
+        # Build tree prefix: "│  " for continuing ancestors, "   " otherwise
+        x = 2
+        for d in range(depth):
+            if d in continuing:
+                _put(view, x, idx, "│", Style(dim=True))
+            x += 3
+
+        # Branch character for non-root entries
+        if depth > 0:
+            branch = "└── " if is_last else "├── "
+            _put(view, x - 3, idx, branch, Style(dim=True))
+
+        # Expand/collapse indicator for directories
+        if entry.is_dir:
+            indicator = "▼ " if is_expanded else "▶ "
+            _put(view, x, idx, indicator, Style(fg="cyan" if is_sel else "white"))
+            x += 2
+
+        # Entry name + size — dirs get trailing /, files are dim
+        suffix = "/" if entry.is_dir else ""
+        size_s = f"  {entry.size_human}"
+        name_w = max(0, w - x - len(suffix) - len(size_s))
+        name = entry.name[:name_w]
+        if is_sel:
+            name_style = Style(bold=True, fg="cyan") if focused else Style(dim=True)
+        elif entry.is_dir:
+            name_style = Style()
+        else:
+            name_style = Style(dim=True)
+        _put(view, x, idx, name + suffix, name_style)
+        _put(view, x + len(name) + len(suffix), idx, size_s, Style(dim=True))
+
+        # Update continuing set for children that follow
+        if is_last:
+            continuing.discard(depth)
+        else:
+            continuing.add(depth)
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -378,6 +485,8 @@ class DiskApp(Surface):
         self.nav_stack: list[str] = []  # relative path components from mount
         self.dir_selected = 0
         self.view_mode = 0  # index into _VIEW_MODES
+        self.tree_expanded: set[tuple[str, ...]] = set()
+        self.tree_children: dict[tuple[str, ...], tuple[DirEntry, ...]] = {}
         self.current_entries: tuple[DirEntry, ...] = ()
         if volumes:
             self.current_entries = volumes[0].entries
@@ -413,6 +522,8 @@ class DiskApp(Surface):
         else:
             self.current_entries = _scan_entries(self._current_path(), depth=2)
         self.dir_selected = 0
+        self.tree_expanded = set()
+        self.tree_children = {}
 
     def layout(self, width: int, height: int) -> None:
         # Fixed split: left list, right detail.
@@ -472,6 +583,9 @@ class DiskApp(Surface):
         # Directory table / lens view
         mode = _VIEW_MODES[self.view_mode]
         if mode == "bars":
+            # Clamp selection to valid range
+            if self.current_entries:
+                self.dir_selected = min(self.dir_selected, len(self.current_entries) - 1)
             parent_bytes = vol.used_bytes if not self.nav_stack else (
                 sum(e.size_bytes for e in self.current_entries) or 1
             )
@@ -479,6 +593,18 @@ class DiskApp(Surface):
                 self.dir_table_r.view(buf),
                 self.current_entries,
                 parent_bytes,
+                self.dir_selected,
+                focused=self.focus == "dirs",
+            )
+        elif mode == "tree":
+            rows = _flatten_tree(
+                self.current_entries, self.tree_expanded, self.tree_children,
+            )
+            if rows:
+                self.dir_selected = min(self.dir_selected, len(rows) - 1)
+            _render_tree_view(
+                self.dir_table_r.view(buf),
+                rows,
                 self.dir_selected,
                 focused=self.focus == "dirs",
             )
@@ -510,6 +636,10 @@ class DiskApp(Surface):
             return
 
         if self.focus == "volumes":
+            if key == "enter":
+                # Drill into the selected volume's directory pane
+                self.focus = "dirs"
+                return
             old = self.selected
             if key == "up":
                 self.selected = max(0, self.selected - 1)
@@ -519,30 +649,90 @@ class DiskApp(Surface):
                 self.nav_stack.clear()
                 self._sync_entries()
         elif self.focus == "dirs":
-            if key == "up":
-                self.dir_selected = max(0, self.dir_selected - 1)
-            elif key == "down":
-                if self.current_entries:
-                    self.dir_selected = min(
-                        len(self.current_entries) - 1, self.dir_selected + 1
-                    )
-            elif key == "enter":
-                if (
-                    self.current_entries
-                    and self.dir_selected < len(self.current_entries)
-                ):
-                    entry = self.current_entries[self.dir_selected]
-                    if entry.is_dir:
-                        self.nav_stack.append(entry.name)
-                        self._sync_entries()
-            elif key == "backspace":
-                if self.nav_stack:
-                    self.nav_stack.pop()
+            mode = _VIEW_MODES[self.view_mode]
+            if mode == "tree":
+                self._on_key_tree(key)
+            elif mode == "bars":
+                self._on_key_bars(key)
+            else:
+                # chart/flame: only backspace
+                if key == "backspace":
+                    self._nav_back()
+
+    def _nav_back(self) -> None:
+        """Pop nav_stack or return focus to volumes."""
+        if self.nav_stack:
+            self.nav_stack.pop()
+            self._sync_entries()
+        else:
+            self.focus = "volumes"
+
+    def _on_key_bars(self, key: str) -> None:
+        if key == "up":
+            self.dir_selected = max(0, self.dir_selected - 1)
+        elif key == "down":
+            if self.current_entries:
+                self.dir_selected = min(
+                    len(self.current_entries) - 1, self.dir_selected + 1
+                )
+        elif key == "enter":
+            if (
+                self.current_entries
+                and self.dir_selected < len(self.current_entries)
+            ):
+                entry = self.current_entries[self.dir_selected]
+                if entry.is_dir:
+                    self.nav_stack.append(entry.name)
                     self._sync_entries()
+        elif key == "backspace":
+            self._nav_back()
+
+    def _on_key_tree(self, key: str) -> None:
+        rows = _flatten_tree(
+            self.current_entries, self.tree_expanded, self.tree_children,
+        )
+        if key == "up":
+            self.dir_selected = max(0, self.dir_selected - 1)
+        elif key == "down":
+            if rows:
+                self.dir_selected = min(len(rows) - 1, self.dir_selected + 1)
+        elif key == "enter":
+            if rows and self.dir_selected < len(rows):
+                entry, _depth, path, is_expanded, _is_last = rows[self.dir_selected]
+                if entry.is_dir:
+                    if is_expanded:
+                        self.tree_expanded.discard(path)
+                    else:
+                        self.tree_expanded.add(path)
+                        # Lazy-scan: if no children available, scan the filesystem
+                        if not entry.children and path not in self.tree_children:
+                            fs_path = os.path.join(self._current_path(), *path)
+                            self.tree_children[path] = _scan_entries(fs_path, depth=2)
+        elif key == "backspace":
+            self._nav_back()
 
 
 async def main() -> None:
-    await DiskApp(volumes=_scan()).run()
+    # Scan with a loading spinner
+    result: list[tuple[Volume, ...]] = []
+
+    def _do_scan() -> None:
+        result.append(_scan())
+
+    thread = threading.Thread(target=_do_scan)
+    thread.start()
+
+    with InPlaceRenderer() as renderer:
+        ss = SpinnerState()
+        while thread.is_alive():
+            char = ss.frames.frames[ss.frame]
+            frame = Block.text(f" {char} Scanning volumes…", Style(dim=True))
+            renderer.render(frame)
+            ss = ss.tick()
+            time.sleep(0.08)
+        renderer.clear()
+
+    await DiskApp(volumes=result[0]).run()
 
 
 if __name__ == "__main__":

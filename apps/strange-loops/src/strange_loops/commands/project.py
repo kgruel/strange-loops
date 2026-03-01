@@ -12,7 +12,6 @@ from strange_loops.store import (
     emit_fact,
     observer,
     parse_duration,
-    render_log,
     require_store,
     store_path,
     store_path_for,
@@ -58,6 +57,53 @@ def _latest_by_group(facts: list[dict], kind: str, group_field: str) -> dict[str
         if existing is None or f["ts"] > existing["ts"]:
             grouped[key] = f
     return grouped
+
+
+# -- Fetch --
+
+
+def fetch_project_status(sp: Path) -> dict:
+    """Fetch project status — latest-per-group fold over decisions, threads, plans."""
+    require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
+
+    from engine import StoreReader
+
+    with StoreReader(sp) as reader:
+        total = reader.fact_total
+        all_facts = reader.facts_between(0, float("inf"))
+
+    decisions = _latest_by_group(all_facts, "decision", "topic")
+    threads = _latest_by_group(all_facts, "thread", "name")
+    plans = _latest_by_group(all_facts, "plan", "name")
+    completions = _latest_by_group(all_facts, "completion", "task")
+
+    # Filter threads: hide resolved
+    open_threads = {k: v for k, v in threads.items() if v["payload"].get("status") != "resolved"}
+
+    return {
+        "total": total,
+        "decisions": decisions,
+        "threads": open_threads,
+        "plans": plans,
+        "completions": completions,
+    }
+
+
+def fetch_project_log(sp: Path, duration_secs: float, kind: str | None = None) -> dict:
+    """Fetch project log — facts in a time range."""
+    require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
+
+    from engine import StoreReader
+
+    now = datetime.now(timezone.utc)
+    since_ts = now.timestamp() - duration_secs
+
+    with StoreReader(sp) as reader:
+        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+
+    facts.sort(key=lambda f: f["ts"])
+
+    return {"facts": facts}
 
 
 # -- Commands --
@@ -190,38 +236,33 @@ def cmd_project_log(args: argparse.Namespace) -> int:
     """Show project log — time-windowed query with optional kind filter."""
     sp = _project_store()
     try:
-        require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    try:
         duration_secs = parse_duration(getattr(args, "since", "7d"))
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    now = datetime.now(timezone.utc)
-    since_ts = now.timestamp() - duration_secs
     kind = getattr(args, "kind", None)
     use_json = getattr(args, "json", False)
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-
-    facts.sort(key=lambda f: f["ts"])
+    try:
+        data = fetch_project_log(sp, duration_secs, kind)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if use_json:
-        for f in facts:
+        for f in data["facts"]:
             f_out = dict(f)
             if isinstance(f_out["ts"], datetime):
                 f_out["ts"] = f_out["ts"].isoformat()
             print(json.dumps(f_out, default=str))
         return 0
 
-    render_log(facts)
+    from painted import show
+
+    from strange_loops.store import log_block
+
+    show(log_block(data["facts"]), file=sys.stdout)
     return 0
 
 

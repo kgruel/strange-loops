@@ -13,47 +13,58 @@ from strange_loops.store import (
     emit_fact,
     observer,
     parse_duration,
-    render_log_with_ticks,
     require_store,
     store_path,
+    tick_to_dict,
 )
+
+
+# -- Fetch --
+
+
+def fetch_session_status(sp: Path) -> dict:
+    """Fetch session status data — summary from store reader."""
+    require_store(sp)
+
+    from engine import StoreReader
+
+    with StoreReader(sp) as reader:
+        return reader.summary()
+
+
+def fetch_session_log(sp: Path, duration_secs: float, kind: str | None = None) -> dict:
+    """Fetch session log — facts and ticks in a time range."""
+    require_store(sp)
+
+    from engine import StoreReader
+
+    now = datetime.now(timezone.utc)
+    since_ts = now.timestamp() - duration_secs
+
+    with StoreReader(sp) as reader:
+        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+        ticks = reader.ticks_between(since_ts, now.timestamp())
+
+    facts.sort(key=lambda f: f["ts"])
+    tick_dicts = [tick_to_dict(t) for t in ticks]
+
+    return {"facts": facts, "ticks": tick_dicts}
 
 
 # -- Rendering (painted) --
 
 
 def _render_status(sp: Path) -> None:
-    """Render session status via painted blocks."""
-    from engine import StoreReader
-    from painted import show
-    from painted.block import Block
-    from painted.compose import join_vertical
-    from painted.palette import current_palette
+    """Render session status via painted blocks — used by session start."""
+    import shutil
 
-    if not Path(sp).exists():
-        p = current_palette()
-        show(Block.text("No session data yet.", p.muted), file=sys.stdout)
-        return
+    from painted import Zoom, show
 
-    with StoreReader(sp) as reader:
-        stats = reader.fact_kind_stats()
-        total = reader.fact_total
+    from strange_loops.lenses.session import session_status_view
 
-    p = current_palette()
-    header = Block.text(f"Session — {total} facts", p.accent)
-
-    if not stats:
-        show(join_vertical(header, Block.text("  (empty)", p.muted)), file=sys.stdout)
-        return
-
-    lines = [header]
-    for kind, info in sorted(stats.items()):
-        count = info["count"]
-        latest = info["latest"]
-        age = f"latest {latest.strftime('%b %d %H:%M')}" if latest else ""
-        lines.append(Block.text(f"  {kind}: {count}  {age}", p.muted))
-
-    show(join_vertical(*lines), file=sys.stdout)
+    data = fetch_session_status(sp)
+    width = shutil.get_terminal_size().columns
+    show(session_status_view(data, Zoom.SUMMARY, width), file=sys.stdout)
 
 
 # -- Commands --
@@ -93,10 +104,7 @@ def cmd_session_status(args: argparse.Namespace) -> int:
 
     use_json = getattr(args, "json", False)
     if use_json:
-        from engine import StoreReader
-
-        with StoreReader(sp) as reader:
-            data = reader.summary()
+        data = fetch_session_status(sp)
         print(json.dumps(data, indent=2, default=str))
         return 0
 
@@ -119,50 +127,36 @@ def cmd_session_log(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    now = datetime.now(timezone.utc)
-    since_ts = now.timestamp() - duration_secs
     kind = getattr(args, "kind", None)
     use_json = getattr(args, "json", False)
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-        ticks = reader.ticks_between(since_ts, now.timestamp())
-
-    facts.sort(key=lambda f: f["ts"])
+    data = fetch_session_log(sp, duration_secs, kind)
 
     if use_json:
-        # Interleave facts and ticks chronologically
-        entries: list[tuple[float, str, object]] = []
-        for f in facts:
+        # JSONL — one JSON object per entry, interleaved chronologically
+        entries: list[tuple[float, str, dict]] = []
+        for f in data["facts"]:
             ts = f["ts"]
             ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
             entries.append((ts_val, "fact", f))
-        for t in ticks:
-            ts = t.ts
+        for t in data["ticks"]:
+            ts = t["ts"]
             ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
             entries.append((ts_val, "tick", t))
         entries.sort(key=lambda e: e[0])
 
         for _, entry_type, item in entries:
-            if entry_type == "fact":
-                f_out = dict(item)
-                if isinstance(f_out["ts"], datetime):
-                    f_out["ts"] = f_out["ts"].isoformat()
-                print(json.dumps(f_out, default=str))
-            else:
-                t_out = {
-                    "type": "tick",
-                    "name": item.name,
-                    "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
-                    "payload": item.payload,
-                    "origin": item.origin,
-                }
-                print(json.dumps(t_out, default=str))
+            f_out = dict(item)
+            if isinstance(f_out.get("ts"), datetime):
+                f_out["ts"] = f_out["ts"].isoformat()
+            print(json.dumps(f_out, default=str))
         return 0
 
-    render_log_with_ticks(facts, ticks)
+    from painted import show
+
+    from strange_loops.store import log_block
+
+    show(log_block(data["facts"], data["ticks"]), file=sys.stdout)
     return 0
 
 

@@ -24,15 +24,15 @@ from strange_loops.store import (
     filter_task_ticks as _filter_task_ticks,
     observer,
     parse_duration,
-    render_log_with_ticks,
-    render_log_entry,
-    render_tick_entry,
+    print_fact_line,
+    print_tick_line,
     require_store,
     store_path,
+    tick_to_dict,
 )
 
 
-def _render_task(state: dict) -> "Block":
+def render_task(state: dict) -> "Block":
     """Render a single task as a painted block."""
     from painted.block import Block
     from painted.compose import join_vertical
@@ -64,7 +64,7 @@ def _render_task(state: dict) -> "Block":
     return join_vertical(*lines)
 
 
-def _render_task_list(tasks: list[dict]) -> "Block":
+def render_task_list(tasks: list[dict]) -> "Block":
     """Render all tasks as a painted block."""
     from painted.block import Block
     from painted.compose import join_vertical
@@ -77,7 +77,7 @@ def _render_task_list(tasks: list[dict]) -> "Block":
     header = Block.text(f"Tasks — {len(tasks)} total", p.accent)
     blocks = [header]
     for t in tasks:
-        blocks.append(_render_task(t))
+        blocks.append(render_task(t))
 
     return join_vertical(*blocks, gap=1)
 
@@ -88,6 +88,46 @@ def _require_task(reader, name: str) -> dict:
     if state is None:
         raise ValueError(f"Task '{name}' not found. Create it first with 'task create'.")
     return state
+
+
+# -- Fetch --
+
+
+def fetch_task_status(sp: Path, name: str | None = None) -> dict | list[dict]:
+    """Fetch task status — single task dict or list of all tasks."""
+    require_store(sp)
+
+    from engine import StoreReader
+
+    with StoreReader(sp) as reader:
+        if name:
+            state = fold_task_state(reader, name)
+            if state is None:
+                raise ValueError(f"Task '{name}' not found.")
+            return state
+        return fold_all_tasks(reader)
+
+
+def fetch_task_log(sp: Path, name: str, duration_secs: float, kind: str | None = None) -> dict:
+    """Fetch task log — filtered facts and ticks for a specific task."""
+    require_store(sp)
+
+    from engine import StoreReader
+
+    now = datetime.now(timezone.utc)
+    since_ts = now.timestamp() - duration_secs
+
+    with StoreReader(sp) as reader:
+        _require_task(reader, name)
+        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
+        ticks = reader.ticks_between(since_ts, now.timestamp())
+
+    facts = _filter_task_facts(facts, name)
+    tick_dicts = [tick_to_dict(t) for t in ticks]
+    tick_dicts = _filter_task_ticks(tick_dicts, name)
+    facts.sort(key=lambda f: f["ts"])
+
+    return {"facts": facts, "ticks": tick_dicts}
 
 
 # -- Commands --
@@ -248,7 +288,7 @@ def cmd_task_status(args: argparse.Namespace) -> int:
             else:
                 from painted import show
 
-                show(_render_task(state), file=sys.stdout)
+                show(render_task(state), file=sys.stdout)
         else:
             tasks = fold_all_tasks(reader)
             if use_json:
@@ -256,7 +296,7 @@ def cmd_task_status(args: argparse.Namespace) -> int:
             else:
                 from painted import show
 
-                show(_render_task_list(tasks), file=sys.stdout)
+                show(render_task_list(tasks), file=sys.stdout)
 
     return 0
 
@@ -564,54 +604,39 @@ def cmd_task_log(args: argparse.Namespace) -> int:
     follow = getattr(args, "follow", False)
 
     if follow:
-        return _follow_task_log(sp, name, kind, use_json)
+        return follow_task_log(sp, name, kind, use_json)
 
-    now = datetime.now(timezone.utc)
-    since_ts = now.timestamp() - duration_secs
-
-    with StoreReader(sp) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-        ticks = reader.ticks_between(since_ts, now.timestamp())
-
-    facts = _filter_task_facts(facts, name)
-    ticks = _filter_task_ticks(ticks, name)
-    facts.sort(key=lambda f: f["ts"])
+    data = fetch_task_log(sp, name, duration_secs, kind)
 
     if use_json:
-        # Interleave facts and ticks chronologically
-        entries: list[tuple[float, str, object]] = []
-        for f in facts:
+        # JSONL — one JSON object per entry, interleaved chronologically
+        entries: list[tuple[float, str, dict]] = []
+        for f in data["facts"]:
             ts = f["ts"]
             ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
             entries.append((ts_val, "fact", f))
-        for t in ticks:
-            ts = t.ts
+        for t in data["ticks"]:
+            ts = t["ts"]
             ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
             entries.append((ts_val, "tick", t))
         entries.sort(key=lambda e: e[0])
 
         for _, entry_type, item in entries:
-            if entry_type == "fact":
-                f_out = dict(item)
-                if isinstance(f_out["ts"], datetime):
-                    f_out["ts"] = f_out["ts"].isoformat()
-                print(json.dumps(f_out, default=str), flush=True)
-            else:
-                t_out = {
-                    "type": "tick",
-                    "name": item.name,
-                    "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
-                    "payload": item.payload,
-                    "origin": item.origin,
-                }
-                print(json.dumps(t_out, default=str), flush=True)
+            f_out = dict(item)
+            if isinstance(f_out.get("ts"), datetime):
+                f_out["ts"] = f_out["ts"].isoformat()
+            print(json.dumps(f_out, default=str), flush=True)
         return 0
 
-    render_log_with_ticks(facts, ticks)
+    from painted import show
+
+    from strange_loops.store import log_block
+
+    show(log_block(data["facts"], data["ticks"]), file=sys.stdout)
     return 0
 
 
-def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> int:
+def follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> int:
     """Follow task log — poll for new facts and ticks, print as they arrive."""
     from engine import StoreReader
 
@@ -624,16 +649,17 @@ def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> i
                 ticks = reader.ticks_between(last_ts, float("inf"))
 
             facts = _filter_task_facts(facts, name)
-            ticks = _filter_task_ticks(ticks, name)
+            tick_dicts = [tick_to_dict(t) for t in ticks]
+            tick_dicts = _filter_task_ticks(tick_dicts, name)
 
             # Build unified timeline
-            entries: list[tuple[float, str, object]] = []
+            entries: list[tuple[float, str, dict]] = []
             for f in facts:
                 ts = f["ts"]
                 ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
                 entries.append((ts_val, "fact", f))
-            for t in ticks:
-                ts = t.ts
+            for t in tick_dicts:
+                ts = t["ts"]
                 ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
                 entries.append((ts_val, "tick", t))
             entries.sort(key=lambda e: e[0])
@@ -643,26 +669,15 @@ def _follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> i
                     continue
                 last_ts = ts_val
 
-                if entry_type == "fact":
-                    if use_json:
-                        f_out = dict(item)
-                        if isinstance(f_out["ts"], datetime):
-                            f_out["ts"] = f_out["ts"].isoformat()
-                        print(json.dumps(f_out, default=str), flush=True)
-                    else:
-                        render_log_entry(item)
+                if use_json:
+                    f_out = dict(item)
+                    if isinstance(f_out.get("ts"), datetime):
+                        f_out["ts"] = f_out["ts"].isoformat()
+                    print(json.dumps(f_out, default=str), flush=True)
+                elif entry_type == "fact":
+                    print_fact_line(item)
                 else:
-                    if use_json:
-                        t_out = {
-                            "type": "tick",
-                            "name": item.name,
-                            "ts": item.ts.isoformat() if isinstance(item.ts, datetime) else item.ts,
-                            "payload": item.payload,
-                            "origin": item.origin,
-                        }
-                        print(json.dumps(t_out, default=str), flush=True)
-                    else:
-                        render_tick_entry(item)
+                    print_tick_line(item)
 
             time.sleep(2)
     except KeyboardInterrupt:

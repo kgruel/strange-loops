@@ -25,13 +25,9 @@ def create_parser() -> argparse.ArgumentParser:
     end_p = session_sub.add_parser("end", help="End a session")
     end_p.add_argument("--observer", help="Observer identity")
 
-    status_p = session_sub.add_parser("status", help="Show session status")
-    status_p.add_argument("--json", action="store_true", help="JSON output")
-
-    log_p = session_sub.add_parser("log", help="Show session log")
-    log_p.add_argument("--since", default="7d", help="Time range (e.g. 7d, 24h)")
-    log_p.add_argument("--kind", help="Filter by fact kind")
-    log_p.add_argument("--json", action="store_true", help="JSONL output")
+    # status and log defined for argparse help; actual dispatch is pre-routed
+    session_sub.add_parser("status", help="Show session status")
+    session_sub.add_parser("log", help="Show session log")
 
     # task
     task_parser = subparsers.add_parser("task", help="Task lifecycle")
@@ -64,12 +60,10 @@ def create_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--base", help="Base branch (default: current branch)")
     run_p.add_argument("--observer", help="Observer identity")
 
-    tstatus_p = task_sub.add_parser("status", help="Show task status")
-    tstatus_p.add_argument("name", nargs="?", help="Task name (omit for all)")
-    tstatus_p.add_argument("--json", action="store_true", help="JSON output")
-
-    tlist_p = task_sub.add_parser("list", help="List all tasks")
-    tlist_p.add_argument("--json", action="store_true", help="JSON output")
+    # status, list, log defined for argparse help; actual dispatch is pre-routed
+    task_sub.add_parser("status", help="Show task status")
+    task_sub.add_parser("list", help="List all tasks")
+    task_sub.add_parser("log", help="Show task log")
 
     diff_p = task_sub.add_parser("diff", help="Show task worktree diff")
     diff_p.add_argument("name", help="Task name")
@@ -82,13 +76,6 @@ def create_parser() -> argparse.ArgumentParser:
     close_p = task_sub.add_parser("close", help="Close a task (remove worktree)")
     close_p.add_argument("name", help="Task name")
     close_p.add_argument("--observer", help="Observer identity")
-
-    tlog_p = task_sub.add_parser("log", help="Show task log")
-    tlog_p.add_argument("name", help="Task name")
-    tlog_p.add_argument("--since", default="7d", help="Time range (e.g. 7d, 24h)")
-    tlog_p.add_argument("--kind", help="Filter by fact kind")
-    tlog_p.add_argument("--json", action="store_true", help="JSONL output")
-    tlog_p.add_argument("--follow", action="store_true", help="Follow new facts")
 
     stop_p = task_sub.add_parser("stop", help="Stop a running task worker")
     stop_p.add_argument("name", help="Task name")
@@ -111,18 +98,237 @@ def create_parser() -> argparse.ArgumentParser:
     emit_p.add_argument("parts", nargs="*", help="KEY=VALUE pairs and/or message")
     emit_p.add_argument("--observer", help="Observer identity")
 
-    pstatus_p = project_sub.add_parser("status", help="Show project status")
-    pstatus_p.add_argument("--json", action="store_true", help="JSON output")
-
-    plog_p = project_sub.add_parser("log", help="Show project log")
-    plog_p.add_argument("--since", default="7d", help="Time range (e.g. 7d, 24h)")
-    plog_p.add_argument("--kind", help="Filter by fact kind")
-    plog_p.add_argument("--json", action="store_true", help="JSONL output")
+    # status, log defined for argparse help; actual dispatch is pre-routed
+    project_sub.add_parser("status", help="Show project status")
+    project_sub.add_parser("log", help="Show project log")
 
     bridge_p = project_sub.add_parser("bridge", help="Bridge task ticks to project completions")
     bridge_p.add_argument("--observer", help="Observer identity")
 
     return parser
+
+
+# -- Display command wrappers (run_cli) --
+
+
+def _run_session_status(argv: list[str]) -> int:
+    from painted import run_cli
+
+    from strange_loops.commands.session import fetch_session_status
+    from strange_loops.lenses.session import session_status_view
+    from strange_loops.store import require_store, store_path
+
+    def fetch():
+        sp = store_path()
+        require_store(sp)
+        return fetch_session_status(sp)
+
+    def render(ctx, data):
+        return session_status_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        argv,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops session status",
+        description="Show session status",
+    )
+
+
+def _run_session_log(argv: list[str]) -> int:
+    from painted import run_cli
+
+    from strange_loops.commands.session import fetch_session_log
+    from strange_loops.lenses.session import session_log_view
+    from strange_loops.store import parse_duration, require_store, store_path
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--since", default="7d")
+    pre.add_argument("--kind", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    try:
+        duration_secs = parse_duration(known.since)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    def fetch():
+        sp = store_path()
+        require_store(sp)
+        return fetch_session_log(sp, duration_secs, known.kind)
+
+    def render(ctx, data):
+        return session_log_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops session log",
+        description="Show session log",
+    )
+
+
+def _run_task_status(argv: list[str]) -> int:
+    from painted import run_cli
+
+    from strange_loops.commands.task import fetch_task_status
+    from strange_loops.lenses.task import task_status_view
+    from strange_loops.store import store_path
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("name", nargs="?", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    def fetch():
+        sp = store_path()
+        return fetch_task_status(sp, known.name)
+
+    def render(ctx, data):
+        return task_status_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops task status",
+        description="Show task status",
+    )
+
+
+def _run_task_list(argv: list[str]) -> int:
+    return _run_task_status(argv)
+
+
+def _run_task_log(argv: list[str]) -> int:
+    from strange_loops.store import parse_duration, require_store, store_path
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("name")
+    pre.add_argument("--since", default="7d")
+    pre.add_argument("--kind", default=None)
+    pre.add_argument("--follow", action="store_true")
+    known, rest = pre.parse_known_args(argv)
+
+    try:
+        duration_secs = parse_duration(known.since)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if known.follow:
+        # Follow bypasses run_cli — uses direct polling + printing
+        sp = store_path()
+        try:
+            require_store(sp)
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        from engine import StoreReader
+
+        from strange_loops.lifecycle import fold_task_state
+
+        with StoreReader(sp) as reader:
+            if fold_task_state(reader, known.name) is None:
+                print(f"Error: Task '{known.name}' not found.", file=sys.stderr)
+                return 1
+
+        use_json = "--json" in rest
+        from strange_loops.commands.task import follow_task_log
+
+        return follow_task_log(sp, known.name, known.kind, use_json)
+
+    from painted import run_cli
+
+    from strange_loops.commands.task import fetch_task_log
+    from strange_loops.lenses.task import task_log_view
+
+    def fetch():
+        sp = store_path()
+        return fetch_task_log(sp, known.name, duration_secs, known.kind)
+
+    def render(ctx, data):
+        return task_log_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops task log",
+        description=f"Show log for task '{known.name}'",
+    )
+
+
+def _run_project_status(argv: list[str]) -> int:
+    from painted import run_cli
+
+    from strange_loops.commands.project import fetch_project_status, _project_store
+    from strange_loops.lenses.project import project_status_view
+
+    def fetch():
+        sp = _project_store()
+        return fetch_project_status(sp)
+
+    def render(ctx, data):
+        return project_status_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        argv,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops project status",
+        description="Show project status",
+    )
+
+
+def _run_project_log(argv: list[str]) -> int:
+    from strange_loops.store import parse_duration
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--since", default="7d")
+    pre.add_argument("--kind", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    try:
+        duration_secs = parse_duration(known.since)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    from painted import run_cli
+
+    from strange_loops.commands.project import fetch_project_log, _project_store
+    from strange_loops.lenses.project import project_log_view
+
+    def fetch():
+        sp = _project_store()
+        return fetch_project_log(sp, duration_secs, known.kind)
+
+    def render(ctx, data):
+        return project_log_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="strange-loops project log",
+        description="Show project log",
+    )
+
+
+# -- Pre-dispatch table for display subcommands --
+
+_DISPLAY_SUB = {
+    ("session", "status"): _run_session_status,
+    ("session", "log"): _run_session_log,
+    ("task", "status"): _run_task_status,
+    ("task", "list"): _run_task_list,
+    ("task", "log"): _run_task_log,
+    ("project", "status"): _run_project_status,
+    ("project", "log"): _run_project_log,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,6 +341,11 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_dashboard(argv[1:])
 
+    # Display subcommands → run_cli
+    if len(argv) >= 2 and (argv[0], argv[1]) in _DISPLAY_SUB:
+        return _DISPLAY_SUB[(argv[0], argv[1])](argv[2:])
+
+    # Action commands → argparse as before
     parser = create_parser()
     args = parser.parse_args(argv)
 

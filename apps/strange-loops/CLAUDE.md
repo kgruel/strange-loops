@@ -30,16 +30,20 @@ uv run --package strange-loops pytest apps/strange-loops/tests
 
 ```
 src/strange_loops/
-  cli.py              # Thin dispatcher — argparse, lazy imports, note command
-  store.py            # Shared store helpers (observer, emit_fact, require_store)
+  cli.py              # Thin dispatcher — pre-dispatch display cmds to run_cli, argparse for actions
+  store.py            # Shared store helpers (observer, emit_fact, fact_line, log_block)
   worktree.py         # Git worktree operations (create, remove, list, diff)
   harness.py          # Shell harness runner (spawn detached, capture output as facts)
   lifecycle.py        # Query-time fold — compiled vertex spec for task state
   commands/
-    session.py        # Session lifecycle (start, end, status, log)
-    task.py           # Task lifecycle (create, assign, send, run, status, list, diff, merge, close)
+    session.py        # Session lifecycle (start, end) + fetch_session_status, fetch_session_log
+    task.py           # Task lifecycle (create, assign, send, run, etc.) + fetch_task_status, fetch_task_log
     dashboard.py      # Dashboard — fetch/render/fetch_stream wired through painted run_cli
-    project.py        # Project coordination (emit, status, log)
+    project.py        # Project coordination (emit, bridge) + fetch_project_status, fetch_project_log
+  lenses/
+    session.py        # session_status_view, session_log_view
+    task.py           # task_status_view, task_log_view
+    project.py        # project_status_view, project_log_view
 tests/
   conftest.py         # Shared fixtures (home, workspace, git_repo)
   test_smoke.py       # Import + entry point smoke test
@@ -108,9 +112,9 @@ emit for decisions that affect the broader project.
 
 ## Conventions
 
-- CLI is thin dispatcher. Logic lives in `commands/` submodules.
+- CLI is thin dispatcher. Display commands pre-dispatch to `run_cli`. Action commands use argparse.
 - `note` is inline in cli.py — too small for its own module.
-- Dashboard delegates to painted `run_cli` (bypasses argparse for mode/zoom).
+- All display commands use painted `run_cli` for `-q`/`-v`/`--json`/`--plain`/`--live`/width.
 - Tests mirror src structure. Factories over mocks.
 - `./dev check` must pass before commit.
 - Snapshot tests: text goldens for visual output, direct assertions for JSON.
@@ -121,9 +125,19 @@ emit for decisions that affect the broader project.
 
 ## Patterns
 
-### Command shape
+### Display command shape (fetch/lens/run_cli)
 
-Every command follows: require store → fold state → validate → act → emit fact → render.
+Display commands (status, log, list) follow: `fetch() -> data`, `lens(data, zoom, width) -> Block`, wired through `run_cli`.
+
+- **Fetch** (`commands/*.py`): `fetch_*(sp, ...) -> dict` — data retrieval, no rendering
+- **Lens** (`lenses/*.py`): `*_view(data, zoom, width) -> Block` — pure function, no IO
+- **run_cli** (`cli.py` `_run_*` wrappers): orchestration — handles `--json`/`--plain`/`--live`/zoom
+
+When adding a new display command or modifying render output, the answer is always: write/edit a lens.
+
+### Action command shape
+
+Every action command follows: require store → fold state → validate → act → emit fact → render.
 This is the skeleton for all task commands. Session commands use the same shape minus fold.
 
 ### Query-time fold

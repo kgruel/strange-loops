@@ -8,6 +8,10 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from painted.block import Block
 
 _PKG_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -95,9 +99,8 @@ def format_date(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
-def render_log_entry(fact: dict) -> None:
-    """Render a single fact as a styled line via painted."""
-    from painted import show
+def fact_line(fact: dict) -> "Block":
+    """Render a single fact as a styled Block."""
     from painted.block import Block
     from painted.palette import current_palette
 
@@ -118,7 +121,7 @@ def render_log_entry(fact: dict) -> None:
 
     who = f" ({obs})" if obs else ""
     text = f"  {time_str} [{kind}]{who} {summary}" if summary else f"  {time_str} [{kind}]{who}"
-    show(Block.text(text, p.muted), file=sys.stdout)
+    return Block.text(text, p.muted)
 
 
 def filter_task_facts(facts: list[dict], name: str) -> list[dict]:
@@ -135,108 +138,140 @@ def filter_task_facts(facts: list[dict], name: str) -> list[dict]:
     return result
 
 
-def render_tick_entry(tick) -> None:
-    """Render a single tick as a styled line via painted.
-
-    Styled with accent (not muted) to visually mark a boundary crossing.
-    """
-    from painted import show
-    from painted.block import Block
+def _tick_status_style(status: str):
+    """Map tick status to a palette style."""
     from painted.palette import current_palette
 
     p = current_palette()
-    ts = tick.ts
+    if status == "completed":
+        return p.success
+    if status == "errored":
+        return p.error
+    if status == "exhausted":
+        return p.warning
+    return p.accent
+
+
+def tick_to_dict(tick) -> dict:
+    """Convert a Tick object to a serializable dict."""
+    return {
+        "type": "tick",
+        "name": tick.name,
+        "ts": tick.ts,
+        "payload": tick.payload if isinstance(tick.payload, dict) else {},
+        "origin": tick.origin,
+    }
+
+
+def tick_line(tick: dict) -> "Block":
+    """Render a single tick dict as a styled Block.
+
+    Default: `  HH:MM ⚡ task-name status` with status colored by outcome.
+    The ⚡ and status color distinguish ticks from regular fact lines.
+    Accepts a tick dict (from tick_to_dict or fetch functions).
+    """
+    from painted.block import Block
+    from painted.compose import join_horizontal
+    from painted.palette import current_palette
+
+    p = current_palette()
+    ts = tick["ts"]
     if isinstance(ts, datetime):
         dt = ts
     else:
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
 
     time_str = format_ts(dt)
-    name = tick.name
-    payload = tick.payload if isinstance(tick.payload, dict) else {}
+    payload = tick.get("payload", {}) if isinstance(tick.get("payload"), dict) else {}
+    status = payload.get("status", "")
+    task_name = payload.get("task", "")
 
-    parts = [f"{k}={v}" for k, v in payload.items() if v is not None and v != ""]
-    summary = " ".join(parts)
+    prefix = Block.text(f"  {time_str} ⚡ ", p.muted)
 
-    text = f"  {time_str} ⚡ [{name}] {summary}" if summary else f"  {time_str} ⚡ [{name}]"
-    show(Block.text(text, p.accent), file=sys.stdout)
+    if task_name and status:
+        name_block = Block.text(f"{task_name} ", p.muted)
+        status_block = Block.text(status, _tick_status_style(status))
+        return join_horizontal(prefix, name_block, status_block)
+    elif status:
+        status_block = Block.text(status, _tick_status_style(status))
+        return join_horizontal(prefix, status_block)
+    else:
+        # Fallback for ticks without task/status payload
+        parts = [f"{k}={v}" for k, v in payload.items() if v is not None and v != ""]
+        summary = " ".join(parts) if parts else tick.get("name", "")
+        return join_horizontal(prefix, Block.text(summary, p.accent))
 
 
-def filter_task_ticks(ticks: list, name: str) -> list:
-    """Filter ticks belonging to a specific task.
+def filter_task_ticks(ticks: list[dict], name: str) -> list[dict]:
+    """Filter tick dicts belonging to a specific task.
 
     Matches payload["task"] == name.
     """
     result = []
     for t in ticks:
-        payload = t.payload if isinstance(t.payload, dict) else {}
+        payload = t.get("payload", {}) if isinstance(t.get("payload"), dict) else {}
         if payload.get("task") == name:
             result.append(t)
     return result
 
 
-def render_log_with_ticks(facts: list[dict], ticks: list) -> None:
-    """Render facts and ticks interleaved chronologically with date grouping."""
-    from painted import show
+def log_block(facts: list[dict], ticks: list[dict] | None = None) -> "Block":
+    """Render facts and ticks interleaved chronologically with date grouping.
+
+    Returns a Block. Pass ticks=None or [] for fact-only logs.
+    """
     from painted.block import Block
+    from painted.compose import join_vertical
     from painted.palette import current_palette
+
+    ticks = ticks or []
 
     if not facts and not ticks:
         p = current_palette()
-        show(Block.text("No facts in the given time range.", p.muted), file=sys.stdout)
-        return
+        return Block.text("No facts in the given time range.", p.muted)
 
     # Build unified timeline: (ts, type, item)
-    entries: list[tuple[float, str, object]] = []
+    entries: list[tuple[float, str, dict]] = []
     for f in facts:
         ts = f["ts"]
         ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
         entries.append((ts_val, "fact", f))
     for t in ticks:
-        ts = t.ts
+        ts = t["ts"]
         ts_val = ts.timestamp() if isinstance(ts, datetime) else ts
         entries.append((ts_val, "tick", t))
 
     entries.sort(key=lambda e: e[0])
 
+    blocks: list[Block] = []
     current_date = None
     for ts_val, entry_type, item in entries:
         dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
         date_str = format_date(dt)
         if date_str != current_date:
             if current_date is not None:
-                print()
+                blocks.append(Block.text(""))
             p = current_palette()
-            show(Block.text(f"{date_str}:", p.accent), file=sys.stdout)
+            blocks.append(Block.text(f"{date_str}:", p.accent))
             current_date = date_str
 
         if entry_type == "fact":
-            render_log_entry(item)
+            blocks.append(fact_line(item))
         else:
-            render_tick_entry(item)
+            blocks.append(tick_line(item))
+
+    return join_vertical(*blocks)
 
 
-def render_log(facts: list[dict]) -> None:
-    """Render facts as a date-grouped chronological log."""
+def print_fact_line(fact: dict) -> None:
+    """Print a fact line to stdout — for streaming/follow modes."""
     from painted import show
-    from painted.block import Block
-    from painted.palette import current_palette
 
-    if not facts:
-        p = current_palette()
-        show(Block.text("No facts in the given time range.", p.muted), file=sys.stdout)
-        return
+    show(fact_line(fact), file=sys.stdout)
 
-    current_date = None
-    for f in facts:
-        ts = f["ts"]
-        dt = ts if isinstance(ts, datetime) else datetime.fromtimestamp(ts, tz=timezone.utc)
-        date_str = format_date(dt)
-        if date_str != current_date:
-            if current_date is not None:
-                print()
-            p = current_palette()
-            show(Block.text(f"{date_str}:", p.accent), file=sys.stdout)
-            current_date = date_str
 
-        render_log_entry(f)
+def print_tick_line(tick: dict) -> None:
+    """Print a tick line to stdout — for streaming/follow modes."""
+    from painted import show
+
+    show(tick_line(tick), file=sys.stdout)

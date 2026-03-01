@@ -10,11 +10,11 @@ from engine import SqliteStore
 
 from strange_loops.store import (
     emit_fact,
+    fact_line,
     format_date,
     format_ts,
     observer,
     parse_duration,
-    render_log_entry,
     require_store,
     store_path,
     store_path_for,
@@ -123,8 +123,8 @@ class TestFormatHelpers:
         assert format_date(dt) == "2026-02-28"
 
 
-class TestRenderLogEntry:
-    def test_renders_fact(self, capsys):
+class TestFactLine:
+    def test_renders_fact(self):
         from datetime import datetime, timezone
 
         fact = {
@@ -133,14 +133,14 @@ class TestRenderLogEntry:
             "observer": "alice",
             "payload": {"key": "val"},
         }
-        render_log_entry(fact)
-        out = capsys.readouterr().out
-        assert "14:30" in out
-        assert "test.kind" in out
-        assert "alice" in out
-        assert "key=val" in out
+        block = fact_line(fact)
+        text = "".join(c.char for c in block.row(0))
+        assert "14:30" in text
+        assert "test.kind" in text
+        assert "alice" in text
+        assert "key=val" in text
 
-    def test_renders_without_observer(self, capsys):
+    def test_renders_without_observer(self):
         from datetime import datetime, timezone
 
         fact = {
@@ -149,7 +149,7 @@ class TestRenderLogEntry:
             "observer": "",
             "payload": {"topic": "auth"},
         }
-        render_log_entry(fact)
-        out = capsys.readouterr().out
-        assert "decision" in out
-        assert "()" not in out
+        block = fact_line(fact)
+        text = "".join(c.char for c in block.row(0))
+        assert "decision" in text
+        assert "()" not in text

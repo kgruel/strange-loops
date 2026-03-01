@@ -304,17 +304,16 @@ class TestSessionLog:
         _freeze_now(monkeypatch)
         rc = main(["session", "log", "--since", "1h", "--json"])
         assert rc == 0
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
+        data = json.loads(capsys.readouterr().out)
+        entries = data["facts"]
 
-        assert len(lines) == 9
-        assert lines[0]["kind"] == "session.start"
-        assert lines[0]["observer"] == "alice"
-        assert lines[1]["kind"] == "task.created"
-        assert lines[1]["payload"]["name"] == "alpha"
-        assert lines[-1]["kind"] == "task.assigned"
-        assert lines[-1]["payload"]["name"] == "beta"
+        assert len(entries) == 9
+        assert entries[0]["kind"] == "session.start"
+        assert entries[0]["observer"] == "alice"
+        assert entries[1]["kind"] == "task.created"
+        assert entries[1]["payload"]["name"] == "alpha"
+        assert entries[-1]["kind"] == "task.assigned"
+        assert entries[-1]["payload"]["name"] == "beta"
 
 
 # -- Snapshot tests: Task --
@@ -387,26 +386,24 @@ class TestTaskLog:
         _freeze_now(monkeypatch)
         rc = main(["task", "log", "alpha", "--since", "1h", "--json"])
         assert rc == 0
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
+        data = json.loads(capsys.readouterr().out)
+        entries = data["facts"]
 
         # alpha has: task.created, task.assigned, task.stage, worker.started,
         # worker.output, worker.output.complete
-        assert len(lines) == 6
-        assert lines[0]["kind"] == "task.created"
-        assert lines[0]["payload"]["name"] == "alpha"
-        assert lines[-1]["kind"] == "worker.output.complete"
+        assert len(entries) == 6
+        assert entries[0]["kind"] == "task.created"
+        assert entries[0]["payload"]["name"] == "alpha"
+        assert entries[-1]["kind"] == "worker.output.complete"
 
     def test_kind_filter_json(self, task_store: Path, capsys, monkeypatch):
         _freeze_now(monkeypatch)
         rc = main(["task", "log", "alpha", "--kind", "task.stage", "--json"])
         assert rc == 0
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
-        assert len(lines) == 1
-        assert lines[0]["kind"] == "task.stage"
+        data = json.loads(capsys.readouterr().out)
+        entries = data["facts"]
+        assert len(entries) == 1
+        assert entries[0]["kind"] == "task.stage"
 
 
 # -- Snapshot tests: Project --
@@ -425,11 +422,11 @@ class TestProjectStatus:
 
         assert data["total"] == 3
         assert "auth" in data["decisions"]
-        assert data["decisions"]["auth"]["message"] == "Use JWT with refresh tokens"
+        assert data["decisions"]["auth"]["payload"]["message"] == "Use JWT with refresh tokens"
         assert "api-design" in data["threads"]
-        assert data["threads"]["api-design"]["status"] == "open"
+        assert data["threads"]["api-design"]["payload"]["status"] == "open"
         assert "next-sprint" in data["plans"]
-        assert data["plans"]["next-sprint"]["status"] == "active"
+        assert data["plans"]["next-sprint"]["payload"]["status"] == "active"
 
 
 class TestProjectLog:
@@ -456,17 +453,16 @@ class TestProjectLog:
         _freeze_now(monkeypatch)
         rc = main(["project", "log", "--since", "1h", "--json"])
         assert rc == 0
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
+        data = json.loads(capsys.readouterr().out)
+        entries = data["facts"]
 
-        assert len(lines) == 3
-        assert lines[0]["kind"] == "decision"
-        assert lines[0]["payload"]["topic"] == "auth"
-        assert lines[1]["kind"] == "thread"
-        assert lines[1]["payload"]["name"] == "api-design"
-        assert lines[2]["kind"] == "plan"
-        assert lines[2]["payload"]["name"] == "next-sprint"
+        assert len(entries) == 3
+        assert entries[0]["kind"] == "decision"
+        assert entries[0]["payload"]["topic"] == "auth"
+        assert entries[1]["kind"] == "thread"
+        assert entries[1]["payload"]["name"] == "api-design"
+        assert entries[2]["kind"] == "plan"
+        assert entries[2]["payload"]["name"] == "next-sprint"
 
 
 # -- Helpers --

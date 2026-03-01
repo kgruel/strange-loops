@@ -96,7 +96,7 @@ class TestSessionStatus:
         monkeypatch.chdir(workspace)
         rc = main(["session", "status"])
         assert rc == 1
-        assert "No session initialized" in capsys.readouterr().err
+        assert "No session initialized" in capsys.readouterr().out
 
     def test_json_output(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
@@ -157,18 +157,17 @@ class TestSessionLog:
         rc = main(["session", "log", "--json"])
         assert rc == 0
 
-        out = capsys.readouterr().out.strip()
-        # JSONL — one line per fact
-        lines = out.split("\n")
-        assert len(lines) >= 1
-        data = json.loads(lines[0])
-        assert "kind" in data
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert "facts" in data
+        assert len(data["facts"]) >= 1
+        assert "kind" in data["facts"][0]
 
     def test_errors_without_session(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
         rc = main(["session", "log"])
         assert rc == 1
-        assert "No session initialized" in capsys.readouterr().err
+        assert "No session initialized" in capsys.readouterr().out
 
     def test_invalid_duration(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)

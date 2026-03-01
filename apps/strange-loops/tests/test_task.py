@@ -172,7 +172,7 @@ class TestTaskStatus:
         monkeypatch.chdir(workspace)
         rc = main(["task", "status"])
         assert rc == 1
-        assert "No session initialized" in capsys.readouterr().err
+        assert "No session initialized" in capsys.readouterr().out
 
 
 class TestTaskList:
@@ -311,13 +311,12 @@ class TestTaskLog:
         rc = main(["task", "log", "log-json", "--json"])
         assert rc == 0
 
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
-        assert len(lines) >= 2  # at least created + assigned
+        data = json.loads(capsys.readouterr().out)
+        facts = data["facts"]
+        assert len(facts) >= 2  # at least created + assigned
         assert all(
             f["payload"].get("name") == "log-json" or f["payload"].get("task") == "log-json"
-            for f in lines
+            for f in facts
         )
 
     def test_filters_other_tasks(self, git_repo: Path, monkeypatch, capsys):
@@ -329,11 +328,10 @@ class TestTaskLog:
         rc = main(["task", "log", "task-a", "--json"])
         assert rc == 0
 
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
+        data = json.loads(capsys.readouterr().out)
+        facts = data["facts"]
         # Should only contain task-a facts
-        assert all(f["payload"].get("name") == "task-a" for f in lines)
+        assert all(f["payload"].get("name") == "task-a" for f in facts)
 
     def test_errors_without_task(self, git_repo: Path, monkeypatch, capsys):
         monkeypatch.chdir(git_repo)
@@ -342,7 +340,7 @@ class TestTaskLog:
 
         rc = main(["task", "log", "nonexistent"])
         assert rc == 1
-        assert "not found" in capsys.readouterr().err.lower()
+        assert "not found" in capsys.readouterr().out.lower()
 
     def test_kind_filter(self, git_repo: Path, monkeypatch, capsys):
         monkeypatch.chdir(git_repo)
@@ -353,11 +351,10 @@ class TestTaskLog:
         rc = main(["task", "log", "kind-test", "--kind", "task.assigned", "--json"])
         assert rc == 0
 
-        lines = [
-            json.loads(ln) for ln in capsys.readouterr().out.strip().splitlines() if ln.strip()
-        ]
-        assert len(lines) == 1
-        assert lines[0]["kind"] == "task.assigned"
+        data = json.loads(capsys.readouterr().out)
+        facts = data["facts"]
+        assert len(facts) == 1
+        assert facts[0]["kind"] == "task.assigned"
 
 
 class TestTaskStop:

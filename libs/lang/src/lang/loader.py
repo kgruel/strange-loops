@@ -15,6 +15,7 @@ from .ast import (
     BoundaryEvery,
     BoundaryWhen,
     Coerce,
+    CombineEntry,
     Explode,
     FoldAvg,
     FoldBy,
@@ -344,6 +345,24 @@ def _load_sources_block(node: ckdl.Node, path: Path | None) -> tuple[SourceEntry
 
 
 # ---------------------------------------------------------------------------
+# Combine block loader
+# ---------------------------------------------------------------------------
+
+
+def _load_combine_block(node: ckdl.Node, path: Path | None) -> tuple[CombineEntry, ...]:
+    entries: list[CombineEntry] = []
+    for child in node.children:
+        if child.name == "vertex":
+            name = _require_arg(child, 0, "vertex name", path)
+            entries.append(CombineEntry(name=name))
+        else:
+            raise _error(f"Unknown combine entry: {child.name}", path)
+    if not entries:
+        raise _error("combine block requires at least one vertex", path)
+    return tuple(entries)
+
+
+# ---------------------------------------------------------------------------
 # Top-level loaders
 # ---------------------------------------------------------------------------
 
@@ -419,6 +438,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     loops: dict[str, LoopDef] = {}
     routes: dict[str, str] | None = None
     emit: str | None = None
+    combine: tuple[CombineEntry, ...] | None = None
 
     for node in doc.nodes:
         key = node.name
@@ -443,6 +463,8 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
                 # Each child node: name is the kind, first arg is the loop target
                 route_target = _require_arg(child, 0, "route target", path)
                 routes[child.name] = route_target
+        elif key == "combine":
+            combine = _load_combine_block(node, path)
         else:
             raise _error(f"Unknown config key: {key}", path)
 
@@ -450,12 +472,21 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     if name is None:
         raise _error("Missing required field: name", path)
 
-    has_template_loop_specs = sources and any(
-        isinstance(s, TemplateSource) and s.loop is not None for s in sources
-    )
-    has_children = discover is not None or vertices is not None
-    if not loops and not has_template_loop_specs and not has_children:
-        raise _error("Missing required field: loops", path)
+    # Validate combine mutual exclusion
+    if combine is not None:
+        if store is not None:
+            raise _error("combine is mutually exclusive with store", path)
+        if discover is not None:
+            raise _error("combine is mutually exclusive with discover", path)
+        if sources is not None:
+            raise _error("combine is mutually exclusive with sources", path)
+    else:
+        has_template_loop_specs = sources and any(
+            isinstance(s, TemplateSource) and s.loop is not None for s in sources
+        )
+        has_children = discover is not None or vertices is not None
+        if not loops and not has_template_loop_specs and not has_children:
+            raise _error("Missing required field: loops", path)
 
     return VertexFile(
         name=name,
@@ -466,6 +497,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         vertices=vertices,
         routes=routes,
         emit=emit,
+        combine=combine,
         path=path,
     )
 

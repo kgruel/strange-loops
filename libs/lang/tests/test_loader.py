@@ -1063,3 +1063,159 @@ sources {
         assert isinstance(source, TemplateSource)
         assert source.loop is not None
         assert source.loop.search == ("title", "summary")
+
+
+class TestCombineBlock:
+    """Tests for combine block parsing (combinatorial vertices)."""
+
+    def test_basic_combine(self):
+        text = """\
+name "all-decisions"
+combine {
+    vertex "project"
+    vertex "meta"
+}
+
+loops {
+  decision {
+    fold {
+      items "by" "topic"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.combine is not None
+        assert len(vertex.combine) == 2
+
+        from lang import CombineEntry
+
+        assert isinstance(vertex.combine[0], CombineEntry)
+        assert vertex.combine[0].name == "project"
+        assert vertex.combine[1].name == "meta"
+
+    def test_combine_three_vertices(self):
+        text = """\
+name "all"
+combine {
+    vertex "project"
+    vertex "meta"
+    vertex "reading"
+}
+
+loops {
+  decision {
+    fold {
+      items "by" "topic"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.combine is not None
+        assert len(vertex.combine) == 3
+        assert vertex.combine[2].name == "reading"
+
+    def test_combine_no_store(self):
+        """Combinatorial vertex has no store."""
+        text = """\
+name "combined"
+combine {
+    vertex "a"
+    vertex "b"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.store is None
+        assert vertex.combine is not None
+
+    def test_combine_with_store_error(self):
+        """combine and store are mutually exclusive."""
+        text = """\
+name "bad"
+store "./data.db"
+combine {
+    vertex "a"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="combine is mutually exclusive with store"):
+            parse_vertex(text)
+
+    def test_combine_with_discover_error(self):
+        """combine and discover are mutually exclusive."""
+        text = """\
+name "bad"
+discover "./**/*.vertex"
+combine {
+    vertex "a"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="combine is mutually exclusive with discover"):
+            parse_vertex(text)
+
+    def test_combine_with_sources_error(self):
+        """combine and sources are mutually exclusive."""
+        text = """\
+name "bad"
+sources {
+    path "./monitor.loop"
+}
+combine {
+    vertex "a"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="combine is mutually exclusive with sources"):
+            parse_vertex(text)
+
+    def test_combine_empty_error(self):
+        """combine block must have at least one vertex."""
+        text = """\
+name "bad"
+combine {
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="combine block requires at least one vertex"):
+            parse_vertex(text)
+
+    def test_combine_unknown_entry_error(self):
+        """Unknown node type inside combine block."""
+        text = """\
+name "bad"
+combine {
+    store "./data.db"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="Unknown combine entry"):
+            parse_vertex(text)
+
+    def test_combine_without_loops_valid(self):
+        """A combine vertex without loops is valid (loops can be empty for combine)."""
+        text = """\
+name "combined"
+combine {
+    vertex "a"
+    vertex "b"
+}
+"""
+        # Combine vertices don't require loops — they can just merge raw facts/ticks
+        vertex = parse_vertex(text)
+        assert vertex.combine is not None
+        assert vertex.loops == {}

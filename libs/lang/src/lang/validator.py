@@ -275,8 +275,9 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
     """
     ctx = ValidationContext(path=str(vertex.path) if vertex.path else None)
 
-    # Check routes reference defined loops
-    if vertex.routes:
+    # Check routes reference defined loops (skip for combine vertices —
+    # routes only make sense with local loops, not cross-store reads)
+    if vertex.routes and vertex.combine is None:
         for kind, loop_name in vertex.routes.items():
             if loop_name not in vertex.loops:
                 ctx.error(

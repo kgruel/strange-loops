@@ -6,6 +6,7 @@ from .ast import (
     BoundaryEvery,
     BoundaryWhen,
     Coerce,
+    CombineEntry,
     Duration,
     Explode,
     FoldAvg,
@@ -90,6 +91,8 @@ __all__ = [
     "BoundaryAfter",
     "BoundaryEvery",
     "BoundaryWhen",
+    # AST types - Combinatorial vertices
+    "CombineEntry",
     # AST types - Template sources
     "SourceEntry",
     "SourceParams",

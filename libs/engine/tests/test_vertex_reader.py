@@ -484,3 +484,446 @@ class TestVertexSearch:
         # Same types
         assert type(search_result["ts"]) is type(facts_result["ts"])
         assert type(search_result["payload"]) is type(facts_result["payload"])
+
+
+# ---------------------------------------------------------------------------
+# Combinatorial vertex helpers
+# ---------------------------------------------------------------------------
+
+
+def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
+    """Insert ticks into a SQLite store at db_path (creates tables if needed)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS facts ("
+        "    rowid INTEGER PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    observer TEXT NOT NULL,"
+        "    origin TEXT NOT NULL DEFAULT '',"
+        "    payload TEXT NOT NULL"
+        ");"
+        "CREATE TABLE IF NOT EXISTS ticks ("
+        "    rowid INTEGER PRIMARY KEY,"
+        "    name TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    since REAL,"
+        "    origin TEXT NOT NULL,"
+        "    payload TEXT NOT NULL"
+        ");"
+    )
+    for t in ticks:
+        conn.execute(
+            "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
+            (t["name"], t["ts"], t.get("since"), t.get("origin", ""), json.dumps(t.get("payload", {}))),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _setup_combine_env(tmp_path: Path, monkeypatch):
+    """Set up a LOOPS_HOME with two instance vertices (alpha, beta) and a combinatorial vertex.
+
+    Returns (combine_vertex_path, alpha_db_path, beta_db_path).
+    """
+    home = tmp_path / "loops_home"
+
+    # alpha vertex: home/alpha/alpha.vertex + store
+    alpha_dir = home / "alpha"
+    alpha_dir.mkdir(parents=True)
+    alpha_vertex = alpha_dir / "alpha.vertex"
+    alpha_vertex.write_text(
+        'name "alpha"\n'
+        'store "./store.db"\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" } }\n'
+        '}\n'
+    )
+    alpha_db = alpha_dir / "store.db"
+
+    # beta vertex: home/beta/beta.vertex + store
+    beta_dir = home / "beta"
+    beta_dir.mkdir(parents=True)
+    beta_vertex = beta_dir / "beta.vertex"
+    beta_vertex.write_text(
+        'name "beta"\n'
+        'store "./store.db"\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" } }\n'
+        '}\n'
+    )
+    beta_db = beta_dir / "store.db"
+
+    # combinatorial vertex (lives alongside home)
+    combine_vertex = tmp_path / "combined.vertex"
+    combine_vertex.write_text(
+        'name "combined"\n'
+        'combine {\n'
+        '    vertex "alpha"\n'
+        '    vertex "beta"\n'
+        '}\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" } }\n'
+        '}\n'
+    )
+
+    monkeypatch.setenv("LOOPS_HOME", str(home))
+    return combine_vertex, alpha_db, beta_db
+
+
+class TestCombinedVertexRead:
+    """vertex_read for combinatorial vertices — fold state across multiple stores."""
+
+    def test_upsert_fold_across_stores(self, tmp_path, monkeypatch):
+        """Facts from both stores merge through the same upsert fold."""
+        from engine import vertex_read
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "db", "message": "use SQLite"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 3000.0, "payload": {"topic": "auth", "message": "use sessions"}},
+            {"kind": "decision", "ts": 4000.0, "payload": {"topic": "deploy", "message": "use nix"}},
+        ])
+
+        result = vertex_read(combine_vpath)
+        items = result["decision"]["items"]
+
+        # auth updated to latest (from beta, ts=3000)
+        assert items["auth"]["message"] == "use sessions"
+        # db from alpha
+        assert items["db"]["message"] == "use SQLite"
+        # deploy from beta
+        assert items["deploy"]["message"] == "use nix"
+        assert len(items) == 3
+
+    def test_timestamp_ordering(self, tmp_path, monkeypatch):
+        """Facts from multiple stores are interleaved by timestamp, not by store order."""
+        from engine import vertex_read
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        # Beta has earlier auth fact, alpha has later — final state should be alpha's
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 5000.0, "payload": {"topic": "auth", "message": "final answer"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "early answer"}},
+        ])
+
+        result = vertex_read(combine_vpath)
+        # ts=5000 > ts=1000 → alpha's fact is later
+        assert result["decision"]["items"]["auth"]["message"] == "final answer"
+
+    def test_count_fold_across_stores(self, tmp_path, monkeypatch):
+        """Count fold sums facts from both stores."""
+        from engine import vertex_read
+
+        home = tmp_path / "loops_home"
+
+        # Set up vertices with count fold
+        for name in ("a", "b"):
+            d = home / name
+            d.mkdir(parents=True)
+            (d / f"{name}.vertex").write_text(
+                f'name "{name}"\nstore "./store.db"\n'
+                'loops { event { fold { count "inc" } } }\n'
+            )
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "a"\n vertex "b" }\n'
+            'loops { event { fold { count "inc" } } }\n'
+        )
+
+        _seed_facts(home / "a" / "store.db", [
+            {"kind": "event", "ts": 1000.0, "payload": {}},
+            {"kind": "event", "ts": 2000.0, "payload": {}},
+        ])
+        _seed_facts(home / "b" / "store.db", [
+            {"kind": "event", "ts": 3000.0, "payload": {}},
+        ])
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = vertex_read(combine)
+        assert result["event"]["count"] == 3
+
+    def test_empty_stores(self, tmp_path, monkeypatch):
+        """Both stores empty → initial fold state."""
+        from engine import vertex_read
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+        _seed_facts(alpha_db, [])
+        _seed_facts(beta_db, [])
+
+        result = vertex_read(combine_vpath)
+        assert result["decision"]["items"] == {}
+
+    def test_missing_store(self, tmp_path, monkeypatch):
+        """Referenced vertex exists but store file doesn't → graceful skip."""
+        from engine import vertex_read
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        # Only create alpha's store, not beta's
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "only alpha"}},
+        ])
+
+        result = vertex_read(combine_vpath)
+        assert result["decision"]["items"]["auth"]["message"] == "only alpha"
+
+    def test_missing_vertex(self, tmp_path, monkeypatch):
+        """Referenced vertex doesn't exist → graceful skip."""
+        from engine import vertex_read
+
+        home = tmp_path / "loops_home"
+        # Only create alpha, not beta
+        alpha_dir = home / "alpha"
+        alpha_dir.mkdir(parents=True)
+        (alpha_dir / "alpha.vertex").write_text(
+            'name "alpha"\nstore "./store.db"\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        _seed_facts(alpha_dir / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "x", "message": "only"}},
+        ])
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "alpha"\n vertex "nonexistent" }\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        result = vertex_read(combine)
+        assert result["decision"]["items"]["x"]["message"] == "only"
+
+    def test_no_resolvable_stores(self, tmp_path, monkeypatch):
+        """All referenced vertices missing → initial state."""
+        from engine import vertex_read
+
+        home = tmp_path / "loops_home"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "gone" }\n'
+            'loops { counter { fold { count "inc" } } }\n'
+        )
+
+        result = vertex_read(combine)
+        assert result["counter"]["count"] == 0
+
+
+class TestCombinedVertexFacts:
+    """vertex_facts for combinatorial vertices — raw facts across stores."""
+
+    def test_merged_time_range(self, tmp_path, monkeypatch):
+        """Facts from both stores appear in time range query."""
+        from engine import vertex_facts
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "decision", "ts": 3000.0, "payload": {"topic": "c"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "b"}},
+        ])
+
+        facts = vertex_facts(combine_vpath, 0.0, 9999.0)
+        assert len(facts) == 3
+        # Ordered by ts
+        topics = [f["payload"]["topic"] for f in facts]
+        assert topics == ["a", "b", "c"]
+
+    def test_kind_filter(self, tmp_path, monkeypatch):
+        """Kind filter works across combined stores."""
+        from engine import vertex_facts
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "thread", "ts": 1500.0, "payload": {"name": "x"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "b"}},
+        ])
+
+        facts = vertex_facts(combine_vpath, 0.0, 9999.0, kind="decision")
+        assert len(facts) == 2
+        assert all(f["kind"] == "decision" for f in facts)
+
+    def test_time_window(self, tmp_path, monkeypatch):
+        """Time window filters across combined stores."""
+        from engine import vertex_facts
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "early"}},
+            {"kind": "decision", "ts": 5000.0, "payload": {"topic": "late"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 3000.0, "payload": {"topic": "mid"}},
+        ])
+
+        facts = vertex_facts(combine_vpath, 2000.0, 4000.0)
+        assert len(facts) == 1
+        assert facts[0]["payload"]["topic"] == "mid"
+
+    def test_empty_combine(self, tmp_path, monkeypatch):
+        """No resolvable stores → empty facts."""
+        from engine import vertex_facts
+
+        home = tmp_path / "loops_home"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "gone" }\n'
+            'loops { counter { fold { count "inc" } } }\n'
+        )
+
+        assert vertex_facts(combine, 0.0, 9999.0) == []
+
+
+class TestCombinedVertexTicks:
+    """vertex_ticks for combinatorial vertices."""
+
+    def test_merged_ticks(self, tmp_path, monkeypatch):
+        """Ticks from both stores appear merged."""
+        from engine import vertex_ticks
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_ticks(alpha_db, [
+            {"name": "decision", "ts": 1000.0, "origin": "alpha", "payload": {"count": 1}},
+        ])
+        _seed_ticks(beta_db, [
+            {"name": "decision", "ts": 2000.0, "origin": "beta", "payload": {"count": 2}},
+        ])
+
+        ticks = vertex_ticks(combine_vpath, 0.0, 9999.0)
+        assert len(ticks) == 2
+        assert ticks[0].ts < ticks[1].ts
+
+    def test_name_filter(self, tmp_path, monkeypatch):
+        """Name filter works across combined stores."""
+        from engine import vertex_ticks
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_ticks(alpha_db, [
+            {"name": "decision", "ts": 1000.0, "origin": "alpha", "payload": {}},
+            {"name": "thread", "ts": 1500.0, "origin": "alpha", "payload": {}},
+        ])
+        _seed_ticks(beta_db, [
+            {"name": "decision", "ts": 2000.0, "origin": "beta", "payload": {}},
+        ])
+
+        ticks = vertex_ticks(combine_vpath, 0.0, 9999.0, name="decision")
+        assert len(ticks) == 2
+
+
+class TestCombinedVertexSummary:
+    """vertex_summary for combinatorial vertices."""
+
+    def test_merged_counts(self, tmp_path, monkeypatch):
+        """Fact and tick counts sum across stores."""
+        from engine import vertex_summary
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "b"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 3000.0, "payload": {"topic": "c"}},
+        ])
+        _seed_ticks(alpha_db, [
+            {"name": "decision", "ts": 1500.0, "origin": "alpha", "payload": {}},
+        ])
+
+        summary = vertex_summary(combine_vpath)
+        assert summary["facts"]["total"] == 3
+        assert summary["facts"]["kinds"]["decision"]["count"] == 3
+        assert summary["ticks"]["total"] == 1
+
+    def test_empty_combine_summary(self, tmp_path, monkeypatch):
+        """No resolvable stores → zeroed summary."""
+        from engine import vertex_summary
+
+        home = tmp_path / "loops_home"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "gone" }\n'
+            'loops { counter { fold { count "inc" } } }\n'
+        )
+
+        summary = vertex_summary(combine)
+        assert summary["facts"]["total"] == 0
+        assert summary["ticks"]["total"] == 0
+
+    def test_three_stores(self, tmp_path, monkeypatch):
+        """Combinatorial vertex with 3 stores merges all."""
+        from engine import vertex_read, vertex_summary
+
+        home = tmp_path / "loops_home"
+        for name in ("x", "y", "z"):
+            d = home / name
+            d.mkdir(parents=True)
+            (d / f"{name}.vertex").write_text(
+                f'name "{name}"\nstore "./store.db"\n'
+                'loops { item { fold { items "by" "key" } } }\n'
+            )
+            _seed_facts(d / "store.db", [
+                {"kind": "item", "ts": float(ord(name) * 100), "payload": {"key": name, "val": name}},
+            ])
+
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine { vertex "x"\n vertex "y"\n vertex "z" }\n'
+            'loops { item { fold { items "by" "key" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        result = vertex_read(combine)
+        assert len(result["item"]["items"]) == 3
+        assert set(result["item"]["items"].keys()) == {"x", "y", "z"}
+
+        summary = vertex_summary(combine)
+        assert summary["facts"]["total"] == 3
+
+
+class TestCombinedVertexSearch:
+    """vertex_search on combinatorial vertices — not yet supported, returns []."""
+
+    def test_search_returns_empty(self, tmp_path, monkeypatch):
+        """Combine vertex search returns [] (no store to search).
+
+        vertex_search delegates to _resolve_store which returns None for
+        combine vertices (no store field). This test documents the behavior
+        so it won't silently change when combine search is implemented.
+        """
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+        ])
+
+        assert vertex_search(combine_vpath, "JWT") == []

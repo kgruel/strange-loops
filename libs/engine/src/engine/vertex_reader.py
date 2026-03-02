@@ -5,14 +5,300 @@ replays facts through declared folds, returns fold state.
 
 StoreReader is an internal detail — callers use vertex_read(),
 vertex_facts(), vertex_ticks(), vertex_summary(), and vertex_search() instead.
+
+Combinatorial vertices (those with a ``combine`` block) virtualize reads
+across multiple stores using SQLite ATTACH DATABASE — no data is copied.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .tick import Tick
+
+
+# ---------------------------------------------------------------------------
+# Combinatorial vertex helpers
+# ---------------------------------------------------------------------------
+
+
+def _loops_home() -> Path:
+    """Resolve the loops config directory (same convention as CLI)."""
+    if env := os.environ.get("LOOPS_HOME"):
+        return Path(env)
+    xdg = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    return Path(xdg) / "loops"
+
+
+def _resolve_combine_stores(ast: Any, vertex_path: Path) -> list[Path]:
+    """Resolve combine entries to a list of existing store paths.
+
+    For each CombineEntry, resolves the vertex name to a .vertex file,
+    parses it, and extracts its store path. Skips entries whose store
+    doesn't exist (graceful degradation).
+    """
+    from lang import parse_vertex_file, resolve_vertex
+
+    home = _loops_home()
+    store_paths: list[Path] = []
+
+    for entry in ast.combine:
+        vpath = resolve_vertex(entry.name, home)
+        if not vpath.is_absolute():
+            vpath = (vertex_path.parent / vpath).resolve()
+        if not vpath.exists():
+            continue
+
+        ref_ast = parse_vertex_file(vpath)
+        if ref_ast.store is None:
+            continue
+
+        sp = ref_ast.store
+        if not sp.is_absolute():
+            sp = (vpath.parent / sp).resolve()
+        if sp.exists():
+            store_paths.append(sp)
+
+    return store_paths
+
+
+def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[str]]:
+    """Open the first store and ATTACH the rest. Returns (conn, aliases).
+
+    All databases are opened read-only via URI mode.
+    """
+    conn = sqlite3.connect(f"file:{store_paths[0]}?mode=ro", uri=True)
+    aliases = ["main"]
+    for i, path in enumerate(store_paths[1:], 1):
+        alias = f"s{i}"
+        assert alias.isidentifier() and alias.isascii(), f"Unsafe alias: {alias}"
+        conn.execute(f"ATTACH DATABASE ? AS [{alias}]", (f"file:{path}?mode=ro",))
+        aliases.append(alias)
+    return conn, aliases
+
+
+def _combined_read(
+    ast: Any, vertex_path: Path, specs: dict
+) -> dict[str, dict[str, Any]]:
+    """Fold state across multiple stores (combinatorial vertex_read)."""
+    store_paths = _resolve_combine_stores(ast, vertex_path)
+    if not store_paths:
+        return {kind: spec.initial_state() for kind, spec in specs.items()}
+
+    conn, aliases = _open_combined(store_paths)
+    try:
+        result: dict[str, dict[str, Any]] = {}
+        for kind, spec in specs.items():
+            # UNION ALL facts of this kind from all attached stores, ordered by ts.
+            # NOTE: ORDER BY ts has undefined row order at timestamp ties across
+            # stores — there is no global ordering column. For idempotent folds
+            # (Upsert, Latest, Max, Min) this is harmless. For order-sensitive
+            # folds (Collect, Window) ties may produce non-deterministic ordering.
+            selects = [
+                f"SELECT kind, ts, observer, origin, payload "
+                f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
+                f"WHERE kind = ? OR kind LIKE ? || '.%'"
+                for a in aliases
+            ]
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            params: list[Any] = []
+            for _ in aliases:
+                params.extend([kind, kind])
+
+            rows = conn.execute(sql, params).fetchall()
+            payloads = []
+            for r in rows:
+                p = json.loads(r[4])
+                p["_ts"] = r[1]
+                p["_observer"] = r[2]
+                payloads.append(p)
+            result[kind] = spec.replay(payloads)
+        return result
+    finally:
+        conn.close()
+
+
+def _combined_facts(
+    ast: Any,
+    vertex_path: Path,
+    since_ts: float,
+    until_ts: float,
+    kind: str | None = None,
+) -> list[dict]:
+    """Raw facts across multiple stores (combinatorial vertex_facts)."""
+    store_paths = _resolve_combine_stores(ast, vertex_path)
+    if not store_paths:
+        return []
+
+    conn, aliases = _open_combined(store_paths)
+    try:
+        # See _combined_read for ts-tie ordering note.
+        if kind is not None:
+            selects = [
+                f"SELECT kind, ts, observer, origin, payload "
+                f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
+                f"WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ? || '.%')"
+                for a in aliases
+            ]
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            params: list[Any] = []
+            for _ in aliases:
+                params.extend([since_ts, until_ts, kind, kind])
+        else:
+            selects = [
+                f"SELECT kind, ts, observer, origin, payload "
+                f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
+                f"WHERE ts >= ? AND ts <= ?"
+                for a in aliases
+            ]
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            params = []
+            for _ in aliases:
+                params.extend([since_ts, until_ts])
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "kind": r[0],
+                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
+                "observer": r[2],
+                "origin": r[3],
+                "payload": json.loads(r[4]),
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def _combined_ticks(
+    ast: Any,
+    vertex_path: Path,
+    since_ts: float,
+    until_ts: float,
+    name: str | None = None,
+) -> list[Tick]:
+    """Ticks across multiple stores (combinatorial vertex_ticks)."""
+    store_paths = _resolve_combine_stores(ast, vertex_path)
+    if not store_paths:
+        return []
+
+    conn, aliases = _open_combined(store_paths)
+    try:
+        # See _combined_read for ts-tie ordering note.
+        if name is not None:
+            selects = [
+                f"SELECT name, ts, since, origin, payload "
+                f"FROM {'[' + a + '].' if a != 'main' else ''}ticks "
+                f"WHERE ts >= ? AND ts <= ? AND name = ?"
+                for a in aliases
+            ]
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            params: list[Any] = []
+            for _ in aliases:
+                params.extend([since_ts, until_ts, name])
+        else:
+            selects = [
+                f"SELECT name, ts, since, origin, payload "
+                f"FROM {'[' + a + '].' if a != 'main' else ''}ticks "
+                f"WHERE ts >= ? AND ts <= ?"
+                for a in aliases
+            ]
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            params = []
+            for _ in aliases:
+                params.extend([since_ts, until_ts])
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            Tick.from_dict({
+                "name": r[0],
+                "ts": r[1],
+                "since": r[2],
+                "origin": r[3],
+                "payload": json.loads(r[4]),
+            })
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def _combined_summary(ast: Any, vertex_path: Path) -> dict:
+    """Merged summary across multiple stores (combinatorial vertex_summary)."""
+    store_paths = _resolve_combine_stores(ast, vertex_path)
+    if not store_paths:
+        return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
+
+    conn, aliases = _open_combined(store_paths)
+    try:
+        # Aggregate fact counts per kind
+        selects_facts = [
+            f"SELECT kind, COUNT(*), MIN(ts), MAX(ts) "
+            f"FROM {'[' + a + '].' if a != 'main' else ''}facts GROUP BY kind"
+            for a in aliases
+        ]
+        sql_facts = " UNION ALL ".join(selects_facts)
+        rows = conn.execute(sql_facts).fetchall()
+
+        # Merge per-kind stats (counts add, times take min/max)
+        kind_stats: dict[str, dict] = {}
+        total_facts = 0
+        for kind, count, min_ts, max_ts in rows:
+            total_facts += count
+            if kind in kind_stats:
+                existing = kind_stats[kind]
+                existing["count"] += count
+                existing["earliest"] = min(existing["earliest"], datetime.fromtimestamp(min_ts, tz=timezone.utc))
+                existing["latest"] = max(existing["latest"], datetime.fromtimestamp(max_ts, tz=timezone.utc))
+            else:
+                kind_stats[kind] = {
+                    "count": count,
+                    "earliest": datetime.fromtimestamp(min_ts, tz=timezone.utc),
+                    "latest": datetime.fromtimestamp(max_ts, tz=timezone.utc),
+                }
+
+        # Aggregate tick counts per name
+        selects_ticks = [
+            f"SELECT name, COUNT(*), MIN(ts), MAX(ts) "
+            f"FROM {'[' + a + '].' if a != 'main' else ''}ticks GROUP BY name"
+            for a in aliases
+        ]
+        sql_ticks = " UNION ALL ".join(selects_ticks)
+        tick_rows = conn.execute(sql_ticks).fetchall()
+
+        name_stats: dict[str, dict] = {}
+        total_ticks = 0
+        for tick_name, count, min_ts, max_ts in tick_rows:
+            total_ticks += count
+            if tick_name in name_stats:
+                existing = name_stats[tick_name]
+                existing["count"] += count
+                existing["earliest"] = min(existing["earliest"], datetime.fromtimestamp(min_ts, tz=timezone.utc))
+                existing["latest"] = max(existing["latest"], datetime.fromtimestamp(max_ts, tz=timezone.utc))
+            else:
+                name_stats[tick_name] = {
+                    "count": count,
+                    "earliest": datetime.fromtimestamp(min_ts, tz=timezone.utc),
+                    "latest": datetime.fromtimestamp(max_ts, tz=timezone.utc),
+                }
+
+        return {
+            "facts": {"total": total_facts, "kinds": kind_stats},
+            "ticks": {"total": total_ticks, "names": name_stats},
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Public read API
+# ---------------------------------------------------------------------------
 
 
 def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
@@ -26,6 +312,9 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
 
     If the vertex has no store or the store doesn't exist yet, returns
     initial (empty) fold state for each declared kind.
+
+    Combinatorial vertices (with a ``combine`` block) virtualize reads
+    across multiple stores using SQLite ATTACH DATABASE.
     """
     from lang import parse_vertex_file
 
@@ -34,6 +323,10 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
 
     ast = parse_vertex_file(vertex_path)
     specs = compile_vertex(ast)
+
+    # Combinatorial vertex: read across multiple stores
+    if ast.combine is not None:
+        return _combined_read(ast, vertex_path, specs)
 
     # Resolve store path relative to vertex file
     if ast.store is None:
@@ -78,6 +371,10 @@ def vertex_facts(
     from .store_reader import StoreReader
 
     ast = parse_vertex_file(vertex_path)
+
+    if ast.combine is not None:
+        return _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
+
     if ast.store is None:
         return []
 
@@ -108,6 +405,10 @@ def vertex_ticks(
     from .store_reader import StoreReader
 
     ast = parse_vertex_file(vertex_path)
+
+    if ast.combine is not None:
+        return _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
+
     if ast.store is None:
         return []
 
@@ -135,6 +436,10 @@ def vertex_summary(vertex_path: Path) -> dict:
     from .store_reader import StoreReader
 
     ast = parse_vertex_file(vertex_path)
+
+    if ast.combine is not None:
+        return _combined_summary(ast, vertex_path)
+
     if ast.store is None:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 

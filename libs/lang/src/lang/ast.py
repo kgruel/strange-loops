@@ -377,6 +377,18 @@ SourceEntry = Path | TemplateSource
 
 
 # -----------------------------------------------------------------------------
+# Combine Entry (for combinatorial vertices)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CombineEntry:
+    """A vertex reference in a combine block."""
+
+    name: str  # vertex name (resolved via resolve_vertex)
+
+
+# -----------------------------------------------------------------------------
 # Top-level File ASTs
 # -----------------------------------------------------------------------------
 
@@ -411,6 +423,7 @@ class VertexFile:
     vertices: tuple[Path, ...] | None = None
     routes: dict[str, str] | None = None
     emit: str | None = None
+    combine: tuple[CombineEntry, ...] | None = None
 
     # Source location for error reporting
     path: Path | None = None

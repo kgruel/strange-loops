@@ -15,8 +15,10 @@ from lang import parse_loop, parse_vertex
 from engine.compiler import (
     CircularVertexError,
     CompiledVertex,
+    collect_all_sources,
     compile_loop,
     compile_sources,
+    compile_sources_block,
     compile_vertex,
     compile_vertex_recursive,
     instantiate_template,
@@ -1815,3 +1817,52 @@ sources {{
         sources, specs = compile_sources(vertex, subdir)
         assert len(sources) == 1
         assert sources[0].kind == "alpha"
+
+
+class TestSourcesBlockCompilation:
+    """Tests for compiling sources sequential blocks."""
+
+    def test_compile_sources_block_basic(self):
+        """compile_sources_block creates SequentialSource wrapping inner Sources."""
+        from atoms import SequentialSource
+        from lang.ast import InlineSource, SourcesBlock
+        from engine.compiler import compile_sources_block
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(command="ruff check src/", kind="lint.result"),
+                InlineSource(command="pytest tests/ -q", kind="test.result"),
+            ),
+        )
+        result = compile_sources_block(block, "ci")
+
+        assert isinstance(result, SequentialSource)
+        assert result.observer == "ci"
+        assert len(result.sources) == 2
+        assert result.sources[0].command == "ruff check src/"
+        assert result.sources[0].kind == "lint.result"
+        assert result.sources[0].observer == "ci"
+        assert result.sources[1].command == "pytest tests/ -q"
+        assert result.sources[1].kind == "test.result"
+
+    def test_sequential_block_in_vertex_compilation(self):
+        """sources sequential block is compiled through compile_vertex_recursive."""
+        from atoms import SequentialSource
+
+        vertex = parse_vertex("""\
+name "ci"
+sources sequential {
+    source "ruff check src/" { kind "lint.result" }
+    source "pytest tests/ -q" { kind "test.result" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        sources, specs = collect_all_sources(compiled)
+
+        assert len(sources) == 1  # One SequentialSource wrapping two inner sources
+        assert isinstance(sources[0], SequentialSource)
+        assert len(sources[0].sources) == 2

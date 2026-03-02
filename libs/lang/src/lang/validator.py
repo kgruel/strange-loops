@@ -25,6 +25,7 @@ from .ast import (
     Transform,
     VertexFile,
     Where,
+    SourcesBlock,
 )
 from .errors import Location, ValidationError
 
@@ -298,6 +299,18 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
             if target in seen:
                 ctx.error(f"loop '{loop_name}' has duplicate fold target '{target}'")
             seen.add(target)
+
+    # Check sources blocks
+    for block in vertex.sources_blocks or []:
+        if not block.sources:
+            ctx.error(f"sources {block.mode} block has no sources")
+        # Check for duplicate kinds within a block
+        kinds = [s.kind for s in block.sources]
+        seen_kinds: set[str] = set()
+        for kind in kinds:
+            if kind in seen_kinds:
+                ctx.error(f"sources {block.mode} block has duplicate kind '{kind}'")
+            seen_kinds.add(kind)
 
     return ctx.errors
 

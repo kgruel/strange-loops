@@ -28,6 +28,7 @@ from .ast import (
     FoldSum,
     FoldWindow,
     FromFile,
+    InlineSource,
     LoopDef,
     LoopFile,
     LStrip,
@@ -38,6 +39,7 @@ from .ast import (
     Select,
     Skip,
     SourceParams,
+    SourcesBlock,
     Split,
     Strip,
     TemplateSource,
@@ -345,6 +347,41 @@ def _load_sources_block(node: ckdl.Node, path: Path | None) -> tuple[SourceEntry
 
 
 # ---------------------------------------------------------------------------
+# Inline source / sources mode block loaders
+# ---------------------------------------------------------------------------
+
+
+def _load_inline_source(node: ckdl.Node, path: Path | None) -> InlineSource:
+    """Load an inline source definition: source "command" { kind "..." }."""
+    command = _require_arg(node, 0, "command", path)
+    kind: str | None = None
+    for child in node.children:
+        if child.name == "kind":
+            kind = _require_arg(child, 0, "kind string", path)
+        else:
+            raise _error(f"Unknown inline source field: {child.name}", path)
+    if kind is None:
+        raise _error(f"inline source {command!r}: missing required field: kind", path)
+    return InlineSource(command=command, kind=kind)
+
+
+def _load_sources_mode_block(node: ckdl.Node, path: Path | None) -> SourcesBlock:
+    """Load a sources block with execution mode: sources sequential { ... }."""
+    mode = str(node.args[0])
+    if mode not in ("sequential",):
+        raise _error(f"Unknown sources mode: {mode!r} (expected 'sequential')", path)
+    inline_sources: list[InlineSource] = []
+    for child in node.children:
+        if child.name == "source":
+            inline_sources.append(_load_inline_source(child, path))
+        else:
+            raise _error(f"Unknown node in sources {mode} block: {child.name}", path)
+    if not inline_sources:
+        raise _error(f"sources {mode} block requires at least one source", path)
+    return SourcesBlock(mode=mode, sources=tuple(inline_sources))
+
+
+# ---------------------------------------------------------------------------
 # Combine block loader
 # ---------------------------------------------------------------------------
 
@@ -439,6 +476,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     routes: dict[str, str] | None = None
     emit: str | None = None
     combine: tuple[CombineEntry, ...] | None = None
+    sources_blocks: list[SourcesBlock] = []
 
     for node in doc.nodes:
         key = node.name
@@ -451,7 +489,12 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         elif key == "emit":
             emit = _require_arg(node, 0, "emit string", path)
         elif key == "sources":
-            sources = _load_sources_block(node, path)
+            if node.args:
+                # sources sequential { ... } — mode block
+                sources_blocks.append(_load_sources_mode_block(node, path))
+            else:
+                # sources { path "..." template "..." } — existing
+                sources = _load_sources_block(node, path)
         elif key == "vertices":
             vertices = tuple(Path(str(a)) for a in node.args)
         elif key == "loops":
@@ -480,12 +523,15 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             raise _error("combine is mutually exclusive with discover", path)
         if sources is not None:
             raise _error("combine is mutually exclusive with sources", path)
+        if sources_blocks:
+            raise _error("combine is mutually exclusive with sources blocks", path)
     else:
         has_template_loop_specs = sources and any(
             isinstance(s, TemplateSource) and s.loop is not None for s in sources
         )
         has_children = discover is not None or vertices is not None
-        if not loops and not has_template_loop_specs and not has_children:
+        has_sources_blocks = bool(sources_blocks)
+        if not loops and not has_template_loop_specs and not has_children and not has_sources_blocks:
             raise _error("Missing required field: loops", path)
 
     return VertexFile(
@@ -498,6 +544,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         routes=routes,
         emit=emit,
         combine=combine,
+        sources_blocks=tuple(sources_blocks) if sources_blocks else None,
         path=path,
     )
 

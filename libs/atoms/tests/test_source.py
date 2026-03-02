@@ -1,10 +1,10 @@
-"""Tests for Source."""
+"""Tests for Source and SequentialSource."""
 
 import asyncio
 
 import pytest
 
-from atoms import Source, CommandSource
+from atoms import Source, CommandSource, SequentialSource
 from atoms import Coerce, Pick, Rename, Skip, Split, Transform
 
 
@@ -551,3 +551,107 @@ class TestCommandSourceAlias:
         data_facts = [f for f in facts if f.kind == "greeting"]
         assert len(data_facts) == 1
         assert data_facts[0].payload["line"] == "hello"
+
+
+class TestSequentialSource:
+    """Tests for SequentialSource — sequential execution with exit-on-failure."""
+
+    async def test_all_succeed(self):
+        """When all sources succeed, all facts are yielded in order."""
+        seq = SequentialSource(sources=(
+            Source(command='echo "step1"', kind="step1", observer="ci"),
+            Source(command='echo "step2"', kind="step2", observer="ci"),
+        ), _observer="ci")
+
+        facts = []
+        async for fact in seq.stream():
+            facts.append(fact)
+
+        # step1 data + step1.complete + step2 data + step2.complete
+        step1_data = [f for f in facts if f.kind == "step1"]
+        step2_data = [f for f in facts if f.kind == "step2"]
+        step1_complete = [f for f in facts if f.kind == "step1.complete"]
+        step2_complete = [f for f in facts if f.kind == "step2.complete"]
+        assert len(step1_data) == 1
+        assert len(step2_data) == 1
+        assert len(step1_complete) == 1
+        assert len(step2_complete) == 1
+        assert step1_complete[0].payload["status"] == "ok"
+        assert step2_complete[0].payload["status"] == "ok"
+
+        # No stopped fact
+        stopped = [f for f in facts if f.kind == "sources.sequential.stopped"]
+        assert len(stopped) == 0
+
+    async def test_first_fails_skips_second(self):
+        """When first source exits non-zero, second is skipped."""
+        seq = SequentialSource(sources=(
+            Source(command="exit 1", kind="lint", observer="ci"),
+            Source(command='echo "should not run"', kind="test", observer="ci"),
+        ), _observer="ci")
+
+        facts = []
+        async for fact in seq.stream():
+            facts.append(fact)
+
+        # lint should have error + complete facts
+        lint_complete = [f for f in facts if f.kind == "lint.complete"]
+        assert len(lint_complete) == 1
+        assert lint_complete[0].payload["status"] == "error"
+
+        # test should NOT have run
+        test_data = [f for f in facts if f.kind == "test"]
+        assert len(test_data) == 0
+
+        # Should have a stopped fact
+        stopped = [f for f in facts if f.kind == "sources.sequential.stopped"]
+        assert len(stopped) == 1
+        assert stopped[0].payload["failed_kind"] == "lint"
+        assert stopped[0].payload["status"] == "failed"
+
+    async def test_second_fails_third_skipped(self):
+        """Failure in the middle stops remaining sources."""
+        seq = SequentialSource(sources=(
+            Source(command='echo "ok"', kind="step1", observer="ci"),
+            Source(command="exit 42", kind="step2", observer="ci"),
+            Source(command='echo "should not run"', kind="step3", observer="ci"),
+        ), _observer="ci")
+
+        facts = []
+        async for fact in seq.stream():
+            facts.append(fact)
+
+        # step1 ran
+        step1_data = [f for f in facts if f.kind == "step1"]
+        assert len(step1_data) == 1
+
+        # step2 ran and failed
+        step2_complete = [f for f in facts if f.kind == "step2.complete"]
+        assert len(step2_complete) == 1
+        assert step2_complete[0].payload["status"] == "error"
+
+        # step3 never ran
+        step3_data = [f for f in facts if f.kind == "step3"]
+        assert len(step3_data) == 0
+
+    async def test_observer_property(self):
+        """SequentialSource exposes observer."""
+        seq = SequentialSource(sources=(), _observer="ci")
+        assert seq.observer == "ci"
+
+    async def test_declaration_order_preserved(self):
+        """Facts arrive in declaration order: all of source1, then source2."""
+        seq = SequentialSource(sources=(
+            Source(command='printf "a\\nb"', kind="first", observer="ci"),
+            Source(command='printf "c\\nd"', kind="second", observer="ci"),
+        ), _observer="ci")
+
+        facts = []
+        async for fact in seq.stream():
+            facts.append(fact)
+
+        kinds = [f.kind for f in facts]
+        # All "first" facts before any "second" facts
+        first_idx = [i for i, k in enumerate(kinds) if k == "first"]
+        second_idx = [i for i, k in enumerate(kinds) if k == "second"]
+        assert max(first_idx) < min(second_idx)

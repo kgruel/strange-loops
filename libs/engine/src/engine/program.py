@@ -33,7 +33,7 @@ class VertexProgram:
     @property
     def has_polling(self) -> bool:
         """True if any source uses interval-based polling."""
-        return any(s.every is not None for s in self.sources)
+        return any(getattr(s, "every", None) is not None for s in self.sources)
 
     async def run(
         self, grant: Any = None, *, on_error: Callable | None = None,
@@ -127,6 +127,7 @@ def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile
         vertices=ast.vertices,
         routes=ast.routes,
         emit=ast.emit,
+        sources_blocks=ast.sources_blocks,
         path=ast.path,
     )
 

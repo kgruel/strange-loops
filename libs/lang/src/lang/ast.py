@@ -377,6 +377,35 @@ SourceEntry = Path | TemplateSource
 
 
 # -----------------------------------------------------------------------------
+# Inline Sources (for sources blocks with execution mode)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InlineSource:
+    """An inline source definition within a sources block.
+
+    Minimal source spec: command + kind. Observer defaults to vertex name
+    at compile time.
+    """
+
+    command: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class SourcesBlock:
+    """A sources block with execution mode.
+
+    Wraps inline source definitions with an execution mode keyword.
+    'sequential' runs sources in declaration order with exit-on-failure gating.
+    """
+
+    mode: str  # "sequential"
+    sources: tuple[InlineSource, ...]
+
+
+# -----------------------------------------------------------------------------
 # Combine Entry (for combinatorial vertices)
 # -----------------------------------------------------------------------------
 
@@ -424,6 +453,7 @@ class VertexFile:
     routes: dict[str, str] | None = None
     emit: str | None = None
     combine: tuple[CombineEntry, ...] | None = None
+    sources_blocks: tuple[SourcesBlock, ...] | None = None
 
     # Source location for error reporting
     path: Path | None = None

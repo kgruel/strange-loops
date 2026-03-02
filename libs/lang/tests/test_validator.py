@@ -441,3 +441,41 @@ kind "disk"
 observer "monitor"
 """)
         validate_loop(loop)  # Should not raise
+
+
+class TestSourcesBlockValidation:
+    """Validation for sources sequential blocks."""
+
+    def test_valid_sequential_block(self):
+        vertex = parse_vertex("""\
+name "ci"
+sources sequential {
+    source "ruff check src/" { kind "lint.result" }
+    source "pytest tests/" { kind "test.result" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+""")
+        validate_vertex(vertex)  # Should not raise
+
+    def test_duplicate_kind_in_block(self):
+        """Duplicate kinds within a sequential block are flagged."""
+        from lang.ast import InlineSource, SourcesBlock, VertexFile
+        from lang.ast import FoldDecl, FoldCount, LoopDef
+
+        vertex = VertexFile(
+            name="ci",
+            loops={"counter": LoopDef(folds=(FoldDecl(target="count", op=FoldCount()),))},
+            sources_blocks=(
+                SourcesBlock(
+                    mode="sequential",
+                    sources=(
+                        InlineSource(command="echo a", kind="test"),
+                        InlineSource(command="echo b", kind="test"),
+                    ),
+                ),
+            ),
+        )
+        with pytest.raises(ValidationError, match="duplicate kind 'test'"):
+            validate_vertex(vertex)

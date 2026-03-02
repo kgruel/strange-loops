@@ -45,6 +45,7 @@ from atoms.parse import (
 
 # Ingress
 from atoms.source import CommandSource, Source
+from atoms.sequential import SequentialSource
 from atoms.runner import Runner
 from atoms.protocol import SourceProtocol
 
@@ -88,6 +89,7 @@ __all__ = [
     # Ingress
     "Source",
     "CommandSource",
+    "SequentialSource",
     "SourceProtocol",
     "Runner",
 ]

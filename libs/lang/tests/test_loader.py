@@ -1219,3 +1219,139 @@ combine {
         vertex = parse_vertex(text)
         assert vertex.combine is not None
         assert vertex.loops == {}
+
+
+class TestSourcesSequentialBlock:
+    """Tests for sources sequential { ... } block parsing."""
+
+    def test_basic_sequential_block(self):
+        text = """\
+name "ci"
+sources sequential {
+    source "ruff check --fix src/" { kind "lint.result" }
+    source "pytest tests/ -q"      { kind "test.result" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources_blocks is not None
+        assert len(vertex.sources_blocks) == 1
+
+        from lang import InlineSource, SourcesBlock
+
+        block = vertex.sources_blocks[0]
+        assert isinstance(block, SourcesBlock)
+        assert block.mode == "sequential"
+        assert len(block.sources) == 2
+        assert isinstance(block.sources[0], InlineSource)
+        assert block.sources[0].command == "ruff check --fix src/"
+        assert block.sources[0].kind == "lint.result"
+        assert block.sources[1].command == "pytest tests/ -q"
+        assert block.sources[1].kind == "test.result"
+
+    def test_sequential_block_single_source(self):
+        text = """\
+name "ci"
+sources sequential {
+    source "make build" { kind "build.result" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources_blocks is not None
+        block = vertex.sources_blocks[0]
+        assert len(block.sources) == 1
+        assert block.sources[0].command == "make build"
+
+    def test_sequential_block_coexists_with_bare_sources(self):
+        """Sequential block and bare sources { path ... } can coexist."""
+        text = """\
+name "ci"
+sources {
+    path "./monitor.loop"
+}
+sources sequential {
+    source "ruff check src/" { kind "lint.result" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.sources is not None
+        assert len(vertex.sources) == 1
+        assert vertex.sources[0] == Path("./monitor.loop")
+        assert vertex.sources_blocks is not None
+        assert len(vertex.sources_blocks) == 1
+
+    def test_sequential_block_no_loops_required(self):
+        """A vertex with sources sequential but no loops is valid."""
+        text = """\
+name "ci"
+sources sequential {
+    source "ruff check src/" { kind "lint.result" }
+    source "pytest tests/" { kind "test.result" }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.loops == {}
+        assert vertex.sources_blocks is not None
+
+    def test_sequential_empty_block_error(self):
+        text = """\
+name "ci"
+sources sequential {
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="sources sequential block requires at least one source"):
+            parse_vertex(text)
+
+    def test_unknown_mode_error(self):
+        text = """\
+name "ci"
+sources parallel {
+    source "echo hi" { kind "test" }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="Unknown sources mode"):
+            parse_vertex(text)
+
+    def test_missing_kind_error(self):
+        text = """\
+name "ci"
+sources sequential {
+    source "ruff check src/"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="missing required field: kind"):
+            parse_vertex(text)
+
+    def test_combine_with_sources_block_error(self):
+        """combine and sources blocks are mutually exclusive."""
+        text = """\
+name "bad"
+sources sequential {
+    source "echo test" { kind "test" }
+}
+combine {
+    vertex "a"
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="combine is mutually exclusive with sources blocks"):
+            parse_vertex(text)

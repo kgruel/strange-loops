@@ -22,6 +22,7 @@ from .ast import (
     FoldWindow,
     FromFile,
     FromSource,
+    InlineSource,
     LoopDef,
     LoopFile,
     LStrip,
@@ -33,6 +34,7 @@ from .ast import (
     Skip,
     SourceEntry,
     SourceParams,
+    SourcesBlock,
     Split,
     Strip,
     TemplateSource,
@@ -93,6 +95,9 @@ __all__ = [
     "BoundaryWhen",
     # AST types - Combinatorial vertices
     "CombineEntry",
+    # AST types - Inline sources / sources blocks
+    "InlineSource",
+    "SourcesBlock",
     # AST types - Template sources
     "SourceEntry",
     "SourceParams",

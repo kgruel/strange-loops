@@ -28,12 +28,14 @@ from lang.ast import (
     FoldSum,
     FoldWindow,
     FromFile,
+    InlineSource,
     LoopDef,
     LoopFile,
     Pick,
     Select,
     Skip,
     SourceParams,
+    SourcesBlock,
     Split,
     TemplateSource,
     Transform,
@@ -459,6 +461,31 @@ def compile_sources(
     return sources, specs
 
 
+def compile_sources_block(block: SourcesBlock, vertex_name: str) -> "SequentialSource":
+    """Compile a sources block with execution mode into a SequentialSource.
+
+    Each inline source becomes a regular Source (one-shot, no polling).
+    The SequentialSource wraps them with the execution mode semantics.
+    """
+    from atoms import Source as RuntimeSource
+    from atoms import SequentialSource
+
+    inner_sources = []
+    for inline in block.sources:
+        inner_sources.append(
+            RuntimeSource(
+                command=inline.command,
+                kind=inline.kind,
+                observer=vertex_name,
+            )
+        )
+
+    return SequentialSource(
+        sources=tuple(inner_sources),
+        _observer=vertex_name,
+    )
+
+
 # -----------------------------------------------------------------------------
 # VertexFile Mapping
 # -----------------------------------------------------------------------------
@@ -617,6 +644,10 @@ def compile_vertex_recursive(
     # Compile this vertex's own sources
     base_dir = vertex.path.parent if vertex.path else Path.cwd()
     own_sources, own_template_specs = compile_sources(vertex, base_dir)
+
+    # Compile sources blocks (e.g. sources sequential { ... })
+    for block in vertex.sources_blocks or []:
+        own_sources.append(compile_sources_block(block, vertex.name))
 
     # Collect child vertex paths from explicit list and discovery
     child_paths: list[Path] = []

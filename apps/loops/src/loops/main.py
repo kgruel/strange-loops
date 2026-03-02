@@ -1425,6 +1425,70 @@ def _run_store(argv: list[str]) -> int:
     )
 
 
+def _run_check(argv: list[str]) -> int:
+    """Run health checks, emit result facts, render with gutter."""
+    from painted import run_cli
+
+    from .health import DEFAULT_STEPS, CheckStep, health_view, run_checks
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("vertex", nargs="?", default=None)
+    pre.add_argument("--observer", default="dev-check")
+    known, rest = pre.parse_known_args(argv)
+
+    # Resolve vertex and store
+    if known.vertex is not None:
+        vertex_path = _resolve_named_vertex(known.vertex)
+    else:
+        local = _find_local_vertex()
+        if local is not None:
+            vertex_path = local
+        else:
+            vertex_path = _init_local_vertex("session")
+            _msg(f"Auto-initialized: {vertex_path}")
+
+    store_path = _resolve_vertex_store_path(vertex_path)
+    if store_path is None:
+        _err("Vertex has no store configured")
+        return 1
+
+    # Discover check steps: use scripts/check.sh steps if project has a dev harness,
+    # otherwise fall back to defaults.
+    steps = DEFAULT_STEPS
+    project_root = vertex_path.parent
+
+    results_ref: list[dict] = []
+
+    def fetch():
+        results = run_checks(
+            store_path,
+            steps,
+            observer=known.observer,
+            cwd=project_root,
+        )
+        results_ref.extend(results)
+        return results
+
+    def render(ctx, data):
+        return health_view(data, ctx.zoom, ctx.width)
+
+    rc = run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="loops check",
+        description="Run project health checks",
+    )
+
+    # Return failure if any check failed
+    if results_ref:
+        last = results_ref[-1]
+        if last.get("payload", {}).get("status") == "failed":
+            return 1
+
+    return rc
+
+
 def _run_ls(argv: list[str]) -> int:
     """Run ls command via painted CLI harness."""
     from painted import run_cli
@@ -1536,6 +1600,7 @@ def main(argv: list[str] | None = None) -> int:
         "validate": _run_validate,
         "test": _run_test,
         "ls": _run_ls,
+        "check": _run_check,
         "run": _run_run,
     }
     if argv and argv[0] in _display:

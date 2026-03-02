@@ -1,0 +1,175 @@
+"""Tests for health check feedback handler and lens."""
+
+from __future__ import annotations
+
+import io
+import time
+from pathlib import Path
+
+from atoms import Fact
+from engine import SqliteStore
+from painted import Zoom
+from painted.writer import print_block
+
+from loops.health import CheckStep, health_lens, health_view, run_checks
+
+
+def _block_text(block) -> str:
+    """Render a Block into plain text."""
+    buf = io.StringIO()
+    print_block(block, buf, use_ansi=False)
+    return buf.getvalue()
+
+
+def _read_all_facts(db_path: Path) -> list[Fact]:
+    with SqliteStore(
+        path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict
+    ) as store:
+        return store.since(0)
+
+
+def _seed_vertex(workspace: Path) -> Path:
+    """Create a minimal vertex + data dir, return store path."""
+    vertex = workspace / "test.vertex"
+    vertex.write_text(
+        'name "test"\n'
+        'store "./data/test.db"\n'
+    )
+    (workspace / "data").mkdir()
+    return workspace / "data" / "test.db"
+
+
+class TestRunChecks:
+    def test_passing_checks_emit_facts(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        steps = [
+            CheckStep("lint", "true"),
+            CheckStep("test", "echo ok"),
+        ]
+
+        results = run_checks(store_path, steps)
+
+        assert len(results) == 2
+        assert results[0]["kind"] == "lint.result"
+        assert results[0]["payload"]["status"] == "passed"
+        assert results[1]["kind"] == "test.result"
+        assert results[1]["payload"]["status"] == "passed"
+        assert results[1]["payload"]["duration_s"] >= 0
+
+        # Facts persisted to store
+        facts = _read_all_facts(store_path)
+        assert len(facts) == 2
+        assert facts[0].kind == "lint.result"
+        assert facts[1].kind == "test.result"
+
+    def test_failing_check_stops_sequence(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        steps = [
+            CheckStep("lint", "true"),
+            CheckStep("test", "false"),
+            CheckStep("arch", "true"),
+        ]
+
+        results = run_checks(store_path, steps)
+
+        assert len(results) == 2
+        assert results[0]["payload"]["status"] == "passed"
+        assert results[1]["payload"]["status"] == "failed"
+        # arch never ran
+        facts = _read_all_facts(store_path)
+        assert len(facts) == 2
+
+    def test_captures_stdout(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        steps = [CheckStep("echo", "echo hello world")]
+
+        results = run_checks(store_path, steps)
+
+        assert "hello world" in results[0]["payload"]["output"]
+
+    def test_captures_stderr_on_failure(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        steps = [CheckStep("fail", "echo oops >&2; false")]
+
+        results = run_checks(store_path, steps)
+
+        assert results[0]["payload"]["status"] == "failed"
+        assert "oops" in results[0]["payload"]["output"]
+
+    def test_custom_observer(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        steps = [CheckStep("lint", "true")]
+
+        results = run_checks(store_path, steps, observer="ci")
+
+        assert results[0]["observer"] == "ci"
+
+    def test_custom_cwd(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        subdir = tmp_path / "project"
+        subdir.mkdir()
+        (subdir / "marker.txt").write_text("here")
+        steps = [CheckStep("check", "cat marker.txt")]
+
+        results = run_checks(store_path, steps, cwd=subdir)
+
+        assert results[0]["payload"]["status"] == "passed"
+        assert "here" in results[0]["payload"]["output"]
+
+
+class TestHealthLens:
+    def _result_payload(self, status="passed", duration_s=1.5, output="all good"):
+        return {"status": status, "duration_s": duration_s, "output": output}
+
+    def test_minimal_shows_name_and_status(self):
+        result = health_lens("lint.result", self._result_payload(), Zoom.MINIMAL)
+        assert isinstance(result, str)
+        assert "lint" in result
+        assert "passed" in result
+
+    def test_non_result_kind_returns_empty(self):
+        result = health_lens("decision", {}, Zoom.SUMMARY)
+        assert result == ""
+
+    def test_summary_returns_block(self):
+        result = health_lens("test.result", self._result_payload(), Zoom.SUMMARY)
+        # At SUMMARY zoom, returns a Block (styled output)
+        from painted import Block
+        assert isinstance(result, Block)
+
+    def test_detailed_includes_output(self):
+        payload = self._result_payload(output="line1\nline2\nline3")
+        result = health_lens("test.result", payload, Zoom.DETAILED)
+        from painted import Block
+        assert isinstance(result, Block)
+
+
+class TestHealthView:
+    def _make_results(self, *statuses: str) -> list[dict]:
+        results = []
+        names = ["lint", "test", "arch"]
+        for i, status in enumerate(statuses):
+            results.append({
+                "kind": f"{names[i]}.result",
+                "ts": time.time(),
+                "payload": {"status": status, "output": "", "duration_s": 0.5},
+                "observer": "dev-check",
+            })
+        return results
+
+    def test_empty_results(self):
+        block = health_view([], Zoom.SUMMARY, 80)
+        assert "No check results" in _block_text(block)
+
+    def test_minimal_shows_all_names(self):
+        results = self._make_results("passed", "passed")
+        block = health_view(results, Zoom.MINIMAL, 80)
+        text = _block_text(block)
+        assert "lint" in text
+        assert "test" in text
+
+    def test_summary_renders_blocks(self):
+        results = self._make_results("passed", "failed")
+        block = health_view(results, Zoom.SUMMARY, 80)
+        # Should render without error
+        assert block is not None

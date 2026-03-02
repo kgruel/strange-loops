@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from pathlib import Path
 
+from strange_loops.lifecycle import tasks_vertex_path
 from strange_loops.store import (
     emit_fact,
     observer,
@@ -22,28 +23,22 @@ from strange_loops.store import (
 # -- Fetch --
 
 
-def fetch_session_status(sp: Path) -> dict:
-    """Fetch session status data — summary from store reader."""
-    require_store(sp)
+def fetch_session_status(vp: Path) -> dict:
+    """Fetch session status data — summary from vertex."""
+    from engine import vertex_summary
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        return reader.summary()
+    return vertex_summary(vp)
 
 
-def fetch_session_log(sp: Path, duration_secs: float, kind: str | None = None) -> dict:
+def fetch_session_log(vp: Path, duration_secs: float, kind: str | None = None) -> dict:
     """Fetch session log — facts and ticks in a time range."""
-    require_store(sp)
-
-    from engine import StoreReader
+    from engine import vertex_facts, vertex_ticks
 
     now = datetime.now(timezone.utc)
     since_ts = now.timestamp() - duration_secs
 
-    with StoreReader(sp) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-        ticks = reader.ticks_between(since_ts, now.timestamp())
+    facts = vertex_facts(vp, since_ts, now.timestamp(), kind=kind)
+    ticks = vertex_ticks(vp, since_ts, now.timestamp())
 
     facts.sort(key=lambda f: f["ts"])
     tick_dicts = [tick_to_dict(t) for t in ticks]
@@ -54,7 +49,7 @@ def fetch_session_log(sp: Path, duration_secs: float, kind: str | None = None) -
 # -- Rendering (painted) --
 
 
-def _render_status(sp: Path) -> None:
+def _render_status() -> None:
     """Render session status via painted blocks — used by session start."""
     import shutil
 
@@ -62,7 +57,7 @@ def _render_status(sp: Path) -> None:
 
     from strange_loops.lenses.session import session_status_view
 
-    data = fetch_session_status(sp)
+    data = fetch_session_status(tasks_vertex_path())
     width = shutil.get_terminal_size().columns
     show(session_status_view(data, Zoom.SUMMARY, width), file=sys.stdout)
 
@@ -75,7 +70,7 @@ def cmd_session_start(args: argparse.Namespace) -> int:
     sp = store_path()
     obs = observer(args)
     emit_fact(sp, "session.start", obs, {})
-    _render_status(sp)
+    _render_status()
     return 0
 
 
@@ -95,32 +90,18 @@ def cmd_session_end(args: argparse.Namespace) -> int:
 
 def cmd_session_status(args: argparse.Namespace) -> int:
     """Show session status."""
-    sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
     use_json = getattr(args, "json", False)
     if use_json:
-        data = fetch_session_status(sp)
+        data = fetch_session_status(tasks_vertex_path())
         print(json.dumps(data, indent=2, default=str))
         return 0
 
-    _render_status(sp)
+    _render_status()
     return 0
 
 
 def cmd_session_log(args: argparse.Namespace) -> int:
     """Show session log — time-range query with optional kind filter."""
-    sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
     try:
         duration_secs = parse_duration(getattr(args, "since", "7d"))
     except ValueError as e:
@@ -130,7 +111,7 @@ def cmd_session_log(args: argparse.Namespace) -> int:
     kind = getattr(args, "kind", None)
     use_json = getattr(args, "json", False)
 
-    data = fetch_session_log(sp, duration_secs, kind)
+    data = fetch_session_log(tasks_vertex_path(), duration_secs, kind)
 
     if use_json:
         # JSONL — one JSON object per entry, interleaved chronologically

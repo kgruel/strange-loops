@@ -129,12 +129,6 @@ def test_apps_do_not_import_store_reader():
         "apps/loops/src/loops/commands/store.py",
         # TODO: migrate to vertex_facts
         "apps/loops/src/loops/pop_store.py",
-        # TODO: migrate to vertex_read/vertex_facts
-        "apps/strange-loops/src/strange_loops/commands/task.py",
-        "apps/strange-loops/src/strange_loops/commands/project.py",
-        "apps/strange-loops/src/strange_loops/commands/dashboard.py",
-        "apps/strange-loops/src/strange_loops/commands/session.py",
-        "apps/strange-loops/src/strange_loops/cli.py",
     }
     _check_exceptions(EXCEPTIONS)
 

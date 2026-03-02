@@ -20,8 +20,8 @@ def _read_all(db_path: Path) -> list[dict]:
 
 
 @pytest.fixture
-def git_repo(tmp_path: Path) -> Path:
-    """Create a minimal git repo with an initial commit."""
+def git_repo(tmp_path: Path, monkeypatch) -> Path:
+    """Create a minimal git repo with an initial commit and vertex file."""
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
@@ -45,6 +45,14 @@ def git_repo(tmp_path: Path) -> Path:
         check=True,
         capture_output=True,
     )
+
+    # Copy vertex file so vertex_read resolves store to repo/data/tasks.db
+    from strange_loops.lifecycle import _PKG_ROOT
+
+    real_vertex = _PKG_ROOT / "loops" / "tasks.vertex"
+    (repo / "tasks.vertex").write_text(real_vertex.read_text())
+    monkeypatch.setattr("strange_loops.lifecycle._TASKS_VERTEX", repo / "tasks.vertex")
+
     return repo
 
 
@@ -168,11 +176,11 @@ class TestTaskStatus:
         assert data["name"] == "feature-j"
         assert data["status"] == "created"
 
-    def test_errors_without_store(self, workspace: Path, monkeypatch, capsys):
+    def test_empty_without_store(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
         rc = main(["task", "status"])
-        assert rc == 1
-        assert "No session initialized" in capsys.readouterr().out
+        assert rc == 0
+        assert "No tasks" in capsys.readouterr().out
 
 
 class TestTaskList:

@@ -116,6 +116,13 @@ def task_store(tmp_path: Path, monkeypatch) -> Path:
     ws.mkdir(exist_ok=True)
     monkeypatch.chdir(ws)
 
+    # Copy vertex file so vertex_read resolves store to ws/data/tasks.db
+    from strange_loops.lifecycle import _PKG_ROOT
+
+    real_vertex = _PKG_ROOT / "loops" / "tasks.vertex"
+    (ws / "tasks.vertex").write_text(real_vertex.read_text())
+    monkeypatch.setattr("strange_loops.lifecycle._TASKS_VERTEX", ws / "tasks.vertex")
+
     db = ws / "data" / "tasks.db"
 
     # Session start
@@ -226,6 +233,13 @@ def project_store(tmp_path: Path, monkeypatch) -> Path:
     """Create a project store with deterministic fixture data."""
     ws = tmp_path / "workspace"
     ws.mkdir(exist_ok=True)
+
+    # Copy vertex file so vertex_read resolves store to ws/data/project.db
+    from strange_loops.lifecycle import _PKG_ROOT
+
+    real_vertex = _PKG_ROOT / "loops" / "project.vertex"
+    (ws / "project.vertex").write_text(real_vertex.read_text())
+    monkeypatch.setattr("strange_loops.lifecycle._PROJECT_VERTEX", ws / "project.vertex")
 
     db = ws / "data" / "project.db"
 

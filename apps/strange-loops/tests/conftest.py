@@ -26,10 +26,24 @@ def home(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    """Isolated workspace directory (simulates a git worktree root)."""
+def workspace(tmp_path: Path, monkeypatch) -> Path:
+    """Isolated workspace with vertex files for testing.
+
+    Copies real vertex declarations so store paths resolve to ws/data/*.db.
+    Patches lifecycle module so all vertex reads go through the temp files.
+    """
     ws = tmp_path / "workspace"
     ws.mkdir()
+
+    from strange_loops.lifecycle import _PKG_ROOT
+
+    for name in ("tasks", "project"):
+        real = _PKG_ROOT / "loops" / f"{name}.vertex"
+        if real.exists():
+            (ws / f"{name}.vertex").write_text(real.read_text())
+
+    monkeypatch.setattr("strange_loops.lifecycle._TASKS_VERTEX", ws / "tasks.vertex")
+    monkeypatch.setattr("strange_loops.lifecycle._PROJECT_VERTEX", ws / "project.vertex")
     return ws
 
 

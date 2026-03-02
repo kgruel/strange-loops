@@ -116,12 +116,10 @@ def _run_session_status(argv: list[str]) -> int:
 
     from strange_loops.commands.session import fetch_session_status
     from strange_loops.lenses.session import session_status_view
-    from strange_loops.store import require_store, store_path
+    from strange_loops.lifecycle import tasks_vertex_path
 
     def fetch():
-        sp = store_path()
-        require_store(sp)
-        return fetch_session_status(sp)
+        return fetch_session_status(tasks_vertex_path())
 
     def render(ctx, data):
         return session_status_view(data, ctx.zoom, ctx.width)
@@ -140,7 +138,8 @@ def _run_session_log(argv: list[str]) -> int:
 
     from strange_loops.commands.session import fetch_session_log
     from strange_loops.lenses.session import session_log_view
-    from strange_loops.store import parse_duration, require_store, store_path
+    from strange_loops.lifecycle import tasks_vertex_path
+    from strange_loops.store import parse_duration
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--since", default="7d")
@@ -154,9 +153,7 @@ def _run_session_log(argv: list[str]) -> int:
         return 1
 
     def fetch():
-        sp = store_path()
-        require_store(sp)
-        return fetch_session_log(sp, duration_secs, known.kind)
+        return fetch_session_log(tasks_vertex_path(), duration_secs, known.kind)
 
     def render(ctx, data):
         return session_log_view(data, ctx.zoom, ctx.width)
@@ -175,15 +172,14 @@ def _run_task_status(argv: list[str]) -> int:
 
     from strange_loops.commands.task import fetch_task_status
     from strange_loops.lenses.task import task_status_view
-    from strange_loops.store import store_path
+    from strange_loops.lifecycle import tasks_vertex_path
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("name", nargs="?", default=None)
     known, rest = pre.parse_known_args(argv)
 
     def fetch():
-        sp = store_path()
-        return fetch_task_status(sp, known.name)
+        return fetch_task_status(tasks_vertex_path(), known.name)
 
     def render(ctx, data):
         return task_status_view(data, ctx.zoom, ctx.width)
@@ -202,7 +198,8 @@ def _run_task_list(argv: list[str]) -> int:
 
 
 def _run_task_log(argv: list[str]) -> int:
-    from strange_loops.store import parse_duration, require_store, store_path
+    from strange_loops.lifecycle import fold_task_state, tasks_vertex_path
+    from strange_loops.store import parse_duration
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("name")
@@ -217,28 +214,18 @@ def _run_task_log(argv: list[str]) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    vp = tasks_vertex_path()
+
     if known.follow:
         # Follow bypasses run_cli — uses direct polling + printing
-        sp = store_path()
-        try:
-            require_store(sp)
-        except FileNotFoundError as e:
-            print(f"Error: {e}", file=sys.stderr)
+        if fold_task_state(vp, known.name) is None:
+            print(f"Error: Task '{known.name}' not found.", file=sys.stderr)
             return 1
-
-        from engine import StoreReader
-
-        from strange_loops.lifecycle import fold_task_state
-
-        with StoreReader(sp) as reader:
-            if fold_task_state(reader, known.name) is None:
-                print(f"Error: Task '{known.name}' not found.", file=sys.stderr)
-                return 1
 
         use_json = "--json" in rest
         from strange_loops.commands.task import follow_task_log
 
-        return follow_task_log(sp, known.name, known.kind, use_json)
+        return follow_task_log(vp, known.name, known.kind, use_json)
 
     from painted import run_cli
 
@@ -246,8 +233,7 @@ def _run_task_log(argv: list[str]) -> int:
     from strange_loops.lenses.task import task_log_view
 
     def fetch():
-        sp = store_path()
-        return fetch_task_log(sp, known.name, duration_secs, known.kind)
+        return fetch_task_log(vp, known.name, duration_secs, known.kind)
 
     def render(ctx, data):
         return task_log_view(data, ctx.zoom, ctx.width)
@@ -264,12 +250,12 @@ def _run_task_log(argv: list[str]) -> int:
 def _run_project_status(argv: list[str]) -> int:
     from painted import run_cli
 
-    from strange_loops.commands.project import fetch_project_status, _project_store
+    from strange_loops.commands.project import fetch_project_status
     from strange_loops.lenses.project import project_status_view
+    from strange_loops.lifecycle import project_vertex_path
 
     def fetch():
-        sp = _project_store()
-        return fetch_project_status(sp)
+        return fetch_project_status(project_vertex_path())
 
     def render(ctx, data):
         return project_status_view(data, ctx.zoom, ctx.width)
@@ -299,12 +285,12 @@ def _run_project_log(argv: list[str]) -> int:
 
     from painted import run_cli
 
-    from strange_loops.commands.project import fetch_project_log, _project_store
+    from strange_loops.commands.project import fetch_project_log
     from strange_loops.lenses.project import project_log_view
+    from strange_loops.lifecycle import project_vertex_path
 
     def fetch():
-        sp = _project_store()
-        return fetch_project_log(sp, duration_secs, known.kind)
+        return fetch_project_log(project_vertex_path(), duration_secs, known.kind)
 
     def render(ctx, data):
         return project_log_view(data, ctx.zoom, ctx.width)

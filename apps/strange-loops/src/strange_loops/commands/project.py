@@ -8,21 +8,18 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from strange_loops.lifecycle import project_vertex_path, tasks_vertex_path
 from strange_loops.store import (
     emit_fact,
     observer,
     parse_duration,
-    require_store,
-    store_path,
     store_path_for,
 )
 
-_VERTEX_NAME = "project"
-
 
 def _project_store() -> Path:
-    """Resolve the project store path from the vertex file."""
-    return store_path_for(_VERTEX_NAME)
+    """Resolve the project store path for write operations."""
+    return store_path_for("project")
 
 
 def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
@@ -44,38 +41,39 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     return payload
 
 
-def _latest_by_group(facts: list[dict], kind: str, group_field: str) -> dict[str, dict]:
-    """Query-time fold: filter by kind, group by field, keep newest per group."""
-    grouped: dict[str, dict] = {}
-    for f in facts:
-        if f["kind"] != kind:
-            continue
-        key = f["payload"].get(group_field, "")
-        if not key:
-            continue
-        existing = grouped.get(key)
-        if existing is None or f["ts"] > existing["ts"]:
-            grouped[key] = f
-    return grouped
+def _items_to_facts(kind_state: dict) -> dict[str, dict]:
+    """Convert vertex_read items to fact-like dicts for lens compatibility.
+
+    vertex_read returns {kind: {"items": {key: enriched_payload}}} where
+    enriched_payload has _ts/_observer injected. Transform to the shape
+    the project lens expects: {key: {"ts": ..., "observer": ..., "payload": {...}}}.
+    """
+    result = {}
+    for key, payload in kind_state.get("items", {}).items():
+        p = {k: v for k, v in payload.items() if not k.startswith("_")}
+        result[key] = {
+            "ts": payload.get("_ts", 0),
+            "observer": payload.get("_observer", ""),
+            "payload": p,
+        }
+    return result
 
 
 # -- Fetch --
 
 
-def fetch_project_status(sp: Path) -> dict:
-    """Fetch project status — latest-per-group fold over decisions, threads, plans."""
-    require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
+def fetch_project_status(vp: Path) -> dict:
+    """Fetch project status — vertex_read fold over decisions, threads, plans."""
+    from engine import vertex_read, vertex_summary
 
-    from engine import StoreReader
+    states = vertex_read(vp)
+    summary = vertex_summary(vp)
+    total = summary["facts"]["total"]
 
-    with StoreReader(sp) as reader:
-        total = reader.fact_total
-        all_facts = reader.facts_between(0, float("inf"))
-
-    decisions = _latest_by_group(all_facts, "decision", "topic")
-    threads = _latest_by_group(all_facts, "thread", "name")
-    plans = _latest_by_group(all_facts, "plan", "name")
-    completions = _latest_by_group(all_facts, "completion", "task")
+    decisions = _items_to_facts(states.get("decision", {}))
+    threads = _items_to_facts(states.get("thread", {}))
+    plans = _items_to_facts(states.get("plan", {}))
+    completions = _items_to_facts(states.get("completion", {}))
 
     # Filter threads: hide resolved
     open_threads = {k: v for k, v in threads.items() if v["payload"].get("status") != "resolved"}
@@ -89,18 +87,14 @@ def fetch_project_status(sp: Path) -> dict:
     }
 
 
-def fetch_project_log(sp: Path, duration_secs: float, kind: str | None = None) -> dict:
+def fetch_project_log(vp: Path, duration_secs: float, kind: str | None = None) -> dict:
     """Fetch project log — facts in a time range."""
-    require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
-
-    from engine import StoreReader
+    from engine import vertex_facts
 
     now = datetime.now(timezone.utc)
     since_ts = now.timestamp() - duration_secs
 
-    with StoreReader(sp) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-
+    facts = vertex_facts(vp, since_ts, now.timestamp(), kind=kind)
     facts.sort(key=lambda f: f["ts"])
 
     return {"facts": facts}
@@ -130,111 +124,34 @@ def cmd_project_emit(args: argparse.Namespace) -> int:
 
 def cmd_project_status(args: argparse.Namespace) -> int:
     """Show project status — latest-per-group fold over decisions, threads, plans."""
-    sp = _project_store()
-    try:
-        require_store(sp, "No project data yet. Run 'strange-loops project emit' first.")
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    import shutil
 
     use_json = getattr(args, "json", False)
-
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        total = reader.fact_total
-        all_facts = reader.facts_between(0, float("inf"))
-
-    decisions = _latest_by_group(all_facts, "decision", "topic")
-    threads = _latest_by_group(all_facts, "thread", "name")
-    plans = _latest_by_group(all_facts, "plan", "name")
-    completions = _latest_by_group(all_facts, "completion", "task")
-
-    # Filter threads: hide resolved
-    open_threads = {k: v for k, v in threads.items() if v["payload"].get("status") != "resolved"}
+    vp = project_vertex_path()
+    data = fetch_project_status(vp)
 
     if use_json:
-        data = {
-            "total": total,
-            "decisions": {k: v["payload"] for k, v in sorted(decisions.items())},
-            "threads": {k: v["payload"] for k, v in sorted(open_threads.items())},
-            "plans": {k: v["payload"] for k, v in sorted(plans.items())},
-            "completions": {k: v["payload"] for k, v in sorted(completions.items())},
+        json_data = {
+            "total": data["total"],
+            "decisions": {k: v["payload"] for k, v in sorted(data["decisions"].items())},
+            "threads": {k: v["payload"] for k, v in sorted(data["threads"].items())},
+            "plans": {k: v["payload"] for k, v in sorted(data["plans"].items())},
+            "completions": {k: v["payload"] for k, v in sorted(data["completions"].items())},
         }
-        print(json.dumps(data, indent=2, default=str))
+        print(json.dumps(json_data, indent=2, default=str))
         return 0
 
-    from painted import show
-    from painted.block import Block
-    from painted.compose import join_vertical
-    from painted.palette import current_palette
+    from painted import Zoom, show
 
-    p = current_palette()
-    sections: list[Block] = [Block.text(f"Project — {total} facts", p.accent)]
+    from strange_loops.lenses.project import project_status_view
 
-    if decisions:
-        dec_lines: list[Block] = [Block.text(f"Decisions ({len(decisions)}):", p.accent)]
-        for topic, f in sorted(decisions.items()):
-            dt = (
-                f["ts"]
-                if isinstance(f["ts"], datetime)
-                else datetime.fromtimestamp(f["ts"], tz=timezone.utc)
-            )
-            msg = f["payload"].get("message", "")
-            label = f"  {topic}: {msg}" if msg else f"  {topic}"
-            dec_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
-        sections.append(join_vertical(*dec_lines))
-
-    if open_threads:
-        thr_lines: list[Block] = [Block.text(f"Open Threads ({len(open_threads)}):", p.accent)]
-        for name, f in sorted(open_threads.items()):
-            dt = (
-                f["ts"]
-                if isinstance(f["ts"], datetime)
-                else datetime.fromtimestamp(f["ts"], tz=timezone.utc)
-            )
-            msg = f["payload"].get("message", "")
-            status = f["payload"].get("status", "")
-            detail = msg or status
-            label = f"  {name}: {detail}" if detail else f"  {name}"
-            thr_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
-        sections.append(join_vertical(*thr_lines))
-
-    if plans:
-        plan_lines: list[Block] = [Block.text(f"Plans ({len(plans)}):", p.accent)]
-        for name, f in sorted(plans.items()):
-            dt = (
-                f["ts"]
-                if isinstance(f["ts"], datetime)
-                else datetime.fromtimestamp(f["ts"], tz=timezone.utc)
-            )
-            status = f["payload"].get("status", "")
-            label = f"  {name}: {status}" if status else f"  {name}"
-            plan_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
-        sections.append(join_vertical(*plan_lines))
-
-    if completions:
-        comp_lines: list[Block] = [Block.text(f"Completions ({len(completions)}):", p.accent)]
-        for task_name, f in sorted(completions.items()):
-            dt = (
-                f["ts"]
-                if isinstance(f["ts"], datetime)
-                else datetime.fromtimestamp(f["ts"], tz=timezone.utc)
-            )
-            status = f["payload"].get("status", "")
-            exit_code = f["payload"].get("exit_code", "")
-            detail = f"{status} exit={exit_code}" if exit_code != "" else status
-            label = f"  {task_name}: {detail}" if detail else f"  {task_name}"
-            comp_lines.append(Block.text(f"{label} ({dt.strftime('%b %d')})", p.muted))
-        sections.append(join_vertical(*comp_lines))
-
-    show(join_vertical(*sections, gap=1), file=sys.stdout)
+    width = shutil.get_terminal_size().columns
+    show(project_status_view(data, Zoom.SUMMARY, width), file=sys.stdout)
     return 0
 
 
 def cmd_project_log(args: argparse.Namespace) -> int:
     """Show project log — time-windowed query with optional kind filter."""
-    sp = _project_store()
     try:
         duration_secs = parse_duration(getattr(args, "since", "7d"))
     except ValueError as e:
@@ -244,11 +161,7 @@ def cmd_project_log(args: argparse.Namespace) -> int:
     kind = getattr(args, "kind", None)
     use_json = getattr(args, "json", False)
 
-    try:
-        data = fetch_project_log(sp, duration_secs, kind)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    data = fetch_project_log(project_vertex_path(), duration_secs, kind)
 
     if use_json:
         for f in data["facts"]:
@@ -268,20 +181,15 @@ def cmd_project_log(args: argparse.Namespace) -> int:
 
 def cmd_project_bridge(args: argparse.Namespace) -> int:
     """Bridge task.tick ticks from tasks.db → completion facts in project.db."""
-    task_sp = store_path()
     project_sp = _project_store()
 
-    try:
-        require_store(task_sp, "No task data yet. Run tasks first.")
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    from engine import vertex_facts, vertex_ticks
 
-    from engine import StoreReader
+    tasks_vp = tasks_vertex_path()
+    project_vp = project_vertex_path()
 
-    # 1. Read all task.tick ticks from tasks.db
-    with StoreReader(task_sp) as reader:
-        ticks = reader.ticks_between(0, float("inf"), name="task.tick")
+    # 1. Read all task.tick ticks from tasks vertex
+    ticks = vertex_ticks(tasks_vp, 0, float("inf"), name="task.tick")
 
     if not ticks:
         from painted import show
@@ -292,16 +200,14 @@ def cmd_project_bridge(args: argparse.Namespace) -> int:
         show(Block.text("No task.tick ticks to bridge.", p.muted), file=sys.stdout)
         return 0
 
-    # 2. Read existing completion facts from project.db (if any)
+    # 2. Read existing completion facts from project vertex (if any)
     already_bridged: set[str] = set()
-    if project_sp.exists():
-        with StoreReader(project_sp) as reader:
-            all_facts = reader.facts_between(0, float("inf"))
-        for f in all_facts:
-            if f["kind"] == "completion":
-                task_name = f["payload"].get("task", "")
-                if task_name:
-                    already_bridged.add(task_name)
+    all_facts = vertex_facts(project_vp, 0, float("inf"))
+    for f in all_facts:
+        if f["kind"] == "completion":
+            task_name = f["payload"].get("task", "")
+            if task_name:
+                already_bridged.add(task_name)
 
     # 3. Latest tick per task
     latest_per_task: dict[str, object] = {}

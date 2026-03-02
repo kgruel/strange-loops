@@ -159,7 +159,7 @@ def diff_full(worktree_path: Path) -> str:
                 f"+++ b/{rel}\n"
                 f"@@ -0,0 +1,{count} @@\n"
             )
-            pseudo_diff += "\n".join(f"+{l}" for l in lines) + "\n"
+            pseudo_diff += "\n".join(f"+{line}" for line in lines) + "\n"
             parts.append(pseudo_diff)
 
     return "".join(parts)

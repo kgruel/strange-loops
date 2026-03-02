@@ -68,9 +68,7 @@ def project_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
         plan_lines: list[Block] = [Block.text(f"Plans ({len(plans)}):", p.accent)]
         for name, f in sorted(plans.items()):
             status = f["payload"].get("status", "")
-            plan_lines.extend(
-                _render_project_item(f, name, status, zoom, p, is_detail_field=True)
-            )
+            plan_lines.extend(_render_project_item(f, name, status, zoom, p, is_detail_field=True))
         sections.append(join_vertical(*plan_lines))
 
     if completions:

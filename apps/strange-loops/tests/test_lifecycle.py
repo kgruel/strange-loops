@@ -1,18 +1,17 @@
-"""Tests for lifecycle — compiled vertex loader + Spec-based fold."""
+"""Tests for lifecycle — vertex_read-based fold for task state."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from atoms import Fact
-from engine import StoreReader, SqliteStore
+from engine import SqliteStore
 
 from strange_loops.lifecycle import (
     _PKG_ROOT,
-    _vertex_path,
     fold_all_tasks,
     fold_task_state,
-    load_compiled,
+    tasks_vertex_path,
 )
 
 
@@ -23,20 +22,36 @@ def _emit(db: Path, kind: str, obs: str, payload: dict) -> None:
         store.append(fact)
 
 
+def _write_test_vertex(tmp_path: Path) -> Path:
+    """Write a tasks.vertex in tmp_path that points to data/tasks.db.
+
+    Copies the real vertex declaration so folds match production.
+    The relative store path resolves to tmp_path/data/tasks.db.
+    """
+    real_vertex = tasks_vertex_path()
+    test_vertex = tmp_path / "tasks.vertex"
+    test_vertex.write_text(real_vertex.read_text())
+    return test_vertex
+
+
 class TestVertexParsesAndCompiles:
     def test_vertex_file_exists(self):
-        assert _vertex_path().exists()
+        assert tasks_vertex_path().exists()
 
     def test_vertex_parses(self):
         from lang import parse_vertex_file
 
-        v = parse_vertex_file(_vertex_path())
+        v = parse_vertex_file(tasks_vertex_path())
         assert v.name == "tasks"
         assert "task.created" in v.loops
         assert "worker.output.complete" in v.loops
 
     def test_vertex_compiles(self):
-        compiled = load_compiled()
+        from engine import compile_vertex_recursive
+        from lang import parse_vertex_file
+
+        vertex = parse_vertex_file(tasks_vertex_path())
+        compiled = compile_vertex_recursive(vertex)
         assert "task.created" in compiled.specs
         assert "task.assigned" in compiled.specs
         assert "task.stage" in compiled.specs
@@ -49,8 +64,11 @@ class TestVertexParsesAndCompiles:
 
     def test_specs_have_correct_folds(self):
         from atoms import Collect, Upsert
+        from engine import compile_vertex_recursive
+        from lang import parse_vertex_file
 
-        compiled = load_compiled()
+        vertex = parse_vertex_file(tasks_vertex_path())
+        compiled = compile_vertex_recursive(vertex)
         # task.* specs use Upsert keyed by "name"
         for kind in (
             "task.created",
@@ -85,7 +103,7 @@ class TestVertexParsesAndCompiles:
     def test_shell_loop_compiles(self):
         from lang import parse_loop_file
 
-        loop_path = _vertex_path().parent / "harnesses" / "shell.loop"
+        loop_path = tasks_vertex_path().parent / "harnesses" / "shell.loop"
         loop = parse_loop_file(loop_path)
         assert loop.kind == "worker.output"
         assert loop.observer == "shell"
@@ -95,7 +113,7 @@ class TestVertexParsesAndCompiles:
     def test_sonnet_loop_compiles(self):
         from lang import parse_loop_file
 
-        loop_path = _vertex_path().parent / "harnesses" / "sonnet.loop"
+        loop_path = tasks_vertex_path().parent / "harnesses" / "sonnet.loop"
         loop = parse_loop_file(loop_path)
         assert loop.kind == "worker.output"
         assert loop.observer == "sonnet"
@@ -106,7 +124,7 @@ class TestVertexParsesAndCompiles:
     def test_codex_loop_compiles(self):
         from lang import parse_loop_file
 
-        loop_path = _vertex_path().parent / "harnesses" / "codex.loop"
+        loop_path = tasks_vertex_path().parent / "harnesses" / "codex.loop"
         loop = parse_loop_file(loop_path)
         assert loop.kind == "worker.output"
         assert loop.observer == "codex"
@@ -117,7 +135,7 @@ class TestVertexParsesAndCompiles:
     def test_gemini_flash_loop_compiles(self):
         from lang import parse_loop_file
 
-        loop_path = _vertex_path().parent / "harnesses" / "gemini-flash.loop"
+        loop_path = tasks_vertex_path().parent / "harnesses" / "gemini-flash.loop"
         loop = parse_loop_file(loop_path)
         assert loop.kind == "worker.output"
         assert loop.observer == "gemini-flash"
@@ -185,6 +203,7 @@ class TestProjectVertexCompiles:
 class TestFoldTaskState:
     def test_fold_created_task(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -192,8 +211,7 @@ class TestFoldTaskState:
             {"name": "build-api", "title": "Build", "base_branch": "main", "description": ""},
         )
 
-        with StoreReader(db) as reader:
-            state = fold_task_state(reader, "build-api")
+        state = fold_task_state(vp, "build-api")
 
         assert state is not None
         assert state["name"] == "build-api"
@@ -202,6 +220,7 @@ class TestFoldTaskState:
 
     def test_fold_assigned_task(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -212,8 +231,7 @@ class TestFoldTaskState:
             db, "task.assigned", "alice", {"name": "t1", "harness": "shell", "worktree": "/tmp/wt"}
         )
 
-        with StoreReader(db) as reader:
-            state = fold_task_state(reader, "t1")
+        state = fold_task_state(vp, "t1")
 
         assert state["status"] == "assigned"
         assert state["harness"] == "shell"
@@ -221,6 +239,7 @@ class TestFoldTaskState:
 
     def test_fold_worker_complete(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -229,14 +248,14 @@ class TestFoldTaskState:
         )
         _emit(db, "worker.output.complete", "a", {"task": "t1", "status": "ok", "returncode": 0})
 
-        with StoreReader(db) as reader:
-            state = fold_task_state(reader, "t1")
+        state = fold_task_state(vp, "t1")
 
         assert state["worker"] == "stopped"
         assert state["exit_code"] == 0
 
     def test_fold_worker_error(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -245,14 +264,14 @@ class TestFoldTaskState:
         )
         _emit(db, "worker.output.complete", "a", {"task": "t1", "status": "error", "returncode": 1})
 
-        with StoreReader(db) as reader:
-            state = fold_task_state(reader, "t1")
+        state = fold_task_state(vp, "t1")
 
         assert state["worker"] == "error"
         assert state["exit_code"] == 1
 
     def test_fold_worker_pid(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -261,13 +280,13 @@ class TestFoldTaskState:
         )
         _emit(db, "worker.started", "a", {"task": "t1", "pid": 12345})
 
-        with StoreReader(db) as reader:
-            state = fold_task_state(reader, "t1")
+        state = fold_task_state(vp, "t1")
 
         assert state["pid"] == 12345
 
     def test_unknown_task_returns_none(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -275,13 +294,13 @@ class TestFoldTaskState:
             {"name": "t1", "title": "", "base_branch": "main", "description": ""},
         )
 
-        with StoreReader(db) as reader:
-            assert fold_task_state(reader, "nonexistent") is None
+        assert fold_task_state(vp, "nonexistent") is None
 
 
 class TestFoldAllTasks:
     def test_fold_multiple_tasks(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -295,8 +314,7 @@ class TestFoldAllTasks:
             {"name": "beta", "title": "B", "base_branch": "main", "description": ""},
         )
 
-        with StoreReader(db) as reader:
-            tasks = fold_all_tasks(reader)
+        tasks = fold_all_tasks(vp)
 
         assert len(tasks) == 2
         names = [t["name"] for t in tasks]
@@ -305,6 +323,7 @@ class TestFoldAllTasks:
 
     def test_fold_independent_state(self, tmp_path: Path):
         db = tmp_path / "data" / "tasks.db"
+        vp = _write_test_vertex(tmp_path)
         _emit(
             db,
             "task.created",
@@ -319,8 +338,7 @@ class TestFoldAllTasks:
         )
         _emit(db, "task.assigned", "a", {"name": "t1", "harness": "shell", "worktree": "/w1"})
 
-        with StoreReader(db) as reader:
-            tasks = fold_all_tasks(reader)
+        tasks = fold_all_tasks(vp)
 
         t1 = next(t for t in tasks if t["name"] == "t1")
         t2 = next(t for t in tasks if t["name"] == "t2")

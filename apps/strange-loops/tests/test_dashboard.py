@@ -215,10 +215,11 @@ class TestFetch:
         assert state.tasks[0].status == "created"
         assert state.fact_total >= 1
 
-    def test_errors_without_store(self, workspace: Path, monkeypatch):
+    def test_empty_without_store(self, workspace: Path, monkeypatch):
         monkeypatch.chdir(workspace)
-        with pytest.raises(FileNotFoundError):
-            _fetch()
+        state = _fetch()
+        assert len(state.tasks) == 0
+        assert state.fact_total == 0
 
 
 class TestRender:
@@ -353,13 +354,12 @@ class TestDashboardCLI:
         assert data["project"]["total"] == 5
         assert data["project"]["decisions"] == 2
 
-    def test_errors_without_store(self, workspace: Path, monkeypatch, capsys):
+    def test_empty_without_store(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
         rc = main(["dashboard"])
-        assert rc == 1
-        # run_cli renders errors to stdout
+        assert rc == 0
         out = capsys.readouterr().out
-        assert "No session initialized" in out
+        assert "No tasks" in out
 
     def test_no_tasks(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)

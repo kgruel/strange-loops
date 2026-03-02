@@ -3,8 +3,8 @@
 The sole read interface for store data. Compiles the vertex declaration,
 replays facts through declared folds, returns fold state.
 
-StoreReader is an internal detail — callers use vertex_read() and
-vertex_facts() instead.
+StoreReader is an internal detail — callers use vertex_read(),
+vertex_facts(), vertex_ticks(), and vertex_summary() instead.
 """
 
 from __future__ import annotations
@@ -88,3 +88,60 @@ def vertex_facts(
 
     with StoreReader(store_path) as reader:
         return reader.facts_between(since_ts, until_ts, kind=kind)
+
+
+def vertex_ticks(
+    vertex_path: Path,
+    since_ts: float,
+    until_ts: float,
+    name: str | None = None,
+) -> list:
+    """Read ticks from a vertex's store within a time range.
+
+    Parallels vertex_facts for tick access through the vertex.
+    Returns Tick objects (from StoreReader.ticks_between).
+    """
+    from lang import parse_vertex_file
+
+    from .store_reader import StoreReader
+
+    ast = parse_vertex_file(vertex_path)
+    if ast.store is None:
+        return []
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    if not store_path.exists():
+        return []
+
+    with StoreReader(store_path) as reader:
+        return reader.ticks_between(since_ts, until_ts, name=name)
+
+
+def vertex_summary(vertex_path: Path) -> dict:
+    """Read store summary from a vertex — fact/tick counts and per-kind stats.
+
+    Returns the same shape as StoreReader.summary():
+        {"facts": {"total": N, "kinds": {...}}, "ticks": {"total": N, "names": {...}}}
+
+    Returns zeroed summary if the vertex has no store or store doesn't exist.
+    """
+    from lang import parse_vertex_file
+
+    from .store_reader import StoreReader
+
+    ast = parse_vertex_file(vertex_path)
+    if ast.store is None:
+        return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    if not store_path.exists():
+        return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
+
+    with StoreReader(store_path) as reader:
+        return reader.summary()

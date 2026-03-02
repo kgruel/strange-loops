@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from painted import CliContext
     from painted.block import Block
 
-from strange_loops.lifecycle import fold_all_tasks
-from strange_loops.store import filter_task_facts, require_store, store_path
+from strange_loops.lifecycle import fold_all_tasks, project_vertex_path, tasks_vertex_path
+from strange_loops.store import filter_task_facts
 
 # Column widths
 _COL_TASK = 26
@@ -168,29 +168,21 @@ def _task_activity(all_facts: list[dict], task_name: str) -> datetime | None:
 
 
 def _project_summary() -> ProjectSummary | None:
-    """Read project store, return summary. None if unavailable."""
+    """Read project vertex, return summary. None if unavailable."""
     try:
-        from strange_loops.store import store_path_for
+        from engine import vertex_summary
 
-        sp = store_path_for("project")
-        if not sp.exists():
+        summary = vertex_summary(project_vertex_path())
+        total = summary["facts"]["total"]
+        if total == 0:
             return None
 
-        from engine import StoreReader
-
-        with StoreReader(sp) as reader:
-            total = reader.fact_total
-            all_facts = reader.facts_between(0, float("inf"))
-
-        counts: dict[str, int] = {}
-        for f in all_facts:
-            counts[f["kind"]] = counts.get(f["kind"], 0) + 1
-
+        kinds = summary["facts"]["kinds"]
         return ProjectSummary(
             total=total,
-            decisions=counts.get("decision", 0),
-            threads=counts.get("thread", 0),
-            plans=counts.get("plan", 0),
+            decisions=kinds.get("decision", {}).get("count", 0),
+            threads=kinds.get("thread", {}).get("count", 0),
+            plans=kinds.get("plan", {}).get("count", 0),
         )
     except Exception:
         return None
@@ -212,16 +204,13 @@ def _project_header(summary: ProjectSummary) -> str:
 
 
 def _fetch() -> DashboardState:
-    """Read task store and project store, return frozen snapshot."""
-    sp = store_path()
-    require_store(sp)
+    """Read task vertex and project vertex, return frozen snapshot."""
+    from engine import vertex_facts, vertex_summary
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        tasks = fold_all_tasks(reader)
-        all_facts = reader.facts_between(0, float("inf"))
-        fact_total = reader.fact_total
+    vp = tasks_vertex_path()
+    tasks = fold_all_tasks(vp)
+    all_facts = vertex_facts(vp, 0, float("inf"))
+    fact_total = vertex_summary(vp)["facts"]["total"]
 
     rows: list[TaskRow] = []
     for task in tasks:
@@ -247,15 +236,12 @@ def _fetch() -> DashboardState:
 
 def _fetch_with_detail(selected_name: str | None) -> DashboardState:
     """Extended fetch: task list + detail facts for selected task + session status."""
-    sp = store_path()
-    require_store(sp)
+    from engine import vertex_facts, vertex_summary
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        tasks = fold_all_tasks(reader)
-        all_facts = reader.facts_between(0, float("inf"))
-        fact_total = reader.fact_total
+    vp = tasks_vertex_path()
+    tasks = fold_all_tasks(vp)
+    all_facts = vertex_facts(vp, 0, float("inf"))
+    fact_total = vertex_summary(vp)["facts"]["total"]
 
     # Session status
     session_facts = [f for f in all_facts if f["kind"] in ("session.start", "session.end")]
@@ -774,9 +760,9 @@ class DashboardSurface:
         dashboard = self  # capture for closures
 
         class _Surface(Surface):
-            def layout(self, w: int, h: int) -> None:
-                dashboard._tasks_w = max(38, w * 2 // 5)
-                dashboard._main_h = h - 4
+            def layout(self, width: int, height: int) -> None:
+                dashboard._tasks_w = max(38, width * 2 // 5)
+                dashboard._main_h = height - 4
 
             def update(self) -> None:
                 now = time.monotonic()

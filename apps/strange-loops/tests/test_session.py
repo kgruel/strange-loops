@@ -92,11 +92,12 @@ class TestSessionEnd:
 
 
 class TestSessionStatus:
-    def test_errors_without_session(self, workspace: Path, monkeypatch, capsys):
+    def test_empty_without_session(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
         rc = main(["session", "status"])
-        assert rc == 1
-        assert "No session initialized" in capsys.readouterr().out
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "0 facts" in out
 
     def test_json_output(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
@@ -163,11 +164,12 @@ class TestSessionLog:
         assert len(data["facts"]) >= 1
         assert "kind" in data["facts"][0]
 
-    def test_errors_without_session(self, workspace: Path, monkeypatch, capsys):
+    def test_empty_without_session(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)
         rc = main(["session", "log"])
-        assert rc == 1
-        assert "No session initialized" in capsys.readouterr().out
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No facts" in out
 
     def test_invalid_duration(self, workspace: Path, monkeypatch, capsys):
         monkeypatch.chdir(workspace)

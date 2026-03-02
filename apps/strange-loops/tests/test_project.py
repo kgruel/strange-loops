@@ -13,13 +13,13 @@ from atoms import Fact
 from engine import SqliteStore
 
 from strange_loops.commands.project import (
-    _latest_by_group,
     _parse_emit_parts,
     cmd_project_bridge,
     cmd_project_emit,
     cmd_project_log,
     cmd_project_status,
 )
+from strange_loops.lifecycle import _PKG_ROOT
 from strange_loops.store import emit_fact, emit_tick
 
 
@@ -30,8 +30,13 @@ def _read_all(db_path: Path) -> list[dict]:
 
 @pytest.fixture
 def project_store(tmp_path: Path, monkeypatch):
-    """Monkeypatch _project_store to return a temp path."""
+    """Temp project vertex + store for testing."""
     db = tmp_path / "data" / "project.db"
+    vertex = tmp_path / "project.vertex"
+    # Copy the real vertex declaration — relative store resolves to tmp_path/data/project.db
+    real = _PKG_ROOT / "loops" / "project.vertex"
+    vertex.write_text(real.read_text())
+    monkeypatch.setattr("strange_loops.commands.project.project_vertex_path", lambda: vertex)
     monkeypatch.setattr("strange_loops.commands.project._project_store", lambda: db)
     return db
 
@@ -111,11 +116,12 @@ class TestProjectEmit:
 
 
 class TestProjectStatus:
-    def test_errors_without_store(self, project_store: Path, capsys):
+    def test_empty_without_store(self, project_store: Path, capsys):
         args = _ns()
         rc = cmd_project_status(args)
-        assert rc == 1
-        assert "No project data" in capsys.readouterr().err
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "0 facts" in out
 
     def test_shows_decisions(self, project_store: Path, capsys):
         emit_fact(project_store, "decision", "", {"topic": "auth", "message": "use JWT"})
@@ -197,49 +203,22 @@ class TestProjectLog:
         data = json.loads(line)
         assert data["kind"] == "decision"
 
-    def test_errors_without_store(self, project_store: Path, capsys):
+    def test_empty_without_store(self, project_store: Path, capsys):
         args = _ns()
         rc = cmd_project_log(args)
-        assert rc == 1
-        assert "No project data" in capsys.readouterr().err
-
-
-class TestLatestByGroup:
-    def test_groups_by_field(self):
-        facts = [
-            {"kind": "decision", "ts": 1.0, "payload": {"topic": "a", "message": "first"}},
-            {"kind": "decision", "ts": 2.0, "payload": {"topic": "b", "message": "other"}},
-            {"kind": "decision", "ts": 3.0, "payload": {"topic": "a", "message": "latest"}},
-        ]
-        result = _latest_by_group(facts, "decision", "topic")
-        assert len(result) == 2
-        assert result["a"]["payload"]["message"] == "latest"
-        assert result["b"]["payload"]["message"] == "other"
-
-    def test_filters_by_kind(self):
-        facts = [
-            {"kind": "decision", "ts": 1.0, "payload": {"topic": "a"}},
-            {"kind": "thread", "ts": 2.0, "payload": {"topic": "a"}},
-        ]
-        result = _latest_by_group(facts, "decision", "topic")
-        assert len(result) == 1
-
-    def test_empty_input(self):
-        assert _latest_by_group([], "decision", "topic") == {}
-
-    def test_skips_missing_group_field(self):
-        facts = [
-            {"kind": "decision", "ts": 1.0, "payload": {"other": "x"}},
-        ]
-        result = _latest_by_group(facts, "decision", "topic")
-        assert len(result) == 0
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No facts" in out
 
 
 @pytest.fixture
 def task_store(tmp_path: Path, monkeypatch):
-    """Monkeypatch store_path to return a temp task store."""
+    """Temp task vertex + store for bridge testing."""
     db = tmp_path / "data" / "tasks.db"
-    monkeypatch.setattr("strange_loops.commands.project.store_path", lambda: db)
+    vertex = tmp_path / "tasks.vertex"
+    real = _PKG_ROOT / "loops" / "tasks.vertex"
+    vertex.write_text(real.read_text())
+    monkeypatch.setattr("strange_loops.commands.project.tasks_vertex_path", lambda: vertex)
     return db
 
 
@@ -329,11 +308,12 @@ class TestProjectBridge:
         out = capsys.readouterr().out
         assert "No task.tick" in out
 
-    def test_errors_without_task_store(self, project_store: Path, task_store: Path, capsys):
+    def test_empty_without_task_store(self, project_store: Path, task_store: Path, capsys):
         args = _ns()
         rc = cmd_project_bridge(args)
-        assert rc == 1
-        assert "No task data" in capsys.readouterr().err
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No task.tick" in out
 
 
 class TestProjectStatusCompletions:

@@ -1,51 +1,28 @@
-"""Compiled vertex loader + Spec-based fold for task state."""
+"""Compiled vertex loader + vertex_read-based fold for task state."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from engine import CompiledVertex, compile_vertex_recursive
-from lang import parse_vertex_file
-
-# Module-level cache — CLI is short-lived, compile once per invocation.
-_compiled: CompiledVertex | None = None
+from engine import vertex_read
 
 # Package root: apps/strange-loops/
 _PKG_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Vertex paths
+_TASKS_VERTEX = _PKG_ROOT / "loops" / "tasks.vertex"
+_PROJECT_VERTEX = _PKG_ROOT / "loops" / "project.vertex"
 
-def _vertex_path() -> Path:
+
+def tasks_vertex_path() -> Path:
     """Resolve loops/tasks.vertex relative to the app root."""
-    return _PKG_ROOT / "loops" / "tasks.vertex"
+    return _TASKS_VERTEX
 
 
-def load_compiled() -> CompiledVertex:
-    """Parse + compile tasks.vertex, cached."""
-    global _compiled  # noqa: PLW0603
-    if _compiled is None:
-        vertex = parse_vertex_file(_vertex_path())
-        _compiled = compile_vertex_recursive(vertex)
-    return _compiled
-
-
-def _fold_all_specs(reader: Any) -> dict[str, dict]:
-    """Fold all facts through compiled specs. Returns {kind: folded_state}."""
-    compiled = load_compiled()
-    all_facts = reader.facts_between(0, float("inf"))
-
-    by_kind: dict[str, list[dict]] = {}
-    for f in all_facts:
-        by_kind.setdefault(f["kind"], []).append(f)
-
-    states: dict[str, dict] = {}
-    for kind, spec in compiled.specs.items():
-        state = spec.initial_state()
-        for fact in by_kind.get(kind, []):
-            state = spec.apply(state, fact["payload"])
-        states[kind] = state
-
-    return states
+def project_vertex_path() -> Path:
+    """Resolve loops/project.vertex relative to the app root."""
+    return _PROJECT_VERTEX
 
 
 def _extract_task(states: dict[str, dict], name: str) -> dict | None:
@@ -95,14 +72,14 @@ def _extract_task(states: dict[str, dict], name: str) -> dict | None:
     return result
 
 
-def fold_task_state(reader: Any, name: str) -> dict | None:
-    """Fold task facts into current state for one task using compiled Specs."""
-    states = _fold_all_specs(reader)
+def fold_task_state(vp: Path, name: str) -> dict | None:
+    """Fold task facts into current state for one task via vertex_read."""
+    states = vertex_read(vp)
     return _extract_task(states, name)
 
 
-def fold_all_tasks(reader: Any) -> list[dict]:
-    """Fold all tasks from the store using compiled Specs."""
-    states = _fold_all_specs(reader)
+def fold_all_tasks(vp: Path) -> list[dict]:
+    """Fold all tasks from the vertex store via vertex_read."""
+    states = vertex_read(vp)
     names = sorted(states.get("task.created", {}).get("items", {}).keys())
     return [s for name in names if (s := _extract_task(states, name)) is not None]

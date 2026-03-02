@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from painted.block import Block
 
 from strange_loops import harness, worktree
-from strange_loops.lifecycle import fold_all_tasks, fold_task_state
+from strange_loops.lifecycle import fold_all_tasks, fold_task_state, tasks_vertex_path
 from strange_loops.store import (
     emit_fact,
     filter_task_facts as _filter_task_facts,
@@ -26,7 +26,6 @@ from strange_loops.store import (
     parse_duration,
     print_fact_line,
     print_tick_line,
-    require_store,
     store_path,
     tick_to_dict,
 )
@@ -124,9 +123,9 @@ def render_task_list(tasks: list[dict], zoom=None) -> "Block":
     return join_vertical(*blocks, gap=1)
 
 
-def _require_task(reader, name: str) -> dict:
+def _require_task(vp: Path, name: str) -> dict:
     """Require that a task exists, return its state."""
-    state = fold_task_state(reader, name)
+    state = fold_task_state(vp, name)
     if state is None:
         raise ValueError(f"Task '{name}' not found. Create it first with 'task create'.")
     return state
@@ -135,34 +134,26 @@ def _require_task(reader, name: str) -> dict:
 # -- Fetch --
 
 
-def fetch_task_status(sp: Path, name: str | None = None) -> dict | list[dict]:
+def fetch_task_status(vp: Path, name: str | None = None) -> dict | list[dict]:
     """Fetch task status — single task dict or list of all tasks."""
-    require_store(sp)
-
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        if name:
-            state = fold_task_state(reader, name)
-            if state is None:
-                raise ValueError(f"Task '{name}' not found.")
-            return state
-        return fold_all_tasks(reader)
+    if name:
+        state = fold_task_state(vp, name)
+        if state is None:
+            raise ValueError(f"Task '{name}' not found.")
+        return state
+    return fold_all_tasks(vp)
 
 
-def fetch_task_log(sp: Path, name: str, duration_secs: float, kind: str | None = None) -> dict:
+def fetch_task_log(vp: Path, name: str, duration_secs: float, kind: str | None = None) -> dict:
     """Fetch task log — filtered facts and ticks for a specific task."""
-    require_store(sp)
+    from engine import vertex_facts, vertex_ticks
 
-    from engine import StoreReader
-
+    _require_task(vp, name)
     now = datetime.now(timezone.utc)
     since_ts = now.timestamp() - duration_secs
 
-    with StoreReader(sp) as reader:
-        _require_task(reader, name)
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-        ticks = reader.ticks_between(since_ts, now.timestamp())
+    facts = vertex_facts(vp, since_ts, now.timestamp(), kind=kind)
+    ticks = vertex_ticks(vp, since_ts, now.timestamp())
 
     facts = _filter_task_facts(facts, name)
     tick_dicts = [tick_to_dict(t) for t in ticks]
@@ -215,23 +206,14 @@ def cmd_task_create(args: argparse.Namespace) -> int:
 def cmd_task_assign(args: argparse.Namespace) -> int:
     """Assign a task: create worktree, emit task.assigned fact."""
     sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
     harness_type = getattr(args, "harness", "shell")
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     base = state.get("base_branch", "main")
     repo_root = Path.cwd()
@@ -266,23 +248,14 @@ def cmd_task_assign(args: argparse.Namespace) -> int:
 def cmd_task_send(args: argparse.Namespace) -> int:
     """Send work to a task: spawn harness (resolved from task state)."""
     sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
     command = args.shell_command
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if "worktree" not in state:
         print(f"Error: Task '{name}' not assigned. Run 'task assign' first.", file=sys.stderr)
@@ -306,39 +279,25 @@ def cmd_task_send(args: argparse.Namespace) -> int:
 
 def cmd_task_status(args: argparse.Namespace) -> int:
     """Show task status — single task detail or all tasks summary."""
-    sp = store_path()
+    use_json = getattr(args, "json", False)
+    name = getattr(args, "name", None)
+    vp = tasks_vertex_path()
+
     try:
-        require_store(sp)
-    except FileNotFoundError as e:
+        data = fetch_task_status(vp, name)
+    except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    use_json = getattr(args, "json", False)
-    name = getattr(args, "name", None)
+    if use_json:
+        print(json.dumps(data, indent=2, default=str))
+    else:
+        from painted import show
 
-    from engine import StoreReader
-
-    with StoreReader(sp) as reader:
-        if name:
-            state = fold_task_state(reader, name)
-            if state is None:
-                print(f"Error: Task '{name}' not found.", file=sys.stderr)
-                return 1
-
-            if use_json:
-                print(json.dumps(state, indent=2, default=str))
-            else:
-                from painted import show
-
-                show(render_task(state), file=sys.stdout)
+        if isinstance(data, list):
+            show(render_task_list(data), file=sys.stdout)
         else:
-            tasks = fold_all_tasks(reader)
-            if use_json:
-                print(json.dumps(tasks, indent=2, default=str))
-            else:
-                from painted import show
-
-                show(render_task_list(tasks), file=sys.stdout)
+            show(render_task(data), file=sys.stdout)
 
     return 0
 
@@ -351,23 +310,13 @@ def cmd_task_list(args: argparse.Namespace) -> int:
 
 def cmd_task_diff(args: argparse.Namespace) -> int:
     """Show diff for a task's worktree."""
-    sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if "worktree" not in state:
         print(f"Error: Task '{name}' has no worktree.", file=sys.stderr)
@@ -390,23 +339,14 @@ def cmd_task_diff(args: argparse.Namespace) -> int:
 def cmd_task_merge(args: argparse.Namespace) -> int:
     """Merge a task's worktree branch back via squash merge."""
     sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
     force = getattr(args, "force", False)
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if "worktree" not in state:
         print(f"Error: Task '{name}' has no worktree.", file=sys.stderr)
@@ -578,22 +518,13 @@ def cmd_task_run(args: argparse.Namespace) -> int:
 def cmd_task_close(args: argparse.Namespace) -> int:
     """Close a task: remove worktree, emit stage fact."""
     sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     # Remove worktree if it exists
     if "worktree" in state:
@@ -617,23 +548,14 @@ def cmd_task_close(args: argparse.Namespace) -> int:
 
 def cmd_task_log(args: argparse.Namespace) -> int:
     """Show log for a specific task — filtered time-range query."""
-    sp = store_path()
+    name = args.name
+    vp = tasks_vertex_path()
+
     try:
-        require_store(sp)
-    except FileNotFoundError as e:
+        _require_task(vp, name)
+    except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-
-    from engine import StoreReader
-
-    name = args.name
-
-    with StoreReader(sp) as reader:
-        try:
-            _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
 
     try:
         duration_secs = parse_duration(getattr(args, "since", "7d"))
@@ -646,9 +568,9 @@ def cmd_task_log(args: argparse.Namespace) -> int:
     follow = getattr(args, "follow", False)
 
     if follow:
-        return follow_task_log(sp, name, kind, use_json)
+        return follow_task_log(vp, name, kind, use_json)
 
-    data = fetch_task_log(sp, name, duration_secs, kind)
+    data = fetch_task_log(vp, name, duration_secs, kind)
 
     if use_json:
         # JSONL — one JSON object per entry, interleaved chronologically
@@ -678,17 +600,16 @@ def cmd_task_log(args: argparse.Namespace) -> int:
     return 0
 
 
-def follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> int:
+def follow_task_log(vp: Path, name: str, kind: str | None, use_json: bool) -> int:
     """Follow task log — poll for new facts and ticks, print as they arrive."""
-    from engine import StoreReader
+    from engine import vertex_facts, vertex_ticks
 
     last_ts = 0.0
 
     try:
         while True:
-            with StoreReader(sp) as reader:
-                facts = reader.facts_between(last_ts, float("inf"), kind=kind)
-                ticks = reader.ticks_between(last_ts, float("inf"))
+            facts = vertex_facts(vp, last_ts, float("inf"), kind=kind)
+            ticks = vertex_ticks(vp, last_ts, float("inf"))
 
             facts = _filter_task_facts(facts, name)
             tick_dicts = [tick_to_dict(t) for t in ticks]
@@ -729,22 +650,13 @@ def follow_task_log(sp: Path, name: str, kind: str | None, use_json: bool) -> in
 def cmd_task_stop(args: argparse.Namespace) -> int:
     """Stop a running task worker."""
     sp = store_path()
-    try:
-        require_store(sp)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    from engine import StoreReader
-
     name = args.name
 
-    with StoreReader(sp) as reader:
-        try:
-            state = _require_task(reader, name)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
+    try:
+        state = _require_task(tasks_vertex_path(), name)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     status = state.get("status", "")
     if status not in ("working", "assigned"):

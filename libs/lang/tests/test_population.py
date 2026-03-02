@@ -44,6 +44,11 @@ class TestResolveVertex:
         result = resolve_vertex("/etc/loops/root.vertex", Path("/home"))
         assert result == Path("/etc/loops/root.vertex")
 
+    def test_slashed_name(self, tmp_path):
+        """Slashed names use leaf for filename: dev/project -> dev/project/project.vertex."""
+        result = resolve_vertex("dev/project", tmp_path)
+        assert result == tmp_path / "dev" / "project" / "project.vertex"
+
     def test_dotslash_dir(self):
         """Starts with ./ -> treated as path, not name."""
         result = resolve_vertex("./reading", Path("/home"))

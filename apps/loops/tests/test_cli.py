@@ -306,6 +306,100 @@ class TestInitCommand:
         args = parser.parse_args(["init"])
         assert args.template is None
 
+    def test_name_arg_parsed(self):
+        parser = create_parser()
+        args = parser.parse_args(["init", "project"])
+        assert args.name == "project"
+        assert args.template is None
+
+    def test_slashed_name_parsed(self):
+        parser = create_parser()
+        args = parser.parse_args(["init", "dev/project", "-t", "session"])
+        assert args.name == "dev/project"
+        assert args.template == "session"
+
+    def test_slashed_name_creates_config_vertex(self, monkeypatch, tmp_path, capsys):
+        """loops init dev/project --template session creates in LOOPS_HOME."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["init", "dev/project", "-t", "session"])
+        assert result == 0
+        vertex = tmp_path / "dev" / "project" / "project.vertex"
+        assert vertex.exists()
+        content = vertex.read_text()
+        assert 'name "project"' in content
+        assert "discover" in content
+        assert (tmp_path / "dev" / "project" / "instances").is_dir()
+
+    def test_slashed_name_infers_template(self, monkeypatch, tmp_path, capsys):
+        """loops init dev/session infers template from leaf name."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["init", "dev/session"])
+        assert result == 0
+        assert (tmp_path / "dev" / "session" / "session.vertex").exists()
+
+    def test_slashed_name_unknown_leaf_requires_template(self, monkeypatch, tmp_path, capsys):
+        """loops init dev/custom without --template errors."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["init", "dev/custom"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "not a known template" in captured.err
+
+    def test_bare_name_creates_local_vertex(self, monkeypatch, tmp_path, capsys):
+        """loops init project creates local vertex in cwd."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        (tmp_path / "myproject").mkdir()
+        monkeypatch.chdir(tmp_path / "myproject")
+        result = main(["init", "project"])
+        assert result == 0
+        vertex = tmp_path / "myproject" / "project.vertex"
+        assert vertex.exists()
+        content = vertex.read_text()
+        assert 'name "project"' in content
+        assert 'store "./data/project.db"' in content
+        assert (tmp_path / "myproject" / "data").is_dir()
+
+    def test_bare_name_registers_with_config(self, monkeypatch, tmp_path, capsys):
+        """loops init project registers cwd with config-level vertex if it exists."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Create config-level vertex first
+        config_dir = tmp_path / "project"
+        config_dir.mkdir()
+        (config_dir / "project.vertex").write_text('name "project"\ndiscover "./instances/**/*.vertex"\n')
+        # Now init local
+        project_dir = tmp_path / "myproject"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        result = main(["init", "project"])
+        assert result == 0
+        link = config_dir / "instances" / "myproject"
+        assert link.is_symlink()
+        assert link.resolve() == project_dir.resolve()
+
+    def test_bare_name_no_register_without_config(self, monkeypatch, tmp_path, capsys):
+        """loops init project without config-level vertex skips registration."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        project_dir = tmp_path / "myproject"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        result = main(["init", "project"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Registered" not in captured.out
+
+    def test_template_project_choice(self):
+        parser = create_parser()
+        args = parser.parse_args(["init", "-t", "project"])
+        assert args.template == "project"
+
+    def test_template_creates_local_with_cwd(self, monkeypatch, tmp_path, capsys):
+        """loops init --template session (no name) creates in cwd."""
+        monkeypatch.chdir(tmp_path)
+        result = main(["init", "--template", "session"])
+        assert result == 0
+        assert (tmp_path / "session.vertex").exists()
+        assert (tmp_path / "data").is_dir()
+
 
 class TestDefaultPaths:
     """start/run/store default to LOOPS_HOME/root.vertex when no file given."""

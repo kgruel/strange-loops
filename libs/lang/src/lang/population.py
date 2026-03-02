@@ -56,7 +56,7 @@ def resolve_vertex(name_or_path: str, home: Path) -> Path:
         or name_or_path.startswith("/")
     ):
         return Path(name_or_path)
-    return home / name_or_path / f"{name_or_path}.vertex"
+    return home / name_or_path / f"{Path(name_or_path).name}.vertex"
 
 
 def template_name(ts: TemplateSource) -> str:

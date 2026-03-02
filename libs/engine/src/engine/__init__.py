@@ -66,6 +66,9 @@ from .compiler import (
 )
 from .program import VertexProgram, load_vertex_program
 
+# Vertex read path (query-time fold materialization)
+from .vertex_reader import vertex_facts, vertex_read
+
 __all__ = [
     # Atoms
     "Tick",
@@ -80,7 +83,8 @@ __all__ = [
     "Store",
     "EventStore",
     "SqliteStore",
-    "StoreReader",
+    # StoreReader: internal to vertex_read. Use vertex_read/vertex_facts instead.
+    # Still importable via `from engine import StoreReader` for backward compat.
     "FileStore",
     "FileWriter",
     "Tailer",
@@ -114,4 +118,7 @@ __all__ = [
     # Program helpers
     "VertexProgram",
     "load_vertex_program",
+    # Vertex read path
+    "vertex_read",
+    "vertex_facts",
 ]

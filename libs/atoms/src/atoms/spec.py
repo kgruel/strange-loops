@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,6 +99,20 @@ class Spec:
         for fn in build_fold_fns(self.folds):
             fn(new, payload)
         return new
+
+    def replay(self, payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
+        """Bulk replay: build folds once, mutate in place, return final state.
+
+        Unlike apply() which deep-copies for purity, replay() mutates a single
+        state dict across all payloads. Use when replaying stored facts where
+        intermediate states are not needed.
+        """
+        fns = build_fold_fns(self.folds)
+        state = self.initial_state()
+        for payload in payloads:
+            for fn in fns:
+                fn(state, payload)
+        return state
 
 
 # Backward compatibility alias (deprecated)

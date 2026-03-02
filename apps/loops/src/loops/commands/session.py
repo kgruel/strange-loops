@@ -28,8 +28,8 @@ def _emit_fact(store_path: Path, kind: str, observer: str, payload: dict) -> Non
         store.append(fact)
 
 
-def _resolve_local_store() -> Path:
-    """Find store via local vertex or LOOPS_HOME fallback.
+def _resolve_local_vertex() -> Path:
+    """Find a vertex file via local cwd or LOOPS_HOME fallback.
 
     Resolution order:
     1. Local vertex in cwd (*.vertex)
@@ -37,36 +37,21 @@ def _resolve_local_store() -> Path:
 
     Raises FileNotFoundError if neither found.
     """
-    from loops.main import _find_local_vertex, _resolve_vertex_store_path, loops_home
+    from loops.main import _find_local_vertex, loops_home
 
     # 1. Local vertex in cwd
     local = _find_local_vertex()
     if local is not None:
-        store_path = _resolve_vertex_store_path(local)
-        if store_path is not None:
-            return store_path
+        return local
 
     # 2. LOOPS_HOME session fallback
     session_vertex = loops_home() / "session" / "session.vertex"
     if session_vertex.exists():
-        store_path = _resolve_vertex_store_path(session_vertex)
-        if store_path is not None:
-            return store_path
+        return session_vertex
 
     raise FileNotFoundError(
         "No vertex found. Run 'loops init --template session' or 'loops emit <kind> ...' first."
     )
-
-
-def _latest_by_group(reader, kind: str, group_field: str) -> list[dict]:
-    """Query-time fold: get recent facts, group by field, keep newest per group."""
-    facts = reader.recent_facts(kind, 500)
-    groups: dict[str, dict] = {}
-    for fact in facts:
-        key = fact["payload"].get(group_field, "")
-        if key not in groups:
-            groups[key] = fact
-    return list(groups.values())
 
 
 def _parse_duration(s: str) -> float:
@@ -96,82 +81,68 @@ def _format_date(ts) -> str:
     return f"{dt.strftime('%b')} {dt.day}"
 
 
-def fetch_status(store_path: Path, kind: str | None = None) -> dict:
-    """Fetch status data from store. Returns dict suitable for JSON serialization.
+def fetch_status(vertex_path: Path, kind: str | None = None) -> dict:
+    """Fetch status data by replaying facts through vertex-declared folds.
+
+    The vertex declaration drives the read: each declared kind's fold is
+    compiled and replayed over stored facts. No hardcoded SQL or Python grouping.
 
     When *kind* is given, only that section is populated (e.g. kind="task"
     returns tasks only, other sections empty).
     """
-    from engine import StoreReader
+    from engine import vertex_read
 
-    if not store_path.exists():
-        return {"decisions": [], "threads": [], "tasks": [], "changes": []}
+    fold_state = vertex_read(vertex_path)
 
     active = {kind} if kind else {"decision", "thread", "task", "change"}
-
-    with StoreReader(store_path) as reader:
-        decisions_raw = _latest_by_group(reader, "decision", "topic") if "decision" in active else []
-        threads_raw = _latest_by_group(reader, "thread", "name") if "thread" in active else []
-        threads_raw = [
-            t for t in threads_raw if t["payload"].get("status") != "resolved"
-        ]
-        tasks_raw = _latest_by_group(reader, "task", "name") if "task" in active else []
-        changes_raw = reader.recent_facts("change", 10) if "change" in active else []
-
-    def _ts(ts):
-        return ts.isoformat() if isinstance(ts, datetime) else ts
 
     return {
         "decisions": [
             {
-                "topic": d["payload"].get("topic", ""),
-                "message": d["payload"].get("message", ""),
-                "ts": _ts(d["ts"]),
+                "topic": v.get("topic", ""),
+                "message": v.get("message", ""),
+                "ts": v.get("_ts", ""),
             }
-            for d in decisions_raw
-        ],
+            for v in fold_state.get("decision", {}).get("items", {}).values()
+        ] if "decision" in active else [],
         "threads": [
             {
-                "name": t["payload"].get("name", ""),
-                "status": t["payload"].get("status", ""),
-                "ts": _ts(t["ts"]),
+                "name": v.get("name", ""),
+                "status": v.get("status", ""),
+                "ts": v.get("_ts", ""),
             }
-            for t in threads_raw
-        ],
+            for v in fold_state.get("thread", {}).get("items", {}).values()
+            if v.get("status") != "resolved"
+        ] if "thread" in active else [],
         "tasks": [
             {
-                "name": t["payload"].get("name", ""),
-                "status": t["payload"].get("status", ""),
-                "summary": t["payload"].get("summary", ""),
-                "ts": _ts(t["ts"]),
+                "name": v.get("name", ""),
+                "status": v.get("status", ""),
+                "summary": v.get("summary", ""),
+                "ts": v.get("_ts", ""),
             }
-            for t in tasks_raw
-        ],
-        "changes": [
+            for v in fold_state.get("task", {}).get("items", {}).values()
+        ] if "task" in active else [],
+        "changes": list(reversed([
             {
-                "summary": c["payload"].get("summary", ""),
-                "files": c["payload"].get("files", ""),
-                "ts": _ts(c["ts"]),
+                "summary": v.get("summary", ""),
+                "files": v.get("files", ""),
+                "ts": v.get("_ts", ""),
             }
-            for c in changes_raw
-        ],
+            for v in fold_state.get("change", {}).get("items", [])
+        ])) if "change" in active else [],
     }
 
 
-def fetch_log(store_path: Path, since: str, kind: str | None) -> list[dict]:
-    """Fetch log facts from store."""
-    from engine import StoreReader
-
-    if not store_path.exists():
-        return []
+def fetch_log(vertex_path: Path, since: str, kind: str | None) -> list[dict]:
+    """Fetch log facts from a vertex's store within a time range."""
+    from engine import vertex_facts
 
     duration_secs = _parse_duration(since)
     now = datetime.now(timezone.utc)
     since_ts = now.timestamp() - duration_secs
 
-    with StoreReader(store_path) as reader:
-        facts = reader.facts_between(since_ts, now.timestamp(), kind=kind)
-
+    facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=kind)
     facts.sort(key=lambda f: f["ts"], reverse=True)
 
     # Normalize timestamps for JSON serialization
@@ -180,5 +151,3 @@ def fetch_log(store_path: Path, since: str, kind: str | None) -> list[dict]:
             f["ts"] = f["ts"].isoformat()
 
     return facts
-
-

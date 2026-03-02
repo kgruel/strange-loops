@@ -166,6 +166,27 @@ class StoreReader:
             for r in rows
         ]
 
+    def facts_by_kind(self, kind: str) -> list[dict]:
+        """All facts for a kind, ordered by insertion (rowid ASC).
+
+        Used for fold replay — facts must be in causal order.
+        """
+        rows = self._conn.execute(
+            "SELECT kind, ts, observer, origin, payload FROM facts "
+            "WHERE kind = ? ORDER BY rowid ASC",
+            (kind,),
+        ).fetchall()
+        return [
+            {
+                "kind": r[0],
+                "ts": r[1],
+                "observer": r[2],
+                "origin": r[3],
+                "payload": json.loads(r[4]),
+            }
+            for r in rows
+        ]
+
     def recent_facts(self, kind: str, n: int) -> list[dict]:
         """Last N facts for a given kind, newest first. Returns raw dicts."""
         rows = self._conn.execute(

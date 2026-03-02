@@ -746,6 +746,16 @@ def _resolve_named_store(name: str) -> Path:
     return store_path
 
 
+def _resolve_named_vertex(name: str) -> Path:
+    """Resolve a vertex name to its .vertex file path."""
+    from lang.population import resolve_vertex
+
+    vertex_path = resolve_vertex(name, loops_home()).resolve()
+    if not vertex_path.exists():
+        raise FileNotFoundError(f"Vertex not found: {vertex_path}")
+    return vertex_path
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     from atoms import Fact
@@ -968,7 +978,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
 def _run_status(argv: list[str]) -> int:
     """Run status command via painted CLI harness."""
     from painted import run_cli
-    from .commands.session import _resolve_local_store, fetch_status
+    from .commands.session import _resolve_local_vertex, fetch_status
     from .lenses.status import status_view
 
     pre = argparse.ArgumentParser(add_help=False)
@@ -978,10 +988,10 @@ def _run_status(argv: list[str]) -> int:
 
     def fetch():
         if known.vertex is not None:
-            store_path = _resolve_named_store(known.vertex)
+            vertex_path = _resolve_named_vertex(known.vertex)
         else:
-            store_path = _resolve_local_store()
-        return fetch_status(store_path, kind=known.kind)
+            vertex_path = _resolve_local_vertex()
+        return fetch_status(vertex_path, kind=known.kind)
 
     def render(ctx, data):
         return status_view(data, ctx.zoom, ctx.width)
@@ -998,7 +1008,7 @@ def _run_status(argv: list[str]) -> int:
 def _run_log(argv: list[str]) -> int:
     """Run log command via painted CLI harness."""
     from painted import run_cli
-    from .commands.session import _resolve_local_store, fetch_log
+    from .commands.session import _resolve_local_vertex, fetch_log
     from .lenses.log import log_view
 
     pre = argparse.ArgumentParser(add_help=False)
@@ -1009,10 +1019,10 @@ def _run_log(argv: list[str]) -> int:
 
     def fetch():
         if known.vertex is not None:
-            store_path = _resolve_named_store(known.vertex)
+            vertex_path = _resolve_named_vertex(known.vertex)
         else:
-            store_path = _resolve_local_store()
-        return fetch_log(store_path, known.since, known.kind)
+            vertex_path = _resolve_local_vertex()
+        return fetch_log(vertex_path, known.since, known.kind)
 
     def render(ctx, data):
         return log_view(data, ctx.zoom, ctx.width)

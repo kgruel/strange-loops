@@ -26,11 +26,8 @@ apps/
   loops/      CLI for the loops system — emit, log, status across vertices
   hlab/       Homelab monitoring — DSL-driven status, alerts, media
   strange-loops/  Task orchestration — tasks as loops, workers in worktrees
-  discord/    Discord transport
-  telegram/   Telegram transport
-  reader/     Feed reader
 
-experiments/  Integration explorations — wires libs together, graduates to apps
+experiments/  Integration explorations and dissolved apps (discord, telegram, reader DSL files)
 docs/         Deep dives — VERTEX.md, TEMPORAL.md, PERSISTENCE.md, IDENTITY.md
 ```
 

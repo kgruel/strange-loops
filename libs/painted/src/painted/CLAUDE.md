@@ -2,6 +2,16 @@
 
 Terminal UI framework built on cell buffers. Start at Level 0. Only escalate when you hit a trigger.
 
+**You are here** in the abstraction chain:
+
+```
+atoms (data)  →  engine (runtime)  →  painted (surface)  →  apps (CLI)
+Fact, Spec        Tick, Vertex         Block, Lens, show     loops status/log
+```
+
+Below: `libs/engine/` produces Ticks and stores. `libs/atoms/` defines Facts and Specs. Painted renders whatever comes out — it doesn't know about loops concepts, just data shapes.
+Above: `apps/loops/`, `apps/hlab/`, `apps/strange-loops/` use painted's `run_cli` and lenses for all display commands.
+
 ---
 
 ## Level 0 — Display data

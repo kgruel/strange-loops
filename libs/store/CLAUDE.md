@@ -1,33 +1,68 @@
-# libs/store
+# store — maintenance operations
 
-Store operations for vertex store databases.
+Slice, merge, search, transport for vertex store databases. Start at Level 0. Only escalate when you hit a trigger.
 
-## What this lib does
+**You are here** in the abstraction chain:
 
-Maintenance operations on the facts/ticks SQLite schema:
-- **slice** — filtered export by time/kind/observer/origin
-- **merge** — combine stores with ULID-based dedup (INSERT OR IGNORE)
-- **search** — FTS5 over fact payloads (phase 2)
-- **transport** — push/pull between stores (phase 3)
+```
+atoms (data)  →  engine (runtime)  →  store (maintenance)
+Fact, Spec        SqliteStore writes    slice/merge/search reads
+```
 
-## Schema
+Below: `libs/engine/` provides `SqliteStore` (write path) and `StoreReader` (read path). This lib operates on the same SQLite databases but for bulk maintenance — extracting subsets, combining stores, cross-DB queries.
 
-ULID primary keys via `sqlite-ulid` extension. Payload enforced as valid JSON.
+---
+
+## Level 0 — Slice and merge
+
+**Trigger**: I need to extract a subset of a store or combine two stores.
+
+```python
+from store import slice_store, merge_store
+
+# Extract decisions from the last week into a standalone store
+result = slice_store(
+    source=Path("data/project.db"),
+    target=Path("data/decisions-week.db"),
+    kinds=["decision"],
+    since=datetime(2025, 2, 22),
+)
+# SliceResult(facts=12, ticks=0, size_bytes=8192)
+
+# Merge another store into ours (dedup on ULID)
+result = merge_store(
+    target=Path("data/project.db"),
+    source=Path("data/imported.db"),
+)
+# MergeResult(facts_added=5, facts_skipped=3, ticks_added=2, ticks_skipped=0)
+```
+
+**Slice filters**: `since`, `before` (time), `kinds` (exact + prefix match), `observers`, `origins`. Ticks filtered by time only. Target must not exist (no accidental overwrite).
+
+**Merge dedup**: `INSERT OR IGNORE` on ULID primary key. Same fact across stores has the same ULID — globally unique IDs make dedup trivial. `dry_run=True` computes counts without committing.
+
+---
+
+## Level 1 — Understand the schema
+
+**Trigger**: I need to know how this differs from engine's SqliteStore.
+
+| Concern | engine.SqliteStore | store |
+|---------|-------------------|-------|
+| PK | `rowid INTEGER` (auto-increment) | `id TEXT DEFAULT (ulid())` |
+| Purpose | Runtime append-only writes | Bulk maintenance operations |
+| Operations | append, since, between | slice, merge, search, transport |
+
+The ULID schema is what makes cross-DB operations work — same fact in two stores has the same ID, so merge is just `INSERT OR IGNORE`.
 
 ```sql
 facts(id TEXT PK DEFAULT (ulid()), kind, ts, observer, origin, payload CHECK json_valid)
 ticks(id TEXT PK DEFAULT (ulid()), name, ts, since, origin, payload CHECK json_valid)
 ```
 
-## Key patterns
+Internally, `_conn.py` handles: `sqlite-ulid` extension loading, schema creation, WAL mode, read-only URI connections. All cross-DB work uses `ATTACH DATABASE` (no Python round-trip).
 
-- `_conn.py` is internal — handles extension loading, schema creation, WAL mode
-- Public API is just the operation functions: `slice_store`, `merge_store`
-- Uses ATTACH DATABASE for cross-DB operations (no Python round-trip)
-- Merge dedup is INSERT OR IGNORE on ULID — globally unique IDs make this trivial
-- Depends on engine (for Tick) and sqlite-ulid (for ULID generation)
-
-## Test
+## Build & test
 
 ```bash
 uv run --package store pytest libs/store/tests

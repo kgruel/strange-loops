@@ -2,6 +2,15 @@
 
 Observations, contracts, and ingress. Start at Level 0. Only escalate when you hit a trigger.
 
+**You are here** in the abstraction chain:
+
+```
+atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
+Fact, Spec        Tick, Vertex         .loop/.vertex      loops emit/status
+```
+
+Above: `libs/engine/` runs facts through vertices — routing, folding, boundary detection, persistence. `apps/loops/` provides the CLI (`loops emit`, `loops status`). When you `loops emit project decision topic=auth ...`, it creates a Fact, resolves a Vertex, and calls `vertex.receive()` — which folds using the Spec you define here.
+
 ---
 
 ## Level 0 — Observe
@@ -21,7 +30,7 @@ Fact.of("deploy", "ci-bot", service="api", version="2.3")
 Fact.of("thread", "kyle", name="store-ops", status="open")
 ```
 
-A fact is any observation — a deploy completing, a decision being made, a thought worth recording. Same atom. `kind` is an open routing key — no enum, no schema. `observer` is who recorded it. `payload` is auto-wrapped in `MappingProxyType` (truly immutable).
+A fact is any observation — a deploy completing, a decision being made, a thought worth recording. Same atom. `kind` is an open routing key — no enum, no schema. `observer` is who recorded it. `payload` is auto-wrapped in `MappingProxyType` (truly immutable). At the CLI level, `loops emit project decision topic=auth ...` does the same thing — creates a Fact and feeds it to a Vertex (see `libs/engine/`).
 
 Factory methods:
 - `Fact.of(kind, observer, **payload)` — auto-timestamps, dict payload
@@ -55,7 +64,7 @@ state = decisions.apply(state, {"topic": "auth", "position": "JWT + refresh toke
 # {"items": {"auth": {...latest...}, "storage": {...}}}
 ```
 
-This is exactly what `project.vertex` does — decisions fold by topic, threads fold by name. Same Spec, same apply.
+This is exactly what `project.vertex` does — decisions fold by topic, threads fold by name. Same Spec, same apply. At runtime, `engine.Vertex` takes these Specs and wires them as fold functions (see `libs/engine/` Level 1).
 
 ```python
 # Technical use case — bounded event collection
@@ -161,7 +170,7 @@ disk = Source(
 
 **Errors as facts**: Failures emit `Fact(kind="source.error", ...)` instead of raising — the runner continues.
 
-`Runner` orchestrates multiple sources against a vertex:
+`Runner` orchestrates multiple sources against a vertex (from `libs/engine/`):
 
 ```python
 from atoms import Runner
@@ -172,6 +181,8 @@ runner.add(health_source)
 async for tick in runner.run():
     print(tick.payload)
 ```
+
+In practice, most code doesn't wire Sources manually — `load_vertex_program()` in engine compiles `.vertex` files that declare sources in KDL (see `libs/engine/` Level 0). This level is for building custom Sources or understanding what the compiler generates.
 
 ---
 

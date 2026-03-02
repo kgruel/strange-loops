@@ -16,17 +16,17 @@ Read `CLAUDE.md` for build commands and structure. Read `LOOPS.md` for the funda
 
 **Progressive CLAUDE.md system** — applying the painted library's progressive discovery pattern to the monorepo. Each lib and app gets a CLAUDE.md with escalation levels, triggers, and "don't reach for yet" barriers. The document is the lens; the vertex store is the state.
 
-Completed:
-- Root `CLAUDE.md` — rewritten as monorepo orientation (pointer to LOOPS.md, build, structure, both stores)
-- `libs/atoms/CLAUDE.md` — 4 levels: Observe (Fact), Accumulate (Spec+Fold), Shape (Parse), Ingest (Source+Runner). Semantic-first examples.
-- `project.vertex` — established as project-specific knowledge store (renamed from session.vertex). Symlinked at `~/.config/loops/project` for global access.
-- Vertex template system merged — slashed name resolution, `loops init` with config registration, aggregation vertices with discover pattern.
+Completed (libs):
+- Root `CLAUDE.md` — monorepo orientation (pointer to LOOPS.md, build, structure, both stores)
+- All 5 libs have progressive CLAUDE.md with levels, triggers, "don't reach for yet" barriers, and "you are here" chain headers
+- `project.vertex` — project-specific knowledge store. Symlinked at `~/.config/loops/project`.
+- Vertex template system — slashed name resolution, `loops init` with config registration, aggregation vertices.
+- discord, telegram, reader dissolved — DSL files preserved in experiments/.
 
-Next:
-- `libs/engine/CLAUDE.md` — Tick, Vertex, Store, Projection, Peer, Grant. Deep dives (VERTEX.md, TEMPORAL.md, PERSISTENCE.md, IDENTITY.md) become reference layer.
-- `libs/lang/CLAUDE.md` — KDL grammar, .loop/.vertex files, validation.
-- `libs/painted/` — already has progressive CLAUDE.md, may need alignment pass.
-- `libs/store/CLAUDE.md` — slice, merge, search, transport.
+Next (apps):
+- `apps/loops/CLAUDE.md` — needs one entirely.
+- `apps/hlab/CLAUDE.md` — rewrite from God CLAUDE.md to progressive levels.
+- `apps/strange-loops/CLAUDE.md` — rewrite from God CLAUDE.md to progressive levels.
 
 ## Active apps
 
@@ -35,9 +35,6 @@ Next:
 | `apps/loops` | CLI for the loops system — emit, log, status, store, validate, run | 191 tests, full painted rendering |
 | `apps/hlab` | Homelab monitoring — DSL-driven status, alerts, media | Working, 3 DSL commands |
 | `apps/strange-loops` | Task orchestration — tasks as loops, workers in worktrees | 56 tests, full lifecycle working |
-| `apps/reader` | Feed reader — RSS/Atom ingestion | Working |
-| `apps/discord` | Discord transport | Scaffold |
-| `apps/telegram` | Telegram transport | Working |
 
 ## Key architectural threads
 

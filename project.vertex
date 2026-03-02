@@ -6,5 +6,5 @@ loops {
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
-  handoff  { fold { items "latest" } }
+  handoff  { fold { items "collect" 1 } }
 }

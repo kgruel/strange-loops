@@ -91,18 +91,20 @@ class TestVertexRead:
         assert items[0]["summary"] == "second"
         assert items[1]["summary"] == "third"
 
-    def test_latest_fold(self, tmp_path):
-        """FoldLatest stores timestamp of most recent fact."""
+    def test_collect_1_fold(self, tmp_path):
+        """FoldCollect with max=1 keeps the latest full payload."""
         from engine import vertex_read
 
-        vpath = _create_vertex_file(tmp_path, "test", '  handoff { fold { items "latest" } }')
+        vpath = _create_vertex_file(tmp_path, "test", '  handoff { fold { items "collect" 1 } }')
         _seed_facts(tmp_path / "store.db", [
-            {"kind": "handoff", "ts": 1000.0, "payload": {"task": "a"}},
-            {"kind": "handoff", "ts": 5000.0, "payload": {"task": "b"}},
+            {"kind": "handoff", "ts": 1000.0, "payload": {"message": "first session"}},
+            {"kind": "handoff", "ts": 5000.0, "payload": {"message": "second session"}},
         ])
 
         result = vertex_read(vpath)
-        assert result["handoff"]["items"] == 5000.0
+        items = result["handoff"]["items"]
+        assert len(items) == 1
+        assert items[0]["message"] == "second session"
 
     def test_empty_store(self, tmp_path):
         """No store file → initial state for all kinds."""
@@ -139,7 +141,7 @@ class TestVertexRead:
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
-  handoff  { fold { items "latest" } }
+  handoff  { fold { items "collect" 1 } }
 """)
         _seed_facts(tmp_path / "store.db", [
             {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
@@ -152,7 +154,8 @@ class TestVertexRead:
         assert set(result.keys()) == {"decision", "thread", "change", "task", "handoff"}
 
         # Handoff surfaced automatically — no reader code knows about it
-        assert result["handoff"]["items"] == 2000.0
+        assert len(result["handoff"]["items"]) == 1
+        assert result["handoff"]["items"][0]["context"] == "finishing auth"
 
         # Original kinds still work
         assert "auth" in result["decision"]["items"]

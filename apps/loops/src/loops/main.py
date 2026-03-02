@@ -100,6 +100,10 @@ _SIFTD_VERTEX = """\
 name "siftd"
 store "./data/siftd.db"
 
+sources {
+  path "sources/claude-code.loop"
+}
+
 loops {
   exchange {
     fold {
@@ -114,6 +118,20 @@ loops {
   }
 }
 """
+
+_SIFTD_CLAUDE_CODE_LOOP = """\
+source "python -m siftd_loops.sources.claude_code"
+kind "exchange"
+observer "siftd"
+format "ndjson"
+"""
+
+# Extra files created alongside vertex templates: {template: {relative_path: content}}
+_TEMPLATE_FILES: dict[str, dict[str, str]] = {
+    "siftd": {
+        "sources/claude-code.loop": _SIFTD_CLAUDE_CODE_LOOP,
+    },
+}
 
 _TEMPLATES: dict[str, str] = {
     "session": _SESSION_VERTEX,
@@ -169,6 +187,12 @@ def _init_local_vertex(template: str, name: str | None = None) -> Path:
         vertex_path.write_text(content)
     data_dir = Path.cwd() / "data"
     data_dir.mkdir(exist_ok=True)
+    # Write any extra files associated with this template
+    for rel_path, file_content in _TEMPLATE_FILES.get(template, {}).items():
+        file_path = Path.cwd() / rel_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if not file_path.exists():
+            file_path.write_text(file_content)
     return vertex_path
 
 

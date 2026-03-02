@@ -285,3 +285,19 @@ class TestTemplate:
         assert "exchange" in content
         assert "search" in content
         assert "tag" in content
+        assert "sources" in content
+
+    def test_init_siftd_creates_loop_file(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
+
+        result = main(["init", "--template", "siftd"])
+        assert result == 0
+
+        loop_path = tmp_path / "sources" / "claude-code.loop"
+        assert loop_path.exists()
+
+        content = loop_path.read_text()
+        assert "siftd_loops.sources.claude_code" in content
+        assert 'kind "exchange"' in content
+        assert 'format "ndjson"' in content

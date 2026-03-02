@@ -96,10 +96,35 @@ loops {
 }
 """
 
+_SIFTD_VERTEX = """\
+name "siftd"
+store "./data/siftd.db"
+
+loops {
+  exchange {
+    fold {
+      items "by" "conversation_id"
+    }
+    search "prompt" "response"
+  }
+  tag {
+    fold {
+      items "by" "name"
+    }
+  }
+}
+"""
+
 _TEMPLATES: dict[str, str] = {
     "session": _SESSION_VERTEX,
     "tasks": _TASKS_VERTEX,
     "project": _PROJECT_VERTEX,
+    "siftd": _SIFTD_VERTEX,
+}
+
+# App registry — registered apps get `loops <app> <command>` dispatch
+_APPS: dict[str, str] = {
+    "siftd": "siftd_loops",
 }
 
 
@@ -975,6 +1000,301 @@ def cmd_emit(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_app(app_name: str, argv: list[str]) -> int:
+    """Dispatch to a registered app — resolves vertex, loads module, routes subcommand."""
+    import importlib
+
+    mod = importlib.import_module(_APPS[app_name])
+
+    # Resolve the app's vertex: local cwd first, then named resolution via LOOPS_HOME
+    vertex_path = None
+    local = Path.cwd() / f"{app_name}.vertex"
+    if local.exists():
+        vertex_path = local
+    else:
+        try:
+            vertex_path = _resolve_named_vertex(app_name)
+        except FileNotFoundError:
+            vertex_path = None
+        except ValueError:
+            vertex_path = None
+
+    # Build available subcommands from module exports
+    subs: list[str] = []
+    # status/log always available (generic fallback exists)
+    subs.append("status")
+    subs.append("log")
+    # search available if vertex has search-declared kinds (always offer it)
+    subs.append("search")
+    # feedback handlers
+    feedback = getattr(mod, "FEEDBACK", {})
+    subs.extend(feedback.keys())
+
+    if not argv:
+        _err(f"Usage: loops {app_name} <{'|'.join(subs)}>")
+        return 1
+
+    sub = argv[0]
+    rest = argv[1:]
+
+    def _require_vertex() -> Path | None:
+        if vertex_path is not None:
+            return vertex_path
+        _err(f"No {app_name} vertex found. Run 'loops init {app_name}' first.")
+        return None
+
+    if sub == "status":
+        vp = _require_vertex()
+        return 1 if vp is None else _run_app_status(vp, mod, rest)
+
+    if sub == "log":
+        vp = _require_vertex()
+        return 1 if vp is None else _run_app_log(vp, mod, rest)
+
+    if sub == "search":
+        vp = _require_vertex()
+        return 1 if vp is None else _run_app_search(vp, mod, rest)
+
+    if sub in feedback:
+        vp = _require_vertex()
+        if vp is None:
+            return 1
+        handler_ref = feedback[sub]
+        handler_mod, handler_fn = handler_ref.rsplit(":", 1)
+        handler = getattr(importlib.import_module(handler_mod), handler_fn)
+        parser = argparse.ArgumentParser(prog=f"loops {app_name} {sub}")
+        parser.add_argument("name", help=f"{sub.capitalize()} name")
+        parser.add_argument("--conversation", required=True, help="Conversation ID")
+        parser.add_argument("--note", default="", help="Optional note")
+        parser.add_argument("--observer", default=os.environ.get("LOOPS_OBSERVER", "user"))
+        args = parser.parse_args(rest)
+        return handler(vp, args)
+
+    _err(f"Unknown {app_name} command: {sub}")
+    return 1
+
+
+def _resolve_app_view(mod, view_name: str):
+    """Resolve a view function from an app module.
+
+    Lookup order:
+    1. mod.<view_name> — app provides a specific view function
+    2. PAYLOAD_LENS — app provides a lens, generic view wraps it
+    3. None — caller falls back to shared loops lenses
+    """
+    specific = getattr(mod, view_name, None)
+    if specific is not None:
+        return specific
+
+    payload_lens = getattr(mod, "PAYLOAD_LENS", None)
+    if payload_lens is not None and view_name in ("log_view", "search_view"):
+        # Build a generic log/search view that delegates payload rendering to the lens
+        return _make_lens_log_view(payload_lens)
+
+    return None
+
+
+def _make_lens_log_view(payload_lens):
+    """Build a log_view that uses a PayloadLens for payload summaries.
+
+    This is the generic fallback: an app that only exports PAYLOAD_LENS
+    gets a log view where kind summaries come from the lens, not the
+    hardcoded _log_summary in the shared log lens.
+    """
+    from datetime import datetime, timezone
+
+    from painted import Block, Style, Zoom, join_vertical
+    from painted.compose import join_horizontal
+
+    def log_view(facts, zoom, width):
+        if not facts:
+            return Block.text("No facts in the given time range.", Style(dim=True), width=width)
+
+        if zoom == Zoom.MINIMAL:
+            counts: dict[str, int] = {}
+            for f in facts:
+                counts[f["kind"]] = counts.get(f["kind"], 0) + 1
+            parts = [f"{count} {kind}" for kind, count in counts.items()]
+            return Block.text(", ".join(parts), Style(), width=width)
+
+        rows: list[Block] = []
+        dim = Style(dim=True)
+        current_date = None
+
+        for f in facts:
+            ts = f["ts"]
+            if isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            elif isinstance(ts, datetime):
+                dt = ts
+            elif isinstance(ts, str):
+                dt = datetime.fromisoformat(ts)
+            else:
+                continue
+
+            date_str = dt.strftime("%Y-%m-%d")
+            if date_str != current_date:
+                if current_date is not None:
+                    rows.append(Block.text("", Style(), width=width))
+                rows.append(Block.text(f"{date_str}:", Style(bold=True), width=width))
+                current_date = date_str
+
+            time_str = dt.strftime("%H:%M")
+            kind = f["kind"]
+            payload = f.get("payload", {})
+            summary = payload_lens(kind, payload, zoom)
+
+            if isinstance(summary, Block):
+                label = Block.text(f"  {time_str} [{kind}] ", Style(), width=0)
+                rows.append(join_horizontal(label, summary))
+            else:
+                line = f"  {time_str} [{kind}] {summary}"
+                if len(line) > width:
+                    line = line[: width - 1] + "…"
+                rows.append(Block.text(line, Style(), width=width))
+
+            if zoom >= Zoom.FULL:
+                for key, val in payload.items():
+                    if val:
+                        rows.append(Block.text(f"           {key}: {val}", dim, width=width))
+
+        return join_vertical(*rows)
+
+    return log_view
+
+
+def _run_app_status(vertex_path: Path, mod, argv: list[str]) -> int:
+    """Run app status via run_cli."""
+    from painted import run_cli
+    from engine import vertex_read
+
+    pre = argparse.ArgumentParser(add_help=False)
+    known, rest = pre.parse_known_args(argv)
+
+    render_fn = _resolve_app_view(mod, "status_view")
+    if render_fn is None:
+        from .lenses.status import status_view as render_fn
+
+    def fetch():
+        fold_state = vertex_read(vertex_path)
+        fetch_fn = getattr(mod, "fetch_status", None)
+        if fetch_fn is not None:
+            return fetch_fn(fold_state)
+        return _generic_fold_summary(fold_state)
+
+    def render(ctx, data):
+        return render_fn(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest, fetch=fetch, render=render,
+        prog=f"loops {getattr(mod, 'APP_NAME', '?')} status",
+        description="Show store status",
+    )
+
+
+def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
+    """Run app log via run_cli."""
+    from painted import run_cli
+    from engine import vertex_facts
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--since", default="7d")
+    pre.add_argument("--kind", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    render_fn = _resolve_app_view(mod, "log_view")
+    if render_fn is None:
+        from .lenses.log import log_view as render_fn
+
+    def fetch():
+        import re
+        m = re.match(r"^(\d+)([dhms])$", known.since)
+        if not m:
+            return []
+        value = int(m.group(1))
+        unit = m.group(2)
+        multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+        duration = value * multipliers[unit]
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        since_ts = now.timestamp() - duration
+        facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=known.kind)
+        facts.sort(key=lambda f: f["ts"], reverse=True)
+        return facts
+
+    def render(ctx, data):
+        return render_fn(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest, fetch=fetch, render=render,
+        prog=f"loops {getattr(mod, 'APP_NAME', '?')} log",
+        description="Show recent facts",
+    )
+
+
+def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
+    """Run app search via run_cli."""
+    from painted import run_cli
+
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("query", nargs="*")
+    pre.add_argument("--kind", default=None)
+    pre.add_argument("--since", default=None)
+    pre.add_argument("--limit", type=int, default=100)
+    known, rest = pre.parse_known_args(argv)
+
+    query_str = " ".join(known.query) if known.query else ""
+
+    render_fn = _resolve_app_view(mod, "search_view")
+    if render_fn is None:
+        render_fn = _resolve_app_view(mod, "log_view")
+    if render_fn is None:
+        from .lenses.log import log_view as render_fn
+
+    def fetch():
+        if not query_str:
+            return []
+        from engine import vertex_search
+        since_ts = None
+        if known.since:
+            import re
+            m = re.match(r"^(\d+)([dhms])$", known.since)
+            if m:
+                value = int(m.group(1))
+                unit = m.group(2)
+                multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                since_ts = now.timestamp() - value * multipliers[unit]
+        return vertex_search(
+            vertex_path, query_str,
+            kind=known.kind, since=since_ts, limit=known.limit,
+        )
+
+    def render(ctx, data):
+        return render_fn(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest, fetch=fetch, render=render,
+        prog=f"loops {getattr(mod, 'APP_NAME', '?')} search",
+        description="Search facts",
+    )
+
+
+def _generic_fold_summary(fold_state: dict) -> dict:
+    """Build a generic summary from raw fold state when no app-specific fetch exists."""
+    sections = {}
+    for kind, state in fold_state.items():
+        items = state.get("items", {})
+        if isinstance(items, dict):
+            sections[kind] = {"count": len(items), "items": items}
+        elif isinstance(items, list):
+            sections[kind] = {"count": len(items), "items": items}
+        else:
+            sections[kind] = {"count": 0, "items": {}}
+    return sections
+
+
 def _run_status(argv: list[str]) -> int:
     """Run status command via painted CLI harness."""
     from painted import run_cli
@@ -1220,6 +1540,10 @@ def main(argv: list[str] | None = None) -> int:
     }
     if argv and argv[0] in _display:
         return _display[argv[0]](argv[1:])
+
+    # Registered app dispatch — `loops <app> <command>`
+    if argv and argv[0] in _APPS:
+        return _run_app(argv[0], argv[1:])
 
     # All other commands via shared parser
     parser = create_parser()

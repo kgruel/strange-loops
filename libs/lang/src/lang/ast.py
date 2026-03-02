@@ -326,6 +326,7 @@ class LoopDef:
 
     folds: tuple[FoldDecl, ...]
     boundary: Boundary | None = None
+    search: tuple[str, ...] = ()  # payload field names for FTS5 indexing
 
 
 # -----------------------------------------------------------------------------

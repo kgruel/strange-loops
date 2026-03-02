@@ -271,19 +271,24 @@ def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
 
 
 def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
-    """Load a loop definition (fold + boundary) from a node's children."""
+    """Load a loop definition (fold + boundary + search) from a node's children."""
     folds: tuple[FoldDecl, ...] = ()
     boundary: Boundary | None = None
+    search: tuple[str, ...] = ()
 
     for child in node.children:
         if child.name == "fold":
             folds = _load_fold_block(child, path)
         elif child.name == "boundary":
             boundary = _load_boundary(child, path)
+        elif child.name == "search":
+            search = tuple(str(a) for a in child.args)
+            if not search:
+                raise _error("search requires at least one field name", path)
         else:
             raise _error(f"Unknown loop field: {child.name}", path)
 
-    return LoopDef(folds=folds, boundary=boundary)
+    return LoopDef(folds=folds, boundary=boundary, search=search)
 
 
 # ---------------------------------------------------------------------------

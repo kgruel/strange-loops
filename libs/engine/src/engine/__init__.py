@@ -56,6 +56,7 @@ from .compiler import (
     CompiledVertex,
     FoldOverride,
     collect_all_sources,
+    collect_search_fields,
     compile_loop,
     compile_sources,
     compile_vertex,
@@ -67,7 +68,7 @@ from .compiler import (
 from .program import VertexProgram, load_vertex_program
 
 # Vertex read path (query-time fold materialization)
-from .vertex_reader import vertex_facts, vertex_read, vertex_summary, vertex_ticks
+from .vertex_reader import vertex_facts, vertex_read, vertex_search, vertex_summary, vertex_ticks
 
 __all__ = [
     # Atoms
@@ -108,6 +109,7 @@ __all__ = [
     "CompiledVertex",
     "FoldOverride",
     "collect_all_sources",
+    "collect_search_fields",
     "compile_loop",
     "compile_sources",
     "compile_vertex",
@@ -121,6 +123,7 @@ __all__ = [
     # Vertex read path
     "vertex_read",
     "vertex_facts",
+    "vertex_search",
     "vertex_ticks",
     "vertex_summary",
 ]

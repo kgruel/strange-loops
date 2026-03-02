@@ -205,6 +205,56 @@ class StoreReader:
             for r in rows
         ]
 
+    def search_facts(
+        self,
+        query: str,
+        *,
+        kind: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """FTS5 search over fact payloads.
+
+        Requires facts_fts virtual table to exist (see vertex_reader._ensure_fts).
+        Returns newest-first, same dict shape as facts_between.
+        """
+        clauses = ["facts_fts MATCH ?"]
+        params: list = [query]
+
+        if kind is not None:
+            clauses.append("fts.kind = ?")
+            params.append(kind)
+        if since is not None:
+            clauses.append("f.ts >= ?")
+            params.append(since)
+        if until is not None:
+            clauses.append("f.ts <= ?")
+            params.append(until)
+
+        where = " AND ".join(clauses)
+        params.append(limit)
+
+        rows = self._conn.execute(
+            f"SELECT f.kind, f.ts, f.observer, f.origin, f.payload "
+            f"FROM facts_fts fts "
+            f"JOIN facts f ON f.rowid = fts.fact_rowid "
+            f"WHERE {where} "
+            f"ORDER BY f.ts DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        return [
+            {
+                "kind": r[0],
+                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
+                "observer": r[2],
+                "origin": r[3],
+                "payload": json.loads(r[4]),
+            }
+            for r in rows
+        ]
+
     def close(self) -> None:
         """Close the database connection."""
         if self._conn is not None:

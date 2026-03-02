@@ -971,3 +971,95 @@ sources {
 """
         with pytest.raises(ParseError, match="at most one 'from' node"):
             parse_vertex(text)
+
+
+class TestSearchDeclaration:
+    """Tests for search field declaration in loop definitions."""
+
+    def test_search_fields_parsed(self):
+        text = """\
+name "messaging"
+loops {
+  exchange {
+    fold { items "by" "conversation_id" }
+    search "prompt" "response"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["exchange"]
+        assert loop_def.search == ("prompt", "response")
+
+    def test_search_single_field(self):
+        text = """\
+name "messaging"
+loops {
+  telegram.message {
+    fold { items "by" "chat_id" }
+    search "text"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.loops["telegram.message"].search == ("text",)
+
+    def test_search_without_fold(self):
+        """A kind can be searchable without being foldable."""
+        text = """\
+name "ambient"
+loops {
+  ambient.text {
+    search "text" "source"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["ambient.text"]
+        assert loop_def.search == ("text", "source")
+        assert loop_def.folds == ()
+
+    def test_no_search_defaults_empty(self):
+        text = """\
+name "project"
+loops {
+  decision {
+    fold { items "by" "topic" }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.loops["decision"].search == ()
+
+    def test_search_empty_args_error(self):
+        text = """\
+name "test"
+loops {
+  thing {
+    fold { count "inc" }
+    search
+  }
+}
+"""
+        with pytest.raises(ParseError, match="search requires at least one field name"):
+            parse_vertex(text)
+
+    def test_search_in_template_loop(self):
+        text = """\
+name "feeds"
+sources {
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
+    loop {
+      fold { items "by" "link" }
+      search "title" "summary"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        from lang import TemplateSource
+
+        source = vertex.sources[0]
+        assert isinstance(source, TemplateSource)
+        assert source.loop is not None
+        assert source.loop.search == ("title", "summary")

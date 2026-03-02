@@ -685,6 +685,41 @@ def compile_vertex(vertex: VertexFile) -> dict[str, Spec]:
     return map_vertex_file(vertex)
 
 
+def collect_search_fields(
+    vertex: VertexFile, base_dir: Path
+) -> dict[str, tuple[str, ...]]:
+    """Collect search field declarations from a vertex and its templates.
+
+    Returns {kind: (field1, field2, ...)} for kinds that declare search.
+    Used by vertex_search to know which payload fields to extract for FTS5.
+    """
+    fields: dict[str, tuple[str, ...]] = {}
+
+    # Direct loops
+    for kind, loop_def in vertex.loops.items():
+        if loop_def.search:
+            fields[kind] = loop_def.search
+
+    # Template loops — resolve params to get actual kind names
+    for source_entry in vertex.sources or []:
+        if isinstance(source_entry, TemplateSource):
+            if source_entry.loop and source_entry.loop.search:
+                all_params: list[SourceParams] = []
+                if isinstance(source_entry.from_, FromFile):
+                    from_path = source_entry.from_.path
+                    if not from_path.is_absolute():
+                        from_path = base_dir / from_path
+                    if from_path.exists():
+                        all_params.extend(_load_params_file(from_path))
+                all_params.extend(source_entry.params)
+                for param_row in all_params:
+                    kind = param_row.values.get("kind")
+                    if kind:
+                        fields[kind] = source_entry.loop.search
+
+    return fields
+
+
 # -----------------------------------------------------------------------------
 # Vertex Materialization
 # -----------------------------------------------------------------------------

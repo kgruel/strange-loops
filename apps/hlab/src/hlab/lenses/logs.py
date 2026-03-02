@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from cells import Block, Style, Span, Line
+from painted import Block, Style, Span, Line
 
 from ..theme import Theme, DEFAULT_THEME
 

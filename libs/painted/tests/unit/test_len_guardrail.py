@@ -10,13 +10,18 @@ import ast
 import re
 from pathlib import Path
 
-TARGET_MODULES = [
-    Path("src/painted/block.py"),
-    Path("src/painted/compose.py"),
-    Path("src/painted/_lens.py"),
-    Path("src/painted/_components/text_input.py"),
-    Path("src/painted/_components/data_explorer.py"),
+_LIB_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Paths relative to _LIB_ROOT — used for both file access and allowlist keys
+_REL_PATHS = [
+    "src/painted/block.py",
+    "src/painted/compose.py",
+    "src/painted/_lens.py",
+    "src/painted/_components/text_input.py",
+    "src/painted/_components/data_explorer.py",
 ]
+
+TARGET_MODULES = [(_LIB_ROOT / p, p) for p in _REL_PATHS]
 
 # Heuristic: arguments containing these tokens are likely string/text.
 _SUSPICIOUS_ARG_RE = re.compile(
@@ -40,9 +45,9 @@ ALLOWLIST = {
 def test_no_new_len_on_text_variables_in_display_modules():
     violations: list[tuple[str, int, str]] = []
 
-    for path in TARGET_MODULES:
-        src = path.read_text(encoding="utf-8")
-        tree = ast.parse(src, filename=str(path))
+    for abs_path, rel_key in TARGET_MODULES:
+        src = abs_path.read_text(encoding="utf-8")
+        tree = ast.parse(src, filename=rel_key)
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -57,9 +62,9 @@ def test_no_new_len_on_text_variables_in_display_modules():
                 continue
 
             call_src = ast.get_source_segment(src, node) or "len(?)"
-            key = (path.as_posix(), node.lineno, call_src)
+            key = (rel_key, node.lineno, call_src)
             if key not in ALLOWLIST:
-                violations.append((path.as_posix(), node.lineno, call_src))
+                violations.append((rel_key, node.lineno, call_src))
 
     if violations:
         formatted = "\n".join(f"- {p}:{ln}: {src}" for p, ln, src in violations)

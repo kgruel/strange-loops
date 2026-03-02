@@ -27,8 +27,8 @@ from argparse import ArgumentParser
 from collections.abc import Callable
 from typing import Any
 
-from cells import Block
-from cells.fidelity import (
+from painted import Block
+from painted.fidelity import (
     CliContext,
     OutputMode,
     Format,
@@ -38,7 +38,7 @@ from cells.fidelity import (
     parse_format,
     detect_context,
 )
-from cells.writer import print_block
+from painted.writer import print_block
 
 from .theme import DEFAULT_THEME
 

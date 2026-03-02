@@ -11,8 +11,8 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
-from cells import Block, Style, join_vertical, join_horizontal, border, pad, ROUNDED
-from cells.tui import Surface
+from painted import Block, Style, join_vertical, join_horizontal, border, pad, ROUNDED
+from painted.tui import Surface
 
 from atoms import Runner
 

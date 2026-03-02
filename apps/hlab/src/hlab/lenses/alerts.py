@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from cells import Block, Style, Zoom, join_vertical, border, ROUNDED
+from painted import Block, Style, Zoom, join_vertical, border, ROUNDED
 
 from ..theme import Theme, DEFAULT_THEME
 

@@ -9,7 +9,7 @@ dependencies = ["lang", "atoms", "engine", "painted"]
 lang = { workspace = true }
 atoms = { workspace = true }
 engine = { workspace = true }
-painted = { path = "../../../painted" }
+painted = { workspace = true }
 
 [project.scripts]
 loops = "loops.main:main"

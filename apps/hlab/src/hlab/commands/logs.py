@@ -13,10 +13,10 @@ from argparse import ArgumentParser
 from collections import deque
 from pathlib import Path
 
-from cells import Block, Style, Zoom, join_vertical
-from cells.fidelity import CliContext, Format
-from cells.inplace import InPlaceRenderer
-from cells.writer import print_block
+from painted import Block, Style, Zoom, join_vertical
+from painted.fidelity import CliContext, Format
+from painted.inplace import InPlaceRenderer
+from painted.writer import print_block
 
 from ..infra import HostConfig, run_ssh_streaming, ssh_base_args
 from ..inventory import (

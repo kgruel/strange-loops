@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Homelab monitoring and management CLI"
 requires-python = ">=3.11"
 dependencies = [
-    "cells",
+    "painted",
     "atoms",
     "engine",
     "httpx>=0.27",
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cells = { workspace = true }
+painted = { workspace = true }
 atoms = { workspace = true }
 engine = { workspace = true }
 

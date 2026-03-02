@@ -29,6 +29,26 @@ from .._components.spinner import (  # noqa: F401
 from .._components.table import Column, TableState, table  # noqa: F401
 from .._components.text_input import TextInputState, text_input  # noqa: F401
 
+# Record rendering
+from .._record import (  # noqa: F401
+    AttentionFn,
+    GutterFn,
+    PayloadLens,
+    apply_attention,
+    apply_gutter,
+    attention_blocked,
+    attention_novelty,
+    attention_relevance,
+    attention_staleness,
+    gutter_freshness,
+    gutter_lifecycle,
+    gutter_pass_fail,
+    record_line,
+    record_line_composed,
+    record_map,
+    record_timeline,
+)
+
 # Stateless views
 from .._lens import (  # noqa: F401
     NodeRenderer,
@@ -104,4 +124,21 @@ __all__ = [
     "ProfileResult",
     "profile",
     "parse_collapsed",
+    # Record rendering
+    "PayloadLens",
+    "GutterFn",
+    "AttentionFn",
+    "record_line",
+    "record_timeline",
+    "record_map",
+    "record_line_composed",
+    "apply_gutter",
+    "apply_attention",
+    "gutter_lifecycle",
+    "gutter_freshness",
+    "gutter_pass_fail",
+    "attention_staleness",
+    "attention_novelty",
+    "attention_blocked",
+    "attention_relevance",
 ]

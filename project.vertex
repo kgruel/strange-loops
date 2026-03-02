@@ -1,5 +1,5 @@
-name "session"
-store "./data/session.db"
+name "project"
+store "./data/project.db"
 
 loops {
   decision { fold { items "by" "topic" } }

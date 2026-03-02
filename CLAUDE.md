@@ -1,95 +1,65 @@
 # CLAUDE.md
 
-Guidance for Claude Code working with the loops monorepo.
-
-## The Model
-
-See `LOOPS.md` for the fundamental model. The system is loops.
-
-**The truths:**
-- Time is fundamental. The past happened.
-- The observer is first-class. Facts exist because a Peer observed.
-- Everything is loops. The end connects to the beginning.
-
-**The atoms:**
-
-| Atom | Structure | Question |
-|------|-----------|----------|
-| Fact | kind + ts + payload + observer + origin | *what happened, where from* |
-| Spec | fields + folds + boundary | *how state accumulates* |
-| Tick | name + ts + payload + origin | *when a cycle completed* |
-
-Three atoms. Peer dissolved to `observer` field on Fact + `Grant` policy at Vertex.
-Vertex is runtime infrastructure, not an atom. Cell is a surface primitive.
+The loops monorepo. See `LOOPS.md` for the fundamental model — three atoms (Fact, Spec, Tick), three truths, everything is loops.
 
 ## Build & Test
 
 ```bash
-uv sync                                                    # install all
-uv run --package atoms pytest libs/atoms/tests               # test one lib
-uv run --package engine pytest libs/engine/tests           # test another
-uv run --package cells pytest libs/cells/tests/test_span.py  # single file
+uv sync                                                # install all workspace packages
+uv run --package <name> pytest libs/<name>/tests       # test one lib
+uv run --package <name> pytest apps/<name>/tests       # test one app
 ```
+
+Each lib and app with a `./dev` script also supports `./dev check` (the CI gate).
 
 ## Structure
 
 ```
 libs/
-  atoms/    Observation + Contract + Ingress: Fact, Spec, Source
-  lang/     KDL loader + validator for .loop/.vertex files
-  engine/   Temporal + Identity: Tick, Vertex, Peer, Grant
-  cells/    Surface: Cell, Block, Buffer, Lens, Surface
+  atoms/      Fact, Spec, Source, Parse, Fold — the data atoms and contracts
+  engine/     Tick, Vertex, Store, Projection, Peer, Grant — runtime and identity
+  lang/       KDL loader + validator for .loop/.vertex files
+  painted/    Terminal rendering — Block, Style, Surface, run_cli, lenses
+  store/      Store operations — slice, merge, search, transport
 
-experiments/   Integration layer — wires libs together
-docs/          Deep dives (VERTEX.md, TEMPORAL.md, PERSISTENCE.md, PEERS.md)
+apps/
+  loops/      CLI for the loops system — emit, log, status across vertices
+  hlab/       Homelab monitoring — DSL-driven status, alerts, media
+  strange-loops/  Task orchestration — tasks as loops, workers in worktrees
+  discord/    Discord transport
+  telegram/   Telegram transport
+  reader/     Feed reader
+
+experiments/  Integration explorations — wires libs together, graduates to apps
+docs/         Deep dives — VERTEX.md, TEMPORAL.md, PERSISTENCE.md, IDENTITY.md
 ```
 
-Each lib has its own README.md with API overview.
+Each lib and app has its own CLAUDE.md. Start there when working in one.
 
-## Data Flow
+## Project Knowledge
 
-```
-Peer observes ──→ Fact(kind, ts, payload)
-                        │
-                        ▼
-                    Vertex ── routes by kind ── Fold (Spec.apply)
-                        │                           │
-                        │                      state accumulates
-                        │                           │
-                        │                      boundary? ──→ Tick
-                        │                                      │
-                        └── Surface ←── Lens ←── state         │
-                              │                                │
-                              └── emit ──→ new Fact ───────────┘
+Two stores accumulate decisions, threads, and tasks. Query from anywhere:
+
+```bash
+loops status project                           # this repo — architecture, API, implementation
+loops status meta                              # cross-cutting — ways of working, patterns, tooling
+loops log project --kind decision              # project decisions
+loops log meta --kind decision --since 7d      # recent cross-cutting decisions
 ```
 
-Facts go in, Ticks come out. Ticks from one loop enter another as atomic input.
-Same primitive at every level. Loops nest.
+**Project store** (`project.vertex`): loops-specific architecture, API design, lib boundaries.
 
-## Key Patterns
-
-- Two libraries: `atoms` (atoms + contracts), `engine` (runtime + identity). `cells` is surface.
-- `engine` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
-- Immutable by default — frozen dataclasses, pure functions
-- Spec is the contract — describes structure and fold operations
-- `Projection(initial, fold=spec.apply)` — no bridge class needed
-- Vertex is sync — async bridge lives at composition point
+**Meta store** (`~/Documents/meta-discussion`): cross-cutting patterns that apply to any project. Key decisions that govern how we work:
+- `architecture/claude-md-levels` — four levels, each adds not repeats
+- `architecture/claude-md-antipatterns` — God/stale/redundant/missing
+- `architecture/doc-roles` — CLAUDE.md is working context, README for API consumers
+- `workflow/handoff-as-fact` — handoff dissolves into the store
+- `design/dissolution-method` — before building X, ask if X dissolves
+- `design/progressive-vertex-chain` — CLAUDE.md is the lens, the store is the state
 
 ## Conventions
 
-**Kind namespacing:** Infrastructure facts prefixed by origin (`ui.key`, `ui.action`).
-Domain facts stay bare (`"health"`, `"deploy"`).
-
-**Kind → Spec naming:** Name Spec after the Fact kind it folds. Legibility, not dispatch.
-
-## References
-
-| Doc | Focus |
-|-----|-------|
-| `LOOPS.md` | The fundamental model — truths, atoms, topology |
-| `HANDOFF.md` | Session continuity — next steps, open threads |
-| `LOG.md` | Session history — what happened when |
-| `docs/VERTEX.md` | Intersection point — routing, folding, branching |
-| `docs/TEMPORAL.md` | Boundaries and nesting — how loops mark time |
-| `docs/PERSISTENCE.md` | Durable state — how loops remember |
-| `docs/IDENTITY.md` | Observer and gating — who sees, who emits |
+- Immutable by default — frozen dataclasses, pure functions
+- `engine` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
+- Each lib/app has: CLAUDE.md, pyproject.toml, src/, tests/
+- `./dev check` must pass before commit

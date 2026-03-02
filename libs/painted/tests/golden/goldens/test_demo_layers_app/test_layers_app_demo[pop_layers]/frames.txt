@@ -1,0 +1,149 @@
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 50%
+
+
+    +/-  counter
+    h    help
+    s    settings
+    q    quit
+
+
+
+
+
+
+
+
+
+
+  layers: base
+--- frame ---
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 50%             ╭─────────────────────╮
+                            │                     │
+                            │   Settings          │
+    +/-  counter            │                     │
+    h    help               │   Volume:  50%      │
+    s    settings           │   [#####-----]      │
+    q    quit               │                     │
+                            │   up/down  adjust   │
+                            │   enter    confirm  │
+                            │   escape   cancel   │
+                            │                     │
+                            ╰─────────────────────╯
+
+
+
+
+
+  layers: base > settings
+--- frame ---
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 50%             ╭─────────────────────╮
+                            │                     │
+                            │   Settings          │
+    +/-  counter            │                     │
+    h    help               │   Volume:  60%      │
+    s    settings           │   [######----]      │
+    q    quit               │                     │
+                            │   up/down  adjust   │
+                            │   enter    confirm  │
+                            │   escape   cancel   │
+                            │                     │
+                            ╰─────────────────────╯
+
+
+
+
+
+  layers: base > settings
+--- frame ---
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 60%
+
+
+    +/-  counter
+    h    help
+    s    settings
+    q    quit
+
+
+
+
+
+
+
+
+
+
+  layers: base
+--- frame ---
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 60%          ╭────────────────────────────╮
+                         │                            │
+                         │   Help                     │
+    +/-  counter         │                            │
+    h    help            │   h    show this help      │
+    s    settings        │   s    open settings       │
+    q    quit            │   +/-  adjust counter      │
+                         │   q    quit                │
+                         │                            │
+                         │   press any key to close   │
+                         │                            │
+                         ╰────────────────────────────╯
+
+
+
+
+
+  layers: base > help
+--- frame ---
+
+   Layer Demo
+
+
+    Counter: 0
+
+    Volume: 60%
+
+
+    +/-  counter
+    h    help
+    s    settings
+    q    quit
+
+
+
+
+
+
+
+
+
+
+  layers: base

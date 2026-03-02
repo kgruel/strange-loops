@@ -1,0 +1,8 @@
+✓ postgres      db-1.internal:5432  300ms  accepting connections
+✓ redis         cache-1.internal:6379  200ms  6 keys, 0 clients blocked
+! api-gateway   gw-1.internal:8443  1400ms  p99 latency 1200ms
+✓ worker        worker-1.internal:9090  500ms  3 jobs queued
+✗ scheduler     cron-1.internal:8080  1800ms  connection refused
+✓ metrics       prom-1.internal:9091  700ms  scrape OK, 142 series
+
+4 healthy  1 degraded  1 down  [1800ms]

@@ -1,0 +1,54 @@
+✓ confirm deploy
+  keys: j -> enter -> y -> q
+  emissions:
+  ui.action            action=stay
+  deploy.select        service=auth-service index=1
+  ui.key               key=j
+  ui.action            action=stay
+  ui.key               key=enter
+  ui.action            action=pop result=auth-service
+  deploy.confirmed     service=auth-service
+  ui.key               key=y
+  ui.action            action=quit
+  ui.key               key=q
+  ✓ deploy.select emitted
+  ✓ deploy.confirmed emitted
+  frames:
+  [initial]
+    > api-gateway
+  [after 'j']
+      api-gateway
+  [after 'enter']
+    Deploy auth-service? (y/n)
+  [after 'y']
+      api-gateway
+  [after 'q']
+      api-gateway
+
+✓ cancel deploy
+  keys: j -> enter -> n -> q
+  emissions:
+  ui.action            action=stay
+  deploy.select        service=auth-service index=1
+  ui.key               key=j
+  ui.action            action=stay
+  ui.key               key=enter
+  ui.action            action=stay
+  ui.key               key=n
+  ui.action            action=quit
+  ui.key               key=q
+  ✓ deploy.select emitted
+  ✓ deploy.confirmed not emitted
+  frames:
+  [initial]
+    > api-gateway
+  [after 'j']
+      api-gateway
+  [after 'enter']
+    Deploy auth-service? (y/n)
+  [after 'n']
+      api-gateway
+  [after 'q']
+      api-gateway
+
+✓ 2/2 scenarios passed

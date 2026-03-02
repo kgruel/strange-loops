@@ -1,0 +1,33 @@
+SUMMARY vs DETAILED:
+
+╭─ --help ─────────────────────────────────────────────╮ ╭─ --help -v ─────────────────────────────────────────────────────────────────────╮
+│deploy — Ship services to production.                 │ │deploy — Ship services to production.                                            │
+│                                                      │ │                                                                                 │
+│Zoom (what to show)                                   │ │Zoom (what to show)                                                              │
+│  -q, --quiet        Minimal output                   │ │  Controls how much detail is rendered. Stackable: -v for detailed, -vv for full.│
+│  -v, --verbose      Detailed (-v) or full (-vv)      │ │  -q, --quiet        Minimal output                                              │
+│                                                      │ │  -v, --verbose      Detailed (-v) or full (-vv)                                 │
+│Mode (how to deliver)                                 │ │                                                                                 │
+│  -i, --interactive  Interactive TUI                  │ │Mode (how to deliver)                                                            │
+│  --static           Static output, no animation      │ │  Delivery mechanism. AUTO selects LIVE for TTY, STATIC for pipes.               │
+│  --live             Live output with in-place updates│ │  -i, --interactive  Interactive TUI                                             │
+│                                                      │ │  --static           Static output, no animation                                 │
+│Format (serialization)                                │ │  --live             Live output with in-place updates                           │
+│  --json             JSON output                      │ │                                                                                 │
+│  --plain            Plain text, no ANSI codes        │ │Format (serialization)                                                           │
+│                                                      │ │  Output serialization. ANSI is default for TTY, PLAIN for pipes.                │
+│Help                                                  │ │  --json             JSON output                                                 │
+│  -h, --help         Show this help                   │ │                     Implies --static.                                           │
+│                                                      │ │  --plain            Plain text, no ANSI codes                                   │
+╰──────────────────────────────────────────────────────╯ │                     Implies --static when piped.                                │
+                                                         │                                                                                 │
+                                                         │Help                                                                             │
+                                                         │  -h, --help         Show this help                                              │
+                                                         │                     Add -v for more detail.                                     │
+                                                         │                                                                                 │
+                                                         │Interaction rules                                                                │
+                                                         │  --json and --plain imply --static (no animation).                              │
+                                                         │  -q (minimal zoom) implies --static.                                            │
+                                                         │  AUTO mode selects LIVE for TTY, STATIC for pipes.                              │
+                                                         │                                                                                 │
+                                                         ╰─────────────────────────────────────────────────────────────────────────────────╯

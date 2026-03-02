@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["painted"]
+# ///
+"""Self-profiling — painted introspects its own rendering performance.
+
+TestSurface profiles a mini TUI app, then renders the results at every
+zoom level through run_cli. Demonstrates lens composition: chart_lens
+for frame cost bars, tree_lens for emission timeline, flame_lens for
+proportional breakdown.
+
+    uv run demos/patterns/profiler.py -q        # summary stats
+    uv run demos/patterns/profiler.py           # emission traces
+    uv run demos/patterns/profiler.py -v        # frame chart + flame graph
+    uv run demos/patterns/profiler.py -vv       # frame-by-frame detail
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+
+from painted import (
+    Block,
+    CliContext,
+    Style,
+    Zoom,
+    border,
+    join_vertical,
+    pad,
+    run_cli,
+    truncate,
+    ROUNDED,
+)
+from painted.views import chart_lens, flame_lens, profile, tree_lens
+from painted.palette import current_palette
+from painted.tui import Layer, Pop, Push, Quit, Stay, Surface, TestSurface, render_layers
+
+
+# --- Data model ---
+
+
+@dataclass(frozen=True)
+class FrameProfile:
+    """Performance metrics for a single rendered frame."""
+    index: int
+    label: str
+    write_count: int
+    is_hot: bool
+
+
+@dataclass(frozen=True)
+class EmissionSummary:
+    """Aggregate count for one emission kind."""
+    kind: str
+    count: int
+
+
+@dataclass(frozen=True)
+class ProfileData:
+    """Complete profiling results from a TestSurface run."""
+    scenario_name: str
+    dimensions: str
+    input_count: int
+    frame_count: int
+    total_writes: int
+    avg_writes: float
+    max_writes: int
+    hot_frame_count: int
+    frames: tuple[FrameProfile, ...]
+    emission_summary: tuple[EmissionSummary, ...]
+    emissions_raw: tuple[tuple[str, dict], ...]
+    cprofile_flame: dict
+    cprofile_total: float
+    cprofile_calls: int
+
+
+# --- Mini app under test ---
+
+
+_ITEMS = (
+    "api-gateway", "auth-service", "worker", "scheduler",
+    "metrics", "logger", "cache", "queue", "storage", "monitor",
+)
+
+_SCENARIO_INPUTS = ["j", "j", "j", "k", "k", "enter", "escape", "q"]
+
+
+def _get_layers(state: dict) -> tuple[Layer, ...]:
+    return state["layers"]
+
+
+def _set_layers(state: dict, layers: tuple[Layer, ...]) -> dict:
+    return {**state, "layers": layers}
+
+
+def _base_layer() -> Layer:
+    def handle(key: str, ls: int, app_state: dict):
+        if key == "j":
+            return min(ls + 1, len(_ITEMS) - 1), app_state, Stay()
+        if key == "k":
+            return max(ls - 1, 0), app_state, Stay()
+        if key == "enter":
+            return ls, app_state, Push(layer=_detail_layer(_ITEMS[ls]))
+        if key == "q":
+            return ls, app_state, Quit()
+        return ls, app_state, Stay()
+
+    def render(ls: int, app_state: dict, view):
+        for i, item in enumerate(_ITEMS):
+            marker = ">" if i == ls else " "
+            view.put_text(0, i, f"{marker} {item}", Style(bold=(i == ls)))
+
+    return Layer(name="list", state=0, handle=handle, render=render)
+
+
+def _detail_layer(name: str) -> Layer:
+    def handle(key: str, ls: str, app_state: dict):
+        if key in ("escape", "q"):
+            return ls, app_state, Pop(result=None)
+        return ls, app_state, Stay()
+
+    def render(ls: str, app_state: dict, view):
+        view.put_text(0, 0, f"Detail: {ls}", Style(bold=True))
+        view.put_text(0, 1, "Press escape to go back", Style(dim=True))
+
+    return Layer(name="detail", state=name, handle=handle, render=render)
+
+
+class _ProfileApp(Surface):
+    def __init__(self):
+        super().__init__()
+        self.state: dict = {"layers": (_base_layer(),)}
+
+    def render(self) -> None:
+        self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
+        render_layers(self.state, self._buf, _get_layers)
+
+    def on_key(self, key: str) -> None:
+        new_state, should_quit, pop_result = self.handle_key(
+            key, self.state, _get_layers, _set_layers,
+        )
+        self.state = new_state
+        layers = _get_layers(new_state)
+        base = layers[0]
+        selected = base.state
+
+        if key in ("j", "k") and len(layers) == 1:
+            self.emit("list.select", service=_ITEMS[selected], index=selected)
+        if key == "enter" and len(layers) > 1:
+            self.emit("list.open", service=_ITEMS[selected])
+        if pop_result is None and key == "escape":
+            self.emit("list.close", service=_ITEMS[selected])
+        if should_quit:
+            self.quit()
+
+
+# --- Sample data (deterministic, for golden tests) ---
+
+SAMPLE_PROFILE = ProfileData(
+    scenario_name="list_nav",
+    dimensions="80x24",
+    input_count=8,
+    frame_count=9,
+    total_writes=272,
+    avg_writes=30.2,
+    max_writes=77,
+    hot_frame_count=1,
+    frames=(
+        FrameProfile(0, "initial", 77, True),
+        FrameProfile(1, "after 'j'", 27, False),
+        FrameProfile(2, "after 'j'", 22, False),
+        FrameProfile(3, "after 'j'", 19, False),
+        FrameProfile(4, "after 'k'", 19, False),
+        FrameProfile(5, "after 'k'", 22, False),
+        FrameProfile(6, "after 'enter'", 43, False),
+        FrameProfile(7, "after 'escape'", 43, False),
+        FrameProfile(8, "after 'q'", 0, False),
+    ),
+    emission_summary=(
+        EmissionSummary("ui.action", 8),
+        EmissionSummary("ui.key", 8),
+        EmissionSummary("list.select", 5),
+        EmissionSummary("list.open", 1),
+        EmissionSummary("list.close", 1),
+    ),
+    emissions_raw=(
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "auth-service", "index": 1}),
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "worker", "index": 2}),
+        ("ui.key", {"key": "j"}),
+        ("list.select", {"service": "scheduler", "index": 3}),
+        ("ui.key", {"key": "k"}),
+        ("list.select", {"service": "worker", "index": 2}),
+        ("ui.key", {"key": "k"}),
+        ("list.select", {"service": "auth-service", "index": 1}),
+        ("ui.key", {"key": "enter"}),
+        ("list.open", {"service": "auth-service"}),
+        ("ui.key", {"key": "escape"}),
+        ("list.close", {"service": "auth-service"}),
+        ("ui.key", {"key": "q"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "stay"}),
+        ("ui.action", {"action": "push", "layer": "detail"}),
+        ("ui.action", {"action": "pop"}),
+        ("ui.action", {"action": "quit"}),
+    ),
+    cprofile_flame={
+        "run_to_completion": {
+            "render": {"fill": 0.003, "put_text": 0.002, "[self]": 0.001},
+            "handle_key": {"on_key": 0.001, "[self]": 0.001},
+            "diff": {"__eq__": 0.002, "[self]": 0.001},
+            "[self]": 0.002,
+        },
+    },
+    cprofile_total=0.015,
+    cprofile_calls=5000,
+)
+
+
+# --- Profile extraction ---
+
+
+def _extract_profile(
+    name: str, harness: TestSurface, frames: list, prof_result,
+) -> ProfileData:
+    """Pure function: extract ProfileData from a completed TestSurface run."""
+    write_counts = [len(f.writes) for f in frames]
+    avg = sum(write_counts) / len(write_counts) if write_counts else 0.0
+    threshold = avg * 2
+
+    frame_profiles = tuple(
+        FrameProfile(
+            index=i,
+            label="initial" if i == 0 else f"after '{_SCENARIO_INPUTS[i - 1]}'",
+            write_count=wc,
+            is_hot=wc > threshold,
+        )
+        for i, wc in enumerate(write_counts)
+    )
+
+    kind_counts: dict[str, int] = {}
+    for kind, _ in harness.emissions:
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+    emission_summary = tuple(
+        EmissionSummary(kind=k, count=c)
+        for k, c in sorted(kind_counts.items(), key=lambda x: -x[1])
+    )
+
+    return ProfileData(
+        scenario_name=name,
+        dimensions=f"{harness.width}x{harness.height}",
+        input_count=len(_SCENARIO_INPUTS),
+        frame_count=len(frames),
+        total_writes=sum(write_counts),
+        avg_writes=round(avg, 1),
+        max_writes=max(write_counts) if write_counts else 0,
+        hot_frame_count=sum(1 for f in frame_profiles if f.is_hot),
+        frames=frame_profiles,
+        emission_summary=emission_summary,
+        emissions_raw=tuple((k, d) for k, d in harness.emissions),
+        cprofile_flame=prof_result.flame_dict,
+        cprofile_total=prof_result.total_time,
+        cprofile_calls=prof_result.call_count,
+    )
+
+
+def _fetch() -> ProfileData:
+    """Run the scenario and extract profiling data."""
+    app = _ProfileApp()
+    harness = TestSurface(app, width=80, height=24, input_queue=_SCENARIO_INPUTS)
+    with profile(module="painted") as prof:
+        frames = harness.run_to_completion()
+    return _extract_profile("list_nav", harness, frames, prof[0])
+
+
+# --- Zoom 0: one-line summary ---
+
+
+def render_minimal(data: ProfileData, width: int) -> Block:
+    """Single-line profiling summary."""
+    result = Block.text(
+        f"{data.frame_count} frames, {data.total_writes} writes, "
+        f"avg {data.avg_writes:.0f}/frame",
+        Style(),
+    )
+    return truncate(result, width)
+
+
+# --- Zoom 1: emission traces ---
+
+
+def render_summary(data: ProfileData, width: int) -> Block:
+    """Scenario overview with emission counts."""
+    p = current_palette()
+    rows: list[Block] = [
+        Block.text(f"Scenario: {data.scenario_name}", Style(bold=True)),
+        Block.text(f"  {data.input_count} inputs, {data.dimensions}", Style(dim=True)),
+        Block.text("", Style()),
+        Block.text(f"Frames:    {data.frame_count}", Style()),
+        Block.text(
+            f"Writes:    {data.total_writes} total "
+            f"(avg {data.avg_writes:.0f}, max {data.max_writes})",
+            Style(),
+        ),
+    ]
+
+    if data.hot_frame_count:
+        rows.append(Block.text(
+            f"Hot frames: {data.hot_frame_count} (>2x avg)", p.warning,
+        ))
+
+    if data.cprofile_calls > 0:
+        rows.append(Block.text(
+            f"cProfile:  {data.cprofile_calls} calls, {data.cprofile_total:.4f}s",
+            Style(),
+        ))
+
+    rows.append(Block.text("", Style()))
+    rows.append(Block.text("Emissions:", Style(dim=True)))
+    for es in data.emission_summary:
+        style = p.accent if not es.kind.startswith("ui.") else Style(dim=True)
+        rows.append(Block.text(f"  {es.count:>3}x  {es.kind}", style))
+
+    return truncate(join_vertical(*rows), width)
+
+
+# --- Zoom 2: frame chart + flame graph ---
+
+
+def _build_emission_tree(emissions_raw: tuple[tuple[str, dict], ...]) -> dict[str, dict[str, int]]:
+    """Build hierarchical emission tree from raw emission data.
+
+    Groups emissions by category (prefix before '.'), aggregates counts
+    for each unique emission entry.
+    """
+    tree: dict[str, dict[str, int]] = {}
+    for kind, data_dict in emissions_raw:
+        category = kind.split(".")[0] if "." in kind else kind
+        if category not in tree:
+            tree[category] = {}
+        detail = " ".join(f"{k}={v}" for k, v in data_dict.items())
+        entry = f"{kind}: {detail}" if detail else kind
+        count = tree[category].get(entry, 0)
+        tree[category][entry] = count + 1
+    return tree
+
+
+def render_detailed(data: ProfileData, width: int) -> Block:
+    """Per-frame write chart, emission flame (horizontal + vertical)."""
+    p = current_palette()
+    sections: list[Block] = []
+    inner_width = min(width - 4, 70)
+
+    # Frame write counts as bar chart
+    frame_data = {f.label: f.write_count for f in data.frames}
+    chart_block = chart_lens(frame_data, 3, inner_width)
+    sections.append(border(chart_block, title="Writes per Frame", chars=ROUNDED))
+    sections.append(Block.text("", Style()))
+
+    # Hot frame callouts
+    hot_frames = [f for f in data.frames if f.is_hot]
+    if hot_frames:
+        hot_rows = [Block.text("Hot frames (>2x average):", p.warning)]
+        for f in hot_frames:
+            hot_rows.append(Block.text(
+                f"  Frame {f.index} ({f.label}): {f.write_count} writes", p.warning,
+            ))
+        sections.append(join_vertical(*hot_rows))
+        sections.append(Block.text("", Style()))
+
+    # cProfile flame graph (horizontal — call tree timing)
+    if data.cprofile_flame:
+        cprof_h = flame_lens(data.cprofile_flame, 2, inner_width)
+        sections.append(border(cprof_h, title="cProfile Timing", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # cProfile vertical flame (per-phase timing comparison)
+    if data.cprofile_flame:
+        cprof_v = flame_lens(data.cprofile_flame, 1, inner_width, height=12)
+        sections.append(border(cprof_v, title="cProfile Cost", chars=ROUNDED))
+
+    return join_vertical(*sections)
+
+
+# --- Zoom 3: frame-by-frame breakdown ---
+
+
+def render_full(data: ProfileData, width: int) -> Block:
+    """Frame-by-frame detail with cProfile flame and emission tree."""
+    p = current_palette()
+    sections: list[Block] = []
+    inner_width = min(width - 4, 70)
+
+    # Per-frame detail
+    for frame in data.frames:
+        style = p.warning if frame.is_hot else Style()
+        hot_marker = " HOT" if frame.is_hot else ""
+        header = Block.text(
+            f"Frame {frame.index}: {frame.write_count} writes{hot_marker}",
+            style,
+        )
+        label_line = Block.text(f"  {frame.label}", Style(dim=True))
+        inner = join_vertical(header, label_line)
+        sections.append(border(
+            pad(inner, right=max(0, min(50, width - 4) - inner.width)),
+            title=f"Frame {frame.index}",
+            chars=ROUNDED,
+        ))
+
+    sections.append(Block.text("", Style()))
+
+    # cProfile flame graph (horizontal — detailed call tree)
+    if data.cprofile_flame:
+        cprof_h = flame_lens(data.cprofile_flame, 2, inner_width)
+        sections.append(border(cprof_h, title="cProfile Timing", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # cProfile vertical flame (per-phase comparison)
+    if data.cprofile_flame:
+        cprof_v = flame_lens(data.cprofile_flame, 1, inner_width, height=12)
+        sections.append(border(cprof_v, title="cProfile Cost (Vertical)", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # Emission frequency chart
+    emission_data = {es.kind: es.count for es in data.emission_summary}
+    if emission_data:
+        chart_block = chart_lens(emission_data, 3, inner_width)
+        sections.append(border(chart_block, title="Emission Frequency", chars=ROUNDED))
+        sections.append(Block.text("", Style()))
+
+    # Full emission tree
+    emission_tree = _build_emission_tree(data.emissions_raw)
+    if emission_tree:
+        tree_block = tree_lens(emission_tree, 2, inner_width)
+        sections.append(border(tree_block, title="Emission Timeline", chars=ROUNDED))
+
+    return join_vertical(*sections)
+
+
+# --- run_cli integration ---
+
+
+def _render(ctx: CliContext, data: ProfileData) -> Block:
+    if ctx.zoom == Zoom.MINIMAL:
+        return render_minimal(data, ctx.width)
+    if ctx.zoom == Zoom.SUMMARY:
+        return render_summary(data, ctx.width)
+    if ctx.zoom == Zoom.FULL:
+        return render_full(data, ctx.width)
+    return render_detailed(data, ctx.width)
+
+
+def main() -> int:
+    return run_cli(
+        sys.argv[1:],
+        render=_render,
+        fetch=_fetch,
+        description=__doc__,
+        prog="profiler.py",
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

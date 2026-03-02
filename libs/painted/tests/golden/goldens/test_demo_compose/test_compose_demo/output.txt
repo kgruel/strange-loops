@@ -1,0 +1,53 @@
+
+  join_horizontal
+
+  cpu  mem  net
+  cpu    mem    net
+
+  alignment
+
+╭─ START ─────────╮ ╭─ CENTER ────────╮ ╭─ END ───────────╮
+│  ok             │ │        ok       │ │               ok│
+│  deploy complete│ │  deploy complete│ │  deploy complete│
+╰─────────────────╯ ╰─────────────────╯ ╰─────────────────╯
+
+  pad
+
+╭───────╮ ╭─ h-pad ───╮ ╭─ all ─────╮
+│content│ │  content  │ │           │
+╰───────╯ ╰───────────╯ │  content  │
+                        │           │
+                        ╰───────────╯
+
+  border
+
+╭─ ROUNDED ╮ ┏━ HEAVY ━━┓ ╔═ DOUBLE ═╗
+│status: ok│ ┃status: ok┃ ║status: ok║
+╰──────────╯ ┗━━━━━━━━━━┛ ╚══════════╝
+
+  truncate
+
+  the configuration file could not be parsed
+  the configuration file coul…
+  the configurati…
+
+  wrap modes (Block.text with width=20)
+
+╭─ NONE ─────────────╮ ╭─ ELLIPSIS ─────────╮
+│the quick brown fox │ │the quick brown fox…│
+╰────────────────────╯ ╰────────────────────╯
+
+╭─ WORD ─────────────╮ ╭─ CHAR ─────────────╮
+│the quick brown fox │ │the quick brown fox │
+│jumps over the lazy │ │jumps over the lazy │
+│dog                 │ │dog                 │
+╰────────────────────╯ ╰────────────────────╯
+
+  composition
+
+  ╭─ Status ───╮
+  │  CPU   45% │
+  │  MEM  2.1G │
+  │  NET  12MB │
+  ╰────────────╯
+

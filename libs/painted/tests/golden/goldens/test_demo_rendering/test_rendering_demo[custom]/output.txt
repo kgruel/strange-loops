@@ -1,0 +1,4 @@
+
+  custom lens: zoom 1 → bordered card
+
+  custom lens: zoom 2 → card with endpoint details

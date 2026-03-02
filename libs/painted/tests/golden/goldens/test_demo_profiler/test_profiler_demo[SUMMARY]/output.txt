@@ -1,0 +1,14 @@
+Scenario: list_nav
+  8 inputs, 80x24
+
+Frames:    9
+Writes:    272 total (avg 30, max 77)
+Hot frames: 1 (>2x avg)
+cProfile:  5000 calls, 0.0150s
+
+Emissions:
+    8x  ui.action
+    8x  ui.key
+    5x  list.select
+    1x  list.open
+    1x  list.close

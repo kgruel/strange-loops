@@ -1,0 +1,11 @@
+Frame Timing
+  9 frames, avg 0.15ms, max 0.42ms
+
+Phase averages (ms):
+     input: 0.019
+    update: 0.001
+    render: 0.106
+      diff: 0.024
+
+Frame totals:
+█▂▂▂▂▂▃▃▁

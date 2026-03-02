@@ -1,0 +1,174 @@
+
+  Component Demo
+
+  Spinner: ⠋  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠋  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠋  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠋  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠋  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠙  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit
+--- frame ---
+
+  Component Demo
+
+  Spinner: ⠙  Loading...
+
+  Progress: [←/→]
+  ██████████░░░░░░░░░░░░░░░░░░░░  35%
+
+  List:
+  ╭────────╮
+  │▸ Apple │
+  │  Banana│
+  │  Cherry│
+  ╰────────╯
+  Input:
+  ╭─────────────────────────╮
+  │Edit me                  │
+  ╰─────────────────────────╯
+
+
+
+
+
+  Tab: focus | Arrows/Type: interact | q: quit

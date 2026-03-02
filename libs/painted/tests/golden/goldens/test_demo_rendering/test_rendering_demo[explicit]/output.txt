@@ -1,0 +1,10 @@
+
+  chart_lens: zoom 0 → stats only
+
+  chart_lens: zoom 1 → sparkline
+
+  chart_lens: zoom 2 → bar chart
+
+  tree_lens: zoom 0 → summary
+
+  tree_lens: zoom 3 → full expansion

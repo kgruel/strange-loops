@@ -1,0 +1,29 @@
+
+  service dashboard (visual layer)
+
+╭─ api-gateway ──────────────╮  ╭─ auth-service ─────────────╮
+│ status: healthy ·          │  │ status: degraded ·         │
+│ replicas: 3/3 · p95: 12ms  │  │ replicas: 2/3 · p95:       │
+│ · errors: 0.2%             │  │ 2100ms · errors: 3.9%      │
+│                            │  │                            │
+│                            │  │                            │
+╰────────────────────────────╯  ╰────────────────────────────╯
+
+╭─ worker ───────────────────╮  ╭─ scheduler ────────────────╮
+│ status: healthy ·          │  │ status: failing ·          │
+│ replicas: 5/5 · p95: 8ms · │  │ replicas: 0/1 · p95: 0ms · │
+│ errors: 0.1%               │  │ errors: 12.4%              │
+│                            │  │                            │
+│                            │  │                            │
+╰────────────────────────────╯  ╰────────────────────────────╯
+
+  hit probes: Buffer.hit(x, y)
+
+  ( 0, 0)  api-gateway    top-left panel border
+  ( 2, 2)  api-gateway    top-left panel content
+  (30, 0)  ∅              horizontal gap
+  (32, 0)  auth-service   top-right panel border
+  ( 0, 7)  ∅              vertical gap
+  ( 0, 8)  worker         bottom-left panel border
+  (30, 7)  ∅              cross-gap
+  (34,10)  scheduler      bottom-right panel content

@@ -1,0 +1,41 @@
+
+  attributes
+
+  bold             deploy OK
+  italic           deploy OK
+  underline        deploy OK
+  dim              deploy OK
+  reverse          deploy OK
+
+  foreground
+
+  red
+  green
+  blue
+  yellow
+  cyan
+  magenta
+
+  background
+
+  red
+  green
+  blue
+  yellow
+  cyan
+  magenta
+
+  combinations
+
+  bold + green     deploy OK
+  dim + italic     deploy OK
+  reverse + cyan   deploy OK
+  bold + underline deploy OK
+  bg + bold        deploy OK
+
+  merge
+
+  base             deploy OK
+  + overlay        deploy OK
+  = merged         deploy OK
+

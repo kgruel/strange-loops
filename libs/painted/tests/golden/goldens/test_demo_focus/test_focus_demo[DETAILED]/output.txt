@@ -1,0 +1,239 @@
+✓ capture required
+  keys: j -> enter -> j -> escape -> q
+  key.ignored        key=j focus=services mode=nav
+  ui.key             key=j
+  focus.capture      widget=services
+  ui.key             key=enter
+  services.cursor    index=1 service=auth-service
+  ui.key             key=j
+  focus.release      widget=services
+  ui.key             key=escape
+  ui.quit            focus=services captured=False
+  ui.key             key=q
+
+  [initial]
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'j']
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'enter']
+╭─ services  CAP ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'q']
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│  api-gateway          OK │ │                          │ │  auth-service
+│> auth-service         DEG│ │matches (fuzzy):          │ │  health=degrad
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+✓ ring navigation
+  keys: tab -> tab -> shift_tab -> q
+  focus.move         from_id=services to_id=search nav=tab
+  ui.key             key=tab
+  focus.move         from_id=search to_id=details nav=tab
+  ui.key             key=tab
+  focus.move         from_id=details to_id=search nav=shift_tab
+  ui.key             key=shift_tab
+  ui.quit            focus=search captured=False
+  ui.key             key=q
+
+  [initial]
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'tab']
+╭─ services ───────────────╮ ╭─ search  NAV ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'q']
+╭─ services ───────────────╮ ╭─ search  NAV ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+✓ capture owns keys
+  keys: tab -> enter -> tab -> escape -> tab -> q
+  focus.move         from_id=services to_id=search nav=tab
+  ui.key             key=tab
+  focus.capture      widget=search
+  ui.key             key=enter
+  key.ignored        key=tab focus=search mode=capture
+  ui.key             key=tab
+  focus.release      widget=search
+  ui.key             key=escape
+  focus.move         from_id=search to_id=details nav=tab
+  ui.key             key=tab
+  ui.quit            focus=details captured=False
+  ui.key             key=q
+
+  [initial]
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'tab']
+╭─ services ───────────────╮ ╭─ search  NAV ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'enter']
+╭─ services ───────────────╮ ╭─ search  CAP ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'q']
+╭─ services ───────────────╮ ╭─ search ─────────────────╮ ╭─ details  NAV
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+✓ fuzzy search
+  keys: tab -> enter -> d -> p -> j -> enter -> escape -> q
+  focus.move         from_id=services to_id=search nav=tab
+  ui.key             key=tab
+  focus.capture      widget=search
+  ui.key             key=enter
+  search.query       query=d
+  ui.key             key=d
+  search.query       query=dp
+  ui.key             key=p
+  search.select      selected=1 match_count=2
+  ui.key             key=j
+  cmd.run            command=deploy auth-service query=dp
+  ui.key             key=enter
+  focus.release      widget=search
+  ui.key             key=escape
+  ui.quit            focus=search captured=False
+  ui.key             key=q
+
+  [initial]
+╭─ services  NAV ──────────╮ ╭─ search ─────────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'tab']
+╭─ services ───────────────╮ ╭─ search  NAV ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'enter']
+╭─ services ───────────────╮ ╭─ search  CAP ────────────╮ ╭─ details ─────
+│name                 healt│ │query:                    │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │> deploy api-gateway      │ │
+│  worker               OK │ │  deploy auth-service     │ │last command:
+│  scheduler            OK │ │  rollback auth-service   │ │  (none)
+│  metrics              OK │ │  tail logs api-gateway   │ │
+│  logger               OK │ │  tail logs auth-service  │ │recent deploy l
+│  cache                OK │ │  scale worker +2         │ │  10:34:12Z  bu
+
+  [after 'q']
+╭─ services ───────────────╮ ╭─ search  NAV ────────────╮ ╭─ details ─────
+│name                 healt│ │query: dp                 │ │selected servic
+│> api-gateway          OK │ │                          │ │  api-gateway
+│  auth-service         DEG│ │matches (fuzzy):          │ │  health=ok  p9
+│  billing              OK │ │  deploy api-gateway      │ │
+│  worker               OK │ │> deploy auth-service     │ │last command:
+│  scheduler            OK │ │ 2 match(es)              │ │  deploy auth-s
+│  metrics              OK │ │                          │ │
+│  logger               OK │ │                          │ │recent deploy l
+│  cache                OK │ │                          │ │  10:34:12Z  bu
+
+✓ focus demo: 4/4 scenarios

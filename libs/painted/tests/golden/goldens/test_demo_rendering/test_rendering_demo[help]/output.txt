@@ -1,0 +1,8 @@
+
+  rendering patterns
+
+  --explicit    lens API: call tree_lens / chart_lens directly
+  --custom      custom render: write your own (data, zoom, width) -> Block
+  --palette     palette switching: change all semantic colors at once
+
+  Run with a flag to see the pattern.

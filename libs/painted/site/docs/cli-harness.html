@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>painted — CLI Harness Fidelity</title>
+  <meta name="description" content="painted documentation">
+  <link rel="stylesheet" href="../style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+</head>
+<body class="docs">
+  <div class="page-wrapper">
+    <div class="top-nav">
+      <a class="brand" href="../index.html">painted</a>
+      <div class="nav-links">
+        <a href="quickstart.html" >Quickstart</a>
+        <a href="primitives.html" >Primitives</a>
+        <a href="composition.html" >Composition</a>
+        <a href="cli-harness.html" aria-current="page">CLI harness</a>
+        <a href="tui.html" >TUI</a>
+      </div>
+      <button class="nav-button" id="theme-toggle" type="button" aria-label="Toggle theme">Theme</button>
+    </div>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="docs-sidebar-title">Docs</div>
+        <nav class="docs-sidebar-links" aria-label="Documentation">
+          <a href="quickstart.html" >Quickstart</a>
+          <a href="primitives.html" >Primitives and Blocks</a>
+          <a href="composition.html" >Composition Layout</a>
+          <a href="cli-harness.html" aria-current="page">CLI Harness Fidelity</a>
+          <a href="tui.html" >TUI Core Layers</a>
+        </nav>
+      </aside>
+
+      <main class="docs-content">
+        <article class="markdown">
+<h1>CLI Harness (fidelity)</h1>
+<p>The fidelity layer standardizes a common CLI UI spectrum:</p>
+<ul>
+<li><strong>STATIC</strong>: print once and exit (scrolls away)</li>
+<li><strong>LIVE</strong>: in-place updates with cursor control</li>
+<li><strong>INTERACTIVE</strong>: a full TUI loop (alt screen + keyboard input)</li>
+</ul>
+<p>It also standardizes:</p>
+<ul>
+<li><strong>Zoom</strong> (<code>-q</code>, <code>-v</code>, <code>-vv</code>) as “detail level”</li>
+<li><strong>Format</strong> (<code>--plain</code>, <code>--json</code>) as “serialization”</li>
+</ul>
+<p>See also:</p>
+<ul>
+<li><code>CLAUDE.md</code>: current API reference (<code>../../CLAUDE.md</code>)</li>
+</ul>
+<hr>
+<h2>Core types</h2>
+<pre class="language-python"><code class="language-python">class Zoom(IntEnum):
+    &quot;&quot;&quot;Detail level for rendering.&quot;&quot;&quot;
+
+    MINIMAL = 0  # One-liner, counts only
+    SUMMARY = 1  # Key information, tree structure
+    DETAILED = 2  # Everything visible, nested expansion
+    FULL = 3  # All fields, full depth</code></pre>
+<pre class="language-python"><code class="language-python">class OutputMode(Enum):
+    &quot;&quot;&quot;Delivery mechanism.&quot;&quot;&quot;
+
+    AUTO = &quot;auto&quot;  # Detect from TTY/pipe
+    STATIC = &quot;static&quot;  # print_block, scrolls away
+    LIVE = &quot;live&quot;  # InPlaceRenderer, cursor control
+    INTERACTIVE = &quot;interactive&quot;  # Surface, alt screen</code></pre>
+<pre class="language-python"><code class="language-python">class Format(Enum):
+    &quot;&quot;&quot;Serialization format.&quot;&quot;&quot;
+
+    AUTO = &quot;auto&quot;  # Detect from TTY
+    ANSI = &quot;ansi&quot;  # Styled terminal output
+    PLAIN = &quot;plain&quot;  # No escape codes
+    JSON = &quot;json&quot;  # Machine-readable</code></pre>
+<pre class="language-python"><code class="language-python">@dataclass(frozen=True)
+class CliContext:
+    &quot;&quot;&quot;Resolved runtime context.&quot;&quot;&quot;
+
+    zoom: Zoom
+    mode: OutputMode  # Resolved (never AUTO)
+    format: Format  # Resolved (never AUTO)
+    is_tty: bool
+    width: int
+    height: int</code></pre>
+<h2>Entry point</h2>
+<p><code>run_cli()</code> is the intended “one call” entry point.</p>
+<pre class="language-python"><code class="language-python">def run_cli(
+    args: list[str],
+    render: Callable[[CliContext, T], &quot;Block&quot;],
+    fetch: Callable[[], T],
+    *,
+    fetch_stream: Callable[[], &quot;AsyncIterator[T]&quot;] | None = None,
+    handlers: dict[OutputMode, Callable[[CliContext], R]] | None = None,
+    default_zoom: Zoom = Zoom.SUMMARY,
+    description: str | None = None,
+    prog: str | None = None,
+    add_args: Callable[[argparse.ArgumentParser], None] | None = None,
+) -&gt; int:</code></pre>
+<hr>
+<h2>Pattern: state → Block, decoupled from I/O</h2>
+<p>The harness keeps a strict separation:</p>
+<ul>
+<li>your code owns <em>state fetching</em> (<code>fetch</code> / <code>fetch_stream</code>)</li>
+<li>your code owns <em>rendering</em> (<code>render(ctx, state) -&gt; Block</code>)</li>
+<li>painted owns <em>delivery</em> (static/live/interactive formatting and terminal behavior)</li>
+</ul>
+<h2>Demo output (fidelity.py)</h2>
+<h3>Zoom.MINIMAL</h3>
+<pre class="painted-output">67% used (134.0G/200.0G)
+</pre>
+<h3>Zoom.DETAILED</h3>
+<pre class="painted-output">╭─ Disk: /home ─────────────────────────────────────────╮
+│<span style="color: green"> 67.0% ████████████████████░░░░░░░░░░</span><span style="opacity: 0.6"> 134.0G/200.0G</span>    │
+╰───────────────────────────────────────────────────────╯
+                                                         
+╭─ By Directory ────────────────────────────────────────╮
+│<span style="font-weight: bold"> 45.0G</span> <span style="color: yellow">▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 33.6%</span>  projects │
+│<span style="font-weight: bold"> 28.0G</span> <span style="color: yellow">▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 20.9%</span>  downloads│
+│<span style="font-weight: bold"> 22.0G</span> <span style="color: cyan">▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 16.4%</span>  .cache   │
+│<span style="font-weight: bold"> 18.0G</span> <span style="color: cyan">▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6"> 13.4%</span>  documents│
+│<span style="font-weight: bold"> 12.0G</span> <span style="color: cyan">▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6">  9.0%</span>  pictures │
+│<span style="font-weight: bold">  9.0G</span> <span style="color: cyan">▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> <span style="opacity: 0.6">  6.7%</span>  .local   │
+╰───────────────────────────────────────────────────────╯
+                                                         
+<span style="color: green; font-weight: bold">  Free: 66.0G  </span>                                          
+</pre>
+        </article>
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <ul class="footer-links">
+        <li><a href="../index.html">Home</a></li>
+        <li><a href="quickstart.html">Docs</a></li>
+        <li><a href="https://github.com/kaygee/painted">GitHub</a></li>
+        <li><a href="https://pypi.org/project/painted/">PyPI</a></li>
+      </ul>
+    </footer>
+  </div>
+
+  <script defer src="../site.js"></script>
+</body>
+</html>
+

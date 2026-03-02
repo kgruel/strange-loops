@@ -8,10 +8,18 @@ from pathlib import Path
 
 from atoms import Fact
 from engine import SqliteStore
+from engine.compiler import compile_sources_block
+from lang.ast import InlineSource, SourcesBlock
 from painted import Zoom
 from painted.writer import print_block
 
-from loops.health import CheckStep, health_lens, health_view, run_checks
+from loops.health import (
+    CheckStep,
+    health_lens,
+    health_view,
+    run_checks,
+    run_sequential_checks,
+)
 
 
 def _block_text(block) -> str:
@@ -173,3 +181,108 @@ class TestHealthView:
         block = health_view(results, Zoom.SUMMARY, 80)
         # Should render without error
         assert block is not None
+
+
+def _make_seq_block(*steps: tuple[str, str]) -> SourcesBlock:
+    """Build a SourcesBlock from (command, kind) pairs."""
+    return SourcesBlock(
+        mode="sequential",
+        sources=tuple(InlineSource(command=cmd, kind=kind) for cmd, kind in steps),
+    )
+
+
+class TestRunSequentialChecks:
+    """Tests for run_sequential_checks — the vertex-aware async runner."""
+
+    def test_passing_steps(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(
+            ("echo ok", "lint.result"),
+            ("true", "test.result"),
+        )
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+
+        assert len(results) == 2
+        assert results[0]["kind"] == "lint.result"
+        assert results[0]["payload"]["status"] == "passed"
+        assert results[1]["kind"] == "test.result"
+        assert results[1]["payload"]["status"] == "passed"
+
+        # Facts persisted
+        facts = _read_all_facts(store_path)
+        assert len(facts) == 2
+
+    def test_failure_stops_sequence(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(
+            ("true", "lint.result"),
+            ("false", "test.result"),
+            ("true", "arch.result"),
+        )
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+
+        assert len(results) == 2
+        assert results[0]["payload"]["status"] == "passed"
+        assert results[1]["payload"]["status"] == "failed"
+        # arch never ran
+        facts = _read_all_facts(store_path)
+        assert len(facts) == 2
+
+    def test_captures_stdout(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(("echo hello world", "echo.result"),)
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+
+        assert results[0]["payload"]["status"] == "passed"
+        assert "hello world" in results[0]["payload"]["output"]
+
+    def test_captures_stderr_on_failure(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(("echo oops >&2; false", "fail.result"),)
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+
+        assert results[0]["payload"]["status"] == "failed"
+        assert "oops" in results[0]["payload"]["output"]
+
+    def test_duration_is_positive(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(("echo fast", "speed.result"),)
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+
+        assert results[0]["payload"]["duration_s"] >= 0
+
+    def test_custom_observer(self, tmp_path):
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(("true", "lint.result"),)
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path, observer="ci")
+
+        assert results[0]["observer"] == "ci"
+
+    def test_results_compatible_with_health_view(self, tmp_path):
+        """Results from run_sequential_checks render through health_view."""
+        store_path = _seed_vertex(tmp_path)
+        block = _make_seq_block(
+            ("echo all good", "lint.result"),
+            ("true", "test.result"),
+        )
+        seq = compile_sources_block(block, "check")
+
+        results = run_sequential_checks(seq, store_path)
+        view = health_view(results, Zoom.SUMMARY, 80)
+
+        assert view is not None
+        text = _block_text(view)
+        assert "lint" in text
+        assert "test" in text

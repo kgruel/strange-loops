@@ -1452,8 +1452,10 @@ def _run_store(argv: list[str]) -> int:
 def _run_check(argv: list[str]) -> int:
     """Run health checks, emit result facts, render with gutter."""
     from painted import run_cli
+    from lang import parse_vertex_file
+    from engine.compiler import compile_sources_block
 
-    from .health import DEFAULT_STEPS, CheckStep, health_view, run_checks
+    from .health import DEFAULT_STEPS, health_view, run_checks, run_sequential_checks
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("vertex", nargs="?", default=None)
@@ -1476,20 +1478,35 @@ def _run_check(argv: list[str]) -> int:
         _err("Vertex has no store configured")
         return 1
 
-    # Discover check steps: use scripts/check.sh steps if project has a dev harness,
-    # otherwise fall back to defaults.
-    steps = DEFAULT_STEPS
-    project_root = vertex_path.parent
+    # Parse vertex AST to check for sources sequential blocks
+    vertex_ast = parse_vertex_file(vertex_path)
+    seq_block = None
+    if vertex_ast.sources_blocks:
+        for block in vertex_ast.sources_blocks:
+            if block.mode == "sequential":
+                seq_block = block
+                break
 
+    project_root = vertex_path.parent
     results_ref: list[dict] = []
 
     def fetch():
-        results = run_checks(
-            store_path,
-            steps,
-            observer=known.observer,
-            cwd=project_root,
-        )
+        if seq_block is not None:
+            # Vertex declares sources sequential — compile and run it
+            seq_source = compile_sources_block(seq_block, vertex_ast.name)
+            results = run_sequential_checks(
+                seq_source,
+                store_path,
+                observer=known.observer,
+            )
+        else:
+            # No sources block — fall back to DEFAULT_STEPS
+            results = run_checks(
+                store_path,
+                DEFAULT_STEPS,
+                observer=known.observer,
+                cwd=project_root,
+            )
         results_ref.extend(results)
         return results
 

@@ -112,6 +112,33 @@ class Block:
         raise ValueError(f"Unknown wrap mode: {wrap}")
 
     @staticmethod
+    def column(
+        rows: Sequence[tuple[str, Style]],
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> Block:
+        """Create a block from per-row (text, style) pairs.
+
+        Each entry becomes one row. Width is inferred from the first row's
+        display width if not given explicitly; all rows are padded/truncated
+        to match.
+        """
+        if not rows:
+            return Block([], 0, id=id)
+
+        if width is None:
+            width = display_width(rows[0][0])
+
+        cell_rows: list[list[Cell]] = []
+        for text, style in rows:
+            cells = _cells_from_text(text, style, max_width=width)
+            cells = _pad_row(cells, width, style)
+            cell_rows.append(cells)
+
+        return Block(cell_rows, width, id=id)
+
+    @staticmethod
     def empty(width: int, height: int, style: Style = Style(), *, id: str | None = None) -> Block:
         """Create a block filled with space cells."""
         space = Cell(" ", style)

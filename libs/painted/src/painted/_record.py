@@ -283,7 +283,8 @@ def record_line(
         lines: list[Block] = [primary_line]
 
         # Secondary fields: long values or specific keys
-        indent = " " * (ts_w + display_width(label_text) + 3)
+        # Shallow indent — gutter rail provides visual continuity to parent
+        indent = "  "
         for k, v in payload.items():
             if v is None or v == "":
                 continue
@@ -307,13 +308,12 @@ def record_line(
     header_line = join_horizontal(*segments)
     lines = [header_line]
 
-    indent = " " * (ts_w + display_width(label_text) + 3)
+    # Shallow indent — gutter rail provides visual continuity to parent
+    indent = "  "
     for k, v in payload.items():
         if v is None or v == "":
             continue
         field_text = f"{indent}{k}: {v}"
-        if len(field_text) > width:
-            field_text = field_text[: width - 1] + "…"
         lines.append(Block.text(field_text, p.muted))
 
     return join_vertical(*lines)
@@ -372,6 +372,10 @@ def record_timeline(
 # Modifier application
 # ---------------------------------------------------------------------------
 
+# Weight stepping: primary gutter char on first line, lighter on continuation.
+# Error heaviest → pass lightest; the rail never breaks.
+_GUTTER_STEP: dict[str, str] = {"█": "▐", "▐": "│", "│": "│", "·": "·"}
+
 
 def apply_gutter(
     block: Block,
@@ -379,10 +383,21 @@ def apply_gutter(
     payload: dict,
     gutter_fn: GutterFn,
 ) -> Block:
-    """Apply a gutter modifier to a rendered block."""
+    """Apply a gutter modifier to a rendered block.
+
+    Builds a continuous gutter rail matching the block's height.
+    First line uses the primary weight from gutter_fn; continuation
+    lines step down one weight level (``█→▐→│``).
+    """
     ch, style = gutter_fn(kind, payload)
-    gutter = Block.text(f"{ch} ", style)
-    return join_horizontal(gutter, block)
+    cont_ch = _GUTTER_STEP.get(ch, ch)
+
+    rows = [(f"{ch} ", style)]
+    if block.height > 1:
+        rows += [(f"{cont_ch} ", style)] * (block.height - 1)
+
+    gutter_block = Block.column(rows)
+    return join_horizontal(gutter_block, block)
 
 
 def apply_attention(
@@ -453,8 +468,14 @@ def record_line_composed(
     # Apply attention (may collapse to one-liner)
     if attention_fn:
         block = apply_attention(
-            block, kind, payload, attention_fn,
-            zoom=zoom, width=inner_width, ts=ts, payload_lens=payload_lens,
+            block,
+            kind,
+            payload,
+            attention_fn,
+            zoom=zoom,
+            width=inner_width,
+            ts=ts,
+            payload_lens=payload_lens,
         )
 
     # Apply gutter (outermost)
@@ -506,7 +527,9 @@ def record_map(
     if sort_groups == "count":
         sorted_keys = sorted(groups.keys(), key=lambda k: len(groups[k]), reverse=True)
     elif sort_groups == "recent":
-        sorted_keys = sorted(groups.keys(), key=lambda k: max(ts for ts, _, _ in groups[k]), reverse=True)
+        sorted_keys = sorted(
+            groups.keys(), key=lambda k: max(ts for ts, _, _ in groups[k]), reverse=True
+        )
     else:
         sorted_keys = sorted(groups.keys())
 
@@ -554,7 +577,10 @@ def record_map(
                 # Show only the latest record per group
                 latest_ts, latest_kind, latest_payload = sub_records[-1]
                 line = record_line_composed(
-                    latest_ts, latest_kind, latest_payload, Zoom.SUMMARY,
+                    latest_ts,
+                    latest_kind,
+                    latest_payload,
+                    Zoom.SUMMARY,
                     width - indent,
                     payload_lens=payload_lens,
                     gutter_fn=gutter_fn,
@@ -566,7 +592,10 @@ def record_map(
                 record_zoom = Zoom.DETAILED if zoom <= Zoom.DETAILED else Zoom.FULL
                 for ts, kind, payload in sub_records:
                     line = record_line_composed(
-                        ts, kind, payload, record_zoom,
+                        ts,
+                        kind,
+                        payload,
+                        record_zoom,
                         width - indent,
                         payload_lens=payload_lens,
                         gutter_fn=gutter_fn,

@@ -220,12 +220,15 @@ def health_lens(kind: str, payload: dict, zoom: Zoom) -> str | Block:
         parts.append(Block.text(f" ({duration}s)", p.muted))
 
     if zoom >= Zoom.DETAILED and output:
-        # Show first few lines of output
         lines = output.splitlines()
-        limit = 20 if zoom >= Zoom.FULL else 5
-        preview = "\n".join(lines[:limit])
-        if len(lines) > limit:
-            preview += f"\n  ... ({len(lines) - limit} more lines)"
+        if zoom >= Zoom.FULL:
+            # FULL contract: show everything
+            preview = "\n".join(lines)
+        else:
+            limit = 5
+            preview = "\n".join(lines[:limit])
+            if len(lines) > limit:
+                preview += f"\n  ... ({len(lines) - limit} more lines)"
         parts.append(Block.text(f"\n  {preview}", p.muted))
 
     return join_horizontal(*parts)

@@ -151,6 +151,25 @@ class TestHealthLens:
         from painted import Block
         assert isinstance(result, Block)
 
+    def test_detailed_caps_output_at_5_lines(self):
+        """DETAILED zoom caps output preview at 5 lines."""
+        lines = "\n".join(f"line{i}" for i in range(20))
+        payload = self._result_payload(output=lines)
+        result = health_lens("test.result", payload, Zoom.DETAILED)
+        text = _block_text(result)
+        assert "... (15 more lines)" in text
+
+    def test_full_shows_all_output_lines(self):
+        """FULL zoom shows complete output without capping."""
+        lines_list = [f"line{i}" for i in range(30)]
+        output = "\n".join(lines_list)
+        payload = self._result_payload(output=output)
+        result = health_lens("test.result", payload, Zoom.FULL)
+        text = _block_text(result)
+        # All lines present, no "more lines" truncation
+        assert "more lines" not in text
+        assert "line29" in text
+
 
 class TestHealthView:
     def _make_results(self, *statuses: str) -> list[dict]:

@@ -82,12 +82,23 @@ class TestRecordLineZoom:
         assert "message:" in text
         assert "author:" in text
 
+    def test_full_does_not_truncate_field_lines(self):
+        """FULL zoom shows complete field values, no ellipsis truncation."""
+        long_value = "A" * 200
+        payload = {"output": long_value}
+        block = record_line(_ts(), "task", payload, Zoom.FULL, 80)
+        text = block_to_text(block)
+        # The full value should appear without ellipsis truncation
+        assert "…" not in text
+        assert long_value in text
+
 
 class TestRecordLinePayloadLens:
     """record_line with payload_lens."""
 
     def test_lens_overrides_content(self):
         """Custom lens replaces default content."""
+
         def my_lens(kind: str, payload: dict, zoom: Zoom) -> str:
             return "CUSTOM"
 
@@ -97,6 +108,7 @@ class TestRecordLinePayloadLens:
 
     def test_lens_returning_block(self):
         """Lens can return a Block instead of str."""
+
         def block_lens(kind: str, payload: dict, zoom: Zoom) -> Block:
             return Block.text("BLOCK_CONTENT", Style())
 
@@ -106,6 +118,7 @@ class TestRecordLinePayloadLens:
 
     def test_lens_at_minimal(self):
         """Lens works at MINIMAL zoom (string result only)."""
+
         def my_lens(kind: str, payload: dict, zoom: Zoom) -> str:
             return "MINI"
 
@@ -129,30 +142,39 @@ class TestRecordLineWidth:
         block = record_line(_ts(), "task", {"name": "x"}, Zoom.MINIMAL, 20)
         assert block.width == 20
 
-    def test_wide_char_kind_width_calculation(self):
-        """Kind name with multi-byte chars uses display_width, not len()."""
-        # "エラー" is 6 display columns (3 chars × 2 cols each)
-        # vs len("エラー") == 3. If we used len(), the indent would be wrong.
+    def test_wide_char_kind_renders(self):
+        """Kind name with multi-byte chars renders correctly at DETAILED."""
         block = record_line(
-            _ts(), "エラー", {"message": "test error"},
-            Zoom.DETAILED, 80,
+            _ts(),
+            "エラー",
+            {"message": "test error"},
+            Zoom.DETAILED,
+            80,
         )
         text = block_to_text(block)
-        # Wide chars render with space placeholders in Block output
         assert "エ" in text
         assert "message:" in text
-        # The continuation line indent should account for display width.
-        # With display_width("エラー")=6: indent = 6 + 6 + 3 = 15 chars
-        # With len("エラー")=3: indent would be wrong at 6 + 3 + 3 = 12 chars
         lines = text.strip().split("\n")
         assert len(lines) > 1, "DETAILED should have continuation lines"
+
+    def test_shallow_continuation_indent(self):
+        """Continuation lines use shallow 2-char indent, not deep column alignment."""
+        payload = {
+            "topic": "SQLite",
+            "message": "Chose SQLite over filesystem for atomic writes and query support",
+        }
+        block = record_line(_ts(), "decision", payload, Zoom.DETAILED, 80)
+        text = block_to_text(block)
+        lines = text.strip().split("\n")
+        assert len(lines) > 1
         continuation = lines[1]
         leading_spaces = len(continuation) - len(continuation.lstrip())
-        # ts_w(DETAILED)=6, display_width("エラー")=6, brackets=3 → indent=15
-        assert leading_spaces == 15
+        # Shallow indent: 2 spaces (gutter rail provides visual continuity)
+        assert leading_spaces == 2
 
     def test_block_lens_constrained_to_content_width(self):
         """Block from PayloadLens is truncated to content_width at SUMMARY."""
+
         def wide_lens(kind: str, payload: dict, zoom: Zoom) -> Block:
             return Block.text("X" * 200, Style())
 
@@ -166,16 +188,22 @@ class TestRecordLineKindSummary:
 
     def test_decision_combines_topic_and_message(self):
         block = record_line(
-            _ts(), "decision", {"topic": "SQLite", "message": "good choice"},
-            Zoom.SUMMARY, 80,
+            _ts(),
+            "decision",
+            {"topic": "SQLite", "message": "good choice"},
+            Zoom.SUMMARY,
+            80,
         )
         text = block_to_text(block)
         assert "SQLite: good choice" in text
 
     def test_thread_shows_name_status_summary(self):
         block = record_line(
-            _ts(), "thread", {"name": "routing", "status": "active", "summary": "Design it"},
-            Zoom.SUMMARY, 80,
+            _ts(),
+            "thread",
+            {"name": "routing", "status": "active", "summary": "Design it"},
+            Zoom.SUMMARY,
+            80,
         )
         text = block_to_text(block)
         assert "routing" in text
@@ -183,8 +211,11 @@ class TestRecordLineKindSummary:
 
     def test_tick_shows_name_status_fold(self):
         block = record_line(
-            _ts(), "tick", {"name": "proj", "status": "running", "fold": "3 collected"},
-            Zoom.SUMMARY, 80,
+            _ts(),
+            "tick",
+            {"name": "proj", "status": "running", "fold": "3 collected"},
+            Zoom.SUMMARY,
+            80,
         )
         text = block_to_text(block)
         assert "proj" in text
@@ -192,16 +223,22 @@ class TestRecordLineKindSummary:
 
     def test_generic_uses_summary_keys(self):
         block = record_line(
-            _ts(), "custom", {"title": "Hello World"},
-            Zoom.SUMMARY, 60,
+            _ts(),
+            "custom",
+            {"title": "Hello World"},
+            Zoom.SUMMARY,
+            60,
         )
         text = block_to_text(block)
         assert "Hello World" in text
 
     def test_generic_fallback_to_kv(self):
         block = record_line(
-            _ts(), "custom", {"x": 1, "y": 2},
-            Zoom.SUMMARY, 60,
+            _ts(),
+            "custom",
+            {"x": 1, "y": 2},
+            Zoom.SUMMARY,
+            60,
         )
         text = block_to_text(block)
         assert "x=1" in text
@@ -253,10 +290,14 @@ class TestRecordTimeline:
     def test_detailed_shows_continuation_lines(self):
         """DETAILED renders records at DETAILED zoom within date groups."""
         records = [
-            (_ts(0), "decision", {
-                "topic": "SQLite",
-                "message": "Chose SQLite over filesystem for atomic writes",
-            }),
+            (
+                _ts(0),
+                "decision",
+                {
+                    "topic": "SQLite",
+                    "message": "Chose SQLite over filesystem for atomic writes",
+                },
+            ),
         ]
         block = record_timeline(records, Zoom.DETAILED, 80)
         text = block_to_text(block)
@@ -283,6 +324,7 @@ class TestRecordTimeline:
 
     def test_block_lens_at_detailed(self):
         """Block-returning PayloadLens works within timeline at DETAILED zoom."""
+
         def block_lens(kind: str, payload: dict, zoom: Zoom) -> str | Block:
             if zoom >= Zoom.DETAILED:
                 return "DETAIL_LENS"
@@ -436,6 +478,52 @@ class TestApplyGutter:
         result = apply_gutter(inner, "task", {}, gutter_lifecycle)
         assert result.width > inner.width
 
+    def test_gutter_continuous_on_multiline(self):
+        """Gutter rail covers every line, not just the first."""
+        from painted.compose import join_vertical
+
+        inner = join_vertical(
+            Block.text("line1", Style()),
+            Block.text("line2", Style()),
+            Block.text("line3", Style()),
+        )
+        result = apply_gutter(inner, "task", {"status": "blocked"}, gutter_lifecycle)
+        text = block_to_text(result)
+        lines = text.strip().split("\n")
+        assert len(lines) == 3
+        # First line: full block █, continuation: half block ▐
+        assert lines[0].startswith("█")
+        assert lines[1].startswith("▐")
+        assert lines[2].startswith("▐")
+
+    def test_gutter_step_pass_stays_thin(self):
+        """Pass/success gutter stays │ on continuation lines (baseline)."""
+        from painted.compose import join_vertical
+
+        inner = join_vertical(
+            Block.text("line1", Style()),
+            Block.text("line2", Style()),
+        )
+        result = apply_gutter(inner, "test", {"status": "passed"}, gutter_pass_fail)
+        text = block_to_text(result)
+        lines = text.strip().split("\n")
+        assert lines[0].startswith("│")
+        assert lines[1].startswith("│")
+
+    def test_gutter_step_warning(self):
+        """Warning gutter: ▐ on first line, │ on continuation."""
+        from painted.compose import join_vertical
+
+        inner = join_vertical(
+            Block.text("line1", Style()),
+            Block.text("line2", Style()),
+        )
+        result = apply_gutter(inner, "test", {"status": "warning"}, gutter_pass_fail)
+        text = block_to_text(result)
+        lines = text.strip().split("\n")
+        assert lines[0].startswith("▐")
+        assert lines[1].startswith("│")
+
 
 class TestApplyAttention:
     """apply_attention tests."""
@@ -449,7 +537,9 @@ class TestApplyAttention:
     def test_low_attention_collapses(self):
         inner = Block.text("content that is very long", Style())
         result = apply_attention(
-            inner, "tick", {"name": "heartbeat"},
+            inner,
+            "tick",
+            {"name": "heartbeat"},
             lambda k, p: 0.1,
             width=60,
         )
@@ -467,7 +557,9 @@ class TestApplyAttention:
         """Collapsed one-liner should have the specified width."""
         inner = Block.text("content", Style())
         result = apply_attention(
-            inner, "tick", {"name": "heartbeat"},
+            inner,
+            "tick",
+            {"name": "heartbeat"},
             lambda k, p: 0.1,
             width=50,
         )
@@ -490,7 +582,11 @@ class TestRecordLineComposed:
 
     def test_with_gutter(self):
         block = record_line_composed(
-            _ts(), "task", {"name": "X", "status": "blocked"}, Zoom.SUMMARY, 60,
+            _ts(),
+            "task",
+            {"name": "X", "status": "blocked"},
+            Zoom.SUMMARY,
+            60,
             gutter_fn=gutter_lifecycle,
         )
         text = block_to_text(block)
@@ -498,7 +594,11 @@ class TestRecordLineComposed:
 
     def test_with_attention(self):
         block = record_line_composed(
-            _ts(), "decision", {"topic": "new"}, Zoom.SUMMARY, 60,
+            _ts(),
+            "decision",
+            {"topic": "new"},
+            Zoom.SUMMARY,
+            60,
             attention_fn=lambda k, p: 1.0,
         )
         text = block_to_text(block)
@@ -506,7 +606,11 @@ class TestRecordLineComposed:
 
     def test_with_gutter_and_attention(self):
         block = record_line_composed(
-            _ts(), "task", {"name": "X", "status": "blocked"}, Zoom.SUMMARY, 80,
+            _ts(),
+            "task",
+            {"name": "X", "status": "blocked"},
+            Zoom.SUMMARY,
+            80,
             gutter_fn=gutter_lifecycle,
             attention_fn=attention_blocked,
         )
@@ -558,7 +662,9 @@ class TestRecordMap:
             (_ts(2), "decision", {"topic": "design/x"}),
         ]
         block = record_map(
-            records, Zoom.MINIMAL, 80,
+            records,
+            Zoom.MINIMAL,
+            80,
             group_key=lambda k, p: p.get("topic", k).split("/")[0],
         )
         text = block_to_text(block)
@@ -571,7 +677,9 @@ class TestRecordMap:
             (_ts(1), "decision", {"topic": "arch/api"}),
         ]
         block = record_map(
-            records, Zoom.SUMMARY, 80,
+            records,
+            Zoom.SUMMARY,
+            80,
             group_key=lambda k, p: p.get("topic", k),
         )
         text = block_to_text(block)
@@ -597,7 +705,9 @@ class TestRecordMap:
             (_ts(0), "task", {"name": "X", "status": "blocked"}),
         ]
         block = record_map(
-            records, Zoom.SUMMARY, 80,
+            records,
+            Zoom.SUMMARY,
+            80,
             gutter_fn=gutter_lifecycle,
         )
         text = block_to_text(block)

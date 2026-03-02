@@ -41,6 +41,35 @@ result = merge_store(
 
 **Merge dedup**: `INSERT OR IGNORE` on ULID primary key. Same fact across stores has the same ULID — globally unique IDs make dedup trivial. `dry_run=True` computes counts without committing.
 
+## Level 0.5 — Receive, compact, transport
+
+**Trigger**: I need to move stores between locations or maintain them.
+
+```python
+from store import receive_store, compact_store, push_store, pull_store, LocalTransport
+
+# Receive: create-or-merge with SQLite validation
+result = receive_store(target=Path("data/project.db"), source=Path("/tmp/incoming.db"))
+# ReceiveResult(status="created"|"merged", facts=5, ticks=2)
+
+# Compact: VACUUM + PRAGMA optimize
+result = compact_store(Path("data/project.db"))
+# CompactResult(before_bytes=16384, after_bytes=8192, saved_bytes=8192)
+
+# Push: slice local -> transport -> remote receive
+transport = LocalTransport()
+result = push_store(Path("data/local.db"), transport, remote_path=Path("data/remote.db"))
+# PushResult(sliced_facts=5, sliced_ticks=2, receive=ReceiveResult(...))
+
+# Pull: remote -> transport -> local receive
+result = pull_store(Path("data/local.db"), transport, remote_path=Path("data/remote.db"))
+# PullResult(sliced_facts=5, sliced_ticks=2, receive=ReceiveResult(...))
+```
+
+**Transport protocol**: `Transport` is a `Protocol` with `push(local_path, *, remote_path)` and `pull(remote_path, *, local_path)`. `LocalTransport` copies files on the same machine. SSH transport is a future phase.
+
+**Push/pull filters**: `since`, `before`, `kinds` — same as slice. Cursor tracking is the caller's responsibility (libs/store is stateless).
+
 ---
 
 ## Level 1 — Understand the schema

@@ -10,6 +10,7 @@ Run: uv run pytest tests/test_architecture.py -v
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -243,5 +244,160 @@ def test_lib_dependency_dag():
 
     assert not violations, (
         "Lib dependency DAG violation (see _LIB_ALLOWED_RUNTIME):\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# AST dataclass collector
+# ---------------------------------------------------------------------------
+
+
+class _DataclassCollector(ast.NodeVisitor):
+    """Find @dataclass classes and check for frozen=True."""
+
+    def __init__(self) -> None:
+        self.unfrozen: list[tuple[str, int]] = []  # (class_name, lineno)
+
+    def _is_dataclass(self, node: ast.expr) -> bool:
+        if isinstance(node, ast.Name) and node.id == "dataclass":
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "dataclass":
+            return True
+        if isinstance(node, ast.Call):
+            return self._is_dataclass(node.func)
+        return False
+
+    def _has_frozen(self, node: ast.expr) -> bool:
+        if not isinstance(node, ast.Call):
+            return False  # bare @dataclass — no frozen
+        for kw in node.keywords:
+            if (
+                kw.arg == "frozen"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+            ):
+                return True
+        return False
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for dec in node.decorator_list:
+            if self._is_dataclass(dec) and not self._has_frozen(dec):
+                self.unfrozen.append((node.name, node.lineno))
+        self.generic_visit(node)
+
+
+def _collect_unfrozen_dataclasses(path: Path) -> list[tuple[str, int]]:
+    """Return (class_name, lineno) for dataclasses missing frozen=True."""
+    collector = _DataclassCollector()
+    collector.visit(ast.parse(path.read_text(), filename=str(path)))
+    return collector.unfrozen
+
+
+# ---------------------------------------------------------------------------
+# Rule 5: Lib dataclasses must be frozen
+# ---------------------------------------------------------------------------
+
+
+def test_lib_dataclasses_frozen():
+    """Lib dataclasses must use @dataclass(frozen=True).
+
+    Convention: "Immutable by default — frozen dataclasses, pure functions."
+    Mutable state belongs in local variables and closures, not data types.
+    """
+    EXCEPTIONS: set[tuple[str, str]] = {
+        # Legitimately mutable — accumulator/collector patterns
+        ("libs/lang/src/lang/validator.py", "ValidationContext"),  # error accumulator
+        ("libs/engine/src/engine/loop.py", "Loop"),  # _period_start timing state
+        ("libs/painted/src/painted/_timer.py", "FrameRecord"),  # timing accumulator
+        # TODO: freeze — these are config/output holders, not accumulators
+        ("libs/atoms/src/atoms/source.py", "Source"),
+        ("libs/engine/src/engine/compiler.py", "CompiledVertex"),
+        ("libs/engine/src/engine/stream.py", "Tap"),
+        ("libs/lang/src/lang/validator.py", "Shape"),
+        ("libs/lang/src/lang/errors.py", "Location"),
+        ("libs/painted/src/painted/buffer.py", "CellWrite"),
+        ("libs/painted/src/painted/fidelity.py", "CliRunner"),
+    }
+    # Validate exception paths still exist
+    for rel_path, _cls in EXCEPTIONS:
+        assert (REPO_ROOT / rel_path).exists(), f"Stale exception: {rel_path}"
+
+    violations = []
+    for lib_dir in (REPO_ROOT / "libs").iterdir():
+        if not lib_dir.is_dir():
+            continue
+        for py_file in _src_py_files(lib_dir):
+            rel = _rel(py_file)
+            for cls_name, lineno in _collect_unfrozen_dataclasses(py_file):
+                if (rel, cls_name) in EXCEPTIONS:
+                    continue
+                violations.append(f"  {rel}:{lineno} class {cls_name}")
+
+    assert not violations, (
+        "Lib dataclasses must use @dataclass(frozen=True):\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 6: atoms has zero external runtime dependencies
+# ---------------------------------------------------------------------------
+
+_STDLIB_MODULES = frozenset(sys.stdlib_module_names)
+
+
+def test_atoms_stdlib_only():
+    """atoms must only import stdlib modules at runtime.
+
+    atoms is the foundational data layer — zero external dependencies
+    keeps it portable and fast to import.
+    """
+    violations = []
+    atoms_dir = REPO_ROOT / "libs" / "atoms"
+    for py_file in _src_py_files(atoms_dir):
+        collector = _collect_imports(py_file)
+        for module, lineno in collector.runtime_modules:
+            top_level = module.split(".")[0]
+            # Allow intra-package imports (atoms.*)
+            if top_level == "atoms":
+                continue
+            if top_level not in _STDLIB_MODULES:
+                violations.append(f"  {_rel(py_file)}:{lineno} imports {module}")
+
+    assert not violations, (
+        "atoms must only import stdlib — no external dependencies:\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 7: sqlite3 confined to engine and store
+# ---------------------------------------------------------------------------
+
+_SQLITE_ALLOWED_LIBS = {"engine", "store"}
+
+
+def test_sqlite3_confined_to_engine_store():
+    """Only engine and store may import sqlite3.
+
+    atoms, lang, and painted have no business touching the database.
+    Database access flows through engine's vertex interface.
+    """
+    violations = []
+    for lib_dir in (REPO_ROOT / "libs").iterdir():
+        if not lib_dir.is_dir():
+            continue
+        lib_name = lib_dir.name
+        if lib_name in _SQLITE_ALLOWED_LIBS:
+            continue
+        for py_file in _src_py_files(lib_dir):
+            collector = _collect_imports(py_file)
+            lines = _imports_module(collector.runtime_modules, "sqlite3")
+            for lineno in lines:
+                violations.append(f"  {_rel(py_file)}:{lineno} — {lib_name} imports sqlite3")
+
+    assert not violations, (
+        "Only engine and store may import sqlite3:\n"
         + "\n".join(violations)
     )

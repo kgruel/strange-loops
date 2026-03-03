@@ -20,3 +20,6 @@ uv.lock
 *.db-wal
 *.gif
 *.tape
+meta-discussion/
+check.vertex
+session.vertex

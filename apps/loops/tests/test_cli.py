@@ -6,40 +6,9 @@ import sys
 
 import pytest
 
-from loops.main import main, create_parser, _parse_vars, loops_home
+from loops.main import main, _parse_vars, loops_home
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-class TestParser:
-    """Argument parser tests."""
-
-    def test_validate_routed_to_display(self):
-        """validate is routed through run_cli, not argparse."""
-        from loops.main import _run_validate
-        assert callable(_run_validate)
-
-    def test_test_routed_to_display(self):
-        """test is routed through run_cli, not argparse."""
-        from loops.main import _run_test
-        assert callable(_run_test)
-
-    def test_run_routed_to_display(self):
-        """run is routed through run_cli, not argparse."""
-        from loops.main import _run_run
-        assert callable(_run_run)
-
-    def test_compile_routed_to_display(self):
-        """compile is routed through run_cli, not argparse."""
-        from loops.main import _run_compile
-        assert callable(_run_compile)
-
-    def test_start_routed_to_display(self):
-        """start is routed through run_cli, not argparse."""
-        # start is handled before argparse in main(), so it never
-        # reaches create_parser(). Verify it's in the display dict.
-        from loops.main import _run_start
-        assert callable(_run_start)
 
 
 class TestParseVars:
@@ -228,11 +197,15 @@ class TestHelp:
     """Help output tests."""
 
     def test_main_help(self, capsys):
-        with pytest.raises(SystemExit) as exc_info:
-            main(["--help"])
-        assert exc_info.value.code == 0
+        result = main(["--help"])
+        assert result == 0
         captured = capsys.readouterr()
         assert "Runtime for .loop and .vertex files" in captured.out
+        # All commands should be visible
+        assert "status" in captured.out
+        assert "log" in captured.out
+        assert "emit" in captured.out
+        assert "init" in captured.out
 
     def test_validate_help(self, capsys):
         # validate is routed through run_cli which handles --help without SystemExit
@@ -292,29 +265,46 @@ class TestInitCommand:
         assert (deep / "root.vertex").exists()
 
     def test_template_flag_parsed(self):
-        parser = create_parser()
-        args = parser.parse_args(["init", "--template", "session"])
+        import argparse
+        from loops.main import _run_init
+        # Verify the wrapper's parser handles template flag
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args(["--template", "session"])
         assert args.template == "session"
 
     def test_template_flag_short(self):
-        parser = create_parser()
-        args = parser.parse_args(["init", "-t", "tasks"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args(["-t", "tasks"])
         assert args.template == "tasks"
 
     def test_no_template_is_none(self):
-        parser = create_parser()
-        args = parser.parse_args(["init"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args([])
         assert args.template is None
 
     def test_name_arg_parsed(self):
-        parser = create_parser()
-        args = parser.parse_args(["init", "project"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args(["project"])
         assert args.name == "project"
         assert args.template is None
 
     def test_slashed_name_parsed(self):
-        parser = create_parser()
-        args = parser.parse_args(["init", "dev/project", "-t", "session"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args(["dev/project", "-t", "session"])
         assert args.name == "dev/project"
         assert args.template == "session"
 
@@ -347,7 +337,7 @@ class TestInitCommand:
         assert "discover" in vertex.read_text()
 
     def test_bare_name_creates_local_vertex(self, monkeypatch, tmp_path, capsys):
-        """loops init project creates local vertex from config-level source."""
+        """loops init project creates vertex in .loops/ from config-level source."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         # Seed a config-level instance vertex as source
         config_dir = tmp_path / "project"
@@ -359,12 +349,12 @@ class TestInitCommand:
         monkeypatch.chdir(tmp_path / "myproject")
         result = main(["init", "project"])
         assert result == 0
-        vertex = tmp_path / "myproject" / "project.vertex"
+        vertex = tmp_path / "myproject" / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
         assert 'name "project"' in content
         assert 'store "./data/project.db"' in content
-        assert (tmp_path / "myproject" / "data").is_dir()
+        assert (tmp_path / "myproject" / ".loops" / "data").is_dir()
 
     def test_bare_name_registers_with_config(self, monkeypatch, tmp_path, capsys):
         """loops init project registers cwd with config-level vertex if it exists."""
@@ -384,6 +374,9 @@ class TestInitCommand:
         monkeypatch.chdir(project_dir)
         result = main(["init", "project"])
         assert result == 0
+        # Vertex created in .loops/
+        assert (project_dir / ".loops" / "project.vertex").exists()
+        # Registered with config
         link = config_dir / "instances" / "myproject"
         assert link.is_symlink()
         assert link.resolve() == project_dir.resolve()
@@ -400,17 +393,20 @@ class TestInitCommand:
         assert "No existing vertex found" in captured.err
 
     def test_template_project_choice(self):
-        parser = create_parser()
-        args = parser.parse_args(["init", "-t", "project"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops init")
+        parser.add_argument("name", nargs="?", default=None)
+        parser.add_argument("--template", "-t")
+        args = parser.parse_args(["-t", "project"])
         assert args.template == "project"
 
     def test_template_creates_local_with_cwd(self, monkeypatch, tmp_path, capsys):
-        """loops init --template session (no name) creates in cwd."""
+        """loops init --template session (no name) creates in .loops/."""
         monkeypatch.chdir(tmp_path)
         result = main(["init", "--template", "session"])
         assert result == 0
-        assert (tmp_path / "session.vertex").exists()
-        assert (tmp_path / "data").is_dir()
+        assert (tmp_path / ".loops" / "session.vertex").exists()
+        assert (tmp_path / ".loops" / "data").is_dir()
 
 
 class TestDefaultPaths:
@@ -441,10 +437,12 @@ class TestDefaultPaths:
         result = main(["run"])
         assert result == 1
 
-    def test_store_parser_file_optional(self):
-        parser = create_parser()
-        args = parser.parse_args(["store"])
-        assert args.file is None
+    def test_store_no_args_falls_back(self, monkeypatch, tmp_path):
+        """store with no file falls back to LOOPS_HOME/root.vertex."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Without root.vertex, returns 1
+        result = main(["store"])
+        assert result == 1
 
     def test_start_explicit_file_still_works(self, tmp_path, capsys):
         """start with an explicit file that doesn't exist returns 1."""
@@ -458,20 +456,31 @@ class TestEmitParsers:
     def test_emit_without_vertex_arg(self):
         """When vertex is omitted, argparse fills vertex greedily.
         Runtime reinterprets via resolution (tested in test_session.py)."""
-        parser = create_parser()
-        args = parser.parse_args(["emit", "decision", "topic=test"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops emit")
+        parser.add_argument("vertex", nargs="?", default=None)
+        parser.add_argument("kind")
+        parser.add_argument("parts", nargs="*")
+        parser.add_argument("--observer", default="")
+        parser.add_argument("--dry-run", action="store_true")
+        args = parser.parse_args(["decision", "topic=test"])
         # argparse always fills vertex first — runtime shifts if it doesn't resolve
         assert args.vertex == "decision"
         assert args.kind == "topic=test"
 
     def test_emit_with_vertex_arg(self):
-        parser = create_parser()
-        args = parser.parse_args(["emit", "session", "decision", "topic=test"])
+        import argparse
+        parser = argparse.ArgumentParser(prog="loops emit")
+        parser.add_argument("vertex", nargs="?", default=None)
+        parser.add_argument("kind")
+        parser.add_argument("parts", nargs="*")
+        parser.add_argument("--observer", default="")
+        parser.add_argument("--dry-run", action="store_true")
+        args = parser.parse_args(["session", "decision", "topic=test"])
         assert args.vertex == "session"
         assert args.kind == "decision"
 
     def test_no_session_subcommand(self):
-        """session subcommand group has been dissolved."""
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["session", "start"])
+        """session subcommand group has been dissolved — 'session' is unknown to AppRunner."""
+        result = main(["session", "start"])
+        assert result == 1

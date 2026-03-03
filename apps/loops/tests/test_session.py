@@ -314,13 +314,13 @@ class TestAutoInit:
         result = main(["emit", "decision", "topic=test", "it works"])
         assert result == 0
 
-        # Vertex created in cwd
-        vertex = tmp_path / "session.vertex"
+        # Vertex created in .loops/
+        vertex = tmp_path / ".loops" / "session.vertex"
         assert vertex.exists()
         assert 'name "session"' in vertex.read_text()
 
         # Store has the fact
-        db_path = tmp_path / "data" / "session.db"
+        db_path = tmp_path / ".loops" / "data" / "session.db"
         facts = _read_all_facts(db_path)
         assert any(f.kind == "decision" for f in facts)
 
@@ -338,9 +338,9 @@ class TestAutoInit:
         result = main(["emit", "task", "name=do-thing", "status=open"])
         assert result == 0
 
-        # Should use tasks vertex, not create session
-        assert (tmp_path / "tasks.vertex").exists()
-        assert not (tmp_path / "session.vertex").exists()
+        # Should use tasks vertex in .loops/, not create session
+        assert (tmp_path / ".loops" / "tasks.vertex").exists()
+        assert not (tmp_path / ".loops" / "session.vertex").exists()
 
         err = capsys.readouterr().err
         assert "Auto-initialized" not in err
@@ -353,12 +353,12 @@ class TestInitTemplate:
         result = main(["init", "--template", "session"])
         assert result == 0
 
-        vertex = tmp_path / "session.vertex"
+        vertex = tmp_path / ".loops" / "session.vertex"
         assert vertex.exists()
         content = vertex.read_text()
         assert 'name "session"' in content
         assert 'store "./data/session.db"' in content
-        assert (tmp_path / "data").is_dir()
+        assert (tmp_path / ".loops" / "data").is_dir()
 
     def test_tasks_template(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"
@@ -369,12 +369,12 @@ class TestInitTemplate:
         result = main(["init", "--template", "tasks"])
         assert result == 0
 
-        vertex = tmp_path / "tasks.vertex"
+        vertex = tmp_path / ".loops" / "tasks.vertex"
         assert vertex.exists()
         content = vertex.read_text()
         assert 'name "tasks"' in content
         assert 'store "./data/tasks.db"' in content
-        assert (tmp_path / "data").is_dir()
+        assert (tmp_path / ".loops" / "data").is_dir()
 
     def test_no_template_is_root(self, tmp_path, monkeypatch, capsys):
         """init without --template still creates root.vertex in LOOPS_HOME."""
@@ -391,9 +391,9 @@ class TestInitTemplate:
         monkeypatch.chdir(tmp_path)
 
         main(["init", "--template", "session"])
-        text1 = (tmp_path / "session.vertex").read_text()
+        text1 = (tmp_path / ".loops" / "session.vertex").read_text()
 
         main(["init", "--template", "session"])
-        text2 = (tmp_path / "session.vertex").read_text()
+        text2 = (tmp_path / ".loops" / "session.vertex").read_text()
 
         assert text1 == text2

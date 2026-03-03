@@ -67,6 +67,86 @@ def _resolve_combine_stores(ast: Any, vertex_path: Path) -> list[Path]:
     return store_paths
 
 
+def _resolve_discover_stores(ast: Any, vertex_path: Path) -> list[Path]:
+    """Resolve discover glob to existing store paths from discovered instances."""
+    from lang import parse_vertex_file
+
+    if ast.discover is None:
+        return []
+
+    base_dir = vertex_path.parent
+    store_paths: list[Path] = []
+    for match in sorted(base_dir.glob(ast.discover)):
+        if match.suffix != ".vertex":
+            continue
+        # Skip self
+        if match.resolve() == vertex_path.resolve():
+            continue
+        try:
+            ref_ast = parse_vertex_file(match)
+        except Exception:
+            continue
+        if ref_ast.store is None:
+            continue
+        sp = ref_ast.store
+        if not sp.is_absolute():
+            sp = (match.parent / sp).resolve()
+        if sp.exists():
+            store_paths.append(sp)
+    return store_paths
+
+
+def _resolve_stores(ast: Any, vertex_path: Path) -> list[Path]:
+    """Resolve store paths from combine or discover."""
+    if ast.combine is not None:
+        return _resolve_combine_stores(ast, vertex_path)
+    if ast.discover is not None:
+        return _resolve_discover_stores(ast, vertex_path)
+    return []
+
+
+def _infer_specs(ast: Any, vertex_path: Path) -> dict:
+    """Get fold specs from the first referenced vertex when aggregation has none.
+
+    Works for both combine (explicit vertex refs) and discover (glob pattern).
+    """
+    from lang import parse_vertex_file, resolve_vertex
+
+    from .compiler import compile_vertex
+
+    # Try combine entries first
+    if ast.combine is not None:
+        home = _loops_home()
+        for entry in ast.combine:
+            vpath = resolve_vertex(entry.name, home)
+            if not vpath.is_absolute():
+                vpath = (vertex_path.parent / vpath).resolve()
+            if not vpath.exists():
+                continue
+            try:
+                ref_ast = parse_vertex_file(vpath)
+            except Exception:
+                continue
+            if ref_ast.loops:
+                return compile_vertex(ref_ast)
+        return {}
+
+    # Try discover pattern
+    if ast.discover is not None:
+        base_dir = vertex_path.parent
+        for match in sorted(base_dir.glob(ast.discover)):
+            if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
+                continue
+            try:
+                ref_ast = parse_vertex_file(match)
+            except Exception:
+                continue
+            if ref_ast.store is not None:
+                return compile_vertex(ref_ast)
+
+    return {}
+
+
 def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[str]]:
     """Open the first store and ATTACH the rest. Returns (conn, aliases).
 
@@ -86,7 +166,7 @@ def _combined_read(
     ast: Any, vertex_path: Path, specs: dict
 ) -> dict[str, dict[str, Any]]:
     """Fold state across multiple stores (combinatorial vertex_read)."""
-    store_paths = _resolve_combine_stores(ast, vertex_path)
+    store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return {kind: spec.initial_state() for kind, spec in specs.items()}
 
@@ -131,7 +211,7 @@ def _combined_facts(
     kind: str | None = None,
 ) -> list[dict]:
     """Raw facts across multiple stores (combinatorial vertex_facts)."""
-    store_paths = _resolve_combine_stores(ast, vertex_path)
+    store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return []
 
@@ -184,7 +264,7 @@ def _combined_ticks(
     name: str | None = None,
 ) -> list[Tick]:
     """Ticks across multiple stores (combinatorial vertex_ticks)."""
-    store_paths = _resolve_combine_stores(ast, vertex_path)
+    store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return []
 
@@ -231,7 +311,7 @@ def _combined_ticks(
 
 def _combined_summary(ast: Any, vertex_path: Path) -> dict:
     """Merged summary across multiple stores (combinatorial vertex_summary)."""
-    store_paths = _resolve_combine_stores(ast, vertex_path)
+    store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 
@@ -324,8 +404,10 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
     ast = parse_vertex_file(vertex_path)
     specs = compile_vertex(ast)
 
-    # Combinatorial vertex: read across multiple stores
-    if ast.combine is not None:
+    # Combinatorial or aggregation vertex: read across multiple stores
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+        if not specs:
+            specs = _infer_specs(ast, vertex_path)
         return _combined_read(ast, vertex_path, specs)
 
     # Resolve store path relative to vertex file
@@ -372,7 +454,7 @@ def vertex_facts(
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None:
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
         return _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
 
     if ast.store is None:
@@ -406,7 +488,7 @@ def vertex_ticks(
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None:
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
         return _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
 
     if ast.store is None:
@@ -437,7 +519,7 @@ def vertex_summary(vertex_path: Path) -> dict:
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None:
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
         return _combined_summary(ast, vertex_path)
 
     if ast.store is None:

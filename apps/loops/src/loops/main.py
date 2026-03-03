@@ -25,6 +25,7 @@ def _err(msg: str, file: TextIO | None = None) -> None:
     """Show an error message through painted."""
     from painted import show, Block
     from painted.palette import current_palette
+
     show(Block.text(msg, current_palette().error), file=file or sys.stderr)
 
 
@@ -32,6 +33,7 @@ def _msg(msg: str, file: TextIO | None = None) -> None:
     """Show a success/info message through painted."""
     from painted import show, Block
     from painted.palette import current_palette
+
     show(Block.text(msg, current_palette().success), file=file or sys.stdout)
 
 
@@ -68,7 +70,14 @@ _APPS: dict[str, str] = {
 
 
 def _find_local_vertex() -> Path | None:
-    """Find a .vertex file in cwd. Returns first match or None."""
+    """Find a .vertex file in .loops/ or cwd. Returns first match or None."""
+    # Prefer .loops/ (new convention)
+    loops_dir = Path.cwd() / ".loops"
+    if loops_dir.is_dir():
+        matches = sorted(loops_dir.glob("*.vertex"))
+        if matches:
+            return matches[0]
+    # Fall back to cwd (existing projects)
     matches = sorted(Path.cwd().glob("*.vertex"))
     return matches[0] if matches else None
 
@@ -108,14 +117,16 @@ def _find_source_vertex(name: str) -> str | None:
 
 
 def _init_local_vertex(name: str, source_name: str | None = None) -> Path | None:
-    """Create a vertex + data dir in cwd from an existing instance. Returns vertex path."""
+    """Create a vertex + data dir in .loops/ from an existing instance. Returns vertex path."""
     import re
 
     source = _find_source_vertex(source_name or name)
     if source is None:
         return None
     # Stamp a local copy with the target name and store path
-    content = re.sub(r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE)
+    content = re.sub(
+        r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE
+    )
     content = re.sub(
         r'^store "./data/.*\.db"',
         f'store "./data/{name}.db"',
@@ -123,10 +134,12 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path | None
         count=1,
         flags=re.MULTILINE,
     )
-    vertex_path = Path.cwd() / f"{name}.vertex"
+    loops_dir = Path.cwd() / ".loops"
+    loops_dir.mkdir(exist_ok=True)
+    vertex_path = loops_dir / f"{name}.vertex"
     if not vertex_path.exists():
         vertex_path.write_text(content)
-    data_dir = Path.cwd() / "data"
+    data_dir = loops_dir / "data"
     data_dir.mkdir(exist_ok=True)
     return vertex_path
 
@@ -205,7 +218,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     if root.exists():
         from painted import show, Block
         from painted.palette import current_palette
-        show(Block.text(f"Already initialized: {root}", current_palette().muted), file=sys.stdout)
+
+        show(
+            Block.text(f"Already initialized: {root}", current_palette().muted),
+            file=sys.stdout,
+        )
         return 0
     home.mkdir(parents=True, exist_ok=True)
     root.write_text(_ROOT_VERTEX)
@@ -227,6 +244,7 @@ def _resolve_vertex_path(file_arg: str | None) -> Path | None:
 def _run_validate(argv: list[str]) -> int:
     """Run validate command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from .lenses.validate import validate_view
 
@@ -255,7 +273,13 @@ def _run_validate(argv: list[str]) -> int:
                 continue
 
             if not path.exists():
-                results.append({"path": str(path), "valid": False, "error": f"{path} does not exist"})
+                results.append(
+                    {
+                        "path": str(path),
+                        "valid": False,
+                        "error": f"{path} does not exist",
+                    }
+                )
                 errors += 1
                 continue
 
@@ -284,6 +308,11 @@ def _run_validate(argv: list[str]) -> int:
         render=render,
         prog="loops validate",
         description="Validate .loop or .vertex files",
+        help_args=[
+            HelpArg(
+                "files", "Files to validate (default: all in cwd)", positional=True
+            ),
+        ],
     )
     if rc != 0:
         return rc
@@ -298,6 +327,7 @@ def _run_validate(argv: list[str]) -> int:
 def _run_test(argv: list[str]) -> int:
     """Run test command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from atoms import run_parse
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
@@ -354,12 +384,17 @@ def _run_test(argv: list[str]) -> int:
         render=render,
         prog="loops test",
         description="Test parse pipeline against sample input",
+        help_args=[
+            HelpArg("file", "Loop file to test", positional=True),
+            HelpArg("--input", "Input file (default: stdin)"),
+        ],
     )
 
 
 def _run_run(argv: list[str]) -> int:
     """Run command via painted CLI harness — execute a .loop or .vertex file."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file", nargs="?", default=None)
@@ -389,6 +424,7 @@ def _run_run(argv: list[str]) -> int:
 def _run_run_loop(path: Path, known, rest: list[str]) -> int:
     """Execute a .loop file through run_cli."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
     from .lenses.run import run_facts_view
@@ -404,13 +440,15 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
         async def _collect():
             count = 0
             async for fact in source.stream():
-                collected.append({
-                    "kind": fact.kind,
-                    "ts": fact.ts,
-                    "payload": fact.payload,
-                    "observer": fact.observer,
-                    "origin": fact.origin,
-                })
+                collected.append(
+                    {
+                        "kind": fact.kind,
+                        "ts": fact.ts,
+                        "payload": fact.payload,
+                        "observer": fact.observer,
+                        "origin": fact.origin,
+                    }
+                )
                 count += 1
                 if limit and count >= limit:
                     break
@@ -422,13 +460,15 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
         accumulated: list[dict] = []
         count = 0
         async for fact in source.stream():
-            accumulated.append({
-                "kind": fact.kind,
-                "ts": fact.ts,
-                "payload": fact.payload,
-                "observer": fact.observer,
-                "origin": fact.origin,
-            })
+            accumulated.append(
+                {
+                    "kind": fact.kind,
+                    "ts": fact.ts,
+                    "payload": fact.payload,
+                    "observer": fact.observer,
+                    "origin": fact.origin,
+                }
+            )
             count += 1
             yield list(accumulated)
             if limit and count >= limit:
@@ -444,12 +484,20 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
         render=render,
         prog="loops run",
         description=f"Stream facts from {path.name}",
+        help_args=[
+            HelpArg("file", "Loop or vertex file", positional=True),
+            HelpArg("--limit", "Max facts to collect"),
+            HelpArg("--rounds", "Number of rounds", default="1"),
+            HelpArg("--daemon", "Run continuously"),
+            HelpArg("--var", "Set variable KEY=VALUE"),
+        ],
     )
 
 
 def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
     """Execute a .vertex file through run_cli."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from engine import load_vertex_program
     from .lenses.run import run_ticks_view
 
@@ -466,15 +514,19 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
         rounds = None
 
     def log_error(fact):
-        payload = dict(fact.payload) if hasattr(fact.payload, 'items') else fact.payload
+        payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
         _err(f"[ERROR] {fact.observer}: {payload}")
 
     from painted import show, Block
     from painted.palette import current_palette
-    show(Block.text(
-        f"Started {program.vertex.name}: {len(program.sources)} sources",
-        current_palette().muted,
-    ), file=sys.stderr)
+
+    show(
+        Block.text(
+            f"Started {program.vertex.name}: {len(program.sources)} sources",
+            current_palette().muted,
+        ),
+        file=sys.stderr,
+    )
 
     def fetch():
         collected: list[dict] = []
@@ -486,12 +538,14 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
                 expected = set(program.expected_ticks)
 
             async for tick in program.run(on_error=log_error):
-                collected.append({
-                    "name": tick.name,
-                    "ts": tick.ts,
-                    "payload": tick.payload,
-                    "origin": getattr(tick, "origin", ""),
-                })
+                collected.append(
+                    {
+                        "name": tick.name,
+                        "ts": tick.ts,
+                        "payload": tick.payload,
+                        "origin": getattr(tick, "origin", ""),
+                    }
+                )
                 if rounds is not None:
                     seen.add(tick.name)
                     if seen >= expected:
@@ -518,12 +572,14 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
         async for tick in program.run(on_error=log_error):
             if stop.is_set():
                 break
-            accumulated.append({
-                "name": tick.name,
-                "ts": tick.ts,
-                "payload": tick.payload,
-                "origin": getattr(tick, "origin", ""),
-            })
+            accumulated.append(
+                {
+                    "name": tick.name,
+                    "ts": tick.ts,
+                    "payload": tick.payload,
+                    "origin": getattr(tick, "origin", ""),
+                }
+            )
             yield list(accumulated)
             if rounds is not None:
                 seen.add(tick.name)
@@ -543,12 +599,20 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
         render=render,
         prog="loops run",
         description=f"Run vertex {program.vertex.name}",
+        help_args=[
+            HelpArg("file", "Loop or vertex file", positional=True),
+            HelpArg("--limit", "Max facts to collect"),
+            HelpArg("--rounds", "Number of rounds", default="1"),
+            HelpArg("--daemon", "Run continuously"),
+            HelpArg("--var", "Set variable KEY=VALUE"),
+        ],
     )
 
 
 def _run_compile(argv: list[str]) -> int:
     """Run compile command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from engine import compile_loop, compile_vertex
     from .lenses.compile import compile_view
@@ -580,9 +644,7 @@ def _run_compile(argv: list[str]) -> int:
                 "parse": [],
             }
             if source.parse:
-                data["parse"] = [
-                    f"{type(op).__name__}: {op}" for op in source.parse
-                ]
+                data["parse"] = [f"{type(op).__name__}: {op}" for op in source.parse]
             return data
 
         elif path.suffix == ".vertex":
@@ -602,9 +664,7 @@ def _run_compile(argv: list[str]) -> int:
             for name, spec in specs.items():
                 data["specs"][name] = {
                     "state_fields": [f.name for f in spec.state_fields],
-                    "folds": [
-                        f"{type(fold).__name__}: {fold}" for fold in spec.folds
-                    ],
+                    "folds": [f"{type(fold).__name__}: {fold}" for fold in spec.folds],
                     "boundary": spec.boundary.kind if spec.boundary else None,
                 }
             return data
@@ -621,12 +681,16 @@ def _run_compile(argv: list[str]) -> int:
         render=render,
         prog="loops compile",
         description="Show compiled structure",
+        help_args=[
+            HelpArg("file", "Loop or vertex file to compile", positional=True),
+        ],
     )
 
 
 def _run_start(argv: list[str]) -> int:
     """Run start command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from engine import load_vertex_program
     from .lenses.start import start_view
 
@@ -652,15 +716,26 @@ def _run_start(argv: list[str]) -> int:
     if not program.sources:
         from painted import show, Block
         from painted.palette import current_palette
-        show(Block.text("Warning: no sources discovered or configured", current_palette().warning), file=sys.stderr)
+
+        show(
+            Block.text(
+                "Warning: no sources discovered or configured",
+                current_palette().warning,
+            ),
+            file=sys.stderr,
+        )
         return 0
 
     from painted import show, Block
     from painted.palette import current_palette
-    show(Block.text(
-        f"Starting {program.vertex.name} with {len(program.sources)} source(s)...",
-        current_palette().muted,
-    ), file=sys.stderr)
+
+    show(
+        Block.text(
+            f"Starting {program.vertex.name} with {len(program.sources)} source(s)...",
+            current_palette().muted,
+        ),
+        file=sys.stderr,
+    )
 
     def fetch():
         return program.collect(rounds=1)
@@ -674,6 +749,10 @@ def _run_start(argv: list[str]) -> int:
         render=render,
         prog="loops start",
         description="Run a .vertex file (one round)",
+        help_args=[
+            HelpArg("file", "Vertex file to start", positional=True),
+            HelpArg("--var", "Set variable KEY=VALUE"),
+        ],
     )
 
 
@@ -755,6 +834,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
     )
     from painted import show, Block
     from painted.palette import current_palette
+
     p = current_palette()
 
     # Resolve vertex: explicit arg → LOOPS_HOME → local cwd → auto-init
@@ -797,10 +877,17 @@ def cmd_emit(args: argparse.Namespace) -> int:
         else:
             result = _init_local_vertex("session")
             if result is None:
-                show(Block.text("No session vertex found to auto-initialize from", p.error), file=sys.stderr)
+                show(
+                    Block.text(
+                        "No session vertex found to auto-initialize from", p.error
+                    ),
+                    file=sys.stderr,
+                )
                 return 1
             vertex_path = result.resolve()
-            show(Block.text(f"Auto-initialized: {vertex_path}", p.muted), file=sys.stderr)
+            show(
+                Block.text(f"Auto-initialized: {vertex_path}", p.muted), file=sys.stderr
+            )
 
     payload = _parse_emit_parts(parts)
     ts = datetime.now(timezone.utc).timestamp()
@@ -813,7 +900,12 @@ def cmd_emit(args: argparse.Namespace) -> int:
     )
 
     if args.dry_run:
-        show(Block.text(json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted), file=sys.stdout)
+        show(
+            Block.text(
+                json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
+            ),
+            file=sys.stdout,
+        )
         return 0
 
     try:
@@ -823,7 +915,10 @@ def cmd_emit(args: argparse.Namespace) -> int:
         return 1
 
     if store_path is None:
-        show(Block.text("Error: vertex has no store configured", p.error), file=sys.stderr)
+        show(
+            Block.text("Error: vertex has no store configured", p.error),
+            file=sys.stderr,
+        )
         return 1
 
     try:
@@ -856,21 +951,27 @@ def cmd_emit(args: argparse.Namespace) -> int:
             include_unscoped = not is_multi
 
             if is_multi and not qualifier:
-                show(Block.text(
-                    "Error: multiple templates in vertex; specify one as "
-                    "'vertex/template' or include template=... in payload",
-                    p.error,
-                ), file=sys.stderr)
+                show(
+                    Block.text(
+                        "Error: multiple templates in vertex; specify one as "
+                        "'vertex/template' or include template=... in payload",
+                        p.error,
+                    ),
+                    file=sys.stderr,
+                )
                 return 1
 
             template = resolve_template(ast, qualifier)
             template_name = template.template.stem if is_multi else None
 
             if template.from_ is None or not hasattr(template.from_, "path"):
-                show(Block.text(
-                    "Error: template has no 'from file' population configured",
-                    p.error,
-                ), file=sys.stderr)
+                show(
+                    Block.text(
+                        "Error: template has no 'from file' population configured",
+                        p.error,
+                    ),
+                    file=sys.stderr,
+                )
                 return 1
 
             list_path = template.from_.path
@@ -881,35 +982,50 @@ def cmd_emit(args: argparse.Namespace) -> int:
 
             header = list_file_header(list_path)
             if not header:
-                show(Block.text(
-                    f"Error: no .list header found at {list_path}",
-                    p.error,
-                ), file=sys.stderr)
+                show(
+                    Block.text(
+                        f"Error: no .list header found at {list_path}",
+                        p.error,
+                    ),
+                    file=sys.stderr,
+                )
                 return 1
 
             if kind == POP_ADD_KIND:
                 if "key" not in payload:
-                    show(Block.text("Error: pop.add requires key=...", p.error), file=sys.stderr)
+                    show(
+                        Block.text("Error: pop.add requires key=...", p.error),
+                        file=sys.stderr,
+                    )
                     return 1
                 missing = [h for h in header[1:] if h not in payload]
                 if missing:
-                    show(Block.text(
-                        "Error: pop.add requires all non-key columns: "
-                        + ", ".join(missing),
-                        p.error,
-                    ), file=sys.stderr)
+                    show(
+                        Block.text(
+                            "Error: pop.add requires all non-key columns: "
+                            + ", ".join(missing),
+                            p.error,
+                        ),
+                        file=sys.stderr,
+                    )
                     return 1
             if kind == POP_RM_KIND and "key" not in payload:
-                show(Block.text("Error: pop.rm requires key=...", p.error), file=sys.stderr)
+                show(
+                    Block.text("Error: pop.rm requires key=...", p.error),
+                    file=sys.stderr,
+                )
                 return 1
 
             if template_name is not None:
                 if "template" in payload and payload.get("template") != template_name:
-                    show(Block.text(
-                        f"Error: payload template={payload.get('template')!r} does not match "
-                        f"resolved template {template_name!r}",
-                        p.error,
-                    ), file=sys.stderr)
+                    show(
+                        Block.text(
+                            f"Error: payload template={payload.get('template')!r} does not match "
+                            f"resolved template {template_name!r}",
+                            p.error,
+                        ),
+                        file=sys.stderr,
+                    )
                     return 1
                 payload["template"] = template_name
 
@@ -1026,7 +1142,9 @@ def _run_app(app_name: str, argv: list[str]) -> int:
         parser.add_argument("name", help=f"{sub.capitalize()} name")
         parser.add_argument("--conversation", required=True, help="Conversation ID")
         parser.add_argument("--note", default="", help="Optional note")
-        parser.add_argument("--observer", default=os.environ.get("LOOPS_OBSERVER", "user"))
+        parser.add_argument(
+            "--observer", default=os.environ.get("LOOPS_OBSERVER", "user")
+        )
         args = parser.parse_args(rest)
         return handler(vp, args)
 
@@ -1068,7 +1186,9 @@ def _make_lens_log_view(payload_lens):
 
     def log_view(facts, zoom, width):
         if not facts:
-            return Block.text("No facts in the given time range.", Style(dim=True), width=width)
+            return Block.text(
+                "No facts in the given time range.", Style(dim=True), width=width
+            )
 
         if zoom == Zoom.MINIMAL:
             counts: dict[str, int] = {}
@@ -1116,7 +1236,9 @@ def _make_lens_log_view(payload_lens):
             if zoom >= Zoom.FULL:
                 for key, val in payload.items():
                     if val:
-                        rows.append(Block.text(f"           {key}: {val}", dim, width=width))
+                        rows.append(
+                            Block.text(f"           {key}: {val}", dim, width=width)
+                        )
 
         return join_vertical(*rows)
 
@@ -1146,7 +1268,9 @@ def _run_app_status(vertex_path: Path, mod, argv: list[str]) -> int:
         return render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        rest, fetch=fetch, render=render,
+        rest,
+        fetch=fetch,
+        render=render,
         prog=f"loops {getattr(mod, 'APP_NAME', '?')} status",
         description="Show store status",
     )
@@ -1155,6 +1279,7 @@ def _run_app_status(vertex_path: Path, mod, argv: list[str]) -> int:
 def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
     """Run app log via run_cli."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from engine import vertex_facts
 
     pre = argparse.ArgumentParser(add_help=False)
@@ -1168,6 +1293,7 @@ def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
 
     def fetch():
         import re
+
         m = re.match(r"^(\d+)([dhms])$", known.since)
         if not m:
             return []
@@ -1176,6 +1302,7 @@ def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
         multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
         duration = value * multipliers[unit]
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         since_ts = now.timestamp() - duration
         facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=known.kind)
@@ -1186,15 +1313,22 @@ def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
         return render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        rest, fetch=fetch, render=render,
+        rest,
+        fetch=fetch,
+        render=render,
         prog=f"loops {getattr(mod, 'APP_NAME', '?')} log",
         description="Show recent facts",
+        help_args=[
+            HelpArg("--since", "Time window", default="7d"),
+            HelpArg("--kind", "Filter by fact kind"),
+        ],
     )
 
 
 def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
     """Run app search via run_cli."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("query", nargs="*")
@@ -1215,29 +1349,43 @@ def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
         if not query_str:
             return []
         from engine import vertex_search
+
         since_ts = None
         if known.since:
             import re
+
             m = re.match(r"^(\d+)([dhms])$", known.since)
             if m:
                 value = int(m.group(1))
                 unit = m.group(2)
                 multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
                 from datetime import datetime, timezone
+
                 now = datetime.now(timezone.utc)
                 since_ts = now.timestamp() - value * multipliers[unit]
         return vertex_search(
-            vertex_path, query_str,
-            kind=known.kind, since=since_ts, limit=known.limit,
+            vertex_path,
+            query_str,
+            kind=known.kind,
+            since=since_ts,
+            limit=known.limit,
         )
 
     def render(ctx, data):
         return render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        rest, fetch=fetch, render=render,
+        rest,
+        fetch=fetch,
+        render=render,
         prog=f"loops {getattr(mod, 'APP_NAME', '?')} search",
         description="Search facts",
+        help_args=[
+            HelpArg("query", "Search terms", positional=True),
+            HelpArg("--kind", "Filter by fact kind"),
+            HelpArg("--since", "Time window"),
+            HelpArg("--limit", "Max results", default="100"),
+        ],
     )
 
 
@@ -1258,6 +1406,7 @@ def _generic_fold_summary(fold_state: dict) -> dict:
 def _run_status(argv: list[str]) -> int:
     """Run status command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from .commands.session import _resolve_local_vertex, fetch_status
     from .lenses.status import status_view
 
@@ -1282,12 +1431,17 @@ def _run_status(argv: list[str]) -> int:
         render=render,
         prog="loops status",
         description="Show local store status",
+        help_args=[
+            HelpArg("vertex", "Vertex name (default: local)", positional=True),
+            HelpArg("--kind", "Filter by fact kind"),
+        ],
     )
 
 
 def _run_log(argv: list[str]) -> int:
     """Run log command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from .commands.session import _resolve_local_vertex, fetch_log
     from .lenses.log import log_view
 
@@ -1313,12 +1467,18 @@ def _run_log(argv: list[str]) -> int:
         render=render,
         prog="loops log",
         description="Show recent facts",
+        help_args=[
+            HelpArg("vertex", "Vertex name (default: local)", positional=True),
+            HelpArg("--since", "Time window", default="7d"),
+            HelpArg("--kind", "Filter by fact kind"),
+        ],
     )
 
 
 def _run_store(argv: list[str]) -> int:
     """Run store command via painted CLI harness."""
     from painted import run_cli, OutputMode
+    from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file", nargs="?", default=None)
@@ -1334,12 +1494,11 @@ def _run_store(argv: list[str]) -> int:
                 return p
             # Otherwise treat as vertex name
             from lang.population import resolve_vertex
+
             return resolve_vertex(file_arg, loops_home())
         root = loops_home() / "root.vertex"
         if not root.exists():
-            raise FileNotFoundError(
-                f"{root} not found. Run 'loops init' first."
-            )
+            raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
         return root
 
     def fetch():
@@ -1382,12 +1541,16 @@ def _run_store(argv: list[str]) -> int:
         default_mode=OutputMode.STATIC,
         prog="loops store",
         description="Inspect store contents",
+        help_args=[
+            HelpArg("file", "Store file, vertex name, or path", positional=True),
+        ],
     )
 
 
 def _run_check(argv: list[str]) -> int:
     """Run health checks, emit result facts, render with gutter."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from lang import parse_vertex_file
     from engine.compiler import compile_sources_block
 
@@ -1455,6 +1618,10 @@ def _run_check(argv: list[str]) -> int:
         render=render,
         prog="loops check",
         description="Run project health checks",
+        help_args=[
+            HelpArg("vertex", "Vertex name (default: local)", positional=True),
+            HelpArg("--observer", "Observer name", default="dev-check"),
+        ],
     )
 
     # Return failure if any check failed
@@ -1469,6 +1636,7 @@ def _run_check(argv: list[str]) -> int:
 def _run_ls(argv: list[str]) -> int:
     """Run ls command via painted CLI harness."""
     from painted import run_cli
+    from painted.fidelity import HelpArg
     from .commands.pop import fetch_ls
     from .lenses.pop import pop_view
 
@@ -1488,125 +1656,188 @@ def _run_ls(argv: list[str]) -> int:
         render=render,
         prog="loops ls",
         description="List template populations",
+        help_args=[
+            HelpArg("target", "Population target name", positional=True),
+        ],
     )
 
 
-def create_parser() -> argparse.ArgumentParser:
-    """Create the argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="loops",
-        description="Runtime for .loop and .vertex files",
-    )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # init
-    init_parser = subparsers.add_parser("init", help="Initialize loops config directory")
-    init_parser.add_argument(
-        "name", nargs="?", default=None,
+def _run_init(argv: list[str]) -> int:
+    """Thin wrapper: parse argv for init, delegate to cmd_init."""
+    parser = argparse.ArgumentParser(prog="loops init", add_help=True)
+    parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
         help="Vertex name (e.g., 'project' or 'dev/project')",
     )
-    init_parser.add_argument(
-        "--template", "-t",
+    parser.add_argument(
+        "--template",
+        "-t",
         help="Source vertex name to use as template (defaults to init name)",
     )
+    args = parser.parse_args(argv)
+    return cmd_init(args)
 
-    # store
-    store_parser = subparsers.add_parser(
-        "store", help="Inspect store contents"
-    )
-    store_parser.add_argument("file", nargs="?", default=None, help=".vertex or .db file")
 
-    # emit
-    emit_parser = subparsers.add_parser(
-        "emit", help="Inject a fact into a vertex store"
+def _run_emit(argv: list[str]) -> int:
+    """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
+    parser = argparse.ArgumentParser(prog="loops emit", add_help=True)
+    parser.add_argument(
+        "vertex",
+        nargs="?",
+        default=None,
+        help="Vertex name or .vertex path (optional; auto-resolves local vertex)",
     )
-    emit_parser.add_argument("vertex", nargs="?", default=None, help="Vertex name or .vertex path (optional; auto-resolves local vertex)")
-    emit_parser.add_argument("kind", help="Fact kind")
-    emit_parser.add_argument(
-        "parts",
-        nargs="*",
-        help="KEY=VALUE pairs and optional trailing message text",
+    parser.add_argument("kind", help="Fact kind")
+    parser.add_argument(
+        "parts", nargs="*", help="KEY=VALUE pairs and optional trailing message text"
     )
-    emit_parser.add_argument(
-        "--observer",
-        default="",
-        help="Observer string (default: empty)",
+    parser.add_argument(
+        "--observer", default="", help="Observer string (default: empty)"
     )
-    emit_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the fact JSON without storing",
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print the fact JSON without storing"
     )
+    args = parser.parse_args(argv)
+    return cmd_emit(args)
 
-    # Population management
-    add_parser = subparsers.add_parser("add", help="Add to template population")
-    add_parser.add_argument("target", help="Vertex name or vertex/template")
-    add_parser.add_argument("values", nargs="+", help="Column values in header order")
 
-    rm_parser = subparsers.add_parser("rm", help="Remove from template population")
-    rm_parser.add_argument("target", help="Vertex name or vertex/template")
-    rm_parser.add_argument("key", help="Key (first column) to remove")
+def _run_add(argv: list[str]) -> int:
+    """Thin wrapper: parse argv for add, delegate to cmd_add."""
+    from .commands.pop import cmd_add
 
-    export_parser = subparsers.add_parser("export", help="Inline with -> .list file")
-    export_parser.add_argument("target", help="Vertex name or vertex/template")
-    export_parser.add_argument(
+    parser = argparse.ArgumentParser(prog="loops add", add_help=True)
+    parser.add_argument("target", help="Vertex name or vertex/template")
+    parser.add_argument("values", nargs="+", help="Column values in header order")
+    args = parser.parse_args(argv)
+    return cmd_add(args)
+
+
+def _run_rm(argv: list[str]) -> int:
+    """Thin wrapper: parse argv for rm, delegate to cmd_rm."""
+    from .commands.pop import cmd_rm
+
+    parser = argparse.ArgumentParser(prog="loops rm", add_help=True)
+    parser.add_argument("target", help="Vertex name or vertex/template")
+    parser.add_argument("key", help="Key (first column) to remove")
+    args = parser.parse_args(argv)
+    return cmd_rm(args)
+
+
+def _run_export(argv: list[str]) -> int:
+    """Thin wrapper: parse argv for export, delegate to cmd_export."""
+    from .commands.pop import cmd_export
+
+    parser = argparse.ArgumentParser(prog="loops export", add_help=True)
+    parser.add_argument("target", help="Vertex name or vertex/template")
+    parser.add_argument(
         "--output",
         "-o",
         help="(deprecated) ignored; export materializes configured .list",
     )
-
-    # status, log, store, start: routed through run_cli in main(), not via argparse.
-    # Their parsers live inside _run_status/_run_log/_run_store/_run_start.
-
-    return parser
+    args = parser.parse_args(argv)
+    return cmd_export(args)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
+    from painted.app_runner import run_app, AppCommand
+
     if argv is None:
         argv = sys.argv[1:]
 
-    # Display commands routed through painted run_cli
-    _display = {
-        "status": _run_status,
-        "log": _run_log,
-        "store": _run_store,
-        "start": _run_start,
-        "compile": _run_compile,
-        "validate": _run_validate,
-        "test": _run_test,
-        "ls": _run_ls,
-        "check": _run_check,
-        "run": _run_run,
-    }
-    if argv and argv[0] in _display:
-        return _display[argv[0]](argv[1:])
+    commands = [
+        # Display commands (routed through painted run_cli internally)
+        AppCommand(
+            "status", "Show store status", _run_status, detail="[vertex] [--kind KIND]"
+        ),
+        AppCommand(
+            "log",
+            "Show recent facts",
+            _run_log,
+            detail="[vertex] [--since SINCE] [--kind KIND]",
+        ),
+        AppCommand(
+            "store",
+            "Inspect store contents",
+            _run_store,
+            detail="[file] — vertex name, path, or .db file",
+        ),
+        AppCommand(
+            "start",
+            "Run a vertex (one round, rendered)",
+            _run_start,
+            detail="[file] [--var KEY=VALUE ...]",
+        ),
+        AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
+        AppCommand(
+            "validate",
+            "Validate syntax and flow",
+            _run_validate,
+            detail="[files...] — defaults to *.loop/*.vertex in cwd",
+        ),
+        AppCommand(
+            "test",
+            "Run parse pipeline against sample input",
+            _run_test,
+            detail="<file> [--input FILE]",
+        ),
+        AppCommand(
+            "run",
+            "Execute a .loop or .vertex file",
+            _run_run,
+            detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
+        ),
+        AppCommand(
+            "check",
+            "Run project health checks",
+            _run_check,
+            detail="[vertex] [--observer OBS]",
+        ),
+        AppCommand(
+            "ls",
+            "List template populations",
+            _run_ls,
+            detail="<target> — vertex name or vertex/template",
+        ),
+        # Action commands
+        AppCommand(
+            "init",
+            "Initialize loops config directory",
+            _run_init,
+            detail="[name] [--template NAME]",
+        ),
+        AppCommand(
+            "emit",
+            "Inject a fact into a vertex store",
+            _run_emit,
+            detail="[vertex] <kind> [KEY=VALUE ...] [--observer OBS] [--dry-run]",
+        ),
+        AppCommand(
+            "add", "Add to template population", _run_add, detail="<target> <values...>"
+        ),
+        AppCommand(
+            "rm", "Remove from template population", _run_rm, detail="<target> <key>"
+        ),
+        AppCommand(
+            "export", "Materialize .list from store", _run_export, detail="<target>"
+        ),
+    ]
 
     # Registered app dispatch — `loops <app> <command>`
-    if argv and argv[0] in _APPS:
-        return _run_app(argv[0], argv[1:])
+    for app_name in _APPS:
+        commands.append(
+            AppCommand(
+                app_name,
+                f"{app_name} commands",
+                lambda argv, n=app_name: _run_app(n, argv),
+            )
+        )
 
-    # All other commands via shared parser
-    parser = create_parser()
-    args = parser.parse_args(argv)
-
-    if args.command == "init":
-        return cmd_init(args)
-    elif args.command == "emit":
-        return cmd_emit(args)
-    elif args.command == "add":
-        from .commands.pop import cmd_add
-        return cmd_add(args)
-    elif args.command == "rm":
-        from .commands.pop import cmd_rm
-        return cmd_rm(args)
-    elif args.command == "export":
-        from .commands.pop import cmd_export
-        return cmd_export(args)
-    else:
-        parser.print_help()
-        return 1
+    return run_app(
+        argv, commands, prog="loops", description="Runtime for .loop and .vertex files"
+    )
 
 
 if __name__ == "__main__":

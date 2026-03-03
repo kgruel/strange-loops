@@ -1,6 +1,9 @@
 # CLAUDE.md
 
-The loops monorepo. See `LOOPS.md` for the fundamental model — three atoms (Fact, Spec, Tick), three truths, everything is loops.
+The strange-loops monorepo. A system for focusing attention.
+
+See `STRANGE-LOOPS.md` for the paradigm — three shapes, four properties, one pattern.
+See `ARCHITECTURE.md` for why it's built this way — libraries, persistence, rendering.
 
 ## Build & Test
 
@@ -16,18 +19,18 @@ Each lib and app with a `./dev` script also supports `./dev check` (the CI gate)
 
 ```
 libs/
-  atoms/      Fact, Spec, Source, Parse, Fold — the data atoms and contracts
-  engine/     Tick, Vertex, Store, Projection, Peer, Grant — runtime and identity
+  atoms/      Fact, Spec, Source, Parse, Fold — the three shapes and ingress
+  engine/     Vertex, Loop, Store, Peer, Grant — the pattern and persistence
   lang/       KDL loader + validator for .loop/.vertex files
-  painted/    Terminal rendering — Block, Style, Surface, run_cli, lenses
+  painted/    Terminal lenses — Block, Style, Surface, run_cli, zoom levels
   store/      Store operations — slice, merge, search, transport
 
 apps/
-  loops/      CLI for the loops system — emit, log, status across vertices
+  loops/      CLI — emit, log, status, store across vertices
   hlab/       Homelab monitoring — DSL-driven status, alerts, media
   strange-loops/  Task orchestration — tasks as loops, workers in worktrees
 
-experiments/  Integration explorations and dissolved apps (discord, telegram, reader DSL files)
+experiments/  Integration explorations and dissolved apps
 docs/         Deep dives — VERTEX.md, TEMPORAL.md, PERSISTENCE.md, IDENTITY.md
 ```
 
@@ -44,15 +47,9 @@ loops log project --kind decision              # project decisions
 loops log meta --kind decision --since 7d      # recent cross-cutting decisions
 ```
 
-**Project store** (`project.vertex`): loops-specific architecture, API design, lib boundaries.
+**Project store** (`project.vertex`): architecture, API design, lib boundaries.
 
-**Meta store** (`~/Documents/meta-discussion`): cross-cutting patterns that apply to any project. Key decisions that govern how we work:
-- `architecture/claude-md-levels` — four levels, each adds not repeats
-- `architecture/claude-md-antipatterns` — God/stale/redundant/missing
-- `architecture/doc-roles` — CLAUDE.md is working context, README for API consumers
-- `workflow/handoff-as-fact` — handoff dissolves into the store
-- `design/dissolution-method` — before building X, ask if X dissolves
-- `design/progressive-vertex-chain` — CLAUDE.md is the lens, the store is the state
+**Meta store** (`~/Documents/meta-discussion`): cross-cutting patterns that apply to any project.
 
 ## Conventions
 

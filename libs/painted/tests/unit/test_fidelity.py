@@ -21,7 +21,7 @@ from painted.fidelity import (
     _build_help_data,
     _extract_add_args_flags,
     _help_args_to_flags,
-    _render_help,
+    render_help,
     add_cli_args,
     parse_format,
     parse_mode,
@@ -622,7 +622,7 @@ class TestBuildHelpDataAugmentation:
 
 
 class TestRenderHelpAugmentation:
-    """Tests for _render_help with primary/secondary hierarchy."""
+    """Tests for render_help with primary/secondary hierarchy."""
 
     @staticmethod
     def _block_text(block: Block) -> str:
@@ -652,7 +652,7 @@ class TestRenderHelpAugmentation:
                 ),
             ),
         )
-        block = _render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
+        block = render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
         text = self._block_text(block)
 
         # Command arg should be present
@@ -679,7 +679,7 @@ class TestRenderHelpAugmentation:
                 ),
             ),
         )
-        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        block = render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
         text = self._block_text(block)
 
         # Command arg present
@@ -705,7 +705,7 @@ class TestRenderHelpAugmentation:
                 ),
             ),
         )
-        block = _render_help(data, Zoom.DETAILED, 80, use_ansi=False)
+        block = render_help(data, Zoom.DETAILED, 80, use_ansi=False)
         text = self._block_text(block)
 
         # Command arg present
@@ -732,7 +732,7 @@ class TestRenderHelpAugmentation:
                 HelpGroup(name="Help", flags=(HelpFlag("-h", "--help", "Show this help"),)),
             ),
         )
-        block = _render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        block = render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
         text = self._block_text(block)
 
         # All groups rendered fully (not collapsed)

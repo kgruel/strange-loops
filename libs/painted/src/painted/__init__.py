@@ -63,6 +63,9 @@ from .fidelity import (
     resolve_mode,
     run_cli,
 )
+
+# App runner (multi-command routing)
+from .app_runner import AppCommand, AppRunner, run_app
 from .icon_set import (
     ASCII_ICONS,
     IconSet,
@@ -199,6 +202,9 @@ __all__ = [
     "CliRunner",
     "HelpArg",
     "run_cli",
+    "AppCommand",
+    "AppRunner",
+    "run_app",
     "add_cli_args",
     "parse_zoom",
     "parse_mode",

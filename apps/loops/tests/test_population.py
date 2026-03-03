@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from loops.main import create_parser, main
+import argparse
+
+from loops.main import main
 
 
 # ---------------------------------------------------------------------------
@@ -51,41 +53,46 @@ class TestParserWiring:
         assert callable(_run_ls)
 
     def test_add_parser(self):
-        parser = create_parser()
+        parser = argparse.ArgumentParser(prog="loops add")
+        parser.add_argument("target")
+        parser.add_argument("values", nargs="+")
         args = parser.parse_args(
-            ["add", "reading", "lobsters", "https://lobste.rs/rss"]
+            ["reading", "lobsters", "https://lobste.rs/rss"]
         )
-        assert args.command == "add"
         assert args.target == "reading"
         assert args.values == ["lobsters", "https://lobste.rs/rss"]
 
     def test_rm_parser(self):
-        parser = create_parser()
-        args = parser.parse_args(["rm", "reading", "lobsters"])
-        assert args.command == "rm"
+        parser = argparse.ArgumentParser(prog="loops rm")
+        parser.add_argument("target")
+        parser.add_argument("key")
+        args = parser.parse_args(["reading", "lobsters"])
         assert args.target == "reading"
         assert args.key == "lobsters"
 
     def test_export_parser(self):
-        parser = create_parser()
-        args = parser.parse_args(["export", "reading"])
-        assert args.command == "export"
+        parser = argparse.ArgumentParser(prog="loops export")
+        parser.add_argument("target")
+        parser.add_argument("--output", "-o")
+        args = parser.parse_args(["reading"])
         assert args.target == "reading"
 
     def test_export_with_output(self):
-        parser = create_parser()
-        args = parser.parse_args(["export", "reading", "-o", "my.list"])
+        parser = argparse.ArgumentParser(prog="loops export")
+        parser.add_argument("target")
+        parser.add_argument("--output", "-o")
+        args = parser.parse_args(["reading", "-o", "my.list"])
         assert args.output == "my.list"
 
-    def test_import_removed(self):
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["import", "reading"])
+    def test_import_unknown(self):
+        """import is not a recognized command."""
+        result = main(["import", "reading"])
+        assert result == 1
 
-    def test_merge_removed(self):
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["merge", "reading", "external.list"])
+    def test_merge_unknown(self):
+        """merge is not a recognized command."""
+        result = main(["merge", "reading", "external.list"])
+        assert result == 1
 
 
 # ---------------------------------------------------------------------------

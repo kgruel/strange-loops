@@ -40,7 +40,7 @@ from painted.fidelity import (
     HelpData,
     HelpFlag,
     HelpGroup,
-    _render_help,
+    render_help,
 )
 
 
@@ -110,7 +110,7 @@ def render_summary(data: HelpData, width: int) -> Block:
         Block.text("Help at default zoom:", Style(dim=True)),
         Block.text("", Style()),
     ]
-    help_block = _render_help(data, Zoom.SUMMARY, width, use_ansi=False)
+    help_block = render_help(data, Zoom.SUMMARY, width, use_ansi=False)
     rows.append(help_block)
     return join_vertical(*rows)
 
@@ -121,7 +121,7 @@ def render_detailed(data: HelpData, width: int) -> Block:
         Block.text("Help at --help -v:", Style(dim=True)),
         Block.text("", Style()),
     ]
-    help_block = _render_help(data, Zoom.DETAILED, width, use_ansi=False)
+    help_block = render_help(data, Zoom.DETAILED, width, use_ansi=False)
     rows.append(help_block)
     return join_vertical(*rows)
 
@@ -130,8 +130,8 @@ def render_full(data: HelpData, width: int) -> Block:
     """Side-by-side: SUMMARY vs DETAILED."""
     col_width = max(30, (width - 3) // 2)
 
-    summary_block = _render_help(data, Zoom.SUMMARY, col_width, use_ansi=False)
-    detailed_block = _render_help(data, Zoom.DETAILED, col_width, use_ansi=False)
+    summary_block = render_help(data, Zoom.SUMMARY, col_width, use_ansi=False)
+    detailed_block = render_help(data, Zoom.DETAILED, col_width, use_ansi=False)
 
     summary_box = border(
         pad(summary_block, right=max(0, col_width - 2 - summary_block.width)),

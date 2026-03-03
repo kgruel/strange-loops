@@ -330,7 +330,9 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
     )
 
 
-def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Block:
+def render_help(
+    data: HelpData, zoom: Zoom, width: int, use_ansi: bool, *, show_rules: bool = True
+) -> Block:
     """Render help data as a composed Block.
 
     Groups with secondary=True are rendered dim and collapsed to a compact
@@ -430,7 +432,7 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
                 _render_group(group, sec_style, sec_header)
 
     # Interaction rules at DETAILED+
-    if zoom >= Zoom.DETAILED:
+    if show_rules and zoom >= Zoom.DETAILED:
         rules_header = "Interaction rules"
         rules = [
             "--json and --plain imply --static (no animation).",
@@ -445,7 +447,7 @@ def _render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Bloc
     return join_vertical(*rows)
 
 
-def _scan_help_args(args: list[str]) -> tuple[Zoom, Format]:
+def scan_help_args(args: list[str]) -> tuple[Zoom, Format]:
     """Quick-scan args for zoom and format when --help is present."""
     zoom = Zoom.SUMMARY
     fmt = Format.AUTO
@@ -655,7 +657,7 @@ class CliRunner(Generic[T]):
 
     def _handle_help(self, args: list[str]) -> int:
         """Render zoom-aware help and return 0."""
-        zoom, fmt = _scan_help_args(args)
+        zoom, fmt = scan_help_args(args)
         help_data = _build_help_data(self)
 
         if fmt == Format.JSON:
@@ -667,7 +669,7 @@ class CliRunner(Generic[T]):
             use_ansi = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
         width = shutil.get_terminal_size().columns
-        block = _render_help(help_data, zoom, width, use_ansi)
+        block = render_help(help_data, zoom, width, use_ansi)
 
         from .writer import print_block
 

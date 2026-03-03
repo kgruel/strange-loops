@@ -82,15 +82,14 @@ class TestRecordLineZoom:
         assert "message:" in text
         assert "author:" in text
 
-    def test_full_does_not_truncate_field_lines(self):
-        """FULL zoom shows complete field values, no ellipsis truncation."""
-        long_value = "A" * 200
-        payload = {"output": long_value}
+    def test_full_shows_all_fields(self):
+        """FULL zoom shows all fields (all lines, constrained to width)."""
+        payload = {"output": "some output", "status": "failed", "extra": "data"}
         block = record_line(_ts(), "task", payload, Zoom.FULL, 80)
         text = block_to_text(block)
-        # The full value should appear without ellipsis truncation
-        assert "…" not in text
-        assert long_value in text
+        assert "output:" in text
+        assert "status:" in text
+        assert "extra:" in text
 
 
 class TestRecordLinePayloadLens:

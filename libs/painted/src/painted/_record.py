@@ -308,18 +308,19 @@ def record_line(
     header_line = join_horizontal(*segments)
     lines = [header_line]
 
-    # Shallow indent — gutter rail provides visual continuity to parent
+    # Shallow indent — gutter rail provides visual continuity to parent.
+    # Constrain all lines to width so join_vertical doesn't pad beyond
+    # terminal width (which causes wrapping gaps).
     indent = "  "
     for k, v in payload.items():
         if v is None or v == "":
             continue
         sv = str(v)
-        # Split multiline values into individual lines to avoid
-        # tall Block.text() blocks that create rendering gaps
+        # Split multiline values into individual lines
         value_lines = sv.splitlines()
-        lines.append(Block.text(f"{indent}{k}: {value_lines[0]}", p.muted))
+        lines.append(Block.text(f"{indent}{k}: {value_lines[0]}", p.muted, width=width))
         for vl in value_lines[1:]:
-            lines.append(Block.text(vl, p.muted))
+            lines.append(Block.text(vl, p.muted, width=width))
 
     return join_vertical(*lines)
 

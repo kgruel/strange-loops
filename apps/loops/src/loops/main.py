@@ -4,9 +4,11 @@ Vertex operations:
     loops <vertex> status           Show store status
     loops <vertex> log              Show recent facts
     loops <vertex> emit <kind> ...  Inject a fact
+    loops <vertex> store            Inspect vertex store contents
 
 Root commands:
     loops ls                        List vertices
+    loops store [file]              Inspect store (name, path, or .db)
     loops start <file>              Run a .vertex file (one round, rendered)
     loops run <file>                Execute a .loop or .vertex file
     loops validate <file>           Validate syntax and flow
@@ -1256,21 +1258,17 @@ def _run_search(argv: list[str], *, vertex_path: Path, mod=None) -> int:
     def fetch():
         if not query_str:
             return []
+        from datetime import datetime, timezone
         from engine import vertex_search
+        from .commands.session import _parse_duration
 
         since_ts = None
         if known.since:
-            import re
-
-            m = re.match(r"^(\d+)([dhms])$", known.since)
-            if m:
-                value = int(m.group(1))
-                unit = m.group(2)
-                multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
-                from datetime import datetime, timezone
-
+            try:
                 now = datetime.now(timezone.utc)
-                since_ts = now.timestamp() - value * multipliers[unit]
+                since_ts = now.timestamp() - _parse_duration(known.since)
+            except ValueError:
+                pass
         return vertex_search(
             vertex_path,
             query_str,
@@ -1377,22 +1375,6 @@ def _run_log(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> i
                 vertex_path = _resolve_named_vertex(vname)
             else:
                 vertex_path = _resolve_local_vertex()
-        if mod is not None:
-            import re
-            from engine import vertex_facts
-            m = re.match(r"^(\d+)([dhms])$", known.since)
-            if not m:
-                return []
-            value = int(m.group(1))
-            unit = m.group(2)
-            multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
-            duration = value * multipliers[unit]
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
-            since_ts = now.timestamp() - duration
-            facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=known.kind)
-            facts.sort(key=lambda f: f["ts"], reverse=True)
-            return facts
         from .commands.session import fetch_log
         return fetch_log(vertex_path, known.since, known.kind)
 
@@ -1711,7 +1693,7 @@ def _run_export(argv: list[str]) -> int:
     return cmd_export(args)
 
 
-_ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls"}
+_ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls", "store"}
 
 _VERTEX_OPS = frozenset({
     "status", "log", "search", "emit", "store",
@@ -1756,6 +1738,7 @@ def _render_main_help(argv: list[str]) -> int:
         name="Commands",
         flags=(
             HelpFlag(None, "ls", "List vertices"),
+            HelpFlag(None, "store", "Inspect store contents", detail="[file]"),
             HelpFlag(None, "start", "Run a vertex (one round, rendered)", detail="[file] [--var KEY=VALUE]"),
             HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
             HelpFlag(None, "compile", "Show compiled structure", detail="<file>"),
@@ -1891,6 +1874,12 @@ def main(argv: list[str] | None = None) -> int:
         root_commands = [
             AppCommand("ls", "List vertices", _run_ls_root),
             AppCommand(
+                "store",
+                "Inspect store contents",
+                _run_store,
+                detail="[file] — vertex name, path, or .db file",
+            ),
+            AppCommand(
                 "start",
                 "Run a vertex (one round, rendered)",
                 _run_start,
@@ -1941,6 +1930,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         return _dispatch_vertex_op(vertex_name, vertex_path, argv[1], argv[2:])
+
+    # Path-like arg → suggest the right invocation
+    if vertex_name.endswith(".vertex") or vertex_name.startswith("./") or vertex_name.startswith("/"):
+        _err(f"File arguments go with a command: loops start {vertex_name}")
+        return 1
 
     # Unknown command
     _err(f"Unknown command: {vertex_name}")

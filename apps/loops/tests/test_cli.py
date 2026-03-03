@@ -440,11 +440,10 @@ class TestDefaultPaths:
         result = main(["run"])
         assert result == 1
 
-    def test_store_vertex_first(self, monkeypatch, tmp_path, capsys):
-        """store via vertex-first dispatch falls back correctly."""
+    def test_store_root_command(self, monkeypatch, tmp_path, capsys):
+        """store as root command falls back to LOOPS_HOME/root.vertex."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # "store" as bare command is no longer valid — it's not a root command
-        # and won't resolve as a vertex name either
+        # Without root.vertex, returns 1
         result = main(["store"])
         assert result == 1
 

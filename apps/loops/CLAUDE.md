@@ -109,7 +109,7 @@ Commands: `init`, `emit`, `add`, `rm`, `export`.
 - `loops init project` — aggregation vertex in LOOPS_HOME + local instance
 - `loops init dev/project --template session` — namespaced vertex in LOOPS_HOME
 
-Templates: `_SESSION_VERTEX`, `_TASKS_VERTEX`, `_PROJECT_VERTEX`, `_AGGREGATION_VERTEX`.
+Templates dissolved: `loops init <name>` finds an existing config-level instance vertex and replicates it. No hardcoded template strings — the live instances ARE the templates.
 
 ---
 

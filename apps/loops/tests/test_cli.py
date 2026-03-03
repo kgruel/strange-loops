@@ -337,17 +337,24 @@ class TestInitCommand:
         assert result == 0
         assert (tmp_path / "dev" / "session" / "session.vertex").exists()
 
-    def test_slashed_name_unknown_leaf_requires_template(self, monkeypatch, tmp_path, capsys):
-        """loops init dev/custom without --template errors."""
+    def test_slashed_name_creates_any_aggregation(self, monkeypatch, tmp_path, capsys):
+        """loops init dev/custom creates aggregation without needing a template."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = main(["init", "dev/custom"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "not a known template" in captured.err
+        assert result == 0
+        vertex = tmp_path / "dev" / "custom" / "custom.vertex"
+        assert vertex.exists()
+        assert "discover" in vertex.read_text()
 
     def test_bare_name_creates_local_vertex(self, monkeypatch, tmp_path, capsys):
-        """loops init project creates local vertex in cwd."""
+        """loops init project creates local vertex from config-level source."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Seed a config-level instance vertex as source
+        config_dir = tmp_path / "project"
+        config_dir.mkdir()
+        (config_dir / "project.vertex").write_text(
+            'name "project"\nstore "./data/project.db"\n\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
         (tmp_path / "myproject").mkdir()
         monkeypatch.chdir(tmp_path / "myproject")
         result = main(["init", "project"])
@@ -362,10 +369,15 @@ class TestInitCommand:
     def test_bare_name_registers_with_config(self, monkeypatch, tmp_path, capsys):
         """loops init project registers cwd with config-level vertex if it exists."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Create config-level vertex first
+        # Create config-level aggregation with a source instance
         config_dir = tmp_path / "project"
         config_dir.mkdir()
         (config_dir / "project.vertex").write_text('name "project"\ndiscover "./instances/**/*.vertex"\n')
+        instances_dir = config_dir / "instances" / "seed"
+        instances_dir.mkdir(parents=True)
+        (instances_dir / "project.vertex").write_text(
+            'name "project"\nstore "./data/project.db"\n\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
         # Now init local
         project_dir = tmp_path / "myproject"
         project_dir.mkdir()
@@ -376,16 +388,16 @@ class TestInitCommand:
         assert link.is_symlink()
         assert link.resolve() == project_dir.resolve()
 
-    def test_bare_name_no_register_without_config(self, monkeypatch, tmp_path, capsys):
-        """loops init project without config-level vertex skips registration."""
+    def test_bare_name_no_source_vertex_errors(self, monkeypatch, tmp_path, capsys):
+        """loops init project without config-level source vertex errors."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         project_dir = tmp_path / "myproject"
         project_dir.mkdir()
         monkeypatch.chdir(project_dir)
         result = main(["init", "project"])
-        assert result == 0
+        assert result == 1
         captured = capsys.readouterr()
-        assert "Registered" not in captured.out
+        assert "No existing vertex found" in captured.err
 
     def test_template_project_choice(self):
         parser = create_parser()

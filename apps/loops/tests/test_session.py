@@ -292,11 +292,24 @@ class TestLog:
         assert "No vertex found" in out
 
 
+def _seed_config_vertex(home: Path, name: str, content: str) -> None:
+    """Create a config-level instance vertex for testing."""
+    config_dir = home / name
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / f"{name}.vertex").write_text(content)
+
+
+_SESSION_CONTENT = 'name "session"\nstore "./data/session.db"\n\nloops {\n  decision { fold { items "by" "topic" } }\n  task { fold { items "by" "name" } }\n}\n'
+_TASKS_CONTENT = 'name "tasks"\nstore "./data/tasks.db"\n\nloops {\n  task { fold { items "by" "name" } }\n}\n'
+
+
 class TestAutoInit:
     def test_emit_creates_vertex_and_store(self, tmp_path, monkeypatch, capsys):
-        """emit in empty dir auto-inits session template."""
+        """emit in empty dir auto-inits session from config-level source."""
+        home = tmp_path / "home"
+        _seed_config_vertex(home, "session", _SESSION_CONTENT)
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
+        monkeypatch.setenv("LOOPS_HOME", str(home))
 
         result = main(["emit", "decision", "topic=test", "it works"])
         assert result == 0
@@ -313,8 +326,10 @@ class TestAutoInit:
 
     def test_emit_reuses_existing_local_vertex(self, tmp_path, monkeypatch, capsys):
         """emit finds and uses existing local vertex without creating a new one."""
+        home = tmp_path / "home"
+        _seed_config_vertex(home, "tasks", _TASKS_CONTENT)
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
+        monkeypatch.setenv("LOOPS_HOME", str(home))
 
         # Pre-create a tasks vertex
         main(["init", "--template", "tasks"])
@@ -346,6 +361,9 @@ class TestInitTemplate:
         assert (tmp_path / "data").is_dir()
 
     def test_tasks_template(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "home"
+        _seed_config_vertex(home, "tasks", _TASKS_CONTENT)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.chdir(tmp_path)
 
         result = main(["init", "--template", "tasks"])

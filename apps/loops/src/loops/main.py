@@ -61,85 +61,6 @@ name "root"
 discover "./**/*.vertex"
 """
 
-_SESSION_VERTEX = """\
-name "session"
-store "./data/session.db"
-
-loops {
-  decision { fold { items "by" "topic" } }
-  thread   { fold { items "by" "name" } }
-  change   { fold { items "collect" 20 } }
-  task     { fold { items "by" "name" } }
-}
-"""
-
-_TASKS_VERTEX = """\
-name "tasks"
-store "./data/tasks.db"
-
-loops {
-  task     { fold { items "by" "name" } }
-  thread   { fold { items "by" "name" } }
-  change   { fold { items "collect" 20 } }
-}
-"""
-
-_PROJECT_VERTEX = """\
-name "project"
-store "./data/project.db"
-
-loops {
-  decision { fold { items "by" "topic" } }
-  thread   { fold { items "by" "name" } }
-  change   { fold { items "collect" 20 } }
-  task     { fold { items "by" "name" } }
-}
-"""
-
-_SIFTD_VERTEX = """\
-name "siftd"
-store "./data/siftd.db"
-
-sources {
-  path "sources/claude-code.loop"
-}
-
-loops {
-  exchange {
-    fold {
-      items "by" "conversation_id"
-    }
-    search "prompt" "response"
-  }
-  tag {
-    fold {
-      items "by" "name"
-    }
-  }
-}
-"""
-
-_SIFTD_CLAUDE_CODE_LOOP = """\
-source "python -m siftd_loops.sources.claude_code"
-kind "exchange"
-observer "siftd"
-format "ndjson"
-"""
-
-# Extra files created alongside vertex templates: {template: {relative_path: content}}
-_TEMPLATE_FILES: dict[str, dict[str, str]] = {
-    "siftd": {
-        "sources/claude-code.loop": _SIFTD_CLAUDE_CODE_LOOP,
-    },
-}
-
-_TEMPLATES: dict[str, str] = {
-    "session": _SESSION_VERTEX,
-    "tasks": _TASKS_VERTEX,
-    "project": _PROJECT_VERTEX,
-    "siftd": _SIFTD_VERTEX,
-}
-
 # App registry — registered apps get `loops <app> <command>` dispatch
 _APPS: dict[str, str] = {
     "siftd": "siftd_loops",
@@ -160,14 +81,41 @@ discover "./instances/**/*.vertex"
 """
 
 
-def _template_content(template: str, name: str) -> str:
-    """Get template content with the vertex name overridden."""
+def _find_source_vertex(name: str) -> str | None:
+    """Find an existing instance vertex to use as source for init.
+
+    Checks config-level vertex: if aggregation (has instances/), uses first
+    discovered instance. Otherwise reads the config vertex directly if it
+    has a store (i.e., is an instance, not an aggregation).
+    """
+    home = loops_home()
+    config_dir = home / name
+    if not config_dir.exists():
+        return None
+    # Aggregation pattern: look in instances/
+    instances_dir = config_dir / "instances"
+    if instances_dir.is_dir():
+        matches = sorted(instances_dir.glob("**/*.vertex"))
+        if matches:
+            return matches[0].read_text()
+    # Direct instance at config level
+    vertex_file = config_dir / f"{Path(name).name}.vertex"
+    if vertex_file.exists():
+        content = vertex_file.read_text()
+        if "store" in content:
+            return content
+    return None
+
+
+def _init_local_vertex(name: str, source_name: str | None = None) -> Path | None:
+    """Create a vertex + data dir in cwd from an existing instance. Returns vertex path."""
     import re
 
-    content = _TEMPLATES[template]
-    # Replace name "template" with name "actual_name"
-    content = re.sub(r'^name ".*"', f'name "{name}"', content, count=1, flags=re.MULTILINE)
-    # Replace store path to match the name
+    source = _find_source_vertex(source_name or name)
+    if source is None:
+        return None
+    # Stamp a local copy with the target name and store path
+    content = re.sub(r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE)
     content = re.sub(
         r'^store "./data/.*\.db"',
         f'store "./data/{name}.db"',
@@ -175,28 +123,15 @@ def _template_content(template: str, name: str) -> str:
         count=1,
         flags=re.MULTILINE,
     )
-    return content
-
-
-def _init_local_vertex(template: str, name: str | None = None) -> Path:
-    """Create a vertex + data dir in cwd from a template. Returns vertex path."""
-    leaf = name or template
-    content = _template_content(template, leaf)
-    vertex_path = Path.cwd() / f"{leaf}.vertex"
+    vertex_path = Path.cwd() / f"{name}.vertex"
     if not vertex_path.exists():
         vertex_path.write_text(content)
     data_dir = Path.cwd() / "data"
     data_dir.mkdir(exist_ok=True)
-    # Write any extra files associated with this template
-    for rel_path, file_content in _TEMPLATE_FILES.get(template, {}).items():
-        file_path = Path.cwd() / rel_path
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        if not file_path.exists():
-            file_path.write_text(file_content)
     return vertex_path
 
 
-def _init_config_vertex(name: str, template: str) -> Path:
+def _init_config_vertex(name: str) -> Path:
     """Create an aggregation vertex + instances dir in LOOPS_HOME. Returns vertex path."""
     home = loops_home()
     leaf = Path(name).name
@@ -239,35 +174,32 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     # Slashed name → config-level aggregation vertex
     if name and "/" in name:
-        leaf = Path(name).name
-        tpl = template or (leaf if leaf in _TEMPLATES else None)
-        if tpl is None:
-            _err(f"No template specified and '{leaf}' is not a known template")
-            return 1
-        vertex_path = _init_config_vertex(name, tpl)
+        vertex_path = _init_config_vertex(name)
         _msg(f"Created {vertex_path}")
         return 0
 
-    # Bare name → local instance + register
+    # Bare name → local instance from existing config vertex + register
     if name:
-        tpl = template or (name if name in _TEMPLATES else None)
-        if tpl is None:
-            _err(f"No template specified and '{name}' is not a known template")
+        vertex_path = _init_local_vertex(name, source_name=template)
+        if vertex_path is None:
+            _err(f"No existing vertex found for '{template or name}'")
             return 1
-        vertex_path = _init_local_vertex(tpl, name)
         _msg(f"Created {vertex_path}")
         link = _register_with_config(name, Path.cwd())
         if link is not None:
             _msg(f"Registered {Path.cwd()} → {link}")
         return 0
 
-    # No name + template → local instance in cwd (existing behavior)
+    # No name + template → local instance in cwd
     if template:
         vertex_path = _init_local_vertex(template)
+        if vertex_path is None:
+            _err(f"No existing vertex found for '{template}'")
+            return 1
         _msg(f"Created {vertex_path}")
         return 0
 
-    # No name + no template → root.vertex in LOOPS_HOME (existing behavior)
+    # No name + no template → root.vertex in LOOPS_HOME
     home = loops_home()
     root = home / "root.vertex"
     if root.exists():
@@ -863,7 +795,11 @@ def cmd_emit(args: argparse.Namespace) -> int:
         if local is not None:
             vertex_path = local.resolve()
         else:
-            vertex_path = _init_local_vertex("session").resolve()
+            result = _init_local_vertex("session")
+            if result is None:
+                show(Block.text("No session vertex found to auto-initialize from", p.error), file=sys.stderr)
+                return 1
+            vertex_path = result.resolve()
             show(Block.text(f"Auto-initialized: {vertex_path}", p.muted), file=sys.stderr)
 
     payload = _parse_emit_parts(parts)
@@ -1571,8 +1507,8 @@ def create_parser() -> argparse.ArgumentParser:
         help="Vertex name (e.g., 'project' or 'dev/project')",
     )
     init_parser.add_argument(
-        "--template", "-t", choices=list(_TEMPLATES),
-        help="Template to use",
+        "--template", "-t",
+        help="Source vertex name to use as template (defaults to init name)",
     )
 
     # store

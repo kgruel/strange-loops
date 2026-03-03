@@ -11,7 +11,8 @@ uv.lock
 .pytest_cache/
 .subtask/
 .tadpole/
-.claude/
+.claude/*
+!.claude/skills/
 .obsidian/
 .DS_Store
 /data/

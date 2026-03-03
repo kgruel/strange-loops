@@ -206,7 +206,7 @@ def setup_defaults(ctx: CliContext) -> None:
 # =============================================================================
 
 
-def _help_args_to_flags(help_args: list[HelpArg]) -> tuple[HelpFlag, ...]:
+def help_args_to_flags(help_args: list[HelpArg]) -> tuple[HelpFlag, ...]:
     """Convert HelpArgs to HelpFlags for rendering."""
     flags: list[HelpFlag] = []
     for arg in help_args:
@@ -251,7 +251,7 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
     # Command args (primary) — from help_args and/or add_args
     command_flags: list[HelpFlag] = []
     if runner.help_args is not None:
-        command_flags.extend(_help_args_to_flags(runner.help_args))
+        command_flags.extend(help_args_to_flags(runner.help_args))
     if runner.add_args is not None:
         command_flags.extend(_extract_add_args_flags(runner.add_args))
 

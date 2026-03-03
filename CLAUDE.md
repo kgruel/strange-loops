@@ -41,15 +41,15 @@ Each lib and app has its own CLAUDE.md. Start there when working in one.
 Two stores accumulate decisions, threads, and tasks. Query from anywhere:
 
 ```bash
-loops status project                           # this repo — architecture, API, implementation
-loops status meta                              # cross-cutting — ways of working, patterns, tooling
-loops log project --kind decision              # project decisions
-loops log meta --kind decision --since 7d      # recent cross-cutting decisions
+uv run loops status project                           # this repo — architecture, API, implementation
+uv run loops status meta                              # cross-cutting — ways of working, patterns, tooling
+uv run loops log project --kind decision              # project decisions
+uv run loops log meta --kind decision --since 7d      # recent cross-cutting decisions
 ```
 
-**Project store** (`project.vertex`): architecture, API design, lib boundaries.
+**Project store** (`.loops/project.vertex`): architecture, API design, lib boundaries.
 
-**Meta store** (`~/Documents/meta-discussion`): cross-cutting patterns that apply to any project.
+**Meta store** (`meta-discussion/meta.vertex`): cross-cutting patterns that apply to any project.
 
 ## Conventions
 

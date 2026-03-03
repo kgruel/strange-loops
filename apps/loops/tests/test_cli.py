@@ -201,11 +201,14 @@ class TestHelp:
         assert result == 0
         captured = capsys.readouterr()
         assert "Runtime for .loop and .vertex files" in captured.out
-        # All commands should be visible
+        # Vertex operations should be visible
         assert "status" in captured.out
         assert "log" in captured.out
         assert "emit" in captured.out
+        # Root commands should be visible
         assert "init" in captured.out
+        assert "run" in captured.out
+        assert "validate" in captured.out
 
     def test_validate_help(self, capsys):
         # validate is routed through run_cli which handles --help without SystemExit
@@ -437,10 +440,11 @@ class TestDefaultPaths:
         result = main(["run"])
         assert result == 1
 
-    def test_store_no_args_falls_back(self, monkeypatch, tmp_path):
-        """store with no file falls back to LOOPS_HOME/root.vertex."""
+    def test_store_vertex_first(self, monkeypatch, tmp_path, capsys):
+        """store via vertex-first dispatch falls back correctly."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Without root.vertex, returns 1
+        # "store" as bare command is no longer valid — it's not a root command
+        # and won't resolve as a vertex name either
         result = main(["store"])
         assert result == 1
 
@@ -451,36 +455,114 @@ class TestDefaultPaths:
 
 
 class TestEmitParsers:
-    """Parser tests for emit and dissolved session commands."""
+    """Parser tests for emit in vertex-first ordering."""
 
-    def test_emit_without_vertex_arg(self):
-        """When vertex is omitted, argparse fills vertex greedily.
-        Runtime reinterprets via resolution (tested in test_session.py)."""
+    def test_vertex_first_emit(self):
+        """Vertex-first: loops session emit decision topic=test"""
         import argparse
         parser = argparse.ArgumentParser(prog="loops emit")
-        parser.add_argument("vertex", nargs="?", default=None)
         parser.add_argument("kind")
         parser.add_argument("parts", nargs="*")
         parser.add_argument("--observer", default="")
         parser.add_argument("--dry-run", action="store_true")
         args = parser.parse_args(["decision", "topic=test"])
-        # argparse always fills vertex first — runtime shifts if it doesn't resolve
-        assert args.vertex == "decision"
-        assert args.kind == "topic=test"
-
-    def test_emit_with_vertex_arg(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops emit")
-        parser.add_argument("vertex", nargs="?", default=None)
-        parser.add_argument("kind")
-        parser.add_argument("parts", nargs="*")
-        parser.add_argument("--observer", default="")
-        parser.add_argument("--dry-run", action="store_true")
-        args = parser.parse_args(["session", "decision", "topic=test"])
-        assert args.vertex == "session"
         assert args.kind == "decision"
+        assert args.parts == ["topic=test"]
 
-    def test_no_session_subcommand(self):
-        """session subcommand group has been dissolved — 'session' is unknown to AppRunner."""
-        result = main(["session", "start"])
+    def test_vertex_not_resolvable(self):
+        """Vertex-first: unresolvable name gives error, not session dispatch."""
+        result = main(["nonexistent_vertex", "status"])
+        assert result == 1
+
+
+class TestRootLs:
+    """Root-level `loops ls` tests."""
+
+    def _seed_home(self, tmp_path):
+        """Create LOOPS_HOME with root.vertex + child vertices."""
+        home = tmp_path / "loops_home"
+        home.mkdir()
+
+        # Root vertex with discover
+        (home / "root.vertex").write_text(
+            'name "root"\n\ndiscover "./**/*.vertex"\n'
+        )
+
+        # Instance vertex: session
+        session_dir = home / "session"
+        session_dir.mkdir()
+        (session_dir / "session.vertex").write_text(
+            'name "session"\nstore "./data/session.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  thread { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+
+        # Aggregation vertex: meta (uses discover for aggregation)
+        meta_dir = home / "meta"
+        meta_dir.mkdir()
+        (meta_dir / "meta.vertex").write_text(
+            'name "meta"\n\ndiscover "../session/**/*.vertex"\n'
+        )
+
+        return home
+
+    def test_ls_discovers_vertices(self, monkeypatch, tmp_path, capsys):
+        home = self._seed_home(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["ls"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "session" in captured.out
+        assert "meta" in captured.out
+
+    def test_ls_minimal(self, monkeypatch, tmp_path, capsys):
+        home = self._seed_home(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["ls", "-q"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "2 vertices" in captured.out
+
+    def test_ls_verbose(self, monkeypatch, tmp_path, capsys):
+        home = self._seed_home(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["ls", "-v"])
+        assert result == 0
+        captured = capsys.readouterr()
+        # DETAILED shows loop definitions
+        assert "decision" in captured.out
+        assert "thread" in captured.out
+
+    def test_ls_json(self, monkeypatch, tmp_path, capsys):
+        import json
+
+        home = self._seed_home(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["ls", "--json"])
+        assert result == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "vertices" in data
+        names = [v["name"] for v in data["vertices"]]
+        assert "session" in names
+        assert "meta" in names
+
+    def test_ls_no_root_vertex(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["ls"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "loops init" in (captured.out + captured.err)
+
+    def test_vertex_ls_still_works(self, monkeypatch, tmp_path):
+        """loops <vertex> ls routes to population, not root ls."""
+        home = self._seed_home(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        # session ls should attempt population ls (will fail because no template,
+        # but it should NOT route to root ls)
+        result = main(["session", "ls"])
+        # Returns 1 because session has no template population, but the important
+        # thing is it doesn't return vertex listing data
         assert result == 1

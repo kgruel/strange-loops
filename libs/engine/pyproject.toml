@@ -5,7 +5,7 @@ description = "Temporal infrastructure and identity — Tick, Vertex, Peer, Gran
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["atoms", "lang"]
+dependencies = ["atoms", "lang", "sqlite-ulid"]
 
 [tool.uv.sources]
 atoms = { workspace = true }

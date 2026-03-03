@@ -1,4 +1,4 @@
-"""Tests for top-level status, log, init --template, and emit auto-init."""
+"""Tests for vertex-first status, log, init --template, and emit."""
 
 from __future__ import annotations
 
@@ -37,8 +37,8 @@ def _seed_session(workspace: Path) -> Path:
 
 
 def _emit_local(kind: str, *parts: str) -> int:
-    """Emit a fact via CLI using local vertex resolution (no vertex arg)."""
-    return main(["emit", kind, *parts])
+    """Emit a fact via CLI using vertex-first dispatch (local session vertex)."""
+    return main(["session", "emit", kind, *parts])
 
 
 class TestStatus:
@@ -50,7 +50,7 @@ class TestStatus:
         assert _emit_local("decision", "topic=sigil", "{{var}} over ${var}") == 0
         assert _emit_local("decision", "topic=store", "personal instance") == 0
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -66,7 +66,7 @@ class TestStatus:
 
         assert _emit_local("decision", "topic=sigil", "{{var}} over ${var}") == 0
 
-        result = main(["status", "-v"])
+        result = main(["session", "status", "-v"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -84,14 +84,14 @@ class TestStatus:
         assert _emit_local("decision", "topic=sigil", "new choice") == 0
 
         # SUMMARY: only topic visible, message bodies hidden
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
         out = capsys.readouterr().out
         assert "Decisions (1):" in out
         assert "sigil" in out
 
         # DETAILED: message body visible, latest wins
-        result = main(["status", "-v"])
+        result = main(["session", "status", "-v"])
         assert result == 0
         out = capsys.readouterr().out
         assert "new choice" in out
@@ -105,7 +105,7 @@ class TestStatus:
         assert _emit_local("thread", "name=open-one", "status=open") == 0
         assert _emit_local("thread", "name=resolved-one", "status=resolved") == 0
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -119,7 +119,7 @@ class TestStatus:
 
         assert _emit_local("task", "name=fix/review", "status=merged") == 0
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -133,7 +133,7 @@ class TestStatus:
 
         assert _emit_local("change", "summary=structural AST", "files=ast.py,loader.py") == 0
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -149,7 +149,7 @@ class TestStatus:
         assert _emit_local("task", "name=task1", "status=open") == 0
         capsys.readouterr()  # clear prior output
 
-        result = main(["status", "--json"])
+        result = main(["session", "status", "--json"])
         assert result == 0
 
         data = json.loads(capsys.readouterr().out)
@@ -165,26 +165,25 @@ class TestStatus:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 1
 
-        # run_cli renders errors as styled blocks on stdout
-        out = capsys.readouterr().out
-        assert "No vertex found" in out
+        captured = capsys.readouterr()
+        assert "Unknown command" in (captured.out + captured.err)
 
     def test_empty_store(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
         _seed_session(tmp_path)
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
         assert "No session data yet." in out
 
     def test_loops_home_fallback(self, tmp_path, monkeypatch, capsys):
-        """Status falls back to LOOPS_HOME/session/ when no local vertex."""
+        """Status resolves via LOOPS_HOME/session/ when no local vertex."""
         home = tmp_path / "home"
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -204,10 +203,10 @@ class TestStatus:
         (session_dir / "data").mkdir()
 
         # Emit via LOOPS_HOME session vertex
-        assert main(["emit", "session", "decision", "topic=fallback", "it works"]) == 0
+        assert main(["session", "emit", "decision", "topic=fallback", "it works"]) == 0
         capsys.readouterr()
 
-        result = main(["status"])
+        result = main(["session", "status"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -224,7 +223,7 @@ class TestLog:
         time.sleep(0.01)
         assert _emit_local("decision", "topic=second", "two") == 0
 
-        result = main(["log", "--since", "1h"])
+        result = main(["session", "log", "--since", "1h"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -241,7 +240,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         assert _emit_local("task", "name=t1", "status=open") == 0
 
-        result = main(["log", "--since", "1h", "--kind", "decision"])
+        result = main(["session", "log", "--since", "1h", "--kind", "decision"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -256,7 +255,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         capsys.readouterr()
 
-        result = main(["log", "--since", "1h", "--json"])
+        result = main(["session", "log", "--since", "1h", "--json"])
         assert result == 0
 
         # run_cli serializes the whole fetch result as JSON
@@ -274,7 +273,7 @@ class TestLog:
 
         assert _emit_local("decision", "topic=recent", "yes") == 0
 
-        result = main(["log", "--since", "1m"])
+        result = main(["session", "log", "--since", "1m"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -284,12 +283,11 @@ class TestLog:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
 
-        result = main(["log"])
+        result = main(["session", "log"])
         assert result == 1
 
-        # run_cli renders errors as styled blocks on stdout
-        out = capsys.readouterr().out
-        assert "No vertex found" in out
+        captured = capsys.readouterr()
+        assert "Unknown command" in (captured.out + captured.err)
 
 
 def _seed_config_vertex(home: Path, name: str, content: str) -> None:
@@ -303,47 +301,42 @@ _SESSION_CONTENT = 'name "session"\nstore "./data/session.db"\n\nloops {\n  deci
 _TASKS_CONTENT = 'name "tasks"\nstore "./data/tasks.db"\n\nloops {\n  task { fold { items "by" "name" } }\n}\n'
 
 
-class TestAutoInit:
-    def test_emit_creates_vertex_and_store(self, tmp_path, monkeypatch, capsys):
-        """emit in empty dir auto-inits session from config-level source."""
+class TestEmitToConfigVertex:
+    def test_emit_to_config_level_vertex(self, tmp_path, monkeypatch, capsys):
+        """emit writes to config-level vertex when no local vertex exists."""
         home = tmp_path / "home"
         _seed_config_vertex(home, "session", _SESSION_CONTENT)
+        (home / "session" / "data").mkdir()
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["emit", "decision", "topic=test", "it works"])
+        result = main(["session", "emit", "decision", "topic=test", "it works"])
         assert result == 0
 
-        # Vertex created in .loops/
-        vertex = tmp_path / ".loops" / "session.vertex"
-        assert vertex.exists()
-        assert 'name "session"' in vertex.read_text()
-
-        # Store has the fact
-        db_path = tmp_path / ".loops" / "data" / "session.db"
+        # Store has the fact in config-level location
+        db_path = home / "session" / "data" / "session.db"
         facts = _read_all_facts(db_path)
         assert any(f.kind == "decision" for f in facts)
 
-    def test_emit_reuses_existing_local_vertex(self, tmp_path, monkeypatch, capsys):
-        """emit finds and uses existing local vertex without creating a new one."""
+    def test_emit_prefers_local_vertex(self, tmp_path, monkeypatch, capsys):
+        """emit uses local vertex when it exists, even if config-level also exists."""
         home = tmp_path / "home"
         _seed_config_vertex(home, "tasks", _TASKS_CONTENT)
+        (home / "tasks" / "data").mkdir()
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        # Pre-create a tasks vertex
+        # Pre-create a local tasks vertex
         main(["init", "--template", "tasks"])
         capsys.readouterr()
 
-        result = main(["emit", "task", "name=do-thing", "status=open"])
+        result = main(["tasks", "emit", "task", "name=do-thing", "status=open"])
         assert result == 0
 
-        # Should use tasks vertex in .loops/, not create session
-        assert (tmp_path / ".loops" / "tasks.vertex").exists()
-        assert not (tmp_path / ".loops" / "session.vertex").exists()
-
-        err = capsys.readouterr().err
-        assert "Auto-initialized" not in err
+        # Should use local vertex in .loops/, not config-level
+        db_path = tmp_path / ".loops" / "data" / "tasks.db"
+        facts = _read_all_facts(db_path)
+        assert any(f.kind == "task" for f in facts)
 
 
 class TestInitTemplate:

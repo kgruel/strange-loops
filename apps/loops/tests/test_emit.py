@@ -53,8 +53,8 @@ class TestEmit:
 
         result = main(
             [
-                "emit",
                 "session",
+                "emit",
                 "decision",
                 "topic=sigil",
                 "{{var}} over ${var}",
@@ -78,8 +78,8 @@ class TestEmit:
 
         result = main(
             [
-                "emit",
                 "session",
+                "emit",
                 "change",
                 "summary=structural AST",
                 "--dry-run",
@@ -96,8 +96,8 @@ class TestEmit:
 
         result = main(
             [
-                "emit",
                 "session",
+                "emit",
                 "task",
                 "name=fix/review",
                 "status=merged",
@@ -121,8 +121,8 @@ class TestEmit:
 
         result = main(
             [
-                "emit",
                 "session",
+                "emit",
                 "thread",
                 "name=env-passthrough",
                 "status=open",
@@ -140,7 +140,7 @@ class TestEmit:
         _write_vertex(home, "session", store=None)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["emit", "session", "decision", "topic=sigil"])
+        result = main(["session", "emit", "decision", "topic=sigil"])
         assert result == 1
         captured = capsys.readouterr()
         assert "vertex has no store configured" in captured.err
@@ -152,8 +152,8 @@ class TestEmit:
 
         result = main(
             [
-                "emit",
                 "session",
+                "emit",
                 "decision",
                 "--observer",
                 "human",

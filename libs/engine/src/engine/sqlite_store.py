@@ -4,7 +4,8 @@ Implements the Store protocol with durable persistence. Facts are stored
 with kind, ts, observer as real columns (SQL-queryable) and payload as
 JSON text (queryable via json_extract()).
 
-Uses WAL mode for concurrent reads during folds.
+Uses WAL mode for concurrent reads during folds. ULID primary keys for
+globally-unique identity and merge compatibility with libs/store.
 """
 
 from __future__ import annotations
@@ -15,29 +16,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
+import sqlite_ulid
+
 from .tick import Tick
 
 T = TypeVar("T")
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS facts (
-    rowid INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL,
-    ts REAL NOT NULL,
+    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+    kind     TEXT NOT NULL,
+    ts       REAL NOT NULL,
     observer TEXT NOT NULL,
-    origin TEXT NOT NULL DEFAULT '',
-    payload TEXT NOT NULL
+    origin   TEXT NOT NULL DEFAULT '',
+    payload  TEXT NOT NULL CHECK (json_valid(payload))
 );
 CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
 CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts);
 
 CREATE TABLE IF NOT EXISTS ticks (
-    rowid INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    ts REAL NOT NULL,
-    since REAL,
-    origin TEXT NOT NULL,
-    payload TEXT NOT NULL
+    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+    name     TEXT NOT NULL,
+    ts       REAL NOT NULL,
+    since    REAL,
+    origin   TEXT NOT NULL,
+    payload  TEXT NOT NULL CHECK (json_valid(payload))
 );
 CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name);
 CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts);
@@ -64,14 +67,12 @@ class SqliteStore(Generic[T]):
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
+        self._conn.enable_load_extension(True)
+        sqlite_ulid.load(self._conn)
+        self._conn.enable_load_extension(False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
-        # Migrate: add origin column to existing databases
-        try:
-            self._conn.execute("ALTER TABLE facts ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
 
     def append(self, event: T) -> None:
         """Append one event to the store."""

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from painted.app_runner import AppCommand, AppRunner, run_app
-from painted.fidelity import HelpData, Zoom
+from painted.fidelity import HelpArg, HelpData, Zoom
 
 
 class TestAppCommand:
@@ -207,6 +207,88 @@ class TestRunApp:
         commands = [AppCommand("go", "Go", lambda argv: 0)]
         assert run_app(["go"], commands) == 0
         assert run_app(["go"], tuple(commands)) == 0
+
+
+class TestSubcommandHelp:
+    """Subcommand help: AppRunner intercepts -h when help_args is set."""
+
+    def _make_runner(self):
+        called = []
+        handler = lambda argv: (called.append(argv), 0)[1]
+        commands = (
+            # Display command — no help_args, handler sees -h
+            AppCommand("status", "Show status", handler),
+            # Action command — help_args set, AppRunner intercepts -h
+            AppCommand(
+                "emit",
+                "Inject a fact",
+                handler,
+                help_args=[
+                    HelpArg("vertex", "Vertex name", positional=True),
+                    HelpArg("kind", "Fact kind", positional=True),
+                    HelpArg("--observer", "Observer string", default=""),
+                    HelpArg("--dry-run", "Print without storing"),
+                ],
+            ),
+        )
+        return AppRunner(commands=commands, prog="loops"), called
+
+    def test_subcommand_help_intercept(self, capsys):
+        """Handler not called when -h intercepted."""
+        runner, called = self._make_runner()
+        rc = runner.run(["emit", "-h", "--plain"])
+        assert rc == 0
+        assert called == []
+        captured = capsys.readouterr()
+        assert "Inject a fact" in captured.out
+
+    def test_no_help_args_passes_through(self):
+        """Display command pattern: handler sees -h."""
+        runner, called = self._make_runner()
+        runner.run(["status", "-h"])
+        assert called == [["-h"]]
+
+    def test_subcommand_help_no_framework_groups(self, capsys):
+        """No Zoom/Format groups in subcommand help."""
+        runner, _ = self._make_runner()
+        rc = runner.run(["emit", "-h", "-vv", "--plain"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Zoom" not in captured.out
+        assert "Format" not in captured.out
+
+    def test_subcommand_help_shows_args(self, capsys):
+        """Command args visible in help output."""
+        runner, _ = self._make_runner()
+        rc = runner.run(["emit", "-h", "--plain"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "vertex" in captured.out
+        assert "kind" in captured.out
+        assert "--observer" in captured.out
+        assert "--dry-run" in captured.out
+
+    def test_subcommand_help_json(self, capsys):
+        """--json returns HelpData as JSON."""
+        runner, _ = self._make_runner()
+        rc = runner.run(["emit", "-h", "--json"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["prog"] == "loops emit"
+        assert data["description"] == "Inject a fact"
+        # No Zoom/Format groups — only args + Help
+        group_names = [g["name"] for g in data["groups"]]
+        assert "Zoom" not in group_names
+        assert "Format" not in group_names
+
+    def test_subcommand_help_prog(self, capsys):
+        """Prog shows 'loops emit'."""
+        runner, _ = self._make_runner()
+        rc = runner.run(["emit", "-h", "--plain"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "loops emit" in captured.out
 
 
 class TestNesting:

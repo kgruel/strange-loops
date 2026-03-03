@@ -1,11 +1,18 @@
 """CLI for the loops runtime.
 
-Commands:
-    loops validate <file>           Validate syntax and flow
-    loops test <file> --input <f>   Run parse pipeline against sample input
-    loops run <file>                Execute a .loop or .vertex file
-    loops compile <file>            Show compiled structure
+Vertex operations:
+    loops <vertex> status           Show store status
+    loops <vertex> log              Show recent facts
+    loops <vertex> emit <kind> ...  Inject a fact
+
+Root commands:
+    loops ls                        List vertices
     loops start <file>              Run a .vertex file (one round, rendered)
+    loops run <file>                Execute a .loop or .vertex file
+    loops validate <file>           Validate syntax and flow
+    loops compile <file>            Show compiled structure
+    loops test <file> --input <f>   Run parse pipeline against sample input
+    loops init [name]               Initialize vertex
 """
 
 from __future__ import annotations
@@ -780,17 +787,31 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
 
 
 def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
-    """Resolve store path from a vertex file. Returns None if no store configured."""
+    """Resolve store path from a vertex file. Returns None if no store configured.
+
+    For combinatorial vertices (combine block, no store), follows the first
+    combine entry to find the writable store.
+    """
     from lang import parse_vertex_file
+    from lang.population import resolve_vertex
 
     ast = parse_vertex_file(vertex_path)
-    if ast.store is None:
-        return None
 
-    store_path = Path(ast.store)
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
-    return store_path
+    if ast.store is not None:
+        store_path = Path(ast.store)
+        if not store_path.is_absolute():
+            store_path = (vertex_path.parent / store_path).resolve()
+        return store_path
+
+    # Follow combine → first entry's store
+    if ast.combine:
+        ref_path = resolve_vertex(ast.combine[0].name, loops_home())
+        if not ref_path.is_absolute():
+            ref_path = (vertex_path.parent / ref_path).resolve()
+        if ref_path.exists():
+            return _resolve_vertex_store_path(ref_path)
+
+    return None
 
 
 def _resolve_named_store(name: str) -> Path:
@@ -816,7 +837,39 @@ def _resolve_named_vertex(name: str) -> Path:
     return vertex_path
 
 
-def cmd_emit(args: argparse.Namespace) -> int:
+def _resolve_vertex_for_dispatch(name: str) -> Path | None:
+    """Try to resolve a name as a vertex for CLI dispatch. Returns None to fall through.
+
+    Resolution chain (local instance wins over config template):
+    1. Skip path-like strings — those are file args for root commands
+    2. Local: .loops/name.vertex
+    3. Local: cwd/name.vertex
+    4. Config-level: LOOPS_HOME/name/name.vertex
+    """
+    if name.endswith(".vertex") or name.startswith("./") or name.startswith("/"):
+        return None
+
+    # Local .loops/
+    local = Path.cwd() / ".loops" / f"{name}.vertex"
+    if local.exists():
+        return local.resolve()
+
+    # Local cwd
+    local = Path.cwd() / f"{name}.vertex"
+    if local.exists():
+        return local.resolve()
+
+    # Config-level resolution
+    from lang.population import resolve_vertex
+
+    candidate = resolve_vertex(name, loops_home())
+    if candidate.exists():
+        return candidate.resolve()
+
+    return None
+
+
+def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     from atoms import Fact
     from lang import parse_vertex_file
@@ -837,57 +890,51 @@ def cmd_emit(args: argparse.Namespace) -> int:
 
     p = current_palette()
 
-    # Resolve vertex: explicit arg → LOOPS_HOME → local cwd → auto-init
-    #
-    # Argparse ambiguity: with vertex as nargs="?", `emit decision topic=x`
-    # gives vertex="decision", kind="topic=x". We detect this by checking
-    # whether the vertex arg actually resolves. If not, reinterpret it as
-    # the kind and shift args.
-    vertex_ref = args.vertex
     kind = args.kind
     parts = list(args.parts or [])
     template_qualifier = None
 
-    def _is_path_like(s: str) -> bool:
-        return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
+    if vertex_path is not None:
+        # Vertex-first dispatch: vertex already resolved, no ambiguity
+        pass
+    else:
+        # Legacy path: resolve vertex from args
+        vertex_ref = args.vertex
 
-    if vertex_ref is not None:
-        if "/" in vertex_ref and not _is_path_like(vertex_ref):
-            vertex_ref, template_qualifier = vertex_ref.split("/", 1)
+        def _is_path_like(s: str) -> bool:
+            return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
 
-        # Try resolving as vertex
-        candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
-        if candidate.exists():
-            vertex_path = candidate
-        elif _is_path_like(vertex_ref):
-            # Explicit path that doesn't exist — error
-            show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
-            return 1
-        else:
-            # vertex_ref doesn't resolve — reinterpret as kind, shift args
-            parts = [kind] + parts
-            kind = vertex_ref
-            vertex_ref = None
+        if vertex_ref is not None:
+            if "/" in vertex_ref and not _is_path_like(vertex_ref):
+                vertex_ref, template_qualifier = vertex_ref.split("/", 1)
 
-    if vertex_ref is None:
-        # No vertex: try local, then auto-init
-        local = _find_local_vertex()
-        if local is not None:
-            vertex_path = local.resolve()
-        else:
-            result = _init_local_vertex("session")
-            if result is None:
+            # Try resolving as vertex
+            candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
+            if candidate.exists():
+                vertex_path = candidate
+            elif _is_path_like(vertex_ref):
+                # Explicit path that doesn't exist — error
+                show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
+                return 1
+            else:
+                # vertex_ref doesn't resolve — reinterpret as kind, shift args
+                parts = [kind] + parts
+                kind = vertex_ref
+                vertex_ref = None
+
+        if vertex_ref is None:
+            # No vertex: try local
+            local = _find_local_vertex()
+            if local is not None:
+                vertex_path = local.resolve()
+            else:
                 show(
                     Block.text(
-                        "No session vertex found to auto-initialize from", p.error
+                        "No vertex found. Run 'loops init' first.", p.error
                     ),
                     file=sys.stderr,
                 )
                 return 1
-            vertex_path = result.resolve()
-            show(
-                Block.text(f"Auto-initialized: {vertex_path}", p.muted), file=sys.stderr
-            )
 
     payload = _parse_emit_parts(parts)
     ts = datetime.now(timezone.utc).timestamp()
@@ -1076,82 +1123,6 @@ def cmd_emit(args: argparse.Namespace) -> int:
         return 1
 
 
-def _run_app(app_name: str, argv: list[str]) -> int:
-    """Dispatch to a registered app — resolves vertex, loads module, routes subcommand."""
-    import importlib
-
-    mod = importlib.import_module(_APPS[app_name])
-
-    # Resolve the app's vertex: local cwd first, then named resolution via LOOPS_HOME
-    vertex_path = None
-    local = Path.cwd() / f"{app_name}.vertex"
-    if local.exists():
-        vertex_path = local
-    else:
-        try:
-            vertex_path = _resolve_named_vertex(app_name)
-        except FileNotFoundError:
-            vertex_path = None
-        except ValueError:
-            vertex_path = None
-
-    # Build available subcommands from module exports
-    subs: list[str] = []
-    # status/log always available (generic fallback exists)
-    subs.append("status")
-    subs.append("log")
-    # search available if vertex has search-declared kinds (always offer it)
-    subs.append("search")
-    # feedback handlers
-    feedback = getattr(mod, "FEEDBACK", {})
-    subs.extend(feedback.keys())
-
-    if not argv:
-        _err(f"Usage: loops {app_name} <{'|'.join(subs)}>")
-        return 1
-
-    sub = argv[0]
-    rest = argv[1:]
-
-    def _require_vertex() -> Path | None:
-        if vertex_path is not None:
-            return vertex_path
-        _err(f"No {app_name} vertex found. Run 'loops init {app_name}' first.")
-        return None
-
-    if sub == "status":
-        vp = _require_vertex()
-        return 1 if vp is None else _run_app_status(vp, mod, rest)
-
-    if sub == "log":
-        vp = _require_vertex()
-        return 1 if vp is None else _run_app_log(vp, mod, rest)
-
-    if sub == "search":
-        vp = _require_vertex()
-        return 1 if vp is None else _run_app_search(vp, mod, rest)
-
-    if sub in feedback:
-        vp = _require_vertex()
-        if vp is None:
-            return 1
-        handler_ref = feedback[sub]
-        handler_mod, handler_fn = handler_ref.rsplit(":", 1)
-        handler = getattr(importlib.import_module(handler_mod), handler_fn)
-        parser = argparse.ArgumentParser(prog=f"loops {app_name} {sub}")
-        parser.add_argument("name", help=f"{sub.capitalize()} name")
-        parser.add_argument("--conversation", required=True, help="Conversation ID")
-        parser.add_argument("--note", default="", help="Optional note")
-        parser.add_argument(
-            "--observer", default=os.environ.get("LOOPS_OBSERVER", "user")
-        )
-        args = parser.parse_args(rest)
-        return handler(vp, args)
-
-    _err(f"Unknown {app_name} command: {sub}")
-    return 1
-
-
 def _resolve_app_view(mod, view_name: str):
     """Resolve a view function from an app module.
 
@@ -1245,88 +1216,22 @@ def _make_lens_log_view(payload_lens):
     return log_view
 
 
-def _run_app_status(vertex_path: Path, mod, argv: list[str]) -> int:
-    """Run app status via run_cli."""
-    from painted import run_cli
-    from engine import vertex_read
-
-    pre = argparse.ArgumentParser(add_help=False)
-    known, rest = pre.parse_known_args(argv)
-
-    render_fn = _resolve_app_view(mod, "status_view")
-    if render_fn is None:
-        from .lenses.status import status_view as render_fn
-
-    def fetch():
-        fold_state = vertex_read(vertex_path)
-        fetch_fn = getattr(mod, "fetch_status", None)
-        if fetch_fn is not None:
-            return fetch_fn(fold_state)
-        return _generic_fold_summary(fold_state)
-
-    def render(ctx, data):
-        return render_fn(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog=f"loops {getattr(mod, 'APP_NAME', '?')} status",
-        description="Show store status",
-    )
+def _generic_fold_summary(fold_state: dict) -> dict:
+    """Build a generic summary from raw fold state when no app-specific fetch exists."""
+    sections = {}
+    for kind, state in fold_state.items():
+        items = state.get("items", {})
+        if isinstance(items, dict):
+            sections[kind] = {"count": len(items), "items": items}
+        elif isinstance(items, list):
+            sections[kind] = {"count": len(items), "items": items}
+        else:
+            sections[kind] = {"count": 0, "items": {}}
+    return sections
 
 
-def _run_app_log(vertex_path: Path, mod, argv: list[str]) -> int:
-    """Run app log via run_cli."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-    from engine import vertex_facts
-
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("--since", default="7d")
-    pre.add_argument("--kind", default=None)
-    known, rest = pre.parse_known_args(argv)
-
-    render_fn = _resolve_app_view(mod, "log_view")
-    if render_fn is None:
-        from .lenses.log import log_view as render_fn
-
-    def fetch():
-        import re
-
-        m = re.match(r"^(\d+)([dhms])$", known.since)
-        if not m:
-            return []
-        value = int(m.group(1))
-        unit = m.group(2)
-        multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
-        duration = value * multipliers[unit]
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc)
-        since_ts = now.timestamp() - duration
-        facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=known.kind)
-        facts.sort(key=lambda f: f["ts"], reverse=True)
-        return facts
-
-    def render(ctx, data):
-        return render_fn(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog=f"loops {getattr(mod, 'APP_NAME', '?')} log",
-        description="Show recent facts",
-        help_args=[
-            HelpArg("--since", "Time window", default="7d"),
-            HelpArg("--kind", "Filter by fact kind"),
-        ],
-    )
-
-
-def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
-    """Run app search via run_cli."""
+def _run_search(argv: list[str], *, vertex_path: Path, mod=None) -> int:
+    """Run search command via painted CLI harness."""
     from painted import run_cli
     from painted.fidelity import HelpArg
 
@@ -1339,9 +1244,12 @@ def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
 
     query_str = " ".join(known.query) if known.query else ""
 
-    render_fn = _resolve_app_view(mod, "search_view")
-    if render_fn is None:
-        render_fn = _resolve_app_view(mod, "log_view")
+    # Resolve render function: module search_view → module log_view → shared log_view
+    render_fn = None
+    if mod is not None:
+        render_fn = _resolve_app_view(mod, "search_view")
+        if render_fn is None:
+            render_fn = _resolve_app_view(mod, "log_view")
     if render_fn is None:
         from .lenses.log import log_view as render_fn
 
@@ -1378,7 +1286,7 @@ def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
         rest,
         fetch=fetch,
         render=render,
-        prog=f"loops {getattr(mod, 'APP_NAME', '?')} search",
+        prog="loops search",
         description="Search facts",
         help_args=[
             HelpArg("query", "Search terms", positional=True),
@@ -1389,77 +1297,107 @@ def _run_app_search(vertex_path: Path, mod, argv: list[str]) -> int:
     )
 
 
-def _generic_fold_summary(fold_state: dict) -> dict:
-    """Build a generic summary from raw fold state when no app-specific fetch exists."""
-    sections = {}
-    for kind, state in fold_state.items():
-        items = state.get("items", {})
-        if isinstance(items, dict):
-            sections[kind] = {"count": len(items), "items": items}
-        elif isinstance(items, list):
-            sections[kind] = {"count": len(items), "items": items}
-        else:
-            sections[kind] = {"count": 0, "items": {}}
-    return sections
-
-
-def _run_status(argv: list[str]) -> int:
+def _run_status(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
     """Run status command via painted CLI harness."""
     from painted import run_cli
     from painted.fidelity import HelpArg
-    from .commands.session import _resolve_local_vertex, fetch_status
-    from .lenses.status import status_view
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("vertex", nargs="?", default=None)
+    if vertex_path is None:
+        pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     known, rest = pre.parse_known_args(argv)
 
+    # Resolve render function: module override → shared lens
+    render_fn = None
+    if mod is not None:
+        render_fn = _resolve_app_view(mod, "status_view")
+    if render_fn is None:
+        from .lenses.status import status_view as render_fn
+
     def fetch():
-        if known.vertex is not None:
-            vertex_path = _resolve_named_vertex(known.vertex)
-        else:
-            vertex_path = _resolve_local_vertex()
+        nonlocal vertex_path
+        if vertex_path is None:
+            from .commands.session import _resolve_local_vertex
+            vname = getattr(known, "vertex", None)
+            if vname is not None:
+                vertex_path = _resolve_named_vertex(vname)
+            else:
+                vertex_path = _resolve_local_vertex()
+        if mod is not None:
+            from engine import vertex_read
+            fold_state = vertex_read(vertex_path)
+            fetch_fn = getattr(mod, "fetch_status", None)
+            if fetch_fn is not None:
+                return fetch_fn(fold_state)
+            return _generic_fold_summary(fold_state)
+        from .commands.session import fetch_status
         return fetch_status(vertex_path, kind=known.kind)
 
     def render(ctx, data):
-        return status_view(data, ctx.zoom, ctx.width)
+        return render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
         rest,
         fetch=fetch,
         render=render,
         prog="loops status",
-        description="Show local store status",
+        description="Show store status",
         help_args=[
-            HelpArg("vertex", "Vertex name (default: local)", positional=True),
             HelpArg("--kind", "Filter by fact kind"),
         ],
     )
 
 
-def _run_log(argv: list[str]) -> int:
+def _run_log(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
     """Run log command via painted CLI harness."""
     from painted import run_cli
     from painted.fidelity import HelpArg
-    from .commands.session import _resolve_local_vertex, fetch_log
-    from .lenses.log import log_view
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("vertex", nargs="?", default=None)
+    if vertex_path is None:
+        pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--since", default="7d")
     pre.add_argument("--kind", default=None)
     known, rest = pre.parse_known_args(argv)
 
+    # Resolve render function: module override → shared lens
+    render_fn = None
+    if mod is not None:
+        render_fn = _resolve_app_view(mod, "log_view")
+    if render_fn is None:
+        from .lenses.log import log_view as render_fn
+
     def fetch():
-        if known.vertex is not None:
-            vertex_path = _resolve_named_vertex(known.vertex)
-        else:
-            vertex_path = _resolve_local_vertex()
+        nonlocal vertex_path
+        if vertex_path is None:
+            from .commands.session import _resolve_local_vertex
+            vname = getattr(known, "vertex", None)
+            if vname is not None:
+                vertex_path = _resolve_named_vertex(vname)
+            else:
+                vertex_path = _resolve_local_vertex()
+        if mod is not None:
+            import re
+            from engine import vertex_facts
+            m = re.match(r"^(\d+)([dhms])$", known.since)
+            if not m:
+                return []
+            value = int(m.group(1))
+            unit = m.group(2)
+            multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+            duration = value * multipliers[unit]
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            since_ts = now.timestamp() - duration
+            facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=known.kind)
+            facts.sort(key=lambda f: f["ts"], reverse=True)
+            return facts
+        from .commands.session import fetch_log
         return fetch_log(vertex_path, known.since, known.kind)
 
     def render(ctx, data):
-        return log_view(data, ctx.zoom, ctx.width)
+        return render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
         rest,
@@ -1468,25 +1406,27 @@ def _run_log(argv: list[str]) -> int:
         prog="loops log",
         description="Show recent facts",
         help_args=[
-            HelpArg("vertex", "Vertex name (default: local)", positional=True),
             HelpArg("--since", "Time window", default="7d"),
             HelpArg("--kind", "Filter by fact kind"),
         ],
     )
 
 
-def _run_store(argv: list[str]) -> int:
+def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     from painted import run_cli, OutputMode
     from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("file", nargs="?", default=None)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
     known, rest = pre.parse_known_args(argv)
-    file_arg = known.file
+    file_arg = getattr(known, "file", None)
 
     def _resolve_store_target() -> Path:
         """Resolve file arg: vertex name, path, or LOOPS_HOME/root.vertex fallback."""
+        if vertex_path is not None:
+            return vertex_path
         if file_arg is not None:
             p = Path(file_arg)
             # If it looks like a path (has extension or path separators), use directly
@@ -1547,7 +1487,7 @@ def _run_store(argv: list[str]) -> int:
     )
 
 
-def _run_check(argv: list[str]) -> int:
+def _run_check(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run health checks, emit result facts, render with gutter."""
     from painted import run_cli
     from painted.fidelity import HelpArg
@@ -1557,20 +1497,23 @@ def _run_check(argv: list[str]) -> int:
     from .health import DEFAULT_STEPS, health_view, run_checks, run_sequential_checks
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("vertex", nargs="?", default=None)
+    if vertex_path is None:
+        pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--observer", default="dev-check")
     known, rest = pre.parse_known_args(argv)
 
     # Resolve vertex and store
-    if known.vertex is not None:
-        vertex_path = _resolve_named_vertex(known.vertex)
-    else:
-        local = _find_local_vertex()
-        if local is not None:
-            vertex_path = local
+    if vertex_path is None:
+        vname = getattr(known, "vertex", None)
+        if vname is not None:
+            vertex_path = _resolve_named_vertex(vname)
         else:
-            vertex_path = _init_local_vertex("session")
-            _msg(f"Auto-initialized: {vertex_path}")
+            local = _find_local_vertex()
+            if local is not None:
+                vertex_path = local
+            else:
+                _err("No vertex found. Run 'loops init' first.")
+                return 1
 
     store_path = _resolve_vertex_store_path(vertex_path)
     if store_path is None:
@@ -1662,9 +1605,32 @@ def _run_ls(argv: list[str]) -> int:
     )
 
 
+def _run_ls_root(argv: list[str]) -> int:
+    """Run root-level ls: list all discovered vertices."""
+    from painted import run_cli
+    from .commands.vertices import fetch_vertices
+    from .lenses.vertices import vertices_view
+
+    home = loops_home()
+
+    def fetch():
+        return fetch_vertices(home)
+
+    def render(ctx, data):
+        return vertices_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        argv,
+        fetch=fetch,
+        render=render,
+        prog="loops ls",
+        description="List vertices",
+    )
+
+
 def _run_init(argv: list[str]) -> int:
     """Thin wrapper: parse argv for init, delegate to cmd_init."""
-    parser = argparse.ArgumentParser(prog="loops init", add_help=True)
+    parser = argparse.ArgumentParser(prog="loops init", add_help=False)
     parser.add_argument(
         "name",
         nargs="?",
@@ -1680,34 +1646,39 @@ def _run_init(argv: list[str]) -> int:
     return cmd_init(args)
 
 
-def _run_emit(argv: list[str]) -> int:
+def _run_emit(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
-    parser = argparse.ArgumentParser(prog="loops emit", add_help=True)
-    parser.add_argument(
-        "vertex",
-        nargs="?",
-        default=None,
-        help="Vertex name or .vertex path (optional; auto-resolves local vertex)",
-    )
+    parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
+    if vertex_path is None:
+        parser.add_argument(
+            "vertex",
+            nargs="?",
+            default=None,
+            help="Vertex name or .vertex path (optional; auto-resolves local vertex)",
+        )
     parser.add_argument("kind", help="Fact kind")
     parser.add_argument(
         "parts", nargs="*", help="KEY=VALUE pairs and optional trailing message text"
     )
     parser.add_argument(
-        "--observer", default="", help="Observer string (default: empty)"
+        "--observer",
+        default=os.environ.get("LOOPS_OBSERVER", ""),
+        help="Observer string (default: $LOOPS_OBSERVER or empty)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print the fact JSON without storing"
     )
     args = parser.parse_args(argv)
-    return cmd_emit(args)
+    if vertex_path is not None:
+        args.vertex = None
+    return cmd_emit(args, vertex_path=vertex_path)
 
 
 def _run_add(argv: list[str]) -> int:
     """Thin wrapper: parse argv for add, delegate to cmd_add."""
     from .commands.pop import cmd_add
 
-    parser = argparse.ArgumentParser(prog="loops add", add_help=True)
+    parser = argparse.ArgumentParser(prog="loops add", add_help=False)
     parser.add_argument("target", help="Vertex name or vertex/template")
     parser.add_argument("values", nargs="+", help="Column values in header order")
     args = parser.parse_args(argv)
@@ -1718,7 +1689,7 @@ def _run_rm(argv: list[str]) -> int:
     """Thin wrapper: parse argv for rm, delegate to cmd_rm."""
     from .commands.pop import cmd_rm
 
-    parser = argparse.ArgumentParser(prog="loops rm", add_help=True)
+    parser = argparse.ArgumentParser(prog="loops rm", add_help=False)
     parser.add_argument("target", help="Vertex name or vertex/template")
     parser.add_argument("key", help="Key (first column) to remove")
     args = parser.parse_args(argv)
@@ -1729,7 +1700,7 @@ def _run_export(argv: list[str]) -> int:
     """Thin wrapper: parse argv for export, delegate to cmd_export."""
     from .commands.pop import cmd_export
 
-    parser = argparse.ArgumentParser(prog="loops export", add_help=True)
+    parser = argparse.ArgumentParser(prog="loops export", add_help=False)
     parser.add_argument("target", help="Vertex name or vertex/template")
     parser.add_argument(
         "--output",
@@ -1740,104 +1711,240 @@ def _run_export(argv: list[str]) -> int:
     return cmd_export(args)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Main entry point."""
-    from painted.app_runner import run_app, AppCommand
+_ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls"}
 
+_VERTEX_OPS = frozenset({
+    "status", "log", "search", "emit", "store",
+    "check", "ls", "add", "rm", "export",
+})
+
+
+def _render_main_help(argv: list[str]) -> int:
+    """Render two-group help: vertex operations + root commands."""
+    import shutil
+    from painted.fidelity import (
+        Format,
+        HelpData,
+        HelpFlag,
+        HelpGroup,
+        Zoom,
+        render_help,
+        scan_help_args,
+    )
+    from painted.writer import print_block
+
+    zoom, fmt = scan_help_args(argv)
+
+    vertex_group = HelpGroup(
+        name="Vertex operations",
+        hint="loops <vertex> <op>",
+        flags=(
+            HelpFlag(None, "status", "Show store status", detail="[--kind KIND]"),
+            HelpFlag(None, "log", "Show recent facts", detail="[--since SINCE] [--kind KIND]"),
+            HelpFlag(None, "search", "Search facts", detail="<query> [--kind KIND]"),
+            HelpFlag(None, "emit", "Inject a fact", detail="<kind> [KEY=VALUE ...] [--dry-run]"),
+            HelpFlag(None, "store", "Inspect store contents"),
+            HelpFlag(None, "check", "Run health checks", detail="[--observer OBS]"),
+            HelpFlag(None, "ls", "List vertex contents", detail="[template]"),
+            HelpFlag(None, "add", "Add to template population", detail="<values...>"),
+            HelpFlag(None, "rm", "Remove from template population", detail="<key>"),
+            HelpFlag(None, "export", "Materialize .list from store"),
+        ),
+    )
+
+    commands_group = HelpGroup(
+        name="Commands",
+        flags=(
+            HelpFlag(None, "ls", "List vertices"),
+            HelpFlag(None, "start", "Run a vertex (one round, rendered)", detail="[file] [--var KEY=VALUE]"),
+            HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
+            HelpFlag(None, "compile", "Show compiled structure", detail="<file>"),
+            HelpFlag(None, "validate", "Validate syntax and flow", detail="[files...]"),
+            HelpFlag(None, "test", "Run parse pipeline", detail="<file> [--input FILE]"),
+            HelpFlag(None, "init", "Initialize vertex", detail="[name] [--template NAME]"),
+        ),
+    )
+
+    zoom_group = HelpGroup(
+        name="Zoom",
+        hint="(what to show)",
+        detail="Controls how much detail is rendered.",
+        flags=(
+            HelpFlag("-q", "--quiet", "Minimal output"),
+            HelpFlag("-v", "--verbose", "Detailed (-v) or full (-vv)"),
+        ),
+        min_zoom=Zoom.SUMMARY,
+    )
+
+    format_group = HelpGroup(
+        name="Format",
+        hint="(serialization)",
+        flags=(
+            HelpFlag(None, "--json", "JSON output"),
+            HelpFlag(None, "--plain", "Plain text, no ANSI codes"),
+        ),
+        min_zoom=Zoom.SUMMARY,
+    )
+
+    help_group = HelpGroup(
+        name="Help",
+        flags=(HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),),
+        min_zoom=Zoom.SUMMARY,
+    )
+
+    help_data = HelpData(
+        prog="loops",
+        description="Runtime for .loop and .vertex files",
+        groups=(vertex_group, commands_group, zoom_group, format_group, help_group),
+    )
+
+    if fmt == Format.JSON:
+        from dataclasses import asdict
+        print(json.dumps(asdict(help_data), default=str))
+        return 0
+
+    use_ansi = fmt != Format.PLAIN
+    if fmt == Format.AUTO:
+        use_ansi = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+    width = shutil.get_terminal_size().columns
+    block = render_help(help_data, zoom, width, use_ansi)
+    print_block(block, use_ansi=use_ansi)
+    return 0
+
+
+def _dispatch_vertex_op(
+    vertex_name: str, vertex_path: Path, op: str, rest: list[str]
+) -> int:
+    """Dispatch a vertex operation with resolved vertex."""
+    import importlib
+
+    # Load app module if registered
+    mod = None
+    if vertex_name in _APPS:
+        mod = importlib.import_module(_APPS[vertex_name])
+
+    # Core vertex operations
+    if op == "status":
+        return _run_status(rest, vertex_path=vertex_path, mod=mod)
+    if op == "log":
+        return _run_log(rest, vertex_path=vertex_path, mod=mod)
+    if op == "search":
+        return _run_search(rest, vertex_path=vertex_path, mod=mod)
+    if op == "emit":
+        return _run_emit(rest, vertex_path=vertex_path)
+    if op == "store":
+        return _run_store(rest, vertex_path=vertex_path)
+    if op == "check":
+        return _run_check(rest, vertex_path=vertex_path)
+
+    # Population operations — reconstruct target argv
+    if op == "ls":
+        qualifier = None
+        flags = []
+        for arg in rest:
+            if qualifier is None and not arg.startswith("-"):
+                qualifier = arg
+            else:
+                flags.append(arg)
+        target = f"{vertex_name}/{qualifier}" if qualifier else vertex_name
+        return _run_ls([target] + flags)
+    if op in ("add", "rm", "export"):
+        handler = {"add": _run_add, "rm": _run_rm, "export": _run_export}[op]
+        return handler([vertex_name] + rest)
+
+    # Feedback handlers from app module
+    if mod is not None:
+        feedback = getattr(mod, "FEEDBACK", {})
+        if op in feedback:
+            handler_ref = feedback[op]
+            handler_mod, handler_fn = handler_ref.rsplit(":", 1)
+            handler = getattr(importlib.import_module(handler_mod), handler_fn)
+            parser = argparse.ArgumentParser(prog=f"loops {vertex_name} {op}")
+            parser.add_argument("name", help=f"{op.capitalize()} name")
+            parser.add_argument("--conversation", required=True, help="Conversation ID")
+            parser.add_argument("--note", default="", help="Optional note")
+            parser.add_argument(
+                "--observer", default=os.environ.get("LOOPS_OBSERVER", "user")
+            )
+            args = parser.parse_args(rest)
+            return handler(vertex_path, args)
+
+    _err(f"Unknown operation: {op}")
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point — vertex-first dispatch."""
     if argv is None:
         argv = sys.argv[1:]
 
-    commands = [
-        # Display commands (routed through painted run_cli internally)
-        AppCommand(
-            "status", "Show store status", _run_status, detail="[vertex] [--kind KIND]"
-        ),
-        AppCommand(
-            "log",
-            "Show recent facts",
-            _run_log,
-            detail="[vertex] [--since SINCE] [--kind KIND]",
-        ),
-        AppCommand(
-            "store",
-            "Inspect store contents",
-            _run_store,
-            detail="[file] — vertex name, path, or .db file",
-        ),
-        AppCommand(
-            "start",
-            "Run a vertex (one round, rendered)",
-            _run_start,
-            detail="[file] [--var KEY=VALUE ...]",
-        ),
-        AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
-        AppCommand(
-            "validate",
-            "Validate syntax and flow",
-            _run_validate,
-            detail="[files...] — defaults to *.loop/*.vertex in cwd",
-        ),
-        AppCommand(
-            "test",
-            "Run parse pipeline against sample input",
-            _run_test,
-            detail="<file> [--input FILE]",
-        ),
-        AppCommand(
-            "run",
-            "Execute a .loop or .vertex file",
-            _run_run,
-            detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
-        ),
-        AppCommand(
-            "check",
-            "Run project health checks",
-            _run_check,
-            detail="[vertex] [--observer OBS]",
-        ),
-        AppCommand(
-            "ls",
-            "List template populations",
-            _run_ls,
-            detail="<target> — vertex name or vertex/template",
-        ),
-        # Action commands
-        AppCommand(
-            "init",
-            "Initialize loops config directory",
-            _run_init,
-            detail="[name] [--template NAME]",
-        ),
-        AppCommand(
-            "emit",
-            "Inject a fact into a vertex store",
-            _run_emit,
-            detail="[vertex] <kind> [KEY=VALUE ...] [--observer OBS] [--dry-run]",
-        ),
-        AppCommand(
-            "add", "Add to template population", _run_add, detail="<target> <values...>"
-        ),
-        AppCommand(
-            "rm", "Remove from template population", _run_rm, detail="<target> <key>"
-        ),
-        AppCommand(
-            "export", "Materialize .list from store", _run_export, detail="<target>"
-        ),
-    ]
+    # No args or --help → two-group help
+    if not argv or (set(argv) & {"-h", "--help"}):
+        return _render_main_help(argv or [])
 
-    # Registered app dispatch — `loops <app> <command>`
-    for app_name in _APPS:
-        commands.append(
+    # Root commands → dispatch directly
+    if argv[0] in _ROOT_COMMANDS:
+        from painted.app_runner import run_app, AppCommand
+        from painted.fidelity import HelpArg
+
+        root_commands = [
+            AppCommand("ls", "List vertices", _run_ls_root),
             AppCommand(
-                app_name,
-                f"{app_name} commands",
-                lambda argv, n=app_name: _run_app(n, argv),
-            )
+                "start",
+                "Run a vertex (one round, rendered)",
+                _run_start,
+                detail="[file] [--var KEY=VALUE ...]",
+            ),
+            AppCommand(
+                "run",
+                "Execute a .loop or .vertex file",
+                _run_run,
+                detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
+            ),
+            AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
+            AppCommand(
+                "validate",
+                "Validate syntax and flow",
+                _run_validate,
+                detail="[files...] — defaults to *.loop/*.vertex in cwd",
+            ),
+            AppCommand(
+                "test",
+                "Run parse pipeline against sample input",
+                _run_test,
+                detail="<file> [--input FILE]",
+            ),
+            AppCommand(
+                "init",
+                "Initialize vertex",
+                _run_init,
+                detail="[name] [--template NAME]",
+                help_args=[
+                    HelpArg("name", "Vertex name (e.g., 'project' or 'dev/project')", positional=True),
+                    HelpArg("--template", "Source vertex name to use as template"),
+                ],
+            ),
+        ]
+        return run_app(
+            argv, root_commands, prog="loops", description="Runtime for .loop and .vertex files"
         )
 
-    return run_app(
-        argv, commands, prog="loops", description="Runtime for .loop and .vertex files"
-    )
+    # Vertex-first dispatch
+    vertex_name = argv[0]
+    vertex_path = _resolve_vertex_for_dispatch(vertex_name)
+
+    if vertex_path is not None:
+        if len(argv) < 2:
+            ops = ", ".join(sorted(_VERTEX_OPS))
+            _err(f"Usage: loops {vertex_name} <op>  ({ops})")
+            return 1
+
+        return _dispatch_vertex_op(vertex_name, vertex_path, argv[1], argv[2:])
+
+    # Unknown command
+    _err(f"Unknown command: {vertex_name}")
+    return 1
 
 
 if __name__ == "__main__":

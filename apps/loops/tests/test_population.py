@@ -84,13 +84,13 @@ class TestParserWiring:
         args = parser.parse_args(["reading", "-o", "my.list"])
         assert args.output == "my.list"
 
-    def test_import_unknown(self):
-        """import is not a recognized command."""
+    def test_unknown_command(self):
+        """Unknown names that don't resolve as vertices return error."""
         result = main(["import", "reading"])
         assert result == 1
 
-    def test_merge_unknown(self):
-        """merge is not a recognized command."""
+    def test_unknown_command_merge(self):
+        """merge is not a recognized command or vertex."""
         result = main(["merge", "reading", "external.list"])
         assert result == 1
 
@@ -140,7 +140,7 @@ class TestLsCommand:
         _setup_file_backed(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["ls", "reading"])
+        result = main(["reading", "ls"])
         assert result == 0
         captured = capsys.readouterr()
         assert "lobsters" in captured.out
@@ -156,8 +156,8 @@ class TestLsCommand:
 
         result = main(
             [
-                "emit",
                 "reading",
+                "emit",
                 "pop.add",
                 "key=lobsters",
                 "feed_url=https://lobste.rs/rss",
@@ -167,17 +167,17 @@ class TestLsCommand:
 
         # Corrupt the materialized view; ls should still show store state.
         (reading / "feeds.list").write_text("kind feed_url\n")
-        result = main(["ls", "reading"])
+        result = main(["reading", "ls"])
         assert result == 0
         captured = capsys.readouterr()
         assert "lobsters" in captured.out
 
     def test_ls_vertex_not_found(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["ls", "nope"])
+        result = main(["nope", "ls"])
         assert result == 1
         captured = capsys.readouterr()
-        assert "not found" in (captured.err + captured.out)
+        assert "Unknown command" in (captured.err + captured.out)
 
     def test_ls_multi_template_requires_qualifier(
         self, tmp_path, monkeypatch, capsys
@@ -207,13 +207,13 @@ class TestLsCommand:
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
         # Without qualifier: error
-        result = main(["ls", "economy"])
+        result = main(["economy", "ls"])
         assert result == 1
         captured = capsys.readouterr()
         assert "2 templates" in (captured.err + captured.out)
 
         # With qualifier: success
-        result = main(["ls", "economy/fred"])
+        result = main(["economy", "ls", "fred"])
         assert result == 0
         captured = capsys.readouterr()
         assert "FEDFUNDS" in captured.out
@@ -231,7 +231,7 @@ class TestAddCommand:
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
         result = main(
-            ["add", "reading", "danluu", "https://danluu.com/atom.xml"]
+            ["reading", "add", "danluu", "https://danluu.com/atom.xml"]
         )
         assert result == 0
         captured = capsys.readouterr()
@@ -245,7 +245,7 @@ class TestAddCommand:
         _setup_file_backed(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["add", "reading", "only_key"])
+        result = main(["reading", "add", "only_key"])
         assert result == 1
         captured = capsys.readouterr()
         assert "expected 2" in captured.err
@@ -257,7 +257,7 @@ class TestAddCommand:
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
         result = main(
-            ["add", "reading", "test", "https://example.com/rss?a=1", "extra"]
+            ["reading", "add", "test", "https://example.com/rss?a=1", "extra"]
         )
         assert result == 0
         content = (reading / "feeds.list").read_text()
@@ -281,7 +281,7 @@ class TestRmCommand:
         )
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["rm", "reading", "lobsters"])
+        result = main(["reading", "rm", "lobsters"])
         assert result == 0
         captured = capsys.readouterr()
         assert "Emitted pop.rm lobsters" in captured.out
@@ -295,7 +295,7 @@ class TestRmCommand:
         reading = _setup_file_backed(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["rm", "reading", "nope"])
+        result = main(["reading", "rm", "nope"])
         assert result == 0
         captured = capsys.readouterr()
         assert "Emitted pop.rm nope" in captured.out
@@ -318,8 +318,8 @@ class TestExportCommand:
 
         result = main(
             [
-                "emit",
                 "reading",
+                "emit",
                 "pop.add",
                 "key=lobsters",
                 "feed_url=https://lobste.rs/rss",
@@ -329,7 +329,7 @@ class TestExportCommand:
 
         # Corrupt view, then export should rebuild it from store.
         (reading / "feeds.list").write_text("kind feed_url\n")
-        result = main(["export", "reading"])
+        result = main(["reading", "export"])
         assert result == 0
         content = (reading / "feeds.list").read_text()
         assert "lobsters" in content
@@ -342,8 +342,8 @@ class TestExportCommand:
 
         result = main(
             [
-                "emit",
                 "reading",
+                "emit",
                 "pop.add",
                 "key=lobsters",
                 "feed_url=https://lobste.rs/rss",
@@ -352,7 +352,7 @@ class TestExportCommand:
         assert result == 0
         assert "lobsters" in (reading / "feeds.list").read_text()
 
-        result = main(["emit", "reading", "pop.rm", "key=lobsters"])
+        result = main(["reading", "emit", "pop.rm", "key=lobsters"])
         assert result == 0
         content = (reading / "feeds.list").read_text()
         assert "lobsters" not in content

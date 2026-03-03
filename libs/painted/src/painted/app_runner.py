@@ -24,10 +24,12 @@ from dataclasses import dataclass
 
 from .fidelity import (
     Format,
+    HelpArg,
     HelpData,
     HelpFlag,
     HelpGroup,
     Zoom,
+    help_args_to_flags,
     render_help,
     scan_help_args,
 )
@@ -45,6 +47,7 @@ class AppCommand:
     description: str  # "Show store status"
     handler: Callable[[list[str]], int]  # receives argv[1:], returns exit code
     detail: str | None = None  # shown at DETAILED+ zoom, e.g. usage hint
+    help_args: list[HelpArg] | None = None  # when set, AppRunner intercepts -h
 
 
 @dataclass(frozen=True)
@@ -67,10 +70,13 @@ class AppRunner:
 
         name = argv[0]
 
-        # Command name first → dispatch (command handles its own --help)
+        # Command name first → dispatch (or intercept -h for action commands)
+        rest = argv[1:]
         for cmd in self.commands:
             if cmd.name == name:
-                return cmd.handler(argv[1:])
+                if cmd.help_args is not None and ("-h" in rest or "--help" in rest):
+                    return self._handle_subcommand_help(cmd, rest)
+                return cmd.handler(rest)
 
         # No command matched — check for --help/-h (top-level help)
         if "-h" in argv or "--help" in argv:
@@ -120,6 +126,55 @@ class AppRunner:
         block = render_help(help_data, zoom, width, use_ansi)
         print_block(block, use_ansi=use_ansi)
         return 0
+
+    def _handle_subcommand_help(self, cmd: AppCommand, args: list[str]) -> int:
+        """Render zoom-aware help for a subcommand and return 0."""
+        from .writer import print_block
+
+        zoom, fmt = scan_help_args(args)
+        help_data = self._build_subcommand_help_data(cmd)
+
+        if fmt == Format.JSON:
+            from dataclasses import asdict
+
+            print(json.dumps(asdict(help_data), default=str))
+            return 0
+
+        use_ansi = fmt != Format.PLAIN
+        if fmt == Format.AUTO:
+            use_ansi = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+        width = shutil.get_terminal_size().columns
+        block = render_help(help_data, zoom, width, use_ansi)
+        print_block(block, use_ansi=use_ansi)
+        return 0
+
+    def _build_subcommand_help_data(self, cmd: AppCommand) -> HelpData:
+        """Build HelpData for a subcommand from its help_args."""
+        assert cmd.help_args is not None
+
+        groups: list[HelpGroup] = []
+
+        # Command args as unnamed primary group
+        command_flags = help_args_to_flags(cmd.help_args)
+        if command_flags:
+            groups.append(HelpGroup(name="", flags=command_flags))
+
+        # Help flag — subordinate when command has its own args
+        help_min_zoom = Zoom.SUMMARY if command_flags else Zoom.MINIMAL
+        help_group = HelpGroup(
+            name="Help",
+            flags=(HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),),
+            min_zoom=help_min_zoom,
+        )
+        groups.append(help_group)
+
+        prog = f"{self.prog} {cmd.name}" if self.prog else cmd.name
+        return HelpData(
+            prog=prog,
+            description=cmd.description,
+            groups=tuple(groups),
+        )
 
     def _build_help_data(self) -> HelpData:
         """Build HelpData from commands."""

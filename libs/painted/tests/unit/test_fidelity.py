@@ -20,7 +20,7 @@ from painted.fidelity import (
     Zoom,
     _build_help_data,
     _extract_add_args_flags,
-    _help_args_to_flags,
+    help_args_to_flags,
     render_help,
     add_cli_args,
     parse_format,
@@ -503,26 +503,26 @@ class TestHelpArg:
 
 
 class TestHelpArgsToFlags:
-    """Tests for _help_args_to_flags conversion."""
+    """Tests for help_args_to_flags conversion."""
 
     def test_positional_arg(self):
-        flags = _help_args_to_flags([HelpArg("vertex", "Vertex name", positional=True)])
+        flags = help_args_to_flags([HelpArg("vertex", "Vertex name", positional=True)])
         assert len(flags) == 1
         assert flags[0].short is None
         assert flags[0].long == "vertex"
         assert flags[0].description == "Vertex name"
 
     def test_optional_arg(self):
-        flags = _help_args_to_flags([HelpArg("--since", "Time range")])
+        flags = help_args_to_flags([HelpArg("--since", "Time range")])
         assert flags[0].long == "--since"
         assert flags[0].description == "Time range"
 
     def test_default_appended(self):
-        flags = _help_args_to_flags([HelpArg("--since", "Time range", default="7d")])
+        flags = help_args_to_flags([HelpArg("--since", "Time range", default="7d")])
         assert "(default: 7d)" in flags[0].description
 
     def test_default_only_no_description(self):
-        flags = _help_args_to_flags([HelpArg("--since", default="7d")])
+        flags = help_args_to_flags([HelpArg("--since", default="7d")])
         assert flags[0].description == "(default: 7d)"
 
 

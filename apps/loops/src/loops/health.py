@@ -209,6 +209,8 @@ def health_lens(kind: str, payload: dict, zoom: Zoom) -> str | Block:
     if zoom <= Zoom.MINIMAL:
         return f"{name} {status}"
 
+    # Return a string summary — record_line handles continuation lines
+    # for 'output' (it's in the well-known secondary field keys).
     p = current_palette()
     status_style = p.success if status == "passed" else p.error
 
@@ -218,18 +220,6 @@ def health_lens(kind: str, payload: dict, zoom: Zoom) -> str | Block:
     ]
     if duration:
         parts.append(Block.text(f" ({duration}s)", p.muted))
-
-    if zoom >= Zoom.DETAILED and output:
-        lines = output.splitlines()
-        if zoom >= Zoom.FULL:
-            # FULL contract: show everything
-            preview = "\n".join(lines)
-        else:
-            limit = 5
-            preview = "\n".join(lines[:limit])
-            if len(lines) > limit:
-                preview += f"\n  ... ({len(lines) - limit} more lines)"
-        parts.append(Block.text(f"\n  {preview}", p.muted))
 
     return join_horizontal(*parts)
 

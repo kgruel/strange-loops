@@ -261,11 +261,6 @@ def record_line(
 
     # --- DETAILED: summary + secondary fields on continuation lines ---
     if zoom <= Zoom.DETAILED:
-        if isinstance(content, str):
-            primary = content
-        else:
-            primary = _default_payload_summary(kind, payload)
-
         # Primary line
         segments = []
         if ts_w > 0:
@@ -275,9 +270,14 @@ def record_line(
         segments.append(Block.text(label_text, kind_s))
         segments.append(Block.text("] ", p.muted))
 
-        if len(primary) > content_width:
-            primary = primary[: content_width - 1] + "…"
-        segments.append(Block.text(primary, Style()))
+        # Use lens content directly — Block or str
+        if isinstance(content, Block):
+            segments.append(truncate(content, content_width))
+        else:
+            primary = str(content)
+            if len(primary) > content_width:
+                primary = primary[: content_width - 1] + "…"
+            segments.append(Block.text(primary, Style()))
 
         primary_line = join_horizontal(*segments)
         lines: list[Block] = [primary_line]
@@ -313,8 +313,13 @@ def record_line(
     for k, v in payload.items():
         if v is None or v == "":
             continue
-        field_text = f"{indent}{k}: {v}"
-        lines.append(Block.text(field_text, p.muted))
+        sv = str(v)
+        # Split multiline values into individual lines to avoid
+        # tall Block.text() blocks that create rendering gaps
+        value_lines = sv.splitlines()
+        lines.append(Block.text(f"{indent}{k}: {value_lines[0]}", p.muted))
+        for vl in value_lines[1:]:
+            lines.append(Block.text(vl, p.muted))
 
     return join_vertical(*lines)
 

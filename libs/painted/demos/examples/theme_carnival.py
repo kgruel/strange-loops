@@ -79,7 +79,9 @@ class PaletteCarnival(Surface):
 
         name, _ = self.palettes[self.palette_index]
 
-        sections.append(Block.text(f"Current: {name.upper()}", palette.accent.merge(Style(bold=True))))
+        sections.append(
+            Block.text(f"Current: {name.upper()}", palette.accent.merge(Style(bold=True)))
+        )
         sections.append(Block.empty(panel_width, 1))
 
         sections.append(Block.text("Status:", palette.muted))
@@ -106,7 +108,12 @@ class PaletteCarnival(Surface):
             ("DEBUG", palette.muted, "verbose output"),
         ]
         for label, level_style, msg in levels:
-            sections.append(pad(join_horizontal(Block.text(label, level_style), Block.text(" " + msg, Style())), left=2))
+            sections.append(
+                pad(
+                    join_horizontal(Block.text(label, level_style), Block.text(" " + msg, Style())),
+                    left=2,
+                )
+            )
         sections.append(Block.empty(panel_width, 1))
 
         sections.append(Block.text("Progress:", palette.muted))
@@ -262,4 +269,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

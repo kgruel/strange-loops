@@ -13,9 +13,19 @@ Run: uv run demos/primitives/compose.py
 """
 
 from painted import (
-    Block, Style, Wrap, Align,
-    join_horizontal, join_vertical, pad, border, truncate,
-    print_block, ROUNDED, HEAVY, DOUBLE,
+    Block,
+    Style,
+    Wrap,
+    Align,
+    join_horizontal,
+    join_vertical,
+    pad,
+    border,
+    truncate,
+    print_block,
+    ROUNDED,
+    HEAVY,
+    DOUBLE,
 )
 
 
@@ -172,23 +182,25 @@ def demo_composition() -> Block:
 
 
 def demo() -> None:
-    print_block(join_vertical(
-        spacer(),
-        demo_join_horizontal(),
-        spacer(),
-        demo_alignment(),
-        spacer(),
-        demo_pad(),
-        spacer(),
-        demo_border(),
-        spacer(),
-        demo_truncate(),
-        spacer(),
-        demo_wrap_modes(),
-        spacer(),
-        demo_composition(),
-        spacer(),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            demo_join_horizontal(),
+            spacer(),
+            demo_alignment(),
+            spacer(),
+            demo_pad(),
+            spacer(),
+            demo_border(),
+            spacer(),
+            demo_truncate(),
+            spacer(),
+            demo_wrap_modes(),
+            spacer(),
+            demo_composition(),
+            spacer(),
+        )
+    )
 
 
 if __name__ == "__main__":

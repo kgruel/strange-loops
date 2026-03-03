@@ -19,33 +19,33 @@ from painted.views import render_big, BigTextFormat
 
 # Color palettes using hex strings (the Color type supports str, int, or hex)
 RAINBOW = [
-    "#ff3c3c",    # red
-    "#ffa028",    # orange
-    "#ffe632",    # yellow
-    "#50dc50",    # green
-    "#3cb4ff",    # cyan
-    "#6464ff",    # blue
-    "#b464ff",    # purple
-    "#ff64b4",    # pink
+    "#ff3c3c",  # red
+    "#ffa028",  # orange
+    "#ffe632",  # yellow
+    "#50dc50",  # green
+    "#3cb4ff",  # cyan
+    "#6464ff",  # blue
+    "#b464ff",  # purple
+    "#ff64b4",  # pink
 ]
 
 FIRE = [
-    "#ffff64",    # bright yellow
-    "#ffdc32",    # yellow
-    "#ffa01e",    # orange
-    "#ff6414",    # red-orange
-    "#ff3214",    # red
-    "#c81e0a",    # dark red
+    "#ffff64",  # bright yellow
+    "#ffdc32",  # yellow
+    "#ffa01e",  # orange
+    "#ff6414",  # red-orange
+    "#ff3214",  # red
+    "#c81e0a",  # dark red
 ]
 
 OCEAN = [
-    "#64ffff",    # bright cyan
-    "#3cdcff",    # light blue
-    "#28b4ff",    # sky blue
-    "#1e8cdc",    # blue
-    "#1464b4",    # deep blue
-    "#1e8cdc",    # blue
-    "#28b4ff",    # sky blue
+    "#64ffff",  # bright cyan
+    "#3cdcff",  # light blue
+    "#28b4ff",  # sky blue
+    "#1e8cdc",  # blue
+    "#1464b4",  # deep blue
+    "#1e8cdc",  # blue
+    "#28b4ff",  # sky blue
 ]
 
 
@@ -99,7 +99,7 @@ class BigTextDemo(Surface):
             bordered = border(
                 pad(big_block, left=2, right=2, top=1, bottom=1),
                 chars=ROUNDED,
-                style=Style(fg=border_color)
+                style=Style(fg=border_color),
             )
             x = max(0, (self._buf.width - bordered.width) // 2)
             y = max(0, (self._buf.height - bordered.height) // 2 - 1)
@@ -122,7 +122,7 @@ class BigTextDemo(Surface):
             bordered = border(
                 pad(big_block, left=2, right=2, top=1, bottom=1),
                 chars=ROUNDED,
-                style=Style(fg=border_color)
+                style=Style(fg=border_color),
             )
             x = max(0, (self._buf.width - bordered.width) // 2)
             y = max(0, (self._buf.height - bordered.height) // 2 - 1)
@@ -160,12 +160,16 @@ class BigTextDemo(Surface):
         # Alphabet (first half)
         self._buf.put_text(2, y, "alphabet:", Style(dim=True))
         y += 1
-        alpha1 = render_big("abcdefghijklm", Style(fg="#50c8ff"), size=self.size, format=self.format)
+        alpha1 = render_big(
+            "abcdefghijklm", Style(fg="#50c8ff"), size=self.size, format=self.format
+        )
         alpha1.paint(self._buf, 2, y)
         y += alpha1.height + 1
 
         # Alphabet (second half)
-        alpha2 = render_big("nopqrstuvwxyz", Style(fg="#50c8ff"), size=self.size, format=self.format)
+        alpha2 = render_big(
+            "nopqrstuvwxyz", Style(fg="#50c8ff"), size=self.size, format=self.format
+        )
         alpha2.paint(self._buf, 2, y)
         y += alpha2.height + 1
 

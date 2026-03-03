@@ -35,35 +35,66 @@ from pathlib import Path
 import time
 
 from painted import (
-    Block, Style, Span, Line,
+    Block,
+    Style,
+    Span,
+    Line,
     Cursor,
-    join_horizontal, join_vertical, pad, border,
+    join_horizontal,
+    join_vertical,
+    pad,
+    border,
     ROUNDED,
     print_block,
 )
 from painted.tui import (
-    Surface, BufferView,
+    Surface,
+    BufferView,
     # Focus management
-    Focus, ring_next, ring_prev, linear_next, linear_prev,
+    Focus,
+    ring_next,
+    ring_prev,
+    linear_next,
+    linear_prev,
     # Search
-    Search, filter_contains, filter_prefix, filter_fuzzy,
+    Search,
+    filter_contains,
+    filter_prefix,
+    filter_fuzzy,
     # Layer
-    Layer, Stay, Pop, Push, Quit, process_key, render_layers,
+    Layer,
+    Stay,
+    Pop,
+    Push,
+    Quit,
+    process_key,
+    render_layers,
 )
 from painted.views import (
-    SpinnerState, spinner, DOTS, BRAILLE, LINE,
-    ProgressState, progress_bar,
-    ListState, list_view,
-    TextInputState, text_input,
-    Column, TableState, table,
+    SpinnerState,
+    spinner,
+    DOTS,
+    BRAILLE,
+    LINE,
+    ProgressState,
+    progress_bar,
+    ListState,
+    list_view,
+    TextInputState,
+    text_input,
+    Column,
+    TableState,
+    table,
 )
 
 
 # -- Data Model --
 
+
 @dataclass(frozen=True)
 class Navigation:
     """Links to adjacent slides in 4 directions."""
+
     up: str | None = None
     down: str | None = None
     left: str | None = None
@@ -81,6 +112,7 @@ class Text:
     - str: plain text with the given style
     - Line: pre-styled inline text (style field ignored)
     """
+
     content: str | Line
     style: Style = field(default_factory=Style)
     center: bool = False
@@ -89,6 +121,7 @@ class Text:
 @dataclass(frozen=True)
 class Code:
     """A code section (source displayed in a box)."""
+
     source: str
     title: str = ""
     center: bool = True  # center the code block by default
@@ -97,6 +130,7 @@ class Code:
 @dataclass(frozen=True)
 class Spacer:
     """Vertical space."""
+
     lines: int = 1
 
 
@@ -107,6 +141,7 @@ class Demo:
     demo_id identifies which demo to render (e.g., "spinner", "list", "text_input").
     The BenchState holds the actual component state.
     """
+
     demo_id: str
     label: str = ""
     center: bool = True
@@ -124,6 +159,7 @@ class Slide:
     zooms: dict mapping zoom level -> sections shown only at that level.
     max_zoom: highest zoom level (0 = no zoom support).
     """
+
     id: str
     title: str
     group: str = ""
@@ -136,6 +172,7 @@ class Slide:
 @dataclass(frozen=True)
 class BenchState:
     """Application state for the teaching bench."""
+
     current_slide: str = "intro"
     zoom: int = 0  # current zoom level (0=summary, 1=detail, 2=source)
     show_minimap: bool = False  # whether to show minimap sidebar
@@ -150,7 +187,9 @@ class BenchState:
     spinner_line: SpinnerState = field(default_factory=lambda: SpinnerState(frames=LINE))
     progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
     list_state: ListState = field(default_factory=lambda: ListState(cursor=Cursor(count=5)))
-    text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
+    text_state: TextInputState = field(
+        default_factory=lambda: TextInputState(text="hello", cursor=5)
+    )
     table_state: TableState = field(default_factory=lambda: TableState(cursor=Cursor(count=4)))
 
     # Focus demo state
@@ -178,6 +217,7 @@ class LensContext:
 
     Component states are passed through for Demo sections.
     """
+
     width: int
     zoom: int = 0
     focus: Focus = field(default_factory=lambda: Focus(id="demo"))
@@ -189,7 +229,9 @@ class LensContext:
     spinner_line: SpinnerState = field(default_factory=lambda: SpinnerState(frames=LINE))
     progress_state: ProgressState = field(default_factory=lambda: ProgressState(value=0.35))
     list_state: ListState = field(default_factory=lambda: ListState(cursor=Cursor(count=5)))
-    text_state: TextInputState = field(default_factory=lambda: TextInputState(text="hello", cursor=5))
+    text_state: TextInputState = field(
+        default_factory=lambda: TextInputState(text="hello", cursor=5)
+    )
     table_state: TableState = field(default_factory=lambda: TableState(cursor=Cursor(count=4)))
 
     # Focus demo state
@@ -249,18 +291,63 @@ CODE_DEFAULT = Style(fg="white")
 
 # Python keywords for highlighting
 PY_KEYWORDS = {
-    "def", "class", "return", "if", "else", "elif", "for", "while", "in",
-    "import", "from", "as", "try", "except", "finally", "with", "yield",
-    "lambda", "and", "or", "not", "is", "None", "True", "False", "async", "await",
+    "def",
+    "class",
+    "return",
+    "if",
+    "else",
+    "elif",
+    "for",
+    "while",
+    "in",
+    "import",
+    "from",
+    "as",
+    "try",
+    "except",
+    "finally",
+    "with",
+    "yield",
+    "lambda",
+    "and",
+    "or",
+    "not",
+    "is",
+    "None",
+    "True",
+    "False",
+    "async",
+    "await",
 }
 PY_BUILTINS = {
-    "print", "len", "range", "str", "int", "float", "list", "dict", "tuple",
-    "set", "bool", "type", "isinstance", "hasattr", "getattr", "setattr",
-    "property", "staticmethod", "classmethod", "super", "self", "max", "min",
+    "print",
+    "len",
+    "range",
+    "str",
+    "int",
+    "float",
+    "list",
+    "dict",
+    "tuple",
+    "set",
+    "bool",
+    "type",
+    "isinstance",
+    "hasattr",
+    "getattr",
+    "setattr",
+    "property",
+    "staticmethod",
+    "classmethod",
+    "super",
+    "self",
+    "max",
+    "min",
 }
 
 
 # -- Layer Accessors --
+
 
 def get_layers(state: BenchState) -> tuple[Layer, ...]:
     """Extract layers from state."""
@@ -274,6 +361,7 @@ def set_layers(state: BenchState, layers: tuple[Layer, ...]) -> BenchState:
 
 # -- Code Highlighting --
 
+
 def highlight_line(text: str) -> Line:
     """Apply basic Python syntax highlighting to a line of code."""
     if not text.strip():
@@ -284,39 +372,39 @@ def highlight_line(text: str) -> Line:
 
     while i < len(text):
         # Leading whitespace
-        if text[i] in ' \t':
+        if text[i] in " \t":
             j = i
-            while j < len(text) and text[j] in ' \t':
+            while j < len(text) and text[j] in " \t":
                 j += 1
             spans.append(Span(text[i:j], CODE_DEFAULT))
             i = j
             continue
 
         # Comments
-        if text[i] == '#':
+        if text[i] == "#":
             spans.append(Span(text[i:], CODE_COMMENT))
             break
 
         # Decorators
-        if text[i] == '@':
+        if text[i] == "@":
             j = i + 1
-            while j < len(text) and (text[j].isalnum() or text[j] == '_'):
+            while j < len(text) and (text[j].isalnum() or text[j] == "_"):
                 j += 1
             spans.append(Span(text[i:j], CODE_DECORATOR))
             i = j
             continue
 
         # Strings (simple handling)
-        if text[i] in '"\'':
+        if text[i] in "\"'":
             quote = text[i]
             # Check for triple quote
-            if text[i:i+3] in ('"""', "'''"):
-                quote = text[i:i+3]
+            if text[i : i + 3] in ('"""', "'''"):
+                quote = text[i : i + 3]
             j = i + len(quote)
             while j < len(text):
-                if text[j] == '\\' and j + 1 < len(text):
+                if text[j] == "\\" and j + 1 < len(text):
                     j += 2
-                elif text[j:j+len(quote)] == quote:
+                elif text[j : j + len(quote)] == quote:
                     j += len(quote)
                     break
                 else:
@@ -328,16 +416,16 @@ def highlight_line(text: str) -> Line:
         # Numbers
         if text[i].isdigit():
             j = i
-            while j < len(text) and (text[j].isdigit() or text[j] == '.'):
+            while j < len(text) and (text[j].isdigit() or text[j] == "."):
                 j += 1
             spans.append(Span(text[i:j], CODE_NUMBER))
             i = j
             continue
 
         # Identifiers and keywords
-        if text[i].isalpha() or text[i] == '_':
+        if text[i].isalpha() or text[i] == "_":
             j = i
-            while j < len(text) and (text[j].isalnum() or text[j] == '_'):
+            while j < len(text) and (text[j].isalnum() or text[j] == "_"):
                 j += 1
             word = text[i:j]
             if word in PY_KEYWORDS:
@@ -377,7 +465,7 @@ def render_text(section: Text, width: int) -> Block:
 
 def render_code(section: Code, width: int) -> Block:
     """Render a code section in a bordered box with syntax highlighting."""
-    source_lines = section.source.strip().split('\n')
+    source_lines = section.source.strip().split("\n")
 
     # Highlight each line
     highlighted: list[Line] = [highlight_line(line) for line in source_lines]
@@ -459,11 +547,14 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         label3 = Block.text("line ", Style(dim=True))
 
         row = join_horizontal(
-            label1, spin1,
+            label1,
+            spin1,
             Block.text("   ", Style()),
-            label2, spin2,
+            label2,
+            spin2,
             Block.text("   ", Style()),
-            label3, spin3,
+            label3,
+            spin3,
         )
         content = border(pad(row, left=1, right=1), ROUNDED, demo_border_style("cyan"))
 
@@ -543,7 +634,9 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         item_blocks = []
         for item in items:
             if item == current:
-                item_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="green", bold=True)))
+                item_blocks.append(
+                    Block.text(f" {item} ", Style(fg="black", bg="green", bold=True))
+                )
             else:
                 item_blocks.append(Block.text(f" {item} ", Style(dim=True)))
         items_row = join_horizontal(*item_blocks, gap=1)
@@ -583,7 +676,9 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         match_blocks = []
         for i, item in enumerate(matches[:5]):  # Show max 5
             if i == search.selected:
-                match_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True)))
+                match_blocks.append(
+                    Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True))
+                )
             else:
                 match_blocks.append(Block.text(f" {item} ", Style(dim=True)))
 
@@ -596,7 +691,9 @@ def render_demo(section: Demo, width: int, state: BenchState) -> Block:
         mode_block = Block.text(f"mode: {mode}", Style(fg="cyan"))
 
         if focused:
-            hint = Block.text("  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta"))
+            hint = Block.text(
+                "  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta")
+            )
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
 
@@ -681,11 +778,14 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
         label3 = Block.text("line ", Style(dim=True))
 
         row = join_horizontal(
-            label1, spin1,
+            label1,
+            spin1,
             Block.text("   ", Style()),
-            label2, spin2,
+            label2,
+            spin2,
             Block.text("   ", Style()),
-            label3, spin3,
+            label3,
+            spin3,
         )
         content = border(pad(row, left=1, right=1), ROUNDED, demo_border_style("cyan"))
 
@@ -765,7 +865,9 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
         item_blocks = []
         for item in items:
             if item == current:
-                item_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="green", bold=True)))
+                item_blocks.append(
+                    Block.text(f" {item} ", Style(fg="black", bg="green", bold=True))
+                )
             else:
                 item_blocks.append(Block.text(f" {item} ", Style(dim=True)))
         items_row = join_horizontal(*item_blocks, gap=1)
@@ -805,7 +907,9 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
         match_blocks = []
         for i, item in enumerate(matches[:5]):  # Show max 5
             if i == search.selected:
-                match_blocks.append(Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True)))
+                match_blocks.append(
+                    Block.text(f" {item} ", Style(fg="black", bg="magenta", bold=True))
+                )
             else:
                 match_blocks.append(Block.text(f" {item} ", Style(dim=True)))
 
@@ -818,7 +922,9 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
         mode_block = Block.text(f"mode: {mode}", Style(fg="cyan"))
 
         if focused:
-            hint = Block.text("  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta"))
+            hint = Block.text(
+                "  type/bksp  up/down select  m: mode  esc: done", Style(fg="magenta")
+            )
         else:
             hint = Block.text("  tab: focus", HINT_STYLE)
 
@@ -837,7 +943,6 @@ def demo_lens(section: Demo, ctx: LensContext) -> Block:
         padding = max(0, (ctx.width - content.width) // 2)
         return pad(content, left=padding)
     return content
-
 
 
 def section_lens(section: Section, ctx: LensContext) -> Block:
@@ -861,7 +966,13 @@ def section_lens(section: Section, ctx: LensContext) -> Block:
 # -- Minimap Lens --
 
 
-def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, height: int, nav_sequence: list[str] | None = None) -> Block:
+def minimap_lens(
+    slides: dict[str, Slide],
+    current: str,
+    current_zoom: int,
+    height: int,
+    nav_sequence: list[str] | None = None,
+) -> Block:
     """Render slide graph as a minimap sidebar.
 
     Shows all slide titles with the current slide highlighted.
@@ -905,7 +1016,7 @@ def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, heig
         # Truncate if too wide
         max_width = 20
         if len(text) > max_width:
-            text = text[:max_width-1] + "\u2026"
+            text = text[: max_width - 1] + "\u2026"
 
         nodes.append(Block.text(text, style))
 
@@ -929,6 +1040,7 @@ def minimap_lens(slides: dict[str, Slide], current: str, current_zoom: int, heig
 
 # -- Slide Loading --
 
+
 def _build_slides_dir() -> Path:
     """Return path to the slides directory."""
     return Path(__file__).parent / "slides"
@@ -940,19 +1052,19 @@ def _convert_sections(section_dicts: list[dict]) -> tuple[Section, ...]:
 
     sections: list[Section] = []
     for sec in section_dicts:
-        if sec['type'] == 'spacer':
-            sections.append(Spacer(sec.get('lines', 1)))
-        elif sec['type'] == 'text':
-            line = parse_styled_text(sec['content'])
-            content = sec['content']
+        if sec["type"] == "spacer":
+            sections.append(Spacer(sec.get("lines", 1)))
+        elif sec["type"] == "text":
+            line = parse_styled_text(sec["content"])
+            content = sec["content"]
             # Hint text (↓/→ prefixed) gets italic dim style
-            is_hint = content.startswith('↓') or content.startswith('→')
+            is_hint = content.startswith("↓") or content.startswith("→")
             style = HINT_STYLE if is_hint else SUBTITLE_STYLE
-            sections.append(Text(line, style, center=sec.get('center', False)))
-        elif sec['type'] == 'code':
-            sections.append(Code(source=sec['source'], title=sec.get('lang', '')))
-        elif sec['type'] == 'demo':
-            sections.append(Demo(demo_id=sec['demo_id']))
+            sections.append(Text(line, style, center=sec.get("center", False)))
+        elif sec["type"] == "code":
+            sections.append(Code(source=sec["source"], title=sec.get("lang", "")))
+        elif sec["type"] == "demo":
+            sections.append(Demo(demo_id=sec["demo_id"]))
     return tuple(sections)
 
 
@@ -972,10 +1084,10 @@ def _to_tour_slide(parsed, nav_data: dict[str, str | None] | None = None) -> Sli
         zooms=zooms,
         max_zoom=parsed.max_zoom,
         nav=Navigation(
-            left=n.get('left'),
-            right=n.get('right'),
-            up=n.get('up'),
-            down=n.get('down'),
+            left=n.get("left"),
+            right=n.get("right"),
+            up=n.get("up"),
+            down=n.get("down"),
         ),
     )
 
@@ -986,10 +1098,16 @@ def build_slides() -> tuple[dict[str, Slide], list[str]]:
     Returns (slides_dict, navigation_sequence).
     """
     import sys
+
     demos_dir = str(Path(__file__).parent)
     if demos_dir not in sys.path:
         sys.path.insert(0, demos_dir)
-    from slide_loader import load_slides_dir, validate_slides, build_navigation, get_navigation_sequence
+    from slide_loader import (
+        load_slides_dir,
+        validate_slides,
+        build_navigation,
+        get_navigation_sequence,
+    )
 
     slides_dir = _build_slides_dir()
     parsed = load_slides_dir(slides_dir)
@@ -1007,21 +1125,27 @@ def build_slides() -> tuple[dict[str, Slide], list[str]]:
 # -- Help Overlay --
 
 HELP_CONTENT = [
-    ("Navigation", [
-        ("left right", "move between topics"),
-        ("up down", "zoom in/out (detail levels)"),
-        ("/", "search/jump to slide"),
-        ("m", "toggle minimap sidebar"),
-        ("q / esc", "quit"),
-        ("?", "toggle this help"),
-    ]),
-    ("Demo Widgets", [
-        ("tab", "focus/unfocus demo"),
-        ("left right", "adjust progress (when focused)"),
-        ("up down", "navigate list (when focused)"),
-        ("type", "edit text input (when focused)"),
-        ("esc", "unfocus demo"),
-    ]),
+    (
+        "Navigation",
+        [
+            ("left right", "move between topics"),
+            ("up down", "zoom in/out (detail levels)"),
+            ("/", "search/jump to slide"),
+            ("m", "toggle minimap sidebar"),
+            ("q / esc", "quit"),
+            ("?", "toggle this help"),
+        ],
+    ),
+    (
+        "Demo Widgets",
+        [
+            ("tab", "focus/unfocus demo"),
+            ("left right", "adjust progress (when focused)"),
+            ("up down", "navigate list (when focused)"),
+            ("type", "edit text input (when focused)"),
+            ("esc", "unfocus demo"),
+        ],
+    ),
 ]
 
 
@@ -1125,8 +1249,11 @@ def render_search_overlay(
 
 # -- Layer Handlers --
 
+
 # Help Layer - no state needed
-def _handle_help(key: str, layer_state: None, app_state: BenchState) -> tuple[None, BenchState, Stay | Pop | Push | Quit]:
+def _handle_help(
+    key: str, layer_state: None, app_state: BenchState
+) -> tuple[None, BenchState, Stay | Pop | Push | Quit]:
     """Help layer: any key dismisses."""
     return None, app_state, Pop()
 
@@ -1146,11 +1273,14 @@ def make_help_layer() -> Layer[None]:
 @dataclass(frozen=True)
 class SearchLayerState:
     """State for the search layer."""
+
     search: Search = field(default_factory=Search)
     slides: dict[str, Slide] = field(default_factory=dict)
 
 
-def _handle_search(key: str, layer_state: SearchLayerState, app_state: BenchState) -> tuple[SearchLayerState, BenchState, Stay | Pop | Push | Quit]:
+def _handle_search(
+    key: str, layer_state: SearchLayerState, app_state: BenchState
+) -> tuple[SearchLayerState, BenchState, Stay | Pop | Push | Quit]:
     """Search layer: handles query input and selection."""
     search = layer_state.search
     slides = layer_state.slides
@@ -1208,7 +1338,9 @@ def _handle_search(key: str, layer_state: SearchLayerState, app_state: BenchStat
 def _render_search(layer_state: SearchLayerState, app_state: BenchState, view: BufferView) -> None:
     """Render search overlay."""
     slide_titles = [(sid, s.title) for sid, s in layer_state.slides.items()]
-    block = render_search_overlay(app_state.width, app_state.height, layer_state.search, slide_titles)
+    block = render_search_overlay(
+        app_state.width, app_state.height, layer_state.search, slide_titles
+    )
     block.paint(view, 0, 0)
 
 
@@ -1226,6 +1358,7 @@ def make_search_layer(slides: dict[str, Slide]) -> Layer[SearchLayerState]:
 @dataclass(frozen=True)
 class DemoLayerState:
     """State for the demo focus layer."""
+
     slides: dict[str, Slide] = field(default_factory=dict)
 
 
@@ -1251,7 +1384,7 @@ def _handle_demo_input(key: str, state: BenchState, demo_id: str) -> tuple[Bench
                 state,
                 progress_state=state.progress_state.set(
                     max(0.0, state.progress_state.value - 0.05)
-                )
+                ),
             )
             handled = True
         elif key == "right":
@@ -1259,7 +1392,7 @@ def _handle_demo_input(key: str, state: BenchState, demo_id: str) -> tuple[Bench
                 state,
                 progress_state=state.progress_state.set(
                     min(1.0, state.progress_state.value + 0.05)
-                )
+                ),
             )
             handled = True
 
@@ -1349,7 +1482,9 @@ def _handle_demo_input(key: str, state: BenchState, demo_id: str) -> tuple[Bench
     return state, handled
 
 
-def _handle_demo(key: str, layer_state: DemoLayerState, app_state: BenchState) -> tuple[DemoLayerState, BenchState, Stay | Pop | Push | Quit]:
+def _handle_demo(
+    key: str, layer_state: DemoLayerState, app_state: BenchState
+) -> tuple[DemoLayerState, BenchState, Stay | Pop | Push | Quit]:
     """Demo focus layer: captures input for widget interaction."""
     if key == "escape":
         # Release focus and pop demo layer
@@ -1387,11 +1522,14 @@ def make_demo_layer(slides: dict[str, Slide]) -> Layer[DemoLayerState]:
 @dataclass(frozen=True)
 class NavLayerState:
     """State for the navigation layer."""
+
     slides: dict[str, Slide] = field(default_factory=dict)
     nav_sequence: list[str] = field(default_factory=list)
 
 
-def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> tuple[NavLayerState, BenchState, Stay | Pop | Push | Quit]:
+def _handle_nav(
+    key: str, layer_state: NavLayerState, app_state: BenchState
+) -> tuple[NavLayerState, BenchState, Stay | Pop | Push | Quit]:
     """Base navigation layer: handles slide navigation and pushes overlays."""
     slides = layer_state.slides
 
@@ -1421,7 +1559,11 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
         elif slide.nav.up:
             target = slides.get(slide.nav.up)
             new_zoom = target.max_zoom if target else 0
-            return layer_state, replace(app_state, current_slide=slide.nav.up, zoom=new_zoom), Stay()
+            return (
+                layer_state,
+                replace(app_state, current_slide=slide.nav.up, zoom=new_zoom),
+                Stay(),
+            )
         return layer_state, app_state, Stay()
 
     # Tab: toggle focus capture (only if slide has interactive demo)
@@ -1462,7 +1604,13 @@ def _handle_nav(key: str, layer_state: NavLayerState, app_state: BenchState) -> 
 
     if new_slide and new_slide in slides:
         # Reset focus when changing slides
-        return layer_state, replace(app_state, current_slide=new_slide, zoom=new_zoom, focus=app_state.focus.release()), Stay()
+        return (
+            layer_state,
+            replace(
+                app_state, current_slide=new_slide, zoom=new_zoom, focus=app_state.focus.release()
+            ),
+            Stay(),
+        )
     elif new_zoom != app_state.zoom:
         # Just change zoom level
         return layer_state, replace(app_state, zoom=new_zoom), Stay()
@@ -1484,7 +1632,9 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     # Calculate minimap width if shown
     minimap_width = 0
     if app_state.show_minimap:
-        minimap_block = minimap_lens(slides, app_state.current_slide, app_state.zoom, height - 2, layer_state.nav_sequence)
+        minimap_block = minimap_lens(
+            slides, app_state.current_slide, app_state.zoom, height - 2, layer_state.nav_sequence
+        )
         minimap_width = minimap_block.width + 1  # +1 for gap
 
         # Render minimap on the left
@@ -1523,7 +1673,9 @@ def _render_nav(layer_state: NavLayerState, app_state: BenchState, view: BufferV
     footer.paint(view, 0, height - 1)
 
 
-def make_nav_layer(slides: dict[str, Slide], nav_sequence: list[str] | None = None) -> Layer[NavLayerState]:
+def make_nav_layer(
+    slides: dict[str, Slide], nav_sequence: list[str] | None = None
+) -> Layer[NavLayerState]:
     """Create the base navigation layer."""
     return Layer(
         name="nav",
@@ -1535,6 +1687,7 @@ def make_nav_layer(slides: dict[str, Slide], nav_sequence: list[str] | None = No
 
 # -- Header & Footer --
 
+
 def render_header(slide: Slide, width: int) -> Block:
     """Render the slide title header."""
     title_block = Block.text(f" {slide.title} ", TITLE_STYLE)
@@ -1543,7 +1696,9 @@ def render_header(slide: Slide, width: int) -> Block:
     return pad(title_block, left=padding, top=1, bottom=1)
 
 
-def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, Slide], state: BenchState) -> Block:
+def render_footer(
+    slide: Slide, nav: Navigation, width: int, slides: dict[str, Slide], state: BenchState
+) -> Block:
     """Render the navigation footer."""
     parts: list[Block] = []
 
@@ -1610,10 +1765,17 @@ def render_footer(slide: Slide, nav: Navigation, width: int, slides: dict[str, S
 
 # -- Main App --
 
+
 class BenchApp(Surface):
     """Interactive teaching bench application."""
 
-    def __init__(self, slides: dict[str, Slide] | None = None, nav_sequence: list[str] | None = None, start_slide: str = "intro", start_zoom: int = 0):
+    def __init__(
+        self,
+        slides: dict[str, Slide] | None = None,
+        nav_sequence: list[str] | None = None,
+        start_slide: str = "intro",
+        start_zoom: int = 0,
+    ):
         super().__init__(fps_cap=30)
         if slides is None:
             slides, nav_sequence = build_slides()
@@ -1686,12 +1848,14 @@ def parse_args() -> argparse.Namespace:
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="Print slides inline and exit (no TUI)",
     )
     group.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="count",
         default=0,
         help="Start deeper (-v: detail level, -vv: source level)",
@@ -1806,7 +1970,9 @@ async def main():
 
     # Fidelity determines starting slide and zoom level
     start_slide, start_zoom = get_start_slide(args.verbose)
-    app = BenchApp(slides=slides, nav_sequence=nav_sequence, start_slide=start_slide, start_zoom=start_zoom)
+    app = BenchApp(
+        slides=slides, nav_sequence=nav_sequence, start_slide=start_slide, start_zoom=start_zoom
+    )
 
     await app.run()
 

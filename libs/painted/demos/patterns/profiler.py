@@ -44,6 +44,7 @@ from painted.tui import Layer, Pop, Push, Quit, Stay, Surface, TestSurface, rend
 @dataclass(frozen=True)
 class FrameProfile:
     """Performance metrics for a single rendered frame."""
+
     index: int
     label: str
     write_count: int
@@ -53,6 +54,7 @@ class FrameProfile:
 @dataclass(frozen=True)
 class EmissionSummary:
     """Aggregate count for one emission kind."""
+
     kind: str
     count: int
 
@@ -60,6 +62,7 @@ class EmissionSummary:
 @dataclass(frozen=True)
 class ProfileData:
     """Complete profiling results from a TestSurface run."""
+
     scenario_name: str
     dimensions: str
     input_count: int
@@ -80,8 +83,16 @@ class ProfileData:
 
 
 _ITEMS = (
-    "api-gateway", "auth-service", "worker", "scheduler",
-    "metrics", "logger", "cache", "queue", "storage", "monitor",
+    "api-gateway",
+    "auth-service",
+    "worker",
+    "scheduler",
+    "metrics",
+    "logger",
+    "cache",
+    "queue",
+    "storage",
+    "monitor",
 )
 
 _SCENARIO_INPUTS = ["j", "j", "j", "k", "k", "enter", "escape", "q"]
@@ -139,7 +150,10 @@ class _ProfileApp(Surface):
 
     def on_key(self, key: str) -> None:
         new_state, should_quit, pop_result = self.handle_key(
-            key, self.state, _get_layers, _set_layers,
+            key,
+            self.state,
+            _get_layers,
+            _set_layers,
         )
         self.state = new_state
         layers = _get_layers(new_state)
@@ -227,7 +241,10 @@ SAMPLE_PROFILE = ProfileData(
 
 
 def _extract_profile(
-    name: str, harness: TestSurface, frames: list, prof_result,
+    name: str,
+    harness: TestSurface,
+    frames: list,
+    prof_result,
 ) -> ProfileData:
     """Pure function: extract ProfileData from a completed TestSurface run."""
     write_counts = [len(f.writes) for f in frames]
@@ -285,8 +302,7 @@ def _fetch() -> ProfileData:
 def render_minimal(data: ProfileData, width: int) -> Block:
     """Single-line profiling summary."""
     result = Block.text(
-        f"{data.frame_count} frames, {data.total_writes} writes, "
-        f"avg {data.avg_writes:.0f}/frame",
+        f"{data.frame_count} frames, {data.total_writes} writes, avg {data.avg_writes:.0f}/frame",
         Style(),
     )
     return truncate(result, width)
@@ -311,15 +327,20 @@ def render_summary(data: ProfileData, width: int) -> Block:
     ]
 
     if data.hot_frame_count:
-        rows.append(Block.text(
-            f"Hot frames: {data.hot_frame_count} (>2x avg)", p.warning,
-        ))
+        rows.append(
+            Block.text(
+                f"Hot frames: {data.hot_frame_count} (>2x avg)",
+                p.warning,
+            )
+        )
 
     if data.cprofile_calls > 0:
-        rows.append(Block.text(
-            f"cProfile:  {data.cprofile_calls} calls, {data.cprofile_total:.4f}s",
-            Style(),
-        ))
+        rows.append(
+            Block.text(
+                f"cProfile:  {data.cprofile_calls} calls, {data.cprofile_total:.4f}s",
+                Style(),
+            )
+        )
 
     rows.append(Block.text("", Style()))
     rows.append(Block.text("Emissions:", Style(dim=True)))
@@ -368,9 +389,12 @@ def render_detailed(data: ProfileData, width: int) -> Block:
     if hot_frames:
         hot_rows = [Block.text("Hot frames (>2x average):", p.warning)]
         for f in hot_frames:
-            hot_rows.append(Block.text(
-                f"  Frame {f.index} ({f.label}): {f.write_count} writes", p.warning,
-            ))
+            hot_rows.append(
+                Block.text(
+                    f"  Frame {f.index} ({f.label}): {f.write_count} writes",
+                    p.warning,
+                )
+            )
         sections.append(join_vertical(*hot_rows))
         sections.append(Block.text("", Style()))
 
@@ -407,11 +431,13 @@ def render_full(data: ProfileData, width: int) -> Block:
         )
         label_line = Block.text(f"  {frame.label}", Style(dim=True))
         inner = join_vertical(header, label_line)
-        sections.append(border(
-            pad(inner, right=max(0, min(50, width - 4) - inner.width)),
-            title=f"Frame {frame.index}",
-            chars=ROUNDED,
-        ))
+        sections.append(
+            border(
+                pad(inner, right=max(0, min(50, width - 4) - inner.width)),
+                title=f"Frame {frame.index}",
+                chars=ROUNDED,
+            )
+        )
 
     sections.append(Block.text("", Style()))
 

@@ -87,10 +87,13 @@ def read_messages(limit: int = 20) -> list[str]:
         sys.exit(1)
 
     url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages?limit={limit}"
-    req = Request(url, headers={
-        "Authorization": f"Bot {token}",
-        "User-Agent": "discord-chat/1.0",
-    })
+    req = Request(
+        url,
+        headers={
+            "Authorization": f"Bot {token}",
+            "User-Agent": "discord-chat/1.0",
+        },
+    )
     with urlopen(req) as resp:
         messages = json.loads(resp.read())
 

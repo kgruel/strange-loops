@@ -173,7 +173,9 @@ def _panel(title: str, *, palette, icons, data: Dashboard, inner_width: int) -> 
         )
 
 
-def _wrap_rows(blocks: list[Block], *, available_width: int, gap: int = 2, row_gap: int = 1) -> Block:
+def _wrap_rows(
+    blocks: list[Block], *, available_width: int, gap: int = 2, row_gap: int = 1
+) -> Block:
     if not blocks:
         return Block.empty(0, 0)
 
@@ -263,9 +265,19 @@ def _render_full(ctx: CliContext, data: Dashboard) -> Block:
     ]
 
     matrix: list[Block] = []
-    for pname, pal in (("DEFAULT", DEFAULT_PALETTE), ("NORD", NORD_PALETTE), ("MONO", MONO_PALETTE)):
-        for iname, icons in (("UNICODE", IconSet()), ("ASCII", ASCII_ICONS), ("CUSTOM", CUSTOM_ICONS)):
-            matrix.append(_panel(f"{pname}/{iname}", palette=pal, icons=icons, data=data, inner_width=inner_w))
+    for pname, pal in (
+        ("DEFAULT", DEFAULT_PALETTE),
+        ("NORD", NORD_PALETTE),
+        ("MONO", MONO_PALETTE),
+    ):
+        for iname, icons in (
+            ("UNICODE", IconSet()),
+            ("ASCII", ASCII_ICONS),
+            ("CUSTOM", CUSTOM_ICONS),
+        ):
+            matrix.append(
+                _panel(f"{pname}/{iname}", palette=pal, icons=icons, data=data, inner_width=inner_w)
+            )
 
     return join_vertical(
         _header("same dashboard, three icon sets", width=width),

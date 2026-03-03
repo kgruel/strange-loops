@@ -61,11 +61,15 @@ class AnimationApp(Surface):
     def render(self) -> None:
         self._buf.fill(0, 0, self._buf.width, self._buf.height, " ", Style())
 
-        status = f" Animation Demo | frame={self.frame:04d} | {'PAUSED' if self.paused else 'RUNNING'} "
+        status = (
+            f" Animation Demo | frame={self.frame:04d} | {'PAUSED' if self.paused else 'RUNNING'} "
+        )
         self._buf.put_text(0, 0, status[: self._buf.width], Style(fg="black", bg="white"))
 
         y = 2
-        self._buf.put_text(2, y, "update() advances state; mark_dirty() triggers render()", Style(dim=True))
+        self._buf.put_text(
+            2, y, "update() advances state; mark_dirty() triggers render()", Style(dim=True)
+        )
         y += 2
 
         self._buf.put_text(2, y, "Spinner:", Style(dim=True))

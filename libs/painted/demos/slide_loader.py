@@ -55,9 +55,11 @@ GROUP_ORDER = ["primitives", "composition", "application", "components"]
 
 # -- Parsed Types (intermediate representation) --
 
+
 @dataclass
 class ParsedSlide:
     """Intermediate representation of a parsed markdown slide."""
+
     id: str
     title: str = ""
     group: str = ""
@@ -78,21 +80,22 @@ CODE_STYLE = Style(fg="yellow")
 
 # -- Frontmatter Parser --
 
+
 def parse_frontmatter(content: str) -> tuple[dict, str]:
     """Extract YAML frontmatter and body from markdown.
 
     Returns (frontmatter_dict, body_text).
     """
-    if not content.startswith('---'):
+    if not content.startswith("---"):
         return {}, content
 
     # Find closing ---
-    end_match = re.search(r'\n---\s*\n', content[3:])
+    end_match = re.search(r"\n---\s*\n", content[3:])
     if not end_match:
         return {}, content
 
-    yaml_text = content[3:end_match.start() + 3]
-    body = content[end_match.end() + 3:]
+    yaml_text = content[3 : end_match.start() + 3]
+    body = content[end_match.end() + 3 :]
 
     # Simple YAML parser (handles our subset)
     frontmatter = parse_simple_yaml(yaml_text)
@@ -108,16 +111,16 @@ def parse_simple_yaml(text: str) -> dict:
     """
     result = {}
 
-    for line in text.split('\n'):
-        if not line.strip() or line.strip().startswith('#'):
+    for line in text.split("\n"):
+        if not line.strip() or line.strip().startswith("#"):
             continue
 
         stripped = line.strip()
 
-        if ':' not in stripped:
+        if ":" not in stripped:
             continue
 
-        key, _, value = stripped.partition(':')
+        key, _, value = stripped.partition(":")
         key = key.strip()
         value = value.strip()
 
@@ -133,7 +136,10 @@ def parse_simple_yaml(text: str) -> dict:
 
 # -- Markdown Body Parser --
 
-def _parse_sections(lines: list[str], start: int, default_align: str = "left") -> tuple[list[dict], int]:
+
+def _parse_sections(
+    lines: list[str], start: int, default_align: str = "left"
+) -> tuple[list[dict], int]:
     """Parse lines into sections until EOF or a [zoom:N] marker.
 
     Returns (sections, next_line_index).
@@ -150,56 +156,62 @@ def _parse_sections(lines: list[str], start: int, default_align: str = "left") -
         stripped = line.strip()
 
         # Stop at zoom marker
-        if re.match(r'\[zoom:\d+\]', stripped):
+        if re.match(r"\[zoom:\d+\]", stripped):
             break
 
         # Skip docgen comment markers (pass through)
-        if stripped.startswith('<!-- docgen:'):
+        if stripped.startswith("<!-- docgen:"):
             i += 1
             continue
 
         # Align marker [align:center] or [align:left]
-        align_match = re.match(r'\[align:(left|center)\]', stripped)
+        align_match = re.match(r"\[align:(left|center)\]", stripped)
         if align_match:
             next_align = align_match.group(1)
             i += 1
             continue
 
         # Code block
-        if stripped.startswith('```'):
+        if stripped.startswith("```"):
             lang = stripped[3:].strip()
             code_lines = []
             i += 1
-            while i < len(lines) and not lines[i].strip().startswith('```'):
+            while i < len(lines) and not lines[i].strip().startswith("```"):
                 code_lines.append(lines[i])
                 i += 1
             i += 1  # skip closing ```
 
-            sections.append({
-                'type': 'code',
-                'source': '\n'.join(code_lines),
-                'lang': lang or 'python',
-            })
+            sections.append(
+                {
+                    "type": "code",
+                    "source": "\n".join(code_lines),
+                    "lang": lang or "python",
+                }
+            )
             continue
 
         # Demo marker [demo:id]
-        demo_match = re.match(r'\[demo:(\w+)\]', stripped)
+        demo_match = re.match(r"\[demo:(\w+)\]", stripped)
         if demo_match:
-            sections.append({
-                'type': 'demo',
-                'demo_id': demo_match.group(1),
-            })
+            sections.append(
+                {
+                    "type": "demo",
+                    "demo_id": demo_match.group(1),
+                }
+            )
             i += 1
             continue
 
         # Spacer marker [spacer] or [spacer:N]
-        spacer_match = re.match(r'\[spacer(?::(\d+))?\]', stripped)
+        spacer_match = re.match(r"\[spacer(?::(\d+))?\]", stripped)
         if spacer_match:
             n = int(spacer_match.group(1)) if spacer_match.group(1) else 1
-            sections.append({
-                'type': 'spacer',
-                'lines': n,
-            })
+            sections.append(
+                {
+                    "type": "spacer",
+                    "lines": n,
+                }
+            )
             i += 1
             continue
 
@@ -212,26 +224,36 @@ def _parse_sections(lines: list[str], start: int, default_align: str = "left") -
         para_lines = []
         while i < len(lines):
             l = lines[i].strip()
-            if not l or l.startswith('```') or l.startswith('#') or l.startswith('[') or l.startswith('<!--'):
+            if (
+                not l
+                or l.startswith("```")
+                or l.startswith("#")
+                or l.startswith("[")
+                or l.startswith("<!--")
+            ):
                 break
             para_lines.append(l)
             i += 1
 
         if para_lines:
-            text = ' '.join(para_lines)
+            text = " ".join(para_lines)
             # Determine centering: one-shot override > slide default
             align = next_align or default_align
             next_align = None  # consume the override
-            sections.append({
-                'type': 'text',
-                'content': text,
-                'center': align == "center",
-            })
+            sections.append(
+                {
+                    "type": "text",
+                    "content": text,
+                    "center": align == "center",
+                }
+            )
 
     return sections, i
 
 
-def parse_body(body: str, default_align: str = "left") -> tuple[str, list[dict], dict[int, list[dict]], int]:
+def parse_body(
+    body: str, default_align: str = "left"
+) -> tuple[str, list[dict], dict[int, list[dict]], int]:
     """Parse markdown body into title, common sections, and zoom sections.
 
     Returns (title, common_sections, zoom_sections, max_zoom).
@@ -240,7 +262,7 @@ def parse_body(body: str, default_align: str = "left") -> tuple[str, list[dict],
     Content after [zoom:N] is shown only at that level (replacement, not additive).
     default_align is passed through to text sections as the centering default.
     """
-    lines = body.split('\n')
+    lines = body.split("\n")
     title = ""
 
     # Find title (first h1)
@@ -250,7 +272,7 @@ def parse_body(body: str, default_align: str = "left") -> tuple[str, list[dict],
         if not stripped:
             i += 1
             continue
-        if stripped.startswith('# '):
+        if stripped.startswith("# "):
             title = stripped[2:].strip()
             i += 1
             break
@@ -266,7 +288,7 @@ def parse_body(body: str, default_align: str = "left") -> tuple[str, list[dict],
 
     while i < len(lines):
         stripped = lines[i].strip()
-        zoom_match = re.match(r'\[zoom:(\d+)\]', stripped)
+        zoom_match = re.match(r"\[zoom:(\d+)\]", stripped)
         if zoom_match:
             level = int(zoom_match.group(1))
             max_zoom = max(max_zoom, level)
@@ -293,16 +315,16 @@ def parse_styled_text(text: str) -> Line:
 
     # Pattern matches: **bold**, *dim*, `code`, {color:text}
     pattern = re.compile(
-        r'\*\*(.+?)\*\*'        # **bold**
-        r'|\*(.+?)\*'           # *dim*
-        r'|`(.+?)`'             # `code`
-        r'|\{(\w+):([^}]+)\}'   # {color:text}
+        r"\*\*(.+?)\*\*"  # **bold**
+        r"|\*(.+?)\*"  # *dim*
+        r"|`(.+?)`"  # `code`
+        r"|\{(\w+):([^}]+)\}"  # {color:text}
     )
 
     for match in pattern.finditer(text):
         # Add plain text before this match
         if match.start() > pos:
-            spans.append(Span(text[pos:match.start()]))
+            spans.append(Span(text[pos : match.start()]))
 
         if match.group(1):  # **bold**
             spans.append(Span(match.group(1), EMPHASIS_STYLE))
@@ -329,6 +351,7 @@ def parse_styled_text(text: str) -> Line:
 
 # -- Validation --
 
+
 class SlideValidationError(Exception):
     """Raised when slide validation fails."""
 
@@ -347,8 +370,7 @@ def validate_slides(slides: dict[str, ParsedSlide]) -> None:
     for slide in slides.values():
         if slide.group and slide.group not in valid_groups:
             raise SlideValidationError(
-                f"Slide '{slide.id}': unknown group '{slide.group}'. "
-                f"Valid groups: {GROUP_ORDER}"
+                f"Slide '{slide.id}': unknown group '{slide.group}'. Valid groups: {GROUP_ORDER}"
             )
 
     # Check contiguous zoom levels
@@ -377,6 +399,7 @@ def validate_slides(slides: dict[str, ParsedSlide]) -> None:
 
 
 # -- Auto-Navigation --
+
 
 def build_navigation(slides: dict[str, ParsedSlide]) -> dict[str, dict[str, str | None]]:
     """Compute left/right navigation from group+order sorting.
@@ -422,10 +445,10 @@ def build_navigation(slides: dict[str, ParsedSlide]) -> dict[str, dict[str, str 
     nav: dict[str, dict[str, str | None]] = {}
     for i, sid in enumerate(sequence):
         nav[sid] = {
-            'left': sequence[i - 1] if i > 0 else None,
-            'right': sequence[i + 1] if i < len(sequence) - 1 else None,
-            'up': None,
-            'down': None,
+            "left": sequence[i - 1] if i > 0 else None,
+            "right": sequence[i + 1] if i < len(sequence) - 1 else None,
+            "up": None,
+            "down": None,
         }
 
     return nav
@@ -439,7 +462,7 @@ def get_navigation_sequence(slides: dict[str, ParsedSlide]) -> list[str]:
     # Find the start (slide with no left)
     start = None
     for sid, n in nav.items():
-        if n['left'] is None:
+        if n["left"] is None:
             start = sid
             break
     if start is None:
@@ -450,12 +473,13 @@ def get_navigation_sequence(slides: dict[str, ParsedSlide]) -> list[str]:
     while current and current not in visited:
         visited.add(current)
         sequence.append(current)
-        current = nav[current]['right']
+        current = nav[current]["right"]
 
     return sequence
 
 
 # -- Main Loader --
+
 
 def load_slide_md(path: Path | str) -> ParsedSlide:
     """Load a single markdown file into a ParsedSlide."""
@@ -463,14 +487,14 @@ def load_slide_md(path: Path | str) -> ParsedSlide:
     content = path.read_text()
 
     frontmatter, body = parse_frontmatter(content)
-    align = frontmatter.get('align', 'left')
+    align = frontmatter.get("align", "left")
     title, common_sections, zoom_sections, max_zoom = parse_body(body, default_align=align)
 
     return ParsedSlide(
-        id=frontmatter.get('id', path.stem),
-        title=frontmatter.get('title', title) or title,
-        group=frontmatter.get('group', ''),
-        order=frontmatter.get('order', 0),
+        id=frontmatter.get("id", path.stem),
+        title=frontmatter.get("title", title) or title,
+        group=frontmatter.get("group", ""),
+        order=frontmatter.get("order", 0),
         align=align,
         common_sections=common_sections,
         zoom_sections=zoom_sections,
@@ -483,12 +507,11 @@ def load_slides_dir(dir_path: Path | str) -> dict[str, ParsedSlide]:
     dir_path = Path(dir_path)
     slides = {}
 
-    for md_file in sorted(dir_path.rglob('*.md')):
+    for md_file in sorted(dir_path.rglob("*.md")):
         slide = load_slide_md(md_file)
         if slide.id in slides:
             raise SlideValidationError(
-                f"Duplicate slide ID '{slide.id}' in {md_file} "
-                f"(already loaded from another file)."
+                f"Duplicate slide ID '{slide.id}' in {md_file} (already loaded from another file)."
             )
         slides[slide.id] = slide
 
@@ -497,7 +520,7 @@ def load_slides_dir(dir_path: Path | str) -> dict[str, ParsedSlide]:
 
 # -- CLI for testing --
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
@@ -531,8 +554,8 @@ if __name__ == '__main__':
         print(f"Max zoom: {parsed.max_zoom}")
         print(f"Common sections ({len(parsed.common_sections)}):")
         for i, sec in enumerate(parsed.common_sections):
-            print(f"  {i+1}. {sec}")
+            print(f"  {i + 1}. {sec}")
         for level in sorted(parsed.zoom_sections):
             print(f"Zoom {level} sections ({len(parsed.zoom_sections[level])}):")
             for i, sec in enumerate(parsed.zoom_sections[level]):
-                print(f"  {i+1}. {sec}")
+                print(f"  {i + 1}. {sec}")

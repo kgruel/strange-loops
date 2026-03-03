@@ -101,7 +101,10 @@ class DeployApp(Surface):
 
     def on_key(self, key: str) -> None:
         new_state, should_quit, pop_result = self.handle_key(
-            key, self.state, _get_layers, _set_layers,
+            key,
+            self.state,
+            _get_layers,
+            _set_layers,
         )
         self.state = new_state
 
@@ -127,8 +130,8 @@ class DeployApp(Surface):
 class Scenario:
     name: str
     keys: list[str]
-    expected_emissions: list[str]     # emission kinds that MUST appear
-    unexpected_emissions: list[str]   # emission kinds that must NOT appear
+    expected_emissions: list[str]  # emission kinds that MUST appear
+    unexpected_emissions: list[str]  # emission kinds that must NOT appear
 
 
 SCENARIOS = (
@@ -227,18 +230,24 @@ def _render_summary(results: list[ScenarioResult], width: int) -> Block:
         header = Block.text(f"{icon} {result.scenario.name}", style)
 
         emission_lines = [_emission_block(k, d) for k, d in result.emissions]
-        trace = join_vertical(*emission_lines) if emission_lines else Block.text("  (no emissions)", Style(dim=True))
+        trace = (
+            join_vertical(*emission_lines)
+            if emission_lines
+            else Block.text("  (no emissions)", Style(dim=True))
+        )
 
         check_lines = [_check_block(desc, ok) for desc, ok in result.checks]
         checks = join_vertical(*check_lines)
 
-        sections.append(join_vertical(
-            header,
-            Block.text("  emissions:", Style(dim=True)),
-            trace,
-            checks,
-            Block.text("", Style()),
-        ))
+        sections.append(
+            join_vertical(
+                header,
+                Block.text("  emissions:", Style(dim=True)),
+                trace,
+                checks,
+                Block.text("", Style()),
+            )
+        )
 
     total = len(results)
     passed = sum(1 for r in results if r.passed)
@@ -261,7 +270,11 @@ def _render_detailed(results: list[ScenarioResult], width: int) -> Block:
         keys_line = Block.text(f"  keys: {keys_str}", Style(dim=True))
 
         emission_lines = [_emission_block(k, d) for k, d in result.emissions]
-        trace = join_vertical(*emission_lines) if emission_lines else Block.text("  (no emissions)", Style(dim=True))
+        trace = (
+            join_vertical(*emission_lines)
+            if emission_lines
+            else Block.text("  (no emissions)", Style(dim=True))
+        )
 
         check_lines = [_check_block(desc, ok) for desc, ok in result.checks]
         checks = join_vertical(*check_lines)
@@ -277,16 +290,18 @@ def _render_detailed(results: list[ScenarioResult], width: int) -> Block:
 
         frames_section = join_vertical(*frame_blocks) if frame_blocks else Block.empty(0, 0)
 
-        sections.append(join_vertical(
-            header,
-            keys_line,
-            Block.text("  emissions:", Style(dim=True)),
-            trace,
-            checks,
-            Block.text("  frames:", Style(dim=True)),
-            frames_section,
-            Block.text("", Style()),
-        ))
+        sections.append(
+            join_vertical(
+                header,
+                keys_line,
+                Block.text("  emissions:", Style(dim=True)),
+                trace,
+                checks,
+                Block.text("  frames:", Style(dim=True)),
+                frames_section,
+                Block.text("", Style()),
+            )
+        )
 
     footer = _render_minimal(results, width)
     return truncate(join_vertical(*sections, footer), width)
@@ -306,7 +321,11 @@ def _render_full(results: list[ScenarioResult], width: int) -> Block:
         keys_line = Block.text(f"keys: {keys_str}", Style(dim=True))
 
         emission_lines = [_emission_block(k, d) for k, d in result.emissions]
-        trace = join_vertical(*emission_lines) if emission_lines else Block.text("(no emissions)", Style(dim=True))
+        trace = (
+            join_vertical(*emission_lines)
+            if emission_lines
+            else Block.text("(no emissions)", Style(dim=True))
+        )
 
         check_lines = [_check_block(desc, ok) for desc, ok in result.checks]
         checks = join_vertical(*check_lines)
@@ -336,7 +355,13 @@ def _render_full(results: list[ScenarioResult], width: int) -> Block:
         )
 
         title = f"{icon} {result.scenario.name}"
-        sections.append(border(pad(inner, right=max(0, min(60, width - 4) - inner.width)), title=title, chars=ROUNDED))
+        sections.append(
+            border(
+                pad(inner, right=max(0, min(60, width - 4) - inner.width)),
+                title=title,
+                chars=ROUNDED,
+            )
+        )
         sections.append(Block.text("", Style()))
 
     footer = _render_minimal(results, width)

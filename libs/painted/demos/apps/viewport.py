@@ -163,7 +163,9 @@ class ViewportInspectorApp(Surface):
         end = min(total, offset + max(0, visible))
 
         y = 0
-        view.put_text(0, y, _truncate(" Viewport inspector ", view.width), Style(fg="cyan", bold=True))
+        view.put_text(
+            0, y, _truncate(" Viewport inspector ", view.width), Style(fg="cyan", bold=True)
+        )
         y += 2
 
         lines = [
@@ -195,7 +197,9 @@ class ViewportInspectorApp(Surface):
                 y += 2
 
         if y < view.height:
-            view.put_text(0, view.height - 1, _truncate(" ↑/↓ move  q quit ", view.width), Style(dim=True))
+            view.put_text(
+                0, view.height - 1, _truncate(" ↑/↓ move  q quit ", view.width), Style(dim=True)
+            )
 
 
 async def main() -> None:

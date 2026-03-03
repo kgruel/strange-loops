@@ -214,7 +214,9 @@ def _snapshot(state: DemoState, *, width: int, height: int) -> list[str]:
     return buffer_to_lines(buf)
 
 
-def _snapshot_progressive(state: DemoState, *, width: int, height: int) -> list[tuple[str, list[str]]]:
+def _snapshot_progressive(
+    state: DemoState, *, width: int, height: int
+) -> list[tuple[str, list[str]]]:
     from painted.buffer import Buffer
     from painted.buffer import BufferView
 
@@ -294,7 +296,9 @@ SCENARIOS: tuple[Scenario, ...] = (
 )
 
 
-def _step_key(state: DemoState, key: str, *, snap_w: int, snap_h: int) -> tuple[DemoState, bool, StepTrace, bool]:
+def _step_key(
+    state: DemoState, key: str, *, snap_w: int, snap_h: int
+) -> tuple[DemoState, bool, StepTrace, bool]:
     layers = _get_layers(state)
     top = layers[-1]
 
@@ -341,7 +345,9 @@ def _step_key(state: DemoState, key: str, *, snap_w: int, snap_h: int) -> tuple[
 
     base_never_popped = True
     if len(layers) == 1 and isinstance(action, Pop):
-        base_never_popped = (len(_get_layers(new_state)) == 1) and (_get_layers(new_state)[0].name == "base")
+        base_never_popped = (len(_get_layers(new_state)) == 1) and (
+            _get_layers(new_state)[0].name == "base"
+        )
 
     step = StepTrace(
         i=0,
@@ -368,7 +374,9 @@ def _run_scenario(scenario: Scenario, *, snap_w: int, snap_h: int) -> ScenarioTr
     base_ok = True
 
     for i, key in enumerate(scenario.keys):
-        state, should_quit, step, base_never_popped = _step_key(state, key, snap_w=snap_w, snap_h=snap_h)
+        state, should_quit, step, base_never_popped = _step_key(
+            state, key, snap_w=snap_w, snap_h=snap_h
+        )
         step = replace(step, i=i)
         steps.append(step)
 
@@ -443,7 +451,9 @@ def _render_summary(traces: list[ScenarioTrace]) -> Block:
         )
         final_stack = t.steps[-1].stack_after if t.steps else t.initial_stack
         stack_line = Block.text(f"  stack: {final_stack}", p.muted)
-        sections.append(join_vertical(header, keys_line, actions_line, stack_line, Block.text("", Style())))
+        sections.append(
+            join_vertical(header, keys_line, actions_line, stack_line, Block.text("", Style()))
+        )
 
     return join_vertical(*sections, _render_minimal(traces))
 
@@ -479,7 +489,14 @@ def _render_detailed(ctx: CliContext, traces: list[ScenarioTrace]) -> Block:
             frames.append(_lines_block(s.frame_after, width=snap_w, max_lines=snap_h))
 
         inner = join_vertical(*rows, *frames)
-        sections.append(border(pad(inner, right=max(0, snap_w - inner.width)), title=title, chars=ROUNDED, style=p.muted))
+        sections.append(
+            border(
+                pad(inner, right=max(0, snap_w - inner.width)),
+                title=title,
+                chars=ROUNDED,
+                style=p.muted,
+            )
+        )
         sections.append(Block.text("", Style()))
 
     return join_vertical(*sections, _render_minimal(traces))
@@ -518,13 +535,24 @@ def _render_full(ctx: CliContext, traces: list[ScenarioTrace]) -> Block:
         order: list[Block] = []
         if max_step is not None and max_step.progressive_after:
             order.append(Block.text("", Style()))
-            order.append(Block.text(f"render order @ step {max_step.i:02d} (after '{max_step.key}'):", p.muted))
+            order.append(
+                Block.text(
+                    f"render order @ step {max_step.i:02d} (after '{max_step.key}'):", p.muted
+                )
+            )
             for label, lines in max_step.progressive_after:
                 order.append(Block.text(f"  [{label}]", Style(dim=True)))
                 order.append(_lines_block(lines, width=snap_w, max_lines=snap_h))
 
         inner = join_vertical(*rows, *order)
-        sections.append(border(pad(inner, right=max(0, snap_w - inner.width)), title=title, chars=ROUNDED, style=p.muted))
+        sections.append(
+            border(
+                pad(inner, right=max(0, snap_w - inner.width)),
+                title=title,
+                chars=ROUNDED,
+                style=p.muted,
+            )
+        )
         sections.append(Block.text("", Style()))
 
     return join_vertical(*sections, _render_minimal(traces))

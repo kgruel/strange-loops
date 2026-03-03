@@ -199,8 +199,11 @@ def _usage_color(pct: float) -> str:
 
 
 def _render_volume_list(
-    view: BufferView, volumes: tuple[Volume, ...], selected: int,
-    *, focused: bool = True,
+    view: BufferView,
+    volumes: tuple[Volume, ...],
+    selected: int,
+    *,
+    focused: bool = True,
 ) -> None:
     """Render the volume list into a fixed-size BufferView."""
     w = view.width
@@ -253,8 +256,12 @@ def _render_detail_header(view: BufferView, vol: Volume, breadcrumb: str) -> Non
 
 
 def _render_dir_table(
-    view: BufferView, entries: tuple[DirEntry, ...], parent_bytes: int,
-    selected: int, *, focused: bool = True,
+    view: BufferView,
+    entries: tuple[DirEntry, ...],
+    parent_bytes: int,
+    selected: int,
+    *,
+    focused: bool = True,
 ) -> None:
     """Render the directory breakdown into a fixed-size BufferView."""
     w = view.width
@@ -279,8 +286,15 @@ def _render_dir_table(
 
 
 def _render_dir_row(
-    view: BufferView, y: int, entry: DirEntry, parent_bytes: int,
-    bar_w: int, total_w: int, *, indent: int, x_offset: int = 0,
+    view: BufferView,
+    y: int,
+    entry: DirEntry,
+    parent_bytes: int,
+    bar_w: int,
+    total_w: int,
+    *,
+    indent: int,
+    x_offset: int = 0,
 ) -> None:
     pct = min(1.0, entry.size_bytes / parent_bytes) if parent_bytes > 0 else 0.0
     size_s = entry.size_human.rjust(6)
@@ -394,14 +408,9 @@ def _flatten_tree(
         is_expanded = path in expanded and entry.is_dir
         rows.append((entry, len(path_prefix), path, is_expanded, is_last))
         if is_expanded:
-            children = (
-                (lazy_children or {}).get(path)
-                or entry.children
-            )
+            children = (lazy_children or {}).get(path) or entry.children
             if children:
-                sorted_children = tuple(
-                    sorted(children, key=lambda e: e.size_bytes, reverse=True)
-                )
+                sorted_children = tuple(sorted(children, key=lambda e: e.size_bytes, reverse=True))
                 rows.extend(_flatten_tree(sorted_children, expanded, lazy_children, path))
     return rows
 
@@ -586,8 +595,10 @@ class DiskApp(Surface):
             # Clamp selection to valid range
             if self.current_entries:
                 self.dir_selected = min(self.dir_selected, len(self.current_entries) - 1)
-            parent_bytes = vol.used_bytes if not self.nav_stack else (
-                sum(e.size_bytes for e in self.current_entries) or 1
+            parent_bytes = (
+                vol.used_bytes
+                if not self.nav_stack
+                else (sum(e.size_bytes for e in self.current_entries) or 1)
             )
             _render_dir_table(
                 self.dir_table_r.view(buf),
@@ -598,7 +609,9 @@ class DiskApp(Surface):
             )
         elif mode == "tree":
             rows = _flatten_tree(
-                self.current_entries, self.tree_expanded, self.tree_children,
+                self.current_entries,
+                self.tree_expanded,
+                self.tree_children,
             )
             if rows:
                 self.dir_selected = min(self.dir_selected, len(rows) - 1)
@@ -672,14 +685,9 @@ class DiskApp(Surface):
             self.dir_selected = max(0, self.dir_selected - 1)
         elif key == "down":
             if self.current_entries:
-                self.dir_selected = min(
-                    len(self.current_entries) - 1, self.dir_selected + 1
-                )
+                self.dir_selected = min(len(self.current_entries) - 1, self.dir_selected + 1)
         elif key == "enter":
-            if (
-                self.current_entries
-                and self.dir_selected < len(self.current_entries)
-            ):
+            if self.current_entries and self.dir_selected < len(self.current_entries):
                 entry = self.current_entries[self.dir_selected]
                 if entry.is_dir:
                     self.nav_stack.append(entry.name)
@@ -689,7 +697,9 @@ class DiskApp(Surface):
 
     def _on_key_tree(self, key: str) -> None:
         rows = _flatten_tree(
-            self.current_entries, self.tree_expanded, self.tree_children,
+            self.current_entries,
+            self.tree_expanded,
+            self.tree_children,
         )
         if key == "up":
             self.dir_selected = max(0, self.dir_selected - 1)

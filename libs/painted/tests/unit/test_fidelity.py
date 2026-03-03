@@ -136,15 +136,19 @@ class TestResolveMode:
 
     def test_auto_tty_with_default_mode_static(self):
         """AUTO on TTY respects default_mode override."""
-        assert resolve_mode(
-            OutputMode.AUTO, is_tty=True, is_pipe=False, default_mode=OutputMode.STATIC
-        ) == OutputMode.STATIC
+        assert (
+            resolve_mode(
+                OutputMode.AUTO, is_tty=True, is_pipe=False, default_mode=OutputMode.STATIC
+            )
+            == OutputMode.STATIC
+        )
 
     def test_auto_pipe_ignores_default_mode(self):
         """Pipe always gets STATIC regardless of default_mode."""
-        assert resolve_mode(
-            OutputMode.AUTO, is_tty=False, is_pipe=True, default_mode=OutputMode.LIVE
-        ) == OutputMode.STATIC
+        assert (
+            resolve_mode(OutputMode.AUTO, is_tty=False, is_pipe=True, default_mode=OutputMode.LIVE)
+            == OutputMode.STATIC
+        )
 
 
 # =============================================================================

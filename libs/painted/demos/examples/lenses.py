@@ -59,19 +59,31 @@ TREE_DATA = [
         "README.md": None,
     },
     # 2. Organization chart
-    ("CEO", {
-        "CTO": ("CTO", {
-            "Engineering": ("Engineering", ["Alice", "Bob", "Carol"]),
-            "DevOps": ("DevOps", ["Dave"]),
-        }),
-        "CFO": ("CFO", {
-            "Finance": ("Finance", ["Eve", "Frank"]),
-        }),
-        "CMO": ("CMO", {
-            "Marketing": ("Marketing", ["Grace", "Henry"]),
-            "Sales": ("Sales", ["Ivy", "Jack", "Kate"]),
-        }),
-    }),
+    (
+        "CEO",
+        {
+            "CTO": (
+                "CTO",
+                {
+                    "Engineering": ("Engineering", ["Alice", "Bob", "Carol"]),
+                    "DevOps": ("DevOps", ["Dave"]),
+                },
+            ),
+            "CFO": (
+                "CFO",
+                {
+                    "Finance": ("Finance", ["Eve", "Frank"]),
+                },
+            ),
+            "CMO": (
+                "CMO",
+                {
+                    "Marketing": ("Marketing", ["Grace", "Henry"]),
+                    "Sales": ("Sales", ["Ivy", "Jack", "Kate"]),
+                },
+            ),
+        },
+    ),
     # 3. Menu structure
     {
         "File": {
@@ -98,16 +110,25 @@ TREE_DATA = [
         },
     },
     # 4. AST-like
-    ("expr", {
-        "binary_op": ("binary_op", {
-            "op": "+",
-            "left": ("literal", {"value": 42}),
-            "right": ("call", {
-                "func": "sqrt",
-                "args": ("args", [("literal", {"value": 16})]),
-            }),
-        }),
-    }),
+    (
+        "expr",
+        {
+            "binary_op": (
+                "binary_op",
+                {
+                    "op": "+",
+                    "left": ("literal", {"value": 42}),
+                    "right": (
+                        "call",
+                        {
+                            "func": "sqrt",
+                            "args": ("args", [("literal", {"value": 16})]),
+                        },
+                    ),
+                },
+            ),
+        },
+    ),
 ]
 
 TREE_LABELS = [
@@ -125,7 +146,32 @@ CHART_DATA = [
     # 3. Response times (ms)
     {"auth": 23, "db": 156, "cache": 3, "api": 89, "render": 45},
     # 4. Sparkline-friendly: hourly traffic
-    [12, 15, 23, 45, 67, 89, 95, 87, 76, 65, 54, 48, 52, 61, 73, 82, 78, 65, 43, 32, 25, 18, 14, 11],
+    [
+        12,
+        15,
+        23,
+        45,
+        67,
+        89,
+        95,
+        87,
+        76,
+        65,
+        54,
+        48,
+        52,
+        61,
+        73,
+        82,
+        78,
+        65,
+        43,
+        32,
+        25,
+        18,
+        14,
+        11,
+    ],
 ]
 
 CHART_LABELS = [
@@ -181,7 +227,9 @@ class LensesApp(Surface):
 
         # Mode indicator (tabs)
         tree_style = Style(fg="green", bold=True) if self._state.mode == "tree" else Style(dim=True)
-        chart_style = Style(fg="green", bold=True) if self._state.mode == "chart" else Style(dim=True)
+        chart_style = (
+            Style(fg="green", bold=True) if self._state.mode == "chart" else Style(dim=True)
+        )
         tab1 = Block.text("[Tree]", tree_style)
         tab2 = Block.text("[Chart]", chart_style)
         tabs = join_horizontal(tab1, Block.text("  ", Style()), tab2)

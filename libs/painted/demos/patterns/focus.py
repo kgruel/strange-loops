@@ -135,7 +135,9 @@ def _services_panel(state: AppState, *, width: int, height: int) -> Block:
     content_w = max(0, width - 2)
     content_h = max(0, height - 2)
 
-    header = Block.text("name                 health   p95   err%", Style(dim=True), width=content_w)
+    header = Block.text(
+        "name                 health   p95   err%", Style(dim=True), width=content_w
+    )
     rows: list[Block] = [header]
 
     for i, svc in enumerate(SERVICES):
@@ -163,7 +165,11 @@ def _search_panel(state: AppState, *, width: int, height: int) -> Block:
     matches = filter_fuzzy(COMMANDS, state.search.query)
     selected = state.search.selected if state.search.selected < len(matches) else -1
 
-    query_style = p.accent.merge(Style(bold=True)) if state.focus.id == "search" and state.focus.captured else Style()
+    query_style = (
+        p.accent.merge(Style(bold=True))
+        if state.focus.id == "search" and state.focus.captured
+        else Style()
+    )
     query_line = join_horizontal(
         Block.text("query: ", Style(dim=True)),
         Block.text(state.search.query or " ", query_style),
@@ -196,17 +202,21 @@ def _details_panel(state: AppState, *, width: int, height: int) -> Block:
 
     rows: list[Block] = [
         Block.text("selected service:", Style(dim=True), width=content_w),
-        Block.text(f"  {svc.name}  v{svc.version}  {svc.region}" if svc else "  (none)", Style(bold=True), width=content_w),
         Block.text(
-            f"  health={svc.health}  p95={svc.p95_ms}ms  err={svc.error_rate:.2f}%"
-            if svc
-            else "",
+            f"  {svc.name}  v{svc.version}  {svc.region}" if svc else "  (none)",
+            Style(bold=True),
+            width=content_w,
+        ),
+        Block.text(
+            f"  health={svc.health}  p95={svc.p95_ms}ms  err={svc.error_rate:.2f}%" if svc else "",
             (_service_style(svc).merge(Style(dim=True)) if svc else Style(dim=True)),
             width=content_w,
         ),
         Block.text("", Style(), width=content_w),
         Block.text("last command:", Style(dim=True), width=content_w),
-        Block.text(f"  {cmd}", p.accent if state.last_command else Style(dim=True), width=content_w),
+        Block.text(
+            f"  {cmd}", p.accent if state.last_command else Style(dim=True), width=content_w
+        ),
         Block.text("", Style(), width=content_w),
         Block.text("recent deploy log:", Style(dim=True), width=content_w),
         Block.text("  10:34:12Z  build ✓  sha=9f2c7a1", p.muted, width=content_w),
@@ -250,7 +260,9 @@ class FocusDemoApp(Surface):
         top = join_horizontal(services, search, details, gap=gap)
 
         mode = "CAPTURE" if self.state.focus.captured else "NAV"
-        status = f"focus={self.state.focus.id}:{mode}   event={self.state.last_event or '—'}   q=quit"
+        status = (
+            f"focus={self.state.focus.id}:{mode}   event={self.state.last_event or '—'}   q=quit"
+        )
         status_style = current_palette().muted
         status_line = Block.text(status, status_style, width=buf.width)
 
@@ -274,12 +286,16 @@ class FocusDemoApp(Surface):
             if key in ("tab", "shift_tab"):
                 before = st.focus.id
                 after = ring_next(WIDGETS, before) if key == "tab" else ring_prev(WIDGETS, before)
-                self.state = replace(st, focus=st.focus.focus(after), last_event=f"focus {before}->{after}")
+                self.state = replace(
+                    st, focus=st.focus.focus(after), last_event=f"focus {before}->{after}"
+                )
                 self.emit("focus.move", from_id=before, to_id=after, nav=key)
                 return
 
             if key == "enter":
-                self.state = replace(st, focus=st.focus.capture(), last_event=f"capture {st.focus.id}")
+                self.state = replace(
+                    st, focus=st.focus.capture(), last_event=f"capture {st.focus.id}"
+                )
                 self.emit("focus.capture", widget=st.focus.id)
                 return
 
@@ -304,13 +320,17 @@ class FocusDemoApp(Surface):
         if key in ("j", "down"):
             cur2 = cur.next()
             svc = SERVICES[cur2.index].name if SERVICES else ""
-            self.state = replace(st, services_cursor=cur2, last_event=f"cursor {cur.index}->{cur2.index}")
+            self.state = replace(
+                st, services_cursor=cur2, last_event=f"cursor {cur.index}->{cur2.index}"
+            )
             self.emit("services.cursor", index=cur2.index, service=svc)
             return
         if key in ("k", "up"):
             cur2 = cur.prev()
             svc = SERVICES[cur2.index].name if SERVICES else ""
-            self.state = replace(st, services_cursor=cur2, last_event=f"cursor {cur.index}->{cur2.index}")
+            self.state = replace(
+                st, services_cursor=cur2, last_event=f"cursor {cur.index}->{cur2.index}"
+            )
             self.emit("services.cursor", index=cur2.index, service=svc)
             return
         if key in ("g", "home"):
@@ -402,7 +422,13 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="fuzzy search",
         keys=["tab", "enter", "d", "p", "j", "enter", "escape", "q"],
-        expected_emissions=["focus.move", "focus.capture", "search.query", "search.select", "cmd.run"],
+        expected_emissions=[
+            "focus.move",
+            "focus.capture",
+            "search.query",
+            "search.select",
+            "cmd.run",
+        ],
         unexpected_emissions=[],
     ),
 )
@@ -586,7 +612,14 @@ def _render_full(results: list[ScenarioResult], width: int) -> Block:
             Block.text("frames:", Style(dim=True)),
             join_vertical(*frame_blocks) if frame_blocks else Block.empty(0, 0),
         )
-        sections.append(border(pad(inner, right=max(0, snap_w - inner.width)), chars=ROUNDED, title=title, style=p.muted))
+        sections.append(
+            border(
+                pad(inner, right=max(0, snap_w - inner.width)),
+                chars=ROUNDED,
+                title=title,
+                style=p.muted,
+            )
+        )
         sections.append(Block.text("", Style()))
 
     return join_vertical(*sections, _render_minimal(results, width))

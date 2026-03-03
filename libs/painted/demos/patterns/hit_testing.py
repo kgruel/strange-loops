@@ -48,10 +48,19 @@ def _spacer() -> Block:
 
 
 SERVICES: tuple[tuple[str, dict], ...] = (
-    ("api-gateway", {"status": "healthy", "replicas": "3/3", "latency_ms": 12, "error_rate_pct": 0.2}),
-    ("auth-service", {"status": "degraded", "replicas": "2/3", "latency_ms": 2100, "error_rate_pct": 3.9}),
+    (
+        "api-gateway",
+        {"status": "healthy", "replicas": "3/3", "latency_ms": 12, "error_rate_pct": 0.2},
+    ),
+    (
+        "auth-service",
+        {"status": "degraded", "replicas": "2/3", "latency_ms": 2100, "error_rate_pct": 3.9},
+    ),
     ("worker", {"status": "healthy", "replicas": "5/5", "latency_ms": 8, "error_rate_pct": 0.1}),
-    ("scheduler", {"status": "failing", "replicas": "0/1", "latency_ms": 0, "error_rate_pct": 12.4}),
+    (
+        "scheduler",
+        {"status": "failing", "replicas": "0/1", "latency_ms": 0, "error_rate_pct": 12.4},
+    ),
 )
 
 
@@ -98,8 +107,7 @@ def _service_panel(name: str, info: dict, *, width: int, inner_height: int) -> B
     error_rate_pct = info.get("error_rate_pct", "?")
 
     text = (
-        f"status: {status} · replicas: {replicas} · "
-        f"p95: {latency_ms}ms · errors: {error_rate_pct}%"
+        f"status: {status} · replicas: {replicas} · p95: {latency_ms}ms · errors: {error_rate_pct}%"
     )
 
     content = Block.text(
@@ -147,7 +155,14 @@ def _build_dashboard(
         1 for y in range(grid.height) for x in range(grid.width) if buf.hit(x, y) is not None
     )
     unique_ids = tuple(
-        sorted({cid for y in range(grid.height) for x in range(grid.width) if (cid := buf.hit(x, y)) is not None})
+        sorted(
+            {
+                cid
+                for y in range(grid.height)
+                for x in range(grid.width)
+                if (cid := buf.hit(x, y)) is not None
+            }
+        )
     )
 
     panel_h = panels[0][1].height
@@ -157,16 +172,22 @@ def _build_dashboard(
     probes.append(ProbeResult(0, 0, buf.hit(0, 0), "top-left panel border"))
     probes.append(ProbeResult(2, 2, buf.hit(2, 2), "top-left panel content"))
     probes.append(ProbeResult(panel_w, 0, buf.hit(panel_w, 0), "horizontal gap"))
-    probes.append(ProbeResult(panel_w + hgap, 0, buf.hit(panel_w + hgap, 0), "top-right panel border"))
+    probes.append(
+        ProbeResult(panel_w + hgap, 0, buf.hit(panel_w + hgap, 0), "top-right panel border")
+    )
     probes.append(ProbeResult(0, panel_h, buf.hit(0, panel_h), "vertical gap"))
-    probes.append(ProbeResult(0, panel_h + vgap, buf.hit(0, panel_h + vgap), "bottom-left panel border"))
+    probes.append(
+        ProbeResult(0, panel_h + vgap, buf.hit(0, panel_h + vgap), "bottom-left panel border")
+    )
     probes.append(ProbeResult(panel_w, panel_h, buf.hit(panel_w, panel_h), "cross-gap"))
-    probes.append(ProbeResult(
-        panel_w + hgap + 2,
-        panel_h + vgap + 2,
-        buf.hit(panel_w + hgap + 2, panel_h + vgap + 2),
-        "bottom-right panel content",
-    ))
+    probes.append(
+        ProbeResult(
+            panel_w + hgap + 2,
+            panel_h + vgap + 2,
+            buf.hit(panel_w + hgap + 2, panel_h + vgap + 2),
+            "bottom-right panel content",
+        )
+    )
 
     return HitTestData(
         grid=grid,
@@ -193,11 +214,13 @@ def _probes_block(probes: tuple[ProbeResult, ...]) -> Block:
         cid = pr.hit_id
         id_text = cid if cid is not None else "∅"
         id_style = p.muted if cid is None else p.accent
-        rows.append(join_horizontal(
-            Block.text(f"  ({pr.x:>2},{pr.y:>2})", Style(dim=True)),
-            Block.text(f"  {id_text:<14s}", id_style),
-            Block.text(f" {pr.label}", Style(dim=True)),
-        ))
+        rows.append(
+            join_horizontal(
+                Block.text(f"  ({pr.x:>2},{pr.y:>2})", Style(dim=True)),
+                Block.text(f"  {id_text:<14s}", id_style),
+                Block.text(f" {pr.label}", Style(dim=True)),
+            )
+        )
     return join_vertical(*rows) if rows else Block.text("  (no probes)", Style(dim=True))
 
 
@@ -238,14 +261,18 @@ def _legend() -> Block:
     styles = _id_styles()
     rows: list[Block] = []
     for name, _info in SERVICES:
-        rows.append(join_horizontal(
-            Block.text("  █", styles.get(name, p.accent)),
-            Block.text(f" {name}", Style(dim=True)),
-        ))
-    rows.append(join_horizontal(
-        Block.text("  ·", p.muted),
-        Block.text(" gap / None", Style(dim=True)),
-    ))
+        rows.append(
+            join_horizontal(
+                Block.text("  █", styles.get(name, p.accent)),
+                Block.text(f" {name}", Style(dim=True)),
+            )
+        )
+    rows.append(
+        join_horizontal(
+            Block.text("  ·", p.muted),
+            Block.text(" gap / None", Style(dim=True)),
+        )
+    )
     return join_vertical(*rows)
 
 
@@ -264,15 +291,30 @@ def _composition_trace(data: HitTestData, *, width: int) -> Block:
     )
 
     rows_step = join_vertical(
-        border(_provenance_map(data.top_row), title="join_horizontal: top row", chars=ROUNDED, style=p.muted),
+        border(
+            _provenance_map(data.top_row),
+            title="join_horizontal: top row",
+            chars=ROUNDED,
+            style=p.muted,
+        ),
         _spacer(),
-        border(_provenance_map(data.bottom_row), title="join_horizontal: bottom row", chars=ROUNDED, style=p.muted),
+        border(
+            _provenance_map(data.bottom_row),
+            title="join_horizontal: bottom row",
+            chars=ROUNDED,
+            style=p.muted,
+        ),
     )
 
-    grid_step = border(_provenance_map(data.grid), title="join_vertical: full grid", chars=ROUNDED, style=p.muted)
+    grid_step = border(
+        _provenance_map(data.grid), title="join_vertical: full grid", chars=ROUNDED, style=p.muted
+    )
 
     inner = join_vertical(
-        Block.text(f"ids allocated on paint: {data.ids_allocated_before_paint} -> {data.ids_allocated_after_paint}", Style(dim=True)),
+        Block.text(
+            f"ids allocated on paint: {data.ids_allocated_before_paint} -> {data.ids_allocated_after_paint}",
+            Style(dim=True),
+        ),
         Block.text(
             f"cells with id: {data.cells_with_id}/{data.total_cells}  unique: {', '.join(data.unique_ids)}",
             Style(dim=True),
@@ -305,36 +347,45 @@ def _composition_trace(data: HitTestData, *, width: int) -> Block:
 
 def _render_minimal(data: HitTestData, width: int) -> Block:
     p = current_palette()
-    return truncate(Block.text(
-        f"grid {data.grid.width}x{data.grid.height}  cells {data.total_cells}  ids {data.cells_with_id}  unique {len(data.unique_ids)}",
-        p.accent,
-    ), width)
+    return truncate(
+        Block.text(
+            f"grid {data.grid.width}x{data.grid.height}  cells {data.total_cells}  ids {data.cells_with_id}  unique {len(data.unique_ids)}",
+            p.accent,
+        ),
+        width,
+    )
 
 
 def _render_summary(data: HitTestData, width: int) -> Block:
-    return truncate(join_vertical(
-        _spacer(),
-        _header("service dashboard (visual layer)"),
-        _spacer(),
-        data.grid,
-        _spacer(),
-        _header("hit probes: Buffer.hit(x, y)"),
-        _spacer(),
-        _probes_block(data.probes),
-    ), width)
+    return truncate(
+        join_vertical(
+            _spacer(),
+            _header("service dashboard (visual layer)"),
+            _spacer(),
+            data.grid,
+            _spacer(),
+            _header("hit probes: Buffer.hit(x, y)"),
+            _spacer(),
+            _probes_block(data.probes),
+        ),
+        width,
+    )
 
 
 def _render_detailed(data: HitTestData, width: int) -> Block:
     p = current_palette()
-    return truncate(join_vertical(
-        _render_summary(data, width),
-        _spacer(),
-        _header("provenance map (id layer)"),
-        _spacer(),
-        border(_provenance_map(data.grid), chars=ROUNDED, style=p.muted),
-        _spacer(),
-        _legend(),
-    ), width)
+    return truncate(
+        join_vertical(
+            _render_summary(data, width),
+            _spacer(),
+            _header("provenance map (id layer)"),
+            _spacer(),
+            border(_provenance_map(data.grid), chars=ROUNDED, style=p.muted),
+            _spacer(),
+            _legend(),
+        ),
+        width,
+    )
 
 
 def _render_full(data: HitTestData, width: int) -> Block:

@@ -156,10 +156,16 @@ def _fetch() -> HealthReport:
     total_ms = 0.0
     for svc in SERVICES:
         latency, status, detail = OUTCOMES[svc.name]
-        checks.append(ServiceCheck(
-            name=svc.name, host=svc.host, port=svc.port,
-            status=status, latency_ms=latency * 1000, detail=detail,
-        ))
+        checks.append(
+            ServiceCheck(
+                name=svc.name,
+                host=svc.host,
+                port=svc.port,
+                status=status,
+                latency_ms=latency * 1000,
+                detail=detail,
+            )
+        )
         total_ms = max(total_ms, latency * 1000)
     return HealthReport(checks=tuple(checks), elapsed_ms=total_ms)
 
@@ -295,7 +301,9 @@ def _render_full(report: HealthReport, width: int) -> Block:
     elapsed = f"  [{report.elapsed_ms:.0f}ms]" if report.elapsed_ms else ""
     footer = Block.text(f"{'  '.join(footer_parts)}{elapsed}", p.muted)
 
-    inner = join_vertical(progress_row, Block.text("", Style()), service_block, Block.text("", Style()), footer)
+    inner = join_vertical(
+        progress_row, Block.text("", Style()), service_block, Block.text("", Style()), footer
+    )
     content_width = inner.width
     padded = pad(inner, right=max(0, min(60, width - 4) - content_width))
 

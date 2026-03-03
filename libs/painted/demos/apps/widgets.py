@@ -15,10 +15,14 @@ import asyncio
 from painted import Line, Style, border
 from painted.tui import Surface, Focus, ring_next
 from painted.views import (
-    SpinnerState, spinner,
-    ProgressState, progress_bar,
-    ListState, list_view,
-    TextInputState, text_input,
+    SpinnerState,
+    spinner,
+    ProgressState,
+    progress_bar,
+    ListState,
+    list_view,
+    TextInputState,
+    text_input,
 )
 
 
@@ -121,9 +125,9 @@ class WidgetsApp(Surface):
         y += 4
 
         # Instructions
-        self._buf.put_text(2, self._buf.height - 1,
-                          "Tab: focus | Arrows/Type: interact | q: quit",
-                          Style(dim=True))
+        self._buf.put_text(
+            2, self._buf.height - 1, "Tab: focus | Arrows/Type: interact | q: quit", Style(dim=True)
+        )
 
     def on_key(self, key: str) -> None:
         if key == "q":
@@ -132,13 +136,9 @@ class WidgetsApp(Surface):
             self.focus = self.focus.focus(ring_next(self.focus_ids, self.focus.id))
         elif self.focus.id == "progress":
             if key == "right":
-                self.progress_state = self.progress_state.set(
-                    self.progress_state.value + 0.05
-                )
+                self.progress_state = self.progress_state.set(self.progress_state.value + 0.05)
             elif key == "left":
-                self.progress_state = self.progress_state.set(
-                    self.progress_state.value - 0.05
-                )
+                self.progress_state = self.progress_state.set(self.progress_state.value - 0.05)
         elif self.focus.id == "list":
             if key == "up":
                 self.list_state = self.list_state.move_up()

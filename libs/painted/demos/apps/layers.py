@@ -14,25 +14,36 @@ import asyncio
 from dataclasses import dataclass, replace
 
 from painted import (
-    Block, Style,
-    join_vertical, pad, border,
+    Block,
+    Style,
+    join_vertical,
+    pad,
+    border,
     ROUNDED,
 )
 from painted.tui import (
-    Surface, BufferView,
-    Layer, Stay, Pop, Push, Quit, render_layers,
+    Surface,
+    BufferView,
+    Layer,
+    Stay,
+    Pop,
+    Push,
+    Quit,
+    render_layers,
 )
 
 
 @dataclass(frozen=True)
 class AppState:
     """Application state."""
+
     counter: int = 0
     volume: int = 50  # 0-100
     layers: tuple[Layer, ...] = ()
 
 
 # -- Layer accessors --
+
 
 def get_layers(state: AppState) -> tuple[Layer, ...]:
     return state.layers
@@ -44,7 +55,10 @@ def set_layers(state: AppState, layers: tuple[Layer, ...]) -> AppState:
 
 # -- Help Layer --
 
-def handle_help(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Stay | Pop | Push | Quit]:
+
+def handle_help(
+    key: str, layer_state: None, app_state: AppState
+) -> tuple[None, AppState, Stay | Pop | Push | Quit]:
     """Any key dismisses help."""
     return None, app_state, Pop()
 
@@ -77,13 +91,17 @@ def make_help_layer() -> Layer[None]:
 
 # -- Settings Layer --
 
+
 @dataclass(frozen=True)
 class SettingsEdit:
     """Temporary edit state for settings."""
+
     volume: int = 50
 
 
-def handle_settings(key: str, layer_state: SettingsEdit, app_state: AppState) -> tuple[SettingsEdit, AppState, Stay | Pop | Push | Quit]:
+def handle_settings(
+    key: str, layer_state: SettingsEdit, app_state: AppState
+) -> tuple[SettingsEdit, AppState, Stay | Pop | Push | Quit]:
     """Settings: up/down changes volume, Enter confirms, Escape cancels."""
     if key == "escape":
         # Cancel: discard changes
@@ -142,7 +160,10 @@ def make_settings_layer(initial_volume: int) -> Layer[SettingsEdit]:
 
 # -- Base Layer --
 
-def handle_base(key: str, layer_state: None, app_state: AppState) -> tuple[None, AppState, Stay | Pop | Push | Quit]:
+
+def handle_base(
+    key: str, layer_state: None, app_state: AppState
+) -> tuple[None, AppState, Stay | Pop | Push | Quit]:
     """Base layer: counter, push overlays."""
     if key == "q":
         return None, app_state, Quit()
@@ -203,6 +224,7 @@ def make_base_layer() -> Layer[None]:
 
 # -- App --
 
+
 class LayersApp(Surface):
     def __init__(self):
         super().__init__()
@@ -222,6 +244,7 @@ class LayersApp(Surface):
 
         if should_quit:
             self.quit()
+
 
 async def main() -> int:
     await LayersApp().run()

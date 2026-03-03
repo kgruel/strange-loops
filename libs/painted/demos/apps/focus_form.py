@@ -86,10 +86,16 @@ class FocusFormApp(Surface):
 
         status = f"Tab/Shift-Tab move • Enter edit/submit • Esc done • q quit (NAV only)"
         view.put_text(0, 0, status[: view.width], Style(dim=True))
-        view.put_text(0, 1, f"Focus.id={self.focus.id}  Focus.captured={self.focus.captured}", Style(dim=True))
+        view.put_text(
+            0, 1, f"Focus.id={self.focus.id}  Focus.captured={self.focus.captured}", Style(dim=True)
+        )
 
         y = 3
-        for field_id, label in (("hostname", "Hostname"), ("port", "Port"), ("username", "Username")):
+        for field_id, label in (
+            ("hostname", "Hostname"),
+            ("port", "Port"),
+            ("username", "Username"),
+        ):
             self._field_block(field_id, label, view.width).paint(view, 0, y)
             y += 3
 
@@ -197,4 +203,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

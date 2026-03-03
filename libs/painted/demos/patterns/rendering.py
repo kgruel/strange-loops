@@ -5,10 +5,10 @@
 # ///
 """Rendering patterns — three ways to control how data becomes output.
 
-    uv run demos/patterns/rendering.py               # show available patterns
-    uv run demos/patterns/rendering.py --explicit     # lens API with zoom
-    uv run demos/patterns/rendering.py --custom       # custom render function
-    uv run demos/patterns/rendering.py --palette      # palette switching
+uv run demos/patterns/rendering.py               # show available patterns
+uv run demos/patterns/rendering.py --explicit     # lens API with zoom
+uv run demos/patterns/rendering.py --custom       # custom render function
+uv run demos/patterns/rendering.py --palette      # palette switching
 """
 
 from __future__ import annotations
@@ -75,34 +75,44 @@ def demo_explicit():
     """Call tree_lens / chart_lens directly instead of auto-dispatch."""
     from painted.views import tree_lens, chart_lens
 
-    print_block(join_vertical(
-        spacer(),
-        header("chart_lens: zoom 0 → stats only"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("chart_lens: zoom 0 → stats only"),
+        )
+    )
     show(chart_lens(METRICS, zoom=0, width=60))
 
-    print_block(join_vertical(
-        spacer(),
-        header("chart_lens: zoom 1 → sparkline"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("chart_lens: zoom 1 → sparkline"),
+        )
+    )
     show(chart_lens(METRICS, zoom=1, width=60))
 
-    print_block(join_vertical(
-        spacer(),
-        header("chart_lens: zoom 2 → bar chart"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("chart_lens: zoom 2 → bar chart"),
+        )
+    )
     show(chart_lens(METRICS, zoom=2, width=60))
 
-    print_block(join_vertical(
-        spacer(),
-        header("tree_lens: zoom 0 → summary"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("tree_lens: zoom 0 → summary"),
+        )
+    )
     show(tree_lens(SERVICE, zoom=0, width=60))
 
-    print_block(join_vertical(
-        spacer(),
-        header("tree_lens: zoom 3 → full expansion"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("tree_lens: zoom 3 → full expansion"),
+        )
+    )
     show(tree_lens(SERVICE, zoom=3, width=60))
 
 
@@ -134,15 +144,19 @@ def demo_custom():
                         status = ep.get("status", "?")
                         latency = ep.get("latency_ms", "?")
                         ep_color = "green" if status == 200 else "red"
-                        details.append(Block.text(
-                            f"   {path}: {status} ({latency}ms)",
-                            Style(fg=ep_color),
-                        ))
+                        details.append(
+                            Block.text(
+                                f"   {path}: {status} ({latency}ms)",
+                                Style(fg=ep_color),
+                            )
+                        )
                 if "queue_depth" in info:
-                    details.append(Block.text(
-                        f"   queue: {info['queue_depth']}",
-                        Style(dim=True),
-                    ))
+                    details.append(
+                        Block.text(
+                            f"   queue: {info['queue_depth']}",
+                            Style(dim=True),
+                        )
+                    )
                 if details:
                     row = join_vertical(row, *details)
 
@@ -154,16 +168,20 @@ def demo_custom():
             content = border(content, chars=ROUNDED, style=Style(dim=True))
         return content
 
-    print_block(join_vertical(
-        spacer(),
-        header("custom lens: zoom 1 → bordered card"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("custom lens: zoom 1 → bordered card"),
+        )
+    )
     show(SERVICE, lens=status_card, zoom=Zoom.SUMMARY)
 
-    print_block(join_vertical(
-        spacer(),
-        header("custom lens: zoom 2 → card with endpoint details"),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("custom lens: zoom 2 → card with endpoint details"),
+        )
+    )
     show(SERVICE, lens=status_card, zoom=Zoom.DETAILED)
 
 
@@ -203,12 +221,14 @@ def demo_palette():
 
     use_palette(DEFAULT_PALETTE)
 
-    print_block(join_vertical(
-        spacer(),
-        header("same card, three palettes"),
-        spacer(),
-        join_horizontal(*cards, gap=2),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            header("same card, three palettes"),
+            spacer(),
+            join_horizontal(*cards, gap=2),
+        )
+    )
 
 
 # --- default: show available patterns ---
@@ -221,8 +241,12 @@ def demo_help():
         Block.text("  rendering patterns", Style(bold=True)),
         spacer(),
         Block.text("  --explicit    lens API: call tree_lens / chart_lens directly", Style()),
-        Block.text("  --custom      custom render: write your own (data, zoom, width) -> Block", Style()),
-        Block.text("  --palette     palette switching: change all semantic colors at once", Style()),
+        Block.text(
+            "  --custom      custom render: write your own (data, zoom, width) -> Block", Style()
+        ),
+        Block.text(
+            "  --palette     palette switching: change all semantic colors at once", Style()
+        ),
         spacer(),
         Block.text("  Run with a flag to see the pattern.", Style(dim=True)),
     )

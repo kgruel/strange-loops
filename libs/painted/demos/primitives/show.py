@@ -16,6 +16,7 @@ Run: uv run demos/primitives/show.py
 
 from painted import show
 
+
 def demo_scalars() -> None:
     show("deploy complete")
     show(42)

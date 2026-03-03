@@ -562,10 +562,9 @@ def main(argv: list[str]) -> int:
 
     expected_payload = json.loads(snippets_out.read_text(encoding="utf-8"))
     actual_payload = _snippet_store_payload(snippets=snippet_store, generated_at=generated_at)
-    if (
-        expected_payload.get("version") != actual_payload.get("version")
-        or expected_payload.get("snippets") != actual_payload.get("snippets")
-    ):
+    if expected_payload.get("version") != actual_payload.get("version") or expected_payload.get(
+        "snippets"
+    ) != actual_payload.get("snippets"):
         print(f"stale: {snippets_out.relative_to(repo_root)}", file=sys.stderr)
         return 2
 

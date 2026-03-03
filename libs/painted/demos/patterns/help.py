@@ -76,16 +76,16 @@ SAMPLE_HELP = HelpData(
             flags=(
                 HelpFlag(None, "--json", "JSON output", detail="Implies --static."),
                 HelpFlag(
-                    None, "--plain", "Plain text, no ANSI codes",
+                    None,
+                    "--plain",
+                    "Plain text, no ANSI codes",
                     detail="Implies --static when piped.",
                 ),
             ),
         ),
         HelpGroup(
             name="Help",
-            flags=(
-                HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),
-            ),
+            flags=(HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),),
         ),
     ),
 )
@@ -99,7 +99,9 @@ def render_minimal(data: HelpData, width: int) -> Block:
     flag_count = sum(len(g.flags) for g in data.groups)
     group_names = ", ".join(g.name.lower() for g in data.groups if g.flags)
     desc = f" — {data.description}" if data.description else ""
-    return truncate(Block.text(f"{data.prog}{desc} ({flag_count} flags: {group_names})", Style()), width)
+    return truncate(
+        Block.text(f"{data.prog}{desc} ({flag_count} flags: {group_names})", Style()), width
+    )
 
 
 def render_summary(data: HelpData, width: int) -> Block:

@@ -44,23 +44,39 @@ def demo_mixed_styles() -> Block:
     return join_vertical(
         header("mixed styles"),
         spacer(),
-        show(Line((
-            Span("  Error: ", Style(fg="red", bold=True)),
-            Span("connection timed out", Style()),
-        ))),
-        show(Line((
-            Span("  12:04:31 ", Style(dim=True)),
-            Span("INFO  ", Style(fg="green", bold=True)),
-            Span("request handled in 42ms", Style()),
-        ))),
-        show(Line((
-            Span("  status  ", Style(dim=True)),
-            Span("healthy", Style(fg="green", bold=True)),
-        ))),
-        show(Line((
-            Span("  latency ", Style(dim=True)),
-            Span("127ms", Style(fg="yellow")),
-        ))),
+        show(
+            Line(
+                (
+                    Span("  Error: ", Style(fg="red", bold=True)),
+                    Span("connection timed out", Style()),
+                )
+            )
+        ),
+        show(
+            Line(
+                (
+                    Span("  12:04:31 ", Style(dim=True)),
+                    Span("INFO  ", Style(fg="green", bold=True)),
+                    Span("request handled in 42ms", Style()),
+                )
+            )
+        ),
+        show(
+            Line(
+                (
+                    Span("  status  ", Style(dim=True)),
+                    Span("healthy", Style(fg="green", bold=True)),
+                )
+            )
+        ),
+        show(
+            Line(
+                (
+                    Span("  latency ", Style(dim=True)),
+                    Span("127ms", Style(fg="yellow")),
+                )
+            )
+        ),
     )
 
 
@@ -69,29 +85,37 @@ def demo_style_inheritance() -> Block:
     return join_vertical(
         header("style inheritance"),
         spacer(),
-        show(Line(
-            spans=(Span("  base style only  ", Style()),),
-            style=base,
-        )),
-        show(Line(
-            spans=(Span("  span adds bold   ", Style(bold=True)),),
-            style=base,
-        )),
-        show(Line(
-            spans=(Span("  span overrides fg", Style(fg="red")),),
-            style=base,
-        )),
+        show(
+            Line(
+                spans=(Span("  base style only  ", Style()),),
+                style=base,
+            )
+        ),
+        show(
+            Line(
+                spans=(Span("  span adds bold   ", Style(bold=True)),),
+                style=base,
+            )
+        ),
+        show(
+            Line(
+                spans=(Span("  span overrides fg", Style(fg="red")),),
+                style=base,
+            )
+        ),
     )
 
 
 def demo_truncation() -> Block:
-    long_line = Line((
-        Span("  Error: ", Style(fg="red", bold=True)),
-        Span(
-            "the configuration file at /etc/app/config.yaml could not be parsed",
-            Style(),
-        ),
-    ))
+    long_line = Line(
+        (
+            Span("  Error: ", Style(fg="red", bold=True)),
+            Span(
+                "the configuration file at /etc/app/config.yaml could not be parsed",
+                Style(),
+            ),
+        )
+    )
     return join_vertical(
         header("truncation"),
         spacer(),
@@ -105,33 +129,43 @@ def demo_wide_characters() -> Block:
     return join_vertical(
         header("wide characters"),
         spacer(),
-        show(Line((
-            Span("  ", Style()),
-            Span("日本語", Style(fg="magenta")),
-            Span(" width=6", Style(dim=True)),
-        ))),
-        show(Line((
-            Span("  ", Style()),
-            Span("café", Style(fg="cyan")),
-            Span("   width=4", Style(dim=True)),
-        ))),
+        show(
+            Line(
+                (
+                    Span("  ", Style()),
+                    Span("日本語", Style(fg="magenta")),
+                    Span(" width=6", Style(dim=True)),
+                )
+            )
+        ),
+        show(
+            Line(
+                (
+                    Span("  ", Style()),
+                    Span("café", Style(fg="cyan")),
+                    Span("   width=4", Style(dim=True)),
+                )
+            )
+        ),
     )
 
 
 def demo() -> None:
-    print_block(join_vertical(
-        spacer(),
-        demo_spans(),
-        spacer(),
-        demo_mixed_styles(),
-        spacer(),
-        demo_style_inheritance(),
-        spacer(),
-        demo_truncation(),
-        spacer(),
-        demo_wide_characters(),
-        spacer(),
-    ))
+    print_block(
+        join_vertical(
+            spacer(),
+            demo_spans(),
+            spacer(),
+            demo_mixed_styles(),
+            spacer(),
+            demo_style_inheritance(),
+            spacer(),
+            demo_truncation(),
+            spacer(),
+            demo_wide_characters(),
+            spacer(),
+        )
+    )
 
 
 if __name__ == "__main__":

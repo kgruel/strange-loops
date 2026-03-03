@@ -108,12 +108,16 @@ SAMPLE_DISK = DiskData(
             "projects",
             45 * 1024**3,
             children=(
-                DirEntry("prism", 12 * 1024**3, children=(
-                    DirEntry("libs", 3 * 1024**3),
-                    DirEntry("experiments", 2 * 1024**3),
-                    DirEntry(".venv", 5 * 1024**3),
-                    DirEntry("node_modules", 2 * 1024**3),
-                )),
+                DirEntry(
+                    "prism",
+                    12 * 1024**3,
+                    children=(
+                        DirEntry("libs", 3 * 1024**3),
+                        DirEntry("experiments", 2 * 1024**3),
+                        DirEntry(".venv", 5 * 1024**3),
+                        DirEntry("node_modules", 2 * 1024**3),
+                    ),
+                ),
                 DirEntry("website", 8 * 1024**3),
                 DirEntry("ml-research", 15 * 1024**3),
                 DirEntry("archive", 10 * 1024**3),
@@ -173,9 +177,12 @@ def render_standard(data: DiskData, width: int) -> Block:
     sorted_entries = sorted(data.entries, key=lambda e: e.size_bytes, reverse=True)
     for entry in sorted_entries[:8]:
         pct = (entry.size_bytes / data.used_bytes) * 100 if data.used_bytes > 0 else 0
-        rows.append(Block.text(
-            f"  {entry.size_human:>6}  {pct:4.1f}%  {entry.name}", Style(),
-        ))
+        rows.append(
+            Block.text(
+                f"  {entry.size_human:>6}  {pct:4.1f}%  {entry.name}",
+                Style(),
+            )
+        )
 
     rows.append(Block.text("", Style()))
     rows.append(Block.text(f"Free: {data.free_human}", Style()))

@@ -298,13 +298,17 @@ def render_detailed(data: TimingData, width: int) -> Block:
     inner_width = min(width - 4, 70)
 
     # Per-frame totals as labeled bar chart (indexed labels to avoid dict collapse)
-    frame_data = {f"F{i} {lbl}": t for i, (lbl, t) in enumerate(zip(data.frame_labels, data.frame_totals))}
+    frame_data = {
+        f"F{i} {lbl}": t for i, (lbl, t) in enumerate(zip(data.frame_labels, data.frame_totals))
+    }
     chart_block = chart_lens(frame_data, 3, inner_width)
     sections.append(border(chart_block, title="Frame Totals (ms)", chars=ROUNDED))
     sections.append(Block.text("", Style()))
 
     # Write counts per frame
-    write_data = {f"F{i} {lbl}": w for i, (lbl, w) in enumerate(zip(data.frame_labels, data.frame_writes))}
+    write_data = {
+        f"F{i} {lbl}": w for i, (lbl, w) in enumerate(zip(data.frame_labels, data.frame_writes))
+    }
     write_chart = chart_lens(write_data, 3, inner_width)
     sections.append(border(write_chart, title="Cell Writes per Frame", chars=ROUNDED))
     sections.append(Block.text("", Style()))
@@ -353,11 +357,13 @@ def render_full(data: TimingData, width: int) -> Block:
             rows.append(Block.text(f"  {name:>8s}: {ms:.3f}ms", Style(dim=True)))
 
         inner = join_vertical(*rows)
-        sections.append(border(
-            pad(inner, right=max(0, min(50, width - 4) - inner.width)),
-            title=f"Frame {i}: {label}",
-            chars=ROUNDED,
-        ))
+        sections.append(
+            border(
+                pad(inner, right=max(0, min(50, width - 4) - inner.width)),
+                title=f"Frame {i}: {label}",
+                chars=ROUNDED,
+            )
+        )
 
     sections.append(Block.text("", Style()))
 

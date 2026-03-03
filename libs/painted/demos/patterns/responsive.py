@@ -129,7 +129,12 @@ SAMPLE = Dashboard(
             duration_s=91,
             owner="ci-bot",
             jobs=(
-                Job(name="docker buildx bake", status="success", duration_s=91, note="cache hit: 83%"),
+                Job(
+                    name="docker buildx bake",
+                    status="success",
+                    duration_s=91,
+                    note="cache hit: 83%",
+                ),
             ),
         ),
         Stage(
@@ -309,7 +314,9 @@ def _card(
 # =============================================================================
 
 
-def render_pipeline_panel(data: Dashboard, *, ctx_width: int, zoom: Zoom, outer_width: int) -> Block:
+def render_pipeline_panel(
+    data: Dashboard, *, ctx_width: int, zoom: Zoom, outer_width: int
+) -> Block:
     bp = _breakpoint(ctx_width)
     bordered = bp != "narrow"
     inner_width = max(1, outer_width - 2) if bordered else max(1, outer_width)
@@ -438,7 +445,9 @@ def render_alerts_panel(data: Dashboard, *, ctx_width: int, zoom: Zoom, outer_wi
 
         head = join_horizontal(
             Block.text(f"{sev_icon} ", sev_style.merge(Style(bold=True)), width=2),
-            Block.text(a.service, Style(bold=True), width=max(1, inner_width - 8), wrap=Wrap.ELLIPSIS),
+            Block.text(
+                a.service, Style(bold=True), width=max(1, inner_width - 8), wrap=Wrap.ELLIPSIS
+            ),
             Block.text(a.since.rjust(6), Style(dim=True), width=6),
         )
         head = truncate(head, inner_width)
@@ -454,7 +463,9 @@ def render_alerts_panel(data: Dashboard, *, ctx_width: int, zoom: Zoom, outer_wi
         body=body,
         outer_width=outer_width,
         bordered=bordered,
-        accent=current_palette().error if any(a.severity == "page" for a in data.alerts) else current_palette().warning,
+        accent=current_palette().error
+        if any(a.severity == "page" for a in data.alerts)
+        else current_palette().warning,
     )
 
 

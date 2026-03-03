@@ -96,20 +96,64 @@ _AGGREGATION_VERTEX = """\
 name "{name}"
 
 discover "./instances/**/*.vertex"
+
+loops {{
+  decision {{ fold {{ items "by" "topic" }} }}
+  thread   {{ fold {{ items "by" "name" }} }}
+  change   {{ fold {{ items "collect" 20 }} }}
+  task     {{ fold {{ items "by" "name" }} }}
+}}
 """
+
+
+def _extract_loops_text(content: str) -> str | None:
+    """Extract the ``loops { ... }`` block from raw vertex file text.
+
+    Uses brace-matching so nested ``{ }`` inside loop definitions are handled.
+    Returns the raw text including the ``loops`` keyword, or ``None``.
+    """
+    idx = content.find("\nloops {")
+    if idx == -1:
+        if content.startswith("loops {"):
+            idx = 0
+        else:
+            return None
+    else:
+        idx += 1  # skip the leading newline
+    depth = 0
+    start = idx
+    i = content.index("{", idx)
+    for i in range(i, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start : i + 1]
+    return None
 
 
 def _find_source_vertex(name: str) -> str | None:
     """Find an existing instance vertex to use as source for init.
 
-    Checks config-level vertex: if aggregation (has instances/), uses first
-    discovered instance. Otherwise reads the config vertex directly if it
-    has a store (i.e., is an instance, not an aggregation).
+    Priority:
+    1. If the aggregation vertex itself declares a loops block, build a
+       synthetic instance from it (name + store + loops).
+    2. Fall back to first sibling instance under instances/.
+    3. Direct config-level instance (has store, not aggregation).
     """
     home = loops_home()
     config_dir = home / name
     if not config_dir.exists():
         return None
+    leaf = Path(name).name
+    # Try aggregation vertex's own loops block first
+    vertex_file = config_dir / f"{leaf}.vertex"
+    if vertex_file.exists():
+        agg_content = vertex_file.read_text()
+        loops_text = _extract_loops_text(agg_content)
+        if loops_text is not None:
+            return f'name "{leaf}"\nstore "./data/{leaf}.db"\n\n{loops_text}\n'
     # Aggregation pattern: look in instances/
     instances_dir = config_dir / "instances"
     if instances_dir.is_dir():
@@ -117,7 +161,6 @@ def _find_source_vertex(name: str) -> str | None:
         if matches:
             return matches[0].read_text()
     # Direct instance at config level
-    vertex_file = config_dir / f"{Path(name).name}.vertex"
     if vertex_file.exists():
         content = vertex_file.read_text()
         if "store" in content:

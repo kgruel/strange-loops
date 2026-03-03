@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from loops.main import main, _parse_vars, loops_home
+from loops.main import main, _parse_vars, _extract_loops_text, _AGGREGATION_VERTEX, loops_home
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -565,3 +565,82 @@ class TestRootLs:
         # Returns 1 because session has no template population, but the important
         # thing is it doesn't return vertex listing data
         assert result == 1
+
+
+class TestExtractLoopsText:
+    """_extract_loops_text extraction tests."""
+
+    def test_extract_loops_text(self):
+        content = (
+            'name "project"\ndiscover "./instances/**/*.vertex"\n\n'
+            'loops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
+        result = _extract_loops_text(content)
+        assert result is not None
+        assert result.startswith("loops {")
+        assert "decision" in result
+        assert result.endswith("}")
+
+    def test_extract_loops_text_none(self):
+        content = 'name "project"\ndiscover "./instances/**/*.vertex"\n'
+        assert _extract_loops_text(content) is None
+
+    def test_extract_loops_text_nested_braces(self):
+        content = 'loops {\n  a { fold { items "by" "x" } }\n  b { fold { items "collect" 5 } }\n}\n'
+        result = _extract_loops_text(content)
+        assert result is not None
+        assert "a {" in result
+        assert "b {" in result
+
+
+class TestAggregationLoops:
+    """Aggregation vertices as loop schema root."""
+
+    def test_aggregation_template_has_loops(self):
+        """_AGGREGATION_VERTEX includes a loops block."""
+        rendered = _AGGREGATION_VERTEX.format(name="test")
+        assert "loops {" in rendered
+        assert "decision" in rendered
+        assert "thread" in rendered
+        assert "change" in rendered
+        assert "task" in rendered
+
+    def test_init_aggregation_has_default_loops(self, monkeypatch, tmp_path, capsys):
+        """New aggregation vertex from template includes loops block."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = main(["init", "dev/myproject"])
+        assert result == 0
+        vertex = tmp_path / "dev" / "myproject" / "myproject.vertex"
+        content = vertex.read_text()
+        assert "loops {" in content
+        assert "decision" in content
+        assert "task" in content
+
+    def test_init_from_aggregation_loops(self, monkeypatch, tmp_path, capsys):
+        """loops init <name> derives instance from aggregation vertex's loops block."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Create aggregation vertex with loops block (no instances yet)
+        config_dir = tmp_path / "project"
+        config_dir.mkdir()
+        (config_dir / "instances").mkdir()
+        (config_dir / "project.vertex").write_text(
+            'name "project"\n'
+            'discover "./instances/**/*.vertex"\n\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '  thread   { fold { items "by" "name" } }\n'
+            '}\n'
+        )
+        # Init local instance
+        project_dir = tmp_path / "myproject"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        result = main(["init", "project"])
+        assert result == 0
+        vertex = project_dir / ".loops" / "project.vertex"
+        assert vertex.exists()
+        content = vertex.read_text()
+        assert 'name "project"' in content
+        assert 'store "./data/project.db"' in content
+        assert "decision" in content
+        assert "thread" in content

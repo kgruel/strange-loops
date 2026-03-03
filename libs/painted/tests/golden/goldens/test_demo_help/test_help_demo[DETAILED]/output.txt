@@ -24,8 +24,3 @@ Help
   -h, --help         Show this help
                      Add -v for more detail.
 
-Interaction rules
-  --json and --plain imply --static (no animation).
-  -q (minimal zoom) implies --static.
-  AUTO mode selects LIVE for TTY, STATIC for pipes.
-

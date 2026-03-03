@@ -94,7 +94,7 @@ class AppRunner:
         # Show help to stderr
         help_data = self._build_help_data()
         width = shutil.get_terminal_size().columns
-        help_block = render_help(help_data, Zoom.SUMMARY, width, use_ansi=True, show_rules=False)
+        help_block = render_help(help_data, Zoom.SUMMARY, width, use_ansi=True)
         print_block(help_block, sys.stderr, use_ansi=True)
 
         return 1
@@ -117,7 +117,7 @@ class AppRunner:
             use_ansi = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
         width = shutil.get_terminal_size().columns
-        block = render_help(help_data, zoom, width, use_ansi, show_rules=False)
+        block = render_help(help_data, zoom, width, use_ansi)
         print_block(block, use_ansi=use_ansi)
         return 0
 
@@ -130,7 +130,7 @@ class AppRunner:
         )
         commands_group = HelpGroup(name="Commands", flags=command_flags)
 
-        # Common flags as secondary groups — these work on display commands
+        # Framework groups — subordinate when commands are the primary content
         zoom_group = HelpGroup(
             name="Zoom",
             hint="(what to show)",
@@ -139,7 +139,7 @@ class AppRunner:
                 HelpFlag("-q", "--quiet", "Minimal output"),
                 HelpFlag("-v", "--verbose", "Detailed (-v) or full (-vv)"),
             ),
-            secondary=True,
+            min_zoom=Zoom.SUMMARY,
         )
 
         format_group = HelpGroup(
@@ -150,13 +150,13 @@ class AppRunner:
                 HelpFlag(None, "--json", "JSON output", detail="Implies --static."),
                 HelpFlag(None, "--plain", "Plain text, no ANSI codes"),
             ),
-            secondary=True,
+            min_zoom=Zoom.SUMMARY,
         )
 
         help_group = HelpGroup(
             name="Help",
             flags=(HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),),
-            secondary=True,
+            min_zoom=Zoom.SUMMARY,
         )
 
         return HelpData(

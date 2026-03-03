@@ -112,7 +112,17 @@ class TestAppRunner:
         rc = runner.run(["--help", "-v"])
         assert rc == 0
         captured = capsys.readouterr()
-        # Verbose (DETAILED) should show group detail text
+        # At DETAILED, framework groups (min_zoom=SUMMARY) have eff=1: expanded but no detail
+        assert "Zoom" in captured.out
+        assert "-q, --quiet" in captured.out
+        assert "Help" in captured.out
+
+    def test_help_very_verbose(self, capsys):
+        runner = self._make_runner()
+        rc = runner.run(["--help", "-vv"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        # At FULL, framework groups (min_zoom=SUMMARY) have eff=2: expanded+detail
         assert "Controls how much detail" in captured.out
         assert "Add -v for more detail" in captured.out
 
@@ -134,7 +144,7 @@ class TestAppRunner:
 class TestBuildHelpData:
     """_build_help_data produces correct HelpData."""
 
-    def test_commands_group_primary(self):
+    def test_commands_group_min_zoom(self):
         runner = AppRunner(
             commands=(
                 AppCommand("a", "Do A", lambda argv: 0),
@@ -143,26 +153,26 @@ class TestBuildHelpData:
         )
         data = runner._build_help_data()
         assert isinstance(data, HelpData)
-        # Commands (primary) + Zoom + Format + Help (secondary)
+        # Commands (min_zoom=MINIMAL) + Zoom + Format + Help (min_zoom=SUMMARY)
         assert len(data.groups) == 4
         commands_group = data.groups[0]
         assert commands_group.name == "Commands"
-        assert not commands_group.secondary
+        assert commands_group.min_zoom == Zoom.MINIMAL
         assert len(commands_group.flags) == 2
         assert commands_group.flags[0].long == "a"
         assert commands_group.flags[1].long == "b"
 
-    def test_secondary_groups(self):
+    def test_framework_groups_min_zoom(self):
         runner = AppRunner(
             commands=(AppCommand("a", "Do A", lambda argv: 0),),
         )
         data = runner._build_help_data()
-        secondary = [g for g in data.groups if g.secondary]
-        names = [g.name for g in secondary]
+        framework = [g for g in data.groups if g.min_zoom == Zoom.SUMMARY]
+        names = [g.name for g in framework]
         assert "Zoom" in names
         assert "Format" in names
         assert "Help" in names
-        assert all(g.secondary for g in secondary)
+        assert all(g.min_zoom == Zoom.SUMMARY for g in framework)
 
     def test_no_interaction_rules(self, capsys):
         """AppRunner help should not show interaction rules even at DETAILED."""

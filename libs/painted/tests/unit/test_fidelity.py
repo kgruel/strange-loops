@@ -561,8 +561,8 @@ class TestExtractAddArgsFlags:
 class TestBuildHelpDataAugmentation:
     """Tests for _build_help_data including command args."""
 
-    def test_no_command_args_no_secondary(self):
-        """Without help_args/add_args, all groups are non-secondary (backward compat)."""
+    def test_no_command_args_min_zoom_minimal(self):
+        """Without help_args/add_args, all groups have min_zoom=MINIMAL."""
         runner = CliRunner(
             render=lambda ctx, data: Block.text("x", Style()),
             fetch=lambda: "ok",
@@ -570,10 +570,10 @@ class TestBuildHelpDataAugmentation:
         )
         data = _build_help_data(runner)
         for group in data.groups:
-            assert group.secondary is False
+            assert group.min_zoom == Zoom.MINIMAL
 
     def test_help_args_creates_command_group(self):
-        """help_args appear as a primary group, rendering opts become secondary."""
+        """help_args appear as min_zoom=MINIMAL group, framework groups get SUMMARY."""
         runner = CliRunner(
             render=lambda ctx, data: Block.text("x", Style()),
             fetch=lambda: "ok",
@@ -585,16 +585,16 @@ class TestBuildHelpDataAugmentation:
         )
         data = _build_help_data(runner)
 
-        # First group is command args (non-secondary, no name)
-        assert data.groups[0].secondary is False
+        # First group is command args (min_zoom=MINIMAL, no name)
+        assert data.groups[0].min_zoom == Zoom.MINIMAL
         assert data.groups[0].name == ""
         assert len(data.groups[0].flags) == 2
         assert data.groups[0].flags[0].long == "vertex"
         assert data.groups[0].flags[1].long == "--since"
 
-        # Remaining groups are secondary
+        # Framework groups have min_zoom=SUMMARY
         for group in data.groups[1:]:
-            assert group.secondary is True
+            assert group.min_zoom == Zoom.SUMMARY
 
     def test_add_args_creates_command_group(self):
         """add_args are introspected into a primary command group."""
@@ -611,18 +611,18 @@ class TestBuildHelpDataAugmentation:
         )
         data = _build_help_data(runner)
 
-        # First group is command args
-        assert data.groups[0].secondary is False
+        # First group is command args (min_zoom=MINIMAL)
+        assert data.groups[0].min_zoom == Zoom.MINIMAL
         assert data.groups[0].name == ""
         assert len(data.groups[0].flags) == 2
 
-        # Remaining groups are secondary
+        # Framework groups have min_zoom=SUMMARY
         for group in data.groups[1:]:
-            assert group.secondary is True
+            assert group.min_zoom == Zoom.SUMMARY
 
 
 class TestRenderHelpAugmentation:
-    """Tests for render_help with primary/secondary hierarchy."""
+    """Tests for render_help with effective zoom (min_zoom) rendering."""
 
     @staticmethod
     def _block_text(block: Block) -> str:
@@ -632,8 +632,8 @@ class TestRenderHelpAugmentation:
             lines.append("".join(cell.char for cell in block.row(y)).rstrip())
         return "\n".join(lines)
 
-    def test_secondary_compact_at_minimal(self):
-        """Secondary groups collapse to a compact dim line at MINIMAL zoom."""
+    def test_compact_at_min_zoom(self):
+        """Groups at eff_zoom=0 render as compact dim line (flag names only)."""
         data = HelpData(
             prog="myapp",
             description="A test app",
@@ -645,28 +645,33 @@ class TestRenderHelpAugmentation:
                         HelpFlag("-q", "--quiet", "Minimal"),
                         HelpFlag("-v", "--verbose", "Verbose"),
                     ),
-                    secondary=True,
+                    min_zoom=Zoom.SUMMARY,
                 ),
                 HelpGroup(
-                    name="Help", flags=(HelpFlag("-h", "--help", "Show help"),), secondary=True
+                    name="Help",
+                    flags=(HelpFlag("-h", "--help", "Show help"),),
+                    min_zoom=Zoom.SUMMARY,
                 ),
             ),
         )
-        block = render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
+        block = render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
         text = self._block_text(block)
 
-        # Command arg should be present
+        # Command arg should be expanded (eff=1)
         assert "vertex" in text
+        assert "Vertex name" in text
 
-        # Secondary flags in compact line (no descriptions)
+        # Framework flags in compact line (eff=0, no descriptions)
         assert "-q" in text
         assert "-h" in text
 
-        # Secondary group headers should NOT appear at MINIMAL
-        assert "Zoom" not in text
+        # Group headers should NOT appear at compact
+        lines = text.split("\n")
+        header_lines = [l for l in lines if l.strip().startswith("Zoom")]
+        assert not header_lines
 
-    def test_secondary_dim_at_summary(self):
-        """Secondary groups render fully but dim at SUMMARY zoom."""
+    def test_expanded_above_min_zoom(self):
+        """Groups at eff_zoom=1 render expanded with header and descriptions."""
         data = HelpData(
             prog="myapp",
             description="A test app",
@@ -675,23 +680,23 @@ class TestRenderHelpAugmentation:
                 HelpGroup(
                     name="Zoom",
                     flags=(HelpFlag("-q", "--quiet", "Minimal"),),
-                    secondary=True,
+                    min_zoom=Zoom.SUMMARY,
                 ),
             ),
         )
-        block = render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
+        block = render_help(data, Zoom.DETAILED, 80, use_ansi=False)
         text = self._block_text(block)
 
-        # Command arg present
+        # Command arg expanded (eff=2)
         assert "vertex" in text
         assert "Vertex name" in text
 
-        # Secondary group expanded with header and descriptions
+        # Framework group expanded with header (eff=1)
         assert "Zoom" in text
         assert "Minimal" in text
 
-    def test_secondary_expanded_at_detailed(self):
-        """Secondary groups expand fully at DETAILED zoom, with group headers."""
+    def test_detail_at_eff_zoom_two(self):
+        """Group and flag detail shown when eff_zoom >= 2."""
         data = HelpData(
             prog="myapp",
             description=None,
@@ -700,23 +705,22 @@ class TestRenderHelpAugmentation:
                 HelpGroup(
                     name="Zoom",
                     hint="(what to show)",
-                    flags=(HelpFlag("-q", "--quiet", "Minimal"),),
-                    secondary=True,
+                    detail="Controls detail level.",
+                    flags=(HelpFlag("-q", "--quiet", "Minimal", detail="Implies --static."),),
+                    min_zoom=Zoom.SUMMARY,
                 ),
             ),
         )
-        block = render_help(data, Zoom.DETAILED, 80, use_ansi=False)
+        block = render_help(data, Zoom.FULL, 80, use_ansi=False)
         text = self._block_text(block)
 
-        # Command arg present
-        assert "vertex" in text
-
-        # Secondary group header present at DETAILED
+        # Framework group at eff=2: header + detail + flag detail
         assert "Zoom (what to show)" in text
-        assert "Minimal" in text
+        assert "Controls detail level." in text
+        assert "Implies --static." in text
 
-    def test_no_secondary_renders_as_before(self):
-        """Without secondary groups, rendering is unchanged."""
+    def test_all_minimal_renders_uniformly(self):
+        """All groups at min_zoom=MINIMAL render expanded at SUMMARY."""
         data = HelpData(
             prog="deploy",
             description="Ship services",
@@ -735,14 +739,61 @@ class TestRenderHelpAugmentation:
         block = render_help(data, Zoom.SUMMARY, 80, use_ansi=False)
         text = self._block_text(block)
 
-        # All groups rendered fully (not collapsed)
+        # All groups rendered expanded (eff=1)
         assert "Zoom (what to show)" in text
         assert "-q, --quiet" in text
         assert "Help" in text
         assert "-h, --help" in text
 
-        # No "details" hint (that's only for secondary compact)
-        assert "--help -v for details" not in text
+    def test_primary_compact_at_minimal(self):
+        """Primary groups (min_zoom=MINIMAL) render compact at MINIMAL."""
+        data = HelpData(
+            prog="myapp",
+            description="A test app",
+            groups=(
+                HelpGroup(
+                    name="Zoom",
+                    flags=(
+                        HelpFlag("-q", "--quiet", "Minimal"),
+                        HelpFlag("-v", "--verbose", "Verbose"),
+                    ),
+                ),
+            ),
+        )
+        block = render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # At MINIMAL (eff=0), compact: flag names present, no descriptions
+        assert "-q" in text
+        assert "-v" in text
+        # Group header should NOT appear in compact
+        lines = text.split("\n")
+        header_lines = [l for l in lines if l.strip().startswith("Zoom")]
+        assert not header_lines
+
+    def test_hidden_below_min_zoom(self):
+        """Groups are hidden when zoom < min_zoom."""
+        data = HelpData(
+            prog="myapp",
+            description=None,
+            groups=(
+                HelpGroup(name="", flags=(HelpFlag(None, "vertex", "Vertex name"),)),
+                HelpGroup(
+                    name="Zoom",
+                    flags=(HelpFlag("-q", "--quiet", "Minimal"),),
+                    min_zoom=Zoom.SUMMARY,
+                ),
+            ),
+        )
+        block = render_help(data, Zoom.MINIMAL, 80, use_ansi=False)
+        text = self._block_text(block)
+
+        # Command arg visible (eff=0, compact)
+        assert "vertex" in text
+
+        # Framework group hidden (eff=-1)
+        assert "Zoom" not in text
+        assert "-q" not in text
 
 
 class TestRunCliHelp:

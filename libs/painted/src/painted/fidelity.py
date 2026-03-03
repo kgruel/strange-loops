@@ -101,7 +101,7 @@ class HelpGroup:
     hint: str | None = None  # "(what to show)" — after name at SUMMARY+
     detail: str | None = None  # longer description at DETAILED+
     flags: tuple[HelpFlag, ...] = ()
-    secondary: bool = False  # dim and compact at SUMMARY when command args present
+    min_zoom: Zoom = Zoom.MINIMAL  # zoom level where this group first appears (compact)
 
 
 @dataclass(frozen=True)
@@ -256,11 +256,11 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
         command_flags.extend(_extract_add_args_flags(runner.add_args))
 
     has_command_args = len(command_flags) > 0
-    secondary = has_command_args  # rendering opts subordinate when command has its own args
+    framework_zoom = Zoom.SUMMARY if has_command_args else Zoom.MINIMAL
 
     # Zoom group — always present
     zoom_flags = (
-        HelpFlag("-q", "--quiet", "Minimal output"),
+        HelpFlag("-q", "--quiet", "Minimal output", detail="Also implies --static (no animation)."),
         HelpFlag("-v", "--verbose", "Detailed (-v) or full (-vv)"),
     )
     zoom_group = HelpGroup(
@@ -268,7 +268,7 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
         hint="(what to show)",
         detail="Controls how much detail is rendered. Stackable: -v for detailed, -vv for full.",
         flags=zoom_flags,
-        secondary=secondary,
+        min_zoom=framework_zoom,
     )
 
     # Mode group — filtered by capability (same logic as add_cli_args)
@@ -292,7 +292,7 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
             hint="(how to deliver)",
             detail="Delivery mechanism. AUTO selects LIVE for TTY, STATIC for pipes.",
             flags=tuple(mode_flags),
-            secondary=secondary,
+            min_zoom=framework_zoom,
         )
 
     # Format group — always present
@@ -307,12 +307,12 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
         hint="(serialization)",
         detail="Output serialization. ANSI is default for TTY, PLAIN for pipes.",
         flags=format_flags,
-        secondary=secondary,
+        min_zoom=framework_zoom,
     )
 
     # Help flag itself
     help_flags = (HelpFlag("-h", "--help", "Show this help", detail="Add -v for more detail."),)
-    help_group = HelpGroup(name="Help", flags=help_flags, secondary=secondary)
+    help_group = HelpGroup(name="Help", flags=help_flags, min_zoom=framework_zoom)
 
     groups: list[HelpGroup] = []
     if command_flags:
@@ -330,18 +330,23 @@ def _build_help_data(runner: CliRunner[T]) -> HelpData:
     )
 
 
-def render_help(
-    data: HelpData, zoom: Zoom, width: int, use_ansi: bool, *, show_rules: bool = True
-) -> Block:
+def render_help(data: HelpData, zoom: Zoom, width: int, use_ansi: bool) -> Block:
     """Render help data as a composed Block.
 
-    Groups with secondary=True are rendered dim and collapsed to a compact
-    single line at SUMMARY zoom. At DETAILED+, they expand fully but stay dim.
-    Groups with secondary=False render at normal weight (backward-compatible).
+    Each group has a min_zoom that controls when it appears and how much
+    detail it shows. The effective zoom for a group is:
+
+        eff = global_zoom - group.min_zoom
+
+    Three rendering states:
+      eff < 0  → hidden
+      eff == 0 → compact (flag names only, single dim line)
+      eff == 1 → expanded (flag columns with descriptions)
+      eff >= 2 → expanded + group.detail + flag.detail
     """
     from .block import Block
     from .cell import Style
-    from .compose import join_vertical, pad
+    from .compose import join_vertical
 
     rows: list[Block] = []
     dim = Style(dim=True) if use_ansi else Style()
@@ -355,18 +360,13 @@ def render_help(
             parts.append(data.prog)
         desc = data.description
         if desc:
-            # Take first line/sentence for summary
             first_line = desc.strip().split("\n")[0].strip()
             parts.append(first_line)
         header = " — ".join(parts) if len(parts) > 1 else parts[0]
         rows.append(Block.text(header, bold))
         rows.append(Block.text("", normal))
 
-    # Separate primary and secondary groups
-    primary = [g for g in data.groups if not g.secondary]
-    secondary = [g for g in data.groups if g.secondary]
-
-    # Flag column width: find widest flag string for alignment
+    # Flag column width: find widest flag string across visible groups
     flag_strs: list[str] = []
     for group in data.groups:
         for flag in group.flags:
@@ -378,19 +378,19 @@ def render_help(
             flag_strs.append(", ".join(parts_f))
     col_width = max((len(s) for s in flag_strs), default=10) + 2  # padding
 
-    def _render_group(group: HelpGroup, style: Style, header_style: Style) -> None:
-        """Render a single group into rows."""
+    def _render_expanded(
+        group: HelpGroup, style: Style, header_style: Style, show_detail: bool
+    ) -> None:
+        """Render a group in expanded form (eff >= 1)."""
         if group.name:
             group_label = group.name
             if group.hint:
                 group_label += f" {group.hint}"
             rows.append(Block.text(group_label, header_style))
 
-        # Group detail at DETAILED+
-        if zoom >= Zoom.DETAILED and group.detail:
+        if show_detail and group.detail:
             rows.append(Block.text(f"  {group.detail}", dim))
 
-        # Flags
         for flag in group.flags:
             parts_f: list[str] = []
             if flag.short:
@@ -401,48 +401,43 @@ def render_help(
             line = f"  {flag_str:<{col_width}}{flag.description}"
             rows.append(Block.text(line, style))
 
-            # Flag detail at DETAILED+
-            if zoom >= Zoom.DETAILED and flag.detail:
+            if show_detail and flag.detail:
                 detail_indent = "  " + " " * col_width
                 rows.append(Block.text(f"{detail_indent}{flag.detail}", dim))
 
         rows.append(Block.text("", normal))
 
-    # Render primary groups
-    for group in primary:
-        _render_group(group, normal, bold)
+    # Collect consecutive compact groups, flush them as a single dim line
+    compact_groups: list[HelpGroup] = []
 
-    # Render secondary groups
-    if secondary:
-        if zoom <= Zoom.MINIMAL:
-            # Compact: single dim line listing all flags
-            flag_names: list[str] = []
-            for group in secondary:
-                for flag in group.flags:
-                    flag_names.append(flag.short or flag.long or "")
-            compact = "  " + "  ".join(flag_names)
-            rows.append(Block.text(compact, dim))
-            rows.append(Block.text("", normal))
-        else:
-            # Full rendering, dim at SUMMARY/DETAILED, normal at FULL
-            dim_bold = Style(bold=True, dim=True) if use_ansi else normal
-            sec_style = dim if zoom < Zoom.FULL else normal
-            sec_header = dim_bold if zoom < Zoom.FULL else bold
-            for group in secondary:
-                _render_group(group, sec_style, sec_header)
-
-    # Interaction rules at DETAILED+
-    if show_rules and zoom >= Zoom.DETAILED:
-        rules_header = "Interaction rules"
-        rules = [
-            "--json and --plain imply --static (no animation).",
-            "-q (minimal zoom) implies --static.",
-            "AUTO mode selects LIVE for TTY, STATIC for pipes.",
-        ]
-        rows.append(Block.text(rules_header, bold))
-        for rule in rules:
-            rows.append(Block.text(f"  {rule}", dim))
+    def _flush_compact() -> None:
+        if not compact_groups:
+            return
+        flag_names: list[str] = []
+        for g in compact_groups:
+            for flag in g.flags:
+                flag_names.append(flag.short or flag.long or "")
+        rows.append(Block.text("  " + "  ".join(flag_names), dim))
         rows.append(Block.text("", normal))
+        compact_groups.clear()
+
+    for group in data.groups:
+        eff = zoom.value - group.min_zoom.value
+        if eff < 0:
+            continue  # hidden
+
+        if eff == 0:
+            compact_groups.append(group)
+        else:
+            _flush_compact()
+            # Dim styling when group is just one step above compact
+            if eff == 1:
+                dim_bold = Style(bold=True, dim=True) if use_ansi else normal
+                _render_expanded(group, dim, dim_bold, show_detail=False)
+            else:
+                _render_expanded(group, normal, bold, show_detail=True)
+
+    _flush_compact()
 
     return join_vertical(*rows)
 

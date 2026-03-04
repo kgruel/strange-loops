@@ -202,8 +202,8 @@ class TestHelp:
         captured = capsys.readouterr()
         assert "Runtime for .loop and .vertex files" in captured.out
         # Vertex operations should be visible
-        assert "status" in captured.out
-        assert "log" in captured.out
+        assert "fold" in captured.out
+        assert "stream" in captured.out
         assert "emit" in captured.out
         # Root commands should be visible
         assert "init" in captured.out

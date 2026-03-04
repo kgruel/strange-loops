@@ -2,8 +2,8 @@
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for
            topic: Use SQLite for persistence
            message: Chose SQLite over filesystem for atomic writes.
-  09:30 [task] implement fold [in-progress] Wire up Spec.apply.
-           Wire up Spec.apply.
+  09:30 [task] implement fold: Wire up Spec.apply.
+           status: in-progress
            name: implement fold
            status: in-progress
            summary: Wire up Spec.apply.
@@ -13,6 +13,7 @@
            files: libs/atoms/src/atoms/spec.py
            summary: Added boundary detection
            files: libs/atoms/src/atoms/spec.py
-  15:00 [thread] vertex-routing [active]
+  15:00 [thread] vertex-routing
+           status: active
            name: vertex-routing
            status: active

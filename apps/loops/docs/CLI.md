@@ -3,40 +3,40 @@
 > Auto-generated from golden test fixtures. Do not edit by hand.
 > Rendered at zoom level: **SUMMARY**, width: 80
 
-## `status`
+## `fold`
 
-Session status — decisions, threads, tasks, changes.
+Folded state — decisions, threads, tasks, changes.
 
 ```
 Decisions (2):                                                                  
   Use SQLite for persistence (Jan 15)                                           
   KDL for config format (Jan 14)                                                
                                                                                 
-Open Threads (2):                                                               
-  vertex-routing: active (Jan 15)                                               
-  tick-nesting: exploring (Jan 14)                                              
+Threads (2):                                                                    
+  vertex-routing (Jan 15)                                                       
+  tick-nesting (Jan 14)                                                         
                                                                                 
-Active Tasks (2):                                                               
-  implement fold: in-progress (Jan 15)                                          
-  add observer field: done (Jan 14)                                             
+Tasks (2):                                                                      
+  implement fold (Jan 15)                                                       
+  add observer field (Jan 14)                                                   
                                                                                 
-Recent Changes (2):                                                             
+Changes (2):                                                                    
   Added boundary detection to Spec (Jan 15)                                     
   Refactored tick emission (Jan 15)
 ```
 
-## `log`
+## `stream`
 
-Session log — chronological facts.
+Event stream — chronological facts.
 
 ```
 2025-01-15:                                                                     
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for 
-  09:30 [task] implement fold [in-progress] Wire up Spec.apply.                 
+  09:30 [task] implement fold: Wire up Spec.apply.                              
                                                                                 
 2025-01-14:                                                                     
   16:00 [change] Added boundary detection                                       
-  15:00 [thread] vertex-routing [active]
+  15:00 [thread] vertex-routing
 ```
 
 ## `store`

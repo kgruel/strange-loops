@@ -97,7 +97,8 @@ class TestStatus:
         assert "new choice" in out
         assert "old choice" not in out
 
-    def test_threads_filters_resolved(self, tmp_path, monkeypatch, capsys):
+    def test_threads_shows_all(self, tmp_path, monkeypatch, capsys):
+        """Generic fold shows all accumulated state — no per-kind filtering."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
         _seed_session(tmp_path)
@@ -110,7 +111,7 @@ class TestStatus:
 
         out = capsys.readouterr().out
         assert "open-one" in out
-        assert "resolved-one" not in out
+        assert "resolved-one" in out
 
     def test_shows_tasks(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -123,8 +124,8 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Active Tasks (1):" in out
-        assert "fix/review: merged" in out
+        assert "Tasks (1):" in out
+        assert "fix/review" in out
 
     def test_shows_changes(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -137,7 +138,7 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Recent Changes (1):" in out
+        assert "Changes (1):" in out
         assert "structural AST" in out
 
     def test_json_output(self, tmp_path, monkeypatch, capsys):
@@ -153,13 +154,15 @@ class TestStatus:
         assert result == 0
 
         data = json.loads(capsys.readouterr().out)
-        assert "decisions" in data
-        assert "threads" in data
-        assert "tasks" in data
-        assert "changes" in data
-        assert len(data["decisions"]) == 1
-        assert data["decisions"][0]["topic"] == "test"
-        assert len(data["tasks"]) == 1
+        assert "sections" in data
+        assert "vertex" in data
+        # Find sections by kind
+        by_kind = {s["kind"]: s for s in data["sections"]}
+        assert "decision" in by_kind
+        assert "task" in by_kind
+        assert len(by_kind["decision"]["items"]) == 1
+        assert by_kind["decision"]["items"][0]["topic"] == "test"
+        assert len(by_kind["task"]["items"]) == 1
 
     def test_no_vertex_found(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
@@ -180,7 +183,7 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "No session data yet." in out
+        assert "No data yet." in out
 
     def test_loops_home_fallback(self, tmp_path, monkeypatch, capsys):
         """Status resolves via LOOPS_HOME/session/ when no local vertex."""
@@ -260,9 +263,11 @@ class TestLog:
 
         # run_cli serializes the whole fetch result as JSON
         data = json.loads(capsys.readouterr().out)
-        assert isinstance(data, list)
-        assert len(data) >= 1
-        for item in data:
+        assert "facts" in data
+        assert "fold_meta" in data
+        facts = data["facts"]
+        assert len(facts) >= 1
+        for item in facts:
             assert "kind" in item
             assert "ts" in item
 

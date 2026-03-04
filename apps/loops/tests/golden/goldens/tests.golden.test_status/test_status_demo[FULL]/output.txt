@@ -1,20 +1,24 @@
 Decisions (2):
   Use SQLite for persistence (2025-01-15T10:00:00+00:00)
-    Chose SQLite over filesystem for atomic writes and query support.
+    message: Chose SQLite over filesystem for atomic writes and query support.
   KDL for config format (2025-01-14T09:30:00+00:00)
-    KDL is human-friendly and supports nested structure.
+    message: KDL is human-friendly and supports nested structure.
 
-Open Threads (2):
-  vertex-routing: active (2025-01-15T11:00:00+00:00)
-  tick-nesting: exploring (2025-01-14T16:00:00+00:00)
+Threads (2):
+  vertex-routing (2025-01-15T11:00:00+00:00)
+    status: active
+  tick-nesting (2025-01-14T16:00:00+00:00)
+    status: exploring
 
-Active Tasks (2):
-  implement fold: in-progress (2025-01-15T11:30:00+00:00)
-    Wire up Spec.apply to projection fold loop.
-  add observer field: done (2025-01-14T14:00:00+00:00)
-    Peer dissolved — observer is now a field on Fact.
+Tasks (2):
+  implement fold (2025-01-15T11:30:00+00:00)
+    status: in-progress
+    summary: Wire up Spec.apply to projection fold loop.
+  add observer field (2025-01-14T14:00:00+00:00)
+    status: done
+    summary: Peer dissolved — observer is now a field on Fact.
 
-Recent Changes (2):
+Changes (2):
   Added boundary detection to Spec (2025-01-15T11:45:00+00:00)
     files: libs/atoms/src/atoms/spec.py
   Refactored tick emission (2025-01-15T10:30:00+00:00)

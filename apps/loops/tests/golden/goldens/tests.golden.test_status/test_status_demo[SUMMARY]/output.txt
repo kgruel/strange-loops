@@ -2,14 +2,14 @@ Decisions (2):
   Use SQLite for persistence (Jan 15)
   KDL for config format (Jan 14)
 
-Open Threads (2):
-  vertex-routing: active (Jan 15)
-  tick-nesting: exploring (Jan 14)
+Threads (2):
+  vertex-routing (Jan 15)
+  tick-nesting (Jan 14)
 
-Active Tasks (2):
-  implement fold: in-progress (Jan 15)
-  add observer field: done (Jan 14)
+Tasks (2):
+  implement fold (Jan 15)
+  add observer field (Jan 14)
 
-Recent Changes (2):
+Changes (2):
   Added boundary detection to Spec (Jan 15)
   Refactored tick emission (Jan 15)

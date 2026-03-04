@@ -1,7 +1,7 @@
 2025-01-15:
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for
-  09:30 [task] implement fold [in-progress] Wire up Spec.apply.
+  09:30 [task] implement fold: Wire up Spec.apply.
 
 2025-01-14:
   16:00 [change] Added boundary detection
-  15:00 [thread] vertex-routing [active]
+  15:00 [thread] vertex-routing

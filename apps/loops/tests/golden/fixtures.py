@@ -10,89 +10,131 @@ from datetime import datetime, timezone
 REF_TS = 1736942400.0
 REF_DT = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
-# ── status ──────────────────────────────────────────────────────────────────
-SAMPLE_STATUS = {
-    "decisions": [
+# ── fold ──────────────────────────────────────────────────────────────────
+SAMPLE_FOLD = {
+    "sections": [
         {
-            "topic": "Use SQLite for persistence",
-            "message": "Chose SQLite over filesystem for atomic writes and query support.",
-            "ts": "2025-01-15T10:00:00+00:00",
+            "kind": "decision",
+            "fold_type": "by",
+            "key_field": "topic",
+            "count": 2,
+            "items": [
+                {
+                    "topic": "Use SQLite for persistence",
+                    "message": "Chose SQLite over filesystem for atomic writes and query support.",
+                    "_ts": "2025-01-15T10:00:00+00:00",
+                },
+                {
+                    "topic": "KDL for config format",
+                    "message": "KDL is human-friendly and supports nested structure.",
+                    "_ts": "2025-01-14T09:30:00+00:00",
+                },
+            ],
         },
         {
-            "topic": "KDL for config format",
-            "message": "KDL is human-friendly and supports nested structure.",
-            "ts": "2025-01-14T09:30:00+00:00",
+            "kind": "thread",
+            "fold_type": "by",
+            "key_field": "name",
+            "count": 2,
+            "items": [
+                {"name": "vertex-routing", "status": "active", "_ts": "2025-01-15T11:00:00+00:00"},
+                {"name": "tick-nesting", "status": "exploring", "_ts": "2025-01-14T16:00:00+00:00"},
+            ],
+        },
+        {
+            "kind": "task",
+            "fold_type": "by",
+            "key_field": "name",
+            "count": 2,
+            "items": [
+                {
+                    "name": "implement fold",
+                    "status": "in-progress",
+                    "summary": "Wire up Spec.apply to projection fold loop.",
+                    "_ts": "2025-01-15T11:30:00+00:00",
+                },
+                {
+                    "name": "add observer field",
+                    "status": "done",
+                    "summary": "Peer dissolved — observer is now a field on Fact.",
+                    "_ts": "2025-01-14T14:00:00+00:00",
+                },
+            ],
+        },
+        {
+            "kind": "change",
+            "fold_type": "collect",
+            "key_field": None,
+            "count": 2,
+            "items": [
+                {
+                    "summary": "Added boundary detection to Spec",
+                    "files": "libs/atoms/src/atoms/spec.py",
+                    "_ts": "2025-01-15T11:45:00+00:00",
+                },
+                {
+                    "summary": "Refactored tick emission",
+                    "files": "libs/engine/src/engine/temporal.py",
+                    "_ts": "2025-01-15T10:30:00+00:00",
+                },
+            ],
         },
     ],
-    "threads": [
-        {"name": "vertex-routing", "status": "active", "ts": "2025-01-15T11:00:00+00:00"},
-        {"name": "tick-nesting", "status": "exploring", "ts": "2025-01-14T16:00:00+00:00"},
-    ],
-    "tasks": [
-        {
-            "name": "implement fold",
-            "status": "in-progress",
-            "summary": "Wire up Spec.apply to projection fold loop.",
-            "ts": "2025-01-15T11:30:00+00:00",
-        },
-        {
-            "name": "add observer field",
-            "status": "done",
-            "summary": "Peer dissolved — observer is now a field on Fact.",
-            "ts": "2025-01-14T14:00:00+00:00",
-        },
-    ],
-    "changes": [
-        {
-            "summary": "Added boundary detection to Spec",
-            "files": "libs/atoms/src/atoms/spec.py",
-            "ts": "2025-01-15T11:45:00+00:00",
-        },
-        {
-            "summary": "Refactored tick emission",
-            "files": "libs/engine/src/engine/temporal.py",
-            "ts": "2025-01-15T10:30:00+00:00",
-        },
-    ],
+    "vertex": "session",
 }
 
-# ── log ─────────────────────────────────────────────────────────────────────
-SAMPLE_LOG = [
-    {
-        "kind": "decision",
-        "ts": "2025-01-15T10:00:00+00:00",
-        "payload": {
-            "topic": "Use SQLite for persistence",
-            "message": "Chose SQLite over filesystem for atomic writes.",
+# Legacy alias for any remaining references
+SAMPLE_STATUS = SAMPLE_FOLD
+
+# ── stream ─────────────────────────────────────────────────────────────────
+SAMPLE_STREAM = {
+    "facts": [
+        {
+            "kind": "decision",
+            "ts": "2025-01-15T10:00:00+00:00",
+            "payload": {
+                "topic": "Use SQLite for persistence",
+                "message": "Chose SQLite over filesystem for atomic writes.",
+            },
+            "observer": "kaygee",
         },
-        "observer": "kaygee",
-    },
-    {
-        "kind": "task",
-        "ts": "2025-01-15T09:30:00+00:00",
-        "payload": {
-            "name": "implement fold",
-            "status": "in-progress",
-            "summary": "Wire up Spec.apply.",
+        {
+            "kind": "task",
+            "ts": "2025-01-15T09:30:00+00:00",
+            "payload": {
+                "name": "implement fold",
+                "status": "in-progress",
+                "summary": "Wire up Spec.apply.",
+            },
+            "observer": "kaygee",
         },
-        "observer": "kaygee",
-    },
-    {
-        "kind": "change",
-        "ts": "2025-01-14T16:00:00+00:00",
-        "payload": {
-            "summary": "Added boundary detection",
-            "files": "libs/atoms/src/atoms/spec.py",
+        {
+            "kind": "change",
+            "ts": "2025-01-14T16:00:00+00:00",
+            "payload": {
+                "summary": "Added boundary detection",
+                "files": "libs/atoms/src/atoms/spec.py",
+            },
+            "observer": "kaygee",
         },
-        "observer": "kaygee",
+        {
+            "kind": "thread",
+            "ts": "2025-01-14T15:00:00+00:00",
+            "payload": {"name": "vertex-routing", "status": "active"},
+            "observer": "kaygee",
+        },
+    ],
+    "fold_meta": {
+        "decision": {"key_field": "topic"},
+        "task": {"key_field": "name"},
+        "change": {"key_field": None},
+        "thread": {"key_field": "name"},
     },
-    {
-        "kind": "thread",
-        "ts": "2025-01-14T15:00:00+00:00",
-        "payload": {"name": "vertex-routing", "status": "active"},
-        "observer": "kaygee",
-    },
-]
+    "vertex": "session",
+}
+
+# Legacy alias
+SAMPLE_LOG = SAMPLE_STREAM
 
 # ── store ───────────────────────────────────────────────────────────────────
 # freshness uses a fixed datetime so we can mock _relative_time

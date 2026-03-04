@@ -18,12 +18,12 @@ from loops.lenses.compile import compile_view
 from loops.lenses.start import start_view
 from loops.lenses.store import store_view
 from loops.lenses.pop import pop_view
-from loops.lenses.status import status_view
-from loops.lenses.log import log_view
+from loops.lenses.fold import fold_view
+from loops.lenses.stream import stream_view
 
 from .fixtures import (
-    SAMPLE_STATUS,
-    SAMPLE_LOG,
+    SAMPLE_FOLD,
+    SAMPLE_STREAM,
     SAMPLE_STORE,
     SAMPLE_START,
     SAMPLE_COMPILE_LOOP,
@@ -56,14 +56,14 @@ def _render_all() -> list[tuple[str, str, str]]:
     entries: list[tuple[str, str, str]] = []
 
     entries.append((
-        "status",
-        "Session status — decisions, threads, tasks, changes.",
-        block_to_text(status_view(SAMPLE_STATUS, ZOOM, WIDTH)),
+        "fold",
+        "Folded state — decisions, threads, tasks, changes.",
+        block_to_text(fold_view(SAMPLE_FOLD, ZOOM, WIDTH)),
     ))
     entries.append((
-        "log",
-        "Session log — chronological facts.",
-        block_to_text(log_view(SAMPLE_LOG, ZOOM, WIDTH)),
+        "stream",
+        "Event stream — chronological facts.",
+        block_to_text(stream_view(SAMPLE_STREAM, ZOOM, WIDTH)),
     ))
 
     with patch("loops.lenses.store._relative_time", _frozen_relative_time):

@@ -1,10 +1,11 @@
 """CLI for the loops runtime.
 
-Vertex operations:
-    loops <vertex> status           Show store status
-    loops <vertex> log              Show recent facts
+Observer operations (vertex-first):
+    loops <vertex>                  Show folded state (default)
+    loops <vertex> fold             Show folded state
+    loops <vertex> stream           Show event stream
+    loops <vertex> stream <query>   Search events (FTS5)
     loops <vertex> emit <kind> ...  Inject a fact
-    loops <vertex> store            Inspect vertex store contents
 
 Root commands:
     loops ls                        List vertices
@@ -1173,15 +1174,26 @@ def _resolve_app_view(mod, view_name: str):
 
     Lookup order:
     1. mod.<view_name> — app provides a specific view function
-    2. PAYLOAD_LENS — app provides a lens, generic view wraps it
-    3. None — caller falls back to shared loops lenses
+    2. Fallback names: fold_view → status_view, stream_view → log_view
+    3. PAYLOAD_LENS — app provides a lens, generic view wraps it
+    4. None — caller falls back to shared loops lenses
     """
     specific = getattr(mod, view_name, None)
     if specific is not None:
         return specific
 
+    # Fallback aliases for transition period
+    _fallbacks = {
+        "fold_view": "status_view",
+        "stream_view": "log_view",
+    }
+    if view_name in _fallbacks:
+        fallback = getattr(mod, _fallbacks[view_name], None)
+        if fallback is not None:
+            return fallback
+
     payload_lens = getattr(mod, "PAYLOAD_LENS", None)
-    if payload_lens is not None and view_name in ("log_view", "search_view"):
+    if payload_lens is not None and view_name in ("log_view", "search_view", "stream_view"):
         # Build a generic log/search view that delegates payload rendering to the lens
         return _make_lens_log_view(payload_lens)
 
@@ -1275,49 +1287,34 @@ def _generic_fold_summary(fold_state: dict) -> dict:
     return sections
 
 
-def _run_search(argv: list[str], *, vertex_path: Path, mod=None) -> int:
-    """Run search command via painted CLI harness."""
+def _run_stream(argv: list[str], *, vertex_path: Path, mod=None) -> int:
+    """Run stream command — unified event history with optional search.
+
+    Dissolves the old log + search into one temporal mode.
+    """
     from painted import run_cli
     from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("query", nargs="*")
+    pre.add_argument("query", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     pre.add_argument("--since", default=None)
-    pre.add_argument("--limit", type=int, default=100)
     known, rest = pre.parse_known_args(argv)
 
-    query_str = " ".join(known.query) if known.query else ""
-
-    # Resolve render function: module search_view → module log_view → shared log_view
+    # Resolve render function: module override → shared lens
     render_fn = None
     if mod is not None:
-        render_fn = _resolve_app_view(mod, "search_view")
-        if render_fn is None:
-            render_fn = _resolve_app_view(mod, "log_view")
+        render_fn = _resolve_app_view(mod, "stream_view")
     if render_fn is None:
-        from .lenses.log import log_view as render_fn
+        from .lenses.stream import stream_view as render_fn
 
     def fetch():
-        if not query_str:
-            return []
-        from datetime import datetime, timezone
-        from engine import vertex_search
-        from .commands.session import _parse_duration
-
-        since_ts = None
-        if known.since:
-            try:
-                now = datetime.now(timezone.utc)
-                since_ts = now.timestamp() - _parse_duration(known.since)
-            except ValueError:
-                pass
-        return vertex_search(
+        from .commands.observer import fetch_stream
+        return fetch_stream(
             vertex_path,
-            query_str,
+            query=known.query,
             kind=known.kind,
-            since=since_ts,
-            limit=known.limit,
+            since=known.since,
         )
 
     def render(ctx, data):
@@ -1327,19 +1324,18 @@ def _run_search(argv: list[str], *, vertex_path: Path, mod=None) -> int:
         rest,
         fetch=fetch,
         render=render,
-        prog="loops search",
-        description="Search facts",
+        prog="loops stream",
+        description="Show event stream",
         help_args=[
-            HelpArg("query", "Search terms", positional=True),
+            HelpArg("query", "Search text (FTS5)", positional=True),
             HelpArg("--kind", "Filter by fact kind"),
-            HelpArg("--since", "Time window"),
-            HelpArg("--limit", "Max results", default="100"),
+            HelpArg("--since", "Time window (7d, 24h, 1h)", default="7d"),
         ],
     )
 
 
-def _run_status(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
-    """Run status command via painted CLI harness."""
+def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
+    """Run fold command — show collapsed vertex state."""
     from painted import run_cli
     from painted.fidelity import HelpArg
 
@@ -1352,14 +1348,14 @@ def _run_status(argv: list[str], *, vertex_path: Path | None = None, mod=None) -
     # Resolve render function: module override → shared lens
     render_fn = None
     if mod is not None:
-        render_fn = _resolve_app_view(mod, "status_view")
+        render_fn = _resolve_app_view(mod, "fold_view")
     if render_fn is None:
-        from .lenses.status import status_view as render_fn
+        from .lenses.fold import fold_view as render_fn
 
     def fetch():
         nonlocal vertex_path
         if vertex_path is None:
-            from .commands.session import _resolve_local_vertex
+            from .commands.observer import _resolve_local_vertex
             vname = getattr(known, "vertex", None)
             if vname is not None:
                 vertex_path = _resolve_named_vertex(vname)
@@ -1372,8 +1368,8 @@ def _run_status(argv: list[str], *, vertex_path: Path | None = None, mod=None) -
             if fetch_fn is not None:
                 return fetch_fn(fold_state)
             return _generic_fold_summary(fold_state)
-        from .commands.session import fetch_status
-        return fetch_status(vertex_path, kind=known.kind)
+        from .commands.observer import fetch_fold
+        return fetch_fold(vertex_path, kind=known.kind)
 
     def render(ctx, data):
         return render_fn(data, ctx.zoom, ctx.width)
@@ -1382,59 +1378,29 @@ def _run_status(argv: list[str], *, vertex_path: Path | None = None, mod=None) -
         rest,
         fetch=fetch,
         render=render,
-        prog="loops status",
-        description="Show store status",
+        prog="loops fold",
+        description="Show folded state",
         help_args=[
             HelpArg("--kind", "Filter by fact kind"),
         ],
     )
 
 
-def _run_log(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
-    """Run log command via painted CLI harness."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-
-    pre = argparse.ArgumentParser(add_help=False)
+def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
+    """Legacy log alias — delegates to _run_stream with --since default."""
+    # If vertex_path not provided, we need to resolve it first for the legacy path
     if vertex_path is None:
+        pre = argparse.ArgumentParser(add_help=False)
         pre.add_argument("vertex", nargs="?", default=None)
-    pre.add_argument("--since", default="7d")
-    pre.add_argument("--kind", default=None)
-    known, rest = pre.parse_known_args(argv)
-
-    # Resolve render function: module override → shared lens
-    render_fn = None
-    if mod is not None:
-        render_fn = _resolve_app_view(mod, "log_view")
-    if render_fn is None:
-        from .lenses.log import log_view as render_fn
-
-    def fetch():
-        nonlocal vertex_path
-        if vertex_path is None:
-            from .commands.session import _resolve_local_vertex
-            vname = getattr(known, "vertex", None)
-            if vname is not None:
-                vertex_path = _resolve_named_vertex(vname)
-            else:
-                vertex_path = _resolve_local_vertex()
-        from .commands.session import fetch_log
-        return fetch_log(vertex_path, known.since, known.kind)
-
-    def render(ctx, data):
-        return render_fn(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops log",
-        description="Show recent facts",
-        help_args=[
-            HelpArg("--since", "Time window", default="7d"),
-            HelpArg("--kind", "Filter by fact kind"),
-        ],
-    )
+        known, rest = pre.parse_known_args(argv)
+        vname = getattr(known, "vertex", None)
+        if vname is not None:
+            vertex_path = _resolve_named_vertex(vname)
+        else:
+            from .commands.observer import _resolve_local_vertex
+            vertex_path = _resolve_local_vertex()
+        argv = rest
+    return _run_stream(argv, vertex_path=vertex_path, mod=mod)
 
 
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -1739,8 +1705,10 @@ def _run_export(argv: list[str]) -> int:
 _ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls", "store"}
 
 _VERTEX_OPS = frozenset({
-    "status", "log", "search", "emit", "store",
+    "fold", "stream", "emit", "store",
     "check", "ls", "add", "rm", "export",
+    # Legacy aliases
+    "status", "log", "search",
 })
 
 
@@ -1762,11 +1730,10 @@ def _render_main_help(argv: list[str]) -> int:
 
     vertex_group = HelpGroup(
         name="Vertex operations",
-        hint="loops <vertex> <op>",
+        hint="loops <vertex> [op]",
         flags=(
-            HelpFlag(None, "status", "Show store status", detail="[--kind KIND]"),
-            HelpFlag(None, "log", "Show recent facts", detail="[--since SINCE] [--kind KIND]"),
-            HelpFlag(None, "search", "Search facts", detail="<query> [--kind KIND]"),
+            HelpFlag(None, "fold", "Show folded state (default)", detail="[--kind KIND]"),
+            HelpFlag(None, "stream", "Show event stream", detail="[query] [--since SINCE] [--kind KIND]"),
             HelpFlag(None, "emit", "Inject a fact", detail="<kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "store", "Inspect store contents"),
             HelpFlag(None, "check", "Run health checks", detail="[--observer OBS]"),
@@ -1839,10 +1806,15 @@ def _render_main_help(argv: list[str]) -> int:
     return 0
 
 
-def _dispatch_vertex_op(
-    vertex_name: str, vertex_path: Path, op: str, rest: list[str]
+def _dispatch_observer(
+    vertex_name: str, vertex_path: Path, rest: list[str]
 ) -> int:
-    """Dispatch a vertex operation with resolved vertex."""
+    """Dispatch observer operations with resolved vertex.
+
+    Default (no subcommand or flags only) → fold mode.
+    Temporal modes: fold, stream, emit.
+    Legacy aliases: status → fold, log → stream, search → stream.
+    """
     import importlib
 
     # Load app module if registered
@@ -1850,25 +1822,40 @@ def _dispatch_vertex_op(
     if vertex_name in _APPS:
         mod = importlib.import_module(_APPS[vertex_name])
 
-    # Core vertex operations
-    if op == "status":
-        return _run_status(rest, vertex_path=vertex_path, mod=mod)
-    if op == "log":
-        return _run_log(rest, vertex_path=vertex_path, mod=mod)
-    if op == "search":
-        return _run_search(rest, vertex_path=vertex_path, mod=mod)
+    # Default: no subcommand or flags only → fold mode
+    if not rest or rest[0].startswith("-"):
+        return _run_fold(rest, vertex_path=vertex_path, mod=mod)
+
+    op = rest[0]
+    args = rest[1:]
+
+    # Temporal modes
+    if op == "fold":
+        return _run_fold(args, vertex_path=vertex_path, mod=mod)
+    if op == "stream":
+        return _run_stream(args, vertex_path=vertex_path, mod=mod)
     if op == "emit":
-        return _run_emit(rest, vertex_path=vertex_path)
+        return _run_emit(args, vertex_path=vertex_path)
+
+    # Legacy aliases
+    if op == "status":
+        return _run_fold(args, vertex_path=vertex_path, mod=mod)
+    if op == "log":
+        return _run_log_legacy(args, vertex_path=vertex_path, mod=mod)
+    if op == "search":
+        return _run_stream([op] + args, vertex_path=vertex_path, mod=mod)
+
+    # Kept as-is (dissolve later)
     if op == "store":
-        return _run_store(rest, vertex_path=vertex_path)
+        return _run_store(args, vertex_path=vertex_path)
     if op == "check":
-        return _run_check(rest, vertex_path=vertex_path)
+        return _run_check(args, vertex_path=vertex_path)
 
     # Population operations — reconstruct target argv
     if op == "ls":
         qualifier = None
         flags = []
-        for arg in rest:
+        for arg in args:
             if qualifier is None and not arg.startswith("-"):
                 qualifier = arg
             else:
@@ -1877,7 +1864,7 @@ def _dispatch_vertex_op(
         return _run_ls([target] + flags)
     if op in ("add", "rm", "export"):
         handler = {"add": _run_add, "rm": _run_rm, "export": _run_export}[op]
-        return handler([vertex_name] + rest)
+        return handler([vertex_name] + args)
 
     # Feedback handlers from app module
     if mod is not None:
@@ -1893,8 +1880,8 @@ def _dispatch_vertex_op(
             parser.add_argument(
                 "--observer", default=os.environ.get("LOOPS_OBSERVER", "user")
             )
-            args = parser.parse_args(rest)
-            return handler(vertex_path, args)
+            parsed = parser.parse_args(args)
+            return handler(vertex_path, parsed)
 
     _err(f"Unknown operation: {op}")
     return 1
@@ -1967,12 +1954,7 @@ def main(argv: list[str] | None = None) -> int:
     vertex_path = _resolve_vertex_for_dispatch(vertex_name)
 
     if vertex_path is not None:
-        if len(argv) < 2:
-            ops = ", ".join(sorted(_VERTEX_OPS))
-            _err(f"Usage: loops {vertex_name} <op>  ({ops})")
-            return 1
-
-        return _dispatch_vertex_op(vertex_name, vertex_path, argv[1], argv[2:])
+        return _dispatch_observer(vertex_name, vertex_path, argv[1:])
 
     # Path-like arg → suggest the right invocation
     if vertex_name.endswith(".vertex") or vertex_name.startswith("./") or vertex_name.startswith("/"):

@@ -299,10 +299,12 @@ def print_block(
         writer = Writer(stream)
         write_block_ansi(block, writer, stream)
     else:
-        # Plain text: just characters, no styling
+        # Plain text: just characters, no styling.
+        # rstrip trailing spaces — join_vertical pads to widest block,
+        # which creates noise when piped to files/other tools.
         for row_idx in range(block.height):
-            for cell in block.row(row_idx):
-                stream.write(cell.char)
+            line = "".join(cell.char for cell in block.row(row_idx))
+            stream.write(line.rstrip())
             stream.write("\n")
 
     stream.flush()

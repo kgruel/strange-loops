@@ -54,8 +54,8 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Decisions (2):" in out
-        # SUMMARY zoom: topics shown, messages omitted
+        assert "## DECISION" in out
+        # SUMMARY zoom: topics shown as labels with body snippets
         assert "sigil" in out
         assert "store" in out
 
@@ -87,7 +87,7 @@ class TestStatus:
         result = main(["session", "status"])
         assert result == 0
         out = capsys.readouterr().out
-        assert "Decisions (1):" in out
+        assert "## DECISION" in out
         assert "sigil" in out
 
         # DETAILED: message body visible, latest wins
@@ -124,7 +124,7 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Tasks (1):" in out
+        assert "## TASK" in out
         assert "fix/review" in out
 
     def test_shows_changes(self, tmp_path, monkeypatch, capsys):
@@ -138,7 +138,7 @@ class TestStatus:
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Changes (1):" in out
+        assert "## CHANGE" in out
         assert "structural AST" in out
 
     def test_json_output(self, tmp_path, monkeypatch, capsys):

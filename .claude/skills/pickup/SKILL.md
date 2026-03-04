@@ -27,14 +27,47 @@ Run probes **in parallel where possible**, then summarize.
 ### Layer 1: Identity — "Who am I"
 
 ```bash
-uv run loops identity status 2>/dev/null
+uv run loops identity log --json 2>/dev/null | jq -r '
+[group_by(.kind)[] | sort_by(.ts) | reverse |
+  if .[0].kind == "self" then [unique_by(.payload.name)[]]
+  elif .[0].kind == "principle" then [unique_by(.payload.name)[]]
+  elif .[0].kind == "observation" then [unique_by(.payload.topic)[]]
+  elif .[0].kind == "thread" then [unique_by(.payload.name)[]]
+  elif .[0].kind == "intention" then [unique_by(.payload.trigger)[]]
+  else . end
+] | flatten |
+group_by(.kind) |
+sort_by(.[0].kind |
+  if . == "self" then "0" elif . == "principle" then "1"
+  elif . == "observation" then "2" elif . == "thread" then "3"
+  elif . == "intention" then "4" else "5" end) |
+.[] |
+(.[0].kind | if . == "self" then "SELF" elif . == "principle" then "PRINCIPLES"
+  elif . == "observation" then "OBSERVATIONS" elif . == "thread" then "THREADS"
+  elif . == "intention" then "INTENTIONS" else (. | ascii_upcase) end) as $header |
+"## " + $header + "\n" +
+([.[] |
+  if .kind == "self" then "  \(.payload.name): \(.payload.message)"
+  elif .kind == "principle" then "  \(.payload.name): \(.payload.message)"
+  elif .kind == "observation" then "  \(.payload.topic): \(.payload.message)"
+  elif .kind == "thread" then "  \(.payload.name) [\(.payload.status // "open")]: \(.payload.message)"
+  elif .kind == "intention" then "  \(.payload.trigger): \(.payload.message)"
+  else "  \(.payload | tostring)" end
+] | join("\n")) + "\n"
+'
 ```
 
-Read the identity store. This is sense of self — not operational context.
-Surface who I am: principles I hold, observations I've made, insights from
-prior sessions, open questions about my own perspective. Ground the session
-in self-knowledge before turning to project context. Skip if no identity
-data yet.
+This renders identity with full message content, deduplicated by fold key,
+ordered: self → principles → observations → threads → intentions.
+
+Read this output carefully — it IS your sense of self. Surface it in the
+pickup summary. Skip if empty (no identity data yet).
+
+**Observer name**: The SELF section's `name` entry holds your observer identity.
+Use that name for all `--observer=<name>` flags on subsequent emit commands.
+If no `self` facts exist, you are unidentified; consider emitting one during
+wrapup via:
+`uv run loops identity emit self --observer=<name> name=name "who I am"`
 
 ### Layer 2: Context — "What are we working on"
 
@@ -84,8 +117,11 @@ git log --oneline -3 2>/dev/null
 
 Present as concise bullets:
 
-- **Identity** — grounding: principles, observations, or open questions from the identity store
-- **Last session** — handoff summary (1-2 lines from the handoff fact)
+- **Identity** — who you are (from `self` kind), principles you hold, observations
+  you've made. Surface the *content* of self-knowledge, not just counts. This
+  grounds the session in who you are before what you're doing.
+- **Last session** — handoff summary (1-2 lines). Prefer handoffs from YOUR
+  observer name when multiple observers have emitted handoffs.
 - **Open threads** — from meta + project, count + names of active ones
 - **Peer context** — any messages from Alcove since last session, or "no new messages"
 - **Workspace** — uncommitted changes or clean, branch name

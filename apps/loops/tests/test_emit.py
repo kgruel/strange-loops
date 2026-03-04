@@ -39,6 +39,7 @@ class TestEmit:
         home = tmp_path / "home"
         _write_vertex(home, "session", store="./data/session.db")
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         fixed = py_datetime(2025, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 

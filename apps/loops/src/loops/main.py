@@ -1372,7 +1372,11 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> 
         return fetch_fold(vertex_path, kind=known.kind)
 
     def render(ctx, data):
-        return render_fn(data, ctx.zoom, ctx.width)
+        # When piped (not TTY), pass width=None so text flows without
+        # truncation or padding. The fold output IS the data — useful
+        # directly as a system prompt or piped to other tools.
+        w = ctx.width if ctx.is_tty else None
+        return render_fn(data, ctx.zoom, w)
 
     return run_cli(
         rest,

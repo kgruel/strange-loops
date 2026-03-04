@@ -99,10 +99,17 @@ def fetch_fold(vertex_path: Path, kind: str | None = None) -> dict:
     ast = parse_vertex_file(vertex_path)
     fold_state = vertex_read(vertex_path)
 
-    active = {kind} if kind else set(fold_state.keys())
+    # Declaration order from AST, not alphabetical.
+    # Include kinds that have fold state OR are declared (declared-but-empty still show).
+    if kind:
+        ordered_kinds = [kind]
+    else:
+        declared = list(ast.loops.keys())
+        undeclared = [k for k in fold_state if k not in ast.loops]
+        ordered_kinds = declared + undeclared
 
     sections: list[dict] = []
-    for kind_name in sorted(active):
+    for kind_name in ordered_kinds:
         state = fold_state.get(kind_name, {})
         items_raw = state.get("items", state)
 

@@ -19,6 +19,19 @@ loops project emit <kind> key=val "msg"    # resolves via .loops/ walk-up
 loops identity emit <kind> "message"       # config-level vertex
 ```
 
+## Observer identity
+
+All emit commands MUST include `--observer=<name>`. Read your observer name
+from the identity store (the `self/name` observation established during pickup).
+If you don't know your observer name, read it now:
+
+```bash
+uv run loops identity log --kind observation --json 2>/dev/null
+```
+
+Look for `topic: "self/name"`. Use that name for all `--observer` flags below.
+If no self/name exists, ask the user what observer name to use.
+
 ## Steps
 
 ### Layer 1: Capture — "What happened this session"
@@ -28,15 +41,15 @@ session that haven't been captured yet.
 
 **Meta store** (cross-cutting patterns, ways of working):
 ```bash
-uv run loops meta emit decision topic=X "rationale"
-uv run loops meta emit thread name=X status=open "description"
-uv run loops meta emit thread name=X status=resolved "outcome"
+uv run loops meta emit decision --observer=<name> topic=X "rationale"
+uv run loops meta emit thread --observer=<name> name=X status=open "description"
+uv run loops meta emit thread --observer=<name> name=X status=resolved "outcome"
 ```
 
 **Project store** (try it — CLI walks up to find `.loops/`, skip on failure):
 ```bash
-uv run loops project emit decision topic=X "rationale"
-uv run loops project emit thread name=X status=open "description"
+uv run loops project emit decision --observer=<name> topic=X "rationale"
+uv run loops project emit thread --observer=<name> name=X status=open "description"
 ```
 
 Ask the user what should be captured if unclear. Don't invent facts.
@@ -50,7 +63,7 @@ reads first. It should answer:
 - What's next?
 
 ```bash
-uv run loops meta emit handoff "Focus: ... Done: ... Next: ..."
+uv run loops meta emit handoff --observer=<name> "Focus: ... Done: ... Next: ..."
 ```
 
 Keep it to 2-3 sentences. The handoff is orientation, not a transcript.
@@ -88,9 +101,9 @@ Only emit if something genuinely surfaced. Most sessions won't have identity
 observations — that's fine. Don't force it.
 
 ```bash
-uv run loops identity emit observation "..."
-uv run loops identity emit principle "..."
-uv run loops identity emit thread name=X status=open "..."
+uv run loops identity emit observation --observer=<name> topic=X "..."
+uv run loops identity emit principle --observer=<name> name=X "..."
+uv run loops identity emit thread --observer=<name> name=X status=open "..."
 ```
 
 ### Layer 5: Workspace — "Clean up"

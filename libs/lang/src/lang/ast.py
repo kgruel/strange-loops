@@ -418,6 +418,27 @@ class CombineEntry:
 
 
 # -----------------------------------------------------------------------------
+# Observer Declaration (for .vertex files)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GrantDecl:
+    """Grant constraints for an observer."""
+
+    potential: frozenset[str]  # kinds this observer can emit
+
+
+@dataclass(frozen=True)
+class ObserverDecl:
+    """An observer declared in a vertex file."""
+
+    name: str
+    identity: str | None = None  # vertex name for identity store
+    grant: GrantDecl | None = None  # emission constraints
+
+
+# -----------------------------------------------------------------------------
 # Top-level File ASTs
 # -----------------------------------------------------------------------------
 
@@ -454,6 +475,7 @@ class VertexFile:
     emit: str | None = None
     combine: tuple[CombineEntry, ...] | None = None
     sources_blocks: tuple[SourcesBlock, ...] | None = None
+    observers: tuple[ObserverDecl, ...] | None = None
 
     # Source location for error reporting
     path: Path | None = None

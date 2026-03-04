@@ -1,57 +1,14 @@
-"""Observer commands — fold (collapsed state) and stream (event history)."""
+"""Data retrieval — fold (collapsed state) and stream (event history)."""
 
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-
-def _observer() -> str:
-    """Read observer from LOOPS_OBSERVER env var."""
-    return os.environ.get("LOOPS_OBSERVER", "")
-
-
-def _emit_fact(store_path: Path, kind: str, observer: str, payload: dict) -> None:
-    """Emit a fact into a store."""
-    from atoms import Fact
-    from engine import SqliteStore
-
-    ts = datetime.now(timezone.utc).timestamp()
-    fact = Fact(kind=kind, ts=ts, payload=payload, observer=observer, origin="")
-
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore(
-        path=store_path, serialize=Fact.to_dict, deserialize=Fact.from_dict
-    ) as store:
-        store.append(fact)
-
-
-def _resolve_local_vertex() -> Path:
-    """Find a vertex file via local cwd or LOOPS_HOME fallback.
-
-    Resolution order:
-    1. Local vertex in cwd (*.vertex)
-    2. LOOPS_HOME/session/session.vertex
-
-    Raises FileNotFoundError if neither found.
-    """
-    from loops.main import _find_local_vertex, loops_home
-
-    # 1. Local vertex in cwd
-    local = _find_local_vertex()
-    if local is not None:
-        return local
-
-    # 2. LOOPS_HOME session fallback
-    session_vertex = loops_home() / "session" / "session.vertex"
-    if session_vertex.exists():
-        return session_vertex
-
-    raise FileNotFoundError(
-        "No vertex found. Run 'loops init --template session' or 'loops emit <kind> ...' first."
-    )
+if TYPE_CHECKING:
+    from atoms import FoldItem, FoldState
 
 
 def _parse_duration(s: str) -> float:
@@ -65,33 +22,17 @@ def _parse_duration(s: str) -> float:
     return value * multipliers[unit]
 
 
-def _format_date(ts) -> str:
-    """Format timestamp as short date (e.g. 'Feb 27')."""
-    if isinstance(ts, str):
-        try:
-            dt = datetime.fromisoformat(ts)
-        except ValueError:
-            return ts[:10] if len(ts) >= 10 else ts
-    elif isinstance(ts, datetime):
-        dt = ts
-    elif isinstance(ts, (int, float)):
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    else:
-        return "?"
-    return f"{dt.strftime('%b')} {dt.day}"
-
-
-def fetch_fold(vertex_path: Path, kind: str | None = None) -> dict:
+def fetch_fold(vertex_path: Path, kind: str | None = None) -> FoldState:
     """Fetch fold state driven entirely by vertex declaration.
 
     No per-kind extractors. The fold declaration's key_field IS the
     display key. fold_type (by/collect) IS the rendering strategy.
 
-    Returns ``{"sections": [...], "vertex": str}`` where each section is::
-
-        {"kind": str, "items": list[dict], "fold_type": "by"|"collect",
-         "key_field": str|None, "count": int}
+    Returns a typed ``FoldState`` — the contract between engine computation
+    and lens rendering.
     """
+    from atoms import FoldItem, FoldSection, FoldState
+
     from engine import vertex_read
     from lang import parse_vertex_file
     from lang.ast import FoldBy, FoldCollect
@@ -108,7 +49,7 @@ def fetch_fold(vertex_path: Path, kind: str | None = None) -> dict:
         undeclared = [k for k in fold_state if k not in ast.loops]
         ordered_kinds = declared + undeclared
 
-    sections: list[dict] = []
+    sections: list[FoldSection] = []
     for kind_name in ordered_kinds:
         state = fold_state.get(kind_name, {})
         items_raw = state.get("items", state)
@@ -127,23 +68,40 @@ def fetch_fold(vertex_path: Path, kind: str | None = None) -> dict:
             elif isinstance(fold_op, FoldCollect):
                 fold_type = "collect"
 
-        # Normalize items to list[dict] regardless of fold type
+        # Normalize items to list[dict] regardless of fold type,
+        # then convert to typed FoldItems
         if fold_type == "by" and isinstance(items_raw, dict):
-            items = [dict(v) for v in items_raw.values()]
+            raw_items = [dict(v) for v in items_raw.values()]
         elif isinstance(items_raw, list):
-            items = [dict(v) for v in items_raw]
+            raw_items = [dict(v) for v in items_raw]
         else:
-            items = [dict(items_raw)] if items_raw else []
+            raw_items = [dict(items_raw)] if items_raw else []
 
-        sections.append({
-            "kind": kind_name,
-            "items": items,
-            "fold_type": fold_type,
-            "key_field": key_field,
-            "count": len(items),
-        })
+        items = tuple(
+            _dict_to_fold_item(d) for d in raw_items
+        )
 
-    return {"sections": sections, "vertex": ast.name}
+        sections.append(FoldSection(
+            kind=kind_name,
+            items=items,
+            fold_type=fold_type,
+            key_field=key_field,
+        ))
+
+    return FoldState(sections=tuple(sections), vertex=ast.name)
+
+
+def _dict_to_fold_item(d: dict) -> FoldItem:
+    """Convert a raw fold output dict to a typed FoldItem.
+
+    Separates metadata (_ts, _observer, _origin) from payload.
+    """
+    from atoms import FoldItem
+
+    ts = d.pop("_ts", None)
+    observer = d.pop("_observer", "")
+    origin = d.pop("_origin", "")
+    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin)
 
 
 def fetch_stream(
@@ -198,7 +156,7 @@ def fetch_stream(
 
 # --- Legacy aliases for backwards compatibility ---
 
-def fetch_status(vertex_path: Path, kind: str | None = None) -> dict:
+def fetch_status(vertex_path: Path, kind: str | None = None) -> FoldState:
     """Legacy alias — delegates to fetch_fold."""
     return fetch_fold(vertex_path, kind=kind)
 

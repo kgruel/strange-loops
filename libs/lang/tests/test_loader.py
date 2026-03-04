@@ -1221,6 +1221,111 @@ combine {
         assert vertex.loops == {}
 
 
+class TestObserversBlock:
+    """Tests for observers block parsing."""
+
+    def test_basic_observers(self):
+        text = """\
+name "project"
+observers {
+  kyle { }
+  loops-claude { identity "identity" }
+}
+loops {
+  decision { fold { items "by" "topic" } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.observers is not None
+        assert len(vertex.observers) == 2
+
+        from lang import ObserverDecl
+
+        assert isinstance(vertex.observers[0], ObserverDecl)
+        assert vertex.observers[0].name == "kyle"
+        assert vertex.observers[0].identity is None
+        assert vertex.observers[0].grant is None
+
+        assert vertex.observers[1].name == "loops-claude"
+        assert vertex.observers[1].identity == "identity"
+
+    def test_observer_with_grant(self):
+        text = """\
+name "project"
+observers {
+  ci-bot {
+    grant {
+      potential "change" "log"
+    }
+  }
+}
+loops {
+  change { fold { items "collect" 20 } }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.observers is not None
+        obs = vertex.observers[0]
+        assert obs.name == "ci-bot"
+        assert obs.grant is not None
+        assert obs.grant.potential == frozenset({"change", "log"})
+
+    def test_observers_empty_error(self):
+        text = """\
+name "project"
+observers {
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="observers block requires at least one observer"):
+            parse_vertex(text)
+
+    def test_observer_unknown_field_error(self):
+        text = """\
+name "project"
+observers {
+  kyle {
+    email "kyle@example.com"
+  }
+}
+loops {
+  counter { fold { count "inc" } }
+}
+"""
+        with pytest.raises(ParseError, match="Unknown observer field"):
+            parse_vertex(text)
+
+    def test_no_observers_is_none(self):
+        vertex = parse_vertex_file(FIXTURES / "minimal.vertex")
+        assert vertex.observers is None
+
+    def test_dotvertex_defaults_name_to_root(self, tmp_path):
+        """A .vertex file (bare dotfile) defaults name to 'root'."""
+        dotvertex = tmp_path / ".vertex"
+        dotvertex.write_text("""\
+discover "./**/*.vertex"
+""")
+        vertex = parse_vertex_file(dotvertex)
+        assert vertex.name == "root"
+        assert vertex.discover == "./**/*.vertex"
+
+    def test_dotvertex_with_observers(self, tmp_path):
+        dotvertex = tmp_path / ".vertex"
+        dotvertex.write_text("""\
+discover "./**/*.vertex"
+
+observers {
+  kyle { }
+}
+""")
+        vertex = parse_vertex_file(dotvertex)
+        assert vertex.name == "root"
+        assert vertex.observers is not None
+        assert vertex.observers[0].name == "kyle"
+
+
 class TestSourcesSequentialBlock:
     """Tests for sources sequential { ... } block parsing."""
 

@@ -150,6 +150,7 @@ class TestEmit:
         home = tmp_path / "home"
         vertex_path = _write_vertex(home, "session", store="./data/session.db")
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main(
             [
@@ -166,3 +167,159 @@ class TestEmit:
         db_path = (vertex_path.parent / "data" / "session.db").resolve()
         facts = _read_all_facts(db_path)
         assert facts[0].observer == "human"
+
+
+class TestObserverResolution:
+    """Observer resolution from .vertex declarations."""
+
+    def _write_vertex_with_observers(
+        self, home: Path, name: str, *, observers_kdl: str
+    ) -> Path:
+        vdir = home / name
+        vdir.mkdir(parents=True)
+        vertex_path = vdir / f"{name}.vertex"
+        vertex_path.write_text(
+            f'name "{name}"\n'
+            'store "./data/session.db"\n'
+            f"{observers_kdl}\n"
+            "loops {\n"
+            '  counter { fold { count "inc" } }\n'
+            "}\n"
+        )
+        return vertex_path
+
+    def test_observer_from_global_dotvertex(self, tmp_path, monkeypatch, capsys):
+        """Single observer in global .vertex auto-resolves."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        _write_vertex(home, "session", store="./data/session.db")
+
+        # Write global .vertex with observer
+        (home / ".vertex").write_text(
+            'discover "./**/*.vertex"\n\n'
+            'observers {\n  test-human { }\n}\n'
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Ensure cwd has no .loops/.vertex in ancestry (avoid project-level pickup)
+        monkeypatch.chdir(tmp_path)
+
+        result = main(
+            ["session", "emit", "decision", "topic=test", "--dry-run"]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["observer"] == "test-human"
+
+    def test_observer_env_overrides_declaration(self, tmp_path, monkeypatch, capsys):
+        """LOOPS_OBSERVER env var selects observer (must still be declared)."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        _write_vertex(home, "session", store="./data/session.db")
+
+        (home / ".vertex").write_text(
+            'discover "./**/*.vertex"\n\n'
+            'observers {\n  declared-obs { }\n  env-obs { }\n}\n'
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setenv("LOOPS_OBSERVER", "env-obs")
+
+        result = main(
+            ["session", "emit", "decision", "topic=test", "--dry-run"]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["observer"] == "env-obs"
+
+    def test_observer_flag_overrides_all(self, tmp_path, monkeypatch, capsys):
+        """--observer flag takes highest priority (must still be declared)."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        _write_vertex(home, "session", store="./data/session.db")
+
+        (home / ".vertex").write_text(
+            'discover "./**/*.vertex"\n\n'
+            'observers {\n  declared-obs { }\n  flag-obs { }\n}\n'
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setenv("LOOPS_OBSERVER", "env-obs")
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "--observer", "flag-obs",
+                "topic=test", "--dry-run",
+            ]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["observer"] == "flag-obs"
+
+    def test_grant_potential_rejects_invalid_kind(self, tmp_path, monkeypatch, capsys):
+        """Observer with grant.potential rejects kinds outside the set."""
+        home = tmp_path / "home"
+        vertex_path = self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  ci-bot {\n    grant {\n      potential "change" "log"\n    }\n  }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "--observer", "ci-bot",
+                "topic=test",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "cannot emit kind" in err
+        assert "decision" in err
+
+    def test_grant_potential_allows_valid_kind(self, tmp_path, monkeypatch):
+        """Observer with grant.potential accepts kinds in the set."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  ci-bot {\n    grant {\n      potential "change" "counter"\n    }\n  }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "ci-bot",
+                "count=1",
+            ]
+        )
+        assert result == 0
+
+    def test_undeclared_observer_rejected(self, tmp_path, monkeypatch, capsys):
+        """Undeclared observer is rejected when observers block exists."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  kyle { }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "--observer", "unknown-user",
+                "topic=test",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "not declared" in err
+        assert "unknown-user" in err

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,7 +79,9 @@ def _load(target: str):
 
 
 def _observer() -> str:
-    return os.environ.get("LOOPS_OBSERVER", "")
+    from loops.commands.identity import resolve_observer
+
+    return resolve_observer()
 
 
 def _append_fact(store_path: Path, kind: str, payload: dict, observer: str) -> None:

@@ -25,6 +25,9 @@ from atoms.types import ValidationError
 # Fold vocabulary
 from atoms.fold import Avg, Collect, Count, FoldOp, Latest, Max, Min, Sum, TopN, Upsert, Window
 
+# Fold output contract
+from atoms.fold_state import FoldItem, FoldSection, FoldState
+
 # Parse vocabulary
 from atoms.parse import (
     Coerce,
@@ -71,6 +74,10 @@ __all__ = [
     "TopN",
     "Upsert",
     "Window",
+    # Fold output contract
+    "FoldItem",
+    "FoldSection",
+    "FoldState",
     # Parse vocabulary
     "Coerce",
     "Explode",

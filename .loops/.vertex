@@ -1,0 +1,7 @@
+// loops monorepo — workspace root
+discover "./**/*.vertex"
+
+observers {
+  kyle { }
+  loops-claude { }
+}

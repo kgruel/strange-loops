@@ -161,7 +161,7 @@ class TestStatus:
         assert "decision" in by_kind
         assert "task" in by_kind
         assert len(by_kind["decision"]["items"]) == 1
-        assert by_kind["decision"]["items"][0]["topic"] == "test"
+        assert by_kind["decision"]["items"][0]["payload"]["topic"] == "test"
         assert len(by_kind["task"]["items"]) == 1
 
     def test_no_vertex_found(self, tmp_path, monkeypatch, capsys):
@@ -375,15 +375,15 @@ class TestInitTemplate:
         assert (tmp_path / ".loops" / "data").is_dir()
 
     def test_no_template_is_root(self, tmp_path, monkeypatch, capsys):
-        """init without --template still creates root.vertex in LOOPS_HOME."""
+        """init without --template still creates .vertex in LOOPS_HOME."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
 
         result = main(["init"])
         assert result == 0
 
-        root = tmp_path / "root.vertex"
+        root = tmp_path / ".vertex"
         assert root.exists()
-        assert 'name "root"' in root.read_text()
+        assert "discover" in root.read_text()
 
     def test_idempotent_template(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)

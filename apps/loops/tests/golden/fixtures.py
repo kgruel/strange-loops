@@ -6,82 +6,84 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from atoms import FoldItem, FoldSection, FoldState
+
 # Fixed reference point: 2025-01-15T12:00:00 UTC
 REF_TS = 1736942400.0
 REF_DT = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 # ── fold ──────────────────────────────────────────────────────────────────
-SAMPLE_FOLD = {
-    "sections": [
-        {
-            "kind": "decision",
-            "fold_type": "by",
-            "key_field": "topic",
-            "count": 2,
-            "items": [
-                {
-                    "topic": "Use SQLite for persistence",
-                    "message": "Chose SQLite over filesystem for atomic writes and query support.",
-                    "_ts": "2025-01-15T10:00:00+00:00",
-                },
-                {
-                    "topic": "KDL for config format",
-                    "message": "KDL is human-friendly and supports nested structure.",
-                    "_ts": "2025-01-14T09:30:00+00:00",
-                },
-            ],
-        },
-        {
-            "kind": "thread",
-            "fold_type": "by",
-            "key_field": "name",
-            "count": 2,
-            "items": [
-                {"name": "vertex-routing", "status": "active", "_ts": "2025-01-15T11:00:00+00:00"},
-                {"name": "tick-nesting", "status": "exploring", "_ts": "2025-01-14T16:00:00+00:00"},
-            ],
-        },
-        {
-            "kind": "task",
-            "fold_type": "by",
-            "key_field": "name",
-            "count": 2,
-            "items": [
-                {
-                    "name": "implement fold",
-                    "status": "in-progress",
-                    "summary": "Wire up Spec.apply to projection fold loop.",
-                    "_ts": "2025-01-15T11:30:00+00:00",
-                },
-                {
-                    "name": "add observer field",
-                    "status": "done",
-                    "summary": "Peer dissolved — observer is now a field on Fact.",
-                    "_ts": "2025-01-14T14:00:00+00:00",
-                },
-            ],
-        },
-        {
-            "kind": "change",
-            "fold_type": "collect",
-            "key_field": None,
-            "count": 2,
-            "items": [
-                {
-                    "summary": "Added boundary detection to Spec",
-                    "files": "libs/atoms/src/atoms/spec.py",
-                    "_ts": "2025-01-15T11:45:00+00:00",
-                },
-                {
-                    "summary": "Refactored tick emission",
-                    "files": "libs/engine/src/engine/temporal.py",
-                    "_ts": "2025-01-15T10:30:00+00:00",
-                },
-            ],
-        },
-    ],
-    "vertex": "session",
-}
+SAMPLE_FOLD = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(
+                    payload={"topic": "Use SQLite for persistence",
+                             "message": "Chose SQLite over filesystem for atomic writes and query support."},
+                    ts="2025-01-15T10:00:00+00:00",
+                ),
+                FoldItem(
+                    payload={"topic": "KDL for config format",
+                             "message": "KDL is human-friendly and supports nested structure."},
+                    ts="2025-01-14T09:30:00+00:00",
+                ),
+            ),
+        ),
+        FoldSection(
+            kind="thread",
+            fold_type="by",
+            key_field="name",
+            items=(
+                FoldItem(
+                    payload={"name": "vertex-routing", "status": "active"},
+                    ts="2025-01-15T11:00:00+00:00",
+                ),
+                FoldItem(
+                    payload={"name": "tick-nesting", "status": "exploring"},
+                    ts="2025-01-14T16:00:00+00:00",
+                ),
+            ),
+        ),
+        FoldSection(
+            kind="task",
+            fold_type="by",
+            key_field="name",
+            items=(
+                FoldItem(
+                    payload={"name": "implement fold", "status": "in-progress",
+                             "summary": "Wire up Spec.apply to projection fold loop."},
+                    ts="2025-01-15T11:30:00+00:00",
+                ),
+                FoldItem(
+                    payload={"name": "add observer field", "status": "done",
+                             "summary": "Peer dissolved — observer is now a field on Fact."},
+                    ts="2025-01-14T14:00:00+00:00",
+                ),
+            ),
+        ),
+        FoldSection(
+            kind="change",
+            fold_type="collect",
+            key_field=None,
+            items=(
+                FoldItem(
+                    payload={"summary": "Added boundary detection to Spec",
+                             "files": "libs/atoms/src/atoms/spec.py"},
+                    ts="2025-01-15T11:45:00+00:00",
+                ),
+                FoldItem(
+                    payload={"summary": "Refactored tick emission",
+                             "files": "libs/engine/src/engine/temporal.py"},
+                    ts="2025-01-15T10:30:00+00:00",
+                ),
+            ),
+        ),
+    ),
+    vertex="session",
+)
 
 # Legacy alias for any remaining references
 SAMPLE_STATUS = SAMPLE_FOLD

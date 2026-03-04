@@ -1,4 +1,4 @@
-"""Vertex discovery — fetch vertex metadata from root.vertex."""
+"""Vertex discovery — fetch vertex metadata from workspace root (.vertex)."""
 
 from __future__ import annotations
 
@@ -74,18 +74,23 @@ def _extract_vertex_info(vpath: Path, ast: Any) -> dict[str, Any]:
 
 
 def fetch_vertices(home: Path) -> dict[str, Any]:
-    """Discover and describe all vertices under root.vertex.
+    """Discover and describe all vertices under .vertex (workspace root).
 
     Returns {"vertices": [{name, path, kind, loops, ...}, ...]}.
-    Raises FileNotFoundError if root.vertex is missing.
+    Raises FileNotFoundError if .vertex is missing.
     """
     from lang import parse_vertex_file
 
-    root_path = home / "root.vertex"
+    root_path = home / ".vertex"
     if not root_path.exists():
-        raise FileNotFoundError(
-            f"{root_path} not found. Run 'loops init' first."
-        )
+        # Backwards compat: accept existing root.vertex
+        legacy = home / "root.vertex"
+        if legacy.exists():
+            root_path = legacy
+        else:
+            raise FileNotFoundError(
+                f"{root_path} not found. Run 'loops init' first."
+            )
 
     root_ast = parse_vertex_file(root_path)
 

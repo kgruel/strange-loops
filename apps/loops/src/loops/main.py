@@ -68,8 +68,6 @@ def loops_home() -> Path:
 
 _ROOT_VERTEX = """\
 // Root vertex — discovers all .vertex files under this directory
-name "root"
-
 discover "./**/*.vertex"
 """
 
@@ -81,8 +79,12 @@ _APPS: dict[str, str] = {
 
 def _find_local_vertex() -> Path | None:
     """Find a .vertex file in .loops/ or cwd. Returns first match or None."""
-    # Prefer .loops/ (new convention)
+    # Prefer .loops/.vertex (workspace root convention)
     loops_dir = Path.cwd() / ".loops"
+    dotvertex = loops_dir / ".vertex"
+    if dotvertex.exists():
+        return dotvertex
+    # Fall back to .loops/*.vertex (named vertex)
     if loops_dir.is_dir():
         matches = sorted(loops_dir.glob("*.vertex"))
         if matches:
@@ -265,15 +267,18 @@ def cmd_init(args: argparse.Namespace) -> int:
         _msg(f"Created {vertex_path}")
         return 0
 
-    # No name + no template → root.vertex in LOOPS_HOME
+    # No name + no template → .vertex in LOOPS_HOME
     home = loops_home()
-    root = home / "root.vertex"
-    if root.exists():
+    root = home / ".vertex"
+    # Backwards compat: accept existing root.vertex
+    legacy_root = home / "root.vertex"
+    if root.exists() or legacy_root.exists():
+        existing = root if root.exists() else legacy_root
         from painted import show, Block
         from painted.palette import current_palette
 
         show(
-            Block.text(f"Already initialized: {root}", current_palette().muted),
+            Block.text(f"Already initialized: {existing}", current_palette().muted),
             file=sys.stdout,
         )
         return 0
@@ -284,14 +289,19 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def _resolve_vertex_path(file_arg: str | None) -> Path | None:
-    """Resolve a vertex file path, defaulting to LOOPS_HOME/root.vertex."""
+    """Resolve a vertex file path, defaulting to LOOPS_HOME/.vertex."""
     if file_arg is not None:
         return Path(file_arg)
-    root = loops_home() / "root.vertex"
-    if not root.exists():
-        _err(f"Error: {root} not found. Run 'loops init' first.")
-        return None
-    return root
+    home = loops_home()
+    root = home / ".vertex"
+    if root.exists():
+        return root
+    # Backwards compat: accept existing root.vertex
+    legacy = home / "root.vertex"
+    if legacy.exists():
+        return legacy
+    _err(f"Error: {root} not found. Run 'loops init' first.")
+    return None
 
 
 def _run_validate(argv: list[str]) -> int:
@@ -925,6 +935,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         resolve_template,
         resolve_vertex,
     )
+    from loops.commands.identity import resolve_observer, validate_emit
     from loops.pop_store import (
         POP_ADD_KIND,
         POP_RM_KIND,
@@ -935,6 +946,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
     from painted.palette import current_palette
 
     p = current_palette()
+
+    # Resolve observer from flag → env → .vertex declaration
+    observer = resolve_observer(args.observer)
 
     kind = args.kind
     parts = list(args.parts or [])
@@ -983,12 +997,20 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                 return 1
 
     payload = _parse_emit_parts(parts)
+
+    # Validate observer + kind against declaration chain
+    if vertex_path is not None:
+        err = validate_emit(vertex_path, observer, kind)
+        if err is not None:
+            show(Block.text(f"Error: {err}", p.error), file=sys.stderr)
+            return 1
+
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(
         kind=kind,
         ts=ts,
         payload=payload,
-        observer=args.observer or "",
+        observer=observer,
         origin="",
     )
 
@@ -1309,7 +1331,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path, mod=None) -> int:
         from .lenses.stream import stream_view as render_fn
 
     def fetch():
-        from .commands.observer import fetch_stream
+        from .commands.fetch import fetch_stream
         return fetch_stream(
             vertex_path,
             query=known.query,
@@ -1355,7 +1377,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> 
     def fetch():
         nonlocal vertex_path
         if vertex_path is None:
-            from .commands.observer import _resolve_local_vertex
+            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
             vname = getattr(known, "vertex", None)
             if vname is not None:
                 vertex_path = _resolve_named_vertex(vname)
@@ -1368,7 +1390,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> 
             if fetch_fn is not None:
                 return fetch_fn(fold_state)
             return _generic_fold_summary(fold_state)
-        from .commands.observer import fetch_fold
+        from .commands.fetch import fetch_fold
         return fetch_fold(vertex_path, kind=known.kind)
 
     def render(ctx, data):
@@ -1401,7 +1423,7 @@ def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=Non
         if vname is not None:
             vertex_path = _resolve_named_vertex(vname)
         else:
-            from .commands.observer import _resolve_local_vertex
+            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
             vertex_path = _resolve_local_vertex()
         argv = rest
     return _run_stream(argv, vertex_path=vertex_path, mod=mod)
@@ -1431,10 +1453,14 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
             from lang.population import resolve_vertex
 
             return resolve_vertex(file_arg, loops_home())
-        root = loops_home() / "root.vertex"
-        if not root.exists():
-            raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
-        return root
+        home = loops_home()
+        root = home / ".vertex"
+        if root.exists():
+            return root
+        legacy = home / "root.vertex"
+        if legacy.exists():
+            return legacy
+        raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
 
     def fetch():
         from .commands.store import make_fetcher
@@ -1657,8 +1683,8 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None) -> int:
     )
     parser.add_argument(
         "--observer",
-        default=os.environ.get("LOOPS_OBSERVER", ""),
-        help="Observer string (default: $LOOPS_OBSERVER or empty)",
+        default=None,
+        help="Observer string (default: from .vertex declaration or $LOOPS_OBSERVER)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print the fact JSON without storing"
@@ -1882,9 +1908,11 @@ def _dispatch_observer(
             parser.add_argument("--conversation", required=True, help="Conversation ID")
             parser.add_argument("--note", default="", help="Optional note")
             parser.add_argument(
-                "--observer", default=os.environ.get("LOOPS_OBSERVER", "user")
+                "--observer", default=None
             )
             parsed = parser.parse_args(args)
+            from loops.commands.identity import resolve_observer as _resolve_obs
+            parsed.observer = _resolve_obs(parsed.observer)
             return handler(vertex_path, parsed)
 
     _err(f"Unknown operation: {op}")

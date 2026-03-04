@@ -1,14 +1,33 @@
 """Fold lens — zoom-aware rendering of collapsed vertex state."""
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+from datetime import datetime, timezone
 
 from painted import Block, Style, Zoom, join_vertical
 
-from ..commands.observer import _format_date
+if TYPE_CHECKING:
+    from atoms import FoldItem, FoldSection, FoldState
 
 
-def fold_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
+def _format_date(ts) -> str:
+    """Format timestamp as short date (e.g. 'Feb 27')."""
+    if isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return ts[:10] if len(ts) >= 10 else ts
+    elif isinstance(ts, datetime):
+        dt = ts
+    elif isinstance(ts, (int, float)):
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    else:
+        return "?"
+    return f"{dt.strftime('%b')} {dt.day}"
+
+
+def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     """Render fold data at the given zoom level.
 
     One generic renderer driven by section metadata (key_field, fold_type).
@@ -21,18 +40,16 @@ def fold_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     Zoom levels:
     - MINIMAL: one-liner counts per kind
     - SUMMARY: key_field value as label + body snippet
-    - DETAILED: + remaining non-key, non-underscore payload fields
-    - FULL: + metadata fields (_ts, _observer, _origin)
+    - DETAILED: + remaining non-key payload fields
+    - FULL: + metadata (ts, observer, origin)
     """
-    sections: list[dict] = data.get("sections", [])
-
-    populated = [s for s in sections if s["items"]]
+    populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
     # MINIMAL: one-liner
     if zoom == Zoom.MINIMAL:
-        parts = [f"{len(s['items'])} {s['kind']}s" for s in populated]
+        parts = [f"{s.count} {s.kind}s" for s in populated]
         return Block.text(", ".join(parts), Style(), width=width)
 
     piped = width is None
@@ -46,13 +63,10 @@ def fold_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
         if rows:
             rows.append(Block.text("", Style(), width=width))
 
-        kind = s["kind"]
-        items = s["items"]
-        key_field = s.get("key_field")
-        header = _section_header(kind, len(items), piped=piped)
+        header = _section_header(s.kind, s.count, piped=piped)
         rows.append(Block.text(header, header_style, width=width))
 
-        _render_items(rows, items, key_field, kind, zoom, fmt, dim_style, meta_style, width)
+        _render_items(rows, s.items, s.key_field, s.kind, zoom, fmt, dim_style, meta_style, width)
 
     return join_vertical(*rows)
 
@@ -84,7 +98,7 @@ def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
 
 def _render_items(
     rows: list[Block],
-    items: list,
+    items: tuple[FoldItem, ...],
     key_field: str | None,
     kind: str,
     zoom: Zoom,
@@ -102,14 +116,14 @@ def _render_items(
     label_fields = _label_fields(key_field)
 
     for item in items:
-        label = _find_label(item, label_fields, kind)
-        used_label = _used_label_field(item, label_fields)
-        ts = item.get("_ts", item.get("ts", ""))
-        date = fmt(ts) if ts else ""
+        payload = item.payload
+        label = _find_label(payload, label_fields, kind)
+        used_label = _used_label_field(payload, label_fields)
+        date = fmt(item.ts) if item.ts else ""
 
         # SUMMARY: label + body snippet (first non-label payload field)
         # More useful than label + date — shows what the fold *contains*.
-        body = _find_body(item, used_label)
+        body = _find_body(payload, used_label)
         if body:
             if width is not None:
                 snippet = _truncate(body, width - len(label) - 6)  # "  label: snippet"
@@ -124,23 +138,24 @@ def _render_items(
 
         # DETAILED: show remaining payload fields as continuation lines
         if zoom >= Zoom.DETAILED:
-            skip = {used_label, "_ts", "ts"} if used_label else {"_ts", "ts"}
+            skip = {used_label} if used_label else set()
             # Also skip the body field already shown in the summary line
-            body_field = _find_body_field(item, used_label)
+            body_field = _find_body_field(payload, used_label)
             if body_field:
                 skip = skip | {body_field}
-            for k, v in item.items():
-                if k.startswith("_") or k in skip or not v:
+            for k, v in payload.items():
+                if k in skip or not v:
                     continue
                 rows.append(Block.text(f"    {k}: {v}", dim_style, width=width))
 
-        # FULL: show metadata fields
+        # FULL: show metadata fields (ts, observer, origin)
         if zoom >= Zoom.FULL:
             if date:
-                rows.append(Block.text(f"    _ts: {fmt(ts)}", meta_style, width=width))
-            for k, v in item.items():
-                if k.startswith("_") and k != "_ts" and v:
-                    rows.append(Block.text(f"    {k}: {v}", meta_style, width=width))
+                rows.append(Block.text(f"    _ts: {fmt(item.ts)}", meta_style, width=width))
+            if item.observer:
+                rows.append(Block.text(f"    _observer: {item.observer}", meta_style, width=width))
+            if item.origin:
+                rows.append(Block.text(f"    _origin: {item.origin}", meta_style, width=width))
 
 
 def _label_fields(key_field: str | None) -> tuple[str, ...]:
@@ -154,42 +169,42 @@ def _label_fields(key_field: str | None) -> tuple[str, ...]:
     return (key_field,) + base
 
 
-def _used_label_field(item: dict, label_fields: tuple[str, ...]) -> str | None:
+def _used_label_field(payload: dict, label_fields: tuple[str, ...]) -> str | None:
     """Return the field name actually used as the label, or None."""
     for lf in label_fields:
-        if item.get(lf):
+        if payload.get(lf):
             return lf
     return None
 
 
-def _find_label(item: dict, label_fields: tuple[str, ...], kind: str) -> str:
-    """Extract the best label from an item dict."""
+def _find_label(payload: dict, label_fields: tuple[str, ...], kind: str) -> str:
+    """Extract the best label from a payload dict."""
     for lf in label_fields:
-        val = item.get(lf)
+        val = payload.get(lf)
         if val:
             return str(val)
-    # Fall back to first non-underscore key with a value
-    for k, v in item.items():
-        if not k.startswith("_") and v:
+    # Fall back to first key with a value
+    for k, v in payload.items():
+        if v:
             return f"{k}: {v}"
     return kind
 
 
-def _find_body(item: dict, used_label: str | None) -> str | None:
-    """Find the first non-label, non-underscore field value — the 'body' of the item."""
-    skip = {used_label, "_ts", "ts"} if used_label else {"_ts", "ts"}
-    for k, v in item.items():
-        if k.startswith("_") or k in skip or not v:
+def _find_body(payload: dict, used_label: str | None) -> str | None:
+    """Find the first non-label field value — the 'body' of the item."""
+    skip = {used_label} if used_label else set()
+    for k, v in payload.items():
+        if k in skip or not v:
             continue
         return str(v)
     return None
 
 
-def _find_body_field(item: dict, used_label: str | None) -> str | None:
+def _find_body_field(payload: dict, used_label: str | None) -> str | None:
     """Return the field name of the body, or None."""
-    skip = {used_label, "_ts", "ts"} if used_label else {"_ts", "ts"}
-    for k, v in item.items():
-        if k.startswith("_") or k in skip or not v:
+    skip = {used_label} if used_label else set()
+    for k, v in payload.items():
+        if k in skip or not v:
             continue
         return k
     return None

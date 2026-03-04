@@ -22,10 +22,12 @@ from .ast import (
     FoldWindow,
     FromFile,
     FromSource,
+    GrantDecl,
     InlineSource,
     LoopDef,
     LoopFile,
     LStrip,
+    ObserverDecl,
     ParseStep,
     Pick,
     Project,
@@ -95,6 +97,9 @@ __all__ = [
     "BoundaryWhen",
     # AST types - Combinatorial vertices
     "CombineEntry",
+    # AST types - Observer declarations
+    "ObserverDecl",
+    "GrantDecl",
     # AST types - Inline sources / sources blocks
     "InlineSource",
     "SourcesBlock",

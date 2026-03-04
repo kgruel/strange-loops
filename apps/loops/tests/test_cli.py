@@ -244,10 +244,9 @@ class TestInitCommand:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = main(["init"])
         assert result == 0
-        root = tmp_path / "root.vertex"
+        root = tmp_path / ".vertex"
         assert root.exists()
         content = root.read_text()
-        assert 'name "root"' in content
         assert "discover" in content
         captured = capsys.readouterr()
         assert "Created" in captured.out
@@ -265,7 +264,7 @@ class TestInitCommand:
         monkeypatch.setenv("LOOPS_HOME", str(deep))
         result = main(["init"])
         assert result == 0
-        assert (deep / "root.vertex").exists()
+        assert (deep / ".vertex").exists()
 
     def test_template_flag_parsed(self):
         import argparse
@@ -413,7 +412,7 @@ class TestInitCommand:
 
 
 class TestDefaultPaths:
-    """start/run/store default to LOOPS_HOME/root.vertex when no file given."""
+    """start/run/store default to LOOPS_HOME/.vertex when no file given."""
 
     def test_start_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
@@ -428,22 +427,22 @@ class TestDefaultPaths:
         assert result == 1
 
     def test_start_file_optional(self, monkeypatch, tmp_path, capsys):
-        """start with no file falls back to LOOPS_HOME/root.vertex."""
+        """start with no file falls back to LOOPS_HOME/.vertex."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Without root.vertex, returns 1 with guidance
+        # Without .vertex, returns 1 with guidance
         result = main(["start"])
         assert result == 1
 
     def test_run_file_optional(self, monkeypatch, tmp_path):
-        """run with no file falls back to LOOPS_HOME/root.vertex."""
+        """run with no file falls back to LOOPS_HOME/.vertex."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = main(["run"])
         assert result == 1
 
     def test_store_root_command(self, monkeypatch, tmp_path, capsys):
-        """store as root command falls back to LOOPS_HOME/root.vertex."""
+        """store as root command falls back to LOOPS_HOME/.vertex."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Without root.vertex, returns 1
+        # Without .vertex, returns 1
         result = main(["store"])
         assert result == 1
 
@@ -478,13 +477,13 @@ class TestRootLs:
     """Root-level `loops ls` tests."""
 
     def _seed_home(self, tmp_path):
-        """Create LOOPS_HOME with root.vertex + child vertices."""
+        """Create LOOPS_HOME with .vertex + child vertices."""
         home = tmp_path / "loops_home"
         home.mkdir()
 
-        # Root vertex with discover
-        (home / "root.vertex").write_text(
-            'name "root"\n\ndiscover "./**/*.vertex"\n'
+        # Root vertex with discover (.vertex — bare dotfile defaults name to "root")
+        (home / ".vertex").write_text(
+            'discover "./**/*.vertex"\n'
         )
 
         # Instance vertex: session

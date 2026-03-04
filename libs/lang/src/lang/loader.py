@@ -28,10 +28,12 @@ from .ast import (
     FoldSum,
     FoldWindow,
     FromFile,
+    GrantDecl,
     InlineSource,
     LoopDef,
     LoopFile,
     LStrip,
+    ObserverDecl,
     Pick,
     Project,
     Replace,
@@ -400,6 +402,43 @@ def _load_combine_block(node: ckdl.Node, path: Path | None) -> tuple[CombineEntr
 
 
 # ---------------------------------------------------------------------------
+# Observer block loader
+# ---------------------------------------------------------------------------
+
+
+def _load_observer_decl(node: ckdl.Node, path: Path | None) -> ObserverDecl:
+    """Load a single observer declaration from an observers block child."""
+    name = node.name
+    identity: str | None = None
+    grant: GrantDecl | None = None
+
+    for child in node.children:
+        if child.name == "identity":
+            identity = _require_arg(child, 0, "identity vertex name", path)
+        elif child.name == "grant":
+            potential: list[str] = []
+            for gc in child.children:
+                if gc.name == "potential":
+                    potential.extend(str(a) for a in gc.args)
+                else:
+                    raise _error(f"Unknown grant field: {gc.name}", path)
+            if not potential:
+                raise _error(f"observer {name!r}: grant requires potential kinds", path)
+            grant = GrantDecl(potential=frozenset(potential))
+        else:
+            raise _error(f"Unknown observer field: {child.name}", path)
+
+    return ObserverDecl(name=name, identity=identity, grant=grant)
+
+
+def _load_observers_block(node: ckdl.Node, path: Path | None) -> tuple[ObserverDecl, ...]:
+    """Load the observers block from a vertex file."""
+    if not node.children:
+        raise _error("observers block requires at least one observer", path)
+    return tuple(_load_observer_decl(child, path) for child in node.children)
+
+
+# ---------------------------------------------------------------------------
 # Top-level loaders
 # ---------------------------------------------------------------------------
 
@@ -477,6 +516,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     emit: str | None = None
     combine: tuple[CombineEntry, ...] | None = None
     sources_blocks: list[SourcesBlock] = []
+    observers: tuple[ObserverDecl, ...] | None = None
 
     for node in doc.nodes:
         key = node.name
@@ -508,12 +548,17 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
                 routes[child.name] = route_target
         elif key == "combine":
             combine = _load_combine_block(node, path)
+        elif key == "observers":
+            observers = _load_observers_block(node, path)
         else:
             raise _error(f"Unknown config key: {key}", path)
 
-    # Validate required fields
+    # Validate required fields — .vertex (bare dotfile) defaults name to "root"
     if name is None:
-        raise _error("Missing required field: name", path)
+        if path is not None and path.name == ".vertex":
+            name = "root"
+        else:
+            raise _error("Missing required field: name", path)
 
     # Validate combine mutual exclusion
     if combine is not None:
@@ -545,6 +590,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         emit=emit,
         combine=combine,
         sources_blocks=tuple(sources_blocks) if sources_blocks else None,
+        observers=observers,
         path=path,
     )
 

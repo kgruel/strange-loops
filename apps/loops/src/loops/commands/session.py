@@ -85,53 +85,106 @@ def fetch_status(vertex_path: Path, kind: str | None = None) -> dict:
     """Fetch status data by replaying facts through vertex-declared folds.
 
     The vertex declaration drives the read: each declared kind's fold is
-    compiled and replayed over stored facts. No hardcoded SQL or Python grouping.
+    compiled and replayed over stored facts.  The set of kinds comes from
+    the vertex declaration (via vertex_read), not a hardcoded list.
 
-    When *kind* is given, only that section is populated (e.g. kind="task"
-    returns tasks only, other sections empty).
+    When *kind* is given, only that section is populated.
+
+    Returns ``{"sections": [...]}`` where each section is::
+
+        {"kind": str, "items": list[dict], "fold_type": "by"|"collect"}
+
+    Known kinds (decision, thread, task, change) get field-specific
+    extraction for richer rendering.  All other kinds get generic
+    extraction (full payload passed through).
     """
     from engine import vertex_read
 
     fold_state = vertex_read(vertex_path)
 
-    active = {kind} if kind else {"decision", "thread", "task", "change"}
+    active = {kind} if kind else set(fold_state.keys())
 
-    return {
-        "decisions": [
-            {
-                "topic": v.get("topic", ""),
-                "message": v.get("message", ""),
-                "ts": v.get("_ts", ""),
-            }
-            for v in fold_state.get("decision", {}).get("items", {}).values()
-        ] if "decision" in active else [],
-        "threads": [
-            {
-                "name": v.get("name", ""),
-                "status": v.get("status", ""),
-                "ts": v.get("_ts", ""),
-            }
-            for v in fold_state.get("thread", {}).get("items", {}).values()
+    # --- known-kind extractors (preserve existing rendering) -----------
+
+    def _extract_decision(items_dict: dict) -> list[dict]:
+        return [
+            {"topic": v.get("topic", ""), "message": v.get("message", ""), "ts": v.get("_ts", "")}
+            for v in items_dict.values()
+        ]
+
+    def _extract_thread(items_dict: dict) -> list[dict]:
+        return [
+            {"name": v.get("name", ""), "status": v.get("status", ""), "ts": v.get("_ts", "")}
+            for v in items_dict.values()
             if v.get("status") != "resolved"
-        ] if "thread" in active else [],
-        "tasks": [
-            {
-                "name": v.get("name", ""),
-                "status": v.get("status", ""),
-                "summary": v.get("summary", ""),
-                "ts": v.get("_ts", ""),
-            }
-            for v in fold_state.get("task", {}).get("items", {}).values()
-        ] if "task" in active else [],
-        "changes": list(reversed([
-            {
-                "summary": v.get("summary", ""),
-                "files": v.get("files", ""),
-                "ts": v.get("_ts", ""),
-            }
-            for v in fold_state.get("change", {}).get("items", [])
-        ])) if "change" in active else [],
+        ]
+
+    def _extract_task(items_dict: dict) -> list[dict]:
+        return [
+            {"name": v.get("name", ""), "status": v.get("status", ""), "summary": v.get("summary", ""), "ts": v.get("_ts", "")}
+            for v in items_dict.values()
+        ]
+
+    def _extract_change(items: list | dict) -> list[dict]:
+        vals = items if isinstance(items, list) else items.values()
+        return list(reversed([
+            {"summary": v.get("summary", ""), "files": v.get("files", ""), "ts": v.get("_ts", "")}
+            for v in vals
+        ]))
+
+    _known_extractors: dict[str, tuple[str, object]] = {
+        "decision": ("by", _extract_decision),
+        "thread": ("by", _extract_thread),
+        "task": ("by", _extract_task),
+        "change": ("collect", _extract_change),
     }
+
+    def _extract_generic(items: list | dict) -> list[dict]:
+        """Pass through full payload for unknown kinds."""
+        if isinstance(items, dict):
+            return [dict(v) for v in items.values()]
+        return [dict(v) for v in items]
+
+    # --- build sections ------------------------------------------------
+
+    sections: list[dict] = []
+    for kind_name in sorted(active):
+        state = fold_state.get(kind_name, {})
+        items_raw = state.get("items", state)
+
+        if kind_name in _known_extractors:
+            fold_type, extractor = _known_extractors[kind_name]
+            extracted = extractor(items_raw)
+        else:
+            fold_type = "by" if isinstance(items_raw, dict) else "collect"
+            extracted = _extract_generic(items_raw)
+
+        if kind_name not in active:
+            continue
+
+        sections.append({
+            "kind": kind_name,
+            "items": extracted,
+            "fold_type": fold_type,
+        })
+
+    # --- backwards compat: also return legacy keys ---------------------
+
+    legacy: dict = {
+        "decisions": [], "threads": [], "tasks": [], "changes": [],
+        "sections": sections,
+    }
+    for sec in sections:
+        k = sec["kind"]
+        if k == "decision":
+            legacy["decisions"] = sec["items"]
+        elif k == "thread":
+            legacy["threads"] = sec["items"]
+        elif k == "task":
+            legacy["tasks"] = sec["items"]
+        elif k == "change":
+            legacy["changes"] = sec["items"]
+    return legacy
 
 
 def fetch_log(vertex_path: Path, since: str, kind: str | None) -> list[dict]:

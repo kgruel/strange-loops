@@ -1865,31 +1865,44 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
         _err(f"No {args.kind} named '{args.name}' found in fold state.")
         return 1
 
-    # Collect produced artifacts: facts emitted since thread opened
-    # Artifact kinds = anything that isn't the thread itself
-    produced = []
+    # Collect produced artifacts via two strategies:
+    # 1. Tagged — facts with thread=<name> in payload (precise)
+    # 2. Temporal — artifact kinds emitted since thread opened (approximate)
+    # Tagged wins when any tagged facts exist; temporal is the fallback.
+    tagged = []
+    temporal = []
     now = datetime.now(timezone.utc).timestamp()
     if target_item.ts:
         all_facts = vertex_facts(vertex_path, target_item.ts, now)
         for f in all_facts:
+            payload = f.get("payload", {})
+
             # Skip the thread's own facts
             if f["kind"] == args.kind:
-                payload = f.get("payload", {})
+                is_self = False
                 for kf in ("name", "topic", "title"):
                     if payload.get(kf) == args.name:
+                        is_self = True
                         break
-                else:
-                    # Different item in same kind — could be produced
-                    _add_produced(produced, f)
-                continue
-            # Check explicit thread tag in payload
-            payload = f.get("payload", {})
+                if is_self:
+                    continue
+
+            # Check explicit thread tag
             if payload.get("thread") == args.name:
-                _add_produced(produced, f)
+                _add_produced(tagged, f)
                 continue
-            # Include artifact kinds (decisions, tasks, threads opened during this thread's lifetime)
+
+            # Temporal: artifact kinds emitted during thread lifetime
             if f["kind"] in ("decision", "task", "thread", "change"):
-                _add_produced(produced, f)
+                _add_produced(temporal, f)
+
+    # Tagged wins when available; temporal is fallback
+    if tagged:
+        produced = tagged
+        produced_mode = "tagged"
+    else:
+        produced = temporal
+        produced_mode = "temporal"
 
     # Deduplicate produced artifacts (same kind:key = same artifact)
     seen = set()
@@ -1926,7 +1939,7 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
         show(Block.text(f"  opened: {opened.strftime('%Y-%m-%d %H:%M')}", Style(dim=True)))
 
     if produced:
-        show(Block.text(f"  produced ({len(produced)}):", Style()))
+        show(Block.text(f"  produced ({len(produced)}, {produced_mode}):", Style()))
         for pr in produced:
             show(Block.text(f"    {pr['kind']}: {pr['key']}", Style(dim=True)))
     else:

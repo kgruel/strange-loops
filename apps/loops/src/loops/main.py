@@ -1940,12 +1940,16 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
     # Emit the resolution fact
     fact = Fact.of(args.kind, obs, **resolution_payload)
 
-    # Resolve writable vertex and emit through runtime
+    # Validate and emit through runtime
+    err = validate_emit(vertex_path, obs, args.kind)
+    if err is not None:
+        _err(f"Error: {err}")
+        return 1
+
     from engine import load_vertex_program
 
     vp = _resolve_writable_vertex(vertex_path)
     program = load_vertex_program(vp)
-    validate_emit(program.vertex, fact)
     program.vertex.receive(fact)
 
     show(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))

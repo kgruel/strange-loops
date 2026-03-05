@@ -227,22 +227,55 @@ def _identity_prompt(sections: list[FoldSection]) -> Block:
     return join_vertical(*rows) if rows else Block.text("(empty)", plain)
 
 
+_HANDOFF_KINDS = {"session", "handoff"}
+
+
+def _render_session(section: FoldSection) -> list[str]:
+    """Render session as handoff content — message and produced artifacts."""
+    lines: list[str] = []
+    for item in section.items:
+        name = item.payload.get("name", "?")
+        status = item.payload.get("status", "?")
+        message = item.payload.get("message", "")
+        produced = item.payload.get("produced", [])
+
+        if status in _RESOLVED_STATUSES and message:
+            # Resolved session IS the handoff — render the message as content
+            lines.append(f"## HANDOFF")
+            lines.append(f"  {message}")
+            if produced:
+                lines.append(f"  produced: {', '.join(produced)}")
+        else:
+            # Open session — just note it
+            lines.append(f"## SESSION")
+            lines.append(f"  {name}: {status}")
+
+    return lines
+
+
 def _schema_prompt(sections: list[FoldSection]) -> Block:
     """Structured schema prompt — original behavior for non-identity vertices.
 
     Filters out resolved/completed items — the prompt lens shows what's
-    active, not what's done. The regular fold lens still shows everything.
+    active, not what's done. Exception: session/handoff kinds get custom
+    rendering (resolved state IS the handoff content).
     """
     rows: list[Block] = []
     plain = Style()
 
     for s in sections:
-        # Filter resolved/completed items from prompt output
-        active_items = [
+        # Session/handoff: custom rendering
+        if s.kind in _HANDOFF_KINDS:
+            for line in _render_session(s):
+                rows.append(Block.text(line, plain))
+            continue
+
+        # Other kinds: filter resolved items
+        items = [
             item for item in s.items
             if item.payload.get("status") not in _RESOLVED_STATUSES
         ]
-        if not active_items:
+        if not items:
             continue
 
         if rows:
@@ -250,7 +283,7 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
 
         rows.append(Block.text(f"## {s.kind.upper()}", plain))
 
-        for item in active_items:
+        for item in items:
             label = _label(item, s.key_field)
             body = _body(item)
             if body:

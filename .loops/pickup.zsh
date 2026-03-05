@@ -20,31 +20,13 @@ if [[ -z "$observer" ]]; then
 fi
 export LOOPS_OBSERVER="$observer"
 
-# --- Session boundary — mark arrival before anything else ---
+# --- Read full fold BEFORE opening new session ---
+# Root .vertex discovers identity + project stores. --observer all sees across observers.
+# Prompt lens renders identity as narrative, session as handoff, filters resolved items.
+system_prompt=$(loops fold --observer all --lens prompt --plain 2>/dev/null || echo "")
+
+# --- Session boundary — mark arrival after reading ---
 loops emit project session name="$observer" status="open" 2>/dev/null || true
-
-# --- Identity context (observer-scoped — sees only your facts) ---
-identity=$(loops identity fold --lens prompt --plain 2>/dev/null || echo "")
-
-# --- Handoff (observer-scoped — last session's resolved state IS the handoff) ---
-handoff=$(loops fold project --kind session --lens prompt --plain 2>/dev/null || echo "")
-
-# --- Open tasks (all observers — tasks are shared, use --observer="" to unscope) ---
-tasks=$(loops fold project --kind task --observer all --lens prompt --plain 2>/dev/null || echo "")
-
-# --- Build system prompt ---
-system_prompt="# Identity
-$identity"
-
-[[ -n "$handoff" && "$handoff" != "(empty)" ]] && system_prompt="$system_prompt
-
-# Last Session Handoff
-$handoff"
-
-[[ -n "$tasks" && "$tasks" != "(empty)" ]] && system_prompt="$system_prompt
-
-# Open Tasks
-$tasks"
 
 # --- Launch ---
 if $dry_run; then

@@ -32,12 +32,16 @@ class FoldItem:
             None if no timestamp available.
         observer: Who emitted the fact(s) that produced this item.
         origin: Which vertex/loop produced the source fact(s).
+        id: ULID of the source fact. For "by" folds, the ID of the most
+            recent contributing fact. For "collect" folds, the exact fact.
+            None for computed/synthetic items.
     """
 
     payload: dict[str, Any]
     ts: float | None = None
     observer: str = ""
     origin: str = ""
+    id: str | None = None
 
 
 @dataclass(frozen=True)

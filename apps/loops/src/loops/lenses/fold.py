@@ -151,6 +151,9 @@ def _render_items(
 
         # DETAILED: show remaining payload fields as continuation lines
         if zoom >= Zoom.DETAILED:
+            # Show short ID for reference
+            if item.id:
+                rows.append(Block.text(f"    id:{item.id[:8]}", meta_style, width=width))
             skip = {used_label} if used_label else set()
             # Also skip the body field already shown in the summary line
             body_field = _find_body_field(payload, used_label)
@@ -161,8 +164,10 @@ def _render_items(
                     continue
                 rows.append(Block.text(f"    {k}: {v}", dim_style, width=width))
 
-        # FULL: show metadata fields (ts, observer, origin)
+        # FULL: show metadata fields (ts, observer, origin, full id)
         if zoom >= Zoom.FULL:
+            if item.id:
+                rows.append(Block.text(f"    _id: {item.id}", meta_style, width=width))
             if date:
                 rows.append(Block.text(f"    _ts: {fmt(item.ts)}", meta_style, width=width))
             if item.observer:

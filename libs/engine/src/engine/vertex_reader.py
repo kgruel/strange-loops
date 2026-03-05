@@ -226,7 +226,7 @@ def _combined_read(
             # (Upsert, Latest, Max, Min) this is harmless. For order-sensitive
             # folds (Collect, Window) ties may produce non-deterministic ordering.
             selects = [
-                f"SELECT kind, ts, observer, origin, payload "
+                f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
                 f"WHERE kind = ? OR kind LIKE ? || '.%'"
                 for a in aliases
@@ -239,12 +239,13 @@ def _combined_read(
             rows = conn.execute(sql, params).fetchall()
             payloads = []
             for r in rows:
-                if observer and r[2] != observer:
+                if observer and r[3] != observer:
                     continue
-                p = json.loads(r[4])
-                p["_ts"] = r[1]
-                p["_observer"] = r[2]
-                p["_origin"] = r[3] or ""
+                p = json.loads(r[5])
+                p["_id"] = r[0]
+                p["_ts"] = r[2]
+                p["_observer"] = r[3]
+                p["_origin"] = r[4] or ""
                 payloads.append(p)
             result[kind] = spec.replay(payloads)
         return result
@@ -493,6 +494,7 @@ def vertex_read(
                 p["_ts"] = fact["ts"]
                 p["_observer"] = fact["observer"]
                 p["_origin"] = fact.get("origin", "")
+                p["_id"] = fact.get("id")
                 payloads.append(p)
             result[kind] = spec.replay(payloads)
         return result
@@ -580,14 +582,15 @@ def vertex_fold(
 def _dict_to_fold_item(d: dict) -> Any:
     """Convert a raw fold output dict to a typed FoldItem.
 
-    Separates metadata (_ts, _observer, _origin) from payload fields.
+    Separates metadata (_ts, _observer, _origin, _id) from payload fields.
     """
     from atoms import FoldItem
 
     ts = d.pop("_ts", None)
     observer = d.pop("_observer", "")
     origin = d.pop("_origin", "")
-    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin)
+    fact_id = d.pop("_id", None)
+    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin, id=fact_id)
 
 
 def vertex_fact_by_id(

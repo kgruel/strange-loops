@@ -449,6 +449,93 @@ def vertex_read(
         return result
 
 
+def vertex_fold(
+    vertex_path: Path,
+    *,
+    observer: str | None = None,
+    kind: str | None = None,
+) -> Any:
+    """Read fold state as a typed ``FoldState``.
+
+    This is the primary read interface for fold state — returns a typed
+    contract (``FoldState`` from atoms) instead of raw dicts.
+
+    Parses the vertex declaration for fold metadata (fold_type, key_field,
+    declaration order), replays facts through specs, and produces typed
+    ``FoldItem``/``FoldSection`` objects with metadata separated from payload.
+
+    When *observer* is provided, only that observer's facts are folded.
+    When *kind* is provided, only that kind is included.
+    """
+    from atoms import FoldItem, FoldSection, FoldState
+    from atoms.fold import Collect, Upsert
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    raw = vertex_read(vertex_path, observer=observer)
+
+    # Declaration order from AST, not alphabetical
+    if kind:
+        ordered_kinds = [kind]
+    else:
+        declared = list(ast.loops.keys())
+        undeclared = [k for k in raw if k not in ast.loops]
+        ordered_kinds = declared + undeclared
+
+    from .compiler import compile_vertex
+
+    specs = compile_vertex(ast)
+
+    sections: list[FoldSection] = []
+    for kind_name in ordered_kinds:
+        state = raw.get(kind_name, {})
+        items_raw = state.get("items", state)
+
+        # Extract fold metadata from compiled spec
+        fold_type = "collect"
+        key_field = None
+        spec = specs.get(kind_name)
+        if spec and spec.folds:
+            fold_op = spec.folds[0]
+            if isinstance(fold_op, Upsert):
+                fold_type = "by"
+                key_field = fold_op.key
+            elif isinstance(fold_op, Collect):
+                fold_type = "collect"
+
+        # Normalize items to list[dict], then convert to typed FoldItems
+        if fold_type == "by" and isinstance(items_raw, dict):
+            raw_items = [dict(v) for v in items_raw.values()]
+        elif isinstance(items_raw, list):
+            raw_items = [dict(v) for v in items_raw]
+        else:
+            raw_items = [dict(items_raw)] if items_raw else []
+
+        items = tuple(_dict_to_fold_item(d) for d in raw_items)
+
+        sections.append(FoldSection(
+            kind=kind_name,
+            items=items,
+            fold_type=fold_type,
+            key_field=key_field,
+        ))
+
+    return FoldState(sections=tuple(sections), vertex=ast.name)
+
+
+def _dict_to_fold_item(d: dict) -> Any:
+    """Convert a raw fold output dict to a typed FoldItem.
+
+    Separates metadata (_ts, _observer, _origin) from payload fields.
+    """
+    from atoms import FoldItem
+
+    ts = d.pop("_ts", None)
+    observer = d.pop("_observer", "")
+    origin = d.pop("_origin", "")
+    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin)
+
+
 def vertex_facts(
     vertex_path: Path,
     since_ts: float,

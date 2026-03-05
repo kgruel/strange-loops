@@ -1,1 +1,4 @@
 .env
+# Override root *.db ignore — meta store is the source of truth
+!data/*.db
+!.loops/data/*.db

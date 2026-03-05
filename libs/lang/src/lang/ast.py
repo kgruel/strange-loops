@@ -418,6 +418,23 @@ class CombineEntry:
 
 
 # -----------------------------------------------------------------------------
+# Lens Declaration (for .vertex files)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LensDecl:
+    """Lens declarations for a vertex.
+
+    Names are resolved via search path: vertex-local > project-local > user-global > built-in.
+    A name starting with '.' or '/' is treated as a path; otherwise as a search name.
+    """
+
+    fold: str | None = None    # lens name/path for fold view
+    stream: str | None = None  # lens name/path for stream view
+
+
+# -----------------------------------------------------------------------------
 # Observer Declaration (for .vertex files)
 # -----------------------------------------------------------------------------
 
@@ -476,6 +493,7 @@ class VertexFile:
     combine: tuple[CombineEntry, ...] | None = None
     sources_blocks: tuple[SourcesBlock, ...] | None = None
     observers: tuple[ObserverDecl, ...] | None = None
+    lens: LensDecl | None = None
 
     # Source location for error reporting
     path: Path | None = None

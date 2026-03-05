@@ -1255,6 +1255,74 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         return 1
 
 
+def _resolve_render_fn(
+    lens_flag: str | None,
+    vertex_path: Path | None,
+    mod,
+    view_name: str,
+):
+    """Resolve render function via 4-tier chain.
+
+    Resolution order:
+    1. --lens CLI flag (resolved via lens_resolver)
+    2. Vertex lens{} declaration (resolved via lens_resolver)
+    3. App module override (_resolve_app_view)
+    4. Built-in default
+    """
+    from .lens_resolver import resolve_lens
+
+    # Determine vertex directory for lens search path
+    vertex_dir = vertex_path.parent if vertex_path is not None else None
+
+    # Tier 1: --lens flag
+    if lens_flag is not None:
+        fn = resolve_lens(lens_flag, view_name, vertex_dir=vertex_dir)
+        if fn is not None:
+            return fn
+
+    # Tier 2: vertex lens{} declaration
+    if vertex_path is not None:
+        vertex_lens = _get_vertex_lens_decl(vertex_path)
+        if vertex_lens is not None:
+            # Pick the right lens name for this view
+            if view_name == "fold_view" and vertex_lens.fold:
+                fn = resolve_lens(vertex_lens.fold, view_name, vertex_dir=vertex_dir)
+                if fn is not None:
+                    return fn
+            elif view_name in ("stream_view", "log_view") and vertex_lens.stream:
+                fn = resolve_lens(vertex_lens.stream, view_name, vertex_dir=vertex_dir)
+                if fn is not None:
+                    return fn
+
+    # Tier 3: app module override
+    if mod is not None:
+        fn = _resolve_app_view(mod, view_name)
+        if fn is not None:
+            return fn
+
+    # Tier 4: built-in defaults
+    if view_name == "fold_view":
+        from .lenses.fold import fold_view
+        return fold_view
+    elif view_name in ("stream_view", "log_view"):
+        from .lenses.stream import stream_view
+        return stream_view
+
+    # Shouldn't reach here, but be safe
+    from .lenses.fold import fold_view
+    return fold_view
+
+
+def _get_vertex_lens_decl(vertex_path: Path):
+    """Extract LensDecl from a vertex file, if present."""
+    try:
+        from lang import parse_vertex_file
+        vf = parse_vertex_file(vertex_path)
+        return vf.lens
+    except Exception:
+        return None
+
+
 def _resolve_app_view(mod, view_name: str):
     """Resolve a view function from an app module.
 
@@ -1394,14 +1462,8 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
-    # Resolve render function: --lens flag → module override → shared lens
-    render_fn = None
-    if known.lens == "prompt":
-        from .lenses.prompt import stream_prompt_view as render_fn
-    elif mod is not None:
-        render_fn = _resolve_app_view(mod, "stream_view")
-    if render_fn is None:
-        from .lenses.stream import stream_view as render_fn
+    # Render function resolved lazily — vertex_path may not be known until fetch()
+    resolved_render_fn = None
 
     def fetch():
         nonlocal vertex_path
@@ -1434,7 +1496,12 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
         )
 
     def render(ctx, data):
-        return render_fn(data, ctx.zoom, ctx.width)
+        nonlocal resolved_render_fn
+        if resolved_render_fn is None:
+            resolved_render_fn = _resolve_render_fn(
+                known.lens, vertex_path, mod, "stream_view",
+            )
+        return resolved_render_fn(data, ctx.zoom, ctx.width)
 
     return run_cli(
         rest,
@@ -1464,14 +1531,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
-    # Resolve render function: --lens flag → module override → shared lens
-    render_fn = None
-    if known.lens == "prompt":
-        from .lenses.prompt import prompt_view as render_fn
-    elif mod is not None:
-        render_fn = _resolve_app_view(mod, "fold_view")
-    if render_fn is None:
-        from .lenses.fold import fold_view as render_fn
+    # Render function resolved lazily — vertex_path may not be known until fetch()
+    resolved_render_fn = None
 
     def fetch():
         nonlocal vertex_path
@@ -1493,11 +1554,16 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
         return fetch_fold(vertex_path, kind=known.kind, observer=observer or None)
 
     def render(ctx, data):
+        nonlocal resolved_render_fn
+        if resolved_render_fn is None:
+            resolved_render_fn = _resolve_render_fn(
+                known.lens, vertex_path, mod, "fold_view",
+            )
         # When piped (not TTY), pass width=None so text flows without
         # truncation or padding. The fold output IS the data — useful
         # directly as a system prompt or piped to other tools.
         w = ctx.width if ctx.is_tty else None
-        return render_fn(data, ctx.zoom, w)
+        return resolved_render_fn(data, ctx.zoom, w)
 
     return run_cli(
         rest,

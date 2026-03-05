@@ -30,6 +30,7 @@ from .ast import (
     FromFile,
     GrantDecl,
     InlineSource,
+    LensDecl,
     LoopDef,
     LoopFile,
     LStrip,
@@ -402,6 +403,30 @@ def _load_combine_block(node: ckdl.Node, path: Path | None) -> tuple[CombineEntr
 
 
 # ---------------------------------------------------------------------------
+# Lens block loader
+# ---------------------------------------------------------------------------
+
+
+def _load_lens_block(node: ckdl.Node, path: Path | None) -> LensDecl:
+    """Load a lens block: lens { fold "name" stream "name" }."""
+    fold: str | None = None
+    stream: str | None = None
+
+    for child in node.children:
+        if child.name == "fold":
+            fold = _require_arg(child, 0, "lens name", path)
+        elif child.name == "stream":
+            stream = _require_arg(child, 0, "lens name", path)
+        else:
+            raise _error(f"Unknown lens field: {child.name}", path)
+
+    if fold is None and stream is None:
+        raise _error("lens block requires at least fold or stream", path)
+
+    return LensDecl(fold=fold, stream=stream)
+
+
+# ---------------------------------------------------------------------------
 # Observer block loader
 # ---------------------------------------------------------------------------
 
@@ -517,6 +542,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     combine: tuple[CombineEntry, ...] | None = None
     sources_blocks: list[SourcesBlock] = []
     observers: tuple[ObserverDecl, ...] | None = None
+    lens: LensDecl | None = None
 
     for node in doc.nodes:
         key = node.name
@@ -550,6 +576,8 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             combine = _load_combine_block(node, path)
         elif key == "observers":
             observers = _load_observers_block(node, path)
+        elif key == "lens":
+            lens = _load_lens_block(node, path)
         else:
             raise _error(f"Unknown config key: {key}", path)
 
@@ -591,6 +619,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         combine=combine,
         sources_blocks=tuple(sources_blocks) if sources_blocks else None,
         observers=observers,
+        lens=lens,
         path=path,
     )
 

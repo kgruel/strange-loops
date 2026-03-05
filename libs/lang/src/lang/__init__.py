@@ -24,6 +24,7 @@ from .ast import (
     FromSource,
     GrantDecl,
     InlineSource,
+    LensDecl,
     LoopDef,
     LoopFile,
     LStrip,
@@ -97,6 +98,8 @@ __all__ = [
     "BoundaryWhen",
     # AST types - Combinatorial vertices
     "CombineEntry",
+    # AST types - Lens declarations
+    "LensDecl",
     # AST types - Observer declarations
     "ObserverDecl",
     "GrantDecl",

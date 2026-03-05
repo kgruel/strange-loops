@@ -1,6 +1,10 @@
 name "identity"
 store "./data/identity.db"
 
+lens {
+  fold "prompt"
+}
+
 loops {
   // Who I am — name, role, what I carry. The ground for everything else.
   self { fold { items "by" "name" } }

@@ -16,6 +16,7 @@ from lang import (
     FoldLatest,
     FoldMax,
     FoldWindow,
+    LensDecl,
     ParseError,
     Pick,
     Skip,
@@ -1459,4 +1460,43 @@ loops {
 }
 """
         with pytest.raises(ParseError, match="combine is mutually exclusive with sources blocks"):
+            parse_vertex(text)
+
+
+class TestLensBlock:
+    """Tests for lens{} block parsing in vertex files."""
+
+    def test_lens_fold_and_stream(self):
+        text = 'name "t"\nstore "./t.db"\nlens {\n  fold "prompt"\n  stream "custom"\n}\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.lens == LensDecl(fold="prompt", stream="custom")
+
+    def test_lens_fold_only(self):
+        text = 'name "t"\nstore "./t.db"\nlens { fold "prompt" }\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.lens == LensDecl(fold="prompt", stream=None)
+
+    def test_lens_stream_only(self):
+        text = 'name "t"\nstore "./t.db"\nlens { stream "custom" }\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.lens == LensDecl(fold=None, stream="custom")
+
+    def test_lens_with_path(self):
+        text = 'name "t"\nstore "./t.db"\nlens { fold "./lenses/my.py" }\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.lens == LensDecl(fold="./lenses/my.py", stream=None)
+
+    def test_no_lens_block(self):
+        text = 'name "t"\nstore "./t.db"\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.lens is None
+
+    def test_empty_lens_block_errors(self):
+        text = 'name "t"\nstore "./t.db"\nlens {}\nloops { x { fold { items "inc" } } }'
+        with pytest.raises(ParseError, match="lens block requires at least fold or stream"):
+            parse_vertex(text)
+
+    def test_unknown_lens_field_errors(self):
+        text = 'name "t"\nstore "./t.db"\nlens { bad "x" }\nloops { x { fold { items "inc" } } }'
+        with pytest.raises(ParseError, match="Unknown lens field: bad"):
             parse_vertex(text)

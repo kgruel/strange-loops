@@ -6,6 +6,6 @@ loops {
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
-  handoff  { fold { items "collect" 1 } }
+  session  { fold { items "by" "name" } }
   log      { fold { items "collect" 20 } }
 }

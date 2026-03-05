@@ -12,7 +12,7 @@ dry_run=false
 [[ "${1:-}" == "--dry-run" ]] && dry_run=true
 
 # --- Resolve observer from .vertex chain ---
-observer=$(uv run loops whoami 2>/dev/null || echo "")
+observer=$(loops whoami 2>/dev/null || echo "")
 if [[ -z "$observer" ]]; then
   echo "No observer identity resolved."
   echo "Declare observers in .loops/.vertex or emit: loops identity emit self name=name \"your-name\""
@@ -21,16 +21,16 @@ fi
 export LOOPS_OBSERVER="$observer"
 
 # --- Session boundary — mark arrival before anything else ---
-uv run loops meta emit session name="$observer" status=active 2>/dev/null || true
+loops emit project session name="$observer" status="open" 2>/dev/null || true
 
 # --- Identity context (observer-scoped — sees only your facts) ---
-identity=$(uv run loops identity fold --lens prompt --plain 2>/dev/null || echo "")
+identity=$(loops identity fold --lens prompt --plain 2>/dev/null || echo "")
 
-# --- Handoff (observer-scoped — your last handoff, not someone else's) ---
-handoff=$(uv run loops meta fold --kind handoff --lens prompt --plain 2>/dev/null || echo "")
+# --- Handoff (observer-scoped — last session's resolved state IS the handoff) ---
+handoff=$(loops fold project --kind session --lens prompt --plain 2>/dev/null || echo "")
 
 # --- Open tasks (all observers — tasks are shared, use --observer="" to unscope) ---
-tasks=$(uv run loops project fold --kind task --observer "" --lens prompt --plain 2>/dev/null || echo "")
+tasks=$(loops fold project --kind task --observer all --lens prompt --plain 2>/dev/null || echo "")
 
 # --- Build system prompt ---
 system_prompt="# Identity

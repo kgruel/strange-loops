@@ -306,24 +306,36 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
 
 
 def _render_session(section: FoldSection) -> list[str]:
-    """Render session as handoff content — message and produced artifacts."""
+    """Render session as handoff content — message and produced artifacts.
+
+    Handles two session shapes:
+    - Project sessions: name + status + message (handoff content)
+    - Identity sessions: trigger + context (operational, e.g. daemon wakes)
+
+    Uses generic label/body helpers as fallback so unknown shapes never
+    produce ``?: ?``.
+    """
     lines: list[str] = []
     for item in section.items:
-        name = item.payload.get("name", "?")
-        status = item.payload.get("status", "?")
+        status = item.payload.get("status", "")
         message = item.payload.get("message", "")
         produced = item.payload.get("produced", [])
 
         if status in _RESOLVED_STATUSES and message:
             # Resolved session IS the handoff — render the message as content
-            lines.append(f"## HANDOFF")
+            lines.append("## HANDOFF")
             lines.append(f"  {message}")
             if produced:
                 lines.append(f"  produced: {', '.join(produced)}")
         else:
-            # Open session — just note it
-            lines.append(f"## SESSION")
-            lines.append(f"  {name}: {status}")
+            # Open/active session — use generic label extraction
+            label = _label(item, section.key_field)
+            body = _body(item)
+            lines.append("## SESSION")
+            if body:
+                lines.append(f"  {label}: {body}")
+            else:
+                lines.append(f"  {label}")
 
     return lines
 

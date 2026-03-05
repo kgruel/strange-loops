@@ -1033,6 +1033,13 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
 
     payload = _parse_emit_parts(parts)
 
+    # Thread auto-tagging: inherit LOOPS_THREAD as default thread association.
+    # Priority: explicit thread= in payload > LOOPS_THREAD env > none.
+    if "thread" not in payload:
+        thread_hint = os.environ.get("LOOPS_THREAD", "")
+        if thread_hint:
+            payload["thread"] = thread_hint
+
     # Validate observer + kind against declaration chain
     if vertex_path is not None:
         err = validate_emit(vertex_path, observer, kind)

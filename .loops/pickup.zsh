@@ -23,11 +23,11 @@ export LOOPS_OBSERVER="$observer"
 # --- Identity context (prompt lens) ---
 identity=$(uv run loops identity fold --lens prompt --plain 2>/dev/null || echo "")
 
-# --- Handoff from meta store (stream, not fold — handoff isn't a fold kind) ---
-handoff=$(uv run loops meta stream --kind handoff --since 1h --lens prompt --plain 2>/dev/null || echo "")
+# --- Handoff from meta store (fold collect 1 = latest, no time window) ---
+handoff=$(uv run loops meta fold --kind handoff --lens prompt --plain 2>/dev/null || echo "")
 
-# --- Project context (open threads) ---
-project=$(uv run loops project fold --kind thread --lens prompt --plain 2>/dev/null || echo "")
+# --- Open tasks from project store ---
+tasks=$(uv run loops project fold --kind task --lens prompt --plain 2>/dev/null || echo "")
 
 # --- Build system prompt ---
 system_prompt="# Identity
@@ -38,10 +38,10 @@ $identity"
 # Last Session Handoff
 $handoff"
 
-[[ -n "$project" && "$project" != "(empty)" ]] && system_prompt="$system_prompt
+[[ -n "$tasks" && "$tasks" != "(empty)" ]] && system_prompt="$system_prompt
 
-# Project Threads
-$project"
+# Open Tasks
+$tasks"
 
 # --- Launch ---
 if $dry_run; then

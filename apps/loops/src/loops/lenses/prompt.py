@@ -2,6 +2,9 @@
 
 Optimized for LLM consumption: markdown sections, no truncation, no ANSI,
 no zoom levels. Always renders the same shape regardless of context.
+
+The identity-aware prompt lens composes narrative from fold data rather than
+dumping schema. Self-knowledge reads as orientation, not configuration.
 """
 from __future__ import annotations
 
@@ -10,35 +13,225 @@ from typing import TYPE_CHECKING, Any
 from painted import Block, Style, Zoom, join_vertical
 
 if TYPE_CHECKING:
-    from atoms import FoldState
+    from atoms import FoldItem, FoldSection, FoldState
 
 
 # ---------------------------------------------------------------------------
-# Fold prompt lens
+# Identity-aware sections — rendered as narrative
+# ---------------------------------------------------------------------------
+
+_IDENTITY_KINDS = {"self", "principle", "observation", "intention", "decision"}
+
+
+def _is_identity_vertex(data: FoldState) -> bool:
+    """True if this looks like an identity vertex (majority identity kinds)."""
+    if not data.sections:
+        return False
+    identity_count = sum(1 for s in data.sections if s.kind in _IDENTITY_KINDS)
+    return identity_count >= len(data.sections) // 2
+
+
+def _render_self_narrative(section: FoldSection) -> list[str]:
+    """Compose self entries into orienting narrative paragraphs."""
+    if not section.items:
+        return []
+
+    lines: list[str] = []
+
+    # Core identity — name and role first, then the rest as characterization
+    name_item = _find_item(section.items, "name")
+    role_item = _find_item(section.items, "role")
+
+    if name_item or role_item:
+        core_parts = []
+        if name_item:
+            core_parts.append(_body(name_item))
+        if role_item:
+            core_parts.append(_body(role_item))
+        lines.append(" ".join(core_parts))
+        lines.append("")
+
+    # Remaining self entries as characterization
+    shown = {"name", "role"}
+    remaining = [i for i in section.items if _label(i, section.key_field) not in shown]
+    if remaining:
+        for item in remaining:
+            label = _label(item, section.key_field)
+            body = _body(item)
+            if body:
+                lines.append(f"**{label}**: {body}")
+        lines.append("")
+
+    return lines
+
+
+def _render_principles(section: FoldSection) -> list[str]:
+    """Render principles with weight distinction."""
+    if not section.items:
+        return []
+
+    strong = []
+    preferences = []
+    for item in section.items:
+        weight = item.payload.get("weight", "principle")
+        if weight == "preference":
+            preferences.append(item)
+        else:
+            strong.append(item)
+
+    lines: list[str] = []
+
+    if strong:
+        lines.append("**Principles** (load-bearing — these constrain decisions):")
+        for item in strong:
+            label = _label(item, section.key_field)
+            body = _body(item)
+            lines.append(f"- **{label}**: {body}" if body else f"- **{label}**")
+        lines.append("")
+
+    if preferences:
+        lines.append("**Preferences** (tendencies — these shape defaults, can be overridden):")
+        for item in preferences:
+            label = _label(item, section.key_field)
+            body = _body(item)
+            lines.append(f"- **{label}**: {body}" if body else f"- **{label}**")
+        lines.append("")
+
+    return lines
+
+
+def _render_observations(section: FoldSection, *, max_items: int = 5) -> list[str]:
+    """Render most recent observations. Attention budget: not everything."""
+    if not section.items:
+        return []
+
+    # Sort by recency, take most recent
+    sorted_items = sorted(section.items, key=lambda i: i.ts or 0, reverse=True)
+    shown = sorted_items[:max_items]
+    remaining = len(sorted_items) - len(shown)
+
+    lines: list[str] = ["**Recent observations**:"]
+    for item in shown:
+        label = _label(item, section.key_field)
+        body = _body(item)
+        lines.append(f"- **{label}**: {body}" if body else f"- **{label}**")
+
+    if remaining > 0:
+        lines.append(f"- *({remaining} more in store)*")
+    lines.append("")
+    return lines
+
+
+def _render_intentions(section: FoldSection) -> list[str]:
+    """Render intentions as open questions / things to watch for."""
+    if not section.items:
+        return []
+
+    lines: list[str] = ["**Watching for**:"]
+    for item in section.items:
+        trigger = _label(item, section.key_field)
+        body = _body(item)
+        lines.append(f"- *{trigger}*: {body}" if body else f"- *{trigger}*")
+    lines.append("")
+    return lines
+
+
+def _render_identity_decisions(section: FoldSection) -> list[str]:
+    """Render identity decisions — resolved positions about how I work."""
+    if not section.items:
+        return []
+
+    lines: list[str] = ["**Working decisions** (confirmed through use):"]
+    for item in section.items:
+        label = _label(item, section.key_field)
+        body = _body(item)
+        lines.append(f"- **{label}**: {body}" if body else f"- **{label}**")
+    lines.append("")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Fold prompt lens (identity-aware)
 # ---------------------------------------------------------------------------
 
 def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     """Render fold data as a system prompt fragment.
 
-    Ignores zoom and width — a system prompt is always the same shape.
-    Markdown ## headers, indented label: body items, no truncation.
+    For identity vertices: composes narrative from fold sections.
+    For other vertices: structured schema (original behavior).
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("(empty)", Style())
 
+    if _is_identity_vertex(data):
+        return _identity_prompt(populated)
+    return _schema_prompt(populated)
+
+
+def _identity_prompt(sections: list[FoldSection]) -> Block:
+    """Narrative identity prompt — orients rather than configures."""
+    plain = Style()
+    all_lines: list[str] = []
+
+    # Render identity sections in a deliberate order
+    section_map = {s.kind: s for s in sections}
+
+    # 1. Self — who you are
+    if "self" in section_map:
+        all_lines.extend(_render_self_narrative(section_map["self"]))
+
+    # 2. Principles and preferences — what you hold
+    if "principle" in section_map:
+        all_lines.extend(_render_principles(section_map["principle"]))
+
+    # 3. Observations — what you've noticed
+    if "observation" in section_map:
+        all_lines.extend(_render_observations(section_map["observation"]))
+
+    # 4. Intentions — what you're watching for
+    if "intention" in section_map:
+        all_lines.extend(_render_intentions(section_map["intention"]))
+
+    # 5. Identity decisions — resolved working positions
+    if "decision" in section_map:
+        all_lines.extend(_render_identity_decisions(section_map["decision"]))
+
+    # 6. Anything else (threads, custom kinds) — fall back to schema
+    for s in sections:
+        if s.kind not in _IDENTITY_KINDS:
+            all_lines.append(f"## {s.kind.upper()}")
+            for item in s.items:
+                label = _label(item, s.key_field)
+                body = _body(item)
+                if body:
+                    all_lines.append(f"  {label}: {body}")
+                else:
+                    all_lines.append(f"  {label}")
+            all_lines.append("")
+
+    # Strip trailing blank lines
+    while all_lines and not all_lines[-1].strip():
+        all_lines.pop()
+
+    rows = [Block.text(line, plain) for line in all_lines]
+    return join_vertical(*rows) if rows else Block.text("(empty)", plain)
+
+
+def _schema_prompt(sections: list[FoldSection]) -> Block:
+    """Structured schema prompt — original behavior for non-identity vertices."""
     rows: list[Block] = []
     plain = Style()
 
-    for s in populated:
+    for s in sections:
         if rows:
             rows.append(Block.text("", plain))
 
         rows.append(Block.text(f"## {s.kind.upper()}", plain))
 
         for item in s.items:
-            label = _find_label(item.payload, s.key_field, s.kind)
-            body = _find_body(item.payload, label)
+            label = _label(item, s.key_field)
+            body = _body(item)
             if body:
                 rows.append(Block.text(f"  {label}: {body}", plain))
             else:
@@ -48,7 +241,7 @@ def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 
 
 # ---------------------------------------------------------------------------
-# Stream prompt lens
+# Stream prompt lens (unchanged)
 # ---------------------------------------------------------------------------
 
 def stream_prompt_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int) -> Block:
@@ -75,7 +268,7 @@ def stream_prompt_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, 
         payload = f["payload"]
         key_field = fold_meta.get(f["kind"], {}).get("key_field")
         label = _find_stream_label(payload, key_field)
-        body = _find_body(payload, label)
+        body = _body_from_payload(payload, label)
         if body:
             rows.append(Block.text(f"{label}: {body}", plain))
         else:
@@ -88,26 +281,51 @@ def stream_prompt_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, 
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-_LABEL_FIELDS = ("topic", "name", "title", "summary", "message")
+_LABEL_FIELDS = ("topic", "name", "title", "trigger", "summary", "message")
 
 
-def _find_label(payload: dict, key_field: str | None, kind: str) -> str:
-    """Extract primary label from a fold item payload."""
-    candidates = (key_field,) if key_field else ()
-    candidates += _LABEL_FIELDS
+def _label(item: FoldItem, key_field: str | None) -> str:
+    """Extract primary label from a FoldItem."""
+    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
     for field in candidates:
-        if field and payload.get(field):
-            return str(payload[field])
-    for k, v in payload.items():
-        if v:
+        if field and item.payload.get(field):
+            return str(item.payload[field])
+    for k, v in item.payload.items():
+        if v and k != "weight":
             return f"{k}: {v}"
-    return kind
+    return "?"
+
+
+def _body(item: FoldItem) -> str:
+    """Find the body text of a FoldItem — first non-label, non-metadata field."""
+    return _body_from_payload(item.payload, _label(item, None))
+
+
+def _body_from_payload(payload: dict, used_label: str) -> str:
+    """Find first non-label field value from a payload dict."""
+    skip = {"weight"}  # metadata fields that aren't body content
+    for k, v in payload.items():
+        if not v:
+            continue
+        if str(v) == used_label:
+            continue
+        if k in skip:
+            continue
+        return str(v)
+    return ""
+
+
+def _find_item(items: tuple[FoldItem, ...], name_value: str) -> FoldItem | None:
+    """Find an item by its name/key field value."""
+    for item in items:
+        if item.payload.get("name") == name_value:
+            return item
+    return None
 
 
 def _find_stream_label(payload: dict, key_field: str | None) -> str:
     """Extract primary label from a stream fact payload."""
-    candidates = (key_field,) if key_field else ()
-    candidates += _LABEL_FIELDS
+    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
     for field in candidates:
         if field and payload.get(field):
             return str(payload[field])
@@ -115,14 +333,3 @@ def _find_stream_label(payload: dict, key_field: str | None) -> str:
         if v:
             return str(v)
     return ""
-
-
-def _find_body(payload: dict, used_label: str) -> str | None:
-    """Find first non-label field value."""
-    for k, v in payload.items():
-        if not v:
-            continue
-        if str(v) == used_label:
-            continue
-        return str(v)
-    return None

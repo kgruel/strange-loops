@@ -842,6 +842,32 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     return payload
 
 
+def _resolve_writable_vertex(vertex_path: Path) -> Path | None:
+    """Resolve to the vertex that owns the writable store.
+
+    For vertices with a store, returns the path as-is.
+    For combine vertices, follows the chain to find the first constituent
+    with a store.  Returns None if no writable vertex is found.
+    """
+    from lang import parse_vertex_file
+    from lang.population import resolve_vertex
+
+    ast = parse_vertex_file(vertex_path)
+
+    if ast.store is not None:
+        return vertex_path
+
+    # Follow combine → first entry's vertex
+    if ast.combine:
+        ref_path = resolve_vertex(ast.combine[0].name, loops_home())
+        if not ref_path.is_absolute():
+            ref_path = (vertex_path.parent / ref_path).resolve()
+        if ref_path.exists():
+            return _resolve_writable_vertex(ref_path)
+
+    return None
+
+
 def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     """Resolve store path from a vertex file. Returns None if no store configured.
 
@@ -1024,20 +1050,29 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         return 0
 
     try:
-        store_path = _resolve_vertex_store_path(vertex_path)
+        # Resolve to the vertex that owns the writable store (follow combine)
+        writable_path = _resolve_writable_vertex(vertex_path)
+        if writable_path is None:
+            show(
+                Block.text("Error: vertex has no store configured", p.error),
+                file=sys.stderr,
+            )
+            return 1
+
+        store_path = _resolve_vertex_store_path(writable_path)
+        if store_path is None:
+            show(
+                Block.text("Error: vertex has no store configured", p.error),
+                file=sys.stderr,
+            )
+            return 1
+
     except Exception as e:
         show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
-    if store_path is None:
-        show(
-            Block.text("Error: vertex has no store configured", p.error),
-            file=sys.stderr,
-        )
-        return 1
-
     try:
-        from engine import SqliteStore
+        from engine import load_vertex_program
 
         # Special-case: pop facts also materialize the configured .list file.
         is_pop = kind in (POP_ADD_KIND, POP_RM_KIND)
@@ -1144,12 +1179,11 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                     return 1
                 payload["template"] = template_name
 
+        # Load the vertex runtime — facts route through loops, boundaries fire
         store_path.parent.mkdir(parents=True, exist_ok=True)
-        with SqliteStore(
-            path=store_path,
-            serialize=Fact.to_dict,
-            deserialize=Fact.from_dict,
-        ) as store:
+        program = load_vertex_program(writable_path, validate_ast=False)
+
+        try:
             if is_pop and list_path is not None and header is not None:
                 # If this is the first pop mutation for this template, seed the store
                 # from the existing .list to avoid clobbering on first materialization.
@@ -1174,8 +1208,22 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                                     observer=args.observer or "",
                                     origin="",
                                 )
-                                store.append(seed_fact)
-            store.append(fact)
+                                program.vertex.receive(seed_fact)
+
+            # Route fact through the vertex runtime — fold, boundary check, store
+            tick = program.vertex.receive(fact)
+            if tick is not None:
+                # Boundary fired — a tick was produced
+                show(
+                    Block.text(
+                        f"tick: {tick.name} ({len(tick.payload)} fields)",
+                        p.muted,
+                    ),
+                )
+        finally:
+            # Clean up the store connection
+            if hasattr(program.vertex, '_store') and program.vertex._store is not None:
+                program.vertex._store.close()
 
         if is_pop and list_path is not None and header is not None:
             pop_materialize_list(

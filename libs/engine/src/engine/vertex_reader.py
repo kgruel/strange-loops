@@ -196,6 +196,7 @@ def _combined_read(
                 p = json.loads(r[4])
                 p["_ts"] = r[1]
                 p["_observer"] = r[2]
+                p["_origin"] = r[3] or ""
                 payloads.append(p)
             result[kind] = spec.replay(payloads)
         return result
@@ -432,6 +433,7 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
                 p = dict(fact["payload"])
                 p["_ts"] = fact["ts"]
                 p["_observer"] = fact["observer"]
+                p["_origin"] = fact.get("origin", "")
                 payloads.append(p)
             result[kind] = spec.replay(payloads)
         return result

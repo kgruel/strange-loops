@@ -269,7 +269,7 @@ def _combined_facts(
         # See _combined_read for ts-tie ordering note.
         if kind is not None:
             selects = [
-                f"SELECT kind, ts, observer, origin, payload "
+                f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
                 f"WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ? || '.%')"
                 for a in aliases
@@ -280,7 +280,7 @@ def _combined_facts(
                 params.extend([since_ts, until_ts, kind, kind])
         else:
             selects = [
-                f"SELECT kind, ts, observer, origin, payload "
+                f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
                 f"WHERE ts >= ? AND ts <= ?"
                 for a in aliases
@@ -293,11 +293,12 @@ def _combined_facts(
         rows = conn.execute(sql, params).fetchall()
         return [
             {
-                "kind": r[0],
-                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
-                "observer": r[2],
-                "origin": r[3],
-                "payload": json.loads(r[4]),
+                "id": r[0],
+                "kind": r[1],
+                "ts": datetime.fromtimestamp(r[2], tz=timezone.utc),
+                "observer": r[3],
+                "origin": r[4],
+                "payload": json.loads(r[5]),
             }
             for r in rows
         ]
@@ -587,6 +588,46 @@ def _dict_to_fold_item(d: dict) -> Any:
     observer = d.pop("_observer", "")
     origin = d.pop("_origin", "")
     return FoldItem(payload=d, ts=ts, observer=observer, origin=origin)
+
+
+def vertex_fact_by_id(
+    vertex_path: Path,
+    id_prefix: str,
+) -> dict | None:
+    """Look up a single fact by ID or ID prefix from a vertex's store.
+
+    For combinatorial vertices, searches across all combined stores.
+    Returns None if not found. Raises ValueError on ambiguous prefix.
+    """
+    from .store_reader import StoreReader
+
+    ast, store_path = _resolve_store(vertex_path)
+
+    # Combinatorial/aggregation vertex: search across stores
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+        store_paths = _resolve_stores(ast, vertex_path)
+        matches: list[dict] = []
+        for sp in store_paths:
+            try:
+                with StoreReader(sp) as reader:
+                    result = reader.fact_by_id(id_prefix)
+                    if result is not None:
+                        matches.append(result)
+            except (FileNotFoundError, ValueError):
+                continue
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous ID prefix '{id_prefix}' — matches across multiple stores"
+            )
+        return matches[0]
+
+    if store_path is None:
+        return None
+
+    with StoreReader(store_path) as reader:
+        return reader.fact_by_id(id_prefix)
 
 
 def vertex_facts(

@@ -193,6 +193,20 @@ def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:
     return False
 
 
+def fetch_fact_by_id(
+    vertex_path: Path,
+    fact_id: str,
+) -> dict | None:
+    """Fetch a single fact by ID or ID prefix.
+
+    Returns the full fact dict with id, kind, ts, observer, origin, payload.
+    Returns None if not found. Raises ValueError on ambiguous prefix.
+    """
+    from engine import vertex_fact_by_id
+
+    return vertex_fact_by_id(vertex_path, fact_id)
+
+
 # --- Legacy aliases for backwards compatibility ---
 
 def fetch_status(vertex_path: Path, kind: str | None = None) -> FoldState:

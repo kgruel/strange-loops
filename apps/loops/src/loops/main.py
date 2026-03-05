@@ -1471,6 +1471,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
     pre.add_argument("--kind", default=None)
     pre.add_argument("--since", default=None)
     pre.add_argument("--lens", default=None)
+    pre.add_argument("--id", default=None, dest="fact_id")
     known, rest = pre.parse_known_args(argv)
 
     # Render function resolved lazily — vertex_path may not be known until fetch()
@@ -1496,6 +1497,18 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
                         query = f"{first} {known.query}"
             if vertex_path is None:
                 vertex_path = _resolve_local_vertex()
+
+        # --id: single fact lookup by ID or prefix
+        if known.fact_id is not None:
+            from .commands.fetch import fetch_fact_by_id
+            try:
+                fact = fetch_fact_by_id(vertex_path, known.fact_id)
+            except ValueError as e:
+                _err(str(e))
+                return {"facts": [], "fold_meta": {}, "vertex": "", "_id_lookup": known.fact_id}
+            if fact is None:
+                return {"facts": [], "fold_meta": {}, "vertex": "", "_id_lookup": known.fact_id}
+            return {"facts": [fact], "fold_meta": {}, "vertex": "", "_id_lookup": known.fact_id}
 
         from .commands.fetch import fetch_stream
         return fetch_stream(
@@ -1526,6 +1539,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
         description="Show event stream",
         help_args=[
             HelpArg("query", "Search text (FTS5)", positional=True),
+            HelpArg("--id", "Look up fact by ID or prefix"),
             HelpArg("--kind", "Filter by fact kind"),
             HelpArg("--observer", "Filter by observer (default: you)"),
             HelpArg("--since", "Time window (7d, 24h, 1h)", default="7d"),

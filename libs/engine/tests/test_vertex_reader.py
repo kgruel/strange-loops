@@ -22,7 +22,7 @@ def _seed_facts(db_path: Path, facts: list[dict]) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
         "CREATE TABLE IF NOT EXISTS facts ("
-        "    rowid INTEGER PRIMARY KEY,"
+        "    id TEXT NOT NULL PRIMARY KEY,"
         "    kind TEXT NOT NULL,"
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
@@ -30,7 +30,7 @@ def _seed_facts(db_path: Path, facts: list[dict]) -> None:
         "    payload TEXT NOT NULL"
         ");"
         "CREATE TABLE IF NOT EXISTS ticks ("
-        "    rowid INTEGER PRIMARY KEY,"
+        "    id TEXT NOT NULL PRIMARY KEY,"
         "    name TEXT NOT NULL,"
         "    ts REAL NOT NULL,"
         "    since REAL,"
@@ -38,10 +38,10 @@ def _seed_facts(db_path: Path, facts: list[dict]) -> None:
         "    payload TEXT NOT NULL"
         ");"
     )
-    for f in facts:
+    for i, f in enumerate(facts):
         conn.execute(
-            "INSERT INTO facts (kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (f["kind"], f["ts"], f.get("observer", "test"), f.get("origin", ""), json.dumps(f["payload"])),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (f.get("id", f"TESTFACT{i:04d}"), f["kind"], f["ts"], f.get("observer", "test"), f.get("origin", ""), json.dumps(f["payload"])),
         )
     conn.commit()
     conn.close()
@@ -423,8 +423,8 @@ class TestVertexSearch:
         # Add more facts directly to the store
         conn = sqlite3.connect(str(db_path))
         conn.execute(
-            "INSERT INTO facts (kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            ("note", 2000.0, "test", "", json.dumps({"text": "second message"})),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            ("TESTFACT_INC", "note", 2000.0, "test", "", json.dumps({"text": "second message"})),
         )
         conn.commit()
         conn.close()
@@ -496,7 +496,7 @@ def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
         "CREATE TABLE IF NOT EXISTS facts ("
-        "    rowid INTEGER PRIMARY KEY,"
+        "    id TEXT NOT NULL PRIMARY KEY,"
         "    kind TEXT NOT NULL,"
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
@@ -504,7 +504,7 @@ def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
         "    payload TEXT NOT NULL"
         ");"
         "CREATE TABLE IF NOT EXISTS ticks ("
-        "    rowid INTEGER PRIMARY KEY,"
+        "    id TEXT NOT NULL PRIMARY KEY,"
         "    name TEXT NOT NULL,"
         "    ts REAL NOT NULL,"
         "    since REAL,"
@@ -512,10 +512,10 @@ def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
         "    payload TEXT NOT NULL"
         ");"
     )
-    for t in ticks:
+    for i, t in enumerate(ticks):
         conn.execute(
-            "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (t["name"], t["ts"], t.get("since"), t.get("origin", ""), json.dumps(t.get("payload", {}))),
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (t.get("id", f"TESTTICK{i:04d}"), t["name"], t["ts"], t.get("since"), t.get("origin", ""), json.dumps(t.get("payload", {}))),
         )
     conn.commit()
     conn.close()

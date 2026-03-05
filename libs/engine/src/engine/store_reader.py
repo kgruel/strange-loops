@@ -136,6 +136,46 @@ class StoreReader:
             return None
         return datetime.fromtimestamp(row[0], tz=timezone.utc)
 
+    def fact_by_id(self, id_prefix: str) -> dict | None:
+        """Look up a single fact by ID or ID prefix.
+
+        Exact match first, then prefix match. Returns None if no match.
+        Raises ValueError if prefix matches multiple facts.
+        """
+        # Exact match
+        row = self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts WHERE id = ?",
+            (id_prefix,),
+        ).fetchone()
+        if row:
+            return self._fact_row_to_dict(row)
+
+        # Prefix match
+        rows = self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            "WHERE id >= ? AND id < ? ORDER BY id LIMIT 2",
+            (id_prefix, id_prefix + "~"),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            raise ValueError(
+                f"Ambiguous ID prefix '{id_prefix}' — matches {rows[0][0]} and {rows[1][0]}"
+            )
+        return self._fact_row_to_dict(rows[0])
+
+    @staticmethod
+    def _fact_row_to_dict(r: tuple) -> dict:
+        """Convert a (id, kind, ts, observer, origin, payload) row to dict."""
+        return {
+            "id": r[0],
+            "kind": r[1],
+            "ts": datetime.fromtimestamp(r[2], tz=timezone.utc),
+            "observer": r[3],
+            "origin": r[4],
+            "payload": json.loads(r[5]),
+        }
+
     def facts_between(
         self,
         since_ts: float,
@@ -145,26 +185,17 @@ class StoreReader:
         """Facts within a time range, optionally filtered by kind."""
         if kind is not None:
             rows = self._conn.execute(
-                "SELECT kind, ts, observer, origin, payload FROM facts "
+                "SELECT id, kind, ts, observer, origin, payload FROM facts "
                 "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?) ORDER BY ts",
                 (since_ts, until_ts, kind, kind + ".%"),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT kind, ts, observer, origin, payload FROM facts "
+                "SELECT id, kind, ts, observer, origin, payload FROM facts "
                 "WHERE ts >= ? AND ts <= ? ORDER BY ts",
                 (since_ts, until_ts),
             ).fetchall()
-        return [
-            {
-                "kind": r[0],
-                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
-                "observer": r[2],
-                "origin": r[3],
-                "payload": json.loads(r[4]),
-            }
-            for r in rows
-        ]
+        return [self._fact_row_to_dict(r) for r in rows]
 
     def facts_by_kind(self, kind: str) -> list[dict]:
         """All facts for a kind, ordered by insertion (rowid ASC).
@@ -172,17 +203,18 @@ class StoreReader:
         Used for fold replay — facts must be in causal order.
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts "
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
             "WHERE kind = ? ORDER BY rowid ASC",
             (kind,),
         ).fetchall()
         return [
             {
-                "kind": r[0],
-                "ts": r[1],
-                "observer": r[2],
-                "origin": r[3],
-                "payload": json.loads(r[4]),
+                "id": r[0],
+                "kind": r[1],
+                "ts": r[2],
+                "observer": r[3],
+                "origin": r[4],
+                "payload": json.loads(r[5]),
             }
             for r in rows
         ]
@@ -190,20 +222,11 @@ class StoreReader:
     def recent_facts(self, kind: str, n: int) -> list[dict]:
         """Last N facts for a given kind, newest first. Returns raw dicts."""
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts "
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
             "WHERE kind = ? ORDER BY ts DESC LIMIT ?",
             (kind, n),
         ).fetchall()
-        return [
-            {
-                "kind": r[0],
-                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
-                "observer": r[2],
-                "origin": r[3],
-                "payload": json.loads(r[4]),
-            }
-            for r in rows
-        ]
+        return [self._fact_row_to_dict(r) for r in rows]
 
     def search_facts(
         self,
@@ -236,7 +259,7 @@ class StoreReader:
         params.append(limit)
 
         rows = self._conn.execute(
-            f"SELECT f.kind, f.ts, f.observer, f.origin, f.payload "
+            f"SELECT f.id, f.kind, f.ts, f.observer, f.origin, f.payload "
             f"FROM facts_fts fts "
             f"JOIN facts f ON f.rowid = fts.fact_rowid "
             f"WHERE {where} "
@@ -244,16 +267,7 @@ class StoreReader:
             params,
         ).fetchall()
 
-        return [
-            {
-                "kind": r[0],
-                "ts": datetime.fromtimestamp(r[1], tz=timezone.utc),
-                "observer": r[2],
-                "origin": r[3],
-                "payload": json.loads(r[4]),
-            }
-            for r in rows
-        ]
+        return [self._fact_row_to_dict(r) for r in rows]
 
     def close(self) -> None:
         """Close the database connection."""

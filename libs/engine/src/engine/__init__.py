@@ -69,7 +69,7 @@ from .compiler import (
 from .program import VertexProgram, load_vertex_program
 
 # Vertex read path (query-time fold materialization)
-from .vertex_reader import vertex_facts, vertex_fold, vertex_read, vertex_search, vertex_summary, vertex_ticks
+from .vertex_reader import vertex_fact_by_id, vertex_facts, vertex_fold, vertex_read, vertex_search, vertex_summary, vertex_ticks
 
 __all__ = [
     # Atoms
@@ -125,6 +125,7 @@ __all__ = [
     # Vertex read path
     "vertex_read",
     "vertex_fold",
+    "vertex_fact_by_id",
     "vertex_facts",
     "vertex_search",
     "vertex_ticks",

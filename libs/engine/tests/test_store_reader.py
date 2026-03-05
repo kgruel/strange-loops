@@ -12,7 +12,7 @@ from engine.store_reader import StoreReader
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS facts (
-    rowid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL PRIMARY KEY,
     kind TEXT NOT NULL,
     ts REAL NOT NULL,
     observer TEXT NOT NULL,
@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
 CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts);
 
 CREATE TABLE IF NOT EXISTS ticks (
-    rowid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
     ts REAL NOT NULL,
     since REAL,
@@ -51,26 +51,26 @@ def populated_db(tmp_db: Path) -> Path:
     conn = sqlite3.connect(str(tmp_db))
     # Two kinds of facts
     conn.execute(
-        "INSERT INTO facts (kind, ts, observer, payload) VALUES (?, ?, ?, ?)",
-        ("page", 100.0, "scraper", '{"url": "a"}'),
+        "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+        ("01FACT_PAGE_A", "page", 100.0, "scraper", '{"url": "a"}'),
     )
     conn.execute(
-        "INSERT INTO facts (kind, ts, observer, payload) VALUES (?, ?, ?, ?)",
-        ("page", 200.0, "scraper", '{"url": "b"}'),
+        "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+        ("01FACT_PAGE_B", "page", 200.0, "scraper", '{"url": "b"}'),
     )
     conn.execute(
-        "INSERT INTO facts (kind, ts, observer, payload) VALUES (?, ?, ?, ?)",
-        ("error", 150.0, "scraper", '{"msg": "fail"}'),
+        "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+        ("01FACT_ERROR1", "error", 150.0, "scraper", '{"msg": "fail"}'),
     )
     # Three ticks, two names
-    for name, ts, payload in [
+    for i, (name, ts, payload) in enumerate([
         ("scrape", 1000.0, {"n": 1}),
         ("scrape", 2000.0, {"n": 2}),
         ("health", 1500.0, {}),
-    ]:
+    ]):
         conn.execute(
-            "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (name, ts, None, "v1", json.dumps(payload)),
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (f"01TICK_{i}", name, ts, None, "v1", json.dumps(payload)),
         )
     conn.commit()
     conn.close()
@@ -116,8 +116,8 @@ class TestRecentTicks:
         conn = sqlite3.connect(str(tmp_db))
         for i in range(10):
             conn.execute(
-                "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-                ("m", float(i * 100), None, "v", json.dumps(i)),
+                "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+                (f"01TICK_LIM{i}", "m", float(i * 100), None, "v", json.dumps(i)),
             )
         conn.commit()
         conn.close()
@@ -182,10 +182,10 @@ class TestTicksBetween:
 
     def test_ordered_by_ts(self, tmp_db: Path):
         conn = sqlite3.connect(str(tmp_db))
-        for ts in [300.0, 100.0, 200.0]:
+        for i, ts in enumerate([300.0, 100.0, 200.0]):
             conn.execute(
-                "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-                ("x", ts, None, "v", json.dumps({"t": ts})),
+                "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+                (f"01TICK_ORD{i}", "x", ts, None, "v", json.dumps({"t": ts})),
             )
         conn.commit()
         conn.close()
@@ -194,6 +194,40 @@ class TestTicksBetween:
             ticks = reader.ticks_between(0, 500.0)
             timestamps = [t.ts.timestamp() for t in ticks]
             assert timestamps == sorted(timestamps)
+
+
+class TestFactById:
+    def test_exact_match(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            fact = reader.fact_by_id("01FACT_PAGE_A")
+            assert fact is not None
+            assert fact["id"] == "01FACT_PAGE_A"
+            assert fact["kind"] == "page"
+            assert fact["payload"] == {"url": "a"}
+
+    def test_prefix_match(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            fact = reader.fact_by_id("01FACT_ERROR")
+            assert fact is not None
+            assert fact["id"] == "01FACT_ERROR1"
+            assert fact["kind"] == "error"
+
+    def test_prefix_ambiguous(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            # "01FACT_PAGE" matches both PAGE_A and PAGE_B
+            with pytest.raises(ValueError, match="Ambiguous"):
+                reader.fact_by_id("01FACT_PAGE")
+
+    def test_not_found(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            assert reader.fact_by_id("NONEXISTENT") is None
+
+    def test_facts_include_id(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            facts = reader.facts_between(0, 300.0)
+            assert all("id" in f for f in facts)
+            ids = {f["id"] for f in facts}
+            assert "01FACT_PAGE_A" in ids
 
 
 class TestFileNotFound:

@@ -66,7 +66,11 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
         header = _section_header(s.kind, s.count, piped=piped)
         rows.append(Block.text(header, header_style, width=width))
 
-        _render_items(rows, s.items, s.key_field, s.kind, zoom, fmt, dim_style, meta_style, width)
+        # Show observer attribution when items come from multiple observers
+        observers = {item.observer for item in s.items if item.observer}
+        show_observer = len(observers) > 1
+
+        _render_items(rows, s.items, s.key_field, s.kind, zoom, fmt, dim_style, meta_style, width, show_observer=show_observer)
 
     return join_vertical(*rows)
 
@@ -106,11 +110,16 @@ def _render_items(
     dim_style: Style,
     meta_style: Style,
     width: int | None,
+    *,
+    show_observer: bool = False,
 ) -> None:
     """Generic item renderer — key_field drives the label, everything else is detail.
 
     When key_field is set (from FoldBy declaration), use it as the primary label.
     Otherwise fall back to heuristic scan of common label fields.
+
+    When show_observer is True, appends observer attribution to each item —
+    activated when a section contains items from multiple observers (unscoped fold).
     """
     # Build ordered label-field priority list
     label_fields = _label_fields(key_field)
@@ -121,19 +130,23 @@ def _render_items(
         used_label = _used_label_field(payload, label_fields)
         date = fmt(item.ts) if item.ts else ""
 
+        # Observer suffix when multi-observer fold
+        obs_suffix = f" ({item.observer})" if show_observer and item.observer else ""
+
         # SUMMARY: label + body snippet (first non-label payload field)
         # More useful than label + date — shows what the fold *contains*.
         body = _find_body(payload, used_label)
         if body:
+            reserved = len(label) + len(obs_suffix) + 6  # "  label (obs): snippet"
             if width is not None:
-                snippet = _truncate(body, width - len(label) - 6)  # "  label: snippet"
+                snippet = _truncate(body, width - reserved)
             else:
                 snippet = body
-            line = f"  {label}: {snippet}"
+            line = f"  {label}{obs_suffix}: {snippet}"
         elif date:
-            line = f"  {label} ({date})"
+            line = f"  {label}{obs_suffix} ({date})"
         else:
-            line = f"  {label}"
+            line = f"  {label}{obs_suffix}"
         rows.append(Block.text(line, Style(), width=width))
 
         # DETAILED: show remaining payload fields as continuation lines

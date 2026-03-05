@@ -1989,6 +1989,18 @@ def _render_main_help(argv: list[str]) -> int:
     return 0
 
 
+def _resolve_observer_flag(raw: str | None) -> str:
+    """Resolve --observer flag, handling the special 'all' value.
+
+    Returns "" to mean 'unscoped / all observers' (engine passes None).
+    Any other value goes through normal observer resolution.
+    """
+    if raw is not None and raw.lower() == "all":
+        return ""  # unscoped — will pass None to engine
+    from .commands.identity import resolve_observer
+    return resolve_observer(raw)
+
+
 def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
     """Dispatch verb-first observer operations: ``loops fold [vertex] [args]``.
 
@@ -1996,13 +2008,11 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
     delegates to the same ``_run_*`` functions with ``vertex_path=None``
     so they resolve the vertex from context (optional positional or local).
     """
-    from .commands.identity import resolve_observer
-
     # Pre-parse --observer from rest (same pattern as _dispatch_observer)
     obs_parser = argparse.ArgumentParser(add_help=False)
     obs_parser.add_argument("--observer", default=None)
     obs_known, rest = obs_parser.parse_known_args(rest)
-    observer = resolve_observer(obs_known.observer)
+    observer = _resolve_observer_flag(obs_known.observer)
 
     if verb == "fold":
         return _run_fold(rest, vertex_path=None, observer=observer)
@@ -2030,13 +2040,12 @@ def _dispatch_observer(
     Legacy aliases: status → fold, log → stream, search → stream.
     """
     import importlib
-    from .commands.identity import resolve_observer
 
     # Pre-parse --observer from rest (before subcommand dispatch)
     obs_parser = argparse.ArgumentParser(add_help=False)
     obs_parser.add_argument("--observer", default=None)
     obs_known, rest = obs_parser.parse_known_args(rest)
-    observer = resolve_observer(obs_known.observer)
+    observer = _resolve_observer_flag(obs_known.observer)
 
     # Load app module if registered
     mod = None

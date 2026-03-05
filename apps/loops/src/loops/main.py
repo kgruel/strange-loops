@@ -7,6 +7,7 @@ Observer operations (verb-first — resolves vertex from context):
     loops stream project "auth"     Stream named vertex, search query
     loops emit decision topic=x     Emit to local vertex
     loops emit project decision     Emit to named vertex
+    loops close thread my-thread    Resolve thread, capture produced artifacts
 
 Observer operations (vertex-first — backward compat):
     loops <vertex>                  Show folded state (default)
@@ -1791,6 +1792,181 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str
     return cmd_emit(args, vertex_path=vertex_path)
 
 
+def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: str = "") -> int:
+    """Close a thread — resolve it and capture what it produced.
+
+    Volitional boundary: the observer decides when a thread is done.
+    Collects associated artifacts (decisions, tasks, threads) by:
+    1. Temporal proximity — facts emitted since the thread opened
+    2. Explicit tagging — facts with thread=<name> in payload
+
+    Emits the resolution fact with a ``produced`` field listing what
+    the thread generated.
+    """
+    from datetime import datetime, timezone
+
+    from atoms import Fact
+    from engine import vertex_facts, vertex_fold
+    from painted import show, Block, Style
+    from painted.palette import current_palette
+    from .commands.identity import resolve_local_vertex, resolve_observer, validate_emit
+
+    p = current_palette()
+
+    parser = argparse.ArgumentParser(prog="loops close", add_help=False)
+    if vertex_path is None:
+        parser.add_argument("vertex", nargs="?", default=None)
+    parser.add_argument("kind", help="Fact kind to close (e.g. thread, task)")
+    parser.add_argument("name", help="Name/key of the item to close")
+    parser.add_argument("message", nargs="?", default=None, help="Resolution summary")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would happen")
+    args = parser.parse_args(argv)
+
+    # Resolve vertex
+    if vertex_path is None:
+        vname = getattr(args, "vertex", None)
+        if vname is not None:
+            resolved = _resolve_vertex_for_dispatch(vname)
+            if resolved is not None:
+                vertex_path = resolved
+            else:
+                # Not a vertex — shift: it's the kind, kind is name, name is message
+                if args.message is None:
+                    args.message = args.name
+                args.name = args.kind
+                args.kind = vname
+                vertex_path = resolve_local_vertex()
+        else:
+            vertex_path = resolve_local_vertex()
+
+    # Resolve observer
+    obs = resolve_observer(observer or None)
+
+    # Find the item in fold state to get its open timestamp
+    fold_state = vertex_fold(vertex_path, observer=None, kind=args.kind)
+    target_item = None
+    for section in fold_state.sections:
+        if section.kind == args.kind:
+            for item in section.items:
+                # Match by key field value (name, topic, etc.)
+                key_field = section.key_field
+                if key_field and item.payload.get(key_field) == args.name:
+                    target_item = item
+                    break
+                # Fallback: check common key fields
+                for kf in ("name", "topic", "title"):
+                    if item.payload.get(kf) == args.name:
+                        target_item = item
+                        break
+                if target_item:
+                    break
+
+    if target_item is None:
+        _err(f"No {args.kind} named '{args.name}' found in fold state.")
+        return 1
+
+    # Collect produced artifacts: facts emitted since thread opened
+    # Artifact kinds = anything that isn't the thread itself
+    produced = []
+    now = datetime.now(timezone.utc).timestamp()
+    if target_item.ts:
+        all_facts = vertex_facts(vertex_path, target_item.ts, now)
+        for f in all_facts:
+            # Skip the thread's own facts
+            if f["kind"] == args.kind:
+                payload = f.get("payload", {})
+                for kf in ("name", "topic", "title"):
+                    if payload.get(kf) == args.name:
+                        break
+                else:
+                    # Different item in same kind — could be produced
+                    _add_produced(produced, f)
+                continue
+            # Check explicit thread tag in payload
+            payload = f.get("payload", {})
+            if payload.get("thread") == args.name:
+                _add_produced(produced, f)
+                continue
+            # Include artifact kinds (decisions, tasks, threads opened during this thread's lifetime)
+            if f["kind"] in ("decision", "task", "thread", "change"):
+                _add_produced(produced, f)
+
+    # Deduplicate produced artifacts (same kind:key = same artifact)
+    seen = set()
+    deduped = []
+    for pr in produced:
+        ref = f"{pr['kind']}:{pr['key']}"
+        if ref not in seen:
+            seen.add(ref)
+            deduped.append(pr)
+    produced = deduped
+
+    # Build resolution payload
+    key_field = "name"
+    for section in fold_state.sections:
+        if section.kind == args.kind and section.key_field:
+            key_field = section.key_field
+            break
+
+    resolution_payload = {
+        key_field: args.name,
+        "status": "resolved",
+    }
+    if args.message:
+        resolution_payload["message"] = args.message
+    if produced:
+        resolution_payload["produced"] = [
+            f"{p['kind']}:{p['key']}" for p in produced
+        ]
+
+    # Show what we found
+    show(Block.text(f"Closing {args.kind}: {args.name}", Style(bold=True)))
+    if target_item.ts:
+        opened = datetime.fromtimestamp(target_item.ts, tz=timezone.utc)
+        show(Block.text(f"  opened: {opened.strftime('%Y-%m-%d %H:%M')}", Style(dim=True)))
+
+    if produced:
+        show(Block.text(f"  produced ({len(produced)}):", Style()))
+        for pr in produced:
+            show(Block.text(f"    {pr['kind']}: {pr['key']}", Style(dim=True)))
+    else:
+        show(Block.text("  no associated artifacts found", Style(dim=True)))
+
+    if args.dry_run:
+        import json as _json
+        show(Block.text(f"\n  dry-run payload: {_json.dumps(resolution_payload)}", Style(dim=True)))
+        return 0
+
+    # Emit the resolution fact
+    fact = Fact.of(args.kind, obs, **resolution_payload)
+
+    # Resolve writable vertex and emit through runtime
+    from engine import load_vertex_program
+
+    vp = _resolve_writable_vertex(vertex_path)
+    program = load_vertex_program(vp)
+    validate_emit(program.vertex, fact)
+    program.vertex.receive(fact)
+
+    show(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))
+    return 0
+
+
+def _add_produced(produced: list[dict], fact: dict) -> None:
+    """Extract a reference from a fact for the produced list."""
+    payload = fact.get("payload", {})
+    # Find the best key for this fact
+    for kf in ("name", "topic", "title"):
+        if payload.get(kf):
+            produced.append({"kind": fact["kind"], "key": payload[kf]})
+            return
+    # Fallback: first non-empty string field
+    for k, v in payload.items():
+        if isinstance(v, str) and v and not k.startswith("_"):
+            produced.append({"kind": fact["kind"], "key": v[:60]})
+            return
+
+
 def _run_add(argv: list[str]) -> int:
     """Thin wrapper: parse argv for add, delegate to cmd_add."""
     from .commands.pop import cmd_add
@@ -1877,10 +2053,10 @@ _ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls", "
 
 # Verbs that support verb-first dispatch: `loops fold` instead of `loops project fold`.
 # These resolve the vertex from context (local .vertex or LOOPS_HOME fallback).
-_OBSERVER_VERBS = frozenset({"fold", "stream", "emit"})
+_OBSERVER_VERBS = frozenset({"fold", "stream", "emit", "close"})
 
 _VERTEX_OPS = frozenset({
-    "fold", "stream", "emit", "store",
+    "fold", "stream", "emit", "close", "store",
     "check", "ls", "add", "rm", "export",
     # Legacy aliases
     "status", "log", "search",
@@ -1910,6 +2086,7 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "fold", "Show folded state (default)", detail="[vertex] [--kind KIND] [--observer OBS]"),
             HelpFlag(None, "stream", "Show event stream", detail="[vertex] [query] [--since SINCE] [--kind KIND]"),
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
+            HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
         ),
     )
 
@@ -2020,6 +2197,8 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
         return _run_stream(rest, vertex_path=None, observer=observer)
     if verb == "emit":
         return _run_emit(rest, vertex_path=None, observer=observer)
+    if verb == "close":
+        return _run_close(rest, vertex_path=None, observer=observer)
 
     _err(f"Unknown verb: {verb}")
     return 1
@@ -2066,6 +2245,8 @@ def _dispatch_observer(
         return _run_stream(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "emit":
         return _run_emit(args, vertex_path=vertex_path, observer=observer)
+    if op == "close":
+        return _run_close(args, vertex_path=vertex_path, observer=observer)
 
     # Legacy aliases
     if op == "status":

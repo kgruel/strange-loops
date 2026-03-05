@@ -1357,7 +1357,7 @@ def _generic_fold_summary(fold_state: dict) -> dict:
     return sections
 
 
-def _run_stream(argv: list[str], *, vertex_path: Path, mod=None) -> int:
+def _run_stream(argv: list[str], *, vertex_path: Path, mod=None, observer: str = "") -> int:
     """Run stream command — unified event history with optional search.
 
     Dissolves the old log + search into one temporal mode.
@@ -1388,6 +1388,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path, mod=None) -> int:
             query=known.query,
             kind=known.kind,
             since=known.since,
+            observer=observer or None,
         )
 
     def render(ctx, data):
@@ -1402,13 +1403,14 @@ def _run_stream(argv: list[str], *, vertex_path: Path, mod=None) -> int:
         help_args=[
             HelpArg("query", "Search text (FTS5)", positional=True),
             HelpArg("--kind", "Filter by fact kind"),
+            HelpArg("--observer", "Filter by observer (default: you)"),
             HelpArg("--since", "Time window (7d, 24h, 1h)", default="7d"),
             HelpArg("--lens", "Render lens (prompt)"),
         ],
     )
 
 
-def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
+def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
     """Run fold command — show collapsed vertex state."""
     from painted import run_cli
     from painted.fidelity import HelpArg
@@ -1440,13 +1442,13 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> 
                 vertex_path = _resolve_local_vertex()
         if mod is not None:
             from engine import vertex_read
-            fold_state = vertex_read(vertex_path)
+            fold_state = vertex_read(vertex_path, observer=observer or None)
             fetch_fn = getattr(mod, "fetch_status", None)
             if fetch_fn is not None:
                 return fetch_fn(fold_state)
             return _generic_fold_summary(fold_state)
         from .commands.fetch import fetch_fold
-        return fetch_fold(vertex_path, kind=known.kind)
+        return fetch_fold(vertex_path, kind=known.kind, observer=observer or None)
 
     def render(ctx, data):
         # When piped (not TTY), pass width=None so text flows without
@@ -1463,12 +1465,13 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> 
         description="Show folded state",
         help_args=[
             HelpArg("--kind", "Filter by fact kind"),
+            HelpArg("--observer", "Filter by observer (default: you)"),
             HelpArg("--lens", "Render lens (prompt)"),
         ],
     )
 
 
-def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=None) -> int:
+def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
     """Legacy log alias — delegates to _run_stream with --since default."""
     # If vertex_path not provided, we need to resolve it first for the legacy path
     if vertex_path is None:
@@ -1482,7 +1485,7 @@ def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=Non
             from .commands.identity import resolve_local_vertex as _resolve_local_vertex
             vertex_path = _resolve_local_vertex()
         argv = rest
-    return _run_stream(argv, vertex_path=vertex_path, mod=mod)
+    return _run_stream(argv, vertex_path=vertex_path, mod=mod, observer=observer)
 
 
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -1723,7 +1726,7 @@ def _run_init(argv: list[str]) -> int:
     return cmd_init(args)
 
 
-def _run_emit(argv: list[str], *, vertex_path: Path | None = None) -> int:
+def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str = "") -> int:
     """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
     parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
     if vertex_path is None:
@@ -1748,6 +1751,9 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None) -> int:
     args = parser.parse_args(argv)
     if vertex_path is not None:
         args.vertex = None
+    # Use dispatch-level observer if emit didn't override
+    if args.observer is None:
+        args.observer = observer or None
     return cmd_emit(args, vertex_path=vertex_path)
 
 
@@ -1863,9 +1869,9 @@ def _render_main_help(argv: list[str]) -> int:
         name="Vertex operations",
         hint="loops <vertex> [op]",
         flags=(
-            HelpFlag(None, "fold", "Show folded state (default)", detail="[--kind KIND]"),
-            HelpFlag(None, "stream", "Show event stream", detail="[query] [--since SINCE] [--kind KIND]"),
-            HelpFlag(None, "emit", "Inject a fact", detail="<kind> [KEY=VALUE ...] [--dry-run]"),
+            HelpFlag(None, "fold", "Show folded state (default)", detail="[--kind KIND] [--observer OBS]"),
+            HelpFlag(None, "stream", "Show event stream", detail="[query] [--since SINCE] [--kind KIND] [--observer OBS]"),
+            HelpFlag(None, "emit", "Inject a fact", detail="<kind> [KEY=VALUE ...] [--dry-run] [--observer OBS]"),
             HelpFlag(None, "store", "Inspect store contents"),
             HelpFlag(None, "check", "Run health checks", detail="[--observer OBS]"),
             HelpFlag(None, "ls", "List vertex contents", detail="[template]"),
@@ -1943,11 +1949,23 @@ def _dispatch_observer(
 ) -> int:
     """Dispatch observer operations with resolved vertex.
 
+    Resolves ``--observer`` once at dispatch level and threads it to all
+    subcommands. Default is the current observer identity (from env /
+    .vertex chain) — you're always yourself unless you explicitly look
+    through someone else's eyes.
+
     Default (no subcommand or flags only) → fold mode.
     Temporal modes: fold, stream, emit.
     Legacy aliases: status → fold, log → stream, search → stream.
     """
     import importlib
+    from .commands.identity import resolve_observer
+
+    # Pre-parse --observer from rest (before subcommand dispatch)
+    obs_parser = argparse.ArgumentParser(add_help=False)
+    obs_parser.add_argument("--observer", default=None)
+    obs_known, rest = obs_parser.parse_known_args(rest)
+    observer = resolve_observer(obs_known.observer)
 
     # Load app module if registered
     mod = None
@@ -1956,26 +1974,26 @@ def _dispatch_observer(
 
     # Default: no subcommand or flags only → fold mode
     if not rest or rest[0].startswith("-"):
-        return _run_fold(rest, vertex_path=vertex_path, mod=mod)
+        return _run_fold(rest, vertex_path=vertex_path, mod=mod, observer=observer)
 
     op = rest[0]
     args = rest[1:]
 
     # Temporal modes
     if op == "fold":
-        return _run_fold(args, vertex_path=vertex_path, mod=mod)
+        return _run_fold(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "stream":
-        return _run_stream(args, vertex_path=vertex_path, mod=mod)
+        return _run_stream(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "emit":
-        return _run_emit(args, vertex_path=vertex_path)
+        return _run_emit(args, vertex_path=vertex_path, observer=observer)
 
     # Legacy aliases
     if op == "status":
-        return _run_fold(args, vertex_path=vertex_path, mod=mod)
+        return _run_fold(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "log":
-        return _run_log_legacy(args, vertex_path=vertex_path, mod=mod)
+        return _run_log_legacy(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "search":
-        return _run_stream([op] + args, vertex_path=vertex_path, mod=mod)
+        return _run_stream([op] + args, vertex_path=vertex_path, mod=mod, observer=observer)
 
     # Kept as-is (dissolve later)
     if op == "store":
@@ -2009,12 +2027,8 @@ def _dispatch_observer(
             parser.add_argument("name", help=f"{op.capitalize()} name")
             parser.add_argument("--conversation", required=True, help="Conversation ID")
             parser.add_argument("--note", default="", help="Optional note")
-            parser.add_argument(
-                "--observer", default=None
-            )
             parsed = parser.parse_args(args)
-            from loops.commands.identity import resolve_observer as _resolve_obs
-            parsed.observer = _resolve_obs(parsed.observer)
+            parsed.observer = observer  # already resolved at dispatch level
             return handler(vertex_path, parsed)
 
     _err(f"Unknown operation: {op}")
@@ -2026,9 +2040,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # No args or --help → two-group help
-    if not argv or (set(argv) & {"-h", "--help"}):
-        return _render_main_help(argv or [])
+    # No args → help
+    if not argv:
+        return _render_main_help([])
+
+    # Top-level help: -h/--help only when it's the first arg (no command yet)
+    if argv[0] in ("-h", "--help"):
+        return _render_main_help(argv)
 
     # Root commands → dispatch directly
     if argv[0] in _ROOT_COMMANDS:

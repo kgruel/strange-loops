@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _IDENTITY_KINDS = {"self", "principle", "observation", "intention", "decision"}
+_RESOLVED_STATUSES = {"resolved", "completed", "done"}
 
 
 def _is_identity_vertex(data: FoldState) -> bool:
@@ -28,7 +29,9 @@ def _is_identity_vertex(data: FoldState) -> bool:
     if not data.sections:
         return False
     identity_count = sum(1 for s in data.sections if s.kind in _IDENTITY_KINDS)
-    return identity_count >= len(data.sections) // 2
+    # Require at least one identity kind (avoids false positive when
+    # a single non-identity section like 'task' is queried alone)
+    return identity_count > 0 and identity_count >= len(data.sections) // 2
 
 
 def _render_self_narrative(section: FoldSection) -> list[str]:
@@ -200,8 +203,14 @@ def _identity_prompt(sections: list[FoldSection]) -> Block:
     # 6. Anything else (threads, custom kinds) — fall back to schema
     for s in sections:
         if s.kind not in _IDENTITY_KINDS:
+            active = [
+                item for item in s.items
+                if item.payload.get("status") not in _RESOLVED_STATUSES
+            ]
+            if not active:
+                continue
             all_lines.append(f"## {s.kind.upper()}")
-            for item in s.items:
+            for item in active:
                 label = _label(item, s.key_field)
                 body = _body(item)
                 if body:
@@ -219,17 +228,29 @@ def _identity_prompt(sections: list[FoldSection]) -> Block:
 
 
 def _schema_prompt(sections: list[FoldSection]) -> Block:
-    """Structured schema prompt — original behavior for non-identity vertices."""
+    """Structured schema prompt — original behavior for non-identity vertices.
+
+    Filters out resolved/completed items — the prompt lens shows what's
+    active, not what's done. The regular fold lens still shows everything.
+    """
     rows: list[Block] = []
     plain = Style()
 
     for s in sections:
+        # Filter resolved/completed items from prompt output
+        active_items = [
+            item for item in s.items
+            if item.payload.get("status") not in _RESOLVED_STATUSES
+        ]
+        if not active_items:
+            continue
+
         if rows:
             rows.append(Block.text("", plain))
 
         rows.append(Block.text(f"## {s.kind.upper()}", plain))
 
-        for item in s.items:
+        for item in active_items:
             label = _label(item, s.key_field)
             body = _body(item)
             if body:

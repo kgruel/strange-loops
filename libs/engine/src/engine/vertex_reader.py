@@ -163,7 +163,7 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
 
 
 def _combined_read(
-    ast: Any, vertex_path: Path, specs: dict
+    ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None
 ) -> dict[str, dict[str, Any]]:
     """Fold state across multiple stores (combinatorial vertex_read)."""
     store_paths = _resolve_stores(ast, vertex_path)
@@ -193,6 +193,8 @@ def _combined_read(
             rows = conn.execute(sql, params).fetchall()
             payloads = []
             for r in rows:
+                if observer and r[2] != observer:
+                    continue
                 p = json.loads(r[4])
                 p["_ts"] = r[1]
                 p["_observer"] = r[2]
@@ -382,11 +384,17 @@ def _combined_summary(ast: Any, vertex_path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
+def vertex_read(
+    vertex_path: Path, *, observer: str | None = None
+) -> dict[str, dict[str, Any]]:
     """Read fold state from a vertex's store.
 
     Parses the vertex file, compiles fold declarations to Specs,
     reads raw facts from the store, and replays through folds.
+
+    When *observer* is provided, only facts from that observer are
+    included in the fold replay — each observer gets their own view
+    of accumulated state.
 
     Returns {kind: fold_state} where fold_state is the accumulated
     result of all facts of that kind replayed through the declared folds.
@@ -409,7 +417,7 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
     if ast.combine is not None or (ast.store is None and ast.discover is not None):
         if not specs:
             specs = _infer_specs(ast, vertex_path)
-        return _combined_read(ast, vertex_path, specs)
+        return _combined_read(ast, vertex_path, specs, observer=observer)
 
     # Resolve store path relative to vertex file
     if ast.store is None:
@@ -426,6 +434,8 @@ def vertex_read(vertex_path: Path) -> dict[str, dict[str, Any]]:
         result = {}
         for kind, spec in specs.items():
             facts = reader.facts_by_kind(kind)
+            if observer:
+                facts = [f for f in facts if f["observer"] == observer]
             # Inject fact metadata into payloads for folds that need it
             # (_ts for Latest fold, _observer for potential future use)
             payloads = []
@@ -444,8 +454,11 @@ def vertex_facts(
     since_ts: float,
     until_ts: float,
     kind: str | None = None,
+    observer: str | None = None,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
+
+    When *observer* is provided, only facts from that observer are returned.
 
     For queries that need raw facts (e.g. log), not fold state.
     Still goes through the vertex — the vertex knows where its store is.
@@ -457,20 +470,23 @@ def vertex_facts(
     ast = parse_vertex_file(vertex_path)
 
     if ast.combine is not None or (ast.store is None and ast.discover is not None):
-        return _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
+        facts = _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
+    elif ast.store is None:
+        facts = []
+    else:
+        store_path = ast.store
+        if not store_path.is_absolute():
+            store_path = (vertex_path.parent / store_path).resolve()
 
-    if ast.store is None:
-        return []
+        if not store_path.exists():
+            facts = []
+        else:
+            with StoreReader(store_path) as reader:
+                facts = reader.facts_between(since_ts, until_ts, kind=kind)
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
-
-    if not store_path.exists():
-        return []
-
-    with StoreReader(store_path) as reader:
-        return reader.facts_between(since_ts, until_ts, kind=kind)
+    if observer:
+        facts = [f for f in facts if f["observer"] == observer]
+    return facts
 
 
 def vertex_ticks(
@@ -625,11 +641,14 @@ def vertex_search(
     since: float | None = None,
     until: float | None = None,
     limit: int = 100,
+    observer: str | None = None,
 ) -> list[dict]:
     """Search fact payloads in a vertex's store via FTS5.
 
     Uses spec-declared search fields — only kinds with a ``search``
     declaration in the vertex file are indexed. Empty query returns nothing.
+
+    When *observer* is provided, only facts from that observer are returned.
 
     Args:
         vertex_path: Path to the .vertex file.
@@ -638,6 +657,7 @@ def vertex_search(
         since: Only facts with ts >= since.
         until: Only facts with ts <= until.
         limit: Maximum results (default 100).
+        observer: Filter to facts from this observer.
 
     Returns:
         Matching facts, newest first. Same shape as vertex_facts.
@@ -660,6 +680,9 @@ def vertex_search(
     _ensure_fts(store_path, search_fields)
 
     with StoreReader(store_path) as reader:
-        return reader.search_facts(
+        facts = reader.search_facts(
             query, kind=kind, since=since, until=until, limit=limit
         )
+        if observer:
+            facts = [f for f in facts if f["observer"] == observer]
+        return facts

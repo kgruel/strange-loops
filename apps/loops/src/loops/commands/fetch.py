@@ -22,7 +22,7 @@ def _parse_duration(s: str) -> float:
     return value * multipliers[unit]
 
 
-def fetch_fold(vertex_path: Path, kind: str | None = None) -> FoldState:
+def fetch_fold(vertex_path: Path, kind: str | None = None, observer: str | None = None) -> FoldState:
     """Fetch fold state driven entirely by vertex declaration.
 
     No per-kind extractors. The fold declaration's key_field IS the
@@ -38,7 +38,7 @@ def fetch_fold(vertex_path: Path, kind: str | None = None) -> FoldState:
     from lang.ast import FoldBy, FoldCollect
 
     ast = parse_vertex_file(vertex_path)
-    fold_state = vertex_read(vertex_path)
+    fold_state = vertex_read(vertex_path, observer=observer)
 
     # Declaration order from AST, not alphabetical.
     # Include kinds that have fold state OR are declared (declared-but-empty still show).
@@ -110,6 +110,7 @@ def fetch_stream(
     query: str | None = None,
     kind: str | None = None,
     since: str | None = None,
+    observer: str | None = None,
 ) -> dict:
     """Fetch event stream with three orthogonal filters.
 
@@ -128,10 +129,14 @@ def fetch_stream(
 
     if query:
         facts = vertex_search(
-            vertex_path, query, kind=kind, since=since_ts, limit=100
+            vertex_path, query, kind=kind, since=since_ts, limit=100,
+            observer=observer,
         )
     else:
-        facts = vertex_facts(vertex_path, since_ts, now.timestamp(), kind=kind)
+        facts = vertex_facts(
+            vertex_path, since_ts, now.timestamp(), kind=kind,
+            observer=observer,
+        )
 
     facts.sort(key=lambda f: f["ts"], reverse=True)
 

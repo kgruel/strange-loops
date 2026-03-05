@@ -16,6 +16,10 @@ Names starting with '.' or '/' are treated as paths relative to the vertex file.
 
 Lens contract: module must export fold_view(data, zoom, width) -> Block
 and/or stream_view(data, zoom, width) -> Block.
+
+Optional context kwargs (vertex_name, etc.) are passed when available.
+Lenses that want them add *, vertex_name=None to their signature.
+Lenses that don't care ignore them — call_lens handles the fallback.
 """
 
 from __future__ import annotations
@@ -148,3 +152,15 @@ def _load_builtin(name: str, candidates: tuple[str, ...]) -> LensRenderFn | None
     except (ImportError, ModuleNotFoundError):
         return None
     return _extract_view(mod, candidates)
+
+
+def call_lens(fn: LensRenderFn, data, zoom, width, **kwargs) -> "Block":
+    """Call a lens render function, passing optional context kwargs if accepted.
+
+    Existing lenses: fold_view(data, zoom, width) — kwargs silently dropped.
+    New lenses: fold_view(data, zoom, width, *, vertex_name=None) — kwargs passed.
+    """
+    try:
+        return fn(data, zoom, width, **kwargs)
+    except TypeError:
+        return fn(data, zoom, width)

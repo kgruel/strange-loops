@@ -1,10 +1,10 @@
-"""Tests for lens resolver — file search, built-in fallback, candidate naming."""
+"""Tests for lens resolver — file search, built-in fallback, candidate naming, call_lens."""
 
 from pathlib import Path
 
 import pytest
 
-from loops.lens_resolver import resolve_lens, _view_candidates, _build_search_path
+from loops.lens_resolver import resolve_lens, call_lens, _view_candidates, _build_search_path
 
 
 class TestViewCandidates:
@@ -121,3 +121,28 @@ class TestResolveFromFile:
     def test_nonexistent_path(self, tmp_path):
         fn = resolve_lens("./nonexistent.py", "fold_view", vertex_dir=tmp_path)
         assert fn is None
+
+
+class TestCallLens:
+    """call_lens passes optional kwargs when the lens accepts them."""
+
+    def test_passes_vertex_name_when_accepted(self):
+        def lens_with_ctx(data, zoom, width, *, vertex_name=None):
+            return f"got:{vertex_name}"
+
+        result = call_lens(lens_with_ctx, "d", "z", 80, vertex_name="project")
+        assert result == "got:project"
+
+    def test_drops_kwargs_when_not_accepted(self):
+        def lens_without_ctx(data, zoom, width):
+            return f"basic:{data}"
+
+        result = call_lens(lens_without_ctx, "d", "z", 80, vertex_name="project")
+        assert result == "basic:d"
+
+    def test_no_kwargs_still_works(self):
+        def lens(data, zoom, width):
+            return "ok"
+
+        result = call_lens(lens, "d", "z", 80)
+        assert result == "ok"

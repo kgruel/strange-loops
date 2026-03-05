@@ -1323,6 +1323,17 @@ def _get_vertex_lens_decl(vertex_path: Path):
         return None
 
 
+def _vertex_name(vertex_path: Path | None) -> str | None:
+    """Extract vertex name from path — stem without extension."""
+    if vertex_path is None:
+        return None
+    name = vertex_path.stem
+    # .vertex (bare dotfile) → infer from parent dir
+    if name == "":
+        return vertex_path.parent.name
+    return name
+
+
 def _resolve_app_view(mod, view_name: str):
     """Resolve a view function from an app module.
 
@@ -1501,7 +1512,11 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
             resolved_render_fn = _resolve_render_fn(
                 known.lens, vertex_path, mod, "stream_view",
             )
-        return resolved_render_fn(data, ctx.zoom, ctx.width)
+        from .lens_resolver import call_lens
+        return call_lens(
+            resolved_render_fn, data, ctx.zoom, ctx.width,
+            vertex_name=_vertex_name(vertex_path),
+        )
 
     return run_cli(
         rest,
@@ -1563,7 +1578,11 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
         # truncation or padding. The fold output IS the data — useful
         # directly as a system prompt or piped to other tools.
         w = ctx.width if ctx.is_tty else None
-        return resolved_render_fn(data, ctx.zoom, w)
+        from .lens_resolver import call_lens
+        return call_lens(
+            resolved_render_fn, data, ctx.zoom, w,
+            vertex_name=_vertex_name(vertex_path),
+        )
 
     return run_cli(
         rest,

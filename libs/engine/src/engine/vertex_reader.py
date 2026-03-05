@@ -105,16 +105,66 @@ def _resolve_stores(ast: Any, vertex_path: Path) -> list[Path]:
     return []
 
 
-def _infer_specs(ast: Any, vertex_path: Path) -> dict:
-    """Get fold specs from the first referenced vertex when aggregation has none.
+class ConflictingFoldSpec(Exception):
+    """Two source vertices declare the same kind with different fold specs."""
 
-    Works for both combine (explicit vertex refs) and discover (glob pattern).
+    def __init__(self, kind: str, source_a: str, source_b: str) -> None:
+        self.kind = kind
+        super().__init__(
+            f"Conflicting fold spec for '{kind}' from '{source_a}' and '{source_b}'. "
+            f"Add an explicit '{kind}' declaration to the aggregation vertex to resolve."
+        )
+
+
+def _specs_match(a: Any, b: Any) -> bool:
+    """Check if two Specs have equivalent fold declarations.
+
+    Compares fold ops (type + parameters) — the part that determines
+    how facts accumulate. Ignores name/about metadata.
+    """
+    if len(a.folds) != len(b.folds):
+        return False
+    for fa, fb in zip(a.folds, b.folds):
+        if type(fa) is not type(fb):
+            return False
+        # Compare fold-relevant attributes (key for Upsert, limit for Collect)
+        if hasattr(fa, "key") and fa.key != fb.key:
+            return False
+        if hasattr(fa, "limit") and fa.limit != fb.limit:
+            return False
+    return True
+
+
+def _collect_source_specs(ast: Any, vertex_path: Path) -> dict:
+    """Collect fold specs from all source vertices, erroring on conflicts.
+
+    Union semantics: all source kinds are included. When two sources
+    declare the same kind with matching fold specs, it passes through.
+    When they conflict (same kind, different fold), raises
+    ConflictingFoldSpec — the aggregation vertex must explicitly declare
+    an override to resolve.
     """
     from lang import parse_vertex_file, resolve_vertex
 
     from .compiler import compile_vertex
 
-    # Try combine entries first
+    merged: dict = {}
+    # Track which source each kind came from (for error messages)
+    source_of: dict[str, str] = {}
+
+    def _merge_from(ref_ast: Any, source_name: str) -> None:
+        if not ref_ast.loops:
+            return
+        source_specs = compile_vertex(ref_ast)
+        for kind, spec in source_specs.items():
+            if kind in merged:
+                if not _specs_match(merged[kind], spec):
+                    raise ConflictingFoldSpec(kind, source_of[kind], source_name)
+                # Matching specs — no conflict, keep existing
+            else:
+                merged[kind] = spec
+                source_of[kind] = source_name
+
     if ast.combine is not None:
         home = _loops_home()
         for entry in ast.combine:
@@ -127,12 +177,9 @@ def _infer_specs(ast: Any, vertex_path: Path) -> dict:
                 ref_ast = parse_vertex_file(vpath)
             except Exception:
                 continue
-            if ref_ast.loops:
-                return compile_vertex(ref_ast)
-        return {}
+            _merge_from(ref_ast, entry.name)
 
-    # Try discover pattern
-    if ast.discover is not None:
+    elif ast.discover is not None:
         base_dir = vertex_path.parent
         for match in sorted(base_dir.glob(ast.discover)):
             if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
@@ -141,10 +188,9 @@ def _infer_specs(ast: Any, vertex_path: Path) -> dict:
                 ref_ast = parse_vertex_file(match)
             except Exception:
                 continue
-            if ref_ast.store is not None:
-                return compile_vertex(ref_ast)
+            _merge_from(ref_ast, match.stem)
 
-    return {}
+    return merged
 
 
 def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[str]]:
@@ -413,11 +459,13 @@ def vertex_read(
     ast = parse_vertex_file(vertex_path)
     specs = compile_vertex(ast)
 
-    # Combinatorial or aggregation vertex: read across multiple stores
+    # Combinatorial or aggregation vertex: read across multiple stores.
+    # Auto-inherit: source specs are the base, aggregation specs override.
     if ast.combine is not None or (ast.store is None and ast.discover is not None):
-        if not specs:
-            specs = _infer_specs(ast, vertex_path)
-        return _combined_read(ast, vertex_path, specs, observer=observer)
+        source_specs = _collect_source_specs(ast, vertex_path)
+        # Source specs as base, aggregation specs override
+        merged = {**source_specs, **specs}
+        return _combined_read(ast, vertex_path, merged, observer=observer)
 
     # Resolve store path relative to vertex file
     if ast.store is None:
@@ -485,6 +533,11 @@ def vertex_fold(
     from .compiler import compile_vertex
 
     specs = compile_vertex(ast)
+    # For combine/discover vertices, merge source specs so fold metadata
+    # (fold_type, key_field) is available for inherited kinds too.
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+        source_specs = _collect_source_specs(ast, vertex_path)
+        specs = {**source_specs, **specs}
 
     sections: list[FoldSection] = []
     for kind_name in ordered_kinds:

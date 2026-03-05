@@ -25,12 +25,11 @@ export LOOPS_OBSERVER="$observer"
 # Prompt lens renders identity as narrative, session as handoff, filters resolved items.
 system_prompt=$(loops fold --observer all --lens prompt --plain 2>/dev/null || echo "")
 
-# --- Session boundary — mark arrival after reading ---
-loops emit project session name="$observer" status="open" 2>/dev/null || true
-
-# --- Launch ---
+# --- Launch (or dry-run) ---
 if $dry_run; then
   echo "$system_prompt"
 else
+  # Session boundary — only on real launch, after reading handoff
+  loops emit project session name="$observer" status="open" 2>/dev/null || true
   exec claude --system-prompt "$system_prompt"
 fi

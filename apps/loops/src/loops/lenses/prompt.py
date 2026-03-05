@@ -139,16 +139,24 @@ def _render_intentions(section: FoldSection) -> list[str]:
     return lines
 
 
-def _render_identity_decisions(section: FoldSection) -> list[str]:
-    """Render identity decisions — resolved positions about how I work."""
+def _render_identity_decisions(section: FoldSection, *, max_items: int = 5) -> list[str]:
+    """Render most recent identity decisions. Rest available via drill-down."""
     if not section.items:
         return []
 
-    lines: list[str] = ["**Working decisions** (confirmed through use):"]
-    for item in section.items:
+    # Most recent first
+    sorted_items = sorted(section.items, key=lambda i: i.ts or 0, reverse=True)
+    shown = sorted_items[:max_items]
+    remaining = len(sorted_items) - len(shown)
+
+    lines: list[str] = ["**Recent working decisions**:"]
+    for item in shown:
         label = _label(item, section.key_field)
         body = _body(item)
         lines.append(f"- **{label}**: {body}" if body else f"- **{label}**")
+
+    if remaining > 0:
+        lines.append(f"- *({remaining} more in store)*")
     lines.append("")
     return lines
 
@@ -200,24 +208,13 @@ def _identity_prompt(sections: list[FoldSection]) -> Block:
     if "decision" in section_map:
         all_lines.extend(_render_identity_decisions(section_map["decision"]))
 
-    # 6. Anything else (threads, custom kinds) — fall back to schema
-    for s in sections:
-        if s.kind not in _IDENTITY_KINDS:
-            active = [
-                item for item in s.items
-                if item.payload.get("status") not in _RESOLVED_STATUSES
-            ]
-            if not active:
-                continue
-            all_lines.append(f"## {s.kind.upper()}")
-            for item in active:
-                label = _label(item, s.key_field)
-                body = _body(item)
-                if body:
-                    all_lines.append(f"  {label}: {body}")
-                else:
-                    all_lines.append(f"  {label}")
-            all_lines.append("")
+    # 6. Non-identity sections — compressed for orientation
+    # Session/handoff: full render (it's the handoff content)
+    # Tasks: show open items (they're actionable)
+    # Everything else: count + most recent, rest summarized
+    non_identity = [s for s in sections if s.kind not in _IDENTITY_KINDS]
+    if non_identity:
+        all_lines.extend(_render_project_compressed(non_identity))
 
     # Strip trailing blank lines
     while all_lines and not all_lines[-1].strip():
@@ -227,7 +224,85 @@ def _identity_prompt(sections: list[FoldSection]) -> Block:
     return join_vertical(*rows) if rows else Block.text("(empty)", plain)
 
 
+# ---------------------------------------------------------------------------
+# Compressed project sections (for combined identity+project prompts)
+# ---------------------------------------------------------------------------
+
 _HANDOFF_KINDS = {"session", "handoff"}
+# Kinds that get full rendering in prompt (actionable or orientation)
+_ACTIONABLE_KINDS = {"task", "session", "handoff"}
+# Kinds to skip entirely in prompt (available via stream if needed)
+_SKIP_KINDS = {"log", "change"}
+# Max items to show before summarizing
+_PROMPT_ITEM_CAP = 3
+
+
+def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
+    """Render non-identity sections compressed for orientation.
+
+    Priority: session/handoff (full), tasks (open items), threads (open names),
+    decisions/other (count + recent few). Changes and log skipped.
+    """
+    lines: list[str] = []
+
+    section_map = {s.kind: s for s in sections}
+
+    # 1. Session/handoff — full render, this is the handoff content
+    for kind in ("session", "handoff"):
+        if kind in section_map:
+            lines.extend(_render_session(section_map[kind]))
+
+    # 2. Tasks — show open items (they're actionable)
+    if "task" in section_map:
+        active = [
+            i for i in section_map["task"].items
+            if i.payload.get("status") not in _RESOLVED_STATUSES
+        ]
+        if active:
+            lines.append("")
+            lines.append("## Open Tasks")
+            for item in active:
+                label = _label(item, section_map["task"].key_field)
+                body = _body(item)
+                priority = item.payload.get("priority", "")
+                pri_tag = f" [{priority}]" if priority else ""
+                if body:
+                    lines.append(f"  {label}{pri_tag}: {body}")
+                else:
+                    lines.append(f"  {label}{pri_tag}")
+
+    # 3. Threads — open names only
+    if "thread" in section_map:
+        active = [
+            i for i in section_map["thread"].items
+            if i.payload.get("status") not in _RESOLVED_STATUSES
+        ]
+        if active:
+            lines.append("")
+            names = [_label(i, section_map["thread"].key_field) for i in active]
+            if len(names) <= _PROMPT_ITEM_CAP:
+                lines.append(f"**Open threads**: {', '.join(names)}")
+            else:
+                shown = names[:_PROMPT_ITEM_CAP]
+                lines.append(
+                    f"**Open threads**: {', '.join(shown)} "
+                    f"(+{len(names) - _PROMPT_ITEM_CAP} more)"
+                )
+
+    # 4. Everything else — count summary only
+    for s in sections:
+        if s.kind in _ACTIONABLE_KINDS | _HANDOFF_KINDS | _SKIP_KINDS | {"thread"}:
+            continue
+        if s.kind in _IDENTITY_KINDS:
+            continue
+        active = [
+            i for i in s.items
+            if i.payload.get("status") not in _RESOLVED_STATUSES
+        ]
+        if active:
+            lines.append(f"**{s.kind}**: {len(active)} active ({len(s.items)} total)")
+
+    return lines
 
 
 def _render_session(section: FoldSection) -> list[str]:

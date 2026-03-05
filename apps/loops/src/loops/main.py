@@ -1,6 +1,14 @@
 """CLI for the loops runtime.
 
-Observer operations (vertex-first):
+Observer operations (verb-first — resolves vertex from context):
+    loops fold                      Show folded state (local vertex)
+    loops fold project              Show folded state (named vertex)
+    loops stream                    Show event stream
+    loops stream project "auth"     Stream named vertex, search query
+    loops emit decision topic=x     Emit to local vertex
+    loops emit project decision     Emit to named vertex
+
+Observer operations (vertex-first — backward compat):
     loops <vertex>                  Show folded state (default)
     loops <vertex> fold             Show folded state
     loops <vertex> stream           Show event stream
@@ -1357,16 +1365,22 @@ def _generic_fold_summary(fold_state: dict) -> dict:
     return sections
 
 
-def _run_stream(argv: list[str], *, vertex_path: Path, mod=None, observer: str = "") -> int:
+def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
     """Run stream command — unified event history with optional search.
 
     Dissolves the old log + search into one temporal mode.
+    When vertex_path is None (verb-first), the first positional is tried as
+    a vertex name before falling back to search query.
     """
     from painted import run_cli
     from painted.fidelity import HelpArg
 
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("query", nargs="?", default=None)
+    if vertex_path is None:
+        pre.add_argument("vertex_or_query", nargs="?", default=None)
+        pre.add_argument("query", nargs="?", default=None)
+    else:
+        pre.add_argument("query", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     pre.add_argument("--since", default=None)
     pre.add_argument("--lens", default=None)
@@ -1382,10 +1396,30 @@ def _run_stream(argv: list[str], *, vertex_path: Path, mod=None, observer: str =
         from .lenses.stream import stream_view as render_fn
 
     def fetch():
+        nonlocal vertex_path
+        query = known.query
+
+        if vertex_path is None:
+            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
+
+            first = getattr(known, "vertex_or_query", None)
+            if first is not None:
+                # Try as vertex name first; if it fails, treat as query
+                resolved = _resolve_vertex_for_dispatch(first)
+                if resolved is not None:
+                    vertex_path = resolved
+                else:
+                    # Not a vertex — it's the query; shift known.query to unused
+                    query = first
+                    if known.query is not None:
+                        query = f"{first} {known.query}"
+            if vertex_path is None:
+                vertex_path = _resolve_local_vertex()
+
         from .commands.fetch import fetch_stream
         return fetch_stream(
             vertex_path,
-            query=known.query,
+            query=query,
             kind=known.kind,
             since=known.since,
             observer=observer or None,
@@ -1841,6 +1875,10 @@ def _whoami_from_identity_store() -> str:
 
 _ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls", "store", "whoami"}
 
+# Verbs that support verb-first dispatch: `loops fold` instead of `loops project fold`.
+# These resolve the vertex from context (local .vertex or LOOPS_HOME fallback).
+_OBSERVER_VERBS = frozenset({"fold", "stream", "emit"})
+
 _VERTEX_OPS = frozenset({
     "fold", "stream", "emit", "store",
     "check", "ls", "add", "rm", "export",
@@ -1865,13 +1903,20 @@ def _render_main_help(argv: list[str]) -> int:
 
     zoom, fmt = scan_help_args(argv)
 
+    observer_group = HelpGroup(
+        name="Observer",
+        hint="loops <verb> [vertex] [args]",
+        flags=(
+            HelpFlag(None, "fold", "Show folded state (default)", detail="[vertex] [--kind KIND] [--observer OBS]"),
+            HelpFlag(None, "stream", "Show event stream", detail="[vertex] [query] [--since SINCE] [--kind KIND]"),
+            HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
+        ),
+    )
+
     vertex_group = HelpGroup(
         name="Vertex operations",
         hint="loops <vertex> [op]",
         flags=(
-            HelpFlag(None, "fold", "Show folded state (default)", detail="[--kind KIND] [--observer OBS]"),
-            HelpFlag(None, "stream", "Show event stream", detail="[query] [--since SINCE] [--kind KIND] [--observer OBS]"),
-            HelpFlag(None, "emit", "Inject a fact", detail="<kind> [KEY=VALUE ...] [--dry-run] [--observer OBS]"),
             HelpFlag(None, "store", "Inspect store contents"),
             HelpFlag(None, "check", "Run health checks", detail="[--observer OBS]"),
             HelpFlag(None, "ls", "List vertex contents", detail="[template]"),
@@ -1926,7 +1971,7 @@ def _render_main_help(argv: list[str]) -> int:
     help_data = HelpData(
         prog="loops",
         description="Runtime for .loop and .vertex files",
-        groups=(vertex_group, commands_group, zoom_group, format_group, help_group),
+        groups=(observer_group, vertex_group, commands_group, zoom_group, format_group, help_group),
     )
 
     if fmt == Format.JSON:
@@ -1942,6 +1987,32 @@ def _render_main_help(argv: list[str]) -> int:
     block = render_help(help_data, zoom, width, use_ansi)
     print_block(block, use_ansi=use_ansi)
     return 0
+
+
+def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
+    """Dispatch verb-first observer operations: ``loops fold [vertex] [args]``.
+
+    Resolves ``--observer`` the same way as ``_dispatch_observer``, then
+    delegates to the same ``_run_*`` functions with ``vertex_path=None``
+    so they resolve the vertex from context (optional positional or local).
+    """
+    from .commands.identity import resolve_observer
+
+    # Pre-parse --observer from rest (same pattern as _dispatch_observer)
+    obs_parser = argparse.ArgumentParser(add_help=False)
+    obs_parser.add_argument("--observer", default=None)
+    obs_known, rest = obs_parser.parse_known_args(rest)
+    observer = resolve_observer(obs_known.observer)
+
+    if verb == "fold":
+        return _run_fold(rest, vertex_path=None, observer=observer)
+    if verb == "stream":
+        return _run_stream(rest, vertex_path=None, observer=observer)
+    if verb == "emit":
+        return _run_emit(rest, vertex_path=None, observer=observer)
+
+    _err(f"Unknown verb: {verb}")
+    return 1
 
 
 def _dispatch_observer(
@@ -2101,6 +2172,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_app(
             argv, root_commands, prog="loops", description="Runtime for .loop and .vertex files"
         )
+
+    # Verb-first dispatch: `loops fold`, `loops stream`, `loops emit`
+    if argv[0] in _OBSERVER_VERBS:
+        return _dispatch_verb_first(argv[0], argv[1:])
 
     # Vertex-first dispatch
     vertex_name = argv[0]

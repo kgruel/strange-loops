@@ -1,0 +1,7 @@
+// meta-discussion — cross-cutting design space
+discover "./**/*.vertex"
+
+observers {
+  kyle { }
+  meta-claude { }
+}

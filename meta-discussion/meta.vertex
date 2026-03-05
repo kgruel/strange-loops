@@ -1,0 +1,13 @@
+// meta — cross-cutting patterns, ways of working, design principles
+// Not loops-specific. Decisions here survive outside any single project.
+// Loops-specific architecture goes in project.vertex.
+name "meta"
+store "./data/meta.db"
+
+loops {
+  decision    { fold { items "by" "topic" } }
+  thread      { fold { items "by" "name" } }
+  dissolution { fold { items "by" "concept" } }
+  handoff     { fold { items "collect" 1 } }
+  session     { fold { items "by" "name" } }
+}

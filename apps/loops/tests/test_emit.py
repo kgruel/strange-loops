@@ -323,3 +323,56 @@ class TestObserverResolution:
         err = capsys.readouterr().err
         assert "not declared" in err
         assert "unknown-user" in err
+
+    def test_combine_cascade_inherits_source_observers(self, tmp_path, monkeypatch, capsys):
+        """Aggregation vertex inherits observers from combine source vertices."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+
+        # Source vertex with observer declared in its workspace root
+        src_dir = tmp_path / "project" / ".loops"
+        src_dir.mkdir(parents=True)
+        src_vertex = src_dir / "project.vertex"
+        src_vertex.write_text(
+            'name "project"\n'
+            'store "./data/project.db"\n'
+            'loops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
+        # Workspace root declares the observer
+        ws_root = src_dir / ".vertex"
+        ws_root.write_text(
+            'discover "./**/*.vertex"\n\n'
+            'observers {\n  src-agent { }\n}\n'
+        )
+
+        # Aggregation vertex that combines from the source
+        agg_dir = home / "project"
+        agg_dir.mkdir(parents=True)
+        agg_vertex = agg_dir / "project.vertex"
+        agg_vertex.write_text(
+            'name "project"\n\n'
+            f'combine {{\n  vertex "{src_vertex}"\n}}\n'
+        )
+
+        # Global .vertex has only kyle — src-agent not declared here
+        (home / ".vertex").write_text(
+            'discover "./**/*.vertex"\n\n'
+            'observers {\n  kyle { }\n}\n'
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # src-agent should be accepted via cascade
+        result = main(
+            [
+                "project", "emit", "decision",
+                "--observer", "src-agent",
+                "topic=cascade-test",
+                "--dry-run",
+            ]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["observer"] == "src-agent"

@@ -4,10 +4,13 @@
 name "meta"
 store "./data/meta.db"
 
+lens {
+  fold "meta"
+}
+
 loops {
   decision    { fold { items "by" "topic" } }
   thread      { fold { items "by" "name" } }
   dissolution { fold { items "by" "concept" } }
-  handoff     { fold { items "collect" 1 } }
   session     { fold { items "by" "name" } }
 }

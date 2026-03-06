@@ -1,9 +1,14 @@
+// Session — lifecycle tracking for delegated sessions
+// One entry per delegate (by who), latest wins.
+// Kyle emits session facts with who=kyle/<agent>, the fold tracks state.
+
 name "session"
 store "./data/session.db"
 
 loops {
-  decision { fold { items "by" "topic" } }
-  thread   { fold { items "by" "name" } }
-  change   { fold { items "collect" 20 } }
-  task     { fold { items "by" "name" } }
+  session {
+    fold { items "by" "who" }
+  }
+
+  boundary when="session" status="closed"
 }

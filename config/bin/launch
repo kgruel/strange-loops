@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+agent="${1:?Usage: launch <agent-name> [working-dir]}"
+workdir="${2:-.}"
+
+delegate="kyle/$agent"
+
+# Resolve loops binary from the monorepo venv
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+LOOPS="${REPO_ROOT}/.venv/bin/loops"
+
+if [[ ! -x "$LOOPS" ]]; then
+  echo "error: loops binary not found at $LOOPS" >&2
+  exit 1
+fi
+
+# Identity belongs to the agent, not the delegation path
+identity=$("$LOOPS" fold identity --observer "$agent" --lens prompt --plain 2>/dev/null || true)
+
+if [[ -z "$identity" ]]; then
+  echo "warning: no identity found for observer '$agent'" >&2
+fi
+
+# Emit session start — Kyle is the principal, delegate is the agent
+"$LOOPS" emit session session who="$delegate" status=open 2>/dev/null || true
+
+# Start claude with delegate identity
+cd "$workdir"
+exec env LOOPS_OBSERVER="$delegate" claude --append-system-prompt "$identity"

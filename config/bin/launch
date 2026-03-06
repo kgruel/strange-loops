@@ -27,4 +27,4 @@ fi
 
 # Start claude with delegate identity
 cd "$workdir"
-exec env LOOPS_OBSERVER="$delegate" claude --append-system-prompt "$identity"
+exec env LOOPS_OBSERVER="$delegate" claude --system-prompt "$identity"

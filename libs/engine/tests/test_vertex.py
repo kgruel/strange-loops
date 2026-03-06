@@ -935,3 +935,46 @@ class TestVertexReplay:
         assert tick.payload["decision"]["auth"]["position"] == "JWT"
         assert tick.payload["session"]["s1"]["status"] == "closed"
         store2.close()
+
+    def test_replay_period_start_bridges_sessions(self, tmp_path):
+        """Since field tracks the previous boundary, not the first-ever fact.
+
+        Without this fix, one-shot CLI invocations set since to the first
+        fact in history (replay sets period_start). With the fix, replay
+        initializes period_start from the last stored tick, so subsequent
+        boundaries produce ticks with since pointing to the previous boundary.
+        """
+        from engine.sqlite_store import SqliteStore
+
+        db_path = tmp_path / "test.db"
+
+        # Session 1: emit some facts and close — produces first tick
+        store1 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v1 = Vertex("project", store=store1)
+        v1.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v1.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v1.register_vertex_boundary("session", match=(("status", "closed"),))
+        v1.receive(fact("decision", topic="auth", position="JWT"))
+        tick1 = v1.receive(fact("session", name="s1", status="closed"))
+        assert tick1 is not None
+        store1.close()
+
+        # Session 2: fresh vertex, replay, emit new facts, close
+        store2 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v2 = Vertex("project", store=store2)
+        v2.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v2.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v2.register_vertex_boundary("session", match=(("status", "closed"),))
+        v2.replay()
+
+        v2.receive(fact("decision", topic="deploy", position="k8s"))
+        tick2 = v2.receive(fact("session", name="s2", status="closed"))
+        assert tick2 is not None
+
+        # The critical assertion: tick2.since should be tick1.ts,
+        # NOT the timestamp of the first-ever fact
+        assert tick2.since == tick1.ts
+
+        # tick2 period is [tick1.ts, tick2.ts] — not [first_fact, tick2.ts]
+        assert tick2.since > tick1.since  # tick1.since < tick1.ts always
+        store2.close()

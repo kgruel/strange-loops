@@ -548,6 +548,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
     vertex_boundary: Boundary | None = None
+    observer_scoped: bool = False
 
     for node in doc.nodes:
         key = node.name
@@ -587,6 +588,12 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             observers = _load_observers_block(node, path)
         elif key == "lens":
             lens = _load_lens_block(node, path)
+        elif key == "scope":
+            scope_val = _require_arg(node, 0, "scope value", path)
+            if scope_val == "observer":
+                observer_scoped = True
+            else:
+                raise _error(f"Unknown scope value: {scope_val!r} (expected 'observer')", path)
         else:
             raise _error(f"Unknown config key: {key}", path)
 
@@ -630,6 +637,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         observers=observers,
         lens=lens,
         boundary=vertex_boundary,
+        observer_scoped=observer_scoped,
         path=path,
     )
 

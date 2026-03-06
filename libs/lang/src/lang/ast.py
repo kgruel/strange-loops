@@ -501,6 +501,7 @@ class VertexFile:
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
     boundary: Boundary | None = None  # vertex-level boundary (fires all loops)
+    observer_scoped: bool = False  # fold defaults to current observer when True
 
     # Source location for error reporting
     path: Path | None = None

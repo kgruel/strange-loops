@@ -1454,7 +1454,7 @@ def _generic_fold_summary(fold_state: dict) -> dict:
     return sections
 
 
-def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
+def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str | None = None) -> int:
     """Run stream command — unified event history with optional search.
 
     Dissolves the old log + search into one temporal mode.
@@ -1480,7 +1480,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
     resolved_render_fn = None
 
     def fetch():
-        nonlocal vertex_path
+        nonlocal vertex_path, observer
         query = known.query
 
         if vertex_path is None:
@@ -1500,6 +1500,10 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
             if vertex_path is None:
                 vertex_path = _resolve_local_vertex()
 
+        # Apply vertex scope — deferred until vertex_path is known
+        observer = _apply_vertex_scope(observer, vertex_path)
+        obs_for_engine = observer if observer else None
+
         # --id: single fact lookup by ID or prefix
         if known.fact_id is not None:
             from .commands.fetch import fetch_fact_by_id
@@ -1518,7 +1522,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
             query=query,
             kind=known.kind,
             since=known.since,
-            observer=observer or None,
+            observer=obs_for_engine,
         )
 
     def render(ctx, data):
@@ -1550,7 +1554,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
     )
 
 
-def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
+def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str | None = None) -> int:
     """Run fold command — show collapsed vertex state."""
     from painted import run_cli
     from painted.fidelity import HelpArg
@@ -1566,7 +1570,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
     resolved_render_fn = None
 
     def fetch():
-        nonlocal vertex_path
+        nonlocal vertex_path, observer
         if vertex_path is None:
             from .commands.identity import resolve_local_vertex as _resolve_local_vertex
             vname = getattr(known, "vertex", None)
@@ -1574,15 +1578,18 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
                 vertex_path = _resolve_named_vertex(vname)
             else:
                 vertex_path = _resolve_local_vertex()
+        # Apply vertex scope — deferred until vertex_path is known
+        observer = _apply_vertex_scope(observer, vertex_path)
+        obs_for_engine = observer if observer else None
         if mod is not None:
             from engine import vertex_read
-            fold_state = vertex_read(vertex_path, observer=observer or None)
+            fold_state = vertex_read(vertex_path, observer=obs_for_engine)
             fetch_fn = getattr(mod, "fetch_status", None)
             if fetch_fn is not None:
                 return fetch_fn(fold_state)
             return _generic_fold_summary(fold_state)
         from .commands.fetch import fetch_fold
-        return fetch_fold(vertex_path, kind=known.kind, observer=observer or None)
+        return fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
 
     def render(ctx, data):
         nonlocal resolved_render_fn
@@ -1869,7 +1876,7 @@ def _run_init(argv: list[str]) -> int:
     return cmd_init(args)
 
 
-def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str = "") -> int:
+def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
     parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
     if vertex_path is None:
@@ -1900,7 +1907,7 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str
     return cmd_emit(args, vertex_path=vertex_path)
 
 
-def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: str = "") -> int:
+def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Close a thread — resolve it and capture what it produced.
 
     Volitional boundary: the observer decides when a thread is done.
@@ -2291,16 +2298,42 @@ def _render_main_help(argv: list[str]) -> int:
     return 0
 
 
-def _resolve_observer_flag(raw: str | None) -> str:
+def _resolve_observer_flag(raw: str | None) -> str | None:
     """Resolve --observer flag, handling the special 'all' value.
 
-    Returns "" to mean 'unscoped / all observers' (engine passes None).
-    Any other value goes through normal observer resolution.
+    Returns:
+        None — no flag given, defer to vertex scope declaration
+        ""   — explicit 'all', always unscoped
+        str  — explicit observer name, always scoped
     """
-    if raw is not None and raw.lower() == "all":
+    if raw is None:
+        return None  # no flag — vertex decides
+    if raw.lower() == "all":
         return ""  # unscoped — will pass None to engine
     from .commands.identity import resolve_observer
     return resolve_observer(raw)
+
+
+def _apply_vertex_scope(observer: str | None, vertex_path: Path | None) -> str | None:
+    """Resolve observer default from vertex scope declaration.
+
+    When observer is None (no flag given), checks the vertex's
+    observer_scoped flag. Scoped vertices default to current observer.
+    Unscoped vertices default to all.
+    """
+    if observer is not None:
+        return observer  # explicit flag — use as-is
+
+    # No flag: check vertex scope
+    if vertex_path is not None:
+        from lang import parse_vertex_file
+        ast = parse_vertex_file(vertex_path)
+        if ast.observer_scoped:
+            from .commands.identity import resolve_observer
+            return resolve_observer(None)
+
+    # Unscoped vertex or no vertex resolved yet — show all
+    return None
 
 
 def _dispatch_verb_first(verb: str, rest: list[str]) -> int:

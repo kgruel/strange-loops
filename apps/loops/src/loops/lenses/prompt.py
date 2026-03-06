@@ -273,15 +273,18 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
                 else:
                     lines.append(f"  {label}{pri_tag}")
 
-    # 3. Threads — open names only
+    # 3. Threads — open names, split by delegation
     if "thread" in section_map:
         active = [
             i for i in section_map["thread"].items
             if i.payload.get("status") not in _RESOLVED_STATUSES
         ]
-        if active:
+        mine = [i for i in active if not i.payload.get("delegate")]
+        delegated = [i for i in active if i.payload.get("delegate")]
+        kf = section_map["thread"].key_field
+        if mine:
             lines.append("")
-            names = [_label(i, section_map["thread"].key_field) for i in active]
+            names = [_label(i, kf) for i in mine]
             if len(names) <= _PROMPT_ITEM_CAP:
                 lines.append(f"**Open threads**: {', '.join(names)}")
             else:
@@ -289,6 +292,15 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
                 lines.append(
                     f"**Open threads**: {', '.join(shown)} "
                     f"(+{len(names) - _PROMPT_ITEM_CAP} more)"
+                )
+        if delegated:
+            by_kind: dict[str, list[str]] = {}
+            for i in delegated:
+                d = i.payload["delegate"]
+                by_kind.setdefault(d, []).append(_label(i, kf))
+            for kind, names in by_kind.items():
+                lines.append(
+                    f"  *delegate {kind}*: {', '.join(names)}"
                 )
 
     # 4. Everything else — count summary only
@@ -373,19 +385,26 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
         if not items:
             continue
 
+        # Split delegated items out
+        mine = [i for i in items if not i.payload.get("delegate")]
+        delegated = [i for i in items if i.payload.get("delegate")]
+
         # Cap large sections to most recent items
         remaining = 0
-        if len(items) > _SCHEMA_ITEM_CAP:
-            sorted_items = sorted(items, key=lambda i: i.ts or 0, reverse=True)
-            remaining = len(items) - _SCHEMA_ITEM_CAP
-            items = sorted_items[:_SCHEMA_ITEM_CAP]
+        if len(mine) > _SCHEMA_ITEM_CAP:
+            sorted_items = sorted(mine, key=lambda i: i.ts or 0, reverse=True)
+            remaining = len(mine) - _SCHEMA_ITEM_CAP
+            mine = sorted_items[:_SCHEMA_ITEM_CAP]
+
+        if not mine and not delegated:
+            continue
 
         if rows:
             rows.append(Block.text("", plain))
 
         rows.append(Block.text(f"## {s.kind.upper()}", plain))
 
-        for item in items:
+        for item in mine:
             label = _label(item, s.key_field)
             body = _body(item)
             if body:
@@ -395,6 +414,17 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
 
         if remaining > 0:
             rows.append(Block.text(f"  ({remaining} more in store)", plain))
+
+        # Delegated items: grouped summary
+        if delegated:
+            by_kind: dict[str, list[str]] = {}
+            for item in delegated:
+                d = item.payload["delegate"]
+                by_kind.setdefault(d, []).append(_label(item, s.key_field))
+            for d_kind, d_names in by_kind.items():
+                rows.append(
+                    Block.text(f"  *delegate {d_kind}*: {', '.join(d_names)}", plain)
+                )
 
     return join_vertical(*rows)
 

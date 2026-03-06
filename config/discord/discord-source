@@ -76,13 +76,16 @@ def cmd_poll(token, channel_id):
         content = msg.get("content", "")
         if not content:
             continue
+        author = msg["author"]["username"]
         line = {
             "discord_message_id": msg["id"],
-            "author": msg["author"]["username"],
+            "author": author,
             "author_id": msg["author"]["id"],
             "content": content,
             "timestamp": msg["timestamp"],
             "direction": "in",
+            "_observer": author,
+            "_origin": "discord",
         }
         print(json.dumps(line, separators=(",", ":")))
         write_cursor(msg["id"])

@@ -268,7 +268,10 @@ class Vertex:
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
 
         # Track vertex-level period start (first fact after reset)
-        if self._vertex_boundary is not None and self._vertex_period_start is None:
+        # Suppressed during replay — replay sets period from last tick instead
+        if (self._vertex_boundary is not None
+                and self._vertex_period_start is None
+                and not self._replaying):
             self._vertex_period_start = fact_ts
 
         # Resolve routing: exact match first, then pattern-based routes
@@ -396,6 +399,11 @@ class Vertex:
         CLI invocation indistinguishable from a persistent runtime — fold
         state reflects all historical facts, not just the current invocation.
 
+        After replay, initializes the vertex period start from the last
+        stored tick. This ensures the next boundary fire produces a tick
+        with ``since`` pointing to the previous boundary, not the first
+        fact in history.
+
         Returns the number of facts replayed.
         """
         if self._store is None:
@@ -405,11 +413,22 @@ class Vertex:
             return 0
         store = self._store
         self._store = None  # suppress re-append during replay
-        self._replaying = True  # suppress boundary firing during replay
+        self._replaying = True  # suppress boundary firing and period tracking
         for fact in facts:
             self.receive(fact)
         self._replaying = False
         self._store = store  # restore
+
+        # Initialize period start from last vertex-level tick.
+        # Vertex-level boundary ticks use self._name as tick name.
+        # The last such tick's ts is the end of the previous period —
+        # the next boundary's since should start from there.
+        if self._vertex_boundary is not None and hasattr(store, 'ticks_since'):
+            for tick in reversed(store.ticks_since(0)):
+                if tick.name == self._name:
+                    self._vertex_period_start = tick.ts
+                    break
+
         return len(facts)
 
     def to_fact(self, tick: Tick) -> Fact:

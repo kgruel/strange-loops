@@ -500,6 +500,7 @@ class VertexFile:
     sources_blocks: tuple[SourcesBlock, ...] | None = None
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
+    boundary: Boundary | None = None  # vertex-level boundary (fires all loops)
 
     # Source location for error reporting
     path: Path | None = None

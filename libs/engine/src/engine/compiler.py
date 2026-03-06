@@ -575,6 +575,7 @@ class CompiledVertex:
     path: Path | None = None
     sources: list | None = None
     template_specs: dict | None = None
+    boundary: "Boundary | None" = None  # vertex-level boundary (fires all loops)
 
 
 def collect_all_sources(compiled: CompiledVertex) -> tuple[list, dict]:
@@ -686,6 +687,11 @@ def compile_vertex_recursive(
         )
         children[child_compiled.name] = child_compiled
 
+    # Compile vertex-level boundary if present
+    vertex_boundary = None
+    if vertex.boundary is not None:
+        vertex_boundary = map_boundary(vertex.boundary)
+
     return CompiledVertex(
         name=vertex.name,
         specs=specs,
@@ -695,6 +701,7 @@ def compile_vertex_recursive(
         path=vertex.path,
         sources=own_sources or None,
         template_specs=own_template_specs or None,
+        boundary=vertex_boundary,
     )
 
 
@@ -882,6 +889,14 @@ def materialize_vertex(
                     reset=reset,
                 )
                 vertex.register_loop(loop)
+
+    # Register vertex-level boundary (fires all loops)
+    if compiled.boundary is not None:
+        b = compiled.boundary
+        vertex.register_vertex_boundary(
+            kind=b.kind,
+            match=b.match,
+        )
 
     # Recursively materialize and attach children
     for child_name, child_compiled in compiled.children.items():

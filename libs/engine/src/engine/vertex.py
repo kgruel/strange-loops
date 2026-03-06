@@ -40,6 +40,14 @@ if TYPE_CHECKING:
 _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
 
 
+def _json_default(obj: object) -> object:
+    """Handle MappingProxyType in JSON serialization."""
+    from types import MappingProxyType
+    if isinstance(obj, MappingProxyType):
+        return dict(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 class Vertex:
     """Where loops meet.
 
@@ -63,6 +71,9 @@ class Vertex:
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._boundary_match: dict[str, tuple[tuple[str, str], ...]] = {}  # boundary_kind → match
+        self._vertex_boundary: str | None = None  # vertex-level boundary kind
+        self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
+        self._vertex_period_start: datetime | None = None
         self._store = store
         self._children: list[Vertex] = []
         self._routes: dict[str, str] = {}  # pattern → loop_name
@@ -127,7 +138,7 @@ class Vertex:
         child accepts it. Used by parent vertices to determine whether
         to forward facts to this child.
         """
-        if kind in self._loops or kind in self._boundary_map:
+        if kind in self._loops or kind in self._boundary_map or kind == self._vertex_boundary:
             return True
         # Check pattern-based routes
         if self._resolve_route(kind) is not None:
@@ -178,6 +189,27 @@ class Vertex:
             if loop.boundary_match:
                 self._boundary_match[loop.boundary_kind] = loop.boundary_match
         self._loops[kind] = loop
+
+    def register_vertex_boundary(
+        self,
+        kind: str,
+        match: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        """Register a vertex-level boundary.
+
+        When a fact of this kind arrives (and matches payload conditions),
+        ALL loop states are snapshot into a single Tick. This is the
+        vertex's cycle boundary — e.g. session close snapshots everything.
+
+        Vertex-level boundaries take precedence over loop-level boundaries
+        for the same kind.
+        """
+        if kind in self._boundary_map:
+            raise ValueError(
+                f"Boundary kind '{kind}' already registered at loop level"
+            )
+        self._vertex_boundary = kind
+        self._vertex_boundary_match = match
 
     def receive(
         self,
@@ -234,6 +266,10 @@ class Vertex:
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
 
+        # Track vertex-level period start (first fact after reset)
+        if self._vertex_boundary is not None and self._vertex_period_start is None:
+            self._vertex_period_start = fact_ts
+
         # Resolve routing: exact match first, then pattern-based routes
         routed_kind = kind  # Default: route to same name as fact kind
         if kind not in self._loops:
@@ -267,7 +303,16 @@ class Vertex:
             self._store_tick(tick)
             return tick
 
-        # Check kind-based boundary trigger
+        # Check vertex-level boundary first (fires all loops)
+        if self._vertex_boundary == kind:
+            if not self._vertex_boundary_match or all(
+                payload.get(k) == v for k, v in self._vertex_boundary_match
+            ):
+                tick = self._fire_vertex_boundary(fact_ts, payload)
+                self._store_tick(tick)
+                return tick
+
+        # Check loop-level kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
             return None
@@ -282,6 +327,31 @@ class Vertex:
         tick = target_loop.fire(fact_ts, origin=self._name,
                                 boundary_payload=payload)
         self._store_tick(tick)
+        return tick
+
+    def _fire_vertex_boundary(
+        self, ts: datetime, boundary_payload: dict,
+    ) -> Tick[dict[str, Any]]:
+        """Fire a vertex-level boundary — snapshot ALL loop states.
+
+        Unlike loop.fire() which snapshots one loop, this captures the
+        full vertex state. Used for observer lifecycle boundaries like
+        session close, where the tick should carry everything.
+        """
+        import json
+
+        # Snapshot all loop states — JSON round-trip to strip MappingProxy
+        raw = {kind: loop.state for kind, loop in self._loops.items()}
+        state = json.loads(json.dumps(raw, default=_json_default))
+        state["_boundary"] = dict(boundary_payload)
+        tick = Tick(
+            name=self._name,
+            ts=ts,
+            payload=state,
+            origin=self._name,
+            since=self._vertex_period_start,
+        )
+        self._vertex_period_start = None  # reset for next period
         return tick
 
     def tick(self, name: str, ts: datetime) -> Tick[dict[str, Any]]:

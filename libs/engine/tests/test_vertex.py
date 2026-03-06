@@ -727,3 +727,106 @@ class TestRegisterCreatesLoop:
 
         assert tick is not None
         assert tick.since is not None
+
+
+class TestVertexLevelBoundary:
+    """Vertex-level boundary fires all loops, not just one."""
+
+    def test_vertex_boundary_fires_all_loops(self):
+        v = Vertex("project")
+        v.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        v.receive(fact("decision", topic="auth", position="JWT"))
+        v.receive(fact("session", name="test", status="open"))
+        tick = v.receive(fact("session", name="test", status="closed"))
+
+        assert tick is not None
+        assert tick.name == "project"  # vertex name, not loop name
+        assert tick.origin == "project"
+        assert "decision" in tick.payload
+        assert "session" in tick.payload
+        assert "_boundary" in tick.payload
+        assert tick.payload["decision"]["auth"]["position"] == "JWT"
+        assert tick.payload["session"]["test"]["status"] == "closed"
+        assert tick.payload["_boundary"]["status"] == "closed"
+
+    def test_vertex_boundary_no_match_returns_none(self):
+        v = Vertex("project")
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        tick = v.receive(fact("session", name="test", status="open"))
+        assert tick is None
+
+    def test_vertex_boundary_tracks_period(self):
+        v = Vertex("project")
+        v.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        v.receive(fact("session", name="test", status="open"))
+        v.receive(fact("decision", topic="auth", position="JWT"))
+        tick = v.receive(fact("session", name="test", status="closed"))
+
+        assert tick is not None
+        assert tick.since is not None
+        assert tick.since <= tick.ts
+
+    def test_vertex_boundary_period_resets(self):
+        """After firing, next fact starts a new period."""
+        v = Vertex("project")
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        v.receive(fact("session", name="s1", status="open"))
+        tick1 = v.receive(fact("session", name="s1", status="closed"))
+        assert tick1 is not None
+
+        v.receive(fact("session", name="s2", status="open"))
+        tick2 = v.receive(fact("session", name="s2", status="closed"))
+        assert tick2 is not None
+        assert tick2.since >= tick1.ts
+
+    def test_vertex_boundary_without_match(self):
+        """Vertex boundary with no match fires on any fact of that kind."""
+        v = Vertex("batch")
+        v.register("metric", [], lambda s, p: [*s, p])
+        v.register_vertex_boundary("flush")
+
+        v.receive(fact("metric", value=1))
+        v.receive(fact("metric", value=2))
+        tick = v.receive(fact("flush"))
+
+        assert tick is not None
+        assert tick.payload["metric"] == [{"value": 1}, {"value": 2}]
+
+    def test_vertex_boundary_conflicts_with_loop_boundary(self):
+        """Can't register vertex boundary for a kind already claimed by a loop."""
+        v = Vertex()
+        v.register("metric", 0, sum_fold, boundary="flush")
+        with pytest.raises(ValueError, match="already registered"):
+            v.register_vertex_boundary("flush")
+
+    def test_vertex_boundary_stores_tick(self, tmp_path):
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("project", store=store)
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        v.receive(fact("session", name="test", status="open"))
+        v.receive(fact("session", name="test", status="closed"))
+
+        ticks = store.ticks_since(0)
+        assert len(ticks) == 1
+        assert ticks[0].name == "project"
+        assert "session" in ticks[0].payload
+        assert "_boundary" in ticks[0].payload
+        store.close()

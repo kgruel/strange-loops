@@ -547,6 +547,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     sources_blocks: list[SourcesBlock] = []
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
+    vertex_boundary: Boundary | None = None
 
     for node in doc.nodes:
         key = node.name
@@ -569,7 +570,11 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             vertices = tuple(Path(str(a)) for a in node.args)
         elif key == "loops":
             for child in node.children:
-                loops[child.name] = _load_loop_def(child, path)
+                if child.name == "boundary":
+                    # Vertex-level boundary — sibling of loop definitions
+                    vertex_boundary = _load_boundary(child, path)
+                else:
+                    loops[child.name] = _load_loop_def(child, path)
         elif key == "routes":
             routes = {}
             for child in node.children:
@@ -624,6 +629,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         sources_blocks=tuple(sources_blocks) if sources_blocks else None,
         observers=observers,
         lens=lens,
+        boundary=vertex_boundary,
         path=path,
     )
 

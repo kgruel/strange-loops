@@ -238,6 +238,45 @@ loops {
         assert isinstance(loop.boundary, BoundaryEvery)
         assert loop.boundary.count == 50
 
+    def test_vertex_level_boundary(self):
+        """boundary as sibling of loop definitions fires vertex-wide."""
+        text = """\
+name "project"
+store "./data/project.db"
+loops {
+  decision {
+    fold { items "by" "topic" }
+  }
+  session {
+    fold { items "by" "name" }
+  }
+  boundary when="session" status="closed"
+}
+"""
+        vertex = parse_vertex(text)
+        # Session loop has NO boundary
+        assert vertex.loops["session"].boundary is None
+        # Vertex has boundary
+        assert vertex.boundary is not None
+        assert isinstance(vertex.boundary, BoundaryWhen)
+        assert vertex.boundary.kind == "session"
+        assert vertex.boundary.match == (("status", "closed"),)
+
+    def test_vertex_level_boundary_no_match(self):
+        """Vertex boundary without match conditions."""
+        text = """\
+name "batch"
+store "./data/batch.db"
+loops {
+  metric { fold { total "sum" "value" } }
+  boundary when="flush"
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.boundary is not None
+        assert vertex.boundary.kind == "flush"
+        assert vertex.boundary.match == ()
+
     def test_every_as_loop_key_still_works(self):
         text = """\
 source "echo test"

@@ -6,9 +6,8 @@ loops {
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
-  session {
-    fold { items "by" "name" }
-    boundary when="session" status="closed"
-  }
+  session  { fold { items "by" "name" } }
   log      { fold { items "collect" 20 } }
+
+  boundary when="session" status="closed"
 }

@@ -1,0 +1,7 @@
+// Discord poll — fetch new messages via discord-source
+// ndjson output: each line is a message with author, content, timestamp
+
+source "uv run --with requests python3 /Users/kaygee/.config/loops/discord/discord-source poll"
+kind "message"
+observer "discord"
+format "ndjson"

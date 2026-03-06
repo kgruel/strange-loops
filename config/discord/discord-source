@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Discord source — thin API wrapper for the discord vertex.
+
+Usage:
+    discord-source poll              Poll new messages, output ndjson to stdout
+    discord-source send <text>       Post via webhook, output ndjson line
+    discord-source channels          List visible channels
+"""
+
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+
+DIR = Path(__file__).parent
+ENV_FILE = DIR / ".env"
+CURSOR_FILE = DIR / "data" / ".cursor"
+API_BASE = "https://discord.com/api/v10"
+BOT_USERNAME = "meta-claude"
+
+
+def load_env():
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    channel_id = os.environ.get("DISCORD_CHANNEL_ID")
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not token or not channel_id:
+        print("ERROR: DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID required", file=sys.stderr)
+        sys.exit(1)
+    return token, channel_id, webhook_url
+
+
+def api_get(token, path, params=None):
+    for _ in range(3):
+        r = requests.get(f"{API_BASE}{path}", headers={"Authorization": f"Bot {token}"}, params=params, timeout=15)
+        if r.status_code == 429:
+            time.sleep(r.json().get("retry_after", 1) + 0.1)
+            continue
+        if not r.ok:
+            print(f"ERROR: {r.status_code} {r.text[:200]}", file=sys.stderr)
+            return None
+        return r.json()
+    print("ERROR: rate limited after 3 retries", file=sys.stderr)
+    return None
+
+
+def read_cursor():
+    if CURSOR_FILE.exists():
+        return CURSOR_FILE.read_text().strip() or None
+    return None
+
+
+def write_cursor(message_id):
+    CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CURSOR_FILE.write_text(message_id)
+
+
+def cmd_poll(token, channel_id):
+    cursor = read_cursor()
+    params = {"limit": 100}
+    if cursor:
+        params["after"] = cursor
+    msgs = api_get(token, f"/channels/{channel_id}/messages", params)
+    if msgs is None:
+        sys.exit(1)
+    for msg in reversed(msgs):
+        content = msg.get("content", "")
+        if not content:
+            continue
+        line = {
+            "discord_message_id": msg["id"],
+            "author": msg["author"]["username"],
+            "author_id": msg["author"]["id"],
+            "content": content,
+            "timestamp": msg["timestamp"],
+            "direction": "in",
+        }
+        print(json.dumps(line, separators=(",", ":")))
+        write_cursor(msg["id"])
+    sys.stdout.flush()
+
+
+def cmd_send(webhook_url, text):
+    if not webhook_url:
+        print("ERROR: DISCORD_WEBHOOK_URL required for send", file=sys.stderr)
+        sys.exit(1)
+    observer = os.environ.get("LOOPS_OBSERVER", BOT_USERNAME)
+    r = requests.post(webhook_url, json={"content": text, "username": observer}, timeout=15)
+    if not r.ok:
+        print(f"ERROR: {r.status_code} {r.text[:200]}", file=sys.stderr)
+        sys.exit(1)
+    line = {
+        "discord_message_id": "",
+        "author": observer,
+        "content": text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "direction": "out",
+    }
+    print(json.dumps(line, separators=(",", ":")))
+
+
+def cmd_channels(token):
+    guilds = api_get(token, "/users/@me/guilds")
+    if guilds is None:
+        return
+    for guild in guilds:
+        print(f"{guild['name']}:")
+        channels = api_get(token, f"/guilds/{guild['id']}/channels")
+        if channels is None:
+            continue
+        for ch in sorted((c for c in channels if c.get("type") == 0), key=lambda c: c.get("position", 0)):
+            print(f"  #{ch['name']} ({ch['id']})")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(1)
+    token, channel_id, webhook_url = load_env()
+    cmd = sys.argv[1]
+    if cmd == "poll":
+        cmd_poll(token, channel_id)
+    elif cmd == "send":
+        if len(sys.argv) < 3:
+            print("Usage: discord-source send <text>", file=sys.stderr)
+            sys.exit(1)
+        cmd_send(webhook_url, " ".join(sys.argv[2:]))
+    elif cmd == "channels":
+        cmd_channels(token)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

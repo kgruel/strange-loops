@@ -1,0 +1,10 @@
+// Real estate — property tracking and market data
+// Redfin/Zillow estimates for specific addresses + neighborhood trends
+
+name "realestate"
+store "./data/realestate.db"
+
+// TODO: sources — property.loop template with properties.list
+// TODO: Redfin neighborhood CSV pulls
+
+discover "./**/*.vertex"

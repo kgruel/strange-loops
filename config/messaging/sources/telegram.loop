@@ -1,0 +1,8 @@
+// Telegram — poll all chats via MTProto (Telethon)
+// Requires: apps/telegram config.json + authenticated session
+
+source "uv run --package telegram-archiver telegram-poll --config /Users/kaygee/Code/loops/apps/telegram/config.json --cursor /Users/kaygee/.config/loops/messaging/data/telegram-cursor.json --session /Users/kaygee/.config/loops/messaging/data/telegram"
+every "5m"
+kind "telegram.message"
+observer "telegram"
+format "ndjson"

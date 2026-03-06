@@ -1,0 +1,13 @@
+// Native — loops-native channels, no external source
+// Direct emit from agents, ticks, notifications.
+
+name "native"
+store "./data/native.db"
+
+loops {
+  message {
+    fold {
+      items "by" "message_id"
+    }
+  }
+}

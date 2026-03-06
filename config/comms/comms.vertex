@@ -1,0 +1,30 @@
+// Comms — unified communications infrastructure
+// Combines external sources (discord, telegram) with native loops channels.
+// The attention surface for cross-observer messaging and tick notifications.
+
+name "comms"
+
+combine {
+  vertex "./discord/discord.vertex"
+  vertex "./native/native.vertex"
+}
+
+observers {
+  kyle { }
+  loops-claude { }
+  meta-claude { }
+  alcove { }
+}
+
+loops {
+  message {
+    fold {
+      items "collect" 100
+    }
+  }
+  check {
+    fold {
+      cursor "collect" 1
+    }
+  }
+}

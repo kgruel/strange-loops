@@ -1,0 +1,9 @@
+// System — local machine monitoring
+// Disk usage, process counts, memory
+
+name "system"
+store "./data/system.db"
+
+// TODO: sources — disk.loop, proc.loop, memory.loop
+
+discover "./**/*.vertex"

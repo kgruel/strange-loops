@@ -1,0 +1,32 @@
+// Economy — macro indicators and market data
+// FRED time series + Redfin bulk data (stub)
+
+name "economy"
+store "./data/economy.db"
+
+sources {
+  // FRED economic indicators — one source per series
+  template "./sources/fred.loop" {
+    from file "./series.list"
+    loop {
+      fold {
+        observations "collect" 100
+        count "inc"
+        updated "latest"
+      }
+      boundary when="{{kind}}.complete"
+    }
+  }
+}
+
+loops {
+  source.error {
+    fold {
+      errors "collect" 20
+      count "inc"
+      latest_error "latest"
+    }
+  }
+}
+
+emit "economy.snapshot"

@@ -1,0 +1,13 @@
+# Store databases — runtime data, not declarations
+**/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+.cursor
+*-cursor.json
+
+# Python cache
+__pycache__/

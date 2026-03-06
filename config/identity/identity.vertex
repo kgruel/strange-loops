@@ -1,0 +1,30 @@
+// Identity — observer self-knowledge across projects
+// Accumulates self, principles, observations, threads, intentions.
+// Local instances init from this template; merge back when done.
+
+name "identity"
+store "./data/identity.db"
+
+loops {
+  // Who I am — name, role, what I carry. The ground for everything else.
+  self { fold { items "by" "name" } }
+
+  // Stable principles — things that hold across sessions
+  // "explicit over implicit", "dissolution test before building"
+  principle { fold { items "by" "name" } }
+
+  // Self-observations — patterns noticed, preferences confirmed
+  observation { fold { items "by" "topic" } }
+
+  // Decisions about how I work — confirmed through use
+  decision { fold { items "by" "topic" } }
+
+  // Open threads — things I'm tracking or investigating
+  thread { fold { items "by" "name" } }
+
+  // Intentions that survive context rotation
+  intention {
+    fold { items "by" "trigger" }
+    search "trigger" "message"
+  }
+}

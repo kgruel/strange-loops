@@ -1,0 +1,17 @@
+// Discord — external source feeding into comms
+// Polls via discord-source, emits message facts with channel payloads.
+
+name "discord"
+store "./data/discord.db"
+
+sources {
+  path "./discord.loop"
+}
+
+loops {
+  message {
+    fold {
+      items "by" "discord_message_id"
+    }
+  }
+}

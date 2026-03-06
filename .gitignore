@@ -11,8 +11,7 @@ uv.lock
 .pytest_cache/
 .subtask/
 .tadpole/
-.claude/*
-!.claude/skills/
+.claude/todos/
 .obsidian/
 .DS_Store
 /data/
@@ -23,3 +22,5 @@ uv.lock
 *.tape
 check.vertex
 session.vertex
+!config/**/session.vertex
+!config/**/check.vertex

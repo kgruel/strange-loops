@@ -1,0 +1,7 @@
+// Telegram backfill — one-shot full history fetch
+// No "every" = runs once, then done. Cursor-aware, so re-running picks up where it left off.
+
+source "uv run --package telegram-archiver telegram-poll --config /Users/kaygee/Code/loops/apps/telegram/config.json --cursor /Users/kaygee/.config/loops/messaging/data/telegram-cursor.json --session /Users/kaygee/.config/loops/messaging/data/telegram --backfill"
+kind "telegram.message"
+observer "telegram"
+format "ndjson"

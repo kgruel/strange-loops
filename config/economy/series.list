@@ -1,0 +1,10 @@
+# FRED economic time series
+# series_id is the FRED identifier, kind becomes the fact kind
+series_id  kind  every
+DFF        federal_funds_rate  6h
+CPIAUCSL   cpi  24h
+UNRATE     unemployment  24h
+MORTGAGE30US  mortgage_30yr  24h
+HOUST      housing_starts  24h
+T10Y2Y     yield_curve_10y2y  6h
+GDP        gdp  24h

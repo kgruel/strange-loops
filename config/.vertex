@@ -1,0 +1,8 @@
+// Root vertex — discovers all .vertex files under this directory
+discover "./**/*.vertex"
+
+observers {
+  kyle { }
+  loops-claude { }
+  meta-claude { }
+}

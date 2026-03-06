@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+  "plugins": [
+    "/Users/kaygee/Code/siftd/plugin"
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run loops emit project session name=\"$(uv run loops whoami 2>/dev/null)\" status=open 2>/dev/null; uv run loops fold project --lens prompt --plain 2>/dev/null"
+          },
+          {
+            "type": "command",
+            "command": "uv run loops fold identity --lens prompt --plain 2>/dev/null"
+          },
+          {
+            "type": "command",
+            "command": "uv run loops run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null; uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "output=$(uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null); [ -n \"$output\" ] && [ \"$output\" != \"(no messages)\" ] && echo \"$output\" || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run loops emit project session name=\"$(uv run loops whoami 2>/dev/null)\" status=closed 2>/dev/null"
+          }
+        ]
+      }
+    ]
+  }
+}

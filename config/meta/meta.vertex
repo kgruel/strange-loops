@@ -1,0 +1,25 @@
+// meta — aggregation vertex, combines meta stores
+name "meta"
+
+combine {
+    vertex "/Users/kaygee/Code/meta-discussion/meta.vertex"
+    vertex "/Users/kaygee/.config/loops/discord/discord.vertex"
+    vertex "/Users/kaygee/.config/loops/identity/identity.vertex"
+}
+
+observers {
+  kyle { }
+  loops-claude { }
+  meta-claude { }
+}
+
+loops {
+  decision    { fold { items "by" "topic" } }
+  thread      { fold { items "by" "name" } }
+  change      { fold { items "collect" 20 } }
+  task        { fold { items "by" "name" } }
+  vision      { fold { items "by" "name" } }
+  dissolution { fold { items "by" "concept" } }
+  handoff     { fold { items "collect" 1 } }
+  session     { fold { items "by" "name" } }
+}

@@ -1,0 +1,45 @@
+// Reading — attention surface
+// Inbound feeds (RSS/Atom) + reaction traces (HN favorites)
+
+name "reading"
+store "./data/reading.db"
+
+sources {
+  // Subscribed feeds — populated from feeds.list
+  template "./sources/feed.loop" {
+    from file "./feeds.list"
+    loop {
+      fold {
+        items "by" "link"
+        count "inc"
+        updated "latest"
+      }
+      boundary when="{{kind}}.complete"
+    }
+  }
+
+  // Reaction traces — deliberate actions on content
+  template "./sources/feed.loop" {
+    with kind="rx.hn.favorite" feed_url="https://hnrss.org/favorites?id=xcessivepro&count=100"
+    loop {
+      fold {
+        items "by" "link"
+        count "inc"
+        updated "latest"
+      }
+      boundary when="{{kind}}.complete"
+    }
+  }
+}
+
+loops {
+  source.error {
+    fold {
+      errors "collect" 20
+      count "inc"
+      latest_error "latest"
+    }
+  }
+}
+
+emit "reading.digest"

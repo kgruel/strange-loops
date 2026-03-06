@@ -117,7 +117,7 @@ Usage: `loops fold meta --lens my_lens`
 **Current user-global lenses:**
 - `comms` — messaging vertices. Author/content extraction, self-scoping, delta rendering.
 - `state` — session orientation. Tasks by priority, open threads, recent decisions.
-- `reference` — living spec reference. Vocabulary entries grouped by category with KDL syntax.
+- `docs` — living system reference. Contracts, conventions, vocabulary, patterns, guides.
 
 **Don't reach for yet**: Vertex declarations, source wiring, hooks.
 
@@ -192,9 +192,10 @@ recent "window" 10 "val" // sliding window
 
 For the full vocabulary with descriptions, KDL syntax, and usage patterns:
 ```bash
-loops fold reference              # summary — one-liner per primitive
-loops fold reference -v           # detailed — KDL syntax + full descriptions
-loops fold reference --kind vocab # just vocabulary, no patterns
+loops fold docs              # summary — one-liner per primitive
+loops fold docs -v           # detailed — KDL syntax + full descriptions
+loops fold docs --kind vocab  # just vocabulary
+loops fold docs --kind contract  # API contracts by scope
 ```
 
 **Sources** — external data ingestion:
@@ -289,7 +290,7 @@ system/              Local machine monitoring
 homelab/             Per-VM agent pattern
 ambient/             Passive attention traces (browsing, screen time)
 messaging/           Direct messaging
-reference/           Living spec reference — fold/parse/boundary vocabulary as facts
+docs/                Living documentation — contracts, conventions, vocab, patterns, guides
 dev/                 Development checks
 realestate/          Real estate data
 ```

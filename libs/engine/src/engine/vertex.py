@@ -75,6 +75,7 @@ class Vertex:
         self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
         self._vertex_period_start: datetime | None = None
         self._store = store
+        self._replaying = False  # suppress boundaries during replay
         self._children: list[Vertex] = []
         self._routes: dict[str, str] = {}  # pattern → loop_name
 
@@ -297,6 +298,10 @@ class Vertex:
                     child_fact = self._tick_to_fact(child_tick, child.name)
                     self.receive(child_fact, grant, _from_child=child.name)
 
+        # During replay, fold only — no boundaries fire
+        if self._replaying:
+            return None
+
         # Check count-based boundary trigger (Loop returned True)
         if count_boundary_fire and loop is not None:
             tick = loop.fire(fact_ts, origin=self._name)
@@ -382,6 +387,30 @@ class Vertex:
         Raises KeyError if kind is not registered.
         """
         return self._loops[kind].version
+
+    def replay(self) -> int:
+        """Replay stored facts to rebuild fold state.
+
+        Reads all facts from the store and routes them through the folds
+        without re-appending or firing boundaries. This makes a one-shot
+        CLI invocation indistinguishable from a persistent runtime — fold
+        state reflects all historical facts, not just the current invocation.
+
+        Returns the number of facts replayed.
+        """
+        if self._store is None:
+            return 0
+        facts = self._store.since(0)
+        if not facts:
+            return 0
+        store = self._store
+        self._store = None  # suppress re-append during replay
+        self._replaying = True  # suppress boundary firing during replay
+        for fact in facts:
+            self.receive(fact)
+        self._replaying = False
+        self._store = store  # restore
+        return len(facts)
 
     def to_fact(self, tick: Tick) -> Fact:
         """Convert a Tick to a Fact with this vertex as observer.

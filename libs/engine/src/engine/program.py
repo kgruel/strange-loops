@@ -175,6 +175,11 @@ def load_vertex_program(
         overrides.update(fold_overrides)
 
     vertex = materialize_vertex(compiled, fold_overrides=overrides or None)
+
+    # Replay stored facts to rebuild fold state — makes one-shot CLI
+    # invocations indistinguishable from a persistent runtime
+    vertex.replay()
+
     # Only specs with boundaries produce ticks (boundary-less = memory pattern)
     expected_ticks = sorted(
         name for name, spec in compiled.specs.items() if spec.boundary is not None

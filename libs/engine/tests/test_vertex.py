@@ -830,3 +830,108 @@ class TestVertexLevelBoundary:
         assert "session" in ticks[0].payload
         assert "_boundary" in ticks[0].payload
         store.close()
+
+
+class TestVertexReplay:
+    """Replay rebuilds fold state from stored facts."""
+
+    def test_replay_rebuilds_state(self, tmp_path):
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # First vertex: receive facts and close
+        v1 = Vertex("project", store=store)
+        v1.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v1.receive(fact("decision", topic="auth", position="JWT"))
+        v1.receive(fact("decision", topic="store", position="SQLite"))
+        store.close()
+
+        # Second vertex: fresh, same store — replay should rebuild
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v2 = Vertex("project", store=store2)
+        v2.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        count = v2.replay()
+
+        assert count == 2
+        assert v2.state("decision") == {
+            "auth": {"topic": "auth", "position": "JWT"},
+            "store": {"topic": "store", "position": "SQLite"},
+        }
+        store2.close()
+
+    def test_replay_does_not_fire_boundaries(self, tmp_path):
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # Store a session open + close
+        v1 = Vertex("project", store=store)
+        v1.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v1.register_vertex_boundary("session", match=(("status", "closed"),))
+        v1.receive(fact("session", name="s1", status="open"))
+        v1.receive(fact("session", name="s1", status="closed"))
+        store.close()
+
+        # Replay should NOT fire the boundary again
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v2 = Vertex("project", store=store2)
+        v2.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v2.register_vertex_boundary("session", match=(("status", "closed"),))
+        v2.replay()
+
+        # Only 1 tick from v1, not a second from replay
+        ticks = store2.ticks_since(0)
+        assert len(ticks) == 1
+        store2.close()
+
+    def test_replay_then_new_boundary_fires_with_full_state(self, tmp_path):
+        """The key test: replay + new fact = tick with accumulated state."""
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # Session 1: emit decisions
+        v1 = Vertex("project", store=store)
+        v1.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v1.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v1.register_vertex_boundary("session", match=(("status", "closed"),))
+        v1.receive(fact("decision", topic="auth", position="JWT"))
+        v1.receive(fact("session", name="s1", status="open"))
+        store.close()
+
+        # Session 2: fresh vertex, replay, then close
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v2 = Vertex("project", store=store2)
+        v2.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v2.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v2.register_vertex_boundary("session", match=(("status", "closed"),))
+        v2.replay()
+
+        # Now close the session — tick should carry the decision from session 1
+        tick = v2.receive(fact("session", name="s1", status="closed"))
+        assert tick is not None
+        assert tick.payload["decision"]["auth"]["position"] == "JWT"
+        assert tick.payload["session"]["s1"]["status"] == "closed"
+        store2.close()

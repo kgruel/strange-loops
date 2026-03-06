@@ -138,6 +138,9 @@ def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Blo
         if section.kind == "check":
             continue
         for item in section.items:
+            content = _extract_content(item.payload)
+            if not content:
+                continue  # skip operational/status facts with no message body
             author = _extract_author(item.payload)
             # Fall back to fact observer when payload has no author
             if author == "unknown" and item.observer:

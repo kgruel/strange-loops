@@ -88,28 +88,22 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         if id_suffix:
             rows.append(Block.text(f"           id:{id_suffix.strip()}", id_style, width=width))
 
-        if is_id_lookup:
-            # --id lookup: show all fields — the intent is full detail
+        if is_id_lookup or zoom >= Zoom.FULL:
+            # --id lookup or FULL: show all fields — no truncation
             if f.get("observer"):
-                rows.append(Block.text(f"           observer: {f['observer']}", dim_style, width=width))
+                rows.append(Block.text(f"           observer: {f['observer']}", dim_style))
             if f.get("origin"):
-                rows.append(Block.text(f"           origin: {f['origin']}", dim_style, width=width))
+                rows.append(Block.text(f"           origin: {f['origin']}", dim_style))
             for key, val in payload.items():
                 if val:
-                    rows.append(Block.text(f"           {key}: {val}", dim_style, width=width))
+                    rows.append(Block.text(f"           {key}: {val}", dim_style))
         elif zoom >= Zoom.DETAILED:
-            # DETAILED+: show non-summary fields on next line
+            # DETAILED: show non-summary fields on next line
             summary_fields = _summary_fields(payload, key_field)
             for key, val in payload.items():
                 if key in summary_fields or not val:
                     continue
-                rows.append(Block.text(f"           {key}: {val}", dim_style, width=width))
-
-            # FULL: dump all payload fields (including ones shown at DETAILED)
-            if zoom >= Zoom.FULL:
-                for key, val in payload.items():
-                    if val:
-                        rows.append(Block.text(f"           {key}: {val}", dim_style, width=width))
+                rows.append(Block.text(f"           {key}: {val}", dim_style))
 
     return join_vertical(*rows)
 

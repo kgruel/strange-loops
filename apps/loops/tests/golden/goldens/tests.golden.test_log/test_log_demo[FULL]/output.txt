@@ -1,19 +1,20 @@
 2025-01-15:
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for
+           observer: kaygee
            topic: Use SQLite for persistence
            message: Chose SQLite over filesystem for atomic writes.
   09:30 [task] implement fold: Wire up Spec.apply.
-           status: in-progress
+           observer: kaygee
            name: implement fold
            status: in-progress
            summary: Wire up Spec.apply.
 
 2025-01-14:
   16:00 [change] Added boundary detection
-           files: libs/atoms/src/atoms/spec.py
+           observer: kaygee
            summary: Added boundary detection
            files: libs/atoms/src/atoms/spec.py
   15:00 [thread] vertex-routing
-           status: active
+           observer: kaygee
            name: vertex-routing
            status: active

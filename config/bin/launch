@@ -4,8 +4,6 @@ set -euo pipefail
 agent="${1:?Usage: launch <agent-name> [working-dir]}"
 workdir="${2:-.}"
 
-delegate="kyle/$agent"
-
 # Resolve loops binary from the monorepo venv
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOOPS="${REPO_ROOT}/.venv/bin/loops"
@@ -22,9 +20,9 @@ if [[ -z "$identity" ]]; then
   echo "warning: no identity found for observer '$agent'" >&2
 fi
 
-# Emit session start — Kyle is the principal, delegate is the agent
-"$LOOPS" emit session session who="$delegate" status=open 2>/dev/null || true
+# Emit session start — principal=kyle, agent name in payload for provenance
+"$LOOPS" emit session session principal=kyle agent="$agent" status=open 2>/dev/null || true
 
-# Start claude with delegate identity
+# Start claude as the agent — observer matches declarations and stored facts
 cd "$workdir"
-exec env LOOPS_OBSERVER="$delegate" claude --system-prompt "$identity"
+exec env LOOPS_OBSERVER="$agent" claude --system-prompt "$identity"

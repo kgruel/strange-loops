@@ -235,6 +235,8 @@ _ACTIONABLE_KINDS = {"task", "session", "handoff"}
 _SKIP_KINDS = {"log", "change"}
 # Max items to show before summarizing
 _PROMPT_ITEM_CAP = 3
+# Cap for _schema_prompt sections (non-identity vertices)
+_SCHEMA_ITEM_CAP = 10
 
 
 def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
@@ -346,6 +348,8 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
     Filters out resolved/completed items — the prompt lens shows what's
     active, not what's done. Exception: session/handoff kinds get custom
     rendering (resolved state IS the handoff content).
+
+    Attention budget: skip log/change, cap large sections to most recent items.
     """
     rows: list[Block] = []
     plain = Style()
@@ -357,6 +361,10 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
                 rows.append(Block.text(line, plain))
             continue
 
+        # Skip noisy kinds — available via stream if needed
+        if s.kind in _SKIP_KINDS:
+            continue
+
         # Other kinds: filter resolved items
         items = [
             item for item in s.items
@@ -364,6 +372,13 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
         ]
         if not items:
             continue
+
+        # Cap large sections to most recent items
+        remaining = 0
+        if len(items) > _SCHEMA_ITEM_CAP:
+            sorted_items = sorted(items, key=lambda i: i.ts or 0, reverse=True)
+            remaining = len(items) - _SCHEMA_ITEM_CAP
+            items = sorted_items[:_SCHEMA_ITEM_CAP]
 
         if rows:
             rows.append(Block.text("", plain))
@@ -377,6 +392,9 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
                 rows.append(Block.text(f"  {label}: {body}", plain))
             else:
                 rows.append(Block.text(f"  {label}", plain))
+
+        if remaining > 0:
+            rows.append(Block.text(f"  ({remaining} more in store)", plain))
 
     return join_vertical(*rows)
 

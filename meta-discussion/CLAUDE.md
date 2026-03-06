@@ -5,18 +5,21 @@ survive outside any specific project. Not loops-specific architecture (that
 lives in project.vertex). Ideas emerge here from work across projects and
 observers, then flow to implementation repos as ticks when ready.
 
-## Context Injection
+## Session Bootstrap
 
-Identity, handoff, and tasks are injected into the system prompt by
-`.loops/pickup.zsh` before session start. No in-session skill needed —
-context is already present when you arrive.
+Launch with observer identity set:
 
-- **Identity** — from identity vertex fold (who you are)
-- **Handoff** — from meta vertex fold, collect 1 (last session's summary)
-- **Tasks** — from project vertex fold (open work items)
+```bash
+LOOPS_OBSERVER=meta-claude claude
+```
 
-Your observer name (`meta-claude`) is resolved by `loops whoami` and
-exported as `LOOPS_OBSERVER` — all emits are tagged automatically.
+Hooks in `.claude/settings.json` (monorepo root) handle everything:
+- **SessionStart** — session marker + project fold + identity fold + comms
+- **UserPromptSubmit** — comms delta (silent when empty)
+- **SessionEnd** — session close marker
+
+Identity, project state, and peer messages inject automatically via hooks.
+`LOOPS_OBSERVER` scopes all reads and tags all emits.
 
 ## Store
 

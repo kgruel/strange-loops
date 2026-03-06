@@ -1000,11 +1000,13 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
 
         if vertex_ref is not None:
-            if "/" in vertex_ref and not _is_path_like(vertex_ref):
-                vertex_ref, template_qualifier = vertex_ref.split("/", 1)
-
-            # Try resolving as vertex
+            # Try resolving the full name first (handles slashed names like comms/native)
             candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
+
+            if not candidate.exists() and "/" in vertex_ref and not _is_path_like(vertex_ref):
+                # Full name didn't resolve — try splitting as vertex/template
+                vertex_ref, template_qualifier = vertex_ref.split("/", 1)
+                candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
             if candidate.exists():
                 vertex_path = candidate
             elif _is_path_like(vertex_ref):

@@ -3,9 +3,13 @@
 Designed for hook consumption: presence-aware, delta-oriented, self-scoping.
 Works with the comms combine vertex (discord, native, future sources).
 
+Delta model: check facts (kind=check, fold by name) mark when each observer
+last checked comms. Messages newer than the observer's last check are "new."
+Emit a check fact after reading to advance the cursor.
+
 Fold view:
-  MINIMAL: status line — "discord: 12 new (5m) | native: 2 (1h)"
-  SUMMARY: recent messages with author + content
+  MINIMAL: delta line — "discord: 3 new (5m) | native: 1 new (2m)"
+  SUMMARY: new messages first, then recent context
   DETAILED: all messages with timestamps
   FULL: full content, no truncation, all metadata
 
@@ -92,19 +96,41 @@ def _self_observer() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Check cursor extraction
+# ---------------------------------------------------------------------------
+
+def _extract_last_check(data: "FoldState", observer: str | None) -> float:
+    """Find the most recent check timestamp for this observer.
+
+    Check facts fold by name (observer name). The timestamp of the matching
+    check item is the cursor — messages after this are "new."
+    Returns 0.0 if no check found (everything is new).
+    """
+    for section in data.sections:
+        if section.kind != "check":
+            continue
+        for item in section.items:
+            name = item.payload.get("name", "")
+            if name == observer and item.ts:
+                return float(item.ts)
+    return 0.0
+
+
+# ---------------------------------------------------------------------------
 # Fold lens — collapsed comms state
 # ---------------------------------------------------------------------------
 
 def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Block:
-    """Render comms fold as presence + delta status.
+    """Render comms fold as delta-aware status.
 
-    MINIMAL: status line per channel — "discord: 12 new (5m)"
-    SUMMARY: recent messages with author + content
-    DETAILED: all messages with timestamps
+    MINIMAL: delta line — "discord: 3 new (5m) | native: quiet"
+    SUMMARY: new messages with author + content
+    DETAILED: all messages with timestamps, new marked
     FULL: full content, no truncation
     """
     plain = Style()
     self_obs = _self_observer()
+    last_check = _extract_last_check(data, self_obs)
 
     # Collect all message items across sections (skip non-message sections)
     messages: list[dict[str, Any]] = []
@@ -119,12 +145,14 @@ def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Blo
             # Scope out self
             if self_obs and author == self_obs:
                 continue
+            ts = float(item.ts) if item.ts else 0.0
             messages.append({
                 "author": author,
                 "content": _extract_content(item.payload),
                 "channel": _extract_channel(item.payload),
-                "ts": item.ts,
+                "ts": ts,
                 "observer": item.observer,
+                "is_new": ts > last_check,
             })
 
     if not messages:
@@ -133,24 +161,37 @@ def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Blo
     # Sort by timestamp, most recent first
     messages.sort(key=lambda m: m.get("ts") or 0, reverse=True)
 
+    new_messages = [m for m in messages if m["is_new"]]
+
     if zoom <= Zoom.MINIMAL:
-        return _render_minimal(messages, plain)
+        return _render_minimal(messages, new_messages, plain)
 
     if zoom <= Zoom.SUMMARY:
-        return _render_summary(messages, plain, width, max_items=10)
+        return _render_summary(new_messages or messages[:5], plain, width,
+                               max_items=10, is_delta=bool(new_messages))
 
     if zoom <= Zoom.DETAILED:
-        return _render_summary(messages, plain, width, max_items=50, show_time=True)
+        return _render_summary(messages, plain, width, max_items=50,
+                               show_time=True, new_cutoff=last_check)
 
     return _render_summary(messages, plain, width, max_items=len(messages),
-                           show_time=True, full=True)
+                           show_time=True, full=True, new_cutoff=last_check)
 
 
-def _render_minimal(messages: list[dict], plain: Style) -> Block:
-    """Status line: channel counts + recency."""
-    # Group by channel
+def _render_minimal(
+    messages: list[dict],
+    new_messages: list[dict],
+    plain: Style,
+) -> Block:
+    """Delta-aware status line per channel."""
+    if not new_messages:
+        # No new messages — show quiet status with last activity time
+        newest_ts = max((m.get("ts") or 0) for m in messages)
+        return Block.text(f"(quiet, last activity {_relative_time(newest_ts)} ago)", plain)
+
+    # Group new messages by channel
     channels: dict[str, list[dict]] = {}
-    for m in messages:
+    for m in new_messages:
         ch = m["channel"]
         channels.setdefault(ch, []).append(m)
 
@@ -158,13 +199,12 @@ def _render_minimal(messages: list[dict], plain: Style) -> Block:
     for ch, msgs in channels.items():
         newest_ts = max((m.get("ts") or 0) for m in msgs)
         recency = _relative_time(newest_ts)
-        # Count unique authors (excluding self)
-        authors = {m["author"] for m in msgs}
+        authors = sorted({m["author"] for m in msgs})
         if len(authors) <= 3:
-            who = ", ".join(sorted(authors))
-            part = f"{ch}: {len(msgs)} ({who}, {recency})"
+            who = ", ".join(authors)
+            part = f"{ch}: {len(msgs)} new from {who} ({recency})"
         else:
-            part = f"{ch}: {len(msgs)} ({recency})"
+            part = f"{ch}: {len(msgs)} new ({recency})"
         parts.append(part)
 
     return Block.text(" | ".join(parts), plain)
@@ -177,11 +217,15 @@ def _render_summary(
     max_items: int = 10,
     show_time: bool = False,
     full: bool = False,
+    is_delta: bool = False,
+    new_cutoff: float = 0.0,
 ) -> Block:
     """Messages with author + content."""
     rows: list[Block] = []
 
     shown = messages[:max_items]
+    multi_channel = len({x["channel"] for x in messages}) > 1
+
     for m in shown:
         author = m["author"]
         content = m["content"]
@@ -189,9 +233,10 @@ def _render_summary(
             content = _truncate(content)
 
         time_tag = f" ({_relative_time(m['ts'])})" if show_time and m.get("ts") else ""
-        ch_tag = f"[{m['channel']}] " if len({x['channel'] for x in messages}) > 1 else ""
+        ch_tag = f"[{m['channel']}] " if multi_channel else ""
+        new_tag = "* " if new_cutoff and m.get("ts", 0) > new_cutoff else "  "
 
-        rows.append(Block.text(f"  {ch_tag}{author}{time_tag}: {content}", plain))
+        rows.append(Block.text(f"{new_tag}{ch_tag}{author}{time_tag}: {content}", plain))
 
     remaining = len(messages) - len(shown)
     if remaining > 0:
@@ -221,27 +266,32 @@ def stream_view(
     if not facts:
         return Block.text("(no new messages)", plain)
 
-    # Filter out self
-    if self_obs:
-        facts = [f for f in facts
-                 if _extract_author(f.get("payload", {})) != self_obs]
+    # Filter out self and check facts
+    filtered: list[dict] = []
+    for f in facts:
+        if f.get("kind") == "check":
+            continue
+        author = _extract_author(f.get("payload", {}))
+        if self_obs and author == self_obs:
+            continue
+        filtered.append(f)
 
-    if not facts:
+    if not filtered:
         return Block.text("(no new messages)", plain)
 
     if zoom <= Zoom.MINIMAL:
         authors: dict[str, int] = {}
-        for f in facts:
+        for f in filtered:
             author = _extract_author(f.get("payload", {}))
             authors[author] = authors.get(author, 0) + 1
         parts = [f"{count} from {author}" for author, count in authors.items()]
-        return Block.text(f"{len(facts)} new ({', '.join(parts)})", plain)
+        return Block.text(f"{len(filtered)} new ({', '.join(parts)})", plain)
 
     rows: list[Block] = []
-    max_items = 10 if zoom <= Zoom.SUMMARY else len(facts)
+    max_items = 10 if zoom <= Zoom.SUMMARY else len(filtered)
     truncate_len = 200 if zoom <= Zoom.SUMMARY else 0
 
-    shown = facts[:max_items]
+    shown = filtered[:max_items]
     for f in shown:
         payload = f.get("payload", {})
         author = _extract_author(payload)
@@ -255,7 +305,7 @@ def stream_view(
         tag = f" ({rel})" if rel else ""
         rows.append(Block.text(f"  {author}{tag}: {content}", plain))
 
-    remaining = len(facts) - len(shown)
+    remaining = len(filtered) - len(shown)
     if remaining > 0:
         rows.append(Block.text(f"  ({remaining} more)", plain))
 

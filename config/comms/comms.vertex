@@ -24,7 +24,7 @@ loops {
   }
   check {
     fold {
-      cursor "collect" 1
+      items "by" "name"
     }
   }
 }

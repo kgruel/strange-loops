@@ -20,7 +20,7 @@
           },
           {
             "type": "command",
-            "command": "uv run loops run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null; uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null"
+            "command": "uv run loops run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null; uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null; uv run loops emit comms/native check name=\"$(uv run loops whoami 2>/dev/null)\" 2>/dev/null"
           }
         ]
       }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "output=$(uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null); [ -n \"$output\" ] && [ \"$output\" != \"(no messages)\" ] && echo \"$output\" || true"
+            "command": "output=$(uv run loops fold comms --observer all --lens comms --plain -q 2>/dev/null); uv run loops emit comms/native check name=\"$(uv run loops whoami 2>/dev/null)\" 2>/dev/null; case \"$output\" in ''|'(no messages)'|'(quiet'*) ;; *) echo \"$output\" ;; esac"
           }
         ]
       }

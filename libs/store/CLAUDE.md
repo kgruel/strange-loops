@@ -5,11 +5,12 @@ Slice, merge, search, transport for vertex store databases. Start at Level 0. On
 **You are here** in the abstraction chain:
 
 ```
-atoms (data)  →  engine (runtime)  →  store (maintenance)
-Fact, Spec        SqliteStore writes    slice/merge/search reads
+atoms (data)  →  engine (runtime)  →  store (maintenance)  →  apps (CLI)
+Fact, Spec        SqliteStore writes    slice/merge/search     loops store/export
 ```
 
 Below: `libs/engine/` provides `SqliteStore` (write path) and `StoreReader` (read path). This lib operates on the same SQLite databases but for bulk maintenance — extracting subsets, combining stores, cross-DB queries.
+Above: `apps/loops/` uses `export` and `store` commands that call into this lib.
 
 ---
 
@@ -41,7 +42,11 @@ result = merge_store(
 
 **Merge dedup**: `INSERT OR IGNORE` on ULID primary key. Same fact across stores has the same ULID — globally unique IDs make dedup trivial. `dry_run=True` computes counts without committing.
 
-## Level 0.5 — Receive, compact, transport
+**Don't reach for yet**: Transport, receive, compact, schema internals.
+
+---
+
+## Level 1 — Receive, compact, transport
 
 **Trigger**: I need to move stores between locations or maintain them.
 
@@ -70,11 +75,13 @@ result = pull_store(Path("data/local.db"), transport, remote_path=Path("data/rem
 
 **Push/pull filters**: `since`, `before`, `kinds` — same as slice. Cursor tracking is the caller's responsibility (libs/store is stateless).
 
+**Don't reach for yet**: Schema internals, connection management.
+
 ---
 
-## Level 1 — Understand the schema
+## Level 2 — Schema and connection internals
 
-**Trigger**: I need to know how this differs from engine's SqliteStore.
+**Trigger**: I need to know how this differs from engine's SqliteStore, or how cross-DB operations work.
 
 | Concern | engine.SqliteStore | store |
 |---------|-------------------|-------|
@@ -89,7 +96,22 @@ facts(id TEXT PK DEFAULT (ulid()), kind, ts, observer, origin, payload CHECK jso
 ticks(id TEXT PK DEFAULT (ulid()), name, ts, since, origin, payload CHECK json_valid)
 ```
 
-Internally, `_conn.py` handles: `sqlite-ulid` extension loading, schema creation, WAL mode, read-only URI connections. All cross-DB work uses `ATTACH DATABASE` (no Python round-trip).
+**Connection internals** (`_conn.py`):
+- `sqlite-ulid` extension loading
+- Schema creation with ULID defaults
+- WAL mode for concurrent reads
+- Read-only URI connections for slice sources
+- `ATTACH DATABASE` for cross-DB operations (no Python round-trip)
+
+---
+
+## Key invariants
+
+- All operations are stateless — no cursors, no connection pools.
+- Merge is idempotent (ULID dedup). Running merge twice produces the same result.
+- Slice creates new files. Never modifies the source.
+- Transport is a Protocol — implementations are pluggable.
+- All results are frozen dataclasses with counts for verification.
 
 ## Build & test
 

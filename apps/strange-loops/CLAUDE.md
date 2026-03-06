@@ -5,8 +5,8 @@ Tasks are loops. Workers run in worktrees. The store is the coordination channel
 **You are here** in the abstraction chain:
 
 ```
-atoms (data)  →  engine (runtime)  →  strange-loops (app)
-Fact, Spec        Tick, Vertex         task create/send/merge
+vertex store (state)  →  strange-loops (app)  →  engine (runtime)  →  atoms (data)
+tasks.db, project.db     task create/send/merge   Vertex, Store        Fact, Spec
 ```
 
 Below: `libs/engine/` provides SqliteStore and vertex fold. `libs/atoms/` defines facts. `libs/painted/` renders all display commands.
@@ -50,7 +50,27 @@ Harnesses: `shell` (raw command), `sonnet` (Claude), `codex`, `gemini-flash`. Wo
 
 ---
 
-## Level 1 — Understand the architecture
+## Level 1 — Configure, don't code
+
+**Trigger**: I need to adjust task behavior, add a harness, or change what data is tracked.
+
+**Task state is derived from facts, not stored directly.** Before modifying app source, understand what's configurable:
+
+- **Task lifecycle** — facts accumulate (`task.create`, `task.stage`, `worker.output`, `task.tick`). State is always fold-at-read-time, never pre-materialized. Changing lifecycle means changing what facts get emitted and how the spec folds them.
+- **Harness configuration** — harnesses are shell commands with templates. Adding a new AI harness is a new entry in the harness registry, not a new command.
+- **Project knowledge** — `project emit` and `session` commands use the same vertex/fold pattern as the loops CLI. Decisions, threads, plans fold by topic/name.
+
+**Two stores, two concerns:**
+- `./data/tasks.db` — session + task + worker facts (the task loop)
+- `./data/project.db` — decision + thread + plan facts (the project loop)
+
+Kind prefix (`session.`, `task.`, `worker.`) namespaces within the task store.
+
+**Don't reach for yet**: Command implementation, lifecycle vertex spec, worktree internals.
+
+---
+
+## Level 2 — Understand the architecture
 
 **Trigger**: I need to modify a command or understand the data model.
 
@@ -62,12 +82,6 @@ Harnesses: `shell` (raw command), `sonnet` (Claude), `codex`, `gemini-flash`. Wo
 - `cli.py`: pre-dispatches display commands to `run_cli`
 
 **Action commands** — require store → fold state → validate → act → emit fact → render.
-
-**Two stores, two concerns:**
-- `./data/tasks.db` — session + task + worker facts (the task loop)
-- `./data/project.db` — decision + thread + plan facts (the project loop)
-
-Kind prefix (`session.`, `task.`, `worker.`) namespaces within the task store.
 
 **Key concept mapping:**
 
@@ -84,7 +98,7 @@ Kind prefix (`session.`, `task.`, `worker.`) namespaces within the task store.
 
 ---
 
-## Level 2 — Query-time fold and worker model
+## Level 3 — Query-time fold and worker model
 
 **Trigger**: I need to understand how task state is derived or how workers communicate.
 

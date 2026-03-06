@@ -1,12 +1,12 @@
 # hlab — homelab monitoring
 
-DSL-driven homelab monitoring and management. Start at Level 0. Only escalate when you hit a trigger.
+DSL-driven homelab monitoring and management. Most work is in the `.vertex` and `.loop` files, not app source. Start at Level 0. Only escalate when you hit a trigger.
 
 **You are here** in the abstraction chain:
 
 ```
-atoms (data)  →  engine (runtime)  →  lang (grammar)  →  hlab (app)
-Fact, Spec        Tick, Vertex         .loop/.vertex      status/alerts/media
+.vertex/.loop (declare)  →  hlab (app)  →  engine (runtime)  →  atoms (data)
+status.vertex, *.loop       status/alerts    Tick, Vertex         Fact, Spec, Parse
 ```
 
 Below: `libs/engine/` runs vertex programs (`.vertex` → ticks). `libs/lang/` parses the DSL. `libs/atoms/` defines facts and parse/fold ops. `libs/painted/` renders everything.
@@ -32,9 +32,43 @@ Common flags: `-q` (one-liner), `-v` (detailed), `-vv` (full), `-i` (interactive
 
 ---
 
-## Level 1 — Understand the command patterns
+## Level 1 — Configure, don't code
 
-**Trigger**: I need to modify a command or add a new one.
+**Trigger**: I need to add a host, change monitoring, or adjust what data is collected.
+
+**Most hlab work is DSL configuration, not Python.** The data pipeline is:
+
+```
+.loop file (command + parse)  →  .vertex file (fold + boundary)  →  lens (render)
+```
+
+Before touching app source, check whether what you need is:
+
+- **A new monitored host** — add a `with` row or template parameter to the `.vertex` file
+- **Different data extraction** — modify the `parse` block in the `.loop` file
+- **Different aggregation** — change the `fold` block in the `.vertex` file
+- **A new data source** — write a `.loop` file (command + format + parse pipeline)
+
+**DSL files live in the app:**
+```
+src/hlab/loops/
+  status.vertex        # 4 stacks from 1 template — container health
+  alerts.vertex        # Prometheus alerts pipeline
+  media_audit.vertex   # Radarr media audit pipeline
+  stacks/status.loop   # Template: docker compose ps per host
+  prometheus/*.loop    # Templates: Prometheus API endpoints
+  radarr/*.loop        # Templates: Radarr API endpoints
+```
+
+See `libs/atoms/` Level 2 (Parse) and Level 3 (Source) for the primitives these files use. See `libs/lang/` for the KDL grammar.
+
+**Don't reach for yet**: Python commands, lenses, fold overrides.
+
+---
+
+## Level 2 — Understand the command patterns
+
+**Trigger**: I need to modify a Python command or add a new one.
 
 **Two patterns:**
 
@@ -69,9 +103,9 @@ main.py routes command
 
 ---
 
-## Level 2 — Work with the DSL pipeline
+## Level 3 — The DSL pipeline
 
-**Trigger**: I need to understand how data flows from SSH/curl to rendered output.
+**Trigger**: I need to understand how data flows from SSH/curl to rendered output, or work with fold overrides.
 
 **Three DSL commands** (status, alerts, media audit) use `.vertex` files:
 
@@ -90,16 +124,6 @@ Each source emits facts with its own kind, then `{kind}.complete`. The `.complet
 - `lenses/` Python: zoom-aware rendering of tick payloads
 
 **Only `status` uses a Python fold override.** `health_fold` computes derived metrics (healthy/total) not expressible as a single fold op. Everything else is DSL-native.
-
-```
-apps/hlab/loops/
-  status.vertex        # 4 stacks from 1 template
-  alerts.vertex        # Prometheus alerts pipeline
-  media_audit.vertex   # Radarr media audit pipeline
-  stacks/status.loop   # Template: docker compose ps per host
-  prometheus/*.loop    # Templates: Prometheus API endpoints
-  radarr/*.loop        # Templates: Radarr API endpoints
-```
 
 ---
 

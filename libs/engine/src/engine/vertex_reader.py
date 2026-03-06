@@ -135,7 +135,9 @@ def _specs_match(a: Any, b: Any) -> bool:
     return True
 
 
-def _collect_source_specs(ast: Any, vertex_path: Path) -> dict:
+def _collect_source_specs(
+    ast: Any, vertex_path: Path, *, override_kinds: frozenset[str] = frozenset()
+) -> dict:
     """Collect fold specs from all source vertices, erroring on conflicts.
 
     Union semantics: all source kinds are included. When two sources
@@ -143,6 +145,9 @@ def _collect_source_specs(ast: Any, vertex_path: Path) -> dict:
     When they conflict (same kind, different fold), raises
     ConflictingFoldSpec — the aggregation vertex must explicitly declare
     an override to resolve.
+
+    Kinds in *override_kinds* are skipped during conflict detection —
+    the aggregation vertex's own declaration will take precedence.
     """
     from lang import parse_vertex_file, resolve_vertex
 
@@ -158,9 +163,11 @@ def _collect_source_specs(ast: Any, vertex_path: Path) -> dict:
         source_specs = compile_vertex(ref_ast)
         for kind, spec in source_specs.items():
             if kind in merged:
-                if not _specs_match(merged[kind], spec):
+                if kind in override_kinds:
+                    pass  # Aggregation will override — skip conflict check
+                elif not _specs_match(merged[kind], spec):
                     raise ConflictingFoldSpec(kind, source_of[kind], source_name)
-                # Matching specs — no conflict, keep existing
+                # Matching specs or overridden — keep existing
             else:
                 merged[kind] = spec
                 source_of[kind] = source_name
@@ -464,7 +471,9 @@ def vertex_read(
     # Combinatorial or aggregation vertex: read across multiple stores.
     # Auto-inherit: source specs are the base, aggregation specs override.
     if ast.combine is not None or (ast.store is None and ast.discover is not None):
-        source_specs = _collect_source_specs(ast, vertex_path)
+        source_specs = _collect_source_specs(
+            ast, vertex_path, override_kinds=frozenset(specs)
+        )
         # Source specs as base, aggregation specs override
         merged = {**source_specs, **specs}
         return _combined_read(ast, vertex_path, merged, observer=observer)
@@ -539,7 +548,9 @@ def vertex_fold(
     # For combine/discover vertices, merge source specs so fold metadata
     # (fold_type, key_field) is available for inherited kinds too.
     if ast.combine is not None or (ast.store is None and ast.discover is not None):
-        source_specs = _collect_source_specs(ast, vertex_path)
+        source_specs = _collect_source_specs(
+            ast, vertex_path, override_kinds=frozenset(specs)
+        )
         specs = {**source_specs, **specs}
 
     sections: list[FoldSection] = []

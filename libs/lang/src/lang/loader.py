@@ -263,7 +263,11 @@ def _load_fold_block(node: ckdl.Node, path: Path | None) -> tuple[FoldDecl, ...]
 def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
     props = node.properties
     if "when" in props:
-        return BoundaryWhen(kind=str(props["when"]))
+        # Extra properties beyond when= are payload match conditions
+        match = tuple(
+            (str(k), str(v)) for k, v in props.items() if k != "when"
+        )
+        return BoundaryWhen(kind=str(props["when"]), match=match)
     if "after" in props:
         return BoundaryAfter(count=int(props["after"]))
     if "every" in props:

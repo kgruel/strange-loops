@@ -62,6 +62,7 @@ class Vertex:
         self._name = name
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
+        self._boundary_match: dict[str, tuple[tuple[str, str], ...]] = {}  # boundary_kind → match
         self._store = store
         self._children: list[Vertex] = []
         self._routes: dict[str, str] = {}  # pattern → loop_name
@@ -174,6 +175,8 @@ class Vertex:
             if loop.boundary_kind in self._boundary_map:
                 raise ValueError(f"Boundary kind already registered: {loop.boundary_kind}")
             self._boundary_map[loop.boundary_kind] = kind
+            if loop.boundary_match:
+                self._boundary_match[loop.boundary_kind] = loop.boundary_match
         self._loops[kind] = loop
 
     def receive(
@@ -267,6 +270,11 @@ class Vertex:
         # Check kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
+            return None
+
+        # Check payload match conditions (if any)
+        match = self._boundary_match.get(kind, ())
+        if match and not all(payload.get(k) == v for k, v in match):
             return None
 
         # Fire from the target loop

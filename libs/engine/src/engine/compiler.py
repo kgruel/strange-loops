@@ -496,7 +496,8 @@ def map_boundary(boundary: BoundaryWhen | BoundaryAfter | BoundaryEvery) -> Boun
     from atoms import Boundary
 
     if isinstance(boundary, BoundaryWhen):
-        return Boundary(kind=boundary.kind, mode="when", reset=True)
+        return Boundary(kind=boundary.kind, mode="when", reset=True,
+                        match=boundary.match)
     elif isinstance(boundary, BoundaryAfter):
         return Boundary(count=boundary.count, mode="after", reset=True)
     elif isinstance(boundary, BoundaryEvery):
@@ -830,6 +831,8 @@ def materialize_vertex(
         boundary = spec.boundary
         reset = boundary.reset if boundary else True
 
+        b_match = boundary.match if boundary else ()
+
         if name in overrides:
             # Use custom fold
             initial, fold_fn = overrides[name]
@@ -841,18 +844,20 @@ def materialize_vertex(
                     boundary_kind=boundary.kind,
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
+                    boundary_match=b_match,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
             else:
-                # Kind-based boundary: use register()
-                vertex.register(
-                    name,
-                    initial,
-                    fold_fn,
-                    boundary=boundary.kind if boundary else None,
+                # Kind-based boundary: use Loop for match support
+                loop = Loop(
+                    name=name,
+                    projection=Projection(initial, fold=fold_fn),
+                    boundary_kind=boundary.kind if boundary else None,
+                    boundary_match=b_match,
                     reset=reset,
                 )
+                vertex.register_loop(loop)
         else:
             # Use declarative Spec.apply
             if boundary and boundary.count is not None:
@@ -863,18 +868,20 @@ def materialize_vertex(
                     boundary_kind=boundary.kind,
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
+                    boundary_match=b_match,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
             else:
-                # Kind-based boundary: use register()
-                vertex.register(
-                    name,
-                    spec.initial_state(),
-                    spec.apply,
-                    boundary=boundary.kind if boundary else None,
+                # Kind-based boundary: use Loop for match support
+                loop = Loop(
+                    name=name,
+                    projection=Projection(spec.initial_state(), fold=spec.apply),
+                    boundary_kind=boundary.kind if boundary else None,
+                    boundary_match=b_match,
                     reset=reset,
                 )
+                vertex.register_loop(loop)
 
     # Recursively materialize and attach children
     for child_name, child_compiled in compiled.children.items():

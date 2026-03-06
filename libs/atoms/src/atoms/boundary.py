@@ -17,6 +17,11 @@ class Boundary:
     - Kind-based (mode="when"): fire when fact of `kind` arrives
     - Count-based (mode="after" or "every"): fire after `count` facts
 
+    Optional payload matching (kind-based only):
+    - match: tuple of (key, value) pairs that must all match the incoming
+      fact's payload for the boundary to fire. E.g. match=(("status", "closed"),)
+      fires only when payload["status"] == "closed".
+
     Attributes:
         kind: The fact kind that triggers the boundary (for mode="when").
         count: Number of facts before boundary fires (for mode="after"/"every").
@@ -24,12 +29,14 @@ class Boundary:
         reset: Whether state resets to initial after the boundary.
             True = state resets (each cycle starts fresh).
             False = state carries (next cycle continues from current state).
+        match: Payload conditions for kind-based boundaries.
     """
 
     kind: str | None = None
     count: int | None = None
     mode: Literal["when", "after", "every"] = "when"
     reset: bool = True
+    match: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind is None and self.count is None:

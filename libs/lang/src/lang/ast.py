@@ -293,9 +293,15 @@ class FoldDecl:
 
 @dataclass(frozen=True)
 class BoundaryWhen:
-    """Kind-based boundary: triggers when fact of given kind arrives."""
+    """Kind-based boundary: triggers when fact of given kind arrives.
+
+    Optional match conditions: payload fields that must equal the given
+    values for the boundary to fire. E.g. boundary when="session" status="closed"
+    fires only when a session fact has status=closed in its payload.
+    """
 
     kind: str
+    match: tuple[tuple[str, str], ...] = ()  # frozen payload conditions
 
 
 @dataclass(frozen=True)

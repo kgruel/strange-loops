@@ -12,6 +12,6 @@ output=$($LOOPS fold comms --observer all --lens comms --plain -q 2>/dev/null ||
 $LOOPS emit comms/native check name="$observer" 2>/dev/null || true
 
 case "$output" in
-  ''|'(no messages)'|'(quiet'*) ;;
+  ''|'(quiet)') ;;
   *) echo "$output" ;;
 esac

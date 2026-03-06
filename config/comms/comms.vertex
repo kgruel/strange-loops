@@ -27,4 +27,9 @@ loops {
       items "by" "name"
     }
   }
+  ack {
+    fold {
+      items "by" "ref"
+    }
+  }
 }

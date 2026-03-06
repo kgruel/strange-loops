@@ -4,6 +4,10 @@
 
 name "comms"
 
+lens {
+  fold "comms"
+}
+
 combine {
   vertex "./discord/discord.vertex"
   vertex "./native/native.vertex"

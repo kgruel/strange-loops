@@ -273,6 +273,10 @@ def _render_minimal(
     if not parts:
         return Block.text("(quiet)", plain)
 
+    # Hint: when messages exist, show how to drill in
+    if channels:
+        parts.append("→ fold comms --observer all")
+
     return Block.text(" ".join(parts), plain)
 
 

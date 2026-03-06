@@ -117,6 +117,7 @@ Usage: `loops fold meta --lens my_lens`
 **Current user-global lenses:**
 - `comms` — messaging vertices. Author/content extraction, self-scoping, delta rendering.
 - `state` — session orientation. Tasks by priority, open threads, recent decisions.
+- `reference` — living spec reference. Vocabulary entries grouped by category with KDL syntax.
 
 **Don't reach for yet**: Vertex declarations, source wiring, hooks.
 
@@ -178,14 +179,23 @@ combine {
 }
 ```
 
-**Fold vocabulary** (declared in `fold {}` blocks):
+**Fold vocabulary** — 10 ops available (upsert, collect, count, latest, sum, min, max, avg, window, topn). Common declarations:
 
-| Declaration | Fold op | What it does |
-|------------|---------|-------------|
-| `items "by" "field"` | Upsert | Latest per key field |
-| `items "collect" N` | Collect | Keep last N (0 = unbounded) |
-| `count "inc"` | Count | Running counter |
-| `updated "latest"` | Latest | Most recent timestamp |
+```kdl
+items "by" "field"       // upsert — latest per key
+items "collect" 50       // bounded list
+count "inc"              // running counter
+updated "latest"         // most recent timestamp
+total "sum" "amount"     // running total
+recent "window" 10 "val" // sliding window
+```
+
+For the full vocabulary with descriptions, KDL syntax, and usage patterns:
+```bash
+loops fold reference              # summary — one-liner per primitive
+loops fold reference -v           # detailed — KDL syntax + full descriptions
+loops fold reference --kind vocab # just vocabulary, no patterns
+```
 
 **Sources** — external data ingestion:
 
@@ -279,6 +289,7 @@ system/              Local machine monitoring
 homelab/             Per-VM agent pattern
 ambient/             Passive attention traces (browsing, screen time)
 messaging/           Direct messaging
+reference/           Living spec reference — fold/parse/boundary vocabulary as facts
 dev/                 Development checks
 realestate/          Real estate data
 ```

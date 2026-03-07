@@ -227,17 +227,12 @@ def _render_minimal(
 ) -> Block:
     """Status bar: presence + channel counts.
 
-    Format: [3m] online: loops-claude (6m) | native: 3 (1 new) | discord: 5
-    Shows freshness, who's active, and unhandled message counts per channel.
+    Format: online: loops-claude (6m) discord: 3 (1 new) native: quiet
+    Shows who's active and unhandled message counts per channel.
     Returns (quiet) when nothing to report — hook filters this out.
     """
     now = time.time()
     parts: list[str] = []
-
-    # Self check freshness — how stale is this view?
-    self_check = all_checks.get(self_obs, 0.0) if self_obs else 0.0
-    if self_check:
-        parts.append(f"[{_relative_time(self_check)}]")
 
     # Presence — other observers with recent checks
     online: list[str] = []
@@ -249,8 +244,11 @@ def _render_minimal(
     if online:
         parts.append(f"online: {', '.join(online)}")
 
-    # Message counts per channel
+    # Message counts per channel — show all known channels
     channels: dict[str, dict[str, int]] = {}
+    # Seed with known channel names so quiet channels appear
+    for ch in ("discord", "native"):
+        channels[ch] = {"total": 0, "new": 0}
     for m in messages:
         ch = m["channel"]
         if ch not in channels:
@@ -262,20 +260,22 @@ def _render_minimal(
     ch_parts: list[str] = []
     for ch in sorted(channels):
         c = channels[ch]
-        if c["new"] > 0:
+        if c["total"] == 0:
+            ch_parts.append(f"{ch}: quiet")
+        elif c["new"] > 0:
             ch_parts.append(f"{ch}: {c['total']} ({c['new']} new)")
         else:
             ch_parts.append(f"{ch}: {c['total']}")
 
     if ch_parts:
-        parts.append(" | ".join(ch_parts))
+        parts.append(" ".join(ch_parts))
 
     if not parts:
         return Block.text("(quiet)", plain)
 
     # Hint: when messages exist, show how to drill in
-    if channels:
-        parts.append("→ fold comms --observer all")
+    if any(channels[ch]["total"] > 0 for ch in channels):
+        parts.append("→ loops read comms --observer all")
 
     return Block.text(" ".join(parts), plain)
 

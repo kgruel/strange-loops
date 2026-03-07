@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_SKIP_KINDS = {"log", "change"}
+_SKIP_KINDS = {"log", "change", "message", "self", "principle", "observation", "intention"}
 _NAMES_ONLY_KINDS = {"decision", "dissolution", "vision"}
 _STATUS_GROUPED_KINDS = {"thread"}
 _COMPACT_KINDS = {"session"}
@@ -51,57 +51,68 @@ def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 
 
 def _schema_prompt(sections: list[FoldSection]) -> Block:
-    """Structured schema prompt — renders active items per section.
+    """Structured schema prompt — ordered by attention priority.
 
-    Each kind gets a rendering strategy matched to its role in attention:
-    - Names-only: reference material (decisions). Drill down for detail.
-    - Status-grouped: orientation (threads). Open vs parked matters.
-    - Compact: presence signal (sessions). Active only.
-    - Default: name + body (tasks, etc). Working context.
+    Rendering order reflects actionability:
+    1. Working context (tasks) — what you're doing
+    2. Orientation (threads) — what's being tracked
+    3. Presence (sessions) — who's active
+    4. Reference (decisions, dissolutions, visions) — background, names only
 
-    Attention budget: skip log/change, cap large sections.
+    Each kind gets a rendering strategy matched to its role.
+    Skips log/change. Unknown kinds use default (name + body).
     """
-    rows: list[Block] = []
-    plain = Style()
+    section_map = {s.kind: s for s in sections}
+    all_lines: list[str] = []
 
+    # --- Tier 1: Working context (default renderer — name + body) ---
+    for kind in ("task",):
+        if kind in section_map:
+            lines = _render_default(section_map[kind])
+            if lines:
+                all_lines.extend(lines)
+
+    # --- Tier 2: Orientation (status-grouped) ---
+    for kind in _STATUS_GROUPED_KINDS:
+        if kind in section_map:
+            lines = _render_status_grouped(section_map[kind])
+            if lines:
+                if all_lines:
+                    all_lines.append("")
+                all_lines.extend(lines)
+
+    # --- Tier 3: Presence (compact) ---
+    for kind in _COMPACT_KINDS:
+        if kind in section_map:
+            lines = _render_compact_session(section_map[kind])
+            if lines:
+                if all_lines:
+                    all_lines.append("")
+                all_lines.extend(lines)
+
+    # --- Tier 4: Reference (names only) ---
+    for kind in ("decision", "dissolution", "vision"):
+        if kind in section_map:
+            lines = _render_names_only(section_map[kind])
+            if lines:
+                if all_lines:
+                    all_lines.append("")
+                all_lines.extend(lines)
+
+    # --- Remaining: anything not handled above (default renderer) ---
+    handled = _SKIP_KINDS | _NAMES_ONLY_KINDS | _STATUS_GROUPED_KINDS | _COMPACT_KINDS | {"task"}
     for s in sections:
-        if s.kind in _SKIP_KINDS:
+        if s.kind in handled:
             continue
-
-        if s.kind in _COMPACT_KINDS:
-            lines = _render_compact_session(s)
-            if lines:
-                for line in lines:
-                    rows.append(Block.text(line, plain))
-            continue
-
-        if s.kind in _NAMES_ONLY_KINDS:
-            lines = _render_names_only(s)
-            if lines:
-                if rows:
-                    rows.append(Block.text("", plain))
-                for line in lines:
-                    rows.append(Block.text(line, plain))
-            continue
-
-        if s.kind in _STATUS_GROUPED_KINDS:
-            lines = _render_status_grouped(s)
-            if lines:
-                if rows:
-                    rows.append(Block.text("", plain))
-                for line in lines:
-                    rows.append(Block.text(line, plain))
-            continue
-
-        # Default: name + body (tasks and any other kinds)
         lines = _render_default(s)
         if lines:
-            if rows:
-                rows.append(Block.text("", plain))
-            for line in lines:
-                rows.append(Block.text(line, plain))
+            if all_lines:
+                all_lines.append("")
+            all_lines.extend(lines)
 
-    return join_vertical(*rows)
+    plain = Style()
+    rows = [Block.text(line, plain) for line in all_lines]
+    return join_vertical(*rows) if rows else Block.text("(empty)", plain)
 
 
 # ---------------------------------------------------------------------------

@@ -5,11 +5,11 @@ Conversation exchanges as facts. Search, tag, and analyze CLI coding sessions. S
 **You are here** in the abstraction chain:
 
 ```
-loops CLI (host)  →  siftd (plugin)  →  engine (runtime)  →  atoms (data)
-loops siftd ...      lens, feedback     vertex_search        Fact, FTS5
+config (declare)  →  loops CLI (use)  →  engine (runtime)  →  atoms (data)
+siftd.vertex         read/emit/search    vertex_search        Fact, FTS5
 ```
 
-siftd is NOT a standalone CLI — it registers into the loops CLI as a plugin. Vertex template, lens, and feedback handlers all wire through loops.
+siftd is a pure-config vertex — no app dispatch, no custom CLI commands. All operations use standard loops verbs. Domain logic lives in the source parser, fold lens, and PayloadLens.
 
 Below: `libs/engine/` provides `vertex_read`, `vertex_search`, `vertex_facts`. `libs/painted/` renders all display output.
 
@@ -20,18 +20,18 @@ Below: `libs/engine/` provides `vertex_read`, `vertex_search`, `vertex_facts`. `
 **Trigger**: I need to search or browse past coding sessions.
 
 ```bash
-loops init siftd                              # create siftd vertex + data dir
-loops siftd search "vertex template design"   # FTS5 search over exchanges
-loops siftd status                            # kind counts, freshness, recent activity
-loops siftd log --since 7d                    # recent exchanges chronologically
-loops siftd tag architecture --conversation abc123  # tag a conversation
+loops init --template siftd                   # create local siftd vertex
+loops read siftd                              # fold state (conversations, tags)
+loops read siftd --facts --since 7d           # recent exchanges chronologically
+loops read siftd --facts "vertex templates"   # FTS5 search over exchanges
+loops emit siftd tag name=architecture conversation_id=abc123  # tag a conversation
 ```
 
 Common flags: `-q` (minimal), `-v` (detailed), `-vv` (full), `--json`, `--plain`.
 
-Data arrives via adapter scripts (separate from this app) or `loops emit exchange ...`.
+Data arrives via adapter scripts (separate from this app) or `loops emit siftd exchange ...`.
 
-**Don't reach for yet**: Lens internals, feedback handlers, vertex declaration.
+**Don't reach for yet**: Lens internals, source adapters, vertex declaration.
 
 ---
 
@@ -39,16 +39,17 @@ Data arrives via adapter scripts (separate from this app) or `loops emit exchang
 
 **Trigger**: I need to change how siftd data is indexed, searched, or displayed.
 
-**siftd's vertex declaration lives in the loops app** (`_TEMPLATES["siftd"]` in `apps/loops/main.py`). It defines:
+**siftd's vertex declaration** lives at `config/siftd/siftd.vertex`. It defines:
 - `exchange` kind — folded `by conversation_id`, FTS5 searchable on `prompt` + `response`
 - `tag` kind — folded `by name`
+- `source.error` kind — bounded error log
 
 Before modifying siftd source, check whether what you need is:
-- **Different search fields** — change the `search` declaration in the vertex template
-- **Different fold behavior** — change the `fold` block in the vertex template
-- **Different display** — the `siftd_lens` in `lens.py` controls rendering. Same contract as all lenses: `(data, zoom, width) -> Block`
+- **Different search fields** — change the `search` declaration in `siftd.vertex`
+- **Different fold behavior** — change the `fold` block in `siftd.vertex`
+- **Different display** — the fold lens at `config/siftd/lenses/fold.py` renders fold state. The PayloadLens in `lens.py` renders individual facts in stream view.
 
-**Don't reach for yet**: Feedback handler implementation, adapter internals.
+**Don't reach for yet**: Source adapter implementation, feedback handler internals.
 
 ---
 
@@ -56,14 +57,21 @@ Before modifying siftd source, check whether what you need is:
 
 **Trigger**: I need to modify siftd's behavior or understand how it plugs into loops.
 
-**Four registration points** in the loops CLI:
+**Three configuration files** (all in `config/siftd/`):
 
-| Registration | What | Where |
-|-------------|------|-------|
-| `_TEMPLATES["siftd"]` | Vertex template for `loops init siftd` | `apps/loops/main.py` |
-| `_APPS["siftd"]` | App dispatch for `loops siftd <cmd>` | `apps/loops/main.py` |
-| `siftd_lens` | PayloadLens for exchange/tag rendering | `apps/siftd/lens.py` |
-| `tag_handler` | Feedback handler — emits tag facts | `apps/siftd/feedback.py` |
+| File | What |
+|------|------|
+| `siftd.vertex` | Vertex declaration — kinds, folds, search fields, source, lens |
+| `lenses/fold.py` | Custom fold lens — domain-aware rendering of FoldState |
+| `sources/claude-code.loop` | Source declaration — points to adapter script |
+
+**Domain logic** (in `apps/siftd/src/siftd_loops/`):
+
+| File | What |
+|------|------|
+| `sources/claude_code.py` | Source adapter — discovers JSONL sessions, emits exchange facts |
+| `lens.py` | PayloadLens for exchange/tag rendering + status/log/search views |
+| `feedback.py` | Tag handler — emits tag facts (used by feedback system) |
 
 **Two fact kinds:**
 - `exchange` — one per prompt/response pair. Folded `by conversation_id`. FTS5 searchable on `prompt` + `response`.
@@ -74,10 +82,10 @@ Before modifying siftd source, check whether what you need is:
 | Concept | Loops equivalent |
 |---------|-----------------|
 | Conversation | Group of exchange facts sharing `conversation_id` |
-| Search | `vertex_search()` with FTS5 index |
-| Status | `vertex_read()` fold state |
-| Log | `vertex_facts()` time range |
-| Tag | Fact on the wire (action-on-the-loop) |
+| Search | `loops read siftd --facts "query"` → `vertex_search()` with FTS5 |
+| Status | `loops read siftd` → fold state via generic read |
+| Log | `loops read siftd --facts --since 7d` → `vertex_facts()` time range |
+| Tag | `loops emit siftd tag name=X conversation_id=Y` |
 
 **Adapter sources** (in `src/siftd_loops/sources/`) ingest conversations from external tools. Each adapter parses a tool's conversation format into exchange facts. Adapters are independent — adding a new one doesn't change siftd's core.
 
@@ -98,16 +106,16 @@ External tool (Claude Code, etc.)
 
 **Search flow:**
 ```
-loops siftd search "query"
-  → vertex_search(store, query) — FTS5 MATCH
+loops read siftd --facts "query"
+  → fetch_stream → vertex_search(store, query) — FTS5 MATCH
   → Returns ranked facts with snippets
-  → siftd_lens renders at zoom level
+  → Stream lens renders at zoom level
 ```
 
-**Tag flow (feedback):**
+**Tag flow:**
 ```
-loops siftd tag <name> --conversation <id>
-  → tag_handler emits tag fact
+loops emit siftd tag name=architecture conversation_id=abc123
+  → cmd_emit → vertex.receive(tag fact)
   → Fold accumulates by tag name
   → Tags are queryable alongside exchanges
 ```
@@ -116,10 +124,11 @@ loops siftd tag <name> --conversation <id>
 
 ## Key conventions
 
-- siftd is a plugin, not standalone. All CLI surface is via loops.
+- siftd is a pure-config vertex. No app dispatch — all CLI surface is standard loops verbs.
 - Exchange facts are append-only. Conversations grow by accumulation.
 - FTS5 search is declared in the vertex, not coded in Python.
 - Adapters are independent scripts — one per external tool.
+- Source dedup is managed by the adapter via manifest files, not by the vertex.
 
 ## Build & test
 

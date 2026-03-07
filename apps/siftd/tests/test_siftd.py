@@ -1,4 +1,4 @@
-"""Tests for siftd — vertex template, lens, feedback, and app dispatch."""
+"""Tests for siftd — vertex config, lens, feedback, and generic vertex dispatch."""
 
 from __future__ import annotations
 
@@ -21,9 +21,14 @@ def _block_text(block) -> str:
     return buf.getvalue()
 
 
-def _seed_siftd(workspace: Path) -> Path:
-    """Create a siftd vertex + data dir in workspace, return store path."""
-    vertex = workspace / "siftd.vertex"
+def _seed_siftd(loops_home: Path) -> Path:
+    """Create siftd vertex in LOOPS_HOME layout, return store path.
+
+    Layout: loops_home/siftd/siftd.vertex + loops_home/siftd/data/siftd.db
+    """
+    siftd_dir = loops_home / "siftd"
+    siftd_dir.mkdir(parents=True, exist_ok=True)
+    vertex = siftd_dir / "siftd.vertex"
     vertex.write_text(
         'name "siftd"\n'
         'store "./data/siftd.db"\n\n'
@@ -37,8 +42,8 @@ def _seed_siftd(workspace: Path) -> Path:
         "  }\n"
         "}\n"
     )
-    (workspace / "data").mkdir()
-    return workspace / "data" / "siftd.db"
+    (siftd_dir / "data").mkdir(exist_ok=True)
+    return siftd_dir / "data" / "siftd.db"
 
 
 def _emit_exchange(store_path: Path, conversation_id: str, prompt: str, response: str,
@@ -188,96 +193,107 @@ class TestFetchStatus:
         assert result["recent"][1]["conversation_id"] == "old"
 
 
-class TestAppDispatch:
-    """Test `loops siftd <command>` dispatch through main."""
+class TestGenericDispatch:
+    """Test siftd through generic vertex operations (read, emit)."""
 
-    def test_siftd_status(self, tmp_path, monkeypatch, capsys):
+    def test_read_siftd_fold(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
 
-        store_path = _seed_siftd(tmp_path)
+        store_path = _seed_siftd(loops_home)
         _emit_exchange(store_path, "conv1", "How do vertex templates work?", "Templates create...", ts=1000.0)
         _emit_exchange(store_path, "conv2", "What is fold?", "Fold replays...", model="gemini", ts=2000.0)
 
-        result = main(["siftd", "status"])
+        result = main(["read", "siftd"])
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "Conversations (2):" in out
+        assert "exchange" in out.lower()
 
-    def test_siftd_log(self, tmp_path, monkeypatch, capsys):
+    def test_implicit_read(self, tmp_path, monkeypatch, capsys):
+        """``loops siftd`` with no subcommand does implicit read."""
+        loops_home = tmp_path / "loops_home"
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
 
-        store_path = _seed_siftd(tmp_path)
+        store_path = _seed_siftd(loops_home)
+        _emit_exchange(store_path, "conv1", "Hello", "Hi there", ts=1000.0)
+
+        result = main(["siftd"])
+        assert result == 0
+
+    def test_read_siftd_facts(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
+        monkeypatch.chdir(tmp_path)
+
+        store_path = _seed_siftd(loops_home)
         _emit_exchange(store_path, "conv1", "How do vertex templates work?", "Templates create...")
 
-        result = main(["siftd", "log", "--since", "1h"])
+        result = main(["read", "siftd", "--facts", "--since", "1h"])
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "vertex templates" in out.lower()
+        assert "exchange" in out.lower()
+        assert "conv1" in out
 
-    def test_siftd_search(self, tmp_path, monkeypatch, capsys):
+    def test_read_siftd_search(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
 
-        store_path = _seed_siftd(tmp_path)
+        store_path = _seed_siftd(loops_home)
         _emit_exchange(store_path, "conv1", "How do vertex templates work?", "Templates create local instances")
 
-        result = main(["siftd", "search", "vertex templates"])
+        result = main(["read", "siftd", "--facts", "vertex templates"])
         assert result == 0
 
         out = capsys.readouterr().out
-        assert "vertex" in out.lower() or "1 match" in out.lower() or "exchange" in out
+        assert "vertex" in out.lower() or "exchange" in out
 
-    def test_siftd_tag(self, tmp_path, monkeypatch, capsys):
+    def test_emit_siftd_tag(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
+        monkeypatch.setenv("LOOPS_OBSERVER", "test-user")
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
 
-        store_path = _seed_siftd(tmp_path)
+        store_path = _seed_siftd(loops_home)
         _emit_exchange(store_path, "conv1", "Design discussion", "Let's use vertex...")
 
-        result = main(["siftd", "tag", "architecture", "--conversation", "conv1"])
+        result = main(["emit", "siftd", "tag", "name=architecture", "conversation_id=conv1"])
         assert result == 0
-
-        out = capsys.readouterr().out
-        assert "tagged" in out
-        assert "#architecture" in out
 
         # Verify the tag fact was stored
         from engine import vertex_read
-        vertex_path = tmp_path / "siftd.vertex"
+        vertex_path = loops_home / "siftd" / "siftd.vertex"
         fold_state = vertex_read(vertex_path)
         tag_items = fold_state.get("tag", {}).get("items", {})
         assert "architecture" in tag_items
 
-    def test_siftd_no_command(self, tmp_path, monkeypatch, capsys):
+    def test_read_siftd_no_vertex(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "empty_home"))
 
-        result = main(["siftd"])
-        assert result == 1
-
-    def test_siftd_no_vertex(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
-
-        result = main(["siftd", "status"])
+        result = main(["read", "siftd"])
         assert result == 1
 
 
 class TestTemplate:
-    """Test `loops init siftd` creates the right vertex."""
+    """Test ``loops init --template siftd`` creates a local vertex from config."""
 
     def test_init_siftd(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
+
+        # Seed LOOPS_HOME with siftd vertex so _find_source_vertex works
+        _seed_siftd(loops_home)
 
         result = main(["init", "--template", "siftd"])
         assert result == 0
 
-        vertex_path = tmp_path / "siftd.vertex"
+        vertex_path = tmp_path / ".loops" / "siftd.vertex"
         assert vertex_path.exists()
 
         content = vertex_path.read_text()
@@ -285,19 +301,16 @@ class TestTemplate:
         assert "exchange" in content
         assert "search" in content
         assert "tag" in content
-        assert "sources" in content
 
-    def test_init_siftd_creates_loop_file(self, tmp_path, monkeypatch, capsys):
+    def test_init_siftd_creates_data_dir(self, tmp_path, monkeypatch, capsys):
+        loops_home = tmp_path / "loops_home"
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops_home"))
+        monkeypatch.setenv("LOOPS_HOME", str(loops_home))
+
+        _seed_siftd(loops_home)
 
         result = main(["init", "--template", "siftd"])
         assert result == 0
 
-        loop_path = tmp_path / "sources" / "claude-code.loop"
-        assert loop_path.exists()
-
-        content = loop_path.read_text()
-        assert "siftd_loops.sources.claude_code" in content
-        assert 'kind "exchange"' in content
-        assert 'format "ndjson"' in content
+        data_dir = tmp_path / ".loops" / "data"
+        assert data_dir.exists()

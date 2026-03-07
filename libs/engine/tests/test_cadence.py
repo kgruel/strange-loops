@@ -157,6 +157,69 @@ class TestCadenceErrorDoesNotResetClock:
         assert cadence.should_run(store, now=now) is True
 
 
+class TestFileStoreQueryMethods:
+    """FileStore implements the same query methods as EventStore and SqliteStore."""
+
+    def _make_file_store(self, tmp_path):
+        from engine import FileStore
+        return FileStore(
+            path=tmp_path / "test.jsonl",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+
+    def test_latest_by_kind(self, tmp_path):
+        store = self._make_file_store(tmp_path)
+        store.append(Fact.of("a", "obs", v=1))
+        store.append(Fact.of("b", "obs", v=2))
+        store.append(Fact.of("a", "obs", v=3))
+
+        latest = store.latest_by_kind("a")
+        assert latest is not None
+        assert latest.payload["v"] == 3
+        assert store.latest_by_kind("missing") is None
+        store.close()
+
+    def test_latest_by_kind_where(self, tmp_path):
+        store = self._make_file_store(tmp_path)
+        store.append(Fact.of("a.complete", "obs", status="ok", v=1))
+        store.append(Fact.of("a.complete", "obs", status="error", v=2))
+        store.append(Fact.of("a.complete", "obs", status="ok", v=3))
+
+        result = store.latest_by_kind_where("a.complete", "status", "ok")
+        assert result is not None
+        assert result.payload["v"] == 3
+
+        result = store.latest_by_kind_where("a.complete", "status", "error")
+        assert result is not None
+        assert result.payload["v"] == 2
+
+        assert store.latest_by_kind_where("a.complete", "status", "missing") is None
+        store.close()
+
+    def test_has_kind_since(self, tmp_path):
+        store = self._make_file_store(tmp_path)
+        now = time.time()
+        store.append(Fact("a", now - 20, {"v": 1}, "obs"))
+        store.append(Fact("b", now - 10, {"v": 2}, "obs"))
+        store.append(Fact("a", now - 5, {"v": 3}, "obs"))
+
+        assert store.has_kind_since("a", now - 15) is True
+        assert store.has_kind_since("a", now - 3) is False
+        assert store.has_kind_since("b", now - 15) is True
+        assert store.has_kind_since("b", now - 5) is False
+        store.close()
+
+    def test_cadence_works_with_file_store(self, tmp_path):
+        """Cadence.should_run works with FileStore — the former gap."""
+        store = self._make_file_store(tmp_path)
+        now = time.time()
+        store.append(Fact("disk.complete", now - 120, {"status": "ok"}, "obs"))
+        cadence = Cadence.elapsed("disk", 60.0)
+        assert cadence.should_run(store, now=now) is True
+        store.close()
+
+
 class TestStoreLatestByKindWhere:
     def test_event_store_filters_by_payload(self):
         store = _make_store()

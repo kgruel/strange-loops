@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -95,6 +95,29 @@ class FileStore(Generic[T]):
 
     def __exit__(self, *args) -> None:
         self.close()
+
+    def latest_by_kind(self, kind: str) -> T | None:
+        """Return the most recent fact of a given kind, or None."""
+        for e in reversed(self._events):
+            if e.kind == kind:
+                return e
+        return None
+
+    def latest_by_kind_where(self, kind: str, key: str, value: Any) -> T | None:
+        """Return the most recent fact of kind where payload[key] == value."""
+        for e in reversed(self._events):
+            if e.kind == kind and e.payload.get(key) == value:
+                return e
+        return None
+
+    def has_kind_since(self, kind: str, ts: float) -> bool:
+        """True if any fact of kind exists with ts > the given timestamp."""
+        for e in reversed(self._events):
+            if e.ts <= ts:
+                break
+            if e.kind == kind:
+                return True
+        return False
 
     @property
     def events(self) -> list[T]:

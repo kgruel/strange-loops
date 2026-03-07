@@ -48,6 +48,18 @@ class Store(Protocol[T_contra]):
         """
         ...
 
+    def latest_by_kind(self, kind: str) -> Any:
+        """Return the most recent event of a given kind, or None."""
+        ...
+
+    def has_kind_since(self, kind: str, ts: float) -> bool:
+        """True if any event of kind exists with ts > the given timestamp."""
+        ...
+
+    def latest_by_kind_where(self, kind: str, key: str, value: Any) -> Any:
+        """Return the most recent event of kind where payload[key] == value, or None."""
+        ...
+
     def close(self) -> None:
         """Release resources."""
         ...

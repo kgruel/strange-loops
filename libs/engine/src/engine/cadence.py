@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from .store import Store
 
 
 @dataclass(frozen=True)
@@ -47,11 +47,11 @@ class Cadence:
         """Always true. For run-once / cursor-based sources."""
         return cls(_kind="", _mode="always")
 
-    def should_run(self, store: object, now: float | None = None) -> bool:
+    def should_run(self, store: "Store", now: float | None = None) -> bool:
         """Evaluate this predicate against the store.
 
         Args:
-            store: Store with latest_by_kind() and has_kind_since() methods.
+            store: Store to query for cadence evaluation.
             now: Epoch seconds. Defaults to time.time().
         """
         if self._mode == "always":

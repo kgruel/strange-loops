@@ -6,7 +6,7 @@ The primary interface to the loops system. Most work is configuration, not code 
 
 ```
 config (declare)  →  loops CLI (use)  →  engine (runtime)  →  atoms (data)
-~/.config/loops/     emit/status/fold    Vertex, Store        Fact, Spec
+~/.config/loops/     read/emit/close     Vertex, Store        Fact, Spec
 ```
 
 Below: `libs/engine/` runs vertex programs and persists facts. `libs/lang/` parses the DSL files. `libs/atoms/` defines the data primitives. `libs/painted/` renders everything.
@@ -19,11 +19,11 @@ Above: `~/.config/loops/` holds vertex declarations, lenses, and hooks. See its 
 **Trigger**: I need to query, emit, or run something.
 
 ```bash
-# Query a vertex store
-loops vertices                                  # all discovered vertices
-loops fold project                              # current folded state
-loops fold project --kind decision              # just decisions
-loops stream meta --since 7d --kind thread      # filtered event history
+# Read vertex state
+loops ls                                        # all discovered vertices
+loops read project                              # current folded state
+loops read project --kind decision              # just decisions
+loops read meta --facts --since 7d --kind thread  # filtered event history
 
 # Emit a fact
 loops emit project decision topic="auth" "JWT over sessions"
@@ -31,7 +31,6 @@ loops emit project thread name="store-ops" status="open"
 
 # Run DSL files
 loops validate disk.loop                        # syntax check
-loops start status.vertex                       # run vertex, render ticks
 loops run disk.loop                             # execute, print facts
 
 # Inspect a store
@@ -75,7 +74,7 @@ See `~/.config/loops/CLAUDE.md` for the full progressive guide to each of these.
 
 **Two command patterns:**
 
-**Display commands** (9) — fetch data, render through painted:
+**Display commands** — fetch data, render through painted:
 ```
 main.py routes command
   → fetch(args) → data           # commands/*.py
@@ -83,9 +82,9 @@ main.py routes command
   → run_cli() handles zoom/json/plain/width
 ```
 
-Commands: `fold`, `stream`, `store`, `start`, `compile`, `validate`, `test`, `ls`, `vertices`.
+Commands: `read` (fold + stream), `store`, `compile`, `validate`, `test`, `ls`.
 
-**Action commands** (5) — parse args, mutate, exit:
+**Action commands** — parse args, mutate, exit:
 ```
 main.py routes command
   → parse args
@@ -93,7 +92,7 @@ main.py routes command
   → show(Block.text()) for confirmation
 ```
 
-Commands: `init`, `emit`, `add`, `rm`, `export`.
+Commands: `init`, `emit`, `close`, `add`, `rm`, `export`.
 
 **Adding a display command:**
 1. `commands/your_cmd.py` — `fetch_*(args) -> dict` (data retrieval, no rendering)
@@ -123,7 +122,7 @@ return run_cli(rest, fetch=fetch, render=render, help_args=[...])
 
 ## Level 3 — Resolution and wiring internals
 
-**Trigger**: I need to understand how `loops fold project` finds the right database, or how lens resolution works.
+**Trigger**: I need to understand how `loops read project` finds the right database, or how lens resolution works.
 
 **Vertex resolution chain** (`_resolve_named_store`):
 1. Try `resolve_vertex(name, LOOPS_HOME)` → `~/.config/loops/{name}/{name}.vertex`
@@ -157,10 +156,10 @@ Templates dissolved: `loops init <name>` finds an existing config-level instance
 
 ## Key conventions
 
-- 9 display commands route through painted `run_cli`. Zero raw `print()`.
+- Display commands route through painted `run_cli`. Zero raw `print()`.
 - 4 zoom levels: MINIMAL (counts), SUMMARY (default), DETAILED (bodies), FULL (timestamps).
 - Lenses are pure: `(data, zoom, width) -> Block`. No IO, no state.
-- `main.py` is the monolith (~1200 lines). Commands/ and lenses/ are extracted concerns.
+- `main.py` is the monolith. Commands/ and lenses/ are extracted concerns.
 - Golden snapshot tests lock output across all 4 zoom levels. Run `--update-goldens` to regenerate.
 
 ## Build & test

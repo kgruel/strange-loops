@@ -6,7 +6,7 @@ Facts arrive, state accumulates, boundaries fire Ticks. Start at Level 0. Only e
 
 ```
 atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         .loop/.vertex      loops emit/status
+Fact, Spec        Tick, Vertex         .loop/.vertex      loops read/emit
 ```
 
 Below: `libs/atoms/` defines what data looks like (Fact, Spec, Fold). Engine receives facts and runs them.
@@ -40,7 +40,7 @@ A Tick is what comes out when a cycle completes — the folded state at a tempor
 Tick(name="jellyfin", ts=..., payload={"healthy": 3, "total": 4}, origin="status")
 ```
 
-This is the same Tick that `loops start status.vertex` renders. Same primitive at every level.
+This is the same Tick that `loops run status.vertex` renders. Same primitive at every level.
 
 **Don't reach for yet**: Vertex, Loop, Projection, Store, Peer.
 
@@ -150,7 +150,7 @@ reader.recent_facts(5)  # last 5 facts
 reader.recent_ticks(5)  # last 5 ticks
 ```
 
-This is what `loops status project` and `loops store` use to query vertex state.
+This is what `loops read project` and `loops store` use to query vertex state.
 
 **Fidelity traversal** — drill from Tick to contributing facts:
 

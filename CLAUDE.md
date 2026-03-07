@@ -62,10 +62,10 @@ meta-discussion/    Cross-cutting design space — patterns, principles, ways of
 Two stores accumulate decisions, threads, and tasks. Query from anywhere:
 
 ```bash
-uv run loops fold project                              # this repo — architecture, API, implementation
-uv run loops fold meta                                 # cross-cutting — ways of working, patterns, tooling
-uv run loops stream project --kind decision            # project decisions
-uv run loops stream meta --kind decision --since 7d    # recent cross-cutting decisions
+uv run loops read project                              # this repo — architecture, API, implementation
+uv run loops read meta                                 # cross-cutting — ways of working, patterns, tooling
+uv run loops read project --facts --kind decision      # project decisions
+uv run loops read meta --facts --kind decision --since 7d  # recent cross-cutting decisions
 ```
 
 **Project store** (`.loops/project.vertex`): architecture, API design, lib boundaries.

@@ -6,14 +6,14 @@ This document is progressive. Start at the level that matches your intent.
 
 ## Level 0 — Using lenses
 
-Every `loops fold` and `loops stream` command renders through a lens. When you don't specify one, you get the generic default.
+Every `loops read` command renders through a lens. When you don't specify one, you get the generic default.
 
 ### Default rendering
 
 ```bash
-loops fold project          # generic fold lens — sections with items, metadata-driven
-loops fold comms            # comms custom lens — lifecycle-aware messages, presence
-loops fold docs             # docs custom lens — vocab grouped by category, guides by level
+loops read project          # generic fold lens — sections with items, metadata-driven
+loops read comms            # comms custom lens — lifecycle-aware messages, presence
+loops read docs             # docs custom lens — vocab grouped by category, guides by level
 ```
 
 Comms, docs, and identity get custom rendering because their vertex files declare a lens:
@@ -32,12 +32,12 @@ Project has no lens declaration, so it falls through to the generic default.
 The `--lens` flag overrides everything — vertex declarations, app overrides, defaults:
 
 ```bash
-loops fold identity --lens prompt    # override: generic schema prompt instead of identity's default narrative
-loops fold project --lens state      # project rendered as session orientation
-loops fold project --lens prompt     # project rendered as structured schema for LLM
+loops read identity --lens prompt    # override: generic schema prompt instead of identity's default narrative
+loops read project --lens state      # project rendered as session orientation
+loops read project --lens prompt     # project rendered as structured schema for LLM
 ```
 
-Note: `loops fold identity` already renders as narrative by default — identity.vertex declares `lens { fold "identity_prompt" }`. The `--lens prompt` flag would *override* that to the generic schema prompt, which is less useful for identity. The flag is for overriding, not for activating.
+Note: `loops read identity` already renders as narrative by default — identity.vertex declares `lens { fold "identity_prompt" }`. The `--lens prompt` flag would *override* that to the generic schema prompt, which is less useful for identity. The flag is for overriding, not for activating.
 
 ### Zoom levels
 
@@ -57,8 +57,8 @@ The lens decides what each level means. The generic fold lens shows counts at MI
 When piped (not a TTY), `width` is `None` — no truncation, no padding. The output IS the data:
 
 ```bash
-loops fold identity --lens prompt --plain | pbcopy   # system prompt to clipboard
-loops fold comms --plain                              # comms status for a hook
+loops read identity --lens prompt --plain | pbcopy   # system prompt to clipboard
+loops read comms --plain                              # comms status for a hook
 ```
 
 `--plain` strips ANSI styling. `width=None` means the lens should produce full-length text.
@@ -132,7 +132,7 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None, **kwargs) -> Block
 Save this to `~/.config/loops/lenses/my_lens.py`, then use it:
 
 ```bash
-loops fold project --lens my_lens
+loops read project --lens my_lens
 ```
 
 ### The stream lens contract
@@ -198,7 +198,7 @@ combine {
 }
 ```
 
-When you run `loops fold comms`, the resolver finds `comms.vertex`'s lens declaration, searches for `comms.py` in the lens path, loads `fold_view` from it, and renders.
+When you run `loops read comms`, the resolver finds `comms.vertex`'s lens declaration, searches for `comms.py` in the lens path, loads `fold_view` from it, and renders.
 
 **docs.vertex** — declares the docs lens for progressive documentation rendering:
 
@@ -210,7 +210,7 @@ lens {
 }
 ```
 
-**identity.vertex** — declares the identity prompt lens. The prompt lens is identity configuration, not generic infrastructure. This means `loops fold identity` gets narrative rendering by default, no `--lens` flag needed:
+**identity.vertex** — declares the identity prompt lens. The prompt lens is identity configuration, not generic infrastructure. This means `loops read identity` gets narrative rendering by default, no `--lens` flag needed:
 
 ```kdl
 name "identity"

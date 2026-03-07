@@ -29,9 +29,9 @@ Facts live in `meta.vertex` → `data/meta.db`.
 
 ```bash
 uv run loops meta emit <kind> key=value "trailing message"
-uv run loops meta fold                    # current fold state
-uv run loops meta stream --kind <kind>    # event history
-uv run loops meta fold --kind decision    # filter to one kind
+uv run loops meta read                    # current fold state
+uv run loops meta read --facts --kind <kind>    # event history
+uv run loops meta read --kind decision    # filter to one kind
 ```
 
 `meta` resolves via combine at `~/.config/loops/meta/meta.vertex` → this

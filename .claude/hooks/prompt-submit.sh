@@ -8,7 +8,7 @@ LOOPS="$REPO_ROOT/.venv/bin/loops"
 
 observer="$($LOOPS whoami 2>/dev/null || echo "unknown")"
 
-output=$($LOOPS fold comms --observer all --lens comms --plain -q 2>/dev/null || true)
+output=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 $LOOPS emit comms/native check name="$observer" 2>/dev/null || true
 
 case "$output" in

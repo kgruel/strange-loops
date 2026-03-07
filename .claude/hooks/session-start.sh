@@ -14,12 +14,12 @@ observer="$($LOOPS whoami 2>/dev/null || echo "unknown")"
 
 # 1. Session marker + project context
 $LOOPS emit project session name="$observer" status=open 2>/dev/null || true
-$LOOPS fold project --lens prompt --plain 2>/dev/null || true
+$LOOPS read project --lens prompt --plain 2>/dev/null || true
 
 # 2. Identity (lens declared in identity.vertex: identity_prompt)
-$LOOPS fold identity --plain 2>/dev/null || true
+$LOOPS read identity --plain 2>/dev/null || true
 
 # 3. Comms — poll discord, show new messages, mark check-in
 $LOOPS run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null || true
-$LOOPS fold comms --observer all --lens comms --plain -q 2>/dev/null || true
+$LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true
 $LOOPS emit comms/native check name="$observer" 2>/dev/null || true

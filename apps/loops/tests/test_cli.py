@@ -39,11 +39,6 @@ class TestParseVars:
         from loops.main import _run_run
         assert callable(_run_run)
 
-    def test_start_accepts_var_via_run_cli(self):
-        """start --var is handled by _run_start's pre-parser, not create_parser."""
-        from loops.main import _run_start
-        assert callable(_run_start)
-
     def test_run_var_parsed_by_pre_parser(self):
         """run's --var is handled by pre-parser in _run_run."""
         from loops.main import _parse_vars
@@ -201,10 +196,10 @@ class TestHelp:
         assert result == 0
         captured = capsys.readouterr()
         assert "Runtime for .loop and .vertex files" in captured.out
-        # Vertex operations should be visible
-        assert "fold" in captured.out
-        assert "stream" in captured.out
+        # Verbs should be visible
+        assert "read" in captured.out
         assert "emit" in captured.out
+        assert "close" in captured.out
         # Root commands should be visible
         assert "init" in captured.out
         assert "run" in captured.out
@@ -412,25 +407,11 @@ class TestInitCommand:
 
 
 class TestDefaultPaths:
-    """start/run/store default to LOOPS_HOME/.vertex when no file given."""
-
-    def test_start_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["start"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "loops init" in captured.err
+    """run/store default to LOOPS_HOME/.vertex when no file given."""
 
     def test_run_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = main(["run"])
-        assert result == 1
-
-    def test_start_file_optional(self, monkeypatch, tmp_path, capsys):
-        """start with no file falls back to LOOPS_HOME/.vertex."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Without .vertex, returns 1 with guidance
-        result = main(["start"])
         assert result == 1
 
     def test_run_file_optional(self, monkeypatch, tmp_path):
@@ -444,11 +425,6 @@ class TestDefaultPaths:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         # Without .vertex, returns 1
         result = main(["store"])
-        assert result == 1
-
-    def test_start_explicit_file_still_works(self, tmp_path, capsys):
-        """start with an explicit file that doesn't exist returns 1."""
-        result = main(["start", str(tmp_path / "my.vertex")])
         assert result == 1
 
 
@@ -627,13 +603,14 @@ class TestHelpUpdated:
         captured = capsys.readouterr()
         assert "Verbs" in captured.out
 
-    def test_help_shows_shorthand_aliases(self, capsys):
-        """Help shows fold/stream as shorthand aliases."""
+    def test_help_hides_legacy_aliases(self, capsys):
+        """Help no longer shows fold/stream/status/log/search."""
         result = main(["--help"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "fold" in captured.out
-        assert "stream" in captured.out
+        # fold/stream still work as silent aliases but aren't in help
+        assert "Shorthand" not in captured.out
+        assert "status" not in captured.out.lower().split("read")[0]  # not as a command
 
 
 class TestEmitParsers:
@@ -653,7 +630,7 @@ class TestEmitParsers:
 
     def test_vertex_not_resolvable(self):
         """Vertex-first: unresolvable name gives error, not session dispatch."""
-        result = main(["nonexistent_vertex", "status"])
+        result = main(["nonexistent_vertex", "fold"])
         assert result == 1
 
 

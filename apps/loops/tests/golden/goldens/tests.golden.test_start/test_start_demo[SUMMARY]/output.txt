@@ -1,2 +1,0 @@
-  [disk] fs, pct, mount
-  [memory] used_mb, total_mb, free_mb

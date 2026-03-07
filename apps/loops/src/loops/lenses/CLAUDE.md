@@ -80,7 +80,7 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 - `prompt` — system prompt rendering (identity-aware narrative for identity vertices, structured schema for others)
 
 **CLI command lenses** (wired to specific display commands):
-- `compile`, `run`, `start`, `store`, `test`, `validate`, `vertices`, `pop`
+- `compile`, `run`, `store`, `test`, `validate`, `vertices`, `pop`
 
 **Utilities** (imported by other lenses):
 - `gist` — content extraction from payloads (`content_gist(kind, payload)`)

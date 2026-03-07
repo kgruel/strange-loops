@@ -48,15 +48,6 @@ disk     ▁▂▃▅▇█▅▃     20    5m ago  /dev/sda1
 memory   ▁▃▅▇     22    5m ago  {'used_mb': 4096, 'total_mb': 16384}
 ```
 
-## `start`
-
-Run vertex and display tick results.
-
-```
-  [disk] fs, pct, mount
-  [memory] used_mb, total_mb, free_mb
-```
-
 ## `compile (loop)`
 
 Compiled .loop source structure.

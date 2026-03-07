@@ -74,7 +74,7 @@ def main():
 
     print(f"\nDone. {'Would emit' if dry_run else 'Emitted'} {len(entries)} facts.")
     if not dry_run:
-        print("Query with: loops log project --kind log")
+        print("Query with: loops read project --facts --kind log")
 
 
 if __name__ == "__main__":

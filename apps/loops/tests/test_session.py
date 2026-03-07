@@ -1,4 +1,4 @@
-"""Tests for vertex-first status, log, init --template, and emit."""
+"""Tests for vertex-first read, stream, init --template, and emit."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class TestStatus:
         assert _emit_local("decision", "topic=sigil", "{{var}} over ${var}") == 0
         assert _emit_local("decision", "topic=store", "personal instance") == 0
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -66,7 +66,7 @@ class TestStatus:
 
         assert _emit_local("decision", "topic=sigil", "{{var}} over ${var}") == 0
 
-        result = main(["session", "status", "-v"])
+        result = main(["session", "read", "-v"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -84,14 +84,14 @@ class TestStatus:
         assert _emit_local("decision", "topic=sigil", "new choice") == 0
 
         # SUMMARY: only topic visible, message bodies hidden
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
         out = capsys.readouterr().out
         assert "## DECISION" in out
         assert "sigil" in out
 
         # DETAILED: message body visible, latest wins
-        result = main(["session", "status", "-v"])
+        result = main(["session", "read", "-v"])
         assert result == 0
         out = capsys.readouterr().out
         assert "new choice" in out
@@ -106,7 +106,7 @@ class TestStatus:
         assert _emit_local("thread", "name=open-one", "status=open") == 0
         assert _emit_local("thread", "name=resolved-one", "status=resolved") == 0
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -120,7 +120,7 @@ class TestStatus:
 
         assert _emit_local("task", "name=fix/review", "status=merged") == 0
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -134,7 +134,7 @@ class TestStatus:
 
         assert _emit_local("change", "summary=structural AST", "files=ast.py,loader.py") == 0
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -150,7 +150,7 @@ class TestStatus:
         assert _emit_local("task", "name=task1", "status=open") == 0
         capsys.readouterr()  # clear prior output
 
-        result = main(["session", "status", "--json"])
+        result = main(["session", "read", "--json"])
         assert result == 0
 
         data = json.loads(capsys.readouterr().out)
@@ -168,7 +168,7 @@ class TestStatus:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 1
 
         captured = capsys.readouterr()
@@ -179,7 +179,7 @@ class TestStatus:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
         _seed_session(tmp_path)
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -209,7 +209,7 @@ class TestStatus:
         assert main(["session", "emit", "decision", "topic=fallback", "it works"]) == 0
         capsys.readouterr()
 
-        result = main(["session", "status"])
+        result = main(["session", "read"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -226,7 +226,7 @@ class TestLog:
         time.sleep(0.01)
         assert _emit_local("decision", "topic=second", "two") == 0
 
-        result = main(["session", "log", "--since", "1h"])
+        result = main(["session", "stream", "--since", "1h"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -243,7 +243,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         assert _emit_local("task", "name=t1", "status=open") == 0
 
-        result = main(["session", "log", "--since", "1h", "--kind", "decision"])
+        result = main(["session", "stream", "--since", "1h", "--kind", "decision"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -258,7 +258,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         capsys.readouterr()
 
-        result = main(["session", "log", "--since", "1h", "--json"])
+        result = main(["session", "stream", "--since", "1h", "--json"])
         assert result == 0
 
         # run_cli serializes the whole fetch result as JSON
@@ -278,7 +278,7 @@ class TestLog:
 
         assert _emit_local("decision", "topic=recent", "yes") == 0
 
-        result = main(["session", "log", "--since", "1m"])
+        result = main(["session", "stream", "--since", "1m"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -288,7 +288,7 @@ class TestLog:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
 
-        result = main(["session", "log"])
+        result = main(["session", "stream"])
         assert result == 1
 
         captured = capsys.readouterr()

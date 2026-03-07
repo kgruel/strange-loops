@@ -19,21 +19,21 @@ Below: `apps/loops/` is the CLI that reads these declarations. `libs/engine/` ru
 
 ```bash
 # What vertices exist?
-loops vertices                           # all discovered vertices
-loops vertices -v                        # with store paths and kinds
+loops ls                                 # all discovered vertices
+loops ls -v                              # with store paths and kinds
 
-# Query a vertex
-loops fold meta                          # current folded state
-loops fold project --kind decision       # just decisions
-loops stream meta --kind thread          # event history
-loops fold comms --lens comms            # domain lens rendering
+# Read a vertex
+loops read meta                          # current folded state
+loops read project --kind decision       # just decisions
+loops read meta --facts --kind thread    # event history
+loops read comms --lens comms            # domain lens rendering
 
 # Emit a fact
 loops emit project decision topic="auth" "JWT over sessions"
 loops emit meta thread name="store-ops" status="open"
 
 # Session orientation
-loops fold project --lens state          # tasks, threads, recent decisions
+loops read project --lens state          # tasks, threads, recent decisions
 ```
 
 The 15 vertices here cover: identity, meta (cross-cutting decisions), project (per-repo architecture), comms (discord + native messaging), reading (RSS feeds), economy (FRED data), system (machine monitoring), homelab, ambient (browsing traces), session, and more.
@@ -99,7 +99,7 @@ def fold_view(data, zoom, width):
     return join_vertical(*rows) if rows else Block.text("(empty)", plain)
 ```
 
-Usage: `loops fold meta --lens my_lens`
+Usage: `loops read meta --lens my_lens`
 
 **Key patterns** from existing lenses:
 - Drive from metadata (`section.key_field`, `section.fold_type`), not `if kind == "decision":`
@@ -192,10 +192,10 @@ recent "window" 10 "val" // sliding window
 
 For the full vocabulary with descriptions, KDL syntax, and usage patterns:
 ```bash
-loops fold docs              # summary — one-liner per primitive
-loops fold docs -v           # detailed — KDL syntax + full descriptions
-loops fold docs --kind vocab  # just vocabulary
-loops fold docs --kind contract  # API contracts by scope
+loops read docs              # summary — one-liner per primitive
+loops read docs -v           # detailed — KDL syntax + full descriptions
+loops read docs --kind vocab  # just vocabulary
+loops read docs --kind contract  # API contracts by scope
 ```
 
 **Sources** — external data ingestion:
@@ -257,7 +257,7 @@ Observers declared on a vertex (or any vertex in its combine chain) can emit to 
 }
 ```
 
-Hooks compose CLI commands — `loops fold`, `loops emit`. No new infrastructure. The pickup script (`pickup.zsh`) reads the full fold before session start and injects it as `--system-prompt`.
+Hooks compose CLI commands — `loops read`, `loops emit`. No new infrastructure. The pickup script (`pickup.zsh`) reads the full fold before session start and injects it as `--system-prompt`.
 
 **Lens declarations** (vertex-level):
 

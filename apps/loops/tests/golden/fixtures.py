@@ -183,12 +183,6 @@ SAMPLE_STORE = {
     "freshness": REF_DT,
 }
 
-# ── start ───────────────────────────────────────────────────────────────────
-SAMPLE_START = {
-    "disk": {"fs": "/dev/sda1", "pct": "42%", "mount": "/"},
-    "memory": {"used_mb": 4096, "total_mb": 16384, "free_mb": 12288},
-}
-
 # ── compile (loop) ──────────────────────────────────────────────────────────
 SAMPLE_COMPILE_LOOP = {
     "type": "loop",

@@ -6,7 +6,7 @@ Observations, contracts, and ingress.
 
 ```
 atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         .loop/.vertex      loops emit/status
+Fact, Spec        Tick, Vertex         .loop/.vertex      loops read/emit
 ```
 
 Above: `libs/engine/` runs facts through vertices. `apps/loops/` provides the CLI. When you `loops emit project decision topic=auth ...`, it creates a Fact, resolves a Vertex, calls `vertex.receive()`.
@@ -14,11 +14,11 @@ Above: `libs/engine/` runs facts through vertices. `apps/loops/` provides the CL
 ## Current reference
 
 ```bash
-loops fold docs --kind contract --plain    # API contracts (Fact, Spec, Parse, Source, Boundary)
-loops fold docs --kind convention --plain  # invariants (frozen types, pure apply, zero deps)
-loops fold docs --kind guide --plain       # progressive workflow (observe → accumulate → shape → ingest)
-loops fold docs --kind vocab --plain       # fold/parse/boundary vocabulary (30 primitives)
-loops fold docs -v --plain                 # everything at detailed zoom
+loops read docs --kind contract --plain    # API contracts (Fact, Spec, Parse, Source, Boundary)
+loops read docs --kind convention --plain  # invariants (frozen types, pure apply, zero deps)
+loops read docs --kind guide --plain       # progressive workflow (observe → accumulate → shape → ingest)
+loops read docs --kind vocab --plain       # fold/parse/boundary vocabulary (30 primitives)
+loops read docs -v --plain                 # everything at detailed zoom
 ```
 
 The docs vertex holds living documentation — contracts, conventions, guides, and vocabulary accumulate as facts. See `~/.config/loops/docs/` for the vertex, `~/.config/loops/lenses/docs.py` for the lens.
@@ -34,5 +34,5 @@ uv run --package atoms pytest libs/atoms/tests/test_fold_typed.py  # single file
 
 Query project-specific atoms decisions:
 ```bash
-loops stream project --kind decision --plain | grep atoms/
+loops read project --facts --kind decision --plain | grep atoms/
 ```

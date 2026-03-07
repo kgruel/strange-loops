@@ -6,7 +6,7 @@ Terminal UI framework built on cell buffers. Start at Level 0. Only escalate whe
 
 ```
 atoms (data)  →  engine (runtime)  →  painted (surface)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         Block, Lens, show     loops status/log
+Fact, Spec        Tick, Vertex         Block, Lens, show     loops read/emit
 ```
 
 Below: `libs/engine/` produces Ticks and stores. `libs/atoms/` defines Facts and Specs. Painted renders whatever comes out — it doesn't know about loops concepts, just data shapes.

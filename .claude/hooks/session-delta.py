@@ -21,7 +21,7 @@ def main() -> None:
 
     # Find session open timestamp
     result = subprocess.run(
-        [loops, "stream", "project", "--kind", "session", "--json"],
+        [loops, "read", "project", "--facts", "--kind", "session", "--json"],
         capture_output=True, text=True, timeout=10,
     )
     if result.returncode != 0:
@@ -29,7 +29,7 @@ def main() -> None:
 
     data = json.loads(result.stdout)
     open_ts = None
-    # Stream returns newest-first — first match is most recent open
+    # Facts returns newest-first — first match is most recent open
     for f in data.get("facts", []):
         p = f.get("payload", {})
         if p.get("name") == observer and p.get("status") == "open":
@@ -40,7 +40,7 @@ def main() -> None:
 
     # Get facts since session open
     result = subprocess.run(
-        [loops, "stream", "project", "--since", "30d", "--json"],
+        [loops, "read", "project", "--facts", "--since", "30d", "--json"],
         capture_output=True, text=True, timeout=10,
     )
     if result.returncode != 0:

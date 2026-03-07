@@ -13,10 +13,6 @@ Verbs (vertex operations):
     loops emit project decision topic=x Inject a fact
     loops close thread my-thread        Resolve thread, capture artifacts
 
-Aliases (verb-first, backward compatible):
-    loops fold project                  = loops read project
-    loops stream project                = loops read project --facts
-
 Commands:
     loops test <file> --input <f>       Run parse pipeline against sample input
     loops compile <file>                Show compiled structure
@@ -25,7 +21,6 @@ Commands:
     loops init [name]                   Initialize vertex
     loops ls                            List vertices
     loops run <file>                    Execute a .loop or .vertex file
-    loops start <file>                  Run a .vertex file (one round, rendered)
 """
 
 from __future__ import annotations
@@ -699,76 +694,6 @@ def _run_compile(argv: list[str]) -> int:
         description="Show compiled structure",
         help_args=[
             HelpArg("file", "Loop or vertex file to compile", positional=True),
-        ],
-    )
-
-
-def _run_start(argv: list[str]) -> int:
-    """Run start command via painted CLI harness."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-    from engine import load_vertex_program
-    from .lenses.start import start_view
-
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("file", nargs="?", default=None)
-    pre.add_argument("--var", action="append", default=[], metavar="KEY=VALUE")
-    known, rest = pre.parse_known_args(argv)
-
-    resolved = _resolve_vertex_path(known.file)
-    if resolved is None:
-        return 1
-    path = resolved
-    if not path.exists():
-        _err(f"Error: {path} does not exist")
-        return 1
-    if path.suffix != ".vertex":
-        _err("Error: start command only works with .vertex files")
-        return 1
-
-    vars = _parse_vars(known.var)
-    program = load_vertex_program(path, vars=vars or None)
-
-    if not program.sources:
-        from painted import show, Block
-        from painted.palette import current_palette
-
-        show(
-            Block.text(
-                "Warning: no sources discovered or configured",
-                current_palette().warning,
-            ),
-            file=sys.stderr,
-        )
-        return 0
-
-    from painted import show, Block
-    from painted.palette import current_palette
-
-    show(
-        Block.text(
-            f"Starting {program.vertex.name} with {len(program.sources)} source(s)...",
-            current_palette().muted,
-        ),
-        file=sys.stderr,
-    )
-
-    def fetch():
-        result = program.sync(force=True)
-        return {t.name: t.payload for t in result.ticks}
-
-    def render(ctx, data):
-        return start_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops start",
-        description="Run a .vertex file (one round)",
-        help_args=[
-            HelpArg("file", "Vertex file to start", positional=True),
-            HelpArg("--var", "Set variable KEY=VALUE"),
         ],
     )
 
@@ -1566,23 +1491,6 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
     )
 
 
-def _run_log_legacy(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str = "") -> int:
-    """Legacy log alias — delegates to _run_stream with --since default."""
-    # If vertex_path not provided, we need to resolve it first for the legacy path
-    if vertex_path is None:
-        pre = argparse.ArgumentParser(add_help=False)
-        pre.add_argument("vertex", nargs="?", default=None)
-        known, rest = pre.parse_known_args(argv)
-        vname = getattr(known, "vertex", None)
-        if vname is not None:
-            vertex_path = _resolve_named_vertex(vname)
-        else:
-            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
-            vertex_path = _resolve_local_vertex()
-        argv = rest
-    return _run_stream(argv, vertex_path=vertex_path, mod=mod, observer=observer)
-
-
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     from painted import run_cli, OutputMode
@@ -1660,95 +1568,6 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
             HelpArg("file", "Store file, vertex name, or path", positional=True),
         ],
     )
-
-
-def _run_check(argv: list[str], *, vertex_path: Path | None = None) -> int:
-    """Run health checks, emit result facts, render with gutter."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-    from lang import parse_vertex_file
-    from engine.compiler import compile_sources_block
-
-    from .health import DEFAULT_STEPS, health_view, run_checks, run_sequential_checks
-
-    pre = argparse.ArgumentParser(add_help=False)
-    if vertex_path is None:
-        pre.add_argument("vertex", nargs="?", default=None)
-    pre.add_argument("--observer", default="dev-check")
-    known, rest = pre.parse_known_args(argv)
-
-    # Resolve vertex and store
-    if vertex_path is None:
-        vname = getattr(known, "vertex", None)
-        if vname is not None:
-            vertex_path = _resolve_named_vertex(vname)
-        else:
-            local = _find_local_vertex()
-            if local is not None:
-                vertex_path = local
-            else:
-                _err("No vertex found. Run 'loops init' first.")
-                return 1
-
-    store_path = _resolve_vertex_store_path(vertex_path)
-    if store_path is None:
-        _err("Vertex has no store configured")
-        return 1
-
-    # Parse vertex AST to check for sources sequential blocks
-    vertex_ast = parse_vertex_file(vertex_path)
-    seq_block = None
-    if vertex_ast.sources_blocks:
-        for block in vertex_ast.sources_blocks:
-            if block.mode == "sequential":
-                seq_block = block
-                break
-
-    project_root = vertex_path.parent
-    results_ref: list[dict] = []
-
-    def fetch():
-        if seq_block is not None:
-            # Vertex declares sources sequential — compile and run it
-            seq_source, _cadence = compile_sources_block(seq_block, vertex_ast.name)
-            results = run_sequential_checks(
-                seq_source,
-                store_path,
-                observer=known.observer,
-            )
-        else:
-            # No sources block — fall back to DEFAULT_STEPS
-            results = run_checks(
-                store_path,
-                DEFAULT_STEPS,
-                observer=known.observer,
-                cwd=project_root,
-            )
-        results_ref.extend(results)
-        return results
-
-    def render(ctx, data):
-        return health_view(data, ctx.zoom, ctx.width)
-
-    rc = run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops check",
-        description="Run project health checks",
-        help_args=[
-            HelpArg("vertex", "Vertex name (default: local)", positional=True),
-            HelpArg("--observer", "Observer name", default="dev-check"),
-        ],
-    )
-
-    # Return failure if any check failed
-    if results_ref:
-        last = results_ref[-1]
-        if last.get("payload", {}).get("status") == "failed":
-            return 1
-
-    return rc
 
 
 def _run_ls(argv: list[str]) -> int:
@@ -2132,18 +1951,16 @@ def _whoami_from_identity_store() -> str:
 _VERBS = frozenset({"read", "fold", "stream", "emit", "close"})
 
 # Dev and setup commands dispatched directly.
-_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store", "run", "start"})
+_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store", "run"})
 _SETUP_COMMANDS = frozenset({"init", "whoami", "ls", "add", "rm", "export"})
 
 # Combined for dispatch check (verbs checked first, then these).
 _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 
-# Legacy vertex-first operations: `loops <vertex> <op>`.
+# Vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
     "read", "fold", "stream", "emit", "close", "store",
-    "check", "ls", "add", "rm", "export",
-    # Legacy aliases
-    "status", "log", "search",
+    "ls", "add", "rm", "export",
 })
 
 
@@ -2202,22 +2019,12 @@ def _render_main_help(argv: list[str]) -> int:
     verbs_group = HelpGroup(
         name="Verbs",
         hint="loops <verb> [vertex] [args]",
+        detail="Implicit read: loops project = loops read project",
         flags=(
             HelpFlag(None, "read", "Read vertex state (default)", detail="[vertex] [--facts] [--ticks] [--kind KIND] [--since SINCE]"),
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
         ),
-    )
-
-    shorthand_group = HelpGroup(
-        name="Shorthand",
-        hint="loops <vertex> [flags]",
-        detail="Implicit read: loops project = loops read project",
-        flags=(
-            HelpFlag(None, "fold", "Alias for read (fold state)", detail="[vertex] [--kind KIND] [--observer OBS]"),
-            HelpFlag(None, "stream", "Alias for read --facts", detail="[vertex] [query] [--since SINCE] [--kind KIND]"),
-        ),
-        min_zoom=Zoom.SUMMARY,
     )
 
     commands_group = HelpGroup(
@@ -2230,7 +2037,6 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "init", "Initialize vertex", detail="[name] [--template NAME]"),
             HelpFlag(None, "ls", "List vertices"),
             HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
-            HelpFlag(None, "start", "Run a vertex (one round, rendered)", detail="[file] [--var KEY=VALUE]"),
             HelpFlag(None, "whoami", "Show resolved observer identity"),
         ),
     )
@@ -2265,7 +2071,7 @@ def _render_main_help(argv: list[str]) -> int:
     help_data = HelpData(
         prog="loops",
         description="Runtime for .loop and .vertex files",
-        groups=(verbs_group, shorthand_group, commands_group, zoom_group, format_group, help_group),
+        groups=(verbs_group, commands_group, zoom_group, format_group, help_group),
     )
 
     if fmt == Format.JSON:
@@ -2395,19 +2201,9 @@ def _dispatch_observer(
     if op == "close":
         return _run_close(args, vertex_path=vertex_path, observer=observer)
 
-    # Legacy aliases
-    if op == "status":
-        return _run_fold(args, vertex_path=vertex_path, mod=mod, observer=observer)
-    if op == "log":
-        return _run_log_legacy(args, vertex_path=vertex_path, mod=mod, observer=observer)
-    if op == "search":
-        return _run_stream([op] + args, vertex_path=vertex_path, mod=mod, observer=observer)
-
-    # Kept as-is (dissolve later)
+    # Dev tools
     if op == "store":
         return _run_store(args, vertex_path=vertex_path)
-    if op == "check":
-        return _run_check(args, vertex_path=vertex_path)
 
     # Population operations — reconstruct target argv
     if op == "ls":
@@ -2475,12 +2271,6 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
             _run_run,
             detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
         ),
-        AppCommand(
-            "start",
-            "Run a vertex (one round, rendered)",
-            _run_start,
-            detail="[file] [--var KEY=VALUE ...]",
-        ),
         # Setup / utility
         AppCommand(
             "init",
@@ -2538,7 +2328,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Path-like arg → suggest the right invocation
     if vertex_name.endswith(".vertex") or vertex_name.startswith("./") or vertex_name.startswith("/"):
-        _err(f"File arguments go with a command: loops start {vertex_name}")
+        _err(f"File arguments go with a command: loops run {vertex_name}")
         return 1
 
     # Unknown command

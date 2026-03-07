@@ -15,7 +15,6 @@ from loops.lenses.validate import validate_view
 from loops.lenses.test import test_view as _test_view
 from loops.lenses.run import run_facts_view, run_ticks_view
 from loops.lenses.compile import compile_view
-from loops.lenses.start import start_view
 from loops.lenses.store import store_view
 from loops.lenses.pop import pop_view
 from loops.lenses.fold import fold_view
@@ -25,7 +24,6 @@ from .fixtures import (
     SAMPLE_FOLD,
     SAMPLE_STREAM,
     SAMPLE_STORE,
-    SAMPLE_START,
     SAMPLE_COMPILE_LOOP,
     SAMPLE_COMPILE_VERTEX,
     SAMPLE_VALIDATE,
@@ -73,11 +71,6 @@ def _render_all() -> list[tuple[str, str, str]]:
             block_to_text(store_view(SAMPLE_STORE, ZOOM, WIDTH)),
         ))
 
-    entries.append((
-        "start",
-        "Run vertex and display tick results.",
-        block_to_text(start_view(SAMPLE_START, ZOOM, WIDTH)),
-    ))
     entries.append((
         "compile (loop)",
         "Compiled .loop source structure.",

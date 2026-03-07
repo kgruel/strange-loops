@@ -8,8 +8,21 @@ from __future__ import annotations
 
 import io
 
-from painted import Block, Cell, Style
+from painted import Block, Cell, CliContext, Style, Zoom
+from painted.fidelity import OutputMode
 from painted.writer import print_block
+
+
+def static_ctx(zoom: Zoom) -> CliContext:
+    """Build a deterministic CliContext for golden/snapshot testing."""
+    return CliContext(
+        zoom=zoom,
+        mode=OutputMode.STATIC,
+        use_ansi=False,
+        is_tty=False,
+        width=80,
+        height=24,
+    )
 
 
 def block_to_text(block: Block, *, use_ansi: bool = False) -> str:

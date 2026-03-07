@@ -15,9 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from painted import CliContext, Zoom
-from painted.fidelity import OutputMode
-from tests.helpers import block_to_text
+from painted import Zoom
+from tests.helpers import block_to_text, static_ctx
 
 _PROJECT = Path(__file__).resolve().parent.parent.parent
 _spec = importlib.util.spec_from_file_location(
@@ -32,13 +31,7 @@ _render = _mod._render
 SAMPLE_PROFILE = _mod.SAMPLE_PROFILE
 
 
-def _ctx(zoom: Zoom) -> CliContext:
-    return CliContext(
-        zoom=zoom, mode=OutputMode.STATIC, use_ansi=False, is_tty=False, width=80, height=24
-    )
-
-
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_profiler_demo(golden, zoom):
-    block = _render(_ctx(zoom), SAMPLE_PROFILE)
+    block = _render(static_ctx(zoom), SAMPLE_PROFILE)
     golden.assert_match(block_to_text(block), "output")

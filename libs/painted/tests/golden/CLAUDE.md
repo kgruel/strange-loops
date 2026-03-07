@@ -19,14 +19,16 @@ stdout via `print_block`/`show`. Capture stdout with `redirect_stdout`, compare.
 
 ## The run_cli Pattern
 
-Each test file is self-contained with three small helpers:
+Each test file imports shared helpers from `tests/helpers.py`:
+
+- `static_ctx(zoom)` — deterministic `CliContext` (STATIC mode, no ANSI, 80x24, non-TTY)
+- `block_to_text(block)` — render Block to plain text via `print_block`
 
 ```python
-import importlib.util, io, sys
+import importlib.util, sys
 from pathlib import Path
-from painted import Block, CliContext, Zoom
-from painted.fidelity import OutputMode
-from painted.writer import print_block
+from painted import Zoom
+from tests.helpers import block_to_text, static_ctx
 
 # Import demo without sys.path mutation
 _PROJECT = Path(__file__).resolve().parent.parent.parent
@@ -40,20 +42,11 @@ _spec.loader.exec_module(_mod)
 _fetch = _mod._fetch
 _render = _mod._render
 
-def _block_to_text(block: Block) -> str:
-    buf = io.StringIO()
-    print_block(block, buf, use_ansi=False)
-    return buf.getvalue()
-
-def _ctx(zoom: Zoom) -> CliContext:
-    return CliContext(zoom=zoom, mode=OutputMode.STATIC, use_ansi=False,
-                      is_tty=False, width=80, height=24)
-
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_<name>_demo(golden, zoom):
     data = _fetch()
-    block = _render(_ctx(zoom), data)
-    golden.assert_match(_block_to_text(block), "output")
+    block = _render(static_ctx(zoom), data)
+    golden.assert_match(block_to_text(block), "output")
 ```
 
 ## The stdout-capture Pattern
@@ -93,6 +86,7 @@ which uses `SAMPLE_DISK` rather than calling `_fetch()`.
 ## Infrastructure
 
 - `conftest.py` — `Golden` class + `golden` fixture (auto-discovered by pytest)
+- `tests/helpers.py` — shared test utilities: `static_ctx(zoom)`, `block_to_text(block)`
 - `_reset_ambient` autouse fixture — resets icon/palette ContextVars before
   each test so test execution order doesn't matter (demos can mutate these)
 - `--update-goldens` flag — registered in root `tests/conftest.py` (pytest

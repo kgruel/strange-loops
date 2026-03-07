@@ -27,6 +27,18 @@ class Cadence:
     _interval: float | None = None
     _trigger_kinds: tuple[str, ...] = ()
 
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def trigger_kinds(self) -> tuple[str, ...]:
+        return self._trigger_kinds
+
     @classmethod
     def elapsed(cls, kind: str, interval: float) -> Cadence:
         """True if interval seconds passed since last {kind}.complete fact."""

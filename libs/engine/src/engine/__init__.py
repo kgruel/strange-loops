@@ -70,7 +70,7 @@ from .compiler import (
     materialize_vertex,
     substitute_vars,
 )
-from .executor import Executor, SyncResult
+from .executor import CyclicDependencyError, Executor, SyncResult, validate_dependency_graph
 from .program import VertexProgram, load_vertex_program
 
 # Vertex read path (query-time fold materialization)
@@ -128,8 +128,10 @@ __all__ = [
     "materialize_vertex",
     "substitute_vars",
     # Executor
+    "CyclicDependencyError",
     "Executor",
     "SyncResult",
+    "validate_dependency_graph",
     # Program helpers
     "VertexProgram",
     "load_vertex_program",

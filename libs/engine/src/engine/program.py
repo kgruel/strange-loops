@@ -137,6 +137,11 @@ def load_vertex_program(
     sources, template_specs = collect_all_sources(compiled)
     compiled.specs.update(template_specs)
 
+    # Validate trigger dependencies form a DAG — fail early on cycles
+    from .executor import validate_dependency_graph
+
+    validate_dependency_graph(sources)
+
     overrides: dict[str, FoldOverride] = {}
     if default_fold_override is not None:
         overrides = {kind: default_fold_override for kind in compiled.specs.keys()}

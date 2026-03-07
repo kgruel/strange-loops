@@ -4,9 +4,10 @@ One-shot execution model. No persistent runtime. External scheduling
 (cron/hooks) provides the heartbeat.
 
 1. Evaluate all cadence predicates against the store
-2. Run qualifying sources concurrently (asyncio.gather)
-3. Route facts through vertex.receive()
-4. Return ticks that fired
+2. Build dependency graph from trigger relationships
+3. Execute in tiers: concurrent within tier, sequential between tiers
+4. Route facts through vertex.receive()
+5. Return ticks that fired
 """
 
 from __future__ import annotations
@@ -22,6 +23,96 @@ if TYPE_CHECKING:
     from .vertex import Vertex
 
 
+class CyclicDependencyError(Exception):
+    """Raised when triggered source cadences form a cycle."""
+
+    def __init__(self, kinds: list[str]) -> None:
+        cycle_str = " -> ".join(kinds)
+        super().__init__(f"Cyclic trigger dependency: {cycle_str}")
+        self.kinds = kinds
+
+
+def _build_dependency_graph(
+    sources: list[tuple[Source, Cadence]],
+) -> dict[int, set[int]]:
+    """Build {source_index: set of source_indices it depends on}.
+
+    Edge: source[i] depends on source[j] when
+    f"{source[j].kind}.complete" is in sources[i].cadence.trigger_kinds.
+
+    Uses source.kind (not cadence.kind) because Source.collect() emits
+    {source.kind}.complete regardless of cadence mode.
+    """
+    # Map complete-kind -> source indices that produce it
+    producers: dict[str, list[int]] = {}
+    for j, (source, cadence) in enumerate(sources):
+        if source.kind:
+            complete_kind = f"{source.kind}.complete"
+            producers.setdefault(complete_kind, []).append(j)
+
+    deps: dict[int, set[int]] = {}
+    for i, (source, cadence) in enumerate(sources):
+        if cadence.mode != "triggered":
+            continue
+        for trigger_kind in cadence.trigger_kinds:
+            for j in producers.get(trigger_kind, []):
+                if j != i:
+                    deps.setdefault(i, set()).add(j)
+
+    return deps
+
+
+def _toposort_tiers(
+    qualifying: set[int],
+    deps: dict[int, set[int]],
+) -> list[list[int]]:
+    """Topological sort into concurrent tiers.
+
+    Returns list of tiers. Within a tier, sources run concurrently.
+    Tiers execute sequentially. Raises CyclicDependencyError on cycle.
+    """
+    # Restrict deps to qualifying set
+    local_deps: dict[int, set[int]] = {}
+    for idx in qualifying:
+        restricted = deps.get(idx, set()) & qualifying
+        local_deps[idx] = restricted
+
+    tiers: list[list[int]] = []
+    remaining = set(qualifying)
+
+    while remaining:
+        # Find nodes with no remaining dependencies
+        tier = [idx for idx in remaining if not local_deps[idx]]
+        if not tier:
+            # Cycle — all remaining nodes have unresolved deps
+            raise CyclicDependencyError(sorted(
+                str(idx) for idx in remaining
+            ))
+        tiers.append(sorted(tier))
+        remaining -= set(tier)
+        # Remove satisfied deps
+        for idx in remaining:
+            local_deps[idx] -= set(tier)
+
+    return tiers
+
+
+def validate_dependency_graph(sources: list[tuple[Source, Cadence]]) -> None:
+    """Validate that trigger dependencies form a DAG.
+
+    Called at compile time (VertexProgram construction). Raises
+    CyclicDependencyError with source kind names if triggered cadences
+    form a cycle.
+    """
+    deps = _build_dependency_graph(sources)
+    all_indices = set(range(len(sources)))
+    try:
+        _toposort_tiers(all_indices, deps)
+    except CyclicDependencyError as e:
+        cycle_kinds = [sources[int(idx)][0].kind for idx in e.kinds]
+        raise CyclicDependencyError(cycle_kinds) from None
+
+
 @dataclass
 class SyncResult:
     """Result of a sync operation."""
@@ -30,6 +121,7 @@ class SyncResult:
     ran: list[str]  # kinds of sources that ran
     skipped: list[str]  # kinds of sources skipped by cadence
     errors: list[Fact]  # source.error facts
+    tiers: list[list[str]]  # execution order: each tier ran concurrently
 
 
 @dataclass
@@ -47,7 +139,11 @@ class Executor:
         *,
         force: bool = False,
     ) -> SyncResult:
-        """One-shot sync. Concurrent by default.
+        """One-shot sync. Dependency-aware concurrency.
+
+        Sources execute in tiers derived from trigger relationships.
+        Independent sources run concurrently. Triggered sources wait
+        for their dependencies to complete first.
 
         Args:
             store: Store for cadence evaluation. If None, uses vertex._store.
@@ -60,28 +156,39 @@ class Executor:
             store = self.vertex._store
 
         now = time.time()
-        qualifying = []
-        skipped = []
+        qualifying_indices: list[int] = []
+        skipped: list[str] = []
 
-        for source, cadence in self.sources:
+        for i, (source, cadence) in enumerate(self.sources):
             if force or store is None or cadence.should_run(store, now):
-                qualifying.append(source)
+                qualifying_indices.append(i)
             else:
                 skipped.append(source.kind)
 
         ticks: list[Tick] = []
         errors: list[Fact] = []
         ran: list[str] = []
+        tier_kinds: list[list[str]] = []
 
-        if qualifying:
-            tasks = [
-                self._run_source(source, grant, ticks, errors)
-                for source in qualifying
-            ]
-            await asyncio.gather(*tasks)
-            ran = [s.kind for s in qualifying]
+        if qualifying_indices:
+            deps = _build_dependency_graph(self.sources)
+            tiers = _toposort_tiers(set(qualifying_indices), deps)
 
-        return SyncResult(ticks=ticks, ran=ran, skipped=skipped, errors=errors)
+            for tier in tiers:
+                tier_sources = [self.sources[i][0] for i in tier]
+                tasks = [
+                    self._run_source(source, grant, ticks, errors)
+                    for source in tier_sources
+                ]
+                await asyncio.gather(*tasks)
+                tier_kinds.append([s.kind for s in tier_sources])
+
+            ran = [self.sources[i][0].kind for i in qualifying_indices]
+
+        return SyncResult(
+            ticks=ticks, ran=ran, skipped=skipped,
+            errors=errors, tiers=tier_kinds,
+        )
 
     async def _run_source(
         self,

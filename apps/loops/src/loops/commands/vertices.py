@@ -83,14 +83,9 @@ def fetch_vertices(home: Path) -> dict[str, Any]:
 
     root_path = home / ".vertex"
     if not root_path.exists():
-        # Backwards compat: accept existing root.vertex
-        legacy = home / "root.vertex"
-        if legacy.exists():
-            root_path = legacy
-        else:
-            raise FileNotFoundError(
-                f"{root_path} not found. Run 'loops init' first."
-            )
+        raise FileNotFoundError(
+            f"{root_path} not found. Run 'loops init' first."
+        )
 
     root_ast = parse_vertex_file(root_path)
 

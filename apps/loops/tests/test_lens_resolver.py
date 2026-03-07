@@ -37,16 +37,6 @@ class TestBuildSearchPath:
 class TestResolveBuiltin:
     """Resolve built-in lenses from the loops.lenses package."""
 
-    def test_prompt_fold(self):
-        fn = resolve_lens("prompt", "fold_view")
-        assert fn is not None
-        assert fn.__name__ == "prompt_view"
-
-    def test_prompt_stream(self):
-        fn = resolve_lens("prompt", "stream_view")
-        assert fn is not None
-        assert fn.__name__ == "stream_prompt_view"
-
     def test_fold_fold(self):
         fn = resolve_lens("fold", "fold_view")
         assert fn is not None

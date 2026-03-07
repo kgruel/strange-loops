@@ -77,7 +77,9 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 **Core rendering** (the temporal modes):
 - `fold` — default fold rendering, driven by section metadata
 - `stream` — time-ordered event history
-- `prompt` — system prompt rendering (identity-aware narrative for identity vertices, structured schema for others)
+
+**User-global lenses** (graduated to `config/lenses/`):
+- `prompt` — system prompt rendering (structured schema, domain-aware kind filtering)
 
 **CLI command lenses** (wired to specific display commands):
 - `compile`, `run`, `store`, `test`, `validate`, `vertices`, `pop`

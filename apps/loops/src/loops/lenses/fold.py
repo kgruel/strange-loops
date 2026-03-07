@@ -80,10 +80,6 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     return join_vertical(*rows)
 
 
-# --- Legacy alias ---
-status_view = fold_view
-
-
 def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     if piped:
         return f"## {kind.upper()}"

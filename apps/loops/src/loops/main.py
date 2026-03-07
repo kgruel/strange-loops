@@ -23,7 +23,6 @@ Commands:
     loops store [file]                  Inspect store (name, path, or .db)
     loops init [name]                   Initialize vertex
     loops ls                            List vertices
-    loops run <file>                    Execute a .vertex file
 """
 
 from __future__ import annotations
@@ -77,11 +76,6 @@ _ROOT_VERTEX = """\
 // Root vertex — discovers all .vertex files under this directory
 discover "./**/*.vertex"
 """
-
-# App registry — registered apps get `loops <app> <command>` dispatch
-_APPS: dict[str, str] = {
-    "siftd": "siftd_loops",
-}
 
 
 def _find_local_vertex() -> Path | None:
@@ -277,15 +271,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     # No name + no template → .vertex in LOOPS_HOME
     home = loops_home()
     root = home / ".vertex"
-    # Backwards compat: accept existing root.vertex
-    legacy_root = home / "root.vertex"
-    if root.exists() or legacy_root.exists():
-        existing = root if root.exists() else legacy_root
+    if root.exists():
         from painted import show, Block
         from painted.palette import current_palette
 
         show(
-            Block.text(f"Already initialized: {existing}", current_palette().muted),
+            Block.text(f"Already initialized: {root}", current_palette().muted),
             file=sys.stdout,
         )
         return 0
@@ -303,10 +294,6 @@ def _resolve_vertex_path(file_arg: str | None) -> Path | None:
     root = home / ".vertex"
     if root.exists():
         return root
-    # Backwards compat: accept existing root.vertex
-    legacy = home / "root.vertex"
-    if legacy.exists():
-        return legacy
     _err(f"Error: {root} not found. Run 'loops init' first.")
     return None
 
@@ -533,94 +520,6 @@ def _run_test(argv: list[str]) -> int:
         )
 
 
-def _run_run(argv: list[str]) -> int:
-    """Run command — execute a .vertex file (one-shot sync)."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("file", nargs="?", default=None)
-    pre.add_argument("--limit", "-n", type=int, default=None)
-    pre.add_argument("--rounds", "-r", type=int, default=1)
-    pre.add_argument("--daemon", "-d", action="store_true", default=False)
-    pre.add_argument("--var", action="append", default=[])
-    known, rest = pre.parse_known_args(argv)
-
-    resolved = _resolve_vertex_path(known.file)
-    if resolved is None:
-        return 1
-    path = resolved.resolve()
-    if not path.exists():
-        _err(f"Error: {path} does not exist")
-        return 1
-
-    if path.suffix == ".loop":
-        _err("Error: use 'loops test' for .loop files")
-        return 1
-    elif path.suffix == ".vertex":
-        return _run_run_vertex(path, known, rest)
-    else:
-        _err(f"Error: run expects a .vertex file, got {path.suffix}")
-        return 1
-
-
-def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
-    """Execute a .vertex file through run_cli (one-shot sync)."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-    from engine import load_vertex_program
-    from .lenses.run import run_ticks_view
-
-    vars = _parse_vars(known.var)
-    program = load_vertex_program(path, vars=vars or None)
-
-    if not program.sources:
-        _err("Error: no sources configured")
-        return 1
-
-    def log_error(fact):
-        payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
-        _err(f"[ERROR] {fact.observer}: {payload}")
-
-    from painted import show, Block
-    from painted.palette import current_palette
-
-    show(
-        Block.text(
-            f"Running {program.vertex.name}: {len(program.sources)} sources",
-            current_palette().muted,
-        ),
-        file=sys.stderr,
-    )
-
-    def fetch():
-        result = program.sync(on_error=log_error, force=True)
-        return [
-            {
-                "name": tick.name,
-                "ts": tick.ts,
-                "payload": tick.payload,
-                "origin": getattr(tick, "origin", ""),
-            }
-            for tick in result.ticks
-        ]
-
-    def render(ctx, data):
-        return run_ticks_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops run",
-        description=f"Run vertex {program.vertex.name}",
-        help_args=[
-            HelpArg("file", "Loop or vertex file", positional=True),
-            HelpArg("--limit", "Max facts to collect"),
-            HelpArg("--var", "Set variable KEY=VALUE"),
-        ],
-    )
-
 
 def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Sync verb — cadence-gated source execution.
@@ -642,15 +541,20 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     pre.add_argument("--var", action="append", default=[])
     known, rest = pre.parse_known_args(argv)
 
-    # Resolve vertex path
+    # Resolve vertex path — accepts name or file path
     if vertex_path is None:
         vname = getattr(known, "vertex", None)
         if vname is not None:
-            try:
-                vertex_path = _resolve_named_vertex(vname)
-            except FileNotFoundError as e:
-                _err(str(e))
-                return 1
+            # File path: direct .vertex file
+            vpath = Path(vname)
+            if vname.endswith(".vertex") or vpath.suffix == ".vertex":
+                vertex_path = vpath.resolve()
+            else:
+                try:
+                    vertex_path = _resolve_named_vertex(vname)
+                except FileNotFoundError as e:
+                    _err(str(e))
+                    return 1
         else:
             vertex_path = _resolve_vertex_path(None)
             if vertex_path is None:
@@ -1241,16 +1145,14 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
 def _resolve_render_fn(
     lens_flag: str | None,
     vertex_path: Path | None,
-    mod,
     view_name: str,
 ):
-    """Resolve render function via 4-tier chain.
+    """Resolve render function via 3-tier chain.
 
     Resolution order:
     1. --lens CLI flag (resolved via lens_resolver)
     2. Vertex lens{} declaration (resolved via lens_resolver)
-    3. App module override (_resolve_app_view)
-    4. Built-in default
+    3. Built-in default
     """
     from .lens_resolver import resolve_lens
 
@@ -1267,31 +1169,23 @@ def _resolve_render_fn(
     if vertex_path is not None:
         vertex_lens = _get_vertex_lens_decl(vertex_path)
         if vertex_lens is not None:
-            # Pick the right lens name for this view
             if view_name == "fold_view" and vertex_lens.fold:
                 fn = resolve_lens(vertex_lens.fold, view_name, vertex_dir=vertex_dir)
                 if fn is not None:
                     return fn
-            elif view_name in ("stream_view", "log_view") and vertex_lens.stream:
+            elif view_name == "stream_view" and vertex_lens.stream:
                 fn = resolve_lens(vertex_lens.stream, view_name, vertex_dir=vertex_dir)
                 if fn is not None:
                     return fn
 
-    # Tier 3: app module override
-    if mod is not None:
-        fn = _resolve_app_view(mod, view_name)
-        if fn is not None:
-            return fn
-
-    # Tier 4: built-in defaults
+    # Tier 3: built-in defaults
     if view_name == "fold_view":
         from .lenses.fold import fold_view
         return fold_view
-    elif view_name in ("stream_view", "log_view"):
+    elif view_name == "stream_view":
         from .lenses.stream import stream_view
         return stream_view
 
-    # Shouldn't reach here, but be safe
     from .lenses.fold import fold_view
     return fold_view
 
@@ -1317,125 +1211,9 @@ def _vertex_name(vertex_path: Path | None) -> str | None:
     return name
 
 
-def _resolve_app_view(mod, view_name: str):
-    """Resolve a view function from an app module.
-
-    Lookup order:
-    1. mod.<view_name> — app provides a specific view function
-    2. Fallback names: fold_view → status_view, stream_view → log_view
-    3. PAYLOAD_LENS — app provides a lens, generic view wraps it
-    4. None — caller falls back to shared loops lenses
-    """
-    specific = getattr(mod, view_name, None)
-    if specific is not None:
-        return specific
-
-    # Fallback aliases for transition period
-    _fallbacks = {
-        "fold_view": "status_view",
-        "stream_view": "log_view",
-    }
-    if view_name in _fallbacks:
-        fallback = getattr(mod, _fallbacks[view_name], None)
-        if fallback is not None:
-            return fallback
-
-    payload_lens = getattr(mod, "PAYLOAD_LENS", None)
-    if payload_lens is not None and view_name in ("log_view", "search_view", "stream_view"):
-        # Build a generic log/search view that delegates payload rendering to the lens
-        return _make_lens_log_view(payload_lens)
-
-    return None
 
 
-def _make_lens_log_view(payload_lens):
-    """Build a log_view that uses a PayloadLens for payload summaries.
-
-    This is the generic fallback: an app that only exports PAYLOAD_LENS
-    gets a log view where kind summaries come from the lens, not the
-    hardcoded _log_summary in the shared log lens.
-    """
-    from datetime import datetime, timezone
-
-    from painted import Block, Style, Zoom, join_vertical
-    from painted.compose import join_horizontal
-
-    def log_view(facts, zoom, width):
-        if not facts:
-            return Block.text(
-                "No facts in the given time range.", Style(dim=True), width=width
-            )
-
-        if zoom == Zoom.MINIMAL:
-            counts: dict[str, int] = {}
-            for f in facts:
-                counts[f["kind"]] = counts.get(f["kind"], 0) + 1
-            parts = [f"{count} {kind}" for kind, count in counts.items()]
-            return Block.text(", ".join(parts), Style(), width=width)
-
-        rows: list[Block] = []
-        dim = Style(dim=True)
-        current_date = None
-
-        for f in facts:
-            ts = f["ts"]
-            if isinstance(ts, (int, float)):
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            elif isinstance(ts, datetime):
-                dt = ts
-            elif isinstance(ts, str):
-                dt = datetime.fromisoformat(ts)
-            else:
-                continue
-
-            date_str = dt.strftime("%Y-%m-%d")
-            if date_str != current_date:
-                if current_date is not None:
-                    rows.append(Block.text("", Style(), width=width))
-                rows.append(Block.text(f"{date_str}:", Style(bold=True), width=width))
-                current_date = date_str
-
-            time_str = dt.strftime("%H:%M")
-            kind = f["kind"]
-            payload = f.get("payload", {})
-            summary = payload_lens(kind, payload, zoom)
-
-            if isinstance(summary, Block):
-                label = Block.text(f"  {time_str} [{kind}] ", Style(), width=0)
-                rows.append(join_horizontal(label, summary))
-            else:
-                line = f"  {time_str} [{kind}] {summary}"
-                if len(line) > width:
-                    line = line[: width - 1] + "…"
-                rows.append(Block.text(line, Style(), width=width))
-
-            if zoom >= Zoom.FULL:
-                for key, val in payload.items():
-                    if val:
-                        rows.append(
-                            Block.text(f"           {key}: {val}", dim, width=width)
-                        )
-
-        return join_vertical(*rows)
-
-    return log_view
-
-
-def _generic_fold_summary(fold_state: dict) -> dict:
-    """Build a generic summary from raw fold state when no app-specific fetch exists."""
-    sections = {}
-    for kind, state in fold_state.items():
-        items = state.get("items", {})
-        if isinstance(items, dict):
-            sections[kind] = {"count": len(items), "items": items}
-        elif isinstance(items, list):
-            sections[kind] = {"count": len(items), "items": items}
-        else:
-            sections[kind] = {"count": 0, "items": {}}
-    return sections
-
-
-def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str | None = None) -> int:
+def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Run stream command — unified event history with optional search.
 
     Dissolves the old log + search into one temporal mode.
@@ -1510,7 +1288,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
         nonlocal resolved_render_fn
         if resolved_render_fn is None:
             resolved_render_fn = _resolve_render_fn(
-                known.lens, vertex_path, mod, "stream_view",
+                known.lens, vertex_path, "stream_view",
             )
         from .lens_resolver import call_lens
         return call_lens(
@@ -1535,7 +1313,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, mod=None, o
     )
 
 
-def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, observer: str | None = None) -> int:
+def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Run fold command — show collapsed vertex state."""
     from painted import run_cli
     from painted.fidelity import HelpArg
@@ -1562,13 +1340,6 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
         # Apply vertex scope — deferred until vertex_path is known
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
-        if mod is not None:
-            from engine import vertex_read
-            fold_state = vertex_read(vertex_path, observer=obs_for_engine)
-            fetch_fn = getattr(mod, "fetch_status", None)
-            if fetch_fn is not None:
-                return fetch_fn(fold_state)
-            return _generic_fold_summary(fold_state)
         from .commands.fetch import fetch_fold
         return fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
 
@@ -1576,7 +1347,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, mod=None, obs
         nonlocal resolved_render_fn
         if resolved_render_fn is None:
             resolved_render_fn = _resolve_render_fn(
-                known.lens, vertex_path, mod, "fold_view",
+                known.lens, vertex_path, "fold_view",
             )
         # When piped (not TTY), pass width=None so text flows without
         # truncation or padding. The fold output IS the data — useful
@@ -1614,7 +1385,7 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     file_arg = getattr(known, "file", None)
 
     def _resolve_store_target() -> Path:
-        """Resolve file arg: vertex name, path, or LOOPS_HOME/root.vertex fallback."""
+        """Resolve file arg: vertex name, path, or LOOPS_HOME/.vertex fallback."""
         if vertex_path is not None:
             return vertex_path
         if file_arg is not None:
@@ -1630,9 +1401,6 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         root = home / ".vertex"
         if root.exists():
             return root
-        legacy = home / "root.vertex"
-        if legacy.exists():
-            return legacy
         raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
 
     def fetch():
@@ -2058,10 +1826,10 @@ def _whoami_from_identity_store() -> str:
 
 # Verb-first dispatch: `loops <verb> [vertex] [args]`.
 # These are the primary CLI verbs — read (implicit default), emit, sync, close.
-_VERBS = frozenset({"read", "fold", "stream", "emit", "close", "sync"})
+_VERBS = frozenset({"read", "emit", "close", "sync"})
 
 # Dev and setup commands dispatched directly.
-_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store", "run"})
+_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
 _SETUP_COMMANDS = frozenset({"init", "whoami", "ls", "add", "rm", "export"})
 
 # Combined for dispatch check (verbs checked first, then these).
@@ -2069,7 +1837,7 @@ _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 
 # Vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
-    "read", "fold", "stream", "emit", "close", "sync", "store",
+    "read", "emit", "close", "sync", "store",
     "ls", "add", "rm", "export",
 })
 
@@ -2078,7 +1846,6 @@ def _run_read(
     argv: list[str],
     *,
     vertex_path: Path | None = None,
-    mod=None,
     observer: str | None = None,
 ) -> int:
     """Unified read verb — routes to fold (default) or stream (--facts/--ticks).
@@ -2099,15 +1866,15 @@ def _run_read(
 
     if known.facts:
         # Fact history mode — delegate to stream (without --facts flag)
-        return _run_stream(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_stream(rest, vertex_path=vertex_path, observer=observer)
     elif known.ticks:
         # Tick history mode — delegate to stream with --kind tick
         if "--kind" not in rest:
             rest.extend(["--kind", "tick"])
-        return _run_stream(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_stream(rest, vertex_path=vertex_path, observer=observer)
     else:
         # Default: fold state
-        return _run_fold(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_fold(rest, vertex_path=vertex_path, observer=observer)
 
 
 def _render_main_help(argv: list[str]) -> int:
@@ -2147,7 +1914,6 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "store", "Inspect store contents", detail="[file]"),
             HelpFlag(None, "init", "Initialize vertex", detail="[name] [--template NAME]"),
             HelpFlag(None, "ls", "List vertices"),
-            HelpFlag(None, "run", "Execute a .vertex file", detail="[file] [--rounds N]"),
             HelpFlag(None, "whoami", "Show resolved observer identity"),
         ),
     )
@@ -2253,10 +2019,6 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
 
     if verb == "read":
         return _run_read(rest, vertex_path=None, observer=observer)
-    if verb == "fold":
-        return _run_fold(rest, vertex_path=None, observer=observer)
-    if verb == "stream":
-        return _run_stream(rest, vertex_path=None, observer=observer)
     if verb == "emit":
         return _run_emit(rest, vertex_path=None, observer=observer)
     if verb == "close":
@@ -2278,37 +2040,24 @@ def _dispatch_observer(
     .vertex chain) — you're always yourself unless you explicitly look
     through someone else's eyes.
 
-    Default (no subcommand or flags only) → fold mode.
-    Temporal modes: fold, stream, emit.
-    Legacy aliases: status → fold, log → stream, search → stream.
+    Default (no subcommand or flags only) → read (fold by default).
     """
-    import importlib
-
     # Pre-parse --observer from rest (before subcommand dispatch)
     obs_parser = argparse.ArgumentParser(add_help=False)
     obs_parser.add_argument("--observer", default=None)
     obs_known, rest = obs_parser.parse_known_args(rest)
     observer = _resolve_observer_flag(obs_known.observer)
 
-    # Load app module if registered
-    mod = None
-    if vertex_name in _APPS:
-        mod = importlib.import_module(_APPS[vertex_name])
-
     # Default: no subcommand or flags only → read (fold by default)
     if not rest or rest[0].startswith("-"):
-        return _run_read(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_read(rest, vertex_path=vertex_path, observer=observer)
 
     op = rest[0]
     args = rest[1:]
 
     # Primary verbs
     if op == "read":
-        return _run_read(args, vertex_path=vertex_path, mod=mod, observer=observer)
-    if op == "fold":
-        return _run_fold(args, vertex_path=vertex_path, mod=mod, observer=observer)
-    if op == "stream":
-        return _run_stream(args, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_read(args, vertex_path=vertex_path, observer=observer)
     if op == "emit":
         return _run_emit(args, vertex_path=vertex_path, observer=observer)
     if op == "close":
@@ -2334,21 +2083,6 @@ def _dispatch_observer(
     if op in ("add", "rm", "export"):
         handler = {"add": _run_add, "rm": _run_rm, "export": _run_export}[op]
         return handler([vertex_name] + args)
-
-    # Feedback handlers from app module
-    if mod is not None:
-        feedback = getattr(mod, "FEEDBACK", {})
-        if op in feedback:
-            handler_ref = feedback[op]
-            handler_mod, handler_fn = handler_ref.rsplit(":", 1)
-            handler = getattr(importlib.import_module(handler_mod), handler_fn)
-            parser = argparse.ArgumentParser(prog=f"loops {vertex_name} {op}")
-            parser.add_argument("name", help=f"{op.capitalize()} name")
-            parser.add_argument("--conversation", required=True, help="Conversation ID")
-            parser.add_argument("--note", default="", help="Optional note")
-            parsed = parser.parse_args(args)
-            parsed.observer = observer  # already resolved at dispatch level
-            return handler(vertex_path, parsed)
 
     _err(f"Unknown operation: {op}")
     return 1
@@ -2380,12 +2114,6 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
             _run_store,
             detail="[file] — vertex name, path, or .db file",
         ),
-        AppCommand(
-            "run",
-            "Execute a .vertex file",
-            _run_run,
-            detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
-        ),
         # Setup / utility
         AppCommand(
             "init",
@@ -2411,7 +2139,7 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Main entry point — three-tier dispatch.
 
-    1. Known verbs (read, emit, sync, close, fold, stream) → verb-first dispatch
+    1. Known verbs (read, emit, sync, close) → verb-first dispatch
     2. Dev/setup commands (test, compile, validate, ...) → direct dispatch
     3. Vertex name → implicit read (or vertex-first op for backward compat)
     """
@@ -2443,7 +2171,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Path-like arg → suggest the right invocation
     if vertex_name.endswith(".vertex") or vertex_name.startswith("./") or vertex_name.startswith("/"):
-        _err(f"File arguments go with a command: loops run {vertex_name}")
+        _err(f"File arguments go with a command: loops sync {vertex_name}")
         return 1
 
     # Unknown command

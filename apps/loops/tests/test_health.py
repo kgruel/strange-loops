@@ -13,13 +13,21 @@ from lang.ast import InlineSource, SourcesBlock
 from painted import Zoom
 from painted.writer import print_block
 
-from loops.health import (
-    CheckStep,
-    health_lens,
-    health_view,
-    run_checks,
-    run_sequential_checks,
-)
+import importlib.util
+import sys
+
+# health.py graduated to config/dev/ — load it from file path
+_health_path = Path(__file__).resolve().parents[3] / "config" / "dev" / "health.py"
+_spec = importlib.util.spec_from_file_location("config_dev_health", _health_path)
+_health_mod = importlib.util.module_from_spec(_spec)
+sys.modules["config_dev_health"] = _health_mod
+_spec.loader.exec_module(_health_mod)
+
+CheckStep = _health_mod.CheckStep
+health_lens = _health_mod.health_lens
+health_view = _health_mod.health_view
+run_checks = _health_mod.run_checks
+run_sequential_checks = _health_mod.run_sequential_checks
 
 
 def _block_text(block) -> str:

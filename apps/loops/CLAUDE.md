@@ -107,7 +107,7 @@ Commands: `init`, `emit`, `close`, `add`, `rm`, `export`.
 **Key wiring — `run_cli()`:**
 ```python
 def fetch():
-    return fetch_status(vertex_path, kind=known.kind)
+    return fetch_fold(vertex_path, kind=known.kind)
 
 def render(ctx, data):
     return render_fn(data, ctx.zoom, ctx.width)
@@ -147,7 +147,7 @@ return run_cli(rest, fetch=fetch, render=render, help_args=[...])
 `--lens` CLI flag overrides all tiers. Vertex `lens {}` declaration overrides tiers 3-4.
 
 **Init system** (vertex templates):
-- `loops init` — root.vertex in LOOPS_HOME
+- `loops init` — .vertex in LOOPS_HOME
 - `loops init project` — aggregation vertex in LOOPS_HOME + local instance
 - `loops init dev/project` — namespaced vertex in LOOPS_HOME
 

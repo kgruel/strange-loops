@@ -31,10 +31,6 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
     global_root = home / ".vertex"
     if global_root.exists():
         return global_root
-    # Legacy fallback
-    legacy = home / "root.vertex"
-    if legacy.exists():
-        return legacy
     return None
 
 
@@ -83,13 +79,11 @@ def resolve_observer(explicit: str | None = None, start: Path | None = None) -> 
 
     # 4. Global .vertex
     home = _loops_home()
-    for filename in (".vertex", "root.vertex"):
-        global_path = home / filename
-        if global_path.exists():
-            observers = _read_observers(global_path)
-            if len(observers) == 1:
-                return observers[0].name
-            break
+    global_path = home / ".vertex"
+    if global_path.exists():
+        observers = _read_observers(global_path)
+        if len(observers) == 1:
+            return observers[0].name
 
     return ""
 
@@ -163,11 +157,9 @@ def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
     # Collect observers from global .vertex
     home = _loops_home()
     global_observers: tuple = ()
-    for filename in (".vertex", "root.vertex"):
-        global_path = home / filename
-        if global_path.exists() and global_path.resolve() != vertex_path.resolve():
-            global_observers = _read_observers(global_path)
-            break
+    global_path = home / ".vertex"
+    if global_path.exists() and global_path.resolve() != vertex_path.resolve():
+        global_observers = _read_observers(global_path)
 
     # Collect observers from combine/discover source vertices (cascade)
     combine_observers = _collect_combine_observers(vertex_path)

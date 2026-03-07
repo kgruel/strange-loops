@@ -110,7 +110,7 @@ def _view_candidates(name: str, view: str) -> tuple[str, ...]:
     # Lens-specific variants: <name>_view for fold, stream_<name>_view for stream
     if view == "fold_view":
         candidates.append(f"{name}_view")
-    elif view in ("stream_view", "log_view"):
+    elif view == "stream_view":
         candidates.append(f"stream_{name}_view")
         candidates.append(f"{name}_view")
 

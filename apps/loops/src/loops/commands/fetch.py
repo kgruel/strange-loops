@@ -205,16 +205,3 @@ def fetch_fact_by_id(
     from engine import vertex_fact_by_id
 
     return vertex_fact_by_id(vertex_path, fact_id)
-
-
-# --- Legacy aliases for backwards compatibility ---
-
-def fetch_status(vertex_path: Path, kind: str | None = None) -> FoldState:
-    """Legacy alias — delegates to fetch_fold."""
-    return fetch_fold(vertex_path, kind=kind)
-
-
-def fetch_log(vertex_path: Path, since: str, kind: str | None) -> list[dict]:
-    """Legacy alias — delegates to fetch_stream, returns facts list."""
-    result = fetch_stream(vertex_path, kind=kind, since=since)
-    return result["facts"]

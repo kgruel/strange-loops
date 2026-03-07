@@ -108,10 +108,6 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
     return join_vertical(*rows)
 
 
-# --- Legacy alias ---
-log_view = stream_view
-
-
 # --- Heuristic label fields (same priority as fold lens) ---
 _LABEL_FIELDS = ("topic", "name", "title", "summary", "message")
 

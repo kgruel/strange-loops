@@ -226,7 +226,7 @@ class TestLog:
         time.sleep(0.01)
         assert _emit_local("decision", "topic=second", "two") == 0
 
-        result = main(["session", "stream", "--since", "1h"])
+        result = main(["session", "read", "--facts", "--since", "1h"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -243,7 +243,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         assert _emit_local("task", "name=t1", "status=open") == 0
 
-        result = main(["session", "stream", "--since", "1h", "--kind", "decision"])
+        result = main(["session", "read", "--facts", "--since", "1h", "--kind", "decision"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -258,7 +258,7 @@ class TestLog:
         assert _emit_local("decision", "topic=d1", "yes") == 0
         capsys.readouterr()
 
-        result = main(["session", "stream", "--since", "1h", "--json"])
+        result = main(["session", "read", "--facts", "--since", "1h", "--json"])
         assert result == 0
 
         # run_cli serializes the whole fetch result as JSON
@@ -278,7 +278,7 @@ class TestLog:
 
         assert _emit_local("decision", "topic=recent", "yes") == 0
 
-        result = main(["session", "stream", "--since", "1m"])
+        result = main(["session", "read", "--facts", "--since", "1m"])
         assert result == 0
 
         out = capsys.readouterr().out
@@ -288,11 +288,8 @@ class TestLog:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "unused"))
 
-        result = main(["session", "stream"])
+        result = main(["session", "read", "--facts"])
         assert result == 1
-
-        captured = capsys.readouterr()
-        assert "Unknown command" in (captured.out + captured.err)
 
 
 def _seed_config_vertex(home: Path, name: str, content: str) -> None:

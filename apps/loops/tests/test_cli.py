@@ -34,13 +34,13 @@ class TestParseVars:
         with pytest.raises(ValueError, match="Invalid --var format"):
             _parse_vars(["no_equals_sign"])
 
-    def test_run_accepts_var_via_run_cli(self):
-        """run --var is handled by _run_run's pre-parser, not create_parser."""
-        from loops.main import _run_run
-        assert callable(_run_run)
+    def test_sync_accepts_var(self):
+        """sync --var is handled by _run_sync's pre-parser."""
+        from loops.main import _run_sync
+        assert callable(_run_sync)
 
-    def test_run_var_parsed_by_pre_parser(self):
-        """run's --var is handled by pre-parser in _run_run."""
+    def test_var_parsed_by_pre_parser(self):
+        """--var is handled by pre-parser in _run_sync."""
         from loops.main import _parse_vars
         assert _parse_vars([]) == {}
 
@@ -202,7 +202,6 @@ class TestHelp:
         assert "close" in captured.out
         # Root commands should be visible
         assert "init" in captured.out
-        assert "run" in captured.out
         assert "validate" in captured.out
 
     def test_validate_help(self, capsys):
@@ -407,18 +406,7 @@ class TestInitCommand:
 
 
 class TestDefaultPaths:
-    """run/store default to LOOPS_HOME/.vertex when no file given."""
-
-    def test_run_no_args_missing_root(self, monkeypatch, tmp_path, capsys):
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["run"])
-        assert result == 1
-
-    def test_run_file_optional(self, monkeypatch, tmp_path):
-        """run with no file falls back to LOOPS_HOME/.vertex."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["run"])
-        assert result == 1
+    """store defaults to LOOPS_HOME/.vertex when no file given."""
 
     def test_store_root_command(self, monkeypatch, tmp_path, capsys):
         """store as root command falls back to LOOPS_HOME/.vertex."""
@@ -503,34 +491,6 @@ class TestReadVerb:
             "}\n"
         )
         result = main(["myvert", "--facts"])
-        assert result == 0
-
-    def test_fold_still_works(self, monkeypatch, tmp_path, capsys):
-        """loops fold <vertex> still works (backward compat)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["fold", "myvert"])
-        assert result == 0
-
-    def test_stream_still_works(self, monkeypatch, tmp_path, capsys):
-        """loops stream <vertex> still works (backward compat)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["stream", "myvert"])
         assert result == 0
 
     def test_vertex_first_read_op(self, monkeypatch, tmp_path, capsys):

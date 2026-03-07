@@ -43,10 +43,6 @@ def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     return _schema_prompt(populated)
 
 
-# --- Legacy alias ---
-status_view = prompt_view
-
-
 def _render_session(section: FoldSection) -> list[str]:
     """Render session as handoff content — message and produced artifacts."""
     return _render_session_lines(section)

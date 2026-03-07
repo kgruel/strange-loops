@@ -1,6 +1,0 @@
-name "discord"
-store "./data/discord.db"
-
-loops {
-  message { fold { items "by" "discord_message_id" } }
-}

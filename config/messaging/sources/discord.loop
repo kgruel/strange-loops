@@ -1,8 +1,0 @@
-// Discord — poll all channels via DiscordChatExporter
-// Requires: apps/discord config.json + DiscordChatExporter.Cli on PATH
-
-source "uv run --package discord-archiver discord-poll --config /Users/kaygee/Code/loops/apps/discord/config.json --cursor /Users/kaygee/.config/loops/messaging/data/discord-cursor.json"
-every "5m"
-kind "discord.message"
-observer "discord"
-format "ndjson"

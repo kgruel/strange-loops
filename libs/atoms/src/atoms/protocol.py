@@ -15,8 +15,7 @@ class SourceProtocol(Protocol):
     convert external signals (commands, files, network events) into Facts.
     Not atoms — they don't appear in the fundamental model.
 
-    A Source has an observer identity and yields facts as they arrive.
-    The stream runs until cancelled or the source is exhausted.
+    A Source has an observer identity and collects facts from one execution.
     """
 
     @property
@@ -24,6 +23,6 @@ class SourceProtocol(Protocol):
         """Identity for facts produced by this source."""
         ...
 
-    async def stream(self) -> AsyncIterator[Fact]:
-        """Yield facts as they arrive. Runs until cancelled or exhausted."""
+    async def collect(self) -> AsyncIterator[Fact]:
+        """Collect facts from a single execution."""
         ...

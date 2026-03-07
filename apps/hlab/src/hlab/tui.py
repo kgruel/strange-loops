@@ -14,7 +14,7 @@ from datetime import datetime
 from painted import Block, Style, join_vertical, join_horizontal, border, pad, ROUNDED
 from painted.tui import Surface
 
-from atoms import Runner
+from engine import Executor, Cadence
 
 from .lenses.status import render_stack_list, render_container_detail, PendingState
 from .theme import DEFAULT_THEME
@@ -137,11 +137,9 @@ class HlabApp(Surface):
             # Start spinner loop now that state is initialized
             asyncio.create_task(self._spinner_loop())
 
-            runner = Runner(vertex)
-            for s in sources:
-                runner.add(s)
-
-            async for tick in runner.run():
+            executor = Executor(vertex, sources)
+            result = await executor.sync_async(force=True)
+            for tick in result.ticks:
                 self._state = self._state.receive(tick.name, tick.payload)
                 self.mark_dirty()
         except Exception as e:

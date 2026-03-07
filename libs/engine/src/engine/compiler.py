@@ -279,22 +279,10 @@ def infer_field_type(target: str, op: DslFoldOp) -> str:
 def map_loop_file(loop: LoopFile) -> Source:
     """Map LoopFile AST to runtime Source.
 
-    Returns a Source configured with:
-    - command: the shell command (None for pure timer)
-    - kind: fact kind
-    - observer: who observed
-    - every: repeat interval (seconds)
-    - trigger: kinds that trigger this source (for on: syntax)
-    - format: output interpretation
-    - parse: compiled parse pipeline
-
-    Timing modes:
-    - loop.every + no on: → polling source
-    - loop.on + no every: → triggered source
-    - loop.every + no source: → pure timer (emits ticks)
+    Returns a Source configured with command, kind, observer, format, parse.
+    Scheduling concerns (every, trigger) are handled by Cadence via compile_source().
     """
     from atoms import Source
-    from lang.ast import Duration
 
     # Validate format at compile time
     if loop.format not in ("lines", "json", "ndjson", "blob"):
@@ -305,17 +293,10 @@ def map_loop_file(loop: LoopFile) -> Source:
     # Compile parse pipeline
     parse_ops = map_parse_steps(loop.parse) if loop.parse else None
 
-    # Map trigger if present
-    trigger = None
-    if loop.on is not None:
-        trigger = loop.on.kinds
-
     return Source(
         command=loop.source,
         kind=loop.kind,
         observer=loop.observer,
-        every=Duration.parse(loop.every).seconds() if loop.every else None,
-        trigger=trigger,
         format=loop.format,
         parse=parse_ops,
         env=loop.env,
@@ -409,15 +390,16 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
 def compile_sources(
     vertex: VertexFile,
     base_dir: Path,
-) -> tuple[list["Source"], dict[str, "Spec"]]:
+) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
     """Compile sources from a vertex, handling both paths and templates.
 
     Returns:
-        (sources, specs) where specs contains any loop specs from templates
+        (source_pairs, specs) where source_pairs are (Source, Cadence) tuples
+        and specs contains any loop specs from templates
     """
     from lang import parse_loop_file
 
-    sources: list["Source"] = []
+    pairs: list[tuple["Source", "Cadence"]] = []
     specs: dict[str, "Spec"] = {}
 
     for source_entry in vertex.sources or []:
@@ -440,7 +422,7 @@ def compile_sources(
             # Instantiate for each param row
             for param_row in all_params:
                 instantiated = instantiate_template(loop_ast, param_row.values)
-                sources.append(compile_loop(instantiated))
+                pairs.append(compile_source(instantiated))
 
                 # If template has a loop spec, create spec for this instance
                 if source_entry.loop:
@@ -456,19 +438,21 @@ def compile_sources(
             if not loop_path.is_absolute():
                 loop_path = base_dir / loop_path
             loop_ast = parse_loop_file(loop_path)
-            sources.append(compile_loop(loop_ast))
+            pairs.append(compile_source(loop_ast))
 
-    return sources, specs
+    return pairs, specs
 
 
-def compile_sources_block(block: SourcesBlock, vertex_name: str) -> "SequentialSource":
-    """Compile a sources block with execution mode into a SequentialSource.
+def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
 
     Each inline source becomes a regular Source (one-shot, no polling).
     The SequentialSource wraps them with the execution mode semantics.
+    Cadence is always() — sequential blocks run every time.
     """
     from atoms import Source as RuntimeSource
     from atoms import SequentialSource
+    from .cadence import Cadence
 
     inner_sources = []
     for inline in block.sources:
@@ -480,10 +464,11 @@ def compile_sources_block(block: SourcesBlock, vertex_name: str) -> "SequentialS
             )
         )
 
-    return SequentialSource(
+    seq = SequentialSource(
         sources=tuple(inner_sources),
         _observer=vertex_name,
     )
+    return seq, Cadence.always()
 
 
 # -----------------------------------------------------------------------------
@@ -713,6 +698,30 @@ def compile_vertex_recursive(
 def compile_loop(loop: LoopFile) -> Source:
     """Compile a .loop file to a runtime Source."""
     return map_loop_file(loop)
+
+
+def compile_source(loop: LoopFile) -> tuple[Source, "Cadence"]:
+    """Compile a .loop file to a (Source, Cadence) pair.
+
+    Source: pure adapter (command + parse)
+    Cadence: store predicate (when to run)
+    """
+    from .cadence import Cadence
+    from lang.ast import Duration
+
+    source = map_loop_file(loop)
+
+    if loop.every and loop.on:
+        raise ValueError("Cannot specify both every and on")
+    elif loop.every:
+        interval = Duration.parse(loop.every).seconds()
+        cadence = Cadence.elapsed(loop.kind, interval)
+    elif loop.on:
+        cadence = Cadence.triggered(loop.on.kinds, loop.kind)
+    else:
+        cadence = Cadence.always()
+
+    return source, cadence
 
 
 def compile_vertex(vertex: VertexFile) -> dict[str, Spec]:

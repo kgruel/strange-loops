@@ -6,7 +6,6 @@ and vertices together.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -18,74 +17,44 @@ from lang.ast import SourceParams, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
     from atoms import Source
+    from .cadence import Cadence
+    from .executor import SyncResult
     from .tick import Tick
     from .vertex import Vertex
 
 
 @dataclass(frozen=True)
 class VertexProgram:
-    """A fully-materialized vertex plus its compiled sources."""
+    """A fully-materialized vertex plus its compiled sources with cadences."""
 
     vertex: Vertex
-    sources: list[Source]
+    sources: list[tuple[Source, Cadence]]
     expected_ticks: list[str]
 
-    @property
-    def has_polling(self) -> bool:
-        """True if any source uses interval-based polling."""
-        return any(getattr(s, "every", None) is not None for s in self.sources)
+    async def sync_async(
+        self,
+        grant: Any = None,
+        *,
+        on_error: Callable | None = None,
+        force: bool = False,
+    ) -> SyncResult:
+        """One-shot sync: evaluate cadence, run qualifying sources."""
+        from .executor import Executor
 
-    async def run(
-        self, grant: Any = None, *, on_error: Callable | None = None,
-    ) -> AsyncIterator[Tick]:
-        """Run all sources and yield ticks as boundaries fire."""
-        from atoms import Runner
+        executor = Executor(self.vertex, self.sources, on_error=on_error)
+        return await executor.sync_async(grant=grant, force=force)
 
-        runner = Runner(self.vertex, on_error=on_error)
-        for source in self.sources:
-            runner.add(source)
-        async for tick in runner.run(grant):
-            yield tick
-
-    async def collect_async(
-        self, *, rounds: int | None = None, grant: Any = None
-    ) -> dict[str, Any]:
-        """Run all sources, return {tick_name: payload}.
-
-        Args:
-            rounds: Number of complete rounds to collect. A round completes
-                when every name in expected_ticks has fired at least once.
-                None (default) = run until all sources exhaust.
-            grant: Optional grant for identity gating.
-        """
-        results: dict[str, Any] = {}
-        if rounds is None:
-            async for tick in self.run(grant):
-                results[tick.name] = tick.payload
-            return results
-
-        seen_this_round: set[str] = set()
-        expected = set(self.expected_ticks)
-        completed_rounds = 0
-
-        async for tick in self.run(grant):
-            results[tick.name] = tick.payload
-            seen_this_round.add(tick.name)
-            if seen_this_round >= expected:
-                completed_rounds += 1
-                if completed_rounds >= rounds:
-                    break
-                seen_this_round = set()
-
-        return results
-
-    def collect(
-        self, *, rounds: int | None = None, grant: Any = None
-    ) -> dict[str, Any]:
-        """Run all sources synchronously, return {tick_name: payload}."""
+    def sync(
+        self,
+        grant: Any = None,
+        *,
+        on_error: Callable | None = None,
+        force: bool = False,
+    ) -> SyncResult:
+        """Synchronous wrapper around sync_async."""
         import asyncio
 
-        return asyncio.run(self.collect_async(rounds=rounds, grant=grant))
+        return asyncio.run(self.sync_async(grant, on_error=on_error, force=force))
 
 
 def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile:

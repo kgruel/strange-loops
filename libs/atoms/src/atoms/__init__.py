@@ -3,7 +3,7 @@
 Consolidates:
 - facts: Fact (the observation atom)
 - specs: Spec, Field, Fold ops, Parse ops (contracts)
-- sources: Source, Runner (ingress adapters)
+- sources: Source (ingress adapters)
 
 Example:
     from atoms import Fact, Spec, Source
@@ -49,7 +49,6 @@ from atoms.parse import (
 # Ingress
 from atoms.source import CommandSource, Source
 from atoms.sequential import SequentialSource
-from atoms.runner import Runner
 from atoms.protocol import SourceProtocol
 
 __all__ = [
@@ -98,5 +97,4 @@ __all__ = [
     "CommandSource",
     "SequentialSource",
     "SourceProtocol",
-    "Runner",
 ]

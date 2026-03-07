@@ -215,7 +215,7 @@ class TestRunSequentialChecks:
             ("echo ok", "lint.result"),
             ("true", "test.result"),
         )
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
 
@@ -236,7 +236,7 @@ class TestRunSequentialChecks:
             ("false", "test.result"),
             ("true", "arch.result"),
         )
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
 
@@ -250,7 +250,7 @@ class TestRunSequentialChecks:
     def test_captures_stdout(self, tmp_path):
         store_path = _seed_vertex(tmp_path)
         block = _make_seq_block(("echo hello world", "echo.result"),)
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
 
@@ -260,7 +260,7 @@ class TestRunSequentialChecks:
     def test_captures_stderr_on_failure(self, tmp_path):
         store_path = _seed_vertex(tmp_path)
         block = _make_seq_block(("echo oops >&2; false", "fail.result"),)
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
 
@@ -270,7 +270,7 @@ class TestRunSequentialChecks:
     def test_duration_is_positive(self, tmp_path):
         store_path = _seed_vertex(tmp_path)
         block = _make_seq_block(("echo fast", "speed.result"),)
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
 
@@ -279,7 +279,7 @@ class TestRunSequentialChecks:
     def test_custom_observer(self, tmp_path):
         store_path = _seed_vertex(tmp_path)
         block = _make_seq_block(("true", "lint.result"),)
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path, observer="ci")
 
@@ -292,7 +292,7 @@ class TestRunSequentialChecks:
             ("echo all good", "lint.result"),
             ("true", "test.result"),
         )
-        seq = compile_sources_block(block, "check")
+        seq, _cadence = compile_sources_block(block, "check")
 
         results = run_sequential_checks(seq, store_path)
         view = health_view(results, Zoom.SUMMARY, 80)

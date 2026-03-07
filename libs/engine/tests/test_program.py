@@ -8,7 +8,7 @@ from typing import AsyncIterator
 import pytest
 
 from atoms import Fact
-from engine import VertexProgram, load_vertex_program
+from engine import Cadence, VertexProgram, load_vertex_program
 from engine import Vertex
 
 
@@ -46,13 +46,10 @@ def test_load_vertex_program_vars_substitution(tmp_path: Path) -> None:
     )
     assert program.expected_ticks == ["a", "b"]
 
-    # Verify the sources got the resolved host values by checking the
-    # compiled source commands contain the substituted IPs
-    commands = [s.command for s in program.sources if s.command]
-    # The template uses {{host}} in the source command — here the loop file
-    # doesn't reference host in the source, so just verify compilation works.
-    # The key check: no {{host_a}} or {{host_b}} remain in the program.
     assert len(program.sources) == 2
+    # Each entry is a (Source, Cadence) pair
+    for source, cadence in program.sources:
+        assert source.command is not None
 
 
 def test_load_vertex_program_vars_unmatched_passthrough(tmp_path: Path) -> None:
@@ -178,15 +175,15 @@ class _MockSource:
     """Source that yields predetermined facts."""
 
     observer: str
+    kind: str
     facts: list[Fact]
-    every: float | None = None
 
-    async def stream(self) -> AsyncIterator[Fact]:
+    async def collect(self) -> AsyncIterator[Fact]:
         for fact in self.facts:
             yield fact
 
 
-def _make_program(sources: list[_MockSource]) -> VertexProgram:
+def _make_program(mock_sources: list[_MockSource]) -> VertexProgram:
     """Build a VertexProgram with two loops (a, b) using mock sources."""
     vertex = Vertex("test")
     vertex.register(
@@ -195,15 +192,17 @@ def _make_program(sources: list[_MockSource]) -> VertexProgram:
     vertex.register(
         "b", 0, lambda s, p: s + p.get("v", 0), boundary="b.complete", reset=True
     )
-    return VertexProgram(vertex=vertex, sources=sources, expected_ticks=["a", "b"])
+    pairs = [(s, Cadence.always()) for s in mock_sources]
+    return VertexProgram(vertex=vertex, sources=pairs, expected_ticks=["a", "b"])
 
 
-class TestVertexProgramRun:
-    """Tests for VertexProgram.run() async iterator."""
+class TestVertexProgramSync:
+    """Tests for VertexProgram.sync() via Executor."""
 
-    def test_run_yields_ticks(self) -> None:
+    def test_sync_returns_ticks(self) -> None:
         source = _MockSource(
             observer="mock",
+            kind="a",
             facts=[
                 Fact.of("a", "mock", v=3),
                 Fact.of("a.complete", "mock"),
@@ -212,146 +211,19 @@ class TestVertexProgramRun:
             ],
         )
         program = _make_program([source])
+        result = program.sync(force=True)
+        tick_map = {t.name: t.payload for t in result.ticks}
+        assert tick_map == {"a": 3, "b": 7}
 
-        async def _run():
-            ticks = {}
-            async for tick in program.run():
-                ticks[tick.name] = tick.payload
-            return ticks
-
-        assert asyncio.run(_run()) == {"a": 3, "b": 7}
-
-    def test_run_with_no_sources(self) -> None:
+    def test_sync_with_no_sources(self) -> None:
         program = _make_program([])
+        result = program.sync(force=True)
+        assert result.ticks == []
 
-        async def _run():
-            ticks = []
-            async for tick in program.run():
-                ticks.append(tick)
-            return ticks
-
-        assert asyncio.run(_run()) == []
-
-
-class TestVertexProgramCollect:
-    """Tests for VertexProgram.collect() sync convenience."""
-
-    def test_collect_returns_dict(self) -> None:
-        source = _MockSource(
-            observer="mock",
-            facts=[
-                Fact.of("a", "mock", v=5),
-                Fact.of("a.complete", "mock"),
-                Fact.of("b", "mock", v=10),
-                Fact.of("b.complete", "mock"),
-            ],
-        )
-        program = _make_program([source])
-
-        result = program.collect()
-        assert result == {"a": 5, "b": 10}
-
-    def test_collect_empty_sources(self) -> None:
+    def test_sync_empty_sources_no_force(self) -> None:
         program = _make_program([])
-
-        result = program.collect()
-        assert result == {}
-
-
-# ---------------------------------------------------------------------------
-# Round-based collection (has_polling, collect with rounds=)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _PollingMockSource:
-    """Source that yields multiple rounds of facts (simulates polling)."""
-
-    observer: str
-    rounds: list[list[Fact]]
-    every: float = 1.0  # marks this as a polling source
-
-    async def stream(self) -> AsyncIterator[Fact]:
-        for round_facts in self.rounds:
-            for fact in round_facts:
-                yield fact
-
-
-class TestHasPolling:
-    def test_has_polling_true(self) -> None:
-        source = _PollingMockSource(observer="mock", rounds=[], every=30.0)
-        program = _make_program([source])
-        assert program.has_polling is True
-
-    def test_has_polling_false(self) -> None:
-        source = _MockSource(observer="mock", facts=[])
-        program = _make_program([source])
-        assert program.has_polling is False
-
-
-class TestCollectRounds:
-    def test_collect_rounds_one(self) -> None:
-        """Two rounds available, collect(rounds=1) returns after first."""
-        source = _PollingMockSource(
-            observer="mock",
-            rounds=[
-                [
-                    Fact.of("a", "mock", v=1),
-                    Fact.of("a.complete", "mock"),
-                    Fact.of("b", "mock", v=2),
-                    Fact.of("b.complete", "mock"),
-                ],
-                [
-                    Fact.of("a", "mock", v=10),
-                    Fact.of("a.complete", "mock"),
-                    Fact.of("b", "mock", v=20),
-                    Fact.of("b.complete", "mock"),
-                ],
-            ],
-        )
-        program = _make_program([source])
-        result = program.collect(rounds=1)
-        # Should get first round values only
-        assert result == {"a": 1, "b": 2}
-
-    def test_collect_rounds_default_unchanged(self) -> None:
-        """Without rounds=, collect() runs until sources exhaust."""
-        source = _MockSource(
-            observer="mock",
-            facts=[
-                Fact.of("a", "mock", v=5),
-                Fact.of("a.complete", "mock"),
-                Fact.of("b", "mock", v=10),
-                Fact.of("b.complete", "mock"),
-            ],
-        )
-        program = _make_program([source])
-        result = program.collect()
-        assert result == {"a": 5, "b": 10}
-
-    def test_collect_async_rounds(self) -> None:
-        """Async variant with rounds=1."""
-        source = _PollingMockSource(
-            observer="mock",
-            rounds=[
-                [
-                    Fact.of("a", "mock", v=3),
-                    Fact.of("a.complete", "mock"),
-                    Fact.of("b", "mock", v=7),
-                    Fact.of("b.complete", "mock"),
-                ],
-                [
-                    Fact.of("a", "mock", v=30),
-                    Fact.of("a.complete", "mock"),
-                    Fact.of("b", "mock", v=70),
-                    Fact.of("b.complete", "mock"),
-                ],
-            ],
-        )
-        program = _make_program([source])
-
-        result = asyncio.run(program.collect_async(rounds=1))
-        assert result == {"a": 3, "b": 7}
+        result = program.sync()
+        assert result.ticks == []
 
 
 # ---------------------------------------------------------------------------

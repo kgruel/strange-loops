@@ -132,7 +132,7 @@ def run_sequential_checks(
     results: list[dict[str, Any]] = []
 
     async def _collect():
-        async for fact in seq_source.stream():
+        async for fact in seq_source.collect():
             kind = fact.kind
 
             if kind == "source.error":

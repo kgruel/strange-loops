@@ -14,7 +14,7 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 import sqlite_ulid
 
@@ -167,6 +167,41 @@ class SqliteStore(Generic[T]):
         """Total number of ticks in the store."""
         row = self._conn.execute("SELECT COUNT(*) FROM ticks").fetchone()
         return row[0]
+
+    def latest_by_kind(self, kind: str) -> T | None:
+        """Return the most recent fact of a given kind, or None."""
+        row = self._conn.execute(
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE kind = ? ORDER BY rowid DESC LIMIT 1",
+            (kind,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._deserialize(
+            {"kind": row[0], "ts": row[1], "observer": row[2], "origin": row[3], "payload": json.loads(row[4])}
+        )
+
+    def latest_by_kind_where(self, kind: str, key: str, value: Any) -> T | None:
+        """Return the most recent fact of kind where payload[key] == value."""
+        path = "$." + key
+        row = self._conn.execute(
+            "SELECT kind, ts, observer, origin, payload FROM facts "
+            "WHERE kind = ? AND json_extract(payload, ?) = ? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (kind, path, value),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._deserialize(
+            {"kind": row[0], "ts": row[1], "observer": row[2], "origin": row[3], "payload": json.loads(row[4])}
+        )
+
+    def has_kind_since(self, kind: str, ts: float) -> bool:
+        """True if any fact of kind exists with ts > the given timestamp."""
+        row = self._conn.execute(
+            "SELECT 1 FROM facts WHERE kind = ? AND ts > ? LIMIT 1",
+            (kind, ts),
+        ).fetchone()
+        return row is not None
 
     def close(self) -> None:
         """Close the database connection."""

@@ -17,6 +17,7 @@ from engine.compiler import (
     CompiledVertex,
     collect_all_sources,
     compile_loop,
+    compile_source,
     compile_sources,
     compile_sources_block,
     compile_vertex,
@@ -215,12 +216,11 @@ observer "shell"
         assert source.command == "whoami"
         assert source.kind == "identity"
         assert source.observer == "shell"
-        assert source.every is None
         assert source.format == "lines"
         assert source.parse is None
 
     def test_loop_with_every(self):
-        """Loop with every compiles to Source with interval."""
+        """Loop with every compiles to Source — every is Cadence concern, not Source."""
         loop = parse_loop("""\
 source "date"
 kind "heartbeat"
@@ -228,7 +228,8 @@ observer "timer"
 every "5s"
 """)
         source = compile_loop(loop)
-        assert source.every == 5.0
+        assert source.command == "date"
+        assert source.kind == "heartbeat"
 
     def test_loop_with_parse(self):
         """Loop with parse pipeline compiles to Source with parse ops."""
@@ -266,7 +267,6 @@ parse {
         loop = parse_loop_file(FIXTURES / "disk.loop")
         source = compile_loop(loop)
         assert source.command == "df -h"
-        assert source.every == 5.0
         assert source.parse is not None
 
 
@@ -464,75 +464,55 @@ loops {
 
 
 class TestTriggeredSource:
-    """Triggered source compilation (on: syntax)."""
+    """Triggered source compilation — scheduling lives in Cadence, not Source."""
 
     def test_single_trigger(self):
-        """Loop with single on: trigger compiles to Source with trigger."""
+        """Loop with on: produces triggered Cadence."""
         loop = parse_loop("""\
 source "process-batch"
 kind "processed"
 observer "worker"
 on "batch.ready"
 """)
-        source = compile_loop(loop)
+        source, cadence = compile_source(loop)
         assert isinstance(source, Source)
         assert source.command == "process-batch"
-        assert source.trigger == ("batch.ready",)
-        assert source.every is None
+        assert cadence._mode == "triggered"
+        assert cadence._trigger_kinds == ("batch.ready",)
 
     def test_multiple_triggers(self):
-        """Loop with multiple on: triggers compiles to Source with trigger tuple."""
+        """Loop with multiple on: triggers produces multi-trigger Cadence."""
         loop = parse_loop("""\
 source "aggregate"
 kind "aggregated"
 observer "collector"
 on "minute" "hour" "day"
 """)
-        source = compile_loop(loop)
-        assert source.trigger == ("minute", "hour", "day")
-        assert source.every is None
+        source, cadence = compile_source(loop)
+        assert cadence._mode == "triggered"
+        assert cadence._trigger_kinds == ("minute", "hour", "day")
 
     def test_polling_source_no_trigger(self):
-        """Loop with every: but no on: has no trigger."""
+        """Loop with every: but no on: produces elapsed Cadence."""
         loop = parse_loop("""\
 source "check-health"
 kind "health"
 observer "monitor"
 every "30s"
 """)
-        source = compile_loop(loop)
-        assert source.trigger is None
-        assert source.every == 30.0
+        source, cadence = compile_source(loop)
+        assert cadence._mode == "elapsed"
+        assert cadence._interval == 30.0
 
-
-class TestPureTimerSource:
-    """Pure timer source compilation (every: without source:)."""
-
-    def test_pure_timer(self):
-        """Loop with every: but no source: compiles to pure timer Source."""
+    def test_no_every_no_trigger(self):
+        """Loop with no every or on produces always Cadence."""
         loop = parse_loop("""\
-kind "tick"
-observer "timer"
-every "1m"
+source "whoami"
+kind "identity"
+observer "shell"
 """)
-        source = compile_loop(loop)
-        assert isinstance(source, Source)
-        assert source.command is None
-        assert source.every == 60.0
-        assert source.kind == "tick"
-
-    def test_pure_timer_with_trigger(self):
-        """Loop with every: and on: compiles to triggered timer."""
-        loop = parse_loop("""\
-kind "batch.tick"
-observer "scheduler"
-every "1m"
-on "minute"
-""")
-        source = compile_loop(loop)
-        assert source.command is None
-        assert source.trigger == ("minute",)
-        assert source.every == 60.0
+        source, cadence = compile_source(loop)
+        assert cadence._mode == "always"
 
 
 class TestNestedVertexCompilation:
@@ -1316,7 +1296,7 @@ class TestTemplateInstantiation:
         assert result.env == {"FOO": "baz"}
 
     def test_invalid_every_raises_on_compile(self):
-        """Invalid every duration raises at compile time."""
+        """Invalid every duration raises at compile time (via compile_source)."""
         from lang.ast import LoopFile
 
         loop = LoopFile(
@@ -1327,7 +1307,7 @@ class TestTemplateInstantiation:
         )
 
         with pytest.raises(ValueError, match=r"Invalid duration"):
-            map_loop_file(loop)
+            compile_source(loop)
 
     def test_compile_sources_simple_paths(self, tmp_path):
         """compile_sources handles simple path entries."""
@@ -1352,11 +1332,12 @@ loops {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, tmp_path)
+        pairs, specs = compile_sources(vertex, tmp_path)
 
-        assert len(sources) == 1
-        assert sources[0].command == "echo hello"
-        assert sources[0].kind == "test"
+        assert len(pairs) == 1
+        source, cadence = pairs[0]
+        assert source.command == "echo hello"
+        assert source.kind == "test"
         assert specs == {}
 
     def test_compile_sources_template(self, tmp_path):
@@ -1391,13 +1372,13 @@ loops {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, tmp_path)
+        pairs, specs = compile_sources(vertex, tmp_path)
 
-        assert len(sources) == 2
-        assert sources[0].kind == "infra"
-        assert sources[0].command == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
-        assert sources[1].kind == "media"
-        assert sources[1].command == 'ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps"'
+        assert len(pairs) == 2
+        assert pairs[0][0].kind == "infra"
+        assert pairs[0][0].command == 'ssh deploy@192.168.1.30 "cd /opt/infra && docker compose ps"'
+        assert pairs[1][0].kind == "media"
+        assert pairs[1][0].command == 'ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps"'
         assert specs == {}
 
     def test_compile_sources_template_with_loop_spec(self, tmp_path):
@@ -1433,9 +1414,9 @@ loops {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, tmp_path)
+        pairs, specs = compile_sources(vertex, tmp_path)
 
-        assert len(sources) == 2
+        assert len(pairs) == 2
         assert "infra" in specs
         assert "media" in specs
 
@@ -1743,11 +1724,11 @@ sources {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, tmp_path)
+        pairs, specs = compile_sources(vertex, tmp_path)
 
-        assert len(sources) == 2
-        assert sources[0].kind == "alpha"
-        assert sources[1].kind == "beta"
+        assert len(pairs) == 2
+        assert pairs[0][0].kind == "alpha"
+        assert pairs[1][0].kind == "beta"
         assert "alpha" in specs
         assert "beta" in specs
 
@@ -1779,11 +1760,11 @@ sources {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, tmp_path)
+        pairs, specs = compile_sources(vertex, tmp_path)
 
-        assert len(sources) == 2
-        assert sources[0].kind == "file_kind"
-        assert sources[1].kind == "inline_kind"
+        assert len(pairs) == 2
+        assert pairs[0][0].kind == "file_kind"
+        assert pairs[1][0].kind == "inline_kind"
 
     def test_relative_path_resolution(self, tmp_path: Path):
         """Relative from file path resolved against vertex base dir."""
@@ -1814,9 +1795,9 @@ sources {{
   }}
 }}
 """)
-        sources, specs = compile_sources(vertex, subdir)
-        assert len(sources) == 1
-        assert sources[0].kind == "alpha"
+        pairs, specs = compile_sources(vertex, subdir)
+        assert len(pairs) == 1
+        assert pairs[0][0].kind == "alpha"
 
 
 class TestSourcesBlockCompilation:
@@ -1835,16 +1816,17 @@ class TestSourcesBlockCompilation:
                 InlineSource(command="pytest tests/ -q", kind="test.result"),
             ),
         )
-        result = compile_sources_block(block, "ci")
+        seq, cadence = compile_sources_block(block, "ci")
 
-        assert isinstance(result, SequentialSource)
-        assert result.observer == "ci"
-        assert len(result.sources) == 2
-        assert result.sources[0].command == "ruff check src/"
-        assert result.sources[0].kind == "lint.result"
-        assert result.sources[0].observer == "ci"
-        assert result.sources[1].command == "pytest tests/ -q"
-        assert result.sources[1].kind == "test.result"
+        assert isinstance(seq, SequentialSource)
+        assert seq.observer == "ci"
+        assert len(seq.sources) == 2
+        assert seq.sources[0].command == "ruff check src/"
+        assert seq.sources[0].kind == "lint.result"
+        assert seq.sources[0].observer == "ci"
+        assert seq.sources[1].command == "pytest tests/ -q"
+        assert seq.sources[1].kind == "test.result"
+        assert cadence._mode == "always"
 
     def test_sequential_block_in_vertex_compilation(self):
         """sources sequential block is compiled through compile_vertex_recursive."""
@@ -1861,8 +1843,9 @@ loops {
 }
 """)
         compiled = compile_vertex_recursive(vertex)
-        sources, specs = collect_all_sources(compiled)
+        pairs, specs = collect_all_sources(compiled)
 
-        assert len(sources) == 1  # One SequentialSource wrapping two inner sources
-        assert isinstance(sources[0], SequentialSource)
-        assert len(sources[0].sources) == 2
+        assert len(pairs) == 1  # One (SequentialSource, Cadence) pair
+        seq, cadence = pairs[0]
+        assert isinstance(seq, SequentialSource)
+        assert len(seq.sources) == 2

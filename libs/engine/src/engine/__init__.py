@@ -50,6 +50,9 @@ from .peer import (
     restrict_grant,
 )
 
+# Cadence
+from .cadence import Cadence
+
 # Compiler (DSL → runtime)
 from .compiler import (
     CircularVertexError,
@@ -58,6 +61,7 @@ from .compiler import (
     collect_all_sources,
     collect_search_fields,
     compile_loop,
+    compile_source,
     compile_sources,
     compile_sources_block,
     compile_vertex,
@@ -66,6 +70,7 @@ from .compiler import (
     materialize_vertex,
     substitute_vars,
 )
+from .executor import Executor, SyncResult
 from .program import VertexProgram, load_vertex_program
 
 # Vertex read path (query-time fold materialization)
@@ -105,6 +110,8 @@ __all__ = [
     "grant_of",
     "expand_grant",
     "restrict_grant",
+    # Cadence
+    "Cadence",
     # Compiler (DSL → runtime)
     "CircularVertexError",
     "CompiledVertex",
@@ -112,6 +119,7 @@ __all__ = [
     "collect_all_sources",
     "collect_search_fields",
     "compile_loop",
+    "compile_source",
     "compile_sources",
     "compile_sources_block",
     "compile_vertex",
@@ -119,6 +127,9 @@ __all__ = [
     "instantiate_template",
     "materialize_vertex",
     "substitute_vars",
+    # Executor
+    "Executor",
+    "SyncResult",
     # Program helpers
     "VertexProgram",
     "load_vertex_program",

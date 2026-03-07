@@ -34,7 +34,6 @@ import argparse
 import asyncio
 import json
 import os
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -512,7 +511,7 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
 
         async def _collect():
             count = 0
-            async for fact in source.stream():
+            async for fact in source.collect():
                 collected.append(
                     {
                         "kind": fact.kind,
@@ -532,7 +531,7 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
     async def fetch_stream():
         accumulated: list[dict] = []
         count = 0
-        async for fact in source.stream():
+        async for fact in source.collect():
             accumulated.append(
                 {
                     "kind": fact.kind,
@@ -568,7 +567,7 @@ def _run_run_loop(path: Path, known, rest: list[str]) -> int:
 
 
 def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
-    """Execute a .vertex file through run_cli."""
+    """Execute a .vertex file through run_cli (one-shot sync)."""
     from painted import run_cli
     from painted.fidelity import HelpArg
     from engine import load_vertex_program
@@ -581,11 +580,6 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
         _err("Error: no sources configured")
         return 1
 
-    daemon = known.daemon
-    rounds = known.rounds
-    if daemon or rounds == 0:
-        rounds = None
-
     def log_error(fact):
         payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
         _err(f"[ERROR] {fact.observer}: {payload}")
@@ -595,72 +589,23 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
 
     show(
         Block.text(
-            f"Started {program.vertex.name}: {len(program.sources)} sources",
+            f"Running {program.vertex.name}: {len(program.sources)} sources",
             current_palette().muted,
         ),
         file=sys.stderr,
     )
 
     def fetch():
-        collected: list[dict] = []
-
-        async def _collect():
-            completed_rounds = 0
-            if rounds is not None:
-                seen: set[str] = set()
-                expected = set(program.expected_ticks)
-
-            async for tick in program.run(on_error=log_error):
-                collected.append(
-                    {
-                        "name": tick.name,
-                        "ts": tick.ts,
-                        "payload": tick.payload,
-                        "origin": getattr(tick, "origin", ""),
-                    }
-                )
-                if rounds is not None:
-                    seen.add(tick.name)
-                    if seen >= expected:
-                        completed_rounds += 1
-                        if completed_rounds >= rounds:
-                            break
-                        seen = set()
-
-        asyncio.run(_collect())
-        return collected
-
-    async def fetch_stream():
-        accumulated: list[dict] = []
-        stop = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, stop.set)
-
-        completed_rounds = 0
-        if rounds is not None:
-            seen: set[str] = set()
-            expected = set(program.expected_ticks)
-
-        async for tick in program.run(on_error=log_error):
-            if stop.is_set():
-                break
-            accumulated.append(
-                {
-                    "name": tick.name,
-                    "ts": tick.ts,
-                    "payload": tick.payload,
-                    "origin": getattr(tick, "origin", ""),
-                }
-            )
-            yield list(accumulated)
-            if rounds is not None:
-                seen.add(tick.name)
-                if seen >= expected:
-                    completed_rounds += 1
-                    if completed_rounds >= rounds:
-                        break
-                    seen = set()
+        result = program.sync(on_error=log_error, force=True)
+        return [
+            {
+                "name": tick.name,
+                "ts": tick.ts,
+                "payload": tick.payload,
+                "origin": getattr(tick, "origin", ""),
+            }
+            for tick in result.ticks
+        ]
 
     def render(ctx, data):
         return run_ticks_view(data, ctx.zoom, ctx.width)
@@ -668,15 +613,12 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
     return run_cli(
         rest,
         fetch=fetch,
-        fetch_stream=fetch_stream,
         render=render,
         prog="loops run",
         description=f"Run vertex {program.vertex.name}",
         help_args=[
             HelpArg("file", "Loop or vertex file", positional=True),
             HelpArg("--limit", "Max facts to collect"),
-            HelpArg("--rounds", "Number of rounds", default="1"),
-            HelpArg("--daemon", "Run continuously"),
             HelpArg("--var", "Set variable KEY=VALUE"),
         ],
     )
@@ -704,7 +646,8 @@ def _run_compile(argv: list[str]) -> int:
         if path.suffix == ".loop":
             ast = parse_loop_file(path)
             validate(ast)
-            source = compile_loop(ast)
+            from engine import compile_source
+            source, cadence = compile_source(ast)
             data: dict = {
                 "type": "loop",
                 "name": path.name,
@@ -712,7 +655,7 @@ def _run_compile(argv: list[str]) -> int:
                 "command": source.command,
                 "kind": source.kind,
                 "observer": source.observer,
-                "every": source.every,
+                "cadence": str(cadence),
                 "format": source.format,
                 "parse": [],
             }
@@ -811,7 +754,8 @@ def _run_start(argv: list[str]) -> int:
     )
 
     def fetch():
-        return program.collect(rounds=1)
+        result = program.sync(force=True)
+        return {t.name: t.payload for t in result.ticks}
 
     def render(ctx, data):
         return start_view(data, ctx.zoom, ctx.width)
@@ -1766,7 +1710,7 @@ def _run_check(argv: list[str], *, vertex_path: Path | None = None) -> int:
     def fetch():
         if seq_block is not None:
             # Vertex declares sources sequential — compile and run it
-            seq_source = compile_sources_block(seq_block, vertex_ast.name)
+            seq_source, _cadence = compile_sources_block(seq_block, vertex_ast.name)
             results = run_sequential_checks(
                 seq_source,
                 store_path,

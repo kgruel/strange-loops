@@ -10,7 +10,7 @@ def compile_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     """Render compiled AST at the given zoom level.
 
     data keys depend on file type:
-      .loop:   {type: "loop", name, command, kind, observer, every, format, parse}
+      .loop:   {type: "loop", name, command, kind, observer, cadence, format, parse}
       .vertex: {type: "vertex", name, store, discover, emit, specs, routes}
 
     Zoom levels:
@@ -55,9 +55,9 @@ def _render_loop(data: dict, zoom: Zoom, width: int) -> Block:
         rows.append(Block.text(f"  command: {data.get('command', '?')}", Style(), width=width))
         rows.append(Block.text(f"  kind: {data.get('kind', '?')}", Style(), width=width))
         rows.append(Block.text(f"  observer: {data.get('observer', '?')}", Style(), width=width))
-        every = data.get("every")
+        cadence = data.get("cadence", "always")
         rows.append(Block.text(
-            f"  every: {every}s" if every else "  every: (once)",
+            f"  cadence: {cadence}",
             Style(), width=width,
         ))
         rows.append(Block.text(f"  format: {data.get('format', '?')}", Style(), width=width))

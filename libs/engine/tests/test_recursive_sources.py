@@ -54,7 +54,7 @@ class TestCollectAllSources:
         sources, specs = collect_all_sources(compiled)
 
         assert len(sources) == 1
-        assert sources[0].kind == "alpha"
+        assert sources[0][0].kind == "alpha"
         assert specs == {}
 
     def test_child_sources_only(self, tmp_path: Path):
@@ -89,7 +89,7 @@ class TestCollectAllSources:
         sources, specs = collect_all_sources(compiled)
 
         assert len(sources) == 1
-        assert sources[0].kind == "beta"
+        assert sources[0][0].kind == "beta"
 
     def test_root_and_child_sources(self, tmp_path: Path):
         """Root + child both have sources → both sets collected."""
@@ -126,7 +126,7 @@ class TestCollectAllSources:
         compiled = compile_vertex_recursive(ast)
         sources, specs = collect_all_sources(compiled)
 
-        kinds = {s.kind for s in sources}
+        kinds = {s.kind for s, _ in sources}
         assert kinds == {"alpha", "beta"}
 
     def test_deep_nesting_grandchild(self, tmp_path: Path):
@@ -176,7 +176,7 @@ class TestCollectAllSources:
         compiled = compile_vertex_recursive(ast)
         sources, specs = collect_all_sources(compiled)
 
-        kinds = {s.kind for s in sources}
+        kinds = {s.kind for s, _ in sources}
         assert "deep" in kinds
 
     def test_template_specs_from_child(self, tmp_path: Path):
@@ -233,7 +233,7 @@ class TestCollectAllSources:
         sources, specs = collect_all_sources(compiled)
 
         assert len(sources) == 1
-        assert sources[0].kind == "sensor"
+        assert sources[0][0].kind == "sensor"
         assert "sensor" in specs
         assert specs["sensor"].boundary.kind == "sensor.complete"
 
@@ -272,5 +272,5 @@ class TestCollectAllSources:
         sources, specs = collect_all_sources(compiled)
 
         assert len(sources) == 1
-        assert sources[0].kind == "test"
-        assert sources[0].command == "echo hello"
+        assert sources[0][0].kind == "test"
+        assert sources[0][0].command == "echo hello"

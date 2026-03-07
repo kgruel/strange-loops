@@ -19,23 +19,22 @@ class SequentialSource:
     If a source exits non-zero (detected via {kind}.complete with status="error"),
     remaining sources are skipped.
 
-    Implements the same stream protocol as Source, so the Runner treats it
-    as a single source — no runner changes needed.
+    Implements the same collect protocol as Source, so the Executor treats it
+    as a single source — no executor changes needed.
     """
 
     sources: tuple[Source, ...]
     _observer: str
-    every: float | None = None  # Always None — sequential blocks are one-shot
 
     @property
     def observer(self) -> str:
         return self._observer
 
-    async def stream(self) -> AsyncIterator[Fact]:
-        """Yield facts from each source in order. Stop on failure."""
+    async def collect(self) -> AsyncIterator[Fact]:
+        """Collect facts from each source in order. Stop on failure."""
         for source in self.sources:
             failed = False
-            async for fact in source.stream():
+            async for fact in source.collect():
                 yield fact
                 if fact.kind == f"{source.kind}.complete" and fact.payload.get("status") == "error":
                     failed = True

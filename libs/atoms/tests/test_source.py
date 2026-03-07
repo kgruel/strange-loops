@@ -20,7 +20,7 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         # One data fact + one completion fact
@@ -40,7 +40,7 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "output"]
@@ -55,7 +55,7 @@ class TestSource:
             observer="my-observer",
         )
 
-        async for fact in source.stream():
+        async for fact in source.collect():
             assert fact.observer == "my-observer"
 
     async def test_command_failure_emits_error_fact(self):
@@ -67,7 +67,7 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         assert len(facts) == 2
@@ -87,52 +87,12 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         error_facts = [f for f in facts if f.kind == "source.error"]
         assert len(error_facts) == 1
         assert "error message" in error_facts[0].payload["stderr"]
-
-    async def test_every_runs_multiple_times(self):
-        """With every set, command re-runs after delay."""
-        source = Source(
-            command='echo "tick"',
-            kind="tick",
-            observer="every-source",
-            every=0.05,
-        )
-
-        facts = []
-        count = 0
-        async for fact in source.stream():
-            facts.append(fact)
-            count += 1
-            if count >= 4:  # Get at least 2 data facts + 2 complete facts
-                break
-
-        # Filter for data facts only
-        data_facts = [f for f in facts if f.kind == "tick"]
-        complete_facts = [f for f in facts if f.kind == "tick.complete"]
-        assert len(data_facts) >= 2
-        assert len(complete_facts) >= 2
-
-    async def test_no_every_runs_once(self):
-        """Without every, command runs exactly once."""
-        source = Source(
-            command='echo "once"',
-            kind="once",
-            observer="once-source",
-            every=None,
-        )
-
-        facts = []
-        async for fact in source.stream():
-            facts.append(fact)
-
-        # One data fact + one completion fact
-        data_facts = [f for f in facts if f.kind == "once"]
-        assert len(data_facts) == 1
 
     async def test_empty_output(self):
         """Command with no output produces only completion fact."""
@@ -143,7 +103,7 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         # No data facts, just completion
@@ -161,7 +121,7 @@ class TestSource:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "split"]
@@ -186,7 +146,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "user"]
@@ -208,7 +168,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "user"]
@@ -230,7 +190,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "process"]
@@ -251,7 +211,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -274,7 +234,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "disk"]
@@ -290,7 +250,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "raw"]
@@ -311,7 +271,7 @@ class TestSourceParse:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "picked"]
@@ -332,7 +292,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "line"]
@@ -349,7 +309,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -366,7 +326,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -386,7 +346,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -403,7 +363,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -420,7 +380,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         # Error fact + completion fact (command itself succeeded)
@@ -445,7 +405,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "data"]
@@ -462,7 +422,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "blob"]
@@ -479,7 +439,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "blob"]
@@ -496,7 +456,7 @@ class TestSourceFormat:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         # No data facts, just completion
@@ -518,15 +478,15 @@ class TestSourceProtocol:
         )
         assert source.observer == "test-observer"
 
-    def test_has_stream_method(self):
-        """Source has async stream method returning async iterator."""
+    def test_has_collect_method(self):
+        """Source has async collect method returning async iterator."""
         source = Source(
             command='echo "test"',
             kind="test",
             observer="test-observer",
         )
-        assert hasattr(source, "stream")
-        assert callable(source.stream)
+        assert hasattr(source, "collect")
+        assert callable(source.collect)
 
 
 class TestCommandSourceAlias:
@@ -545,7 +505,7 @@ class TestCommandSourceAlias:
         )
 
         facts = []
-        async for fact in source.stream():
+        async for fact in source.collect():
             facts.append(fact)
 
         data_facts = [f for f in facts if f.kind == "greeting"]
@@ -564,7 +524,7 @@ class TestSequentialSource:
         ), _observer="ci")
 
         facts = []
-        async for fact in seq.stream():
+        async for fact in seq.collect():
             facts.append(fact)
 
         # step1 data + step1.complete + step2 data + step2.complete
@@ -591,7 +551,7 @@ class TestSequentialSource:
         ), _observer="ci")
 
         facts = []
-        async for fact in seq.stream():
+        async for fact in seq.collect():
             facts.append(fact)
 
         # lint should have error + complete facts
@@ -618,7 +578,7 @@ class TestSequentialSource:
         ), _observer="ci")
 
         facts = []
-        async for fact in seq.stream():
+        async for fact in seq.collect():
             facts.append(fact)
 
         # step1 ran
@@ -647,7 +607,7 @@ class TestSequentialSource:
         ), _observer="ci")
 
         facts = []
-        async for fact in seq.stream():
+        async for fact in seq.collect():
             facts.append(fact)
 
         kinds = [f.kind for f in facts]

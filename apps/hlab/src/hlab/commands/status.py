@@ -59,10 +59,11 @@ def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:
         if stack:
             program = VertexProgram(
                 vertex=program.vertex,
-                sources=[s for s in program.sources if s.kind == stack],
+                sources=[(s, c) for s, c in program.sources if s.kind == stack],
                 expected_ticks=[stack],
             )
-        results = program.collect(rounds=1)
+        result = program.sync(force=True)
+        results = {t.name: t.payload for t in result.ticks}
 
         if want_stats or want_logs:
             from .enrichment import enrich_all

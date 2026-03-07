@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 class Source:
     """Bridge from shell command output to Facts flowing into Vertex.
 
-    The shell is the universal adapter — Source doesn't need to know about
-    HTTP, files, or APIs. It runs commands and shapes output into Facts.
+    Source is a pure adapter: command + parse → facts. Scheduling concerns
+    (when to run) live in Cadence (engine layer), not here.
 
     Format controls how stdout is interpreted:
     - lines: each stdout line becomes a Fact (default)
@@ -32,28 +32,19 @@ class Source:
     - format=blob: parse is ignored (blob is raw text)
 
     Errors are emitted as facts with kind="source.error" rather than raised.
-    This allows the runner to continue processing other sources.
-
-    Timing modes:
-    - every + no trigger: polling source (runs on interval)
-    - trigger + no every: triggered source (runs when trigger kinds arrive)
-    - no every + no trigger: run once
+    This allows the executor to continue processing other sources.
 
     Attributes:
-        command: Shell command to execute (None for pure timer)
+        command: Shell command to execute
         kind: Fact kind for output
         observer: Identity for produced facts
-        every: Seconds between runs (None = run once or triggered)
-        trigger: Kind(s) that trigger this source (None = polling/run-once)
         format: How to interpret stdout (lines, json, blob)
         parse: Optional parse pipeline to transform output into structured data
     """
 
-    command: str | None
+    command: str
     kind: str
     observer: str
-    every: float | None = None
-    trigger: tuple[str, ...] | None = None
     format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
     env: dict[str, str] | None = None
@@ -183,99 +174,80 @@ class Source:
             if text:
                 yield Fact.of(self.kind, self.observer, text=text)
 
-    async def stream(self) -> AsyncIterator[Fact]:
-        """Yield facts from command output. Re-runs if every is set.
+    async def collect(self) -> AsyncIterator[Fact]:
+        """Collect facts from a single command execution."""
+        try:
+            import os
 
-        For pure timer sources (command=None), emits time-shaped tick facts.
-        """
-        while True:
-            if self.command is None:
-                # Pure timer: emit tick fact with timestamp
-                from datetime import datetime, timezone
+            proc_env = None
+            if self.env:
+                proc_env = os.environ.copy()
+                proc_env.update(self.env)
 
+            proc = await asyncio.create_subprocess_shell(
+                self.command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                limit=1024 * 1024,  # 1MB line buffer (default 64KB)
+                env=proc_env,
+            )
+
+            if self.format == "lines":
+                async for fact in self._emit_lines(proc):
+                    yield fact
+            elif self.format == "json":
+                async for fact in self._emit_json(proc):
+                    yield fact
+            elif self.format == "ndjson":
+                async for fact in self._emit_ndjson(proc):
+                    yield fact
+            elif self.format == "blob":
+                async for fact in self._emit_blob(proc):
+                    yield fact
+
+            await proc.wait()
+
+            if proc.returncode != 0:
+                stderr_text = ""
+                if proc.stderr is not None:
+                    stderr_text = (await proc.stderr.read()).decode()
                 yield Fact.of(
-                    self.kind,
+                    "source.error",
                     self.observer,
-                    tick=datetime.now(timezone.utc).isoformat(),
+                    command=self.command,
+                    returncode=proc.returncode,
+                    stderr=stderr_text,
+                )
+                yield Fact.of(
+                    f"{self.kind}.complete",
+                    self.observer,
+                    command=self.command,
+                    status="error",
                 )
             else:
-                try:
-                    import os
+                yield Fact.of(
+                    f"{self.kind}.complete",
+                    self.observer,
+                    command=self.command,
+                    status="ok",
+                )
 
-                    proc_env = None
-                    if self.env:
-                        proc_env = os.environ.copy()
-                        proc_env.update(self.env)
-
-                    proc = await asyncio.create_subprocess_shell(
-                        self.command,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        limit=1024 * 1024,  # 1MB line buffer (default 64KB)
-                        env=proc_env,
-                    )
-
-                    if self.format == "lines":
-                        async for fact in self._emit_lines(proc):
-                            yield fact
-                    elif self.format == "json":
-                        async for fact in self._emit_json(proc):
-                            yield fact
-                    elif self.format == "ndjson":
-                        async for fact in self._emit_ndjson(proc):
-                            yield fact
-                    elif self.format == "blob":
-                        async for fact in self._emit_blob(proc):
-                            yield fact
-
-                    await proc.wait()
-
-                    if proc.returncode != 0:
-                        stderr_text = ""
-                        if proc.stderr is not None:
-                            stderr_text = (await proc.stderr.read()).decode()
-                        yield Fact.of(
-                            "source.error",
-                            self.observer,
-                            command=self.command,
-                            returncode=proc.returncode,
-                            stderr=stderr_text,
-                        )
-                        yield Fact.of(
-                            f"{self.kind}.complete",
-                            self.observer,
-                            command=self.command,
-                            status="error",
-                        )
-                    else:
-                        yield Fact.of(
-                            f"{self.kind}.complete",
-                            self.observer,
-                            command=self.command,
-                            status="ok",
-                        )
-
-                except Exception as e:
-                    yield Fact.of(
-                        "source.error",
-                        self.observer,
-                        command=self.command,
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    yield Fact.of(
-                        f"{self.kind}.complete",
-                        self.observer,
-                        command=self.command,
-                        status="error",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-
-            if self.every is None:
-                break
-
-            await asyncio.sleep(self.every)
+        except Exception as e:
+            yield Fact.of(
+                "source.error",
+                self.observer,
+                command=self.command,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            yield Fact.of(
+                f"{self.kind}.complete",
+                self.observer,
+                command=self.command,
+                status="error",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
 
 # Deprecated alias for backwards compatibility

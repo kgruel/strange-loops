@@ -1,0 +1,38 @@
+// siftd — conversation search
+// LLM conversations as facts. Search, fold, query.
+
+name "siftd"
+store "./data/siftd.db"
+
+lens {
+    fold "fold"
+}
+
+sources {
+  path "./sources/claude-code.loop"
+}
+
+loops {
+  exchange {
+    fold {
+      items "by" "conversation_id"
+      count "inc"
+      updated "latest"
+    }
+    search "prompt" "response"
+  }
+
+  tag {
+    fold {
+      items "by" "name"
+    }
+  }
+
+  source.error {
+    fold {
+      errors "collect" 20
+      count "inc"
+      latest_error "latest"
+    }
+  }
+}

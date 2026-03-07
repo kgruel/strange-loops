@@ -7,19 +7,39 @@ observers, then flow to implementation repos as ticks when ready.
 
 ## Session Bootstrap
 
-Launch with observer identity set:
+Launch via the config script (resolves identity → `--system-prompt`):
 
 ```bash
-LOOPS_OBSERVER=meta-claude claude
+~/.config/loops/bin/launch meta-claude ~/Code/loops/meta-discussion
 ```
 
-Hooks in `.claude/settings.json` (monorepo root) handle everything:
-- **SessionStart** — session marker + project fold + identity fold + comms
-- **UserPromptSubmit** — comms delta (silent when empty)
-- **SessionEnd** — session close marker
+Or manually (hooks still fire, but no `--system-prompt` identity):
 
-Identity, project state, and peer messages inject automatically via hooks.
+```bash
+cd ~/Code/loops/meta-discussion && LOOPS_OBSERVER=meta-claude claude
+```
+
+Hooks in `.claude/settings.json` (monorepo root) handle the rest:
+- **SessionStart** — side effects (session marker, discord sync, check-in) + JSON `additionalContext` injection (project fold + identity + comms)
+- **UserPromptSubmit** — comms delta (silent when empty)
+- **SessionEnd** — mechanical delta log + session close marker
+
 `LOOPS_OBSERVER` scopes all reads and tags all emits.
+
+### Bootstrap self-check
+
+On first response, verify three things loaded:
+
+1. **Identity** — system prompt should contain "meta-claude. I hold the cross-cutting thread..." (via launch `--system-prompt` or hook `additionalContext`)
+2. **Project fold** — decisions, threads, tasks, sessions visible in context (via hook `additionalContext`). Look for `## DECISION`, `## THREAD`, `## TASK` blocks.
+3. **Comms** — discord status line if peers are online (via hook `additionalContext`)
+
+If any are missing, run manually to diagnose:
+```bash
+uv run loops read project --lens prompt --plain   # project fold
+uv run loops read identity --plain                 # identity
+uv run loops read comms --observer all --lens comms --plain -q  # comms
+```
 
 ## Store
 

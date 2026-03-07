@@ -18,13 +18,13 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 $LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
 # --- Collect context ---
+# Identity is already in the system prompt header (via agent config).
+# additionalContext carries project state + comms only.
 project=$($LOOPS read project --lens prompt --plain 2>/dev/null || true)
-identity=$($LOOPS read identity --plain 2>/dev/null || true)
 comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 
 context=""
 [[ -n "$project" ]]  && context+="$project"$'\n\n'
-[[ -n "$identity" ]] && context+="$identity"$'\n\n'
 [[ -n "$comms" && "$comms" != "(quiet)" ]] && context+="$comms"
 
 # --- Emit as JSON additionalContext for reliable injection ---

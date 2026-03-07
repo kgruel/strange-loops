@@ -18,7 +18,6 @@ from loops.lenses._helpers import (
     body as _body,
     find_item as _find_item,
     label as _label,
-    render_session as _render_session,
 )
 
 if TYPE_CHECKING:
@@ -213,16 +212,28 @@ def _render_identity_decisions(section: "FoldSection", *, max_items: int = 5) ->
 # ---------------------------------------------------------------------------
 
 def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
-    """Render non-identity sections compressed for orientation."""
+    """Render non-identity sections compressed for orientation.
+
+    Same rendering strategies as the prompt lens but within the identity
+    context — sessions compact, threads grouped, decisions names-only,
+    tasks with body.
+    """
     lines: list[str] = []
 
     section_map = {s.kind: s for s in sections}
 
-    # 1. Session — active sessions
+    # 1. Session — active only, compact
     if "session" in section_map:
-        lines.extend(_render_session(section_map["session"]))
+        active = [
+            i for i in section_map["session"].items
+            if i.payload.get("status") not in RESOLVED_STATUSES
+        ]
+        if active:
+            names = [_label(i, section_map["session"].key_field) for i in active]
+            lines.append(f"## SESSION")
+            lines.append(f"  online: {', '.join(names)}")
 
-    # 2. Tasks — show open items
+    # 2. Tasks — show open items with body
     if "task" in section_map:
         active = [
             i for i in section_map["task"].items
@@ -230,7 +241,7 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
         ]
         if active:
             lines.append("")
-            lines.append("## Open Tasks")
+            lines.append("## TASK")
             for item in active:
                 label = _label(item, section_map["task"].key_field)
                 body = _body(item)
@@ -241,41 +252,55 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
                 else:
                     lines.append(f"  {label}{pri_tag}")
 
-    # 3. Threads — open names, split by delegation
+    # 3. Threads — grouped by status
     if "thread" in section_map:
         active = [
             i for i in section_map["thread"].items
             if i.payload.get("status") not in RESOLVED_STATUSES
         ]
-        mine = [i for i in active if not i.payload.get("delegate")]
-        delegated = [i for i in active if i.payload.get("delegate")]
-        kf = section_map["thread"].key_field
-        if mine:
-            lines.append("")
-            names = [_label(i, kf) for i in mine]
-            if len(names) <= _PROMPT_ITEM_CAP:
-                lines.append(f"**Open threads**: {', '.join(names)}")
-            else:
-                shown = names[:_PROMPT_ITEM_CAP]
-                lines.append(
-                    f"**Open threads**: {', '.join(shown)} "
-                    f"(+{len(names) - _PROMPT_ITEM_CAP} more)"
-                )
-        if delegated:
-            by_kind: dict[str, list[str]] = {}
-            for i in delegated:
-                d = i.payload["delegate"]
-                by_kind.setdefault(d, []).append(_label(i, kf))
-            for kind, names in by_kind.items():
-                lines.append(
-                    f"  *delegate {kind}*: {', '.join(names)}"
-                )
+        if active:
+            mine = [i for i in active if not i.payload.get("delegate")]
+            delegated = [i for i in active if i.payload.get("delegate")]
+            kf = section_map["thread"].key_field
 
-    # 4. Everything else — count summary only
+            open_items = [i for i in mine if i.payload.get("status") not in {"parked"}]
+            parked_items = [i for i in mine if i.payload.get("status") == "parked"]
+
+            lines.append("")
+            lines.append("## THREAD")
+            if open_items:
+                names = [_label(i, kf) for i in open_items]
+                lines.append(f"  open: {', '.join(names)}")
+            if parked_items:
+                names = [_label(i, kf) for i in parked_items]
+                lines.append(f"  parked: {', '.join(names)}")
+            if delegated:
+                by_kind: dict[str, list[str]] = {}
+                for i in delegated:
+                    d = i.payload["delegate"]
+                    by_kind.setdefault(d, []).append(_label(i, kf))
+                for kind, names in by_kind.items():
+                    lines.append(f"  *delegate {kind}*: {', '.join(names)}")
+
+    # 4. Decisions — names only (reference material)
+    for kind in ("decision", "dissolution", "vision"):
+        if kind in section_map:
+            s = section_map[kind]
+            sorted_items = sorted(s.items, key=lambda i: i.ts or 0, reverse=True)
+            shown = sorted_items[:_PROMPT_ITEM_CAP]
+            remaining = len(sorted_items) - len(shown)
+            lines.append("")
+            lines.append(f"## {kind.upper()}")
+            for item in shown:
+                lines.append(f"  {_label(item, s.key_field)}")
+            if remaining > 0:
+                lines.append(f"  ({remaining} more in store)")
+
+    # 5. Everything else — count summary only
+    handled = _IDENTITY_KINDS | _ACTIONABLE_KINDS | _SESSION_KINDS | _SKIP_KINDS
+    handled |= {"thread", "decision", "dissolution", "vision"}
     for s in sections:
-        if s.kind in _ACTIONABLE_KINDS | _SESSION_KINDS | _SKIP_KINDS | {"thread"}:
-            continue
-        if s.kind in _IDENTITY_KINDS:
+        if s.kind in handled:
             continue
         active = [
             i for i in s.items

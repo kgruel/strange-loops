@@ -3,6 +3,13 @@
 Optimized for LLM consumption: markdown sections, no truncation, no ANSI,
 no zoom levels. Always renders the same shape regardless of context.
 
+Attention budget drives rendering per kind:
+- decisions: names only (reference material, drill down for body)
+- threads: grouped by status (open vs parked = orientation)
+- tasks: name + body (working context, actionable)
+- sessions: active only, compact (presence signal)
+- log/change: skipped (noise)
+
 Generic schema prompt — renders active items per section. Identity-specific
 narrative rendering lives in config/lenses/identity_prompt.py, declared
 via lens { fold "identity_prompt" } in identity.vertex.
@@ -18,16 +25,16 @@ from loops.lenses._helpers import (
     body as _body,
     body_from_payload as _body_from_payload,
     label as _label,
-    render_session as _render_session_lines,
 )
 
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_SESSION_KINDS = {"session"}
-_ACTIONABLE_KINDS = {"task", "session"}
 _SKIP_KINDS = {"log", "change"}
+_NAMES_ONLY_KINDS = {"decision", "dissolution", "vision"}
+_STATUS_GROUPED_KINDS = {"thread"}
+_COMPACT_KINDS = {"session"}
 _SCHEMA_ITEM_CAP = 10
 
 
@@ -43,83 +50,190 @@ def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     return _schema_prompt(populated)
 
 
-def _render_session(section: FoldSection) -> list[str]:
-    """Render session items — active sessions with label + status."""
-    return _render_session_lines(section)
-
-
 def _schema_prompt(sections: list[FoldSection]) -> Block:
     """Structured schema prompt — renders active items per section.
 
-    Filters out resolved/completed items — the prompt lens shows what's
-    active, not what's done. Session kinds get custom rendering.
+    Each kind gets a rendering strategy matched to its role in attention:
+    - Names-only: reference material (decisions). Drill down for detail.
+    - Status-grouped: orientation (threads). Open vs parked matters.
+    - Compact: presence signal (sessions). Active only.
+    - Default: name + body (tasks, etc). Working context.
 
-    Attention budget: skip log/change, cap large sections to most recent items.
+    Attention budget: skip log/change, cap large sections.
     """
     rows: list[Block] = []
     plain = Style()
 
     for s in sections:
-        # Session: custom rendering
-        if s.kind in _SESSION_KINDS:
-            for line in _render_session(s):
-                rows.append(Block.text(line, plain))
-            continue
-
-        # Skip noisy kinds — available via stream if needed
         if s.kind in _SKIP_KINDS:
             continue
 
-        # Other kinds: filter resolved items
-        items = [
-            item for item in s.items
-            if item.payload.get("status") not in RESOLVED_STATUSES
-        ]
-        if not items:
+        if s.kind in _COMPACT_KINDS:
+            lines = _render_compact_session(s)
+            if lines:
+                for line in lines:
+                    rows.append(Block.text(line, plain))
             continue
 
-        # Split delegated items out
-        mine = [i for i in items if not i.payload.get("delegate")]
-        delegated = [i for i in items if i.payload.get("delegate")]
-
-        # Cap large sections to most recent items
-        remaining = 0
-        if len(mine) > _SCHEMA_ITEM_CAP:
-            sorted_items = sorted(mine, key=lambda i: i.ts or 0, reverse=True)
-            remaining = len(mine) - _SCHEMA_ITEM_CAP
-            mine = sorted_items[:_SCHEMA_ITEM_CAP]
-
-        if not mine and not delegated:
+        if s.kind in _NAMES_ONLY_KINDS:
+            lines = _render_names_only(s)
+            if lines:
+                if rows:
+                    rows.append(Block.text("", plain))
+                for line in lines:
+                    rows.append(Block.text(line, plain))
             continue
 
-        if rows:
-            rows.append(Block.text("", plain))
+        if s.kind in _STATUS_GROUPED_KINDS:
+            lines = _render_status_grouped(s)
+            if lines:
+                if rows:
+                    rows.append(Block.text("", plain))
+                for line in lines:
+                    rows.append(Block.text(line, plain))
+            continue
 
-        rows.append(Block.text(f"## {s.kind.upper()}", plain))
-
-        for item in mine:
-            label = _label(item, s.key_field)
-            body = _body(item)
-            if body:
-                rows.append(Block.text(f"  {label}: {body}", plain))
-            else:
-                rows.append(Block.text(f"  {label}", plain))
-
-        if remaining > 0:
-            rows.append(Block.text(f"  ({remaining} more in store)", plain))
-
-        # Delegated items: grouped summary
-        if delegated:
-            by_kind: dict[str, list[str]] = {}
-            for item in delegated:
-                d = item.payload["delegate"]
-                by_kind.setdefault(d, []).append(_label(item, s.key_field))
-            for d_kind, d_names in by_kind.items():
-                rows.append(
-                    Block.text(f"  *delegate {d_kind}*: {', '.join(d_names)}", plain)
-                )
+        # Default: name + body (tasks and any other kinds)
+        lines = _render_default(s)
+        if lines:
+            if rows:
+                rows.append(Block.text("", plain))
+            for line in lines:
+                rows.append(Block.text(line, plain))
 
     return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
+# Rendering strategies
+# ---------------------------------------------------------------------------
+
+def _render_names_only(section: FoldSection) -> list[str]:
+    """Names only — reference material. Recent first, no body.
+
+    For decisions, dissolutions, visions: the topic name is the signal.
+    Body is available via drill-down (loops read <vertex> --kind <kind>).
+    """
+    items = list(section.items)
+    # Sort by recency
+    sorted_items = sorted(items, key=lambda i: i.ts or 0, reverse=True)
+
+    shown = sorted_items[:_SCHEMA_ITEM_CAP]
+    remaining = len(sorted_items) - len(shown)
+
+    lines = [f"## {section.kind.upper()}"]
+    for item in shown:
+        lines.append(f"  {_label(item, section.key_field)}")
+
+    if remaining > 0:
+        lines.append(f"  ({remaining} more in store)")
+
+    return lines
+
+
+def _render_status_grouped(section: FoldSection) -> list[str]:
+    """Grouped by status — orientation signal.
+
+    For threads: open vs parked tells the agent what's active vs noted.
+    Delegated items rendered separately.
+    """
+    active = [
+        i for i in section.items
+        if i.payload.get("status") not in RESOLVED_STATUSES
+    ]
+    if not active:
+        return []
+
+    mine = [i for i in active if not i.payload.get("delegate")]
+    delegated = [i for i in active if i.payload.get("delegate")]
+
+    open_items = [i for i in mine if i.payload.get("status") not in {"parked"}]
+    parked_items = [i for i in mine if i.payload.get("status") == "parked"]
+
+    lines = [f"## {section.kind.upper()}"]
+
+    if open_items:
+        names = [_label(i, section.key_field) for i in open_items]
+        lines.append(f"  open: {', '.join(names)}")
+
+    if parked_items:
+        names = [_label(i, section.key_field) for i in parked_items]
+        lines.append(f"  parked: {', '.join(names)}")
+
+    if delegated:
+        by_delegate: dict[str, list[str]] = {}
+        for item in delegated:
+            d = item.payload["delegate"]
+            by_delegate.setdefault(d, []).append(_label(item, section.key_field))
+        for d_kind, d_names in by_delegate.items():
+            lines.append(f"  *delegate {d_kind}*: {', '.join(d_names)}")
+
+    return lines
+
+
+def _render_compact_session(section: FoldSection) -> list[str]:
+    """Compact presence signal — active sessions only.
+
+    Filters to non-resolved/non-closed. One line listing who's online.
+    """
+    active = [
+        i for i in section.items
+        if i.payload.get("status") not in RESOLVED_STATUSES
+    ]
+    if not active:
+        return []
+
+    names = [_label(i, section.key_field) for i in active]
+    return [f"## SESSION", f"  online: {', '.join(names)}"]
+
+
+def _render_default(section: FoldSection) -> list[str]:
+    """Name + body — working context. Actionable items.
+
+    For tasks and any other kinds: show what's active with enough
+    context to orient. Cap to most recent items.
+    """
+    items = [
+        item for item in section.items
+        if item.payload.get("status") not in RESOLVED_STATUSES
+    ]
+    if not items:
+        return []
+
+    mine = [i for i in items if not i.payload.get("delegate")]
+    delegated = [i for i in items if i.payload.get("delegate")]
+
+    remaining = 0
+    if len(mine) > _SCHEMA_ITEM_CAP:
+        sorted_items = sorted(mine, key=lambda i: i.ts or 0, reverse=True)
+        remaining = len(mine) - _SCHEMA_ITEM_CAP
+        mine = sorted_items[:_SCHEMA_ITEM_CAP]
+
+    if not mine and not delegated:
+        return []
+
+    lines = [f"## {section.kind.upper()}"]
+
+    for item in mine:
+        label = _label(item, section.key_field)
+        body = _body(item)
+        if body:
+            lines.append(f"  {label}: {body}")
+        else:
+            lines.append(f"  {label}")
+
+    if remaining > 0:
+        lines.append(f"  ({remaining} more in store)")
+
+    if delegated:
+        by_kind: dict[str, list[str]] = {}
+        for item in delegated:
+            d = item.payload["delegate"]
+            by_kind.setdefault(d, []).append(_label(item, section.key_field))
+        for d_kind, d_names in by_kind.items():
+            lines.append(f"  *delegate {d_kind}*: {', '.join(d_names)}")
+
+    return lines
 
 
 # ---------------------------------------------------------------------------

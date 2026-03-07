@@ -11,6 +11,8 @@ Verbs (vertex operations):
     loops read project --facts --kind decision --since 7d
     loops project                       Implicit read (= loops read project)
     loops emit project decision topic=x Inject a fact
+    loops sync project                  Run sources (cadence-gated)
+    loops sync project --force          Run all sources unconditionally
     loops close thread my-thread        Resolve thread, capture artifacts
 
 Commands:
@@ -614,6 +616,114 @@ def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
         help_args=[
             HelpArg("file", "Loop or vertex file", positional=True),
             HelpArg("--limit", "Max facts to collect"),
+            HelpArg("--var", "Set variable KEY=VALUE"),
+        ],
+    )
+
+
+def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Sync verb — cadence-gated source execution.
+
+    ``loops sync [vertex] [--force] [--var KEY=VALUE]``
+
+    Default: evaluate cadence predicates, run stale sources.
+    --force: run all sources unconditionally.
+    """
+    from painted import run_cli, show, Block
+    from painted.fidelity import HelpArg
+    from painted.palette import current_palette
+    from engine import load_vertex_program
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("vertex", nargs="?", default=None)
+    pre.add_argument("--force", "-f", action="store_true", default=False)
+    pre.add_argument("--var", action="append", default=[])
+    known, rest = pre.parse_known_args(argv)
+
+    # Resolve vertex path
+    if vertex_path is None:
+        vname = getattr(known, "vertex", None)
+        if vname is not None:
+            try:
+                vertex_path = _resolve_named_vertex(vname)
+            except FileNotFoundError as e:
+                _err(str(e))
+                return 1
+        else:
+            vertex_path = _resolve_vertex_path(None)
+            if vertex_path is None:
+                return 1
+
+    if not vertex_path.exists():
+        _err(f"Error: {vertex_path} does not exist")
+        return 1
+
+    try:
+        vars = _parse_vars(known.var)
+    except ValueError as e:
+        _err(str(e))
+        return 1
+
+    program = load_vertex_program(vertex_path, vars=vars or None)
+
+    if not program.sources:
+        _err("No sources configured")
+        return 1
+
+    force = known.force
+
+    def log_error(fact):
+        payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
+        _err(f"[ERROR] {fact.observer}: {payload}")
+
+    label = "force" if force else "cadence-gated"
+    show(
+        Block.text(
+            f"Syncing {program.vertex.name}: {len(program.sources)} sources ({label})",
+            current_palette().muted,
+        ),
+        file=sys.stderr,
+    )
+
+    def fetch():
+        result = program.sync(on_error=log_error, force=force)
+        return {
+            "ran": result.ran,
+            "skipped": result.skipped,
+            "errors": [
+                {
+                    "kind": e.kind,
+                    "observer": e.observer,
+                    "payload": dict(e.payload) if hasattr(e.payload, "items") else e.payload,
+                }
+                for e in result.errors
+            ],
+            "ticks": [
+                {
+                    "name": tick.name,
+                    "ts": tick.ts,
+                    "payload": tick.payload,
+                    "origin": getattr(tick, "origin", ""),
+                }
+                for tick in result.ticks
+            ],
+        }
+
+    def render(ctx, data):
+        from .lenses.sync import sync_view
+
+        return sync_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="loops sync",
+        description=f"Sync vertex {program.vertex.name}",
+        help_args=[
+            HelpArg("vertex", "Vertex name", positional=True),
+            HelpArg("--force", "Run all sources unconditionally"),
             HelpArg("--var", "Set variable KEY=VALUE"),
         ],
     )
@@ -1946,9 +2056,8 @@ def _whoami_from_identity_store() -> str:
 
 
 # Verb-first dispatch: `loops <verb> [vertex] [args]`.
-# These are the primary CLI verbs — read (implicit default), emit, close.
-# sync will be added by cadence-implementation.
-_VERBS = frozenset({"read", "fold", "stream", "emit", "close"})
+# These are the primary CLI verbs — read (implicit default), emit, sync, close.
+_VERBS = frozenset({"read", "fold", "stream", "emit", "close", "sync"})
 
 # Dev and setup commands dispatched directly.
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store", "run"})
@@ -1959,7 +2068,7 @@ _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 
 # Vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
-    "read", "fold", "stream", "emit", "close", "store",
+    "read", "fold", "stream", "emit", "close", "sync", "store",
     "ls", "add", "rm", "export",
 })
 
@@ -2023,6 +2132,7 @@ def _render_main_help(argv: list[str]) -> int:
         flags=(
             HelpFlag(None, "read", "Read vertex state (default)", detail="[vertex] [--facts] [--ticks] [--kind KIND] [--since SINCE]"),
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
+            HelpFlag(None, "sync", "Run sources (cadence-gated)", detail="[vertex] [--force] [--var KEY=VALUE]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
         ),
     )
@@ -2150,6 +2260,8 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
         return _run_emit(rest, vertex_path=None, observer=observer)
     if verb == "close":
         return _run_close(rest, vertex_path=None, observer=observer)
+    if verb == "sync":
+        return _run_sync(rest, vertex_path=None)
 
     _err(f"Unknown verb: {verb}")
     return 1
@@ -2200,6 +2312,8 @@ def _dispatch_observer(
         return _run_emit(args, vertex_path=vertex_path, observer=observer)
     if op == "close":
         return _run_close(args, vertex_path=vertex_path, observer=observer)
+    if op == "sync":
+        return _run_sync(args, vertex_path=vertex_path)
 
     # Dev tools
     if op == "store":
@@ -2296,7 +2410,7 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Main entry point — three-tier dispatch.
 
-    1. Known verbs (read, emit, close, fold, stream) → verb-first dispatch
+    1. Known verbs (read, emit, sync, close, fold, stream) → verb-first dispatch
     2. Dev/setup commands (test, compile, validate, ...) → direct dispatch
     3. Vertex name → implicit read (or vertex-first op for backward compat)
     """

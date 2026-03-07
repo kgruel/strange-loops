@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
 
 _IDENTITY_KINDS = {"self", "principle", "observation", "intention", "decision"}
-_HANDOFF_KINDS = {"session", "handoff"}
-_ACTIONABLE_KINDS = {"task", "session", "handoff"}
+_SESSION_KINDS = {"session"}
+_ACTIONABLE_KINDS = {"task", "session"}
 _SKIP_KINDS = {"log", "change"}
 _PROMPT_ITEM_CAP = 3
 
@@ -218,10 +218,9 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
 
     section_map = {s.kind: s for s in sections}
 
-    # 1. Session/handoff — full render
-    for kind in ("session", "handoff"):
-        if kind in section_map:
-            lines.extend(_render_session(section_map[kind]))
+    # 1. Session — active sessions
+    if "session" in section_map:
+        lines.extend(_render_session(section_map["session"]))
 
     # 2. Tasks — show open items
     if "task" in section_map:
@@ -274,7 +273,7 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
 
     # 4. Everything else — count summary only
     for s in sections:
-        if s.kind in _ACTIONABLE_KINDS | _HANDOFF_KINDS | _SKIP_KINDS | {"thread"}:
+        if s.kind in _ACTIONABLE_KINDS | _SESSION_KINDS | _SKIP_KINDS | {"thread"}:
             continue
         if s.kind in _IDENTITY_KINDS:
             continue

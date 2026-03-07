@@ -77,32 +77,18 @@ def render_session(
     label_fn=None,
     body_fn=None,
 ) -> list[str]:
-    """Render session as handoff content.
-
-    Resolved sessions render as HANDOFF with message + produced.
-    Active sessions render as SESSION with label + body.
-    """
+    """Render session items — active sessions with label + status."""
     _label = label_fn or label
     _body = body_fn or body
     lines: list[str] = []
     for item in section.items:
-        status = item.payload.get("status", "")
-        message = item.payload.get("message", "")
-        produced = item.payload.get("produced", [])
-
-        if status in RESOLVED_STATUSES and message:
-            lines.append("## HANDOFF")
-            lines.append(f"  {message}")
-            if produced:
-                lines.append(f"  produced: {', '.join(produced)}")
+        lbl = _label(item, section.key_field)
+        bdy = _body(item)
+        lines.append("## SESSION")
+        if bdy:
+            lines.append(f"  {lbl}: {bdy}")
         else:
-            lbl = _label(item, section.key_field)
-            bdy = _body(item)
-            lines.append("## SESSION")
-            if bdy:
-                lines.append(f"  {lbl}: {bdy}")
-            else:
-                lines.append(f"  {lbl}")
+            lines.append(f"  {lbl}")
     return lines
 
 

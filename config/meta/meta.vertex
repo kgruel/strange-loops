@@ -20,6 +20,5 @@ loops {
   task        { fold { items "by" "name" } }
   vision      { fold { items "by" "name" } }
   dissolution { fold { items "by" "concept" } }
-  handoff     { fold { items "collect" 1 } }
   session     { fold { items "by" "name" } }
 }

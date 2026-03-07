@@ -73,7 +73,7 @@ def fold_view(
     if "decision" in sections:
         _decisions(rows, sections["decision"], zoom, width)
 
-    # Session/handoff — last handoff if present
+    # Session — latest session state
     if "session" in sections:
         _session(rows, sections["session"], zoom, width)
 
@@ -283,20 +283,16 @@ def _session(
     zoom: Zoom,
     width: int | None,
 ) -> None:
-    # Show most recent session/handoff
+    # Show most recent session
     sorted_items = sorted(section.items, key=lambda i: i.ts or 0, reverse=True)
     if not sorted_items:
         return
 
     latest = sorted_items[0]
-    status = latest.payload.get("status", "")
     message = latest.payload.get("message", "")
+    label = _label(latest, section.key_field)
 
-    if status in RESOLVED_STATUSES and message:
-        rows.append(Block.text("Last handoff:", Style(bold=True), width=width))
-        rows.append(Block.text(f"  {message}", Style(), width=width))
-    elif message:
-        label = _label(latest, section.key_field)
+    if message:
         rows.append(Block.text(f"Session: {label}", Style(bold=True), width=width))
         rows.append(Block.text(f"  {message}", Style(), width=width))
 

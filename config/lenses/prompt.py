@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_HANDOFF_KINDS = {"session", "handoff"}
-_ACTIONABLE_KINDS = {"task", "session", "handoff"}
+_SESSION_KINDS = {"session"}
+_ACTIONABLE_KINDS = {"task", "session"}
 _SKIP_KINDS = {"log", "change"}
 _SCHEMA_ITEM_CAP = 10
 
@@ -44,7 +44,7 @@ def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 
 
 def _render_session(section: FoldSection) -> list[str]:
-    """Render session as handoff content — message and produced artifacts."""
+    """Render session items — active sessions with label + status."""
     return _render_session_lines(section)
 
 
@@ -52,8 +52,7 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
     """Structured schema prompt — renders active items per section.
 
     Filters out resolved/completed items — the prompt lens shows what's
-    active, not what's done. Exception: session/handoff kinds get custom
-    rendering (resolved state IS the handoff content).
+    active, not what's done. Session kinds get custom rendering.
 
     Attention budget: skip log/change, cap large sections to most recent items.
     """
@@ -61,8 +60,8 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
     plain = Style()
 
     for s in sections:
-        # Session/handoff: custom rendering
-        if s.kind in _HANDOFF_KINDS:
+        # Session: custom rendering
+        if s.kind in _SESSION_KINDS:
             for line in _render_session(s):
                 rows.append(Block.text(line, plain))
             continue
@@ -131,8 +130,7 @@ def stream_prompt_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, 
     """Render stream facts as system prompt content.
 
     Strips timestamps, date headers, and kind tags. Emits the full message
-    of each fact — most recent first. For single-fact use cases (handoff),
-    this produces just the message text.
+    of each fact — most recent first.
     """
     if isinstance(data, dict):
         facts = data.get("facts", [])

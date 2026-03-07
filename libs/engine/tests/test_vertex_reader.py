@@ -95,16 +95,16 @@ class TestVertexRead:
         """FoldCollect with max=1 keeps the latest full payload."""
         from engine import vertex_read
 
-        vpath = _create_vertex_file(tmp_path, "test", '  handoff { fold { items "collect" 1 } }')
+        vpath = _create_vertex_file(tmp_path, "test", '  alert { fold { items "collect" 1 } }')
         _seed_facts(tmp_path / "store.db", [
-            {"kind": "handoff", "ts": 1000.0, "payload": {"message": "first session"}},
-            {"kind": "handoff", "ts": 5000.0, "payload": {"message": "second session"}},
+            {"kind": "alert", "ts": 1000.0, "payload": {"message": "first alert"}},
+            {"kind": "alert", "ts": 5000.0, "payload": {"message": "second alert"}},
         ])
 
         result = vertex_read(vpath)
-        items = result["handoff"]["items"]
+        items = result["alert"]["items"]
         assert len(items) == 1
-        assert items[0]["message"] == "second session"
+        assert items[0]["message"] == "second alert"
 
     def test_empty_store(self, tmp_path):
         """No store file → initial state for all kinds."""
@@ -127,7 +127,7 @@ class TestVertexRead:
         result = vertex_read(vpath)
         assert result["decision"]["items"] == {}
 
-    def test_handoff_proof(self, tmp_path):
+    def test_declaration_driven_kinds(self, tmp_path):
         """Adding a new kind to vertex surfaces in read with zero code changes.
 
         This is the proof that the architecture works: new kinds are driven
@@ -135,27 +135,27 @@ class TestVertexRead:
         """
         from engine import vertex_read
 
-        # Vertex with original 4 kinds + handoff (5th)
+        # Vertex with original 4 kinds + alert (5th)
         vpath = _create_vertex_file(tmp_path, "project", """
   decision { fold { items "by" "topic" } }
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
-  handoff  { fold { items "collect" 1 } }
+  alert    { fold { items "collect" 1 } }
 """)
         _seed_facts(tmp_path / "store.db", [
             {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
-            {"kind": "handoff", "ts": 2000.0, "payload": {"context": "finishing auth"}},
+            {"kind": "alert", "ts": 2000.0, "payload": {"context": "finishing auth"}},
         ])
 
         result = vertex_read(vpath)
 
         # All 5 kinds present in result
-        assert set(result.keys()) == {"decision", "thread", "change", "task", "handoff"}
+        assert set(result.keys()) == {"decision", "thread", "change", "task", "alert"}
 
-        # Handoff surfaced automatically — no reader code knows about it
-        assert len(result["handoff"]["items"]) == 1
-        assert result["handoff"]["items"][0]["context"] == "finishing auth"
+        # Alert surfaced automatically — no reader code knows about it
+        assert len(result["alert"]["items"]) == 1
+        assert result["alert"]["items"][0]["context"] == "finishing auth"
 
         # Original kinds still work
         assert "auth" in result["decision"]["items"]

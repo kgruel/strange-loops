@@ -16,8 +16,8 @@ observer="$($LOOPS whoami 2>/dev/null || echo "unknown")"
 $LOOPS emit project session name="$observer" status=open 2>/dev/null || true
 $LOOPS fold project --lens prompt --plain 2>/dev/null || true
 
-# 2. Identity
-$LOOPS fold identity --lens prompt --plain 2>/dev/null || true
+# 2. Identity (lens declared in identity.vertex: identity_prompt)
+$LOOPS fold identity --plain 2>/dev/null || true
 
 # 3. Comms — poll discord, show new messages, mark check-in
 $LOOPS run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null || true

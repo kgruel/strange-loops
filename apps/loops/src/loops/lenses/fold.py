@@ -1,4 +1,9 @@
-"""Fold lens — zoom-aware rendering of collapsed vertex state."""
+"""Fold lens — zoom-aware rendering of collapsed vertex state.
+
+Generic defaults: simple, not smart. Driven by section metadata
+(key_field, fold_type). Counts, labels, bodies, progressive zoom.
+If a domain needs more, write a custom lens.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -70,7 +75,7 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
         observers = {item.observer for item in s.items if item.observer}
         show_observer = len(observers) > 1
 
-        _render_items(rows, s.items, s.key_field, s.kind, zoom, fmt, dim_style, meta_style, width, show_observer=show_observer)
+        _render_items(rows, s.items, s.key_field, s.fold_type, zoom, fmt, dim_style, meta_style, width, show_observer=show_observer)
 
     return join_vertical(*rows)
 
@@ -79,24 +84,12 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 status_view = fold_view
 
 
-_KNOWN_HEADERS: dict[str, str] = {
-    "decision": "Decisions",
-    "thread": "Threads",
-    "task": "Tasks",
-    "change": "Changes",
-    "self": "Self",
-    "principle": "Principles",
-    "observation": "Observations",
-    "intention": "Intentions",
-}
-
-
 def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     if piped:
-        # Markdown-style headers for piped output — directly usable
-        # as system prompts, notes, piped to other tools.
         return f"## {kind.upper()}"
-    label = _KNOWN_HEADERS.get(kind, kind.title() + ("s" if kind[-1] != "s" else ""))
+    label = kind.title()
+    if not kind.endswith("s"):
+        label += "s"
     return f"{label} ({count}):"
 
 
@@ -104,7 +97,7 @@ def _render_items(
     rows: list[Block],
     items: tuple[FoldItem, ...],
     key_field: str | None,
-    kind: str,
+    fold_type: str,
     zoom: Zoom,
     fmt,
     dim_style: Style,
@@ -113,29 +106,32 @@ def _render_items(
     *,
     show_observer: bool = False,
 ) -> None:
-    """Generic item renderer — key_field drives the label, everything else is detail.
+    """Generic item renderer — metadata-driven.
 
-    When key_field is set (from FoldBy declaration), use it as the primary label.
-    Otherwise fall back to heuristic scan of common label fields.
+    "by" folds: key_field drives the label, remaining fields are body/detail.
+    "collect" folds: no key promotion, render content from first payload field.
 
     When show_observer is True, appends observer attribution to each item —
-    activated when a section contains items from multiple observers (unscoped fold).
+    activated when a section contains items from multiple observers.
     """
-    # Build ordered label-field priority list
-    label_fields = _label_fields(key_field)
+    is_by = fold_type == "by"
 
     for item in items:
         payload = item.payload
-        label = _find_label(payload, label_fields, kind)
-        used_label = _used_label_field(payload, label_fields)
+        if is_by and key_field:
+            label = str(payload.get(key_field, ""))
+            used_label_field = key_field
+        else:
+            # collect folds or missing key_field: first non-empty field
+            label, used_label_field = _first_field(payload)
+
         date = fmt(item.ts) if item.ts else ""
 
         # Observer suffix when multi-observer fold
         obs_suffix = f" ({item.observer})" if show_observer and item.observer else ""
 
         # SUMMARY: label + body snippet (first non-label payload field)
-        # More useful than label + date — shows what the fold *contains*.
-        body = _find_body(payload, used_label)
+        body = _find_body(payload, used_label_field)
         if body:
             reserved = len(label) + len(obs_suffix) + 6  # "  label (obs): snippet"
             if width is not None:
@@ -154,9 +150,9 @@ def _render_items(
             # Show short ID for reference
             if item.id:
                 rows.append(Block.text(f"    id:{item.id[:8]}", meta_style, width=width))
-            skip = {used_label} if used_label else set()
+            skip = {used_label_field} if used_label_field else set()
             # Also skip the body field already shown in the summary line
-            body_field = _find_body_field(payload, used_label)
+            body_field = _find_body_field(payload, used_label_field)
             if body_field:
                 skip = skip | {body_field}
             for k, v in payload.items():
@@ -176,41 +172,17 @@ def _render_items(
                 rows.append(Block.text(f"    _origin: {item.origin}", meta_style, width=width))
 
 
-def _label_fields(key_field: str | None) -> tuple[str, ...]:
-    """Build ordered label-field priority list from key_field."""
-    base = ("topic", "name", "title", "summary", "message")
-    if key_field is None:
-        return base
-    if key_field in base:
-        # Promote key_field to front
-        return (key_field,) + tuple(f for f in base if f != key_field)
-    return (key_field,) + base
-
-
-def _used_label_field(payload: dict, label_fields: tuple[str, ...]) -> str | None:
-    """Return the field name actually used as the label, or None."""
-    for lf in label_fields:
-        if payload.get(lf):
-            return lf
-    return None
-
-
-def _find_label(payload: dict, label_fields: tuple[str, ...], kind: str) -> str:
-    """Extract the best label from a payload dict."""
-    for lf in label_fields:
-        val = payload.get(lf)
-        if val:
-            return str(val)
-    # Fall back to first key with a value
+def _first_field(payload: dict) -> tuple[str, str | None]:
+    """Return (value, field_name) for the first non-empty payload field."""
     for k, v in payload.items():
         if v:
-            return f"{k}: {v}"
-    return kind
+            return str(v), k
+    return "?", None
 
 
-def _find_body(payload: dict, used_label: str | None) -> str | None:
+def _find_body(payload: dict, used_label_field: str | None) -> str | None:
     """Find the first non-label field value — the 'body' of the item."""
-    skip = {used_label} if used_label else set()
+    skip = {used_label_field} if used_label_field else set()
     for k, v in payload.items():
         if k in skip or not v:
             continue
@@ -218,9 +190,9 @@ def _find_body(payload: dict, used_label: str | None) -> str | None:
     return None
 
 
-def _find_body_field(payload: dict, used_label: str | None) -> str | None:
+def _find_body_field(payload: dict, used_label_field: str | None) -> str | None:
     """Return the field name of the body, or None."""
-    skip = {used_label} if used_label else set()
+    skip = {used_label_field} if used_label_field else set()
     for k, v in payload.items():
         if k in skip or not v:
             continue
@@ -234,7 +206,7 @@ def _truncate(text: str, max_len: int) -> str:
         max_len = 10
     if len(text) <= max_len:
         return text
-    return text[: max_len - 1] + "…"
+    return text[: max_len - 1] + "\u2026"
 
 
 def _format_ts_full(ts) -> str:

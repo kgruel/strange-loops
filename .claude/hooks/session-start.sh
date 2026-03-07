@@ -12,14 +12,27 @@ fi
 
 observer="$($LOOPS whoami 2>/dev/null || echo "unknown")"
 
-# 1. Session marker + project context
-$LOOPS emit project session name="$observer" status=open 2>/dev/null || true
-$LOOPS read project --lens prompt --plain 2>/dev/null || true
+# --- Side effects (no stdout needed) ---
+$LOOPS emit project session name="$observer" status=open >/dev/null 2>&1 || true
+$LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1 || true
+$LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
-# 2. Identity (lens declared in identity.vertex: identity_prompt)
-$LOOPS read identity --plain 2>/dev/null || true
+# --- Collect context ---
+project=$($LOOPS read project --lens prompt --plain 2>/dev/null || true)
+identity=$($LOOPS read identity --plain 2>/dev/null || true)
+comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 
-# 3. Comms — poll discord, show new messages, mark check-in
-$LOOPS run ~/.config/loops/comms/discord/discord.vertex --plain -q 2>/dev/null || true
-$LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true
-$LOOPS emit comms/native check name="$observer" 2>/dev/null || true
+context=""
+[[ -n "$project" ]]  && context+="$project"$'\n\n'
+[[ -n "$identity" ]] && context+="$identity"$'\n\n'
+[[ -n "$comms" && "$comms" != "(quiet)" ]] && context+="$comms"
+
+# --- Emit as JSON additionalContext for reliable injection ---
+if [[ -n "$context" ]]; then
+  jq -n --arg ctx "$context" '{
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: $ctx
+    }
+  }'
+fi

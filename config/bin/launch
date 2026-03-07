@@ -5,7 +5,7 @@ agent="${1:?Usage: launch <agent-name> [working-dir]}"
 workdir="${2:-.}"
 
 # Resolve loops binary from the monorepo venv
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd -P "$(dirname "$0")/../.." && pwd)"
 LOOPS="${REPO_ROOT}/.venv/bin/loops"
 
 if [[ ! -x "$LOOPS" ]]; then
@@ -14,7 +14,7 @@ if [[ ! -x "$LOOPS" ]]; then
 fi
 
 # Identity belongs to the agent, not the delegation path
-identity=$("$LOOPS" fold identity --observer "$agent" --lens prompt --plain 2>/dev/null || true)
+identity=$("$LOOPS" read identity --observer "$agent" --plain 2>/dev/null || true)
 
 if [[ -z "$identity" ]]; then
   echo "warning: no identity found for observer '$agent'" >&2

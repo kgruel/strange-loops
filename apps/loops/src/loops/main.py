@@ -16,13 +16,14 @@ Verbs (vertex operations):
     loops close thread my-thread        Resolve thread, capture artifacts
 
 Commands:
-    loops test <file> --input <f>       Run parse pipeline against sample input
+    loops test <file>                   Test a .loop file (run command, show facts)
+    loops test <file> --input <f>       Test parse pipeline against sample input
     loops compile <file>                Show compiled structure
     loops validate <file>               Validate syntax and flow
     loops store [file]                  Inspect store (name, path, or .db)
     loops init [name]                   Initialize vertex
     loops ls                            List vertices
-    loops run <file>                    Execute a .loop or .vertex file
+    loops run <file>                    Execute a .vertex file
 """
 
 from __future__ import annotations
@@ -394,17 +395,20 @@ def _run_validate(argv: list[str]) -> int:
 
 
 def _run_test(argv: list[str]) -> int:
-    """Run test command via painted CLI harness."""
+    """Test a .loop file — preview facts without persistence.
+
+    Without --input: run the command, stream output through parse, show facts.
+    With --input: use file as input for parse pipeline instead of running.
+    """
     from painted import run_cli
     from painted.fidelity import HelpArg
-    from atoms import run_parse
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
-    from .lenses.test import test_view
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file")
     pre.add_argument("--input", "-i", default=None)
+    pre.add_argument("--limit", "-n", type=int, default=None)
     known, rest = pre.parse_known_args(argv)
 
     path = Path(known.file)
@@ -416,52 +420,121 @@ def _run_test(argv: list[str]) -> int:
         _err("Error: test command only works with .loop files")
         return 1
 
-    def fetch():
-        ast = parse_loop_file(path)
-        validate_loop(ast)
-        source = compile_loop(ast)
+    if known.input:
+        # Parse-only mode: feed file through parse pipeline
+        from atoms import run_parse
+        from .lenses.test import test_view
 
-        if source.parse is None:
-            return {"results": [], "skipped": 0, "warning": "no parse pipeline defined"}
+        def fetch():
+            ast = parse_loop_file(path)
+            validate_loop(ast)
+            source = compile_loop(ast)
 
-        if known.input:
+            if source.parse is None:
+                return {"results": [], "skipped": 0, "warning": "no parse pipeline defined"}
+
             input_path = Path(known.input)
             if not input_path.exists():
                 raise FileNotFoundError(f"{input_path} does not exist")
             lines = input_path.read_text().splitlines()
-        else:
-            lines = sys.stdin.read().splitlines()
 
-        results = []
-        skipped = 0
+            results = []
+            skipped = 0
 
-        for line in lines:
-            result = run_parse(line, source.parse)
-            if result is None:
-                skipped += 1
-            else:
-                results.append(result)
+            for line in lines:
+                result = run_parse(line, source.parse)
+                if result is None:
+                    skipped += 1
+                else:
+                    results.append(result)
 
-        return {"results": results, "skipped": skipped}
+            return {"results": results, "skipped": skipped}
 
-    def render(ctx, data):
-        return test_view(data, ctx.zoom, ctx.width)
+        def render(ctx, data):
+            return test_view(data, ctx.zoom, ctx.width)
 
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops test",
-        description="Test parse pipeline against sample input",
-        help_args=[
-            HelpArg("file", "Loop file to test", positional=True),
-            HelpArg("--input", "Input file (default: stdin)"),
-        ],
-    )
+        return run_cli(
+            rest,
+            fetch=fetch,
+            render=render,
+            prog="loops test",
+            description="Test parse pipeline against sample input",
+            help_args=[
+                HelpArg("file", "Loop file to test", positional=True),
+                HelpArg("--input", "Input file to feed through parse pipeline"),
+                HelpArg("--limit", "Max facts to show"),
+            ],
+        )
+
+    else:
+        # Run mode: execute command, stream through parse, show facts
+        from .lenses.run import run_facts_view
+
+        ast = parse_loop_file(path)
+        validate_loop(ast)
+        source = compile_loop(ast)
+        limit = known.limit
+
+        def fetch():
+            collected: list[dict] = []
+
+            async def _collect():
+                count = 0
+                async for fact in source.collect():
+                    collected.append(
+                        {
+                            "kind": fact.kind,
+                            "ts": fact.ts,
+                            "payload": fact.payload,
+                            "observer": fact.observer,
+                            "origin": fact.origin,
+                        }
+                    )
+                    count += 1
+                    if limit and count >= limit:
+                        break
+
+            asyncio.run(_collect())
+            return collected
+
+        async def fetch_stream():
+            accumulated: list[dict] = []
+            count = 0
+            async for fact in source.collect():
+                accumulated.append(
+                    {
+                        "kind": fact.kind,
+                        "ts": fact.ts,
+                        "payload": fact.payload,
+                        "observer": fact.observer,
+                        "origin": fact.origin,
+                    }
+                )
+                count += 1
+                yield list(accumulated)
+                if limit and count >= limit:
+                    break
+
+        def render(ctx, data):
+            return run_facts_view(data, ctx.zoom, ctx.width)
+
+        return run_cli(
+            rest,
+            fetch=fetch,
+            fetch_stream=fetch_stream,
+            render=render,
+            prog="loops test",
+            description=f"Run {path.name} — preview facts, no persistence",
+            help_args=[
+                HelpArg("file", "Loop file to test", positional=True),
+                HelpArg("--input", "Input file to feed through parse pipeline"),
+                HelpArg("--limit", "Max facts to show"),
+            ],
+        )
 
 
 def _run_run(argv: list[str]) -> int:
-    """Run command via painted CLI harness — execute a .loop or .vertex file."""
+    """Run command — execute a .vertex file (one-shot sync)."""
     from painted import run_cli
     from painted.fidelity import HelpArg
 
@@ -482,85 +555,13 @@ def _run_run(argv: list[str]) -> int:
         return 1
 
     if path.suffix == ".loop":
-        return _run_run_loop(path, known, rest)
+        _err("Error: use 'loops test' for .loop files")
+        return 1
     elif path.suffix == ".vertex":
         return _run_run_vertex(path, known, rest)
     else:
-        _err(f"Error: run expects a .loop or .vertex file, got {path.suffix}")
+        _err(f"Error: run expects a .vertex file, got {path.suffix}")
         return 1
-
-
-def _run_run_loop(path: Path, known, rest: list[str]) -> int:
-    """Execute a .loop file through run_cli."""
-    from painted import run_cli
-    from painted.fidelity import HelpArg
-    from lang import parse_loop_file, validate_loop
-    from engine import compile_loop
-    from .lenses.run import run_facts_view
-
-    ast = parse_loop_file(path)
-    validate_loop(ast)
-    source = compile_loop(ast)
-    limit = known.limit
-
-    def fetch():
-        collected: list[dict] = []
-
-        async def _collect():
-            count = 0
-            async for fact in source.collect():
-                collected.append(
-                    {
-                        "kind": fact.kind,
-                        "ts": fact.ts,
-                        "payload": fact.payload,
-                        "observer": fact.observer,
-                        "origin": fact.origin,
-                    }
-                )
-                count += 1
-                if limit and count >= limit:
-                    break
-
-        asyncio.run(_collect())
-        return collected
-
-    async def fetch_stream():
-        accumulated: list[dict] = []
-        count = 0
-        async for fact in source.collect():
-            accumulated.append(
-                {
-                    "kind": fact.kind,
-                    "ts": fact.ts,
-                    "payload": fact.payload,
-                    "observer": fact.observer,
-                    "origin": fact.origin,
-                }
-            )
-            count += 1
-            yield list(accumulated)
-            if limit and count >= limit:
-                break
-
-    def render(ctx, data):
-        return run_facts_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        fetch_stream=fetch_stream,
-        render=render,
-        prog="loops run",
-        description=f"Stream facts from {path.name}",
-        help_args=[
-            HelpArg("file", "Loop or vertex file", positional=True),
-            HelpArg("--limit", "Max facts to collect"),
-            HelpArg("--rounds", "Number of rounds", default="1"),
-            HelpArg("--daemon", "Run continuously"),
-            HelpArg("--var", "Set variable KEY=VALUE"),
-        ],
-    )
 
 
 def _run_run_vertex(path: Path, known, rest: list[str]) -> int:
@@ -2140,13 +2141,13 @@ def _render_main_help(argv: list[str]) -> int:
     commands_group = HelpGroup(
         name="Commands",
         flags=(
-            HelpFlag(None, "test", "Run parse pipeline", detail="<file> [--input FILE]"),
+            HelpFlag(None, "test", "Test a .loop file", detail="<file> [--input FILE] [--limit N]"),
             HelpFlag(None, "compile", "Show compiled structure", detail="<file>"),
             HelpFlag(None, "validate", "Validate syntax and flow", detail="[files...]"),
             HelpFlag(None, "store", "Inspect store contents", detail="[file]"),
             HelpFlag(None, "init", "Initialize vertex", detail="[name] [--template NAME]"),
             HelpFlag(None, "ls", "List vertices"),
-            HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
+            HelpFlag(None, "run", "Execute a .vertex file", detail="[file] [--rounds N]"),
             HelpFlag(None, "whoami", "Show resolved observer identity"),
         ),
     )
@@ -2362,9 +2363,9 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
         # Dev tools
         AppCommand(
             "test",
-            "Run parse pipeline against sample input",
+            "Test a .loop file — preview facts, no persistence",
             _run_test,
-            detail="<file> [--input FILE]",
+            detail="<file> [--input FILE] [--limit N]",
         ),
         AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
         AppCommand(
@@ -2381,7 +2382,7 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
         ),
         AppCommand(
             "run",
-            "Execute a .loop or .vertex file",
+            "Execute a .vertex file",
             _run_run,
             detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
         ),

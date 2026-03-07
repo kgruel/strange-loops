@@ -31,7 +31,8 @@ loops emit project thread name="store-ops" status="open"
 
 # Run DSL files
 loops validate disk.loop                        # syntax check
-loops run disk.loop                             # execute, print facts
+loops test disk.loop                            # run command, preview facts
+loops test disk.loop --input sample.txt         # test parse pipeline
 
 # Inspect a store
 loops store data/project.db                     # store contents

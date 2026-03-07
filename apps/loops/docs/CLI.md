@@ -98,7 +98,7 @@ Validate .loop and .vertex files.
 ✗ loops/broken.loop: Parse error: unexpected token 'foo' at line 3
 ```
 
-## `test`
+## `test (--input)`
 
 Test parse pipeline with sample input.
 
@@ -108,6 +108,17 @@ Test parse pipeline with sample input.
   fs: /dev/disk3
 
 --- 3 parsed, 1 skipped ---
+```
+
+## `test (run)`
+
+Run a .loop file — preview facts, no persistence.
+
+```
+  [disk] fs=/dev/sda1, pct=42%, mount=/
+  [memory] used_mb=4096, total_mb=16384
+
+--- 2 facts ---
 ```
 
 ## `ls`
@@ -121,20 +132,9 @@ memory   file:///var/log/mem.csv
 network  https://monitor.local/net
 ```
 
-## `run (facts)`
-
-Stream facts from a running loop.
-
-```
-  [disk] fs=/dev/sda1, pct=42%, mount=/
-  [memory] used_mb=4096, total_mb=16384
-
---- 2 facts ---
-```
-
 ## `run (ticks)`
 
-Stream ticks from a running vertex.
+Run a .vertex file — one-shot sync.
 
 ```
   [2023-11-14T22:13:20+00:00] tick: disk (3 keys)

@@ -1,4 +1,8 @@
-"""Golden tests for the run command (facts and ticks views)."""
+"""Golden tests for run/test command lenses (facts and ticks views).
+
+run_facts_view: used by `test` command (without --input) to show streamed facts.
+run_ticks_view: used by `run` command for .vertex one-shot sync results.
+"""
 from __future__ import annotations
 
 import pytest

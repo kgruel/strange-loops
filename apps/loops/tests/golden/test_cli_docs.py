@@ -87,9 +87,14 @@ def _render_all() -> list[tuple[str, str, str]]:
         block_to_text(validate_view(SAMPLE_VALIDATE, ZOOM, WIDTH)),
     ))
     entries.append((
-        "test",
+        "test (--input)",
         "Test parse pipeline with sample input.",
         block_to_text(_test_view(SAMPLE_TEST, ZOOM, WIDTH)),
+    ))
+    entries.append((
+        "test (run)",
+        "Run a .loop file — preview facts, no persistence.",
+        block_to_text(run_facts_view(SAMPLE_FACTS, ZOOM, WIDTH)),
     ))
     entries.append((
         "ls",
@@ -97,13 +102,8 @@ def _render_all() -> list[tuple[str, str, str]]:
         block_to_text(pop_view(SAMPLE_LS, ZOOM, WIDTH)),
     ))
     entries.append((
-        "run (facts)",
-        "Stream facts from a running loop.",
-        block_to_text(run_facts_view(SAMPLE_FACTS, ZOOM, WIDTH)),
-    ))
-    entries.append((
         "run (ticks)",
-        "Stream ticks from a running vertex.",
+        "Run a .vertex file — one-shot sync.",
         block_to_text(run_ticks_view(SAMPLE_TICKS, ZOOM, WIDTH)),
     ))
 

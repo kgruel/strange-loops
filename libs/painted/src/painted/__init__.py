@@ -52,14 +52,12 @@ from .fidelity import (
     HelpFlag,
     HelpGroup,
     OutputMode,
-    # New API
     Zoom,
     add_cli_args,
     detect_context,
     parse_format,
     parse_mode,
     parse_zoom,
-    resolve_format,
     resolve_mode,
     run_cli,
 )
@@ -129,23 +127,30 @@ def show(
     from ._lens import shape_lens
     from .fidelity import setup_defaults
 
+    # Resolve format to bools — JSON short-circuits, plain suppresses ANSI
+    is_json = format == Format.JSON
+    force_plain = format == Format.PLAIN
+
     # Block passthrough — already rendered
     if isinstance(data, Block):
-        ctx = detect_context(zoom, OutputMode.AUTO, format)
+        if is_json:
+            # Can't JSON-serialize a Block, fall through to ANSI/plain
+            pass
+        ctx = detect_context(zoom, OutputMode.AUTO, force_plain=force_plain)
         setup_defaults(ctx)
-        print_block(data, file, use_ansi=(ctx.format == Format.ANSI))
+        print_block(data, file, use_ansi=ctx.use_ansi)
         return
 
-    # Detect output context
-    ctx = detect_context(zoom, OutputMode.AUTO, format)
-    setup_defaults(ctx)
-
-    # JSON path — serialize directly
-    if ctx.format == Format.JSON:
+    # JSON path — serialize directly, bypasses render pipeline
+    if is_json:
         file.write(_json.dumps(data, default=str))
         file.write("\n")
         file.flush()
         return
+
+    # Detect output context
+    ctx = detect_context(zoom, OutputMode.AUTO, force_plain=force_plain)
+    setup_defaults(ctx)
 
     # Scalars — no structure to inspect, just print
     if lens is None and (data is None or isinstance(data, (str, int, float, bool))):
@@ -157,7 +162,7 @@ def show(
     # Rendered path — lens to Block, then print
     render_fn = lens or shape_lens
     block = render_fn(data, ctx.zoom, ctx.width)
-    print_block(block, file, use_ansi=(ctx.format == Format.ANSI))
+    print_block(block, file, use_ansi=ctx.use_ansi)
 
 
 __all__ = [
@@ -210,7 +215,6 @@ __all__ = [
     "parse_mode",
     "parse_format",
     "resolve_mode",
-    "resolve_format",
     "detect_context",
     # In-place rendering
     "InPlaceRenderer",

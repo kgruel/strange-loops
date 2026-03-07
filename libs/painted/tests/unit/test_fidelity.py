@@ -16,7 +16,6 @@ from painted.fidelity import (
     HelpFlag,
     HelpGroup,
     OutputMode,
-    # New API
     Zoom,
     _build_help_data,
     _extract_add_args_flags,
@@ -26,7 +25,6 @@ from painted.fidelity import (
     parse_format,
     parse_mode,
     parse_zoom,
-    resolve_format,
     resolve_mode,
     run_cli,
 )
@@ -175,26 +173,44 @@ class TestParseFormat:
         assert parse_format(args) == Format.AUTO
 
 
-class TestResolveFormat:
-    """Tests for resolve_format function."""
+class TestUseAnsiResolution:
+    """Tests for use_ansi resolution via detect_context.
 
-    def test_explicit_format_preserved(self):
-        """Non-AUTO formats are returned unchanged."""
-        assert resolve_format(Format.JSON, is_tty=True, mode=OutputMode.LIVE) == Format.JSON
-        assert resolve_format(Format.PLAIN, is_tty=True, mode=OutputMode.LIVE) == Format.PLAIN
-        assert resolve_format(Format.ANSI, is_tty=False, mode=OutputMode.STATIC) == Format.ANSI
+    Format dissolved: resolve_format removed, use_ansi derived from
+    force_plain + TTY detection + mode in detect_context.
+    """
 
-    def test_auto_interactive_gives_ansi(self):
-        """AUTO with INTERACTIVE mode gives ANSI."""
-        assert resolve_format(Format.AUTO, is_tty=False, mode=OutputMode.INTERACTIVE) == Format.ANSI
+    def test_force_plain_gives_no_ansi(self, monkeypatch):
+        """force_plain=True always produces use_ansi=False."""
+        from painted.fidelity import detect_context
 
-    def test_auto_tty_gives_ansi(self):
-        """AUTO with TTY gives ANSI."""
-        assert resolve_format(Format.AUTO, is_tty=True, mode=OutputMode.STATIC) == Format.ANSI
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        ctx = detect_context(Zoom.SUMMARY, OutputMode.STATIC, force_plain=True)
+        assert ctx.use_ansi is False
 
-    def test_auto_pipe_gives_plain(self):
-        """AUTO with pipe gives PLAIN."""
-        assert resolve_format(Format.AUTO, is_tty=False, mode=OutputMode.STATIC) == Format.PLAIN
+    def test_tty_gives_ansi(self, monkeypatch):
+        """TTY without force_plain produces use_ansi=True."""
+        from painted.fidelity import detect_context
+
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        ctx = detect_context(Zoom.SUMMARY, OutputMode.STATIC)
+        assert ctx.use_ansi is True
+
+    def test_pipe_gives_no_ansi(self, monkeypatch):
+        """Pipe without force_plain produces use_ansi=False."""
+        from painted.fidelity import detect_context
+
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        ctx = detect_context(Zoom.SUMMARY, OutputMode.STATIC)
+        assert ctx.use_ansi is False
+
+    def test_interactive_always_ansi(self, monkeypatch):
+        """INTERACTIVE mode forces use_ansi=True even on pipe."""
+        from painted.fidelity import detect_context
+
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        ctx = detect_context(Zoom.SUMMARY, OutputMode.INTERACTIVE)
+        assert ctx.use_ansi is True
 
 
 # =============================================================================
@@ -308,7 +324,7 @@ class TestCliContext:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.STATIC,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=80,
             height=24,

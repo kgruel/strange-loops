@@ -15,7 +15,7 @@ from pathlib import Path
 from types import ModuleType
 
 from painted import Block, CliContext, Zoom
-from painted.fidelity import Format, OutputMode
+from painted.fidelity import OutputMode
 
 CaptureResult = Block | str
 
@@ -113,7 +113,7 @@ def capture_demo(
         ctx = CliContext(
             zoom=zoom,
             mode=OutputMode.STATIC,
-            format=Format.PLAIN,
+            use_ansi=False,
             is_tty=False,
             width=width,
             height=height,

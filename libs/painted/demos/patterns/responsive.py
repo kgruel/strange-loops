@@ -34,7 +34,6 @@ from painted import (
     Align,
     Block,
     CliContext,
-    Format,
     OutputMode,
     Style,
     Wrap,
@@ -539,7 +538,7 @@ class ResponsiveSurface(Surface):
         ctx = CliContext(
             zoom=self._zoom,
             mode=OutputMode.INTERACTIVE,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=self._width,
             height=self._height,
@@ -576,7 +575,7 @@ def _handle_interactive(ctx: CliContext) -> int:
     data = SAMPLE
     if not ctx.is_tty:
         block = _render(ctx, data)
-        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        print_block(block, use_ansi=ctx.use_ansi)
         return 0
     surface = ResponsiveSurface(data, zoom=ctx.zoom)
     asyncio.run(surface.run())

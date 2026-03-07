@@ -1,9 +1,31 @@
-"""Fidelity: zoom, output mode, and format handling for CLI tools.
+"""Fidelity: the CLI framework layer of painted.
 
-Separates three orthogonal concerns:
+This module sits on top of painted's rendering primitives (Block, Style,
+compose, writer) and provides the blessed path for CLI tools: argument
+parsing, context detection, mode dispatch, and lifecycle management.
+
+painted contains two concerns that share Block as their contract:
+
+  Renderer  — cell.py, block.py, compose.py, writer.py, lenses, palette, etc.
+              Pure library code. Turns data into terminal pixels.
+
+  Framework — this module (fidelity.py) and app_runner.py.
+              Connects user intent (-v, --json, pipe detection) to rendering.
+
+The separation exists at the code level: this module has zero module-level
+imports from painted's rendering modules. All rendering imports (Block,
+writer, InPlaceRenderer) are lazy — inside functions — so the framework
+types (Zoom, Format, OutputMode, CliContext) can be imported without
+pulling in the rendering stack.
+
+Within this module, two orthogonal concerns are separated:
 - Zoom (detail level): -v/-q flags, stackable
-- Output Mode (experience): auto-detected or explicit -i/--static/--live
-- Format (serialization): --json/--plain or auto-detected
+- Output Mode (delivery): auto-detected or explicit -i/--static/--live
+
+--json is data export (short-circuits before rendering). --plain suppresses
+ANSI codes (a writer fidelity toggle, not a separate concern). The Format
+enum still exists for argument parsing but dissolves into use_ansi:bool on
+CliContext — lenses never see it.
 
 Usage:
     from painted.fidelity import run_cli, CliContext, Zoom
@@ -72,7 +94,7 @@ class CliContext:
 
     zoom: Zoom
     mode: OutputMode  # Resolved (never AUTO)
-    format: Format  # Resolved (never AUTO)
+    use_ansi: bool  # Writer fidelity — True for styled, False for plain
     is_tty: bool
     width: int
     height: int
@@ -153,35 +175,29 @@ def resolve_mode(
     return OutputMode.STATIC
 
 
-def resolve_format(requested: Format, is_tty: bool, mode: OutputMode) -> Format:
-    """Resolve AUTO to concrete format."""
-    if requested != Format.AUTO:
-        return requested
-    if mode == OutputMode.INTERACTIVE:
-        return Format.ANSI
-    if is_tty:
-        return Format.ANSI
-    return Format.PLAIN
-
-
 def detect_context(
     zoom: Zoom,
     mode: OutputMode,
-    fmt: Format,
+    *,
+    force_plain: bool = False,
     default_mode: OutputMode = OutputMode.LIVE,
 ) -> CliContext:
-    """Detect and resolve full runtime context."""
+    """Detect and resolve full runtime context.
+
+    JSON is not a context concern — callers handle it before reaching here.
+    ``force_plain`` suppresses ANSI when the user passes ``--plain``.
+    """
     is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
     is_pipe = not is_tty
 
     resolved_mode = resolve_mode(mode, is_tty, is_pipe, default_mode)
-    resolved_format = resolve_format(fmt, is_tty, resolved_mode)
+    use_ansi = not force_plain and (is_tty or resolved_mode == OutputMode.INTERACTIVE)
 
     size = shutil.get_terminal_size()
     return CliContext(
         zoom=zoom,
         mode=resolved_mode,
-        format=resolved_format,
+        use_ansi=use_ansi,
         is_tty=is_tty,
         width=size.columns,
         height=size.lines,
@@ -197,7 +213,7 @@ def setup_defaults(ctx: CliContext) -> None:
     """
     from .icon_set import ASCII_ICONS, use_icons
 
-    if ctx.format == Format.PLAIN:
+    if not ctx.use_ansi:
         use_icons(ASCII_ICONS)
 
 
@@ -642,11 +658,18 @@ class CliRunner(Generic[T]):
         mode = parse_mode(parsed)
         fmt = parse_format(parsed)
 
-        # Non-animated formats and minimal zoom imply static mode
-        if mode == OutputMode.AUTO and (fmt in (Format.JSON, Format.PLAIN) or zoom == Zoom.MINIMAL):
+        # JSON short-circuits — it's data export, not rendering
+        is_json = fmt == Format.JSON
+        if is_json:
+            return self._export_json()
+
+        force_plain = fmt == Format.PLAIN
+
+        # Plain text and minimal zoom imply static mode
+        if mode == OutputMode.AUTO and (force_plain or zoom == Zoom.MINIMAL):
             mode = OutputMode.STATIC
 
-        ctx = detect_context(zoom, mode, fmt, self.default_mode)
+        ctx = detect_context(zoom, mode, force_plain=force_plain, default_mode=self.default_mode)
 
         return self._dispatch(ctx)
 
@@ -671,6 +694,21 @@ class CliRunner(Generic[T]):
         print_block(block, use_ansi=use_ansi)
         return 0
 
+    def _export_json(self) -> int:
+        """Export data as JSON — bypasses render pipeline entirely."""
+        try:
+            state = self.fetch()
+        except Exception as exc:
+            message = self._exception_message(exc)
+            print(json.dumps({"error": message}))
+            return 1
+        try:
+            data = asdict(state)  # type: ignore[arg-type]  # T may be dataclass
+        except TypeError:
+            data = state
+        print(json.dumps(data, default=str))
+        return 0
+
     def _dispatch(self, ctx: CliContext) -> int:
         """Dispatch to appropriate output mechanism."""
         setup_defaults(ctx)
@@ -679,21 +717,6 @@ class CliRunner(Generic[T]):
         if self.handlers and ctx.mode in self.handlers:
             result = self.handlers[ctx.mode](ctx)
             return result if isinstance(result, int) else 0
-
-        # JSON format special case
-        if ctx.format == Format.JSON:
-            try:
-                state = self.fetch()
-            except Exception as exc:
-                message = self._exception_message(exc)
-                print(json.dumps({"error": message}))
-                return 1
-            try:
-                data = asdict(state)  # type: ignore[arg-type]  # T may be dataclass
-            except TypeError:
-                data = state
-            print(json.dumps(data, default=str))
-            return 0
 
         # Dispatch by mode
         if ctx.mode == OutputMode.STATIC:
@@ -716,17 +739,17 @@ class CliRunner(Generic[T]):
             state = self.fetch()
         except Exception as exc:
             block = self._fetch_error_block(ctx, exc)
-            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            print_block(block, use_ansi=ctx.use_ansi)
             return 1
 
         try:
             block = self.render(ctx, state)
         except Exception as exc:
             block = self._render_error_block(ctx, exc)
-            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            print_block(block, use_ansi=ctx.use_ansi)
             return 2
 
-        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        print_block(block, use_ansi=ctx.use_ansi)
         return 0
 
     def _run_live(self, ctx: CliContext) -> int:
@@ -770,17 +793,17 @@ class CliRunner(Generic[T]):
             state = self.fetch()
         except Exception as exc:
             block = self._fetch_error_block(ctx, exc)
-            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            print_block(block, use_ansi=ctx.use_ansi)
             return 1
 
         try:
             block = self.render(ctx, state)
         except Exception as exc:
             block = self._render_error_block(ctx, exc)
-            print_block(block, use_ansi=(ctx.format == Format.ANSI))
+            print_block(block, use_ansi=ctx.use_ansi)
             return 2
 
-        print_block(block, use_ansi=(ctx.format == Format.ANSI))
+        print_block(block, use_ansi=ctx.use_ansi)
         return 0
 
     @staticmethod

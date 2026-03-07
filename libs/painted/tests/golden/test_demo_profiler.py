@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from painted import CliContext, Zoom
-from painted.fidelity import Format, OutputMode
+from painted.fidelity import OutputMode
 from tests.helpers import block_to_text
 
 _PROJECT = Path(__file__).resolve().parent.parent.parent
@@ -34,7 +34,7 @@ SAMPLE_PROFILE = _mod.SAMPLE_PROFILE
 
 def _ctx(zoom: Zoom) -> CliContext:
     return CliContext(
-        zoom=zoom, mode=OutputMode.STATIC, format=Format.PLAIN, is_tty=False, width=80, height=24
+        zoom=zoom, mode=OutputMode.STATIC, use_ansi=False, is_tty=False, width=80, height=24
     )
 
 

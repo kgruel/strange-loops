@@ -11,10 +11,8 @@ from painted import Block, Style
 from painted.fidelity import (
     CliContext,
     CliRunner,
-    Format,
     OutputMode,
     Zoom,
-    resolve_format,
     resolve_mode,
     run_cli,
 )
@@ -191,7 +189,7 @@ class TestCliRunnerErrorBlocks:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.STATIC,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=80,
             height=24,
@@ -204,7 +202,7 @@ class TestCliRunnerErrorBlocks:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.STATIC,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=80,
             height=24,
@@ -217,7 +215,7 @@ class TestCliRunnerErrorBlocks:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.STATIC,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=80,
             height=24,
@@ -230,7 +228,7 @@ class TestCliRunnerErrorBlocks:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.STATIC,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=True,
             width=0,
             height=24,
@@ -264,7 +262,7 @@ class TestCliRunnerLiveFallback:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=False,
             width=80,
             height=24,
@@ -286,7 +284,7 @@ class TestCliRunnerLiveFallback:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=False,
             width=80,
             height=24,
@@ -306,7 +304,7 @@ class TestCliRunnerLiveFallback:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=False,
             width=80,
             height=24,
@@ -330,7 +328,7 @@ class TestCliRunnerLiveFallback:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.INTERACTIVE,
-            format=Format.ANSI,
+            use_ansi=True,
             is_tty=False,
             width=80,
             height=24,
@@ -379,7 +377,7 @@ class TestCliRunnerLiveStreaming:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.PLAIN,
+            use_ansi=False,
             is_tty=False,
             width=40,
             height=5,
@@ -433,7 +431,7 @@ class TestCliRunnerLiveStreaming:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.PLAIN,
+            use_ansi=False,
             is_tty=False,
             width=40,
             height=5,
@@ -490,7 +488,7 @@ class TestCliRunnerLiveStreaming:
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
             mode=OutputMode.LIVE,
-            format=Format.PLAIN,
+            use_ansi=False,
             is_tty=False,
             width=40,
             height=5,

@@ -37,46 +37,55 @@ painted is consumed by every app in the monorepo. It doesn't know about loops co
 
 **Trigger**: I need to know where to make a change.
 
-**Three layers, bottom to top:**
+**Two concerns, one contract.** painted contains two distinct subsystems that share `Block` as their contract:
+
+1. **The Renderer** — cells, styled text, blocks, composition, lenses, writer. Pure library code that turns data into terminal pixels. No knowledge of CLI args, modes, or dispatch.
+
+2. **The CLI Framework** — argument parsing, context detection, mode dispatch, lifecycle management. Sits on top of the renderer. Connects user intent (`-v`, `--json`, pipe detection) to rendering.
+
+They live in one package because CLI and TUI are fidelity levels of the same lens — not different apps. But the boundary is real: `fidelity.py` has zero module-level imports from painted's rendering modules. All imports are lazy, inside functions.
+
+**The Renderer** (bottom to top):
 
 ```
 Cell / Span / Line          # atomic units — one character, styled text, row
 Block                       # immutable rectangle of cells — the universal type
 compose / border / pad      # layout operations on Blocks
+writer / InPlaceRenderer    # delivery: dump to stdout or cursor-controlled rewrite
 ```
 
-**On top of that, two modes:**
+**The CLI Framework** (on top of the renderer):
 
 ```
-Static:  print_block()           # dump Block to stdout
-Live:    InPlaceRenderer          # cursor-controlled in-place rewriting
-Full:    Surface + Layer          # alt-screen TUI with keyboard + diff rendering
+fidelity.py                 # run_cli — zoom/mode/format parsing, context detection, dispatch
+app_runner.py               # run_app — multi-command routing through run_cli
 ```
 
-**The CLI harness** (`run_cli` in `fidelity.py`) ties it together:
-- Parses zoom/format/mode from CLI flags
-- Calls `fetch()` for data, `render(ctx, data)` for Block
-- Dispatches to static/live/interactive output
+**The TUI Subsystem** (a separate interactive delivery mechanism):
 
-**Module map** (what lives where):
+```
+Surface + Layer             # alt-screen TUI with keyboard + diff rendering
+```
 
-| Module | Responsibility |
-|--------|---------------|
-| `cell.py` | Cell, Style, EMPTY_CELL |
-| `span.py` | Span, Line |
-| `block.py` | Block, Wrap |
-| `compose.py` | join, pad, border, truncate, Align |
-| `fidelity.py` | Zoom, OutputMode, Format, CliContext, run_cli |
-| `app_runner.py` | AppCommand, run_app (multi-command dispatch) |
-| `writer.py` | Writer, ColorDepth, print_block |
-| `inplace.py` | InPlaceRenderer |
-| `palette.py` | Palette (5 semantic Style roles), presets |
-| `icon_set.py` | IconSet (glyph vocabulary), ASCII fallback |
-| `_record.py` | record_line, PayloadLens, GutterFn |
-| `_lens.py` | shape_lens, tree_lens, chart_lens, flame_lens |
-| `_components/` | Stateful view components (spinner, progress, list, table, etc.) |
-| `tui/` | Surface, Layer, Focus, Search, Buffer, KeyboardInput |
-| `views/` | Public view-layer namespace (re-exports lenses + components) |
+**Module map** (grouped by concern):
+
+| Concern | Module | Responsibility |
+|---------|--------|---------------|
+| Renderer | `cell.py` | Cell, Style, EMPTY_CELL |
+| Renderer | `span.py` | Span, Line |
+| Renderer | `block.py` | Block, Wrap |
+| Renderer | `compose.py` | join, pad, border, truncate, Align |
+| Renderer | `writer.py` | Writer, ColorDepth, print_block |
+| Renderer | `inplace.py` | InPlaceRenderer |
+| Renderer | `palette.py` | Palette (5 semantic Style roles), presets |
+| Renderer | `icon_set.py` | IconSet (glyph vocabulary), ASCII fallback |
+| Renderer | `_record.py` | record_line, PayloadLens, GutterFn |
+| Renderer | `_lens.py` | shape_lens, tree_lens, chart_lens, flame_lens |
+| Renderer | `_components/` | Stateful view components (spinner, progress, list, table, etc.) |
+| Renderer | `views/` | Public view-layer namespace (re-exports lenses + components) |
+| Framework | `fidelity.py` | Zoom, OutputMode, Format, CliContext, run_cli |
+| Framework | `app_runner.py` | AppCommand, run_app (multi-command dispatch) |
+| TUI | `tui/` | Surface, Layer, Focus, Search, Buffer, KeyboardInput |
 
 **Don't reach for yet**: record_line internals, TUI subsystem, mouse protocol.
 

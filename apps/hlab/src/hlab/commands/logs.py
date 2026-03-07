@@ -14,7 +14,7 @@ from collections import deque
 from pathlib import Path
 
 from painted import Block, Style, Zoom, join_vertical
-from painted.fidelity import CliContext, Format
+from painted.fidelity import CliContext
 from painted.inplace import InPlaceRenderer
 from painted.writer import print_block
 
@@ -248,13 +248,13 @@ async def _run_logs_async(ctx: CliContext, args) -> int:
             if filter_ and not filter_.matches(log):
                 continue
 
-            if ctx.format == Format.PLAIN:
+            if not ctx.use_ansi:
                 print(render_log_line_plain(log, config))
             else:
                 blocks.append(render_log_line(log, DEFAULT_THEME, config, state, ctx.width))
             line_count += 1
 
-        if ctx.format != Format.PLAIN and blocks:
+        if ctx.use_ansi and blocks:
             print_block(join_vertical(*blocks), use_ansi=True)
 
         print(f"\n{line_count} lines", file=sys.stderr)

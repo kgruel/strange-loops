@@ -25,7 +25,7 @@ Each test file is self-contained with three small helpers:
 import importlib.util, io, sys
 from pathlib import Path
 from painted import Block, CliContext, Zoom
-from painted.fidelity import Format, OutputMode
+from painted.fidelity import OutputMode
 from painted.writer import print_block
 
 # Import demo without sys.path mutation
@@ -46,7 +46,7 @@ def _block_to_text(block: Block) -> str:
     return buf.getvalue()
 
 def _ctx(zoom: Zoom) -> CliContext:
-    return CliContext(zoom=zoom, mode=OutputMode.STATIC, format=Format.PLAIN,
+    return CliContext(zoom=zoom, mode=OutputMode.STATIC, use_ansi=False,
                       is_tty=False, width=80, height=24)
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)

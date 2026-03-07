@@ -55,20 +55,22 @@ def _run_command(
     mode = parse_mode(args)
     fmt = parse_format(args)
 
-    if fmt == Format.JSON and mode == OutputMode.AUTO:
-        mode = OutputMode.STATIC
-
-    ctx = detect_context(zoom, mode, fmt)
-
-    if ctx.format == Format.JSON:
+    # JSON short-circuits — data export, not rendering
+    if fmt == Format.JSON:
         data = fetch_fn()
         output = to_json(data) if to_json else data
         print(json_module.dumps(output, default=str))
         return 0
 
+    force_plain = fmt == Format.PLAIN
+    if force_plain and mode == OutputMode.AUTO:
+        mode = OutputMode.STATIC
+
+    ctx = detect_context(zoom, mode, force_plain=force_plain)
+
     data = fetch_fn()
     block = render_fn(ctx, data)
-    print_block(block, use_ansi=(ctx.format == Format.ANSI))
+    print_block(block, use_ansi=ctx.use_ansi)
     return 0
 
 
@@ -165,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             zoom = parse_zoom(args)
             mode = parse_mode(args)
             fmt = parse_format(args)
-            ctx = detect_context(zoom, mode, fmt)
+            ctx = detect_context(zoom, mode, force_plain=(fmt == Format.PLAIN))
             return run_logs(ctx, args)
 
         elif args.command == "media":
@@ -182,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                 zoom = parse_zoom(args)
                 mode = parse_mode(args)
                 fmt = parse_format(args)
-                ctx = detect_context(zoom, mode, fmt)
+                ctx = detect_context(zoom, mode, force_plain=(fmt == Format.PLAIN))
                 return run_fix(ctx, args)
 
             else:
@@ -195,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
                 zoom = parse_zoom(args)
                 mode = parse_mode(args)
                 fmt = parse_format(args)
-                ctx = detect_context(zoom, mode, fmt)
+                ctx = detect_context(zoom, mode, force_plain=(fmt == Format.PLAIN))
                 return run_sync(ctx, args)
 
             else:

@@ -12,9 +12,11 @@ Fact, Spec        Tick, Vertex         Block, Lens, show     loops read/emit
 Below: `libs/engine/` produces Ticks and stores. `libs/atoms/` defines Facts and Specs. Painted renders whatever comes out — it doesn't know about loops concepts, just data shapes.
 Above: `apps/loops/`, `apps/hlab/`, `apps/strange-loops/` use painted's `run_cli` and lenses for all display commands.
 
+**Two concerns, one contract.** painted has a rendering library (Block, Style, compose, lenses, writer) and a CLI framework (run_cli, CliRunner, context detection, mode dispatch). The contract between them is `Block` — your lens produces Blocks, the framework delivers them. Levels 0-1 below are pure renderer. Level 2 is the CLI framework. Levels 3-4 are specialized delivery mechanisms.
+
 ---
 
-## Level 0 — Display data
+## Level 0 — Display data (Renderer)
 
 **Trigger**: I have data and want it to look decent in a terminal.
 
@@ -32,7 +34,7 @@ show(data, zoom=Zoom.MINIMAL)             # one-liner
 
 ---
 
-## Level 1 — Compose layout
+## Level 1 — Compose layout (Renderer)
 
 **Trigger**: I need custom layout — columns, borders, padding.
 
@@ -58,9 +60,9 @@ All immutable. All return new Blocks. Still just printing — no state, no frame
 
 ---
 
-## Level 2 — CLI tool
+## Level 2 — CLI tool (Framework)
 
-**Trigger**: I need `-v`/`-q`, `--json`, pipe detection, help text.
+**Trigger**: I need `-v`/`-q`, `--json`, pipe detection, help text. This is where you cross from the rendering library into the CLI framework.
 
 ```python
 from painted import run_cli, CliContext, Block
@@ -87,7 +89,7 @@ Streaming: add `fetch_stream` for live updates.
 
 ---
 
-## Level 3 — Live animation
+## Level 3 — Live animation (Delivery)
 
 **Trigger**: I need progress updates without alt-screen, outside the CLI harness.
 
@@ -108,7 +110,7 @@ Cursor-controlled in-place rewriting. Note: `run_cli` with `fetch_stream` alread
 
 ---
 
-## Level 4 — Interactive TUI
+## Level 4 — Interactive TUI (Delivery)
 
 **Trigger**: I need keyboard input, full-screen, modal dialogs.
 

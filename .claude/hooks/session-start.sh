@@ -15,13 +15,16 @@ observer="$($LOOPS whoami 2>/dev/null || echo "unknown")"
 # --- Side effects (no stdout needed) ---
 $LOOPS emit project session name="$observer" status=open >/dev/null 2>&1 || true
 $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1 || true
-$LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
 # --- Collect context ---
 # Identity is already in the system prompt header (via agent config).
 # additionalContext carries project state + comms only.
+# Read comms BEFORE emitting check — so "new" means "since last session."
 project=$($LOOPS read project --lens prompt --plain 2>/dev/null || true)
 comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
+
+# Advance cursor after reading — marks what we've seen
+$LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
 context=""
 [[ -n "$project" ]]  && context+="$project"$'\n\n'

@@ -219,16 +219,21 @@ def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Blo
 _ONLINE_THRESHOLD = 1800  # 30 minutes — recent check = active session
 
 
+_PREVIEW_CAP = 3  # max new message previews in scan bar
+_PREVIEW_TRUNCATE = 120  # characters per preview line
+
+
 def _render_minimal(
     messages: list[dict],
     plain: Style,
     all_checks: dict[str, float],
     self_obs: str | None,
 ) -> Block:
-    """Status bar: presence + channel counts.
+    """Scan bar + preview: presence, channel counts, new message previews.
 
     Format: online: loops-claude (6m) discord: 3 (1 new) native: quiet
-    Shows who's active and unhandled message counts per channel.
+    When new messages exist, appends preview lines (author + first line)
+    so the observer can judge salience without drilling in.
     Returns (quiet) when nothing to report — hook filters this out.
     """
     now = time.time()
@@ -249,6 +254,7 @@ def _render_minimal(
     # Seed with known channel names so quiet channels appear
     for ch in ("discord", "native"):
         channels[ch] = {"total": 0, "new": 0}
+    new_messages: list[dict] = []
     for m in messages:
         ch = m["channel"]
         if ch not in channels:
@@ -256,6 +262,7 @@ def _render_minimal(
         channels[ch]["total"] += 1
         if m["state"] == "new":
             channels[ch]["new"] += 1
+            new_messages.append(m)
 
     ch_parts: list[str] = []
     for ch in sorted(channels):
@@ -273,11 +280,21 @@ def _render_minimal(
     if not parts:
         return Block.text("(quiet)", plain)
 
-    # Hint: when messages exist, show how to drill in
-    if any(channels[ch]["total"] > 0 for ch in channels):
-        parts.append("→ loops read comms --observer all")
+    rows: list[Block] = [Block.text(" ".join(parts), plain)]
 
-    return Block.text(" ".join(parts), plain)
+    # Preview — new messages get author + first line for salience judgment
+    if new_messages:
+        for m in new_messages[:_PREVIEW_CAP]:
+            author = m["author"]
+            content = _truncate(m["content"], _PREVIEW_TRUNCATE)
+            rel = _relative_time(m["ts"])
+            tag = f" ({rel})" if rel else ""
+            rows.append(Block.text(f"  * {author}{tag}: {content}", plain))
+        remaining_new = len(new_messages) - _PREVIEW_CAP
+        if remaining_new > 0:
+            rows.append(Block.text(f"  ({remaining_new} more new)", plain))
+
+    return join_vertical(*rows) if len(rows) > 1 else rows[0]
 
 
 def _render_summary(

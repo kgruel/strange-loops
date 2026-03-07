@@ -1,30 +1,31 @@
 """CLI for the loops runtime.
 
-Observer operations (verb-first — resolves vertex from context):
-    loops fold                      Show folded state (local vertex)
-    loops fold project              Show folded state (named vertex)
-    loops stream                    Show event stream
-    loops stream project "auth"     Stream named vertex, search query
-    loops emit decision topic=x     Emit to local vertex
-    loops emit project decision     Emit to named vertex
-    loops close thread my-thread    Resolve thread, capture produced artifacts
+Verb-first dispatch — three-tier:
+  1. Verbs: loops <verb> [vertex] [args]
+  2. Commands: loops <command> [args]
+  3. Vertex shorthand: loops <vertex> [flags]  (implicit read)
 
-Observer operations (vertex-first — backward compat):
-    loops <vertex>                  Show folded state (default)
-    loops <vertex> fold             Show folded state
-    loops <vertex> stream           Show event stream
-    loops <vertex> stream <query>   Search events (FTS5)
-    loops <vertex> emit <kind> ...  Inject a fact
+Verbs (vertex operations):
+    loops read project                  Read vertex state (fold, default)
+    loops read project --facts          Read filtered fact history
+    loops read project --facts --kind decision --since 7d
+    loops project                       Implicit read (= loops read project)
+    loops emit project decision topic=x Inject a fact
+    loops close thread my-thread        Resolve thread, capture artifacts
 
-Root commands:
-    loops ls                        List vertices
-    loops store [file]              Inspect store (name, path, or .db)
-    loops start <file>              Run a .vertex file (one round, rendered)
-    loops run <file>                Execute a .loop or .vertex file
-    loops validate <file>           Validate syntax and flow
-    loops compile <file>            Show compiled structure
-    loops test <file> --input <f>   Run parse pipeline against sample input
-    loops init [name]               Initialize vertex
+Aliases (verb-first, backward compatible):
+    loops fold project                  = loops read project
+    loops stream project                = loops read project --facts
+
+Commands:
+    loops test <file> --input <f>       Run parse pipeline against sample input
+    loops compile <file>                Show compiled structure
+    loops validate <file>               Validate syntax and flow
+    loops store [file]                  Inspect store (name, path, or .db)
+    loops init [name]                   Initialize vertex
+    loops ls                            List vertices
+    loops run <file>                    Execute a .loop or .vertex file
+    loops start <file>                  Run a .vertex file (one round, rendered)
 """
 
 from __future__ import annotations
@@ -2181,18 +2182,61 @@ def _whoami_from_identity_store() -> str:
         return ""
 
 
-_ROOT_COMMANDS = {"run", "start", "compile", "validate", "test", "init", "ls", "store", "whoami"}
+# Verb-first dispatch: `loops <verb> [vertex] [args]`.
+# These are the primary CLI verbs — read (implicit default), emit, close.
+# sync will be added by cadence-implementation.
+_VERBS = frozenset({"read", "fold", "stream", "emit", "close"})
 
-# Verbs that support verb-first dispatch: `loops fold` instead of `loops project fold`.
-# These resolve the vertex from context (local .vertex or LOOPS_HOME fallback).
-_OBSERVER_VERBS = frozenset({"fold", "stream", "emit", "close"})
+# Dev and setup commands dispatched directly.
+_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store", "run", "start"})
+_SETUP_COMMANDS = frozenset({"init", "whoami", "ls", "add", "rm", "export"})
 
+# Combined for dispatch check (verbs checked first, then these).
+_COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
+
+# Legacy vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
-    "fold", "stream", "emit", "close", "store",
+    "read", "fold", "stream", "emit", "close", "store",
     "check", "ls", "add", "rm", "export",
     # Legacy aliases
     "status", "log", "search",
 })
+
+
+def _run_read(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    mod=None,
+    observer: str | None = None,
+) -> int:
+    """Unified read verb — routes to fold (default) or stream (--facts/--ticks).
+
+    ``loops read [vertex] [flags]`` is the primary read interface.
+    Default (no flags) shows fold state. ``--facts`` shows filtered fact
+    history. ``--ticks`` shows tick history.
+
+    This is a thin router — delegates to ``_run_fold`` or ``_run_stream``
+    which handle their own argument parsing, fetch, and rendering.
+    """
+    # Pre-parse only the mode flags to decide which path to take.
+    # Strip mode flags before delegating — delegates don't know about them.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--facts", action="store_true", default=False)
+    pre.add_argument("--ticks", action="store_true", default=False)
+    known, rest = pre.parse_known_args(argv)
+
+    if known.facts:
+        # Fact history mode — delegate to stream (without --facts flag)
+        return _run_stream(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+    elif known.ticks:
+        # Tick history mode — delegate to stream with --kind tick
+        if "--kind" not in rest:
+            rest.extend(["--kind", "tick"])
+        return _run_stream(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+    else:
+        # Default: fold state
+        return _run_fold(rest, vertex_path=vertex_path, mod=mod, observer=observer)
 
 
 def _render_main_help(argv: list[str]) -> int:
@@ -2211,41 +2255,38 @@ def _render_main_help(argv: list[str]) -> int:
 
     zoom, fmt = scan_help_args(argv)
 
-    observer_group = HelpGroup(
-        name="Observer",
+    verbs_group = HelpGroup(
+        name="Verbs",
         hint="loops <verb> [vertex] [args]",
         flags=(
-            HelpFlag(None, "fold", "Show folded state (default)", detail="[vertex] [--kind KIND] [--observer OBS]"),
-            HelpFlag(None, "stream", "Show event stream", detail="[vertex] [query] [--since SINCE] [--kind KIND]"),
+            HelpFlag(None, "read", "Read vertex state (default)", detail="[vertex] [--facts] [--ticks] [--kind KIND] [--since SINCE]"),
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
         ),
     )
 
-    vertex_group = HelpGroup(
-        name="Vertex operations",
-        hint="loops <vertex> [op]",
+    shorthand_group = HelpGroup(
+        name="Shorthand",
+        hint="loops <vertex> [flags]",
+        detail="Implicit read: loops project = loops read project",
         flags=(
-            HelpFlag(None, "store", "Inspect store contents"),
-            HelpFlag(None, "check", "Run health checks", detail="[--observer OBS]"),
-            HelpFlag(None, "ls", "List vertex contents", detail="[template]"),
-            HelpFlag(None, "add", "Add to template population", detail="<values...>"),
-            HelpFlag(None, "rm", "Remove from template population", detail="<key>"),
-            HelpFlag(None, "export", "Materialize .list from store"),
+            HelpFlag(None, "fold", "Alias for read (fold state)", detail="[vertex] [--kind KIND] [--observer OBS]"),
+            HelpFlag(None, "stream", "Alias for read --facts", detail="[vertex] [query] [--since SINCE] [--kind KIND]"),
         ),
+        min_zoom=Zoom.SUMMARY,
     )
 
     commands_group = HelpGroup(
         name="Commands",
         flags=(
-            HelpFlag(None, "ls", "List vertices"),
-            HelpFlag(None, "store", "Inspect store contents", detail="[file]"),
-            HelpFlag(None, "start", "Run a vertex (one round, rendered)", detail="[file] [--var KEY=VALUE]"),
-            HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
+            HelpFlag(None, "test", "Run parse pipeline", detail="<file> [--input FILE]"),
             HelpFlag(None, "compile", "Show compiled structure", detail="<file>"),
             HelpFlag(None, "validate", "Validate syntax and flow", detail="[files...]"),
-            HelpFlag(None, "test", "Run parse pipeline", detail="<file> [--input FILE]"),
+            HelpFlag(None, "store", "Inspect store contents", detail="[file]"),
             HelpFlag(None, "init", "Initialize vertex", detail="[name] [--template NAME]"),
+            HelpFlag(None, "ls", "List vertices"),
+            HelpFlag(None, "run", "Execute a .loop or .vertex file", detail="[file] [--rounds N]"),
+            HelpFlag(None, "start", "Run a vertex (one round, rendered)", detail="[file] [--var KEY=VALUE]"),
             HelpFlag(None, "whoami", "Show resolved observer identity"),
         ),
     )
@@ -2280,7 +2321,7 @@ def _render_main_help(argv: list[str]) -> int:
     help_data = HelpData(
         prog="loops",
         description="Runtime for .loop and .vertex files",
-        groups=(observer_group, vertex_group, commands_group, zoom_group, format_group, help_group),
+        groups=(verbs_group, shorthand_group, commands_group, zoom_group, format_group, help_group),
     )
 
     if fmt == Format.JSON:
@@ -2337,10 +2378,10 @@ def _apply_vertex_scope(observer: str | None, vertex_path: Path | None) -> str |
 
 
 def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
-    """Dispatch verb-first observer operations: ``loops fold [vertex] [args]``.
+    """Dispatch verb-first operations: ``loops <verb> [vertex] [args]``.
 
     Resolves ``--observer`` the same way as ``_dispatch_observer``, then
-    delegates to the same ``_run_*`` functions with ``vertex_path=None``
+    delegates to the appropriate ``_run_*`` function with ``vertex_path=None``
     so they resolve the vertex from context (optional positional or local).
     """
     # Pre-parse --observer from rest (same pattern as _dispatch_observer)
@@ -2349,6 +2390,8 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
     obs_known, rest = obs_parser.parse_known_args(rest)
     observer = _resolve_observer_flag(obs_known.observer)
 
+    if verb == "read":
+        return _run_read(rest, vertex_path=None, observer=observer)
     if verb == "fold":
         return _run_fold(rest, vertex_path=None, observer=observer)
     if verb == "stream":
@@ -2389,14 +2432,16 @@ def _dispatch_observer(
     if vertex_name in _APPS:
         mod = importlib.import_module(_APPS[vertex_name])
 
-    # Default: no subcommand or flags only → fold mode
+    # Default: no subcommand or flags only → read (fold by default)
     if not rest or rest[0].startswith("-"):
-        return _run_fold(rest, vertex_path=vertex_path, mod=mod, observer=observer)
+        return _run_read(rest, vertex_path=vertex_path, mod=mod, observer=observer)
 
     op = rest[0]
     args = rest[1:]
 
-    # Temporal modes
+    # Primary verbs
+    if op == "read":
+        return _run_read(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "fold":
         return _run_fold(args, vertex_path=vertex_path, mod=mod, observer=observer)
     if op == "stream":
@@ -2454,8 +2499,73 @@ def _dispatch_observer(
     return 1
 
 
+def _dispatch_command(cmd: str, argv: list[str]) -> int:
+    """Dispatch dev tools and setup commands."""
+    from painted.app_runner import run_app, AppCommand
+    from painted.fidelity import HelpArg
+
+    commands = [
+        # Dev tools
+        AppCommand(
+            "test",
+            "Run parse pipeline against sample input",
+            _run_test,
+            detail="<file> [--input FILE]",
+        ),
+        AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
+        AppCommand(
+            "validate",
+            "Validate syntax and flow",
+            _run_validate,
+            detail="[files...] — defaults to *.loop/*.vertex in cwd",
+        ),
+        AppCommand(
+            "store",
+            "Inspect store contents",
+            _run_store,
+            detail="[file] — vertex name, path, or .db file",
+        ),
+        AppCommand(
+            "run",
+            "Execute a .loop or .vertex file",
+            _run_run,
+            detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
+        ),
+        AppCommand(
+            "start",
+            "Run a vertex (one round, rendered)",
+            _run_start,
+            detail="[file] [--var KEY=VALUE ...]",
+        ),
+        # Setup / utility
+        AppCommand(
+            "init",
+            "Initialize vertex",
+            _run_init,
+            detail="[name] [--template NAME]",
+            help_args=[
+                HelpArg("name", "Vertex name (e.g., 'project' or 'dev/project')", positional=True),
+                HelpArg("--template", "Source vertex name to use as template"),
+            ],
+        ),
+        AppCommand("whoami", "Show resolved observer identity", _run_whoami),
+        AppCommand("ls", "List vertices", _run_ls_root),
+        AppCommand("add", "Add to template population", _run_add, detail="<target> <values...>"),
+        AppCommand("rm", "Remove from template population", _run_rm, detail="<target> <key>"),
+        AppCommand("export", "Materialize .list from store", _run_export, detail="<target>"),
+    ]
+    return run_app(
+        [cmd] + argv, commands, prog="loops", description="Runtime for .loop and .vertex files"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point — vertex-first dispatch."""
+    """Main entry point — three-tier dispatch.
+
+    1. Known verbs (read, emit, close, fold, stream) → verb-first dispatch
+    2. Dev/setup commands (test, compile, validate, ...) → direct dispatch
+    3. Vertex name → implicit read (or vertex-first op for backward compat)
+    """
     if argv is None:
         argv = sys.argv[1:]
 
@@ -2467,65 +2577,15 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] in ("-h", "--help"):
         return _render_main_help(argv)
 
-    # Root commands → dispatch directly
-    if argv[0] in _ROOT_COMMANDS:
-        from painted.app_runner import run_app, AppCommand
-        from painted.fidelity import HelpArg
-
-        root_commands = [
-            AppCommand("ls", "List vertices", _run_ls_root),
-            AppCommand(
-                "store",
-                "Inspect store contents",
-                _run_store,
-                detail="[file] — vertex name, path, or .db file",
-            ),
-            AppCommand(
-                "start",
-                "Run a vertex (one round, rendered)",
-                _run_start,
-                detail="[file] [--var KEY=VALUE ...]",
-            ),
-            AppCommand(
-                "run",
-                "Execute a .loop or .vertex file",
-                _run_run,
-                detail="[file] [--rounds N] [--limit N] [--daemon] [--var KEY=VALUE]",
-            ),
-            AppCommand("compile", "Show compiled structure", _run_compile, detail="<file>"),
-            AppCommand(
-                "validate",
-                "Validate syntax and flow",
-                _run_validate,
-                detail="[files...] — defaults to *.loop/*.vertex in cwd",
-            ),
-            AppCommand(
-                "test",
-                "Run parse pipeline against sample input",
-                _run_test,
-                detail="<file> [--input FILE]",
-            ),
-            AppCommand(
-                "init",
-                "Initialize vertex",
-                _run_init,
-                detail="[name] [--template NAME]",
-                help_args=[
-                    HelpArg("name", "Vertex name (e.g., 'project' or 'dev/project')", positional=True),
-                    HelpArg("--template", "Source vertex name to use as template"),
-                ],
-            ),
-            AppCommand("whoami", "Show resolved observer identity", _run_whoami),
-        ]
-        return run_app(
-            argv, root_commands, prog="loops", description="Runtime for .loop and .vertex files"
-        )
-
-    # Verb-first dispatch: `loops fold`, `loops stream`, `loops emit`
-    if argv[0] in _OBSERVER_VERBS:
+    # Tier 1: Known verbs → verb-first dispatch
+    if argv[0] in _VERBS:
         return _dispatch_verb_first(argv[0], argv[1:])
 
-    # Vertex-first dispatch
+    # Tier 2: Dev tools and setup commands → direct dispatch
+    if argv[0] in _COMMANDS:
+        return _dispatch_command(argv[0], argv[1:])
+
+    # Tier 3: Try as vertex name → implicit read (with backward compat for old ops)
     vertex_name = argv[0]
     vertex_path = _resolve_vertex_for_dispatch(vertex_name)
 

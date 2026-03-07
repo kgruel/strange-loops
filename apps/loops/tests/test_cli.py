@@ -452,6 +452,190 @@ class TestDefaultPaths:
         assert result == 1
 
 
+class TestReadVerb:
+    """Tests for the read verb and implicit read dispatch."""
+
+    def test_read_routes_to_fold_by_default(self, monkeypatch, tmp_path, capsys):
+        """loops read <vertex> with no flags routes to fold."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Seed a vertex with a store
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["read", "myvert"])
+        assert result == 0
+        captured = capsys.readouterr()
+        # Should produce fold output (empty vertex = no sections, but no error)
+        assert result == 0
+
+    def test_read_facts_flag_routes_to_stream(self, monkeypatch, tmp_path, capsys):
+        """loops read <vertex> --facts routes to stream/facts mode."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["read", "myvert", "--facts"])
+        assert result == 0
+
+    def test_read_ticks_flag(self, monkeypatch, tmp_path, capsys):
+        """loops read <vertex> --ticks routes to stream with kind=tick filter."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["read", "myvert", "--ticks"])
+        assert result == 0
+
+    def test_implicit_read_via_vertex_name(self, monkeypatch, tmp_path, capsys):
+        """loops <vertex> (no verb) routes to implicit read."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["myvert"])
+        assert result == 0
+
+    def test_implicit_read_with_facts_flag(self, monkeypatch, tmp_path, capsys):
+        """loops <vertex> --facts routes to implicit read with facts mode."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["myvert", "--facts"])
+        assert result == 0
+
+    def test_fold_still_works(self, monkeypatch, tmp_path, capsys):
+        """loops fold <vertex> still works (backward compat)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["fold", "myvert"])
+        assert result == 0
+
+    def test_stream_still_works(self, monkeypatch, tmp_path, capsys):
+        """loops stream <vertex> still works (backward compat)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["stream", "myvert"])
+        assert result == 0
+
+    def test_vertex_first_read_op(self, monkeypatch, tmp_path, capsys):
+        """loops <vertex> read routes to read (vertex-first backward compat)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["myvert", "read"])
+        assert result == 0
+
+    def test_vertex_first_read_with_facts(self, monkeypatch, tmp_path, capsys):
+        """loops <vertex> read --facts works."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "myvert"
+        vdir.mkdir()
+        (vdir / "myvert.vertex").write_text(
+            'name "myvert"\nstore "./data/myvert.db"\n\n'
+            "loops {\n"
+            '  thing { fold { count "inc" } }\n'
+            "}\n"
+        )
+        result = main(["myvert", "read", "--facts"])
+        assert result == 0
+
+
+class TestDispatchTiers:
+    """Tests for the three-tier dispatch model."""
+
+    def test_verb_dispatches_before_vertex(self, monkeypatch, tmp_path):
+        """Verbs (read, emit, fold, stream) dispatch in tier 1, before vertex resolution."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # 'read' with no vertex and no local .vertex should fail at vertex resolution
+        result = main(["read"])
+        assert result == 1  # fails at vertex resolution, not as "unknown command"
+
+    def test_command_dispatches_before_vertex(self, monkeypatch, tmp_path):
+        """Commands (test, compile, ...) dispatch in tier 2, before vertex resolution."""
+        # validate with no files in an empty dir
+        monkeypatch.chdir(tmp_path)
+        result = main(["validate"])
+        # Should run validate (finds no files), not try as vertex name
+        assert result == 1  # no files found
+
+    def test_unknown_command_errors(self):
+        """Unknown first arg that isn't a vertex gives error."""
+        result = main(["totally_unknown_thing"])
+        assert result == 1
+
+
+class TestHelpUpdated:
+    """Verify help text reflects the new verb-first model."""
+
+    def test_help_shows_read_verb(self, capsys):
+        result = main(["--help"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "read" in captured.out
+        assert "Read vertex state" in captured.out
+
+    def test_help_shows_verbs_group(self, capsys):
+        result = main(["--help"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Verbs" in captured.out
+
+    def test_help_shows_shorthand_aliases(self, capsys):
+        """Help shows fold/stream as shorthand aliases."""
+        result = main(["--help"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "fold" in captured.out
+        assert "stream" in captured.out
+
+
 class TestEmitParsers:
     """Parser tests for emit in vertex-first ordering."""
 

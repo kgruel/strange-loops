@@ -21,11 +21,30 @@ from typing import TYPE_CHECKING
 
 from painted import Block, Style, Zoom, join_vertical
 
+from loops.lenses._helpers import (
+    RESOLVED_STATUSES,
+    body as _helpers_body,
+    label as _helpers_label,
+)
+
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_RESOLVED_STATUSES = frozenset({"resolved", "completed", "done", "closed"})
+_META_LABEL_FIELDS = ("topic", "name", "title", "trigger", "concept", "summary")
+_META_BODY_SKIP = frozenset(
+    {"weight", "status", "produced", "thread", "observer"}
+    | set(_META_LABEL_FIELDS)
+)
+
+
+def _label(item: "FoldItem", key_field: str | None) -> str:
+    return _helpers_label(item, key_field, label_fields=_META_LABEL_FIELDS)
+
+
+def _body(item: "FoldItem") -> str:
+    return _helpers_body(item, skip=_META_BODY_SKIP,
+                         label_fields=_META_LABEL_FIELDS)
 
 
 def fold_view(data: "FoldState", zoom: Zoom, width: int | None) -> Block:
@@ -63,7 +82,7 @@ def _minimal(sections: dict[str, "FoldSection"]) -> list[str]:
     # Open tasks (yours)
     if "task" in sections:
         active = [i for i in sections["task"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         if active:
             names = [_label(i, sections["task"].key_field) for i in active]
             lines.append(f"Tasks: {', '.join(names)}")
@@ -71,7 +90,7 @@ def _minimal(sections: dict[str, "FoldSection"]) -> list[str]:
     # Active thread count
     if "thread" in sections:
         active = [i for i in sections["thread"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         if active:
             lines.append(f"Threads: {len(active)} active")
 
@@ -99,7 +118,7 @@ def _summary(sections: dict[str, "FoldSection"]) -> list[str]:
     # Open tasks
     if "task" in sections:
         active = [i for i in sections["task"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         if active:
             lines.append("")
             lines.append("# Open Tasks")
@@ -126,7 +145,7 @@ def _summary(sections: dict[str, "FoldSection"]) -> list[str]:
     # Active threads — names only
     if "thread" in sections:
         active = [i for i in sections["thread"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         if active:
             lines.append("")
             names = [_label(i, sections["thread"].key_field) for i in active[:5]]
@@ -159,7 +178,7 @@ def _detailed(sections: dict[str, "FoldSection"]) -> list[str]:
     # Open tasks with messages
     if "task" in sections:
         active = [i for i in sections["task"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         if active:
             lines.append("")
             lines.append("# Open Tasks")
@@ -190,9 +209,9 @@ def _detailed(sections: dict[str, "FoldSection"]) -> list[str]:
     # All threads with status
     if "thread" in sections:
         active = [i for i in sections["thread"].items
-                  if i.payload.get("status") not in _RESOLVED_STATUSES]
+                  if i.payload.get("status") not in RESOLVED_STATUSES]
         resolved = [i for i in sections["thread"].items
-                    if i.payload.get("status") in _RESOLVED_STATUSES]
+                    if i.payload.get("status") in RESOLVED_STATUSES]
         if active:
             lines.append("")
             lines.append(f"# Active Threads ({len(active)})")
@@ -281,7 +300,7 @@ def _full(sections: dict[str, "FoldSection"]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Session rendering
+# Session rendering (meta-specific format — uses # headers, not ##)
 # ---------------------------------------------------------------------------
 
 def _render_session(section: "FoldSection") -> list[str]:
@@ -291,7 +310,7 @@ def _render_session(section: "FoldSection") -> list[str]:
         message = item.payload.get("message", "")
         produced = item.payload.get("produced", [])
 
-        if status in _RESOLVED_STATUSES and message:
+        if status in RESOLVED_STATUSES and message:
             lines.append("# Last Session Handoff")
             lines.append(f"  {message}")
             if produced:
@@ -305,29 +324,6 @@ def _render_session(section: "FoldSection") -> list[str]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_LABEL_FIELDS = ("topic", "name", "title", "trigger", "concept", "summary")
-
-
-def _label(item: "FoldItem", key_field: str | None) -> str:
-    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
-    for field in candidates:
-        if field and item.payload.get(field):
-            return str(item.payload[field])
-    return "?"
-
-
-def _body(item: "FoldItem") -> str:
-    label = _label(item, None)
-    skip = {"weight", "status", "produced", "thread", "observer"}
-    for k, v in item.payload.items():
-        if not v or str(v) == label or k in skip:
-            continue
-        if k in _LABEL_FIELDS:
-            continue
-        return str(v)
-    return ""
-
 
 def _group_by_namespace(section: "FoldSection") -> dict[str, list["FoldItem"]]:
     groups: dict[str, list["FoldItem"]] = {}

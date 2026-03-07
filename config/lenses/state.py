@@ -17,12 +17,28 @@ from typing import TYPE_CHECKING
 
 from painted import Block, Style, Zoom, join_vertical
 
+from loops.lenses._helpers import (
+    RESOLVED_STATUSES,
+    body as _helpers_body,
+    label as _helpers_label,
+)
+
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_RESOLVED = {"resolved", "completed", "done", "closed"}
+_STATE_LABEL_FIELDS = ("topic", "name", "title", "summary")
+_STATE_BODY_SKIP = frozenset({"status", "priority", "weight"})
 _PRIORITY_ORDER = {"now": 0, "next": 1, "after": 2, "later": 3}
+
+
+def _label(item: FoldItem, key_field: str | None) -> str:
+    return _helpers_label(item, key_field, label_fields=_STATE_LABEL_FIELDS)
+
+
+def _body(item: FoldItem, key_field: str | None = None) -> str:
+    return _helpers_body(item, key_field, skip=_STATE_BODY_SKIP,
+                         label_fields=_STATE_LABEL_FIELDS)
 
 
 def fold_view(
@@ -78,13 +94,13 @@ def _minimal(
 
     tasks = sections.get("task")
     if tasks:
-        open_tasks = [i for i in tasks.items if i.payload.get("status") not in _RESOLVED]
+        open_tasks = [i for i in tasks.items if i.payload.get("status") not in RESOLVED_STATUSES]
         if open_tasks:
             parts.append(f"{len(open_tasks)} tasks")
 
     threads = sections.get("thread")
     if threads:
-        open_threads = [i for i in threads.items if i.payload.get("status") not in _RESOLVED]
+        open_threads = [i for i in threads.items if i.payload.get("status") not in RESOLVED_STATUSES]
         if open_threads:
             parts.append(f"{len(open_threads)} threads")
 
@@ -130,7 +146,7 @@ def _tasks(
     zoom: Zoom,
     width: int | None,
 ) -> None:
-    open_items = [i for i in section.items if i.payload.get("status") not in _RESOLVED]
+    open_items = [i for i in section.items if i.payload.get("status") not in RESOLVED_STATUSES]
     resolved = len(section.items) - len(open_items)
 
     if not open_items:
@@ -179,7 +195,7 @@ def _threads(
     zoom: Zoom,
     width: int | None,
 ) -> None:
-    open_items = [i for i in section.items if i.payload.get("status") not in _RESOLVED]
+    open_items = [i for i in section.items if i.payload.get("status") not in RESOLVED_STATUSES]
     resolved = len(section.items) - len(open_items)
 
     if not open_items:
@@ -276,7 +292,7 @@ def _session(
     status = latest.payload.get("status", "")
     message = latest.payload.get("message", "")
 
-    if status in _RESOLVED and message:
+    if status in RESOLVED_STATUSES and message:
         rows.append(Block.text("Last handoff:", Style(bold=True), width=width))
         rows.append(Block.text(f"  {message}", Style(), width=width))
     elif message:
@@ -293,30 +309,6 @@ def _session(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_LABEL_FIELDS = ("topic", "name", "title", "summary")
-
-
-def _label(item: FoldItem, key_field: str | None) -> str:
-    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
-    for f in candidates:
-        if f and item.payload.get(f):
-            return str(item.payload[f])
-    for k, v in item.payload.items():
-        if v:
-            return str(v)
-    return "?"
-
-
-def _body(item: FoldItem, key_field: str | None) -> str:
-    """First non-label, non-status field."""
-    label_val = _label(item, key_field)
-    skip = {"status", "priority", "weight"}
-    for k, v in item.payload.items():
-        if not v or str(v) == label_val or k in skip:
-            continue
-        return str(v)
-    return ""
 
 
 def _fmt_ts(ts) -> str:

@@ -13,12 +13,19 @@ from typing import TYPE_CHECKING
 
 from painted import Block, Style, Zoom, join_vertical
 
+from loops.lenses._helpers import (
+    RESOLVED_STATUSES,
+    body as _body,
+    find_item as _find_item,
+    label as _label,
+    render_session as _render_session,
+)
+
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
 _IDENTITY_KINDS = {"self", "principle", "observation", "intention", "decision"}
-_RESOLVED_STATUSES = {"resolved", "completed", "done"}
 _HANDOFF_KINDS = {"session", "handoff"}
 _ACTIONABLE_KINDS = {"task", "session", "handoff"}
 _SKIP_KINDS = {"log", "change"}
@@ -220,7 +227,7 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
     if "task" in section_map:
         active = [
             i for i in section_map["task"].items
-            if i.payload.get("status") not in _RESOLVED_STATUSES
+            if i.payload.get("status") not in RESOLVED_STATUSES
         ]
         if active:
             lines.append("")
@@ -239,7 +246,7 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
     if "thread" in section_map:
         active = [
             i for i in section_map["thread"].items
-            if i.payload.get("status") not in _RESOLVED_STATUSES
+            if i.payload.get("status") not in RESOLVED_STATUSES
         ]
         mine = [i for i in active if not i.payload.get("delegate")]
         delegated = [i for i in active if i.payload.get("delegate")]
@@ -273,7 +280,7 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
             continue
         active = [
             i for i in s.items
-            if i.payload.get("status") not in _RESOLVED_STATUSES
+            if i.payload.get("status") not in RESOLVED_STATUSES
         ]
         if active:
             lines.append(f"**{s.kind}**: {len(active)} active ({len(s.items)} total)")
@@ -281,64 +288,3 @@ def _render_project_compressed(sections: list["FoldSection"]) -> list[str]:
     return lines
 
 
-def _render_session(section: "FoldSection") -> list[str]:
-    """Render session as handoff content."""
-    lines: list[str] = []
-    for item in section.items:
-        status = item.payload.get("status", "")
-        message = item.payload.get("message", "")
-        produced = item.payload.get("produced", [])
-
-        if status in _RESOLVED_STATUSES and message:
-            lines.append("## HANDOFF")
-            lines.append(f"  {message}")
-            if produced:
-                lines.append(f"  produced: {', '.join(produced)}")
-        else:
-            label = _label(item, section.key_field)
-            body = _body(item)
-            lines.append("## SESSION")
-            if body:
-                lines.append(f"  {label}: {body}")
-            else:
-                lines.append(f"  {label}")
-
-    return lines
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_LABEL_FIELDS = ("topic", "name", "title", "trigger", "summary", "message")
-
-
-def _label(item: "FoldItem", key_field: str | None) -> str:
-    """Extract primary label from a FoldItem."""
-    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
-    for field in candidates:
-        if field and item.payload.get(field):
-            return str(item.payload[field])
-    for k, v in item.payload.items():
-        if v and k != "weight":
-            return f"{k}: {v}"
-    return "?"
-
-
-def _body(item: "FoldItem") -> str:
-    """Find the body text of a FoldItem — first non-label, non-metadata field."""
-    label = _label(item, None)
-    skip = {"weight"}
-    for k, v in item.payload.items():
-        if not v or str(v) == label or k in skip:
-            continue
-        return str(v)
-    return ""
-
-
-def _find_item(items: tuple["FoldItem", ...], name_value: str) -> "FoldItem | None":
-    """Find an item by its name/key field value."""
-    for item in items:
-        if item.payload.get("name") == name_value:
-            return item
-    return None

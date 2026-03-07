@@ -13,11 +13,18 @@ from typing import TYPE_CHECKING, Any
 
 from painted import Block, Style, Zoom, join_vertical
 
+from loops.lenses._helpers import (
+    RESOLVED_STATUSES,
+    body as _body,
+    body_from_payload as _body_from_payload,
+    label as _label,
+    render_session as _render_session_lines,
+)
+
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
 
 
-_RESOLVED_STATUSES = {"resolved", "completed", "done"}
 _HANDOFF_KINDS = {"session", "handoff"}
 _ACTIONABLE_KINDS = {"task", "session", "handoff"}
 _SKIP_KINDS = {"log", "change"}
@@ -41,38 +48,8 @@ status_view = prompt_view
 
 
 def _render_session(section: FoldSection) -> list[str]:
-    """Render session as handoff content — message and produced artifacts.
-
-    Handles two session shapes:
-    - Project sessions: name + status + message (handoff content)
-    - Identity sessions: trigger + context (operational, e.g. daemon wakes)
-
-    Uses generic label/body helpers as fallback so unknown shapes never
-    produce ``?: ?``.
-    """
-    lines: list[str] = []
-    for item in section.items:
-        status = item.payload.get("status", "")
-        message = item.payload.get("message", "")
-        produced = item.payload.get("produced", [])
-
-        if status in _RESOLVED_STATUSES and message:
-            # Resolved session IS the handoff — render the message as content
-            lines.append("## HANDOFF")
-            lines.append(f"  {message}")
-            if produced:
-                lines.append(f"  produced: {', '.join(produced)}")
-        else:
-            # Open/active session — use generic label extraction
-            label = _label(item, section.key_field)
-            body = _body(item)
-            lines.append("## SESSION")
-            if body:
-                lines.append(f"  {label}: {body}")
-            else:
-                lines.append(f"  {label}")
-
-    return lines
+    """Render session as handoff content — message and produced artifacts."""
+    return _render_session_lines(section)
 
 
 def _schema_prompt(sections: list[FoldSection]) -> Block:
@@ -101,7 +78,7 @@ def _schema_prompt(sections: list[FoldSection]) -> Block:
         # Other kinds: filter resolved items
         items = [
             item for item in s.items
-            if item.payload.get("status") not in _RESOLVED_STATUSES
+            if item.payload.get("status") not in RESOLVED_STATUSES
         ]
         if not items:
             continue
@@ -188,41 +165,10 @@ def stream_prompt_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, 
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Stream helpers (not shared — stream data has different shape)
 # ---------------------------------------------------------------------------
 
 _LABEL_FIELDS = ("topic", "name", "title", "trigger", "summary", "message")
-
-
-def _label(item: FoldItem, key_field: str | None) -> str:
-    """Extract primary label from a FoldItem."""
-    candidates = (key_field,) + _LABEL_FIELDS if key_field else _LABEL_FIELDS
-    for field in candidates:
-        if field and item.payload.get(field):
-            return str(item.payload[field])
-    for k, v in item.payload.items():
-        if v and k != "weight":
-            return f"{k}: {v}"
-    return "?"
-
-
-def _body(item: FoldItem) -> str:
-    """Find the body text of a FoldItem — first non-label, non-metadata field."""
-    return _body_from_payload(item.payload, _label(item, None))
-
-
-def _body_from_payload(payload: dict, used_label: str) -> str:
-    """Find first non-label field value from a payload dict."""
-    skip = {"weight"}  # metadata fields that aren't body content
-    for k, v in payload.items():
-        if not v:
-            continue
-        if str(v) == used_label:
-            continue
-        if k in skip:
-            continue
-        return str(v)
-    return ""
 
 
 def _find_stream_label(payload: dict, key_field: str | None) -> str:

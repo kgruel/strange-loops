@@ -130,18 +130,19 @@ class Source:
                         error_type="JSONDecodeError",
                     )
 
-    def _extract_metadata(self, payload: dict) -> tuple[str, str]:
-        """Extract per-record observer and origin overrides from payload.
+    def _extract_metadata(self, payload: dict) -> tuple[str, str, float | None]:
+        """Extract per-record metadata overrides from payload.
 
-        ndjson sources can include ``_observer`` and ``_origin`` keys to
-        override the Source-level defaults. These are removed from the
-        payload before the Fact is created.
+        ndjson sources can include ``_observer``, ``_origin``, and
+        ``_ts`` keys to override Source-level defaults. These are removed
+        from the payload before the Fact is created.
 
-        Returns (observer, origin) with Source defaults as fallback.
+        Returns (observer, origin, ts) with Source defaults as fallback.
         """
         observer = payload.pop("_observer", self.observer)
         origin = payload.pop("_origin", "")
-        return observer, origin
+        ts = payload.pop("_ts", None)
+        return observer, origin, ts
 
     async def _emit_ndjson(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
         """Parse each stdout line as JSON, emit one fact per line."""
@@ -154,8 +155,8 @@ class Source:
                     data = json.loads(text)
                     payload = self._parse_data(data)
                     if payload is not None:
-                        observer, origin = self._extract_metadata(payload)
-                        yield Fact.of(self.kind, observer, origin=origin, **payload)
+                        observer, origin, ts = self._extract_metadata(payload)
+                        yield Fact.of(self.kind, observer, origin=origin, ts=ts, **payload)
                 except json.JSONDecodeError as e:
                     yield Fact.of(
                         "source.error",

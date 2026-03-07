@@ -9,7 +9,7 @@ Usage:
 
 Output format (one JSON object per line):
     {"conversation_id": "...", "prompt": "...", "response": "...",
-     "model": "...", "workspace": "...", "ts": 1234567890.0}
+     "model": "...", "workspace": "...", "_ts": 1234567890.0}
 
 The Source declaration provides kind="exchange" and observer="siftd" —
 this script only emits payload fields.
@@ -245,14 +245,50 @@ def _build_exchange(
     ts: float | None,
 ) -> dict:
     """Assemble an exchange dict from accumulated state."""
-    return {
+    result = {
         "conversation_id": conv_id,
         "prompt": prompt,
         "response": "\n".join(response_parts),
         "model": model or "",
         "workspace": workspace or "",
-        "ts": ts or 0.0,
     }
+    if ts is not None:
+        result["_ts"] = ts
+    return result
+
+
+
+# ---------------------------------------------------------------------------
+# Manifest (cursor state for idempotent re-sync)
+# ---------------------------------------------------------------------------
+
+
+def load_manifest(manifest_path: Path | None) -> dict:
+    """Load the file manifest from disk. Returns empty dict if missing."""
+    if manifest_path is None:
+        return {}
+    try:
+        return json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+def save_manifest(manifest: dict, manifest_path: Path | None) -> None:
+    """Atomically save the file manifest to disk."""
+    if manifest_path is None:
+        return
+    tmp = manifest_path.with_suffix(".tmp")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(json.dumps(manifest, indent=2))
+    tmp.rename(manifest_path)
+
+
+def file_changed(path: Path, manifest: dict) -> bool:
+    """Return True if a file needs (re-)processing based on size."""
+    entry = manifest.get(str(path))
+    if entry is None:
+        return True
+    return path.stat().st_size != entry.get("size")
 
 
 # ---------------------------------------------------------------------------
@@ -260,19 +296,32 @@ def _build_exchange(
 # ---------------------------------------------------------------------------
 
 
-def emit(paths: list[Path], out=None) -> int:
+def emit(paths: list[Path], out=None, manifest_path: Path | None = None) -> int:
     """Parse all session files and emit NDJSON exchanges.
+
+    When manifest_path is provided, skips files that haven't changed
+    since last processing (based on file size). Updates the manifest
+    after processing.
 
     Returns the number of exchanges emitted.
     """
     if out is None:
         out = sys.stdout
+    manifest = load_manifest(manifest_path)
     count = 0
     for path in paths:
-        for exchange in parse_exchanges(path):
+        if not file_changed(path, manifest):
+            continue
+        exchanges = parse_exchanges(path)
+        for exchange in exchanges:
             json.dump(exchange, out, ensure_ascii=False)
             out.write("\n")
             count += 1
+        manifest[str(path)] = {
+            "size": path.stat().st_size,
+            "exchanges": len(exchanges),
+        }
+    save_manifest(manifest, manifest_path)
     return count
 
 
@@ -297,10 +346,19 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override default discovery locations",
     )
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="Data directory for manifest (cursor state)",
+    )
     args = parser.parse_args(argv)
 
+    manifest_path = None
+    if args.data_dir:
+        manifest_path = Path(args.data_dir) / ".manifest"
+
     paths = discover(locations=args.locations, since=args.since)
-    emit(paths)
+    emit(paths, manifest_path=manifest_path)
     return 0
 
 

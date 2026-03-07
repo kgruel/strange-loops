@@ -180,8 +180,8 @@ class TestParseExchanges:
         assert ex["model"] == "claude-sonnet-4-20250514"
         assert ex["workspace"] == "/tmp/project"
         assert ex["conversation_id"] == "sess-1"
-        assert isinstance(ex["ts"], float)
-        assert ex["ts"] > 0
+        assert isinstance(ex["_ts"], float)
+        assert ex["_ts"] > 0
 
     def test_multiple_exchanges(self, tmp_path):
         path = _write_session(tmp_path / "session.jsonl", [
@@ -332,7 +332,7 @@ class TestEmit:
         assert obj["response"] == "A vertex is..."
         assert "model" in obj
         assert "workspace" in obj
-        assert "ts" in obj
+        assert "_ts" in obj
 
     def test_multiple_files(self, tmp_path):
         dir1 = tmp_path / "project1"
@@ -371,6 +371,110 @@ class TestEmit:
         emit([path], out=buf)
         obj = json.loads(buf.getvalue().strip())
         assert "kind" not in obj
+
+
+
+
+# ---------------------------------------------------------------------------
+# Manifest (cursor / idempotent re-sync)
+# ---------------------------------------------------------------------------
+
+
+class TestManifest:
+    def test_load_manifest_missing_file(self, tmp_path):
+        from siftd_loops.sources.claude_code import load_manifest
+        result = load_manifest(tmp_path / "nonexistent" / ".manifest")
+        assert result == {}
+
+    def test_load_manifest_none(self):
+        from siftd_loops.sources.claude_code import load_manifest
+        assert load_manifest(None) == {}
+
+    def test_save_and_load_manifest(self, tmp_path):
+        from siftd_loops.sources.claude_code import load_manifest, save_manifest
+        manifest_path = tmp_path / ".manifest"
+        data = {"/tmp/session.jsonl": {"size": 1234, "exchanges": 5}}
+        save_manifest(data, manifest_path)
+        loaded = load_manifest(manifest_path)
+        assert loaded == data
+
+    def test_save_manifest_none_is_noop(self):
+        from siftd_loops.sources.claude_code import save_manifest
+        save_manifest({"key": "val"}, None)  # should not raise
+
+    def test_file_changed_new_file(self, tmp_path):
+        from siftd_loops.sources.claude_code import file_changed
+        path = _write_session(tmp_path / "new.jsonl", [_user_record("hi")])
+        assert file_changed(path, {}) is True
+
+    def test_file_changed_same_size(self, tmp_path):
+        from siftd_loops.sources.claude_code import file_changed
+        path = _write_session(tmp_path / "same.jsonl", [_user_record("hi")])
+        manifest = {str(path): {"size": path.stat().st_size, "exchanges": 1}}
+        assert file_changed(path, manifest) is False
+
+    def test_file_changed_different_size(self, tmp_path):
+        from siftd_loops.sources.claude_code import file_changed
+        path = _write_session(tmp_path / "grew.jsonl", [_user_record("hi")])
+        manifest = {str(path): {"size": 1, "exchanges": 1}}  # wrong size
+        assert file_changed(path, manifest) is True
+
+
+class TestEmitWithManifest:
+    def test_skips_unchanged_files(self, tmp_path):
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("What is a vertex?"),
+            _assistant_record("A vertex is..."),
+        ])
+        manifest_path = tmp_path / ".manifest"
+
+        # First emit — should process
+        buf1 = io.StringIO()
+        count1 = emit([path], out=buf1, manifest_path=manifest_path)
+        assert count1 == 1
+
+        # Second emit — should skip (unchanged)
+        buf2 = io.StringIO()
+        count2 = emit([path], out=buf2, manifest_path=manifest_path)
+        assert count2 == 0
+        assert buf2.getvalue() == ""
+
+    def test_reprocesses_grown_file(self, tmp_path):
+        path = tmp_path / "session.jsonl"
+        _write_session(path, [
+            _user_record("Q1"),
+            _assistant_record("A1"),
+        ])
+        manifest_path = tmp_path / ".manifest"
+
+        # First emit
+        buf1 = io.StringIO()
+        emit([path], out=buf1, manifest_path=manifest_path)
+
+        # Grow the file
+        with path.open("a") as f:
+            f.write(json.dumps(_user_record("Q2")) + "\n")
+            f.write(json.dumps(_assistant_record("A2")) + "\n")
+
+        # Second emit — should reprocess (file grew)
+        buf2 = io.StringIO()
+        count2 = emit([path], out=buf2, manifest_path=manifest_path)
+        assert count2 == 2  # re-emits all exchanges from the file
+
+    def test_no_manifest_processes_all(self, tmp_path):
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Q1"),
+            _assistant_record("A1"),
+        ])
+
+        # Without manifest — always processes
+        buf1 = io.StringIO()
+        count1 = emit([path], out=buf1, manifest_path=None)
+        assert count1 == 1
+
+        buf2 = io.StringIO()
+        count2 = emit([path], out=buf2, manifest_path=None)
+        assert count2 == 1  # processes again, no cursor
 
 
 # ---------------------------------------------------------------------------

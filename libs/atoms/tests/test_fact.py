@@ -66,6 +66,21 @@ class TestFactory:
         f = Fact.of("ping", "sensor")
         assert f.payload == {}
 
+    def test_of_explicit_ts(self):
+        f = Fact.of("exchange", "siftd", ts=1234567890.0, prompt="hello")
+        assert f.ts == 1234567890.0
+        assert f.payload["prompt"] == "hello"
+
+    def test_of_ts_none_uses_current_time(self):
+        before = time.time()
+        f = Fact.of("exchange", "siftd", ts=None, prompt="hello")
+        after = time.time()
+        assert before <= f.ts <= after
+
+    def test_of_ts_not_in_payload(self):
+        f = Fact.of("exchange", "siftd", ts=1234567890.0, prompt="hello")
+        assert "ts" not in f.payload
+
 
 # --- Tick factory ---
 
@@ -101,6 +116,12 @@ class TestTickFactory:
         assert rebuilt.ts == original.ts
         assert rebuilt.observer == original.observer
         assert dict(rebuilt.payload) == dict(original.payload)
+
+    def test_tick_explicit_ts(self):
+        f = Fact.tick("hourly", "vertex-a", ts=1234567890.0, count=42)
+        assert f.ts == 1234567890.0
+        assert f.kind == "tick.hourly"
+        assert f.payload["count"] == 42
 
     def test_tick_is_kind(self):
         f = Fact.tick("hourly", "vertex-a")

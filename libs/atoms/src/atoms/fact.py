@@ -40,28 +40,30 @@ class Fact(Generic[T]):
             )
 
     @classmethod
-    def of(cls, kind: str, observer: str, *, origin: str = "", **data: Any) -> Fact[dict]:
+    def of(cls, kind: str, observer: str, *, origin: str = "", ts: float | None = None, **data: Any) -> Fact[dict]:
         """Create a Fact with auto-timestamp and dict payload.
 
         Args:
             kind: Domain-specific routing key
             observer: Who produced this observation
             origin: Which loop produced this (empty for external observations)
+            ts: Event timestamp override (default: current time)
             **data: Keyword arguments become the dict payload
         """
-        return cls(kind=kind, ts=time.time(), payload=data, observer=observer, origin=origin)
+        return cls(kind=kind, ts=ts if ts is not None else time.time(), payload=data, observer=observer, origin=origin)
 
     @classmethod
-    def tick(cls, name: str, observer: str, *, origin: str = "", **data: Any) -> Fact[dict]:
+    def tick(cls, name: str, observer: str, *, origin: str = "", ts: float | None = None, **data: Any) -> Fact[dict]:
         """Create a boundary-related Fact with tick. prefix.
 
         Args:
             name: Boundary name — auto-prefixed to kind="tick.{name}"
             observer: Who produced this observation
             origin: Which loop produced this (empty for external observations)
+            ts: Event timestamp override (default: current time)
             **data: Keyword arguments become the dict payload
         """
-        return cls(kind=f"tick.{name}", ts=time.time(), payload=data, observer=observer, origin=origin)
+        return cls(kind=f"tick.{name}", ts=ts if ts is not None else time.time(), payload=data, observer=observer, origin=origin)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a plain dict for serialization."""

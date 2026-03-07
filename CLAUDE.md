@@ -4,6 +4,7 @@ The strange-loops monorepo. A system for focusing attention.
 
 See `STRANGE-LOOPS.md` for the paradigm — three shapes, four properties, one pattern.
 See `ARCHITECTURE.md` for why it's built this way — libraries, persistence, rendering.
+See `DESIGN-DECISIONS.md` for the architectural north star — tiered decisions, layer boundaries, implementation chain.
 
 ## Where to start
 

@@ -556,7 +556,6 @@ def vertex_fold(
     sections: list[FoldSection] = []
     for kind_name in ordered_kinds:
         state = raw.get(kind_name, {})
-        items_raw = state.get("items", state)
 
         # Extract fold metadata from compiled spec
         fold_type = "collect"
@@ -569,6 +568,13 @@ def vertex_fold(
                 key_field = fold_op.key
             elif isinstance(fold_op, Collect):
                 fold_type = "collect"
+
+        # Extract items from fold state using the spec's target name
+        # (not hardcoded "items" — any target name works)
+        if spec and spec.folds:
+            items_raw = state.get(spec.folds[0].target, state)
+        else:
+            items_raw = state
 
         # Normalize items to list[dict], then convert to typed FoldItems
         if fold_type == "by" and isinstance(items_raw, dict):

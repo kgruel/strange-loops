@@ -161,6 +161,60 @@ class TestVertexRead:
         assert "auth" in result["decision"]["items"]
 
 
+class TestVertexFold:
+    """vertex_fold: typed FoldState with named fold targets."""
+
+    def test_named_upsert_target(self, tmp_path):
+        """Upsert target with a name other than 'items' works through vertex_fold."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { topics "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "db", "message": "SQLite"}},
+        ])
+
+        result = vertex_fold(vpath)
+        section = result.sections[0]
+        assert section.kind == "decision"
+        assert section.fold_type == "by"
+        assert len(section.items) == 2
+        payloads = {item.payload["topic"]: item.payload["message"] for item in section.items}
+        assert payloads == {"auth": "JWT", "db": "SQLite"}
+
+    def test_named_collect_target(self, tmp_path):
+        """Collect target with a name other than 'items' works through vertex_fold."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  event { fold { recent "collect" 3 } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "event", "ts": 1000.0, "payload": {"msg": "first"}},
+            {"kind": "event", "ts": 2000.0, "payload": {"msg": "second"}},
+        ])
+
+        result = vertex_fold(vpath)
+        section = result.sections[0]
+        assert section.kind == "event"
+        assert section.fold_type == "collect"
+        assert len(section.items) == 2
+        assert section.items[0].payload["msg"] == "first"
+        assert section.items[1].payload["msg"] == "second"
+
+    def test_items_target_still_works(self, tmp_path):
+        """The conventional 'items' target name continues to work."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+        ])
+
+        result = vertex_fold(vpath)
+        section = result.sections[0]
+        assert len(section.items) == 1
+        assert section.items[0].payload["topic"] == "auth"
+
+
 class TestVertexFacts:
     """vertex_facts: raw fact access through the vertex."""
 

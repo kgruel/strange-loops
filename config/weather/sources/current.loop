@@ -1,0 +1,19 @@
+// Current conditions from Open-Meteo (Austin, TX)
+// Free API, no key required, JSON response.
+
+source "curl -sf 'https://api.open-meteo.com/v1/forecast?latitude=30.27&longitude=-97.74&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,pressure_msl&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America/Chicago'"
+kind "reading"
+observer "weather"
+origin "open-meteo"
+format "json"
+
+parse {
+  project {
+    temp_f       path="current.temperature_2m"
+    humidity     path="current.relative_humidity_2m"
+    feels_like   path="current.apparent_temperature"
+    wind_mph     path="current.wind_speed_10m"
+    pressure_hpa path="current.pressure_msl"
+    observed_at  path="current.time"
+  }
+}

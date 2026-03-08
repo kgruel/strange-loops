@@ -30,6 +30,21 @@ class SequentialSource:
     def observer(self) -> str:
         return self._observer
 
+    @property
+    def kind(self) -> str:
+        """Primary kind — first inner source's kind.
+
+        SequentialSource wraps multiple sources, but the executor needs
+        a single kind for dependency graphs and status reporting.
+        The first source's kind represents the block.
+        """
+        return self.sources[0].kind if self.sources else ""
+
+    @property
+    def command(self) -> str:
+        """Primary command — first inner source's command."""
+        return self.sources[0].command if self.sources else ""
+
     async def collect(self) -> AsyncIterator[Fact]:
         """Collect facts from each source in order. Stop on failure."""
         for source in self.sources:

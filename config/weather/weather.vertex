@@ -1,0 +1,43 @@
+// weather — personal weather monitoring
+// Stage 3: inline source + predicate boundary.
+// Source moved from external .loop to inline (full vocabulary).
+// Boundary fires tick when temperature exceeds threshold.
+
+name "weather"
+store "./data/weather.db"
+
+sources sequential {
+  source "curl -sf 'https://api.open-meteo.com/v1/forecast?latitude=30.27&longitude=-97.74&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,pressure_msl&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America/Chicago'" {
+    kind "reading"
+    observer "weather"
+    origin "open-meteo"
+    format "json"
+    every "30m"
+    parse {
+      project {
+        temp_f       path="current.temperature_2m"
+        humidity     path="current.relative_humidity_2m"
+        feels_like   path="current.apparent_temperature"
+        wind_mph     path="current.wind_speed_10m"
+        pressure_hpa path="current.pressure_msl"
+        observed_at  path="current.time"
+      }
+    }
+  }
+}
+
+loops {
+  reading {
+    fold {
+      last24h    "collect" 48
+      total      "inc"
+      latest_at  "latest"
+      high       "max" "temp_f"
+      low        "min" "temp_f"
+      humidity   "max" "humidity"
+    }
+    boundary when="reading" {
+      condition "high" ">=" 80
+    }
+  }
+}

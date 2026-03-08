@@ -742,3 +742,69 @@ class TestRunParseMany:
         assert len(results) == 2
         assert results[0] == {"id": 1, "title": "A"}
         assert results[1] == {"id": 2, "title": "B"}
+
+
+class TestFlatten:
+    """Tests for Flatten parse op."""
+
+    def test_basic_flatten(self):
+        """Flatten extracts subfields from array elements into text."""
+        from atoms import Flatten
+
+        data = {
+            "prompt": "hello",
+            "tool_calls": [
+                {"name": "read_file", "input": "foo.py"},
+                {"name": "write_file", "input": "bar.py"},
+            ],
+        }
+        pipeline = [Flatten(field="tool_calls", into="tool_text", extract=("name", "input"))]
+        result = run_parse(data, pipeline)
+        assert result is not None
+        assert "tool_text" in result
+        assert "name: read_file" in result["tool_text"]
+        assert "input: foo.py" in result["tool_text"]
+        assert "name: write_file" in result["tool_text"]
+        # Original fields preserved
+        assert result["prompt"] == "hello"
+        assert result["tool_calls"] == data["tool_calls"]
+
+    def test_flatten_single_extract(self):
+        """Single extract field omits key prefix."""
+        from atoms import Flatten
+
+        data = {"items": [{"name": "a"}, {"name": "b"}]}
+        pipeline = [Flatten(field="items", into="names", extract=("name",))]
+        result = run_parse(data, pipeline)
+        assert result is not None
+        assert result["names"] == "a\nb"
+
+    def test_flatten_missing_field(self):
+        """Flatten on missing field produces empty string."""
+        from atoms import Flatten
+
+        data = {"prompt": "hello"}
+        pipeline = [Flatten(field="tool_calls", into="tool_text", extract=("name",))]
+        result = run_parse(data, pipeline)
+        assert result is not None
+        assert result["tool_text"] == ""
+
+    def test_flatten_empty_array(self):
+        """Flatten on empty array produces empty string."""
+        from atoms import Flatten
+
+        data = {"tool_calls": []}
+        pipeline = [Flatten(field="tool_calls", into="tool_text", extract=("name",))]
+        result = run_parse(data, pipeline)
+        assert result is not None
+        assert result["tool_text"] == ""
+
+    def test_flatten_non_dict_elements_skipped(self):
+        """Non-dict array elements are silently skipped."""
+        from atoms import Flatten
+
+        data = {"items": ["string", {"name": "valid"}, 42]}
+        pipeline = [Flatten(field="items", into="text", extract=("name",))]
+        result = run_parse(data, pipeline)
+        assert result is not None
+        assert result["text"] == "valid"

@@ -1558,3 +1558,114 @@ class TestLensBlock:
         text = 'name "t"\nstore "./t.db"\nlens { bad "x" }\nloops { x { fold { items "inc" } } }'
         with pytest.raises(ParseError, match="Unknown lens field: bad"):
             parse_vertex(text)
+
+
+class TestParseAtVertex:
+    """Tests for per-kind parse declarations in .vertex loop definitions."""
+
+    def test_select_in_loop_def(self):
+        """Parse block with select in a vertex loop definition."""
+        from lang.ast import Select
+
+        text = """\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response" "model"
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["exchange"]
+        assert len(loop_def.parse) == 1
+        assert isinstance(loop_def.parse[0], Select)
+        assert loop_def.parse[0].fields == ("prompt", "response", "model")
+
+    def test_parse_with_search_and_fold(self):
+        """Parse, search, and fold can coexist in a loop definition."""
+        from lang.ast import Select
+
+        text = """\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response"
+    }
+    fold { items "by" "conversation_id" }
+    search "prompt" "response"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["exchange"]
+        assert len(loop_def.parse) == 1
+        assert isinstance(loop_def.parse[0], Select)
+        assert loop_def.search == ("prompt", "response")
+        assert len(loop_def.folds) == 1
+
+    def test_no_parse_defaults_empty(self):
+        """Loop def without parse block has empty parse tuple."""
+        text = """\
+name "project"
+loops {
+  decision {
+    fold { items "by" "topic" }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.loops["decision"].parse == ()
+
+    def test_flatten_in_loop_def(self):
+        """Flatten parse step in a vertex loop definition."""
+        from lang.ast import Flatten
+
+        text = """\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      flatten "tool_calls" into="tool_text" {
+        extract "name" "input"
+      }
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["exchange"]
+        assert len(loop_def.parse) == 1
+        step = loop_def.parse[0]
+        assert isinstance(step, Flatten)
+        assert step.field == "tool_calls"
+        assert step.into == "tool_text"
+        assert step.extract == ("name", "input")
+
+    def test_multiple_parse_steps(self):
+        """Multiple parse steps in sequence."""
+        from lang.ast import Flatten, Select
+
+        text = """\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response" "tool_calls"
+      flatten "tool_calls" into="tool_text" {
+        extract "name" "input"
+      }
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        loop_def = vertex.loops["exchange"]
+        assert len(loop_def.parse) == 2
+        assert isinstance(loop_def.parse[0], Select)
+        assert isinstance(loop_def.parse[1], Flatten)

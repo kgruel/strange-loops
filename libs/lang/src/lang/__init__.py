@@ -9,6 +9,7 @@ from .ast import (
     CombineEntry,
     Duration,
     Explode,
+    Flatten,
     FoldAvg,
     FoldBy,
     FoldCollect,
@@ -78,6 +79,7 @@ __all__ = [
     "Explode",
     "Project",
     "Where",
+    "Flatten",
     # AST types - Vertex file
     "VertexFile",
     "LoopDef",

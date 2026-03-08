@@ -219,8 +219,29 @@ class Where:
     value: str | None = None
 
 
+@dataclass(frozen=True)
+class Flatten:
+    """Flatten an array-of-objects field into a searchable text field.
+
+    Takes an array field, extracts named subfields from each element,
+    and concatenates into a single text field.
+
+    Attributes:
+        field: Source array field name.
+        into: Target text field name.
+        extract: Subfield names to extract from each element.
+
+    Examples:
+        Flatten(field="tool_calls", into="tool_text", extract=("name", "input"))
+    """
+
+    field: str
+    into: str
+    extract: tuple[str, ...]
+
+
 # Type alias for parse operations
-ParseOp = Skip | Split | Pick | Rename | Transform | Coerce | Select | Explode | Project | Where
+ParseOp = Skip | Split | Pick | Rename | Transform | Coerce | Select | Explode | Project | Where | Flatten
 
 
 def _apply_skip(value: str | dict[str, Any], op: Skip) -> str | dict[str, Any] | None:
@@ -510,6 +531,25 @@ def _apply_single_op(value: Any, op: ParseOp) -> Any:
     return None
 
 
+def _apply_flatten(value: dict[str, Any], op: Flatten) -> dict[str, Any]:
+    """Apply Flatten: extract subfields from array elements into a text field.
+
+    The original field is preserved; the flattened text is added alongside.
+    """
+    arr = value.get(op.field)
+    if not isinstance(arr, list):
+        return {**value, op.into: ""}
+    parts: list[str] = []
+    for item in arr:
+        if not isinstance(item, dict):
+            continue
+        for key in op.extract:
+            v = item.get(key)
+            if v is not None:
+                parts.append(f"{key}: {v}" if len(op.extract) > 1 else str(v))
+    return {**value, op.into: "\n".join(parts)}
+
+
 def has_explode(pipeline: list[ParseOp]) -> bool:
     """Check if a pipeline contains any Explode ops."""
     return any(isinstance(op, Explode) for op in pipeline)
@@ -571,6 +611,11 @@ def run_parse(
             if isinstance(value, dict):
                 results = _apply_explode(value, op)
                 value = results[0] if results else None
+            else:
+                return None
+        elif isinstance(op, Flatten):
+            if isinstance(value, dict):
+                value = _apply_flatten(value, op)
             else:
                 return None
         else:

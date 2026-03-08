@@ -78,6 +78,7 @@ class Vertex:
         self._replaying = False  # suppress boundaries during replay
         self._children: list[Vertex] = []
         self._routes: dict[str, str] = {}  # pattern → loop_name
+        self._parse_pipelines: dict[str, list] = {}  # kind → compiled ParseOp list
 
     @property
     def name(self) -> str:
@@ -119,6 +120,17 @@ class Vertex:
             routes: Dict mapping glob patterns to loop names
         """
         self._routes = routes.copy()
+
+    def set_parse_pipelines(self, pipelines: dict[str, list]) -> None:
+        """Set per-kind parse pipelines.
+
+        Parse pipelines transform fact payloads before routing to folds.
+        Derived fields are added alongside originals.
+
+        Args:
+            pipelines: Dict mapping kind name to list of compiled ParseOps
+        """
+        self._parse_pipelines = pipelines.copy()
 
     def _resolve_route(self, kind: str) -> str | None:
         """Resolve a fact kind to a loop name via route patterns.
@@ -281,6 +293,20 @@ class Vertex:
             resolved = self._resolve_route(kind)
             if resolved is not None:
                 routed_kind = resolved
+
+        # Apply per-kind parse pipeline (transforms payload before fold)
+        parse_pipeline = self._parse_pipelines.get(routed_kind)
+        if parse_pipeline is not None:
+            from atoms import run_parse
+            # Convert MappingProxyType to dict for parse pipeline
+            parse_input = dict(payload) if hasattr(payload, 'keys') else payload
+            parsed = run_parse(parse_input, parse_pipeline)
+            if parsed is None:
+                # Parse rejected this fact — skip fold and routing,
+                # consistent with source-level parse where None means
+                # "drop the record." Fact is already stored for audit.
+                return None
+            payload = parsed
 
         # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire

@@ -479,3 +479,54 @@ loops {
         )
         with pytest.raises(ValidationError, match="duplicate kind 'test'"):
             validate_vertex(vertex)
+
+
+class TestVertexParseValidation:
+    """Validate per-kind parse pipelines in .vertex loop definitions."""
+
+    def test_valid_select_in_vertex(self):
+        """Select is valid in vertex parse — dict input, dict output."""
+        vertex = parse_vertex("""\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response"
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+""")
+        validate_vertex(vertex)  # Should not raise
+
+    def test_split_invalid_in_vertex_parse(self):
+        """Split requires string input but vertex parse starts as dict."""
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  event {
+    parse {
+      split
+    }
+    fold { count "inc" }
+  }
+}
+""")
+        with pytest.raises(ValidationError, match="split.*requires string input"):
+            validate_vertex(vertex)
+
+    def test_skip_invalid_in_vertex_parse(self):
+        """Skip requires string input but vertex parse starts as dict."""
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  event {
+    parse {
+      skip "^header"
+    }
+    fold { count "inc" }
+  }
+}
+""")
+        with pytest.raises(ValidationError, match="skip.*requires string input"):
+            validate_vertex(vertex)

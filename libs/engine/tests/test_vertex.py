@@ -978,3 +978,144 @@ class TestVertexReplay:
         # tick2 period is [tick1.ts, tick2.ts] — not [first_fact, tick2.ts]
         assert tick2.since > tick1.since  # tick1.since < tick1.ts always
         store2.close()
+
+
+class TestParseAtVertex:
+    """Per-kind parse pipelines applied at Vertex.receive() time."""
+
+    def test_select_filters_payload(self):
+        """Parse pipeline with Select filters payload fields before fold."""
+        from atoms import Select as RuntimeSelect
+
+        v = Vertex()
+        v.register("exchange", [], collect_fold)
+        v.set_parse_pipelines({
+            "exchange": [RuntimeSelect("prompt", "response")],
+        })
+
+        v.receive(fact("exchange", prompt="hello", response="world", model="gpt-4", extra="noise"))
+        state = v.state("exchange")
+        assert len(state) == 1
+        assert state[0] == {"prompt": "hello", "response": "world"}
+
+    def test_parse_preserves_unregistered_kinds(self):
+        """Facts for kinds without parse pipelines pass through unmodified."""
+        from atoms import Select as RuntimeSelect
+
+        v = Vertex()
+        v.register("exchange", [], collect_fold)
+        v.register("other", [], collect_fold)
+        v.set_parse_pipelines({
+            "exchange": [RuntimeSelect("prompt")],
+        })
+
+        v.receive(fact("other", prompt="hello", extra="kept"))
+        state = v.state("other")
+        assert len(state) == 1
+        assert "extra" in state[0]
+
+    def test_flatten_adds_derived_field(self):
+        """Flatten parse op adds a text field derived from array elements."""
+        from atoms import Flatten as RuntimeFlatten
+
+        v = Vertex()
+        v.register("exchange", [], collect_fold)
+        v.set_parse_pipelines({
+            "exchange": [RuntimeFlatten(
+                field="tool_calls",
+                into="tool_text",
+                extract=("name", "input"),
+            )],
+        })
+
+        v.receive(fact("exchange", tool_calls=[
+            {"name": "read_file", "input": "foo.py"},
+            {"name": "write_file", "input": "bar.py"},
+        ], prompt="hello"))
+
+        state = v.state("exchange")
+        assert len(state) == 1
+        assert "tool_text" in state[0]
+        assert "read_file" in state[0]["tool_text"]
+        assert "write_file" in state[0]["tool_text"]
+        # Original field preserved
+        assert "tool_calls" in state[0]
+        assert "prompt" in state[0]
+
+    def test_parse_with_route(self):
+        """Parse pipeline applies when fact kind is resolved via route."""
+        from atoms import Select as RuntimeSelect
+
+        v = Vertex()
+        v.register("exchange", [], collect_fold)
+        v.set_routes({"exchange.*": "exchange"})
+        v.set_parse_pipelines({
+            "exchange": [RuntimeSelect("prompt")],
+        })
+
+        v.receive(fact("exchange.siftd", prompt="hello", model="gpt-4"))
+        state = v.state("exchange")
+        assert len(state) == 1
+        assert state[0] == {"prompt": "hello"}
+
+    def test_integration_parse_then_fold(self):
+        """End-to-end: parse transforms payload, then fold accumulates."""
+        from atoms import Select as RuntimeSelect
+
+        def upsert_fold(state, payload):
+            key = payload.get("topic", "unknown")
+            return {**state, key: payload}
+
+        v = Vertex()
+        v.register("decision", {}, upsert_fold)
+        v.set_parse_pipelines({
+            "decision": [RuntimeSelect("topic", "position")],
+        })
+
+        v.receive(fact("decision", topic="auth", position="JWT", extra="noise"))
+        v.receive(fact("decision", topic="deploy", position="k8s", tags=["prod"]))
+
+        state = v.state("decision")
+        assert "auth" in state
+        assert state["auth"] == {"topic": "auth", "position": "JWT"}
+        assert "deploy" in state
+        assert state["deploy"] == {"topic": "deploy", "position": "k8s"}
+        # "extra" and "tags" were stripped by Select
+
+    def test_parse_none_skips_fold(self):
+        """When parse returns None, the fact is dropped — not silently passed through."""
+        from atoms import Where
+
+        v = Vertex()
+        v.register("event", [], collect_fold)
+        # Where filter: only pass through facts with status=active
+        v.set_parse_pipelines({
+            "event": [Where(path="status", op="equals", value="active")],
+        })
+
+        v.receive(fact("event", status="active", name="a"))
+        v.receive(fact("event", status="closed", name="b"))  # should be dropped
+        v.receive(fact("event", status="active", name="c"))
+
+        state = v.state("event")
+        assert len(state) == 2
+        assert state[0]["name"] == "a"
+        assert state[1]["name"] == "c"
+
+    def test_parse_none_still_stores(self):
+        """Rejected facts are still stored (for audit) even though fold is skipped."""
+        from atoms import Where
+
+        store = EventStore()
+        v = Vertex("test", store=store)
+        v.register("event", [], collect_fold)
+        v.set_parse_pipelines({
+            "event": [Where(path="status", op="equals", value="active")],
+        })
+
+        v.receive(fact("event", status="closed", name="dropped"))
+
+        # Fold should be empty — fact was rejected by parse
+        assert v.state("event") == []
+        # But store should have the fact
+        assert len(list(store.since(0))) == 1

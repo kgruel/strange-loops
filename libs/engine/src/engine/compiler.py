@@ -42,6 +42,7 @@ from lang.ast import (
     Trigger,
     VertexFile,
 )
+from lang.ast import Flatten as DslFlatten
 from lang.ast import Explode as DslExplode
 from lang.ast import Project as DslProject
 from lang.ast import Where as DslWhere
@@ -195,6 +196,13 @@ def map_where(step: DslWhere) -> "RuntimeParseOp":
     return RuntimeWhere(path=step.path, op=step.op, value=step.value)
 
 
+def map_flatten(step: DslFlatten) -> "RuntimeParseOp":
+    """Map DSL Flatten to runtime Flatten."""
+    from atoms import Flatten as RuntimeFlatten
+
+    return RuntimeFlatten(field=step.field, into=step.into, extract=step.extract)
+
+
 def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
     """Map DSL parse steps to runtime parse ops."""
     result: list[RuntimeParseOp] = []
@@ -219,6 +227,8 @@ def map_parse_steps(steps: tuple[DslParseStep, ...]) -> list[RuntimeParseOp]:
             result.append(map_project(step))
         elif isinstance(step, DslWhere):
             result.append(map_where(step))
+        elif isinstance(step, DslFlatten):
+            result.append(map_flatten(step))
 
     return result
 
@@ -350,7 +360,7 @@ def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
         new_kind = substitute_vars(boundary.kind, params)
         boundary = BoundaryWhen(kind=new_kind)
 
-    return LoopDef(folds=loop_def.folds, boundary=boundary)
+    return LoopDef(folds=loop_def.folds, boundary=boundary, search=loop_def.search, parse=loop_def.parse)
 
 
 def _load_params_file(file_path: Path) -> list[SourceParams]:
@@ -541,6 +551,18 @@ def map_vertex_file(vertex: VertexFile) -> dict[str, Spec]:
     return specs
 
 
+def compile_parse_pipelines(vertex: VertexFile) -> dict[str, list["RuntimeParseOp"]] | None:
+    """Compile per-kind parse pipelines from LoopDef.parse declarations.
+
+    Returns a dict mapping kind → list[ParseOp], or None if no loop has parse.
+    """
+    pipelines: dict[str, list["RuntimeParseOp"]] = {}
+    for name, loop_def in vertex.loops.items():
+        if loop_def.parse:
+            pipelines[name] = map_parse_steps(loop_def.parse)
+    return pipelines or None
+
+
 # -----------------------------------------------------------------------------
 # Compiled Vertex Tree
 # -----------------------------------------------------------------------------
@@ -563,6 +585,7 @@ class CompiledVertex:
     sources: list | None = None
     template_specs: dict | None = None
     boundary: "Boundary | None" = None  # vertex-level boundary (fires all loops)
+    parse_pipelines: dict[str, list["RuntimeParseOp"]] | None = None  # kind → compiled ParseOp list
 
 
 def collect_all_sources(compiled: CompiledVertex) -> tuple[list, dict]:
@@ -679,6 +702,9 @@ def compile_vertex_recursive(
     if vertex.boundary is not None:
         vertex_boundary = map_boundary(vertex.boundary)
 
+    # Compile per-kind parse pipelines
+    parse_pipes = compile_parse_pipelines(vertex)
+
     return CompiledVertex(
         name=vertex.name,
         specs=specs,
@@ -689,6 +715,7 @@ def compile_vertex_recursive(
         sources=own_sources or None,
         template_specs=own_template_specs or None,
         boundary=vertex_boundary,
+        parse_pipelines=parse_pipes,
     )
 
 
@@ -900,6 +927,10 @@ def materialize_vertex(
                     reset=reset,
                 )
                 vertex.register_loop(loop)
+
+    # Register per-kind parse pipelines
+    if compiled.parse_pipelines:
+        vertex.set_parse_pipelines(compiled.parse_pipelines)
 
     # Register vertex-level boundary (fires all loops)
     if compiled.boundary is not None:

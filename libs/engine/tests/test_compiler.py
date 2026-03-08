@@ -1870,3 +1870,97 @@ loops {
         seq, cadence = pairs[0]
         assert isinstance(seq, SequentialSource)
         assert len(seq.sources) == 2
+
+
+class TestParseAtVertex:
+    """Per-kind parse pipeline compilation from .vertex LoopDef."""
+
+    def test_compile_parse_pipelines(self):
+        """LoopDef.parse compiles to ParseOp list in CompiledVertex."""
+        from atoms import Select as RuntimeSelect
+        from engine.compiler import compile_parse_pipelines
+
+        vertex = parse_vertex("""\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response"
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+""")
+        pipelines = compile_parse_pipelines(vertex)
+        assert pipelines is not None
+        assert "exchange" in pipelines
+        assert len(pipelines["exchange"]) == 1
+        assert isinstance(pipelines["exchange"][0], RuntimeSelect)
+        assert pipelines["exchange"][0].fields == ("prompt", "response")
+
+    def test_no_parse_returns_none(self):
+        """Vertex without parse declarations returns None."""
+        from engine.compiler import compile_parse_pipelines
+
+        vertex = parse_vertex("""\
+name "project"
+loops {
+  decision {
+    fold { items "by" "topic" }
+  }
+}
+""")
+        assert compile_parse_pipelines(vertex) is None
+
+    def test_compile_vertex_recursive_includes_parse(self):
+        """compile_vertex_recursive populates parse_pipelines on CompiledVertex."""
+        vertex = parse_vertex("""\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      select "prompt" "response"
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        assert compiled.parse_pipelines is not None
+        assert "exchange" in compiled.parse_pipelines
+
+    def test_flatten_compiles_to_runtime(self):
+        """Flatten DSL step compiles to runtime Flatten op."""
+        from atoms import Flatten as RuntimeFlatten
+        from engine.compiler import compile_parse_pipelines
+
+        vertex = parse_vertex("""\
+name "messaging"
+loops {
+  exchange {
+    parse {
+      flatten "tool_calls" into="tool_text" {
+        extract "name" "input"
+      }
+    }
+    fold { items "by" "conversation_id" }
+  }
+}
+""")
+        pipelines = compile_parse_pipelines(vertex)
+        assert pipelines is not None
+        op = pipelines["exchange"][0]
+        assert isinstance(op, RuntimeFlatten)
+        assert op.field == "tool_calls"
+        assert op.into == "tool_text"
+        assert op.extract == ("name", "input")
+
+    def test_map_parse_steps_with_flatten(self):
+        """map_parse_steps handles Flatten DSL step."""
+        from atoms import Flatten as RuntimeFlatten
+        from lang.ast import Flatten as DslFlatten
+
+        steps = (DslFlatten(field="calls", into="text", extract=("name",)),)
+        result = map_parse_steps(steps)
+        assert len(result) == 1
+        assert isinstance(result[0], RuntimeFlatten)

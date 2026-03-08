@@ -177,7 +177,20 @@ class Where:
     value: str | None = None
 
 
-ParseStep = Skip | Split | Pick | Select | Transform | Explode | Project | Where
+@dataclass(frozen=True)
+class Flatten:
+    """Flatten an array-of-objects field into a searchable text field.
+
+    Takes an array field, extracts named subfields from each element,
+    and concatenates into a single text field.
+    """
+
+    field: str
+    into: str
+    extract: tuple[str, ...]
+
+
+ParseStep = Skip | Split | Pick | Select | Transform | Explode | Project | Where | Flatten
 
 
 # -----------------------------------------------------------------------------
@@ -333,6 +346,7 @@ class LoopDef:
     folds: tuple[FoldDecl, ...]
     boundary: Boundary | None = None
     search: tuple[str, ...] = ()  # payload field names for FTS5 indexing
+    parse: tuple[ParseStep, ...] = ()  # per-kind parse pipeline
 
 
 # -----------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from atoms.fold_state import FoldItem, FoldSection, FoldState
 from atoms.parse import (
     Coerce,
     Explode,
+    Flatten,
     Pick,
     Project,
     Rename,
@@ -80,6 +81,7 @@ __all__ = [
     # Parse vocabulary
     "Coerce",
     "Explode",
+    "Flatten",
     "Pick",
     "Project",
     "Rename",

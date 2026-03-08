@@ -27,6 +27,7 @@ from .ast import (
     FoldMin,
     FoldSum,
     FoldWindow,
+    Flatten,
     FromFile,
     GrantDecl,
     InlineSource,
@@ -192,6 +193,25 @@ def _load_where(node: ckdl.Node, path: Path | None) -> Where:
     return Where(path=str(where_path), op="exists")
 
 
+def _load_flatten(node: ckdl.Node, path: Path | None) -> Flatten:
+    """Load a flatten step: flatten "field" into="target" { extract "a" "b" }"""
+    if not node.args:
+        raise _error("flatten requires a field name argument", path)
+    field = str(node.args[0])
+    props = node.properties
+    into = props.get("into")
+    if into is None:
+        raise _error("flatten requires into= property", path)
+    # Extract fields from child 'extract' node
+    extract_fields: tuple[str, ...] = ()
+    for child in node.children:
+        if child.name == "extract":
+            extract_fields = tuple(str(a) for a in child.args)
+    if not extract_fields:
+        raise _error("flatten requires extract with at least one field name", path)
+    return Flatten(field=field, into=str(into), extract=extract_fields)
+
+
 _PARSE_STEP_LOADERS = {
     "skip": _load_skip,
     "split": _load_split,
@@ -201,6 +221,7 @@ _PARSE_STEP_LOADERS = {
     "explode": _load_explode,
     "project": _load_project,
     "where": _load_where,
+    "flatten": _load_flatten,
 }
 
 
@@ -281,10 +302,11 @@ def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
 
 
 def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
-    """Load a loop definition (fold + boundary + search) from a node's children."""
+    """Load a loop definition (fold + boundary + search + parse) from a node's children."""
     folds: tuple[FoldDecl, ...] = ()
     boundary: Boundary | None = None
     search: tuple[str, ...] = ()
+    parse: tuple[ParseStep, ...] = ()
 
     for child in node.children:
         if child.name == "fold":
@@ -295,10 +317,12 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
             search = tuple(str(a) for a in child.args)
             if not search:
                 raise _error("search requires at least one field name", path)
+        elif child.name == "parse":
+            parse = _load_parse_block(child, path)
         else:
             raise _error(f"Unknown loop field: {child.name}", path)
 
-    return LoopDef(folds=folds, boundary=boundary, search=search)
+    return LoopDef(folds=folds, boundary=boundary, search=search, parse=parse)
 
 
 # ---------------------------------------------------------------------------

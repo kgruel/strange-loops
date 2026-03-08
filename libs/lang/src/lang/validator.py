@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from .ast import (
     Coerce,
     Explode,
+    Flatten,
     LoopFile,
     ParseStep,
     Pick,
@@ -207,6 +208,14 @@ def validate_parse_flow(
             fields = tuple(step.fields.keys())
             shape = Shape.dict_shape(fields)
 
+        elif isinstance(step, Flatten):
+            if shape.kind != ShapeKind.DICT:
+                ctx.error(
+                    f"flatten (step {step_num}) requires dict input",
+                    hint="flatten operates on JSON/dict data",
+                )
+            # Flatten adds a new field alongside originals — shape stays DICT
+
     return shape
 
 
@@ -299,6 +308,12 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
             if target in seen:
                 ctx.error(f"loop '{loop_name}' has duplicate fold target '{target}'")
             seen.add(target)
+
+        # Validate per-kind parse pipeline — vertex receives dicts, not raw lines
+        if loop_def.parse:
+            validate_parse_flow(
+                loop_def.parse, ctx, initial_shape=Shape(ShapeKind.DICT),
+            )
 
     # Check sources blocks
     for block in vertex.sources_blocks or []:

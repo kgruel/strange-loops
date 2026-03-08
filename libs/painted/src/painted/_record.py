@@ -309,8 +309,8 @@ def record_line(
     lines = [header_line]
 
     # Shallow indent — gutter rail provides visual continuity to parent.
-    # Constrain all lines to width so join_vertical doesn't pad beyond
-    # terminal width (which causes wrapping gaps).
+    # FULL zoom: show complete values without truncation. Long lines may
+    # wrap in the terminal, but data completeness wins at this zoom level.
     indent = "  "
     for k, v in payload.items():
         if v is None or v == "":
@@ -318,9 +318,9 @@ def record_line(
         sv = str(v)
         # Split multiline values into individual lines
         value_lines = sv.splitlines()
-        lines.append(Block.text(f"{indent}{k}: {value_lines[0]}", p.muted, width=width))
+        lines.append(Block.text(f"{indent}{k}: {value_lines[0]}", p.muted))
         for vl in value_lines[1:]:
-            lines.append(Block.text(vl, p.muted, width=width))
+            lines.append(Block.text(vl, p.muted))
 
     return join_vertical(*lines)
 

@@ -357,7 +357,8 @@ def _run_validate(argv: list[str]) -> int:
         return data
 
     def render(ctx, data):
-        return validate_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return validate_view(data, ctx.zoom, w)
 
     rc = run_cli(
         rest,
@@ -438,7 +439,8 @@ def _run_test(argv: list[str]) -> int:
             return {"results": results, "skipped": skipped}
 
         def render(ctx, data):
-            return test_view(data, ctx.zoom, ctx.width)
+            w = ctx.width if ctx.is_tty else None
+            return test_view(data, ctx.zoom, w)
 
         return run_cli(
             rest,
@@ -503,7 +505,8 @@ def _run_test(argv: list[str]) -> int:
                     break
 
         def render(ctx, data):
-            return run_facts_view(data, ctx.zoom, ctx.width)
+            w = ctx.width if ctx.is_tty else None
+            return run_facts_view(data, ctx.zoom, w)
 
         return run_cli(
             rest,
@@ -1404,9 +1407,10 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
             resolved_render_fn = _resolve_render_fn(
                 known.lens, vertex_path, "stream_view",
             )
+        w = ctx.width if ctx.is_tty else None
         from .lens_resolver import call_lens
         return call_lens(
-            resolved_render_fn, data, ctx.zoom, ctx.width,
+            resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
         )
 

@@ -1,8 +1,8 @@
 ✓ loops/disk.loop
-    /Users/kaygee/Code/loops/loops/disk.loop
+    /Users/kaygee/.subtask/workspaces/-Users-kaygee-Code-loops--8/loops/disk.loo
 ✓ loops/memory.loop
-    /Users/kaygee/Code/loops/loops/memory.loop
+    /Users/kaygee/.subtask/workspaces/-Users-kaygee-Code-loops--8/loops/memory.l
 ✗ loops/broken.loop:
-    /Users/kaygee/Code/loops/loops/broken.loop
+    /Users/kaygee/.subtask/workspaces/-Users-kaygee-Code-loops--8/loops/broken.l
     Parse error: unexpected token 'foo' at line 3
 Expected 'command' or 'kind' d

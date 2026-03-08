@@ -7,7 +7,14 @@ from typing import Any
 from painted import Block, Style, Zoom, join_vertical
 
 
-def run_facts_view(data: list[dict], zoom: Zoom, width: int) -> Block:
+def _block(text: str, style: Style, width: int | None) -> Block:
+    """Create a Block, respecting width=None (no truncation)."""
+    if width is not None:
+        return Block.text(text, style, width=width)
+    return Block.text(text, style)
+
+
+def run_facts_view(data: list[dict], zoom: Zoom, width: int | None) -> Block:
     """Render a list of facts at the given zoom level.
 
     Each item: {kind, ts, payload, observer, origin}
@@ -19,7 +26,7 @@ def run_facts_view(data: list[dict], zoom: Zoom, width: int) -> Block:
     - FULL: all fields including observer, origin, ts
     """
     if not data:
-        return Block.text("No facts.", Style(dim=True), width=width)
+        return _block("No facts.", Style(dim=True), width)
 
     rows: list[Block] = []
     dim_style = Style(dim=True)
@@ -29,38 +36,36 @@ def run_facts_view(data: list[dict], zoom: Zoom, width: int) -> Block:
         payload = fact.get("payload", {})
 
         if zoom == Zoom.MINIMAL:
-            rows.append(Block.text(f"  [{kind}]", Style(), width=width))
+            rows.append(_block(f"  [{kind}]", Style(), width))
 
         elif zoom == Zoom.SUMMARY:
             if isinstance(payload, dict) and payload:
                 keys = ", ".join(f"{k}={v}" for k, v in list(payload.items())[:3])
                 if len(payload) > 3:
                     keys += " ..."
-                rows.append(Block.text(f"  [{kind}] {keys}", Style(), width=width))
+                rows.append(_block(f"  [{kind}] {keys}", Style(), width))
             else:
-                rows.append(Block.text(f"  [{kind}]", Style(), width=width))
+                rows.append(_block(f"  [{kind}]", Style(), width))
 
         elif zoom == Zoom.DETAILED:
-            rows.append(Block.text(f"  [{kind}] {payload}", Style(), width=width))
+            rows.append(_block(f"  [{kind}] {payload}", Style(), width))
 
         else:  # FULL
             ts = fact.get("ts", "")
             observer = fact.get("observer", "")
             origin = fact.get("origin", "")
-            rows.append(Block.text(f"  [{kind}] {payload}", Style(), width=width))
+            rows.append(_block(f"  [{kind}] {payload}", Style(), width))
             meta = f"    ts={ts} observer={observer} origin={origin}"
-            rows.append(Block.text(meta, dim_style, width=width))
+            rows.append(_block(meta, dim_style, width))
 
     # Footer
-    rows.append(Block.text("", Style(), width=width))
-    rows.append(Block.text(
-        f"--- {len(data)} facts ---", dim_style, width=width,
-    ))
+    rows.append(_block("", Style(), width))
+    rows.append(_block(f"--- {len(data)} facts ---", dim_style, width))
 
     return join_vertical(*rows)
 
 
-def run_ticks_view(data: list[dict], zoom: Zoom, width: int) -> Block:
+def run_ticks_view(data: list[dict], zoom: Zoom, width: int | None) -> Block:
     """Render a list of ticks at the given zoom level.
 
     Each item: {name, ts, payload, origin}
@@ -72,7 +77,7 @@ def run_ticks_view(data: list[dict], zoom: Zoom, width: int) -> Block:
     - FULL: all fields
     """
     if not data:
-        return Block.text("No ticks.", Style(dim=True), width=width)
+        return _block("No ticks.", Style(dim=True), width)
 
     rows: list[Block] = []
     dim_style = Style(dim=True)
@@ -83,43 +88,38 @@ def run_ticks_view(data: list[dict], zoom: Zoom, width: int) -> Block:
         ts = tick.get("ts", "")
 
         if zoom == Zoom.MINIMAL:
-            rows.append(Block.text(f"  tick: {name}", Style(), width=width))
+            rows.append(_block(f"  tick: {name}", Style(), width))
 
         elif zoom == Zoom.SUMMARY:
             ts_str = _format_ts(ts)
             n_keys = len(payload) if isinstance(payload, dict) else 0
-            rows.append(Block.text(
-                f"  [{ts_str}] tick: {name} ({n_keys} keys)",
-                Style(), width=width,
+            rows.append(_block(
+                f"  [{ts_str}] tick: {name} ({n_keys} keys)", Style(), width,
             ))
 
         elif zoom == Zoom.DETAILED:
             ts_str = _format_ts(ts)
-            rows.append(Block.text(
-                f"  [{ts_str}] tick: {name}", Style(bold=True), width=width,
+            rows.append(_block(
+                f"  [{ts_str}] tick: {name}", Style(bold=True), width,
             ))
             if isinstance(payload, dict):
                 for k, v in payload.items():
-                    rows.append(Block.text(f"    {k}: {v}", Style(), width=width))
+                    rows.append(_block(f"    {k}: {v}", Style(), width))
 
         else:  # FULL
             ts_str = _format_ts(ts)
             origin = tick.get("origin", "")
-            rows.append(Block.text(
-                f"  [{ts_str}] tick: {name}", Style(bold=True), width=width,
+            rows.append(_block(
+                f"  [{ts_str}] tick: {name}", Style(bold=True), width,
             ))
             if isinstance(payload, dict):
                 for k, v in payload.items():
-                    rows.append(Block.text(f"    {k}: {v}", Style(), width=width))
-            rows.append(Block.text(
-                f"    origin={origin}", dim_style, width=width,
-            ))
+                    rows.append(_block(f"    {k}: {v}", Style(), width))
+            rows.append(_block(f"    origin={origin}", dim_style, width))
 
     # Footer
-    rows.append(Block.text("", Style(), width=width))
-    rows.append(Block.text(
-        f"--- {len(data)} ticks ---", dim_style, width=width,
-    ))
+    rows.append(_block("", Style(), width))
+    rows.append(_block(f"--- {len(data)} ticks ---", dim_style, width))
 
     return join_vertical(*rows)
 

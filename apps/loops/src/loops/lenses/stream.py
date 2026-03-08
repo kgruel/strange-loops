@@ -7,7 +7,14 @@ from typing import Any
 from painted import Block, Style, Zoom, join_vertical
 
 
-def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int) -> Block:
+def _block(text: str, style: Style, width: int | None) -> Block:
+    """Create a Block, respecting width=None (no truncation)."""
+    if width is not None:
+        return Block.text(text, style, width=width)
+    return Block.text(text, style)
+
+
+def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None) -> Block:
     """Render event stream at the given zoom level.
 
     Accepts either:
@@ -32,7 +39,7 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         fold_meta = {}
 
     if not facts:
-        return Block.text("No facts in the given time range.", Style(dim=True), width=width)
+        return _block("No facts in the given time range.", Style(dim=True), width)
 
     # MINIMAL: just counts
     if zoom == Zoom.MINIMAL:
@@ -40,7 +47,7 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         for f in facts:
             counts[f["kind"]] = counts.get(f["kind"], 0) + 1
         parts = [f"{count} {kind}" for kind, count in counts.items()]
-        return Block.text(", ".join(parts), Style(), width=width)
+        return _block(", ".join(parts), Style(), width)
 
     rows: list[Block] = []
     dim_style = Style(dim=True)
@@ -62,8 +69,8 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         date_str = dt.strftime("%Y-%m-%d")
         if date_str != current_date:
             if current_date is not None:
-                rows.append(Block.text("", Style(), width=width))
-            rows.append(Block.text(f"{date_str}:", Style(bold=True), width=width))
+                rows.append(_block("", Style(), width))
+            rows.append(_block(f"{date_str}:", Style(bold=True), width))
             current_date = date_str
 
         time_str = dt.strftime("%H:%M")
@@ -82,11 +89,11 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         # Use fold_meta key_field for summary, fall back to heuristic
         key_field = fold_meta.get(kind_str, {}).get("key_field")
         summary = _stream_summary(payload, key_field)
-        rows.append(Block.text(f"  {time_str} [{kind_str}] {summary}", Style(), width=width))
+        rows.append(_block(f"  {time_str} [{kind_str}] {summary}", Style(), width))
 
         # Show ID on a detail line when present
         if id_suffix:
-            rows.append(Block.text(f"           id:{id_suffix.strip()}", id_style, width=width))
+            rows.append(_block(f"           id:{id_suffix.strip()}", id_style, width))
 
         if is_id_lookup or zoom >= Zoom.FULL:
             # --id lookup or FULL: show all fields — no truncation
@@ -103,7 +110,7 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
             for key, val in payload.items():
                 if key in summary_fields or not val:
                     continue
-                rows.append(Block.text(f"           {key}: {val}", dim_style))
+                rows.append(_block(f"           {key}: {val}", dim_style, width))
 
     return join_vertical(*rows)
 

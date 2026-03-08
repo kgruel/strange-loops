@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
 
@@ -31,8 +32,8 @@ class Source:
     - format=json: parse runs on the parsed JSON dict
     - format=blob: parse is ignored (blob is raw text)
 
-    Errors are emitted as facts with kind="source.error" rather than raised.
-    This allows the executor to continue processing other sources.
+    Errors are logged to stderr rather than emitted as facts.
+    The .complete fact carries status="error" so the vertex knows a run failed.
 
     Attributes:
         command: Shell command to execute
@@ -122,13 +123,7 @@ class Source:
                         if payload is not None:
                             yield Fact.of(self.kind, self.observer, **payload)
                 except json.JSONDecodeError as e:
-                    yield Fact.of(
-                        "source.error",
-                        self.observer,
-                        command=self.command,
-                        error=f"JSON decode error: {e}",
-                        error_type="JSONDecodeError",
-                    )
+                    print(f"source: JSON decode error: {e} (command: {self.command})", file=sys.stderr)
 
     def _extract_metadata(self, payload: dict) -> tuple[str, str, float | None]:
         """Extract per-record metadata overrides from payload.
@@ -158,14 +153,7 @@ class Source:
                         observer, origin, ts = self._extract_metadata(payload)
                         yield Fact.of(self.kind, observer, origin=origin, ts=ts, **payload)
                 except json.JSONDecodeError as e:
-                    yield Fact.of(
-                        "source.error",
-                        self.observer,
-                        command=self.command,
-                        error=f"JSON decode error on line: {e}",
-                        error_type="JSONDecodeError",
-                        line=text[:100],  # Include truncated line for debugging
-                    )
+                    print(f"source: JSON decode error on line: {e} (command: {self.command})", file=sys.stderr)
 
     async def _emit_blob(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
         """Emit entire stdout as single fact with text payload."""
@@ -212,13 +200,10 @@ class Source:
                 stderr_text = ""
                 if proc.stderr is not None:
                     stderr_text = (await proc.stderr.read()).decode()
-                yield Fact.of(
-                    "source.error",
-                    self.observer,
-                    command=self.command,
-                    returncode=proc.returncode,
-                    stderr=stderr_text,
-                )
+                if stderr_text:
+                    print(f"source: command failed (rc={proc.returncode}): {stderr_text.rstrip()}", file=sys.stderr)
+                else:
+                    print(f"source: command failed (rc={proc.returncode}): {self.command}", file=sys.stderr)
                 yield Fact.of(
                     f"{self.kind}.complete",
                     self.observer,
@@ -234,13 +219,7 @@ class Source:
                 )
 
         except Exception as e:
-            yield Fact.of(
-                "source.error",
-                self.observer,
-                command=self.command,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+            print(f"source: {type(e).__name__}: {e} (command: {self.command})", file=sys.stderr)
             yield Fact.of(
                 f"{self.kind}.complete",
                 self.observer,

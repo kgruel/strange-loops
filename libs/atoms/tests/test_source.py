@@ -58,8 +58,8 @@ class TestSource:
         async for fact in source.collect():
             assert fact.observer == "my-observer"
 
-    async def test_command_failure_emits_error_fact(self):
-        """Non-zero exit code emits source.error fact."""
+    async def test_command_failure_emits_complete_error(self):
+        """Non-zero exit code logs to stderr and emits complete with status=error."""
         source = Source(
             command="exit 1",
             kind="output",
@@ -70,16 +70,14 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
-        assert len(facts) == 2
-        assert facts[0].kind == "source.error"
-        assert facts[0].payload["returncode"] == 1
+        # Only the .complete fact — no source.error
+        assert len(facts) == 1
+        assert facts[0].kind == "output.complete"
+        assert facts[0].payload["status"] == "error"
         assert facts[0].observer == "fail-source"
-        # Source always closes its own boundary
-        assert facts[1].kind == "output.complete"
-        assert facts[1].payload["status"] == "error"
 
     async def test_command_with_stderr(self):
-        """Stderr captured in error fact."""
+        """Stderr is logged, not emitted as a fact."""
         source = Source(
             command='echo "error message" >&2 && exit 1',
             kind="output",
@@ -90,9 +88,13 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
+        # No source.error facts — errors go to stderr
         error_facts = [f for f in facts if f.kind == "source.error"]
-        assert len(error_facts) == 1
-        assert "error message" in error_facts[0].payload["stderr"]
+        assert len(error_facts) == 0
+        # .complete still signals the failure
+        complete = [f for f in facts if f.kind == "output.complete"]
+        assert len(complete) == 1
+        assert complete[0].payload["status"] == "error"
 
     async def test_empty_output(self):
         """Command with no output produces only completion fact."""
@@ -370,8 +372,8 @@ class TestSourceFormat:
         assert len(data_facts) == 2
         assert [f.payload for f in data_facts] == [{"_json": [1, 2]}, {"_json": [3, 4]}]
 
-    async def test_format_json_invalid_emits_error(self):
-        """format=json with invalid JSON emits error fact plus completion."""
+    async def test_format_json_invalid_logs_to_stderr(self):
+        """format=json with invalid JSON logs to stderr, emits only completion."""
         source = Source(
             command='echo "not valid json"',
             kind="data",
@@ -383,10 +385,13 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        # Error fact + completion fact (command itself succeeded)
+        # No source.error facts — JSON errors go to stderr
         error_facts = [f for f in facts if f.kind == "source.error"]
-        assert len(error_facts) == 1
-        assert "JSON decode error" in error_facts[0].payload["error"]
+        assert len(error_facts) == 0
+        # Command succeeded so .complete has status=ok
+        complete = [f for f in facts if f.kind == "data.complete"]
+        assert len(complete) == 1
+        assert complete[0].payload["status"] == "ok"
 
     async def test_format_json_with_parse(self):
         """format=json applies parse to the parsed dict.

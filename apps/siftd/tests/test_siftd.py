@@ -22,16 +22,25 @@ def _block_text(block) -> str:
 
 
 def _seed_siftd(loops_home: Path) -> Path:
-    """Create siftd vertex in LOOPS_HOME layout, return store path.
+    """Create siftd aggregation + claude-code instance in LOOPS_HOME layout.
 
-    Layout: loops_home/siftd/siftd.vertex + loops_home/siftd/data/siftd.db
+    Layout:
+      loops_home/siftd/siftd.vertex               (aggregation, no store)
+      loops_home/siftd/claude-code/claude-code.vertex  (instance, owns store)
+      loops_home/siftd/claude-code/data/claude-code.db
+
+    Returns the instance store path.
     """
     siftd_dir = loops_home / "siftd"
-    siftd_dir.mkdir(parents=True, exist_ok=True)
-    vertex = siftd_dir / "siftd.vertex"
-    vertex.write_text(
-        'name "siftd"\n'
-        'store "./data/siftd.db"\n\n'
+    cc_dir = siftd_dir / "claude-code"
+    cc_dir.mkdir(parents=True, exist_ok=True)
+
+    # Aggregation vertex — combines child vertices
+    (siftd_dir / "siftd.vertex").write_text(
+        'name "siftd"\n\n'
+        "combine {\n"
+        '  vertex "./claude-code/claude-code.vertex"\n'
+        "}\n\n"
         "loops {\n"
         "  exchange {\n"
         '    fold { items "by" "conversation_id" }\n'
@@ -42,8 +51,24 @@ def _seed_siftd(loops_home: Path) -> Path:
         "  }\n"
         "}\n"
     )
-    (siftd_dir / "data").mkdir(exist_ok=True)
-    return siftd_dir / "data" / "siftd.db"
+
+    # Instance vertex — owns the store
+    (cc_dir / "claude-code.vertex").write_text(
+        'name "claude-code"\n'
+        'store "./data/claude-code.db"\n\n'
+        "loops {\n"
+        "  exchange {\n"
+        '    fold { items "by" "conversation_id" }\n'
+        '    search "prompt" "response"\n'
+        "  }\n"
+        "  tag {\n"
+        '    fold { items "by" "name" }\n'
+        "  }\n"
+        "}\n"
+    )
+
+    (cc_dir / "data").mkdir(exist_ok=True)
+    return cc_dir / "data" / "claude-code.db"
 
 
 def _emit_exchange(store_path: Path, conversation_id: str, prompt: str, response: str,
@@ -239,6 +264,7 @@ class TestGenericDispatch:
         assert "conv1" in out
 
     def test_read_siftd_search(self, tmp_path, monkeypatch, capsys):
+        """FTS5 search works on the instance vertex (per-store, not combined)."""
         loops_home = tmp_path / "loops_home"
         monkeypatch.setenv("LOOPS_HOME", str(loops_home))
         monkeypatch.chdir(tmp_path)
@@ -246,11 +272,12 @@ class TestGenericDispatch:
         store_path = _seed_siftd(loops_home)
         _emit_exchange(store_path, "conv1", "How do vertex templates work?", "Templates create local instances")
 
-        result = main(["read", "siftd", "--facts", "vertex templates"])
-        assert result == 0
-
-        out = capsys.readouterr().out
-        assert "vertex" in out.lower() or "exchange" in out
+        # Search the instance vertex directly — FTS5 is per-store
+        from engine import vertex_search
+        cc_vertex = loops_home / "siftd" / "claude-code" / "claude-code.vertex"
+        results = vertex_search(cc_vertex, "vertex templates")
+        assert len(results) >= 1
+        assert results[0]["kind"] == "exchange"
 
     def test_emit_siftd_tag(self, tmp_path, monkeypatch, capsys):
         loops_home = tmp_path / "loops_home"

@@ -1,0 +1,26 @@
+// Claude Code — instance vertex for claude-code session ingestion
+// Owns the store. Parses JSONL sessions into exchange facts.
+
+name "claude-code"
+store "./data/claude-code.db"
+
+sources {
+  path "./sources/claude-code.loop"
+}
+
+loops {
+  exchange {
+    fold {
+      items "by" "conversation_id"
+      count "inc"
+      updated "latest"
+    }
+    search "prompt" "response"
+  }
+
+  tag {
+    fold {
+      items "by" "name"
+    }
+  }
+}

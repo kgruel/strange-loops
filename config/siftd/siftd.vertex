@@ -1,15 +1,14 @@
-// siftd — conversation search
-// LLM conversations as facts. Search, fold, query.
+// siftd — conversation search (aggregation)
+// Combines harness-specific child vertices. No own store.
 
 name "siftd"
-store "./data/siftd.db"
 
 lens {
     fold "fold"
 }
 
-sources {
-  path "./sources/claude-code.loop"
+combine {
+  vertex "./claude-code/claude-code.vertex"
 }
 
 loops {
@@ -27,5 +26,4 @@ loops {
       items "by" "name"
     }
   }
-
 }

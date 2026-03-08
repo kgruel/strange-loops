@@ -39,14 +39,17 @@ Data arrives via adapter scripts (separate from this app) or `loops emit siftd e
 
 **Trigger**: I need to change how siftd data is indexed, searched, or displayed.
 
-**siftd's vertex declaration** lives at `config/siftd/siftd.vertex`. It defines:
+**siftd uses harness topology** — an aggregation vertex combining harness-specific children:
+- `config/siftd/siftd.vertex` — aggregation (combine, no own store)
+- `config/siftd/claude-code/claude-code.vertex` — instance (store, sources)
+
+Both declare the same kinds:
 - `exchange` kind — folded `by conversation_id`, FTS5 searchable on `prompt` + `response`
 - `tag` kind — folded `by name`
-- `source.error` kind — bounded error log
 
 Before modifying siftd source, check whether what you need is:
-- **Different search fields** — change the `search` declaration in `siftd.vertex`
-- **Different fold behavior** — change the `fold` block in `siftd.vertex`
+- **Different search fields** — change the `search` declaration in both vertex files
+- **Different fold behavior** — change the `fold` block (aggregation overrides instance)
 - **Different display** — the fold lens at `config/siftd/lenses/fold.py` renders fold state. The PayloadLens in `lens.py` renders individual facts in stream view.
 
 **Don't reach for yet**: Source adapter implementation, feedback handler internals.
@@ -57,13 +60,14 @@ Before modifying siftd source, check whether what you need is:
 
 **Trigger**: I need to modify siftd's behavior or understand how it plugs into loops.
 
-**Three configuration files** (all in `config/siftd/`):
+**Configuration files** (in `config/siftd/`):
 
 | File | What |
 |------|------|
-| `siftd.vertex` | Vertex declaration — kinds, folds, search fields, source, lens |
+| `siftd.vertex` | Aggregation vertex — combines children, overrides folds |
+| `claude-code/claude-code.vertex` | Instance vertex — store, sources, kind declarations |
+| `claude-code/sources/claude-code.loop` | Source declaration — points to adapter script |
 | `lenses/fold.py` | Custom fold lens — domain-aware rendering of FoldState |
-| `sources/claude-code.loop` | Source declaration — points to adapter script |
 
 **Domain logic** (in `apps/siftd/src/siftd_loops/`):
 

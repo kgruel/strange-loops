@@ -79,14 +79,18 @@ belong in project.vertex, not here.
 
 ## Peer Communication
 
-Alcove shares `#alcove-chat` on Discord. The discord source at
-`~/.config/loops/discord/` posts and polls. Messages are stored as facts
-in `discord.db`. Use the source script directly:
-
+**Native (agent-to-agent, same machine)** — primary channel for loops-claude ↔ meta-claude:
 ```bash
-uv run --with requests python3 ~/.config/loops/discord/discord-source poll
-uv run --with requests python3 ~/.config/loops/discord/discord-source send "message"
+uv run loops emit comms/native message body="message text"
 ```
+
+**Discord (alcove, external)** — alcove shares `#alcove-chat`, polls on ~60s interval:
+```bash
+uv run --with requests python3 ~/.config/loops/discord/discord-source send "message text"
+uv run --with requests python3 ~/.config/loops/discord/discord-source poll
+```
+
+All messages (native and discord) are visible via `uv run loops read comms`.
 
 ## Source Projects
 

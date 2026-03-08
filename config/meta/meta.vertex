@@ -7,10 +7,11 @@ combine {
     vertex "/Users/kaygee/.config/loops/identity/identity.vertex"
 }
 
+scope "observer"
+
 observers {
-  kyle { }
-  loops-claude { }
   meta-claude { }
+  kyle { }
 }
 
 loops {

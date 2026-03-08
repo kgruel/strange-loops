@@ -3,6 +3,12 @@
 // Loops-specific architecture goes in project.vertex.
 name "meta"
 store "./data/meta.db"
+scope "observer"
+
+observers {
+  meta-claude { }
+  kyle { }
+}
 
 lens {
   fold "meta"

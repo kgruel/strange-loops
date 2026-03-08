@@ -521,6 +521,112 @@ def _run_test(argv: list[str]) -> int:
 
 
 
+def _resolve_combine_vertex_paths(vertex_path: Path) -> list[Path]:
+    """Resolve an aggregation vertex's combine entries to child vertex paths.
+
+    Mirrors engine.vertex_reader._resolve_combine_stores but returns vertex
+    paths instead of store paths — we need VertexPrograms, not databases.
+    """
+    from lang import parse_vertex_file, resolve_vertex
+
+    ast = parse_vertex_file(vertex_path)
+    if not ast.combine:
+        return []
+
+    home = loops_home()
+    child_paths: list[Path] = []
+    for entry in ast.combine:
+        vpath = resolve_vertex(entry.name, home)
+        if not vpath.is_absolute():
+            vpath = (vertex_path.parent / vpath).resolve()
+        if vpath.exists():
+            child_paths.append(vpath)
+    return child_paths
+
+
+def _run_sync_aggregate(
+    child_paths: list[Path],
+    *,
+    vars: dict[str, str] | None,
+    force: bool,
+    parent_name: str,
+    rest: list[str],
+) -> int:
+    """Sync each combine child independently and aggregate results."""
+    from painted import run_cli, show, Block
+    from painted.fidelity import HelpArg
+    from painted.palette import current_palette
+    from engine import load_vertex_program
+
+    label = "force" if force else "cadence-gated"
+    show(
+        Block.text(
+            f"Syncing {parent_name}: {len(child_paths)} children ({label})",
+            current_palette().muted,
+        ),
+        file=sys.stderr,
+    )
+
+    def log_error(fact):
+        payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
+        _err(f"[ERROR] {fact.observer}: {payload}")
+
+    def fetch():
+        all_ran: list[str] = []
+        all_skipped: list[str] = []
+        all_errors: list[dict] = []
+        all_ticks: list[dict] = []
+
+        for child_path in child_paths:
+            child_program = load_vertex_program(child_path, vars=vars)
+            if not child_program.sources:
+                continue
+            result = child_program.sync(on_error=log_error, force=force)
+            all_ran.extend(result.ran)
+            all_skipped.extend(result.skipped)
+            all_errors.extend(
+                {
+                    "kind": e.kind,
+                    "observer": e.observer,
+                    "payload": dict(e.payload) if hasattr(e.payload, "items") else e.payload,
+                }
+                for e in result.errors
+            )
+            all_ticks.extend(
+                {
+                    "name": tick.name,
+                    "ts": tick.ts,
+                    "payload": tick.payload,
+                    "origin": getattr(tick, "origin", ""),
+                }
+                for tick in result.ticks
+            )
+
+        return {
+            "ran": all_ran,
+            "skipped": all_skipped,
+            "errors": all_errors,
+            "ticks": all_ticks,
+        }
+
+    def render(ctx, data):
+        from .lenses.sync import sync_view
+        return sync_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="loops sync",
+        description=f"Sync vertex {parent_name} (aggregation)",
+        help_args=[
+            HelpArg("vertex", "Vertex name", positional=True),
+            HelpArg("--force", "Run all sources unconditionally"),
+            HelpArg("--var", "Set variable KEY=VALUE"),
+        ],
+    )
+
+
 def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Sync verb — cadence-gated source execution.
 
@@ -572,9 +678,17 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     program = load_vertex_program(vertex_path, vars=vars or None)
 
+    # Aggregation vertex: no own sources but has combine children — sync each child
     if not program.sources:
-        _err("No sources configured")
-        return 1
+        child_paths = _resolve_combine_vertex_paths(vertex_path)
+        if not child_paths:
+            _err("No sources configured")
+            return 1
+
+        return _run_sync_aggregate(
+            child_paths, vars=vars or None, force=known.force,
+            parent_name=program.vertex.name, rest=rest,
+        )
 
     force = known.force
 

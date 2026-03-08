@@ -237,3 +237,131 @@ class TestSyncLens:
         block = sync_view(data, Zoom.MINIMAL, 80)
         text = _block_to_text(block)
         assert "nothing to sync" in text
+
+
+def _make_aggregation_vertex(tmp_path: Path) -> Path:
+    """Create an aggregation vertex that combines two child instance vertices."""
+    # Child 1: has its own source
+    child1_dir = tmp_path / "child1"
+    child1_dir.mkdir()
+    (child1_dir / "ping.loop").write_text(
+        'source "echo child1-ok"\n'
+        'kind "child1"\n'
+        'observer "test"\n'
+    )
+    (child1_dir / "child1.vertex").write_text(
+        'name "child1"\n'
+        'store "./data/child1.db"\n\n'
+        'sources {\n'
+        '  path "./ping.loop"\n'
+        '}\n\n'
+        "loops {\n"
+        "  child1 {\n"
+        '    fold { count "inc" }\n'
+        '    boundary when="child1.complete"\n'
+        "  }\n"
+        "}\n"
+    )
+
+    # Child 2: has its own source
+    child2_dir = tmp_path / "child2"
+    child2_dir.mkdir()
+    (child2_dir / "ping.loop").write_text(
+        'source "echo child2-ok"\n'
+        'kind "child2"\n'
+        'observer "test"\n'
+    )
+    (child2_dir / "child2.vertex").write_text(
+        'name "child2"\n'
+        'store "./data/child2.db"\n\n'
+        'sources {\n'
+        '  path "./ping.loop"\n'
+        '}\n\n'
+        "loops {\n"
+        "  child2 {\n"
+        '    fold { count "inc" }\n'
+        '    boundary when="child2.complete"\n'
+        "  }\n"
+        "}\n"
+    )
+
+    # Aggregation vertex: no sources, just combine
+    agg_dir = tmp_path / "agg"
+    agg_dir.mkdir()
+    (agg_dir / "agg.vertex").write_text(
+        'name "agg"\n\n'
+        "combine {\n"
+        '  vertex "child1"\n'
+        '  vertex "child2"\n'
+        "}\n\n"
+        "loops {\n"
+        "  child1 {\n"
+        '    fold { count "inc" }\n'
+        "  }\n"
+        "  child2 {\n"
+        '    fold { count "inc" }\n'
+        "  }\n"
+        "}\n"
+    )
+
+    return agg_dir / "agg.vertex"
+
+
+def _make_aggregation_no_children(tmp_path: Path) -> Path:
+    """Create an aggregation vertex with combine entries that don't resolve."""
+    agg_dir = tmp_path / "agg-empty"
+    agg_dir.mkdir()
+    (agg_dir / "agg-empty.vertex").write_text(
+        'name "agg-empty"\n\n'
+        "combine {\n"
+        '  vertex "nonexistent"\n'
+        "}\n\n"
+        "loops {\n"
+        "  thing {\n"
+        '    fold { count "inc" }\n'
+        "  }\n"
+        "}\n"
+    )
+    return agg_dir / "agg-empty.vertex"
+
+
+class TestSyncAggregation:
+    """Sync traverses combine children for aggregation vertices."""
+
+    def test_sync_aggregation_syncs_children(self, monkeypatch, tmp_path, capsys):
+        """Aggregation vertex with combine children syncs each child."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_aggregation_vertex(tmp_path)
+
+        from loops.main import _run_sync
+
+        result = _run_sync(["--force"], vertex_path=vertex_path)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "children" in captured.err
+
+    def test_sync_aggregation_no_children_errors(self, monkeypatch, tmp_path, capsys):
+        """Aggregation vertex whose combine children don't exist errors."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_aggregation_no_children(tmp_path)
+
+        from loops.main import _run_sync
+
+        result = _run_sync([], vertex_path=vertex_path)
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "No sources" in captured.err
+
+    def test_sync_instance_vertex_unchanged(self, monkeypatch, tmp_path, capsys):
+        """Instance vertex with own sources still syncs directly."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_vertex_with_source(tmp_path)
+
+        from loops.main import _run_sync
+
+        result = _run_sync(["--force"], vertex_path=vertex_path)
+        assert result == 0
+        captured = capsys.readouterr()
+        # Should show source count, not children count
+        assert "sources" in captured.err
+        assert "children" not in captured.err

@@ -97,6 +97,25 @@ observer "http"
         loop = parse_loop(text)
         assert loop.source == 'curl -sf "http://host/api?x=1&y=2"'
 
+    def test_origin_default(self):
+        text = """\
+source "whoami"
+kind "identity"
+observer "shell"
+"""
+        loop = parse_loop(text)
+        assert loop.origin == ""
+
+    def test_origin_declared(self):
+        text = """\
+source "whoami"
+kind "identity"
+observer "shell"
+origin "claude-code"
+"""
+        loop = parse_loop(text)
+        assert loop.origin == "claude-code"
+
     def test_from_file(self):
         loop = parse_loop_file(FIXTURES / "minimal.loop")
         assert loop.source == "whoami"

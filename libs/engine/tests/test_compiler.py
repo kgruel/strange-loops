@@ -260,6 +260,27 @@ parse {
         assert isinstance(source.parse[4], RuntimeTransform)
         assert isinstance(source.parse[5], RuntimeCoerce)
 
+    def test_loop_with_origin(self):
+        """Loop with origin declaration wires to Source.origin."""
+        loop = parse_loop("""\
+source "whoami"
+kind "identity"
+observer "shell"
+origin "claude-code"
+""")
+        source = compile_loop(loop)
+        assert source.origin == "claude-code"
+
+    def test_loop_without_origin(self):
+        """Loop without origin defaults to empty string."""
+        loop = parse_loop("""\
+source "whoami"
+kind "identity"
+observer "shell"
+""")
+        source = compile_loop(loop)
+        assert source.origin == ""
+
     def test_loop_from_fixture(self):
         """Full fixture loop compiles correctly."""
         from lang import parse_loop_file

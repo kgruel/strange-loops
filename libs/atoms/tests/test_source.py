@@ -471,6 +471,62 @@ class TestSourceFormat:
         assert facts[0].kind == "blob.complete"
 
 
+class TestSourceOrigin:
+    """Tests for Source origin field."""
+
+    async def test_origin_default_empty(self):
+        """Source origin defaults to empty string."""
+        source = Source(command='echo "hi"', kind="test", observer="obs")
+        assert source.origin == ""
+
+    async def test_origin_stamped_on_lines(self):
+        """Source-level origin is stamped on facts in lines format."""
+        source = Source(
+            command='echo "hello"',
+            kind="greeting",
+            observer="obs",
+            origin="my-source",
+        )
+        facts = []
+        async for fact in source.collect():
+            facts.append(fact)
+        data_facts = [f for f in facts if f.kind == "greeting"]
+        assert len(data_facts) == 1
+        assert data_facts[0].origin == "my-source"
+
+    async def test_origin_stamped_on_ndjson(self):
+        """Source-level origin is used as default in ndjson format."""
+        source = Source(
+            command='echo \'{"msg": "hi"}\'',
+            kind="data",
+            observer="obs",
+            format="ndjson",
+            origin="my-source",
+        )
+        facts = []
+        async for fact in source.collect():
+            facts.append(fact)
+        data_facts = [f for f in facts if f.kind == "data"]
+        assert len(data_facts) == 1
+        assert data_facts[0].origin == "my-source"
+
+    async def test_ndjson_origin_override(self):
+        """_origin in ndjson payload overrides Source-level origin."""
+        source = Source(
+            command='echo \'{"msg": "hi", "_origin": "override"}\'',
+            kind="data",
+            observer="obs",
+            format="ndjson",
+            origin="default-origin",
+        )
+        facts = []
+        async for fact in source.collect():
+            facts.append(fact)
+        data_facts = [f for f in facts if f.kind == "data"]
+        assert len(data_facts) == 1
+        assert data_facts[0].origin == "override"
+
+
 class TestSourceProtocol:
     """Verify Source satisfies SourceProtocol."""
 

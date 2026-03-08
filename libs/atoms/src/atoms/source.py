@@ -48,6 +48,7 @@ class Source:
     observer: str
     format: Literal["lines", "json", "ndjson", "blob"] = "lines"
     parse: list[ParseOp] | None = field(default=None)
+    origin: str = ""
     env: dict[str, str] | None = None
 
     def _has_explode(self) -> bool:
@@ -105,7 +106,7 @@ class Source:
                 text = line.decode().rstrip("\n")
                 payload = self._parse_data(text)
                 if payload is not None:
-                    yield Fact.of(self.kind, self.observer, **payload)
+                    yield Fact.of(self.kind, self.observer, origin=self.origin, **payload)
 
     async def _emit_json(self, proc: asyncio.subprocess.Process) -> AsyncIterator[Fact]:
         """Parse stdout as JSON, emit fact(s)."""
@@ -117,11 +118,11 @@ class Source:
                     data = json.loads(text)
                     if self._has_explode():
                         for payload in self._parse_data_many(data):
-                            yield Fact.of(self.kind, self.observer, **payload)
+                            yield Fact.of(self.kind, self.observer, origin=self.origin, **payload)
                     else:
                         payload = self._parse_data(data)
                         if payload is not None:
-                            yield Fact.of(self.kind, self.observer, **payload)
+                            yield Fact.of(self.kind, self.observer, origin=self.origin, **payload)
                 except json.JSONDecodeError as e:
                     print(f"source: JSON decode error: {e} (command: {self.command})", file=sys.stderr)
 
@@ -135,7 +136,7 @@ class Source:
         Returns (observer, origin, ts) with Source defaults as fallback.
         """
         observer = payload.pop("_observer", self.observer)
-        origin = payload.pop("_origin", "")
+        origin = payload.pop("_origin", self.origin)
         ts = payload.pop("_ts", None)
         return observer, origin, ts
 
@@ -161,7 +162,7 @@ class Source:
             raw = await proc.stdout.read()
             text = raw.decode()
             if text:
-                yield Fact.of(self.kind, self.observer, text=text)
+                yield Fact.of(self.kind, self.observer, origin=self.origin, text=text)
 
     async def collect(self) -> AsyncIterator[Fact]:
         """Collect facts from a single command execution."""

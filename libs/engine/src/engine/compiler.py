@@ -299,6 +299,7 @@ def map_loop_file(loop: LoopFile) -> Source:
         observer=loop.observer,
         format=loop.format,
         parse=parse_ops,
+        origin=loop.origin,
         env=loop.env,
     )
 
@@ -332,6 +333,7 @@ def instantiate_template(loop_ast: LoopFile, params: dict[str, str]) -> LoopFile
         on=loop_ast.on,
         format=substitute_vars(loop_ast.format, params),
         timeout=substitute_vars(loop_ast.timeout, params),
+        origin=substitute_vars(loop_ast.origin, params) if loop_ast.origin else "",
         env={k: substitute_vars(v, params) for k, v in loop_ast.env.items()} if loop_ast.env else None,
         parse=loop_ast.parse,
         path=loop_ast.path,

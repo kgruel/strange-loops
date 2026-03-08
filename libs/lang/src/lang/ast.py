@@ -477,6 +477,7 @@ class LoopFile:
     on: Trigger | None = None  # Event trigger (mutually exclusive with every)
     format: str = "lines"
     timeout: str = "60s"
+    origin: str = ""
     env: dict[str, str] | None = None
     parse: tuple[ParseStep, ...] = ()
 

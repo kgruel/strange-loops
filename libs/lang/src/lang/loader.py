@@ -480,6 +480,7 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
     on: Trigger | None = None
     format_: str = "lines"
     timeout: str = "60s"
+    origin: str = ""
     env: dict[str, str] | None = None
     parse_steps: tuple[ParseStep, ...] = ()
 
@@ -503,6 +504,8 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
                 on = Trigger.multi(kinds)
         elif name == "format":
             format_ = _require_arg(node, 0, "format string", path)
+        elif name == "origin":
+            origin = _require_arg(node, 0, "origin string", path)
         elif name == "timeout":
             timeout = _require_arg(node, 0, "duration", path)
         elif name == "parse":
@@ -528,6 +531,7 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
         on=on,
         format=format_,
         timeout=timeout,
+        origin=origin,
         env=env,
         parse=parse_steps,
         path=path,

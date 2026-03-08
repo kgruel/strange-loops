@@ -455,32 +455,52 @@ def compile_sources(
     return pairs, specs
 
 
+def _inline_to_loop_file(inline: InlineSource, vertex_name: str) -> LoopFile:
+    """Convert an InlineSource to a LoopFile for compilation.
+
+    Observer defaults to vertex_name when not specified in the inline source.
+    """
+    return LoopFile(
+        kind=inline.kind,
+        observer=inline.observer or vertex_name,
+        source=inline.command,
+        every=inline.every or None,
+        on=inline.on,
+        format=inline.format,
+        timeout=inline.timeout,
+        origin=inline.origin,
+        env=dict(inline.env) if inline.env else None,
+        parse=inline.parse,
+    )
+
+
 def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
 
-    Each inline source becomes a regular Source (one-shot, no polling).
-    The SequentialSource wraps them with the execution mode semantics.
-    Cadence is always() — sequential blocks run every time.
+    Each inline source is compiled through map_loop_file for full Source
+    construction (format, parse pipeline, origin, env). The SequentialSource
+    wraps them with the execution mode semantics.
+
+    Cadence is determined per-source but sequential blocks use the most
+    restrictive (first source's cadence), since they run as a unit.
     """
-    from atoms import Source as RuntimeSource
     from atoms import SequentialSource
     from .cadence import Cadence
 
     inner_sources = []
+    block_cadence: Cadence | None = None
     for inline in block.sources:
-        inner_sources.append(
-            RuntimeSource(
-                command=inline.command,
-                kind=inline.kind,
-                observer=vertex_name,
-            )
-        )
+        loop_file = _inline_to_loop_file(inline, vertex_name)
+        source, cadence = compile_source(loop_file)
+        inner_sources.append(source)
+        if block_cadence is None:
+            block_cadence = cadence
 
     seq = SequentialSource(
         sources=tuple(inner_sources),
         _observer=vertex_name,
     )
-    return seq, Cadence.always()
+    return seq, block_cadence or Cadence.always()
 
 
 # -----------------------------------------------------------------------------

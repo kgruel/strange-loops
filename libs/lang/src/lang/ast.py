@@ -405,12 +405,21 @@ SourceEntry = Path | TemplateSource
 class InlineSource:
     """An inline source definition within a sources block.
 
-    Minimal source spec: command + kind. Observer defaults to vertex name
-    at compile time.
+    Shares the full .loop vocabulary with LoopFile. Observer defaults to
+    vertex name at compile time (unlike LoopFile which requires explicit).
     """
 
     command: str
     kind: str
+    observer: str = ""
+    every: str = ""
+    on: Trigger | None = None
+    format: str = "lines"
+    timeout: str = "60s"
+    origin: str = ""
+    env: tuple[tuple[str, str], ...] = ()
+    parse: tuple[ParseStep, ...] = ()
+    path: str = ""
 
 
 @dataclass(frozen=True)

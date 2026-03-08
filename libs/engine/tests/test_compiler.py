@@ -1872,6 +1872,135 @@ loops {
         assert len(seq.sources) == 2
 
 
+class TestInlineSourceCompilation:
+    """Tests for compiling extended inline sources."""
+
+    def test_inline_source_with_format_and_parse(self):
+        """Extended inline source compiles to Source with format and parse pipeline."""
+        from atoms import SequentialSource
+        from atoms import Project as RuntimeProject
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(
+                    command="curl https://api.example.com/data",
+                    kind="reading",
+                    format="json",
+                    origin="weather-api",
+                    parse=(DslProject(fields={"temp": "main.temp"}),),
+                ),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "weather")
+
+        assert isinstance(seq, SequentialSource)
+        inner = seq.sources[0]
+        assert inner.command == "curl https://api.example.com/data"
+        assert inner.kind == "reading"
+        assert inner.format == "json"
+        assert inner.origin == "weather-api"
+        assert inner.observer == "weather"  # defaults to vertex name
+        assert inner.parse is not None
+        assert len(inner.parse) == 1
+        assert isinstance(inner.parse[0], RuntimeProject)
+
+    def test_inline_source_with_cadence(self):
+        """Inline source with every= produces elapsed cadence."""
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(
+                    command="curl https://api.example.com/data",
+                    kind="reading",
+                    every="30m",
+                ),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "weather")
+
+        assert cadence._mode == "elapsed"
+        assert cadence._kind == "reading"
+        assert cadence._interval == 1800.0  # 30m in seconds
+
+    def test_inline_source_with_triggered_cadence(self):
+        """Inline source with on= produces triggered cadence."""
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(
+                    command="deploy",
+                    kind="deploy.result",
+                    on=Trigger.single("test.complete"),
+                ),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "ci")
+
+        assert cadence._mode == "triggered"
+        assert cadence._trigger_kinds == ("test.complete",)
+
+    def test_inline_source_observer_override(self):
+        """Inline source with explicit observer uses that instead of vertex name."""
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(
+                    command="run-tests",
+                    kind="test.result",
+                    observer="test-runner",
+                ),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "ci")
+
+        assert seq.sources[0].observer == "test-runner"
+
+    def test_inline_source_with_env(self):
+        """Inline source with env passes through to compiled Source."""
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(
+                    command="check-api",
+                    kind="api.status",
+                    env=(("API_KEY", "secret"),),
+                ),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "monitor")
+
+        assert seq.sources[0].env == {"API_KEY": "secret"}
+
+    def test_inline_source_backward_compatible(self):
+        """Minimal inline source (command + kind only) still compiles correctly."""
+        from atoms import SequentialSource
+        from lang.ast import InlineSource, SourcesBlock
+
+        block = SourcesBlock(
+            mode="sequential",
+            sources=(
+                InlineSource(command="echo hello", kind="greeting"),
+            ),
+        )
+        seq, cadence = compile_sources_block(block, "test")
+
+        assert isinstance(seq, SequentialSource)
+        assert seq.sources[0].command == "echo hello"
+        assert seq.sources[0].kind == "greeting"
+        assert seq.sources[0].observer == "test"
+        assert cadence._mode == "always"
+
+
 class TestParseAtVertex:
     """Per-kind parse pipeline compilation from .vertex LoopDef."""
 

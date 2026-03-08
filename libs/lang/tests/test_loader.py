@@ -1521,6 +1521,120 @@ loops {
             parse_vertex(text)
 
 
+class TestInlineSourceExtended:
+    """Tests for extended inline source fields (format, every, parse, env, etc.)."""
+
+    def test_inline_source_with_format_and_every(self):
+        text = """\
+name "weather"
+sources sequential {
+    source "curl https://api.example.com/data" {
+        kind "reading"
+        format "json"
+        every "30m"
+        origin "weather-api"
+    }
+}
+"""
+        vertex = parse_vertex(text)
+        block = vertex.sources_blocks[0]
+        src = block.sources[0]
+        assert src.command == "curl https://api.example.com/data"
+        assert src.kind == "reading"
+        assert src.format == "json"
+        assert src.every == "30m"
+        assert src.origin == "weather-api"
+
+    def test_inline_source_with_parse_block(self):
+        text = """\
+name "weather"
+sources sequential {
+    source "curl https://api.example.com/data" {
+        kind "reading"
+        format "json"
+        parse {
+            project {
+                temp_f path="main.temp"
+                humidity path="main.humidity"
+            }
+        }
+    }
+}
+"""
+        vertex = parse_vertex(text)
+        src = vertex.sources_blocks[0].sources[0]
+        assert src.format == "json"
+        assert len(src.parse) == 1
+        from lang import Project
+        assert isinstance(src.parse[0], Project)
+        assert src.parse[0].fields == {"temp_f": "main.temp", "humidity": "main.humidity"}
+
+    def test_inline_source_with_env(self):
+        text = """\
+name "monitor"
+sources sequential {
+    source "check-api" {
+        kind "api.status"
+        env API_KEY="secret" TIMEOUT="30"
+    }
+}
+"""
+        vertex = parse_vertex(text)
+        src = vertex.sources_blocks[0].sources[0]
+        assert ("API_KEY", "secret") in src.env
+        assert ("TIMEOUT", "30") in src.env
+
+    def test_inline_source_with_observer(self):
+        text = """\
+name "ci"
+sources sequential {
+    source "run-tests" {
+        kind "test.result"
+        observer "test-runner"
+    }
+}
+"""
+        vertex = parse_vertex(text)
+        src = vertex.sources_blocks[0].sources[0]
+        assert src.observer == "test-runner"
+
+    def test_inline_source_with_on_trigger(self):
+        text = """\
+name "ci"
+sources sequential {
+    source "deploy" {
+        kind "deploy.result"
+        on "test.complete"
+    }
+}
+"""
+        vertex = parse_vertex(text)
+        src = vertex.sources_blocks[0].sources[0]
+        assert src.on is not None
+        assert src.on.kinds == ("test.complete",)
+
+    def test_inline_source_defaults_unchanged(self):
+        """Minimal inline source still works — all new fields use defaults."""
+        text = """\
+name "ci"
+sources sequential {
+    source "echo hello" { kind "greeting" }
+}
+"""
+        vertex = parse_vertex(text)
+        src = vertex.sources_blocks[0].sources[0]
+        assert src.command == "echo hello"
+        assert src.kind == "greeting"
+        assert src.observer == ""
+        assert src.every == ""
+        assert src.on is None
+        assert src.format == "lines"
+        assert src.timeout == "60s"
+        assert src.origin == ""
+        assert src.env == ()
+        assert src.parse == ()
+
+
 class TestLensBlock:
     """Tests for lens{} block parsing in vertex files."""
 

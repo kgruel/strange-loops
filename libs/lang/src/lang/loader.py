@@ -382,18 +382,76 @@ def _load_sources_block(node: ckdl.Node, path: Path | None) -> tuple[SourceEntry
 # ---------------------------------------------------------------------------
 
 
+def _load_source_fields(
+    nodes: list[ckdl.Node], path: Path | None
+) -> dict[str, object]:
+    """Parse the shared source field vocabulary from a list of KDL nodes.
+
+    Used by both _load_inline_source (children) and _load_loop_file (top-level).
+    Returns a dict of parsed field values; callers pick what they need.
+    """
+    fields: dict[str, object] = {}
+    for node in nodes:
+        name = node.name
+        if name == "source":
+            fields["source"] = _require_arg(node, 0, "command", path)
+        elif name == "kind":
+            fields["kind"] = _require_arg(node, 0, "kind string", path)
+        elif name == "observer":
+            fields["observer"] = _require_arg(node, 0, "observer string", path)
+        elif name == "every":
+            fields["every"] = _require_arg(node, 0, "duration", path)
+        elif name == "on":
+            kinds = [str(a) for a in node.args]
+            if not kinds:
+                raise _error("on: requires at least one trigger kind", path)
+            if len(kinds) == 1:
+                fields["on"] = Trigger.single(kinds[0])
+            else:
+                fields["on"] = Trigger.multi(kinds)
+        elif name == "format":
+            fields["format"] = _require_arg(node, 0, "format string", path)
+        elif name == "origin":
+            fields["origin"] = _require_arg(node, 0, "origin string", path)
+        elif name == "timeout":
+            fields["timeout"] = _require_arg(node, 0, "duration", path)
+        elif name == "parse":
+            fields["parse"] = _load_parse_block(node, path)
+        elif name == "env":
+            fields["env"] = {k: str(v) for k, v in node.properties.items()}
+        elif name == "path":
+            fields["path"] = _require_arg(node, 0, "path", path)
+        else:
+            raise _error(f"Unknown source field: {name}", path)
+    return fields
+
+
 def _load_inline_source(node: ckdl.Node, path: Path | None) -> InlineSource:
     """Load an inline source definition: source "command" { kind "..." }."""
     command = _require_arg(node, 0, "command", path)
-    kind: str | None = None
-    for child in node.children:
-        if child.name == "kind":
-            kind = _require_arg(child, 0, "kind string", path)
-        else:
-            raise _error(f"Unknown inline source field: {child.name}", path)
+    fields = _load_source_fields(node.children, path)
+
+    kind = fields.get("kind")
     if kind is None:
         raise _error(f"inline source {command!r}: missing required field: kind", path)
-    return InlineSource(command=command, kind=kind)
+
+    # env: LoopFile uses dict, InlineSource uses tuple-of-pairs (frozen)
+    env_dict = fields.get("env")
+    env_pairs = tuple(sorted(env_dict.items())) if env_dict else ()
+
+    return InlineSource(
+        command=command,
+        kind=kind,
+        observer=fields.get("observer", ""),
+        every=fields.get("every", ""),
+        on=fields.get("on"),
+        format=fields.get("format", "lines"),
+        timeout=fields.get("timeout", "60s"),
+        origin=fields.get("origin", ""),
+        env=env_pairs,
+        parse=fields.get("parse", ()),
+        path=fields.get("path", ""),
+    )
 
 
 def _load_sources_mode_block(node: ckdl.Node, path: Path | None) -> SourcesBlock:
@@ -497,47 +555,12 @@ def _load_observers_block(node: ckdl.Node, path: Path | None) -> tuple[ObserverD
 
 
 def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
-    source: str | None = None
-    kind: str | None = None
-    observer: str | None = None
-    every: str | None = None
-    on: Trigger | None = None
-    format_: str = "lines"
-    timeout: str = "60s"
-    origin: str = ""
-    env: dict[str, str] | None = None
-    parse_steps: tuple[ParseStep, ...] = ()
+    fields = _load_source_fields(doc.nodes, path)
 
-    for node in doc.nodes:
-        name = node.name
-        if name == "source":
-            source = _require_arg(node, 0, "command", path)
-        elif name == "kind":
-            kind = _require_arg(node, 0, "kind string", path)
-        elif name == "observer":
-            observer = _require_arg(node, 0, "observer string", path)
-        elif name == "every":
-            every = _require_arg(node, 0, "duration", path)
-        elif name == "on":
-            kinds = [str(a) for a in node.args]
-            if not kinds:
-                raise _error("on: requires at least one trigger kind", path)
-            if len(kinds) == 1:
-                on = Trigger.single(kinds[0])
-            else:
-                on = Trigger.multi(kinds)
-        elif name == "format":
-            format_ = _require_arg(node, 0, "format string", path)
-        elif name == "origin":
-            origin = _require_arg(node, 0, "origin string", path)
-        elif name == "timeout":
-            timeout = _require_arg(node, 0, "duration", path)
-        elif name == "parse":
-            parse_steps = _load_parse_block(node, path)
-        elif name == "env":
-            env = {k: str(v) for k, v in node.properties.items()}
-        else:
-            raise _error(f"Unknown config key: {name}", path)
+    kind = fields.get("kind")
+    observer = fields.get("observer")
+    source = fields.get("source")
+    every = fields.get("every")
 
     # Validate required fields
     if kind is None:
@@ -552,12 +575,12 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
         observer=observer,
         source=source,
         every=every,
-        on=on,
-        format=format_,
-        timeout=timeout,
-        origin=origin,
-        env=env,
-        parse=parse_steps,
+        on=fields.get("on"),
+        format=fields.get("format", "lines"),
+        timeout=fields.get("timeout", "60s"),
+        origin=fields.get("origin", ""),
+        env=fields.get("env"),
+        parse=fields.get("parse", ()),
         path=path,
     )
 

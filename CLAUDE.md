@@ -72,6 +72,49 @@ uv run loops read meta --facts --kind decision --since 7d  # recent cross-cuttin
 
 **Meta store** (`meta-discussion/meta.vertex`): cross-cutting patterns that apply to any project.
 
+## Session Discipline
+
+The project store accumulates threads, tasks, and decisions across sessions. Staleness enters when work lands (commits, implementations) but the store isn't updated to reflect it. The session hooks handle open/close mechanics — **you** handle semantic accuracy.
+
+**Emit as you go:**
+- When a thread is resolved by implementation, emit `status=resolved` before moving on
+- When a task is completed, emit `status=completed`
+- When a decision is made, emit it — don't defer to session end
+
+**Emit syntax — use `key=value` for all fields:**
+```bash
+# CORRECT — name= is the fold key, must be explicit:
+uv run loops emit project thread name=vertex-completeness status=resolved message="Done."
+uv run loops emit project task name=fix-bug status=completed
+uv run loops emit project decision topic=design/my-decision message="Rationale here."
+
+# WRONG — positional arg goes to 'message', fold can't key it:
+uv run loops emit project thread vertex-completeness status=resolved   # silently lost
+```
+
+The fold keys by `name` (threads, tasks, sessions) or `topic` (decisions). If the fact
+has no key field, the fold can't upsert it — the emit succeeds silently but the data
+is orphaned. Always use `name=` or `topic=` explicitly.
+
+**Review before wrap-up:**
+```bash
+uv run loops read project --lens reconcile --plain    # groups by attention-need, recency tags
+```
+
+The reconcile lens groups items by: THIS SESSION (just touched, probably current),
+NEEDS REVIEW (open but not touched this session — stale candidates), RESOLVED (done).
+If something in NEEDS REVIEW was resolved by your work, emit the update.
+
+**What the hooks handle (you don't need to):**
+- `SessionStart`: emits `session status=open`, syncs comms, injects project fold + comms as context
+- `UserPromptSubmit`: checks for new comms
+- `SessionEnd`: emits mechanical delta (fact counts by kind), emits `session status=closed`
+
+**What the hooks don't handle (you do):**
+- Thread/task status changes — only you know what was accomplished
+- Decision recording — the hook can't infer architectural choices from commits
+- Staleness reconciliation — if the tree lens shows stale items, update them
+
 ## Conventions
 
 - Immutable by default — frozen dataclasses, pure functions

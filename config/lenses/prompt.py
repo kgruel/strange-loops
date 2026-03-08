@@ -16,6 +16,7 @@ via lens { fold "identity_prompt" } in identity.vertex.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from painted import Block, Style, Zoom, join_vertical
@@ -36,6 +37,24 @@ _NAMES_ONLY_KINDS = {"decision", "dissolution", "vision"}
 _STATUS_GROUPED_KINDS = {"thread"}
 _COMPACT_KINDS = {"session"}
 _SCHEMA_ITEM_CAP = 10
+
+
+def _recency_tag(ts: float | None) -> str:
+    """Human-readable relative time tag for an item."""
+    if ts is None:
+        return ""
+    now = datetime.now(tz=timezone.utc).timestamp()
+    delta = now - ts
+    if delta < 300:
+        return " (now)"
+    if delta < 3600:
+        return f" ({int(delta / 60)}m)"
+    if delta < 86400:
+        return f" ({int(delta / 3600)}h)"
+    days = int(delta / 86400)
+    if days <= 7:
+        return f" ({days}d)"
+    return " (stale)"
 
 
 def prompt_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
@@ -143,10 +162,10 @@ def _render_names_only(section: FoldSection) -> list[str]:
 
 
 def _render_status_grouped(section: FoldSection) -> list[str]:
-    """Grouped by status — orientation signal.
+    """Grouped by status — orientation signal with recency tags.
 
     For threads: open vs parked tells the agent what's active vs noted.
-    Delegated items rendered separately.
+    Recency tags surface staleness. Delegated items rendered separately.
     """
     active = [
         i for i in section.items
@@ -158,14 +177,17 @@ def _render_status_grouped(section: FoldSection) -> list[str]:
     mine = [i for i in active if not i.payload.get("delegate")]
     delegated = [i for i in active if i.payload.get("delegate")]
 
-    open_items = [i for i in mine if i.payload.get("status") not in {"parked"}]
+    open_items = sorted(
+        [i for i in mine if i.payload.get("status") not in {"parked"}],
+        key=lambda i: i.ts or 0, reverse=True,
+    )
     parked_items = [i for i in mine if i.payload.get("status") == "parked"]
 
     lines = [f"## {section.kind.upper()}"]
 
     if open_items:
-        names = [_label(i, section.key_field) for i in open_items]
-        lines.append(f"  open: {', '.join(names)}")
+        tagged = [f"{_label(i, section.key_field)}{_recency_tag(i.ts)}" for i in open_items]
+        lines.append(f"  open: {', '.join(tagged)}")
 
     if parked_items:
         names = [_label(i, section.key_field) for i in parked_items]
@@ -199,10 +221,10 @@ def _render_compact_session(section: FoldSection) -> list[str]:
 
 
 def _render_default(section: FoldSection) -> list[str]:
-    """Name + body — working context. Actionable items.
+    """Name + body — working context with recency tags.
 
     For tasks and any other kinds: show what's active with enough
-    context to orient. Cap to most recent items.
+    context to orient. Cap to most recent items. Recency tags surface staleness.
     """
     items = [
         item for item in section.items
@@ -226,12 +248,13 @@ def _render_default(section: FoldSection) -> list[str]:
     lines = [f"## {section.kind.upper()}"]
 
     for item in mine:
-        label = _label(item, section.key_field)
-        body = _body(item)
-        if body:
-            lines.append(f"  {label}: {body}")
+        lbl = _label(item, section.key_field)
+        tag = _recency_tag(item.ts)
+        bdy = _body(item)
+        if bdy:
+            lines.append(f"  {lbl}{tag}: {bdy}")
         else:
-            lines.append(f"  {label}")
+            lines.append(f"  {lbl}{tag}")
 
     if remaining > 0:
         lines.append(f"  ({remaining} more in store)")

@@ -74,14 +74,49 @@ def _tool_use_record(
     }
 
 
-def _tool_result_record(tool_id: str, content: str, *, ts: str = "2025-01-15T10:00:15Z") -> dict:
-    return {
+def _tool_result_record(
+    tool_id: str, content: str, *, ts: str = "2025-01-15T10:00:15Z",
+    tool_use_result: dict | None = None,
+) -> dict:
+    record = {
         "type": "user",
         "timestamp": ts,
         "message": {
             "role": "user",
             "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": content}],
         },
+    }
+    if tool_use_result is not None:
+        record["toolUseResult"] = tool_use_result
+    return record
+
+
+def _thinking_assistant_record(
+    text: str, thinking: list[str], *,
+    model: str = "claude-sonnet-4-20250514", ts: str = "2025-01-15T10:00:05Z",
+) -> dict:
+    """Assistant record with both text and thinking blocks."""
+    content = []
+    for t in thinking:
+        content.append({"type": "thinking", "thinking": t})
+    content.append({"type": "text", "text": text})
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {
+            "role": "assistant",
+            "model": model,
+            "content": content,
+            "usage": {"input_tokens": 200, "output_tokens": 100},
+        },
+    }
+
+
+def _system_turn_duration_record(duration_ms: int) -> dict:
+    return {
+        "type": "system",
+        "subtype": "turn_duration",
+        "durationMs": duration_ms,
     }
 
 
@@ -161,7 +196,7 @@ class TestConversationId:
 
 
 # ---------------------------------------------------------------------------
-# Parsing
+# Parsing — basic exchanges
 # ---------------------------------------------------------------------------
 
 
@@ -196,7 +231,7 @@ class TestParseExchanges:
         assert exchanges[1]["prompt"] == "Question 2"
 
     def test_tool_result_not_counted_as_exchange(self, tmp_path):
-        """Tool result messages (user records with only tool_result blocks) are skipped."""
+        """Tool result messages are skipped as prompts but tool calls are captured."""
         path = _write_session(tmp_path / "session.jsonl", [
             _user_record("Read file X"),
             _tool_use_record("Read", "tool-1", {"file_path": "/tmp/x.py"}),
@@ -206,6 +241,11 @@ class TestParseExchanges:
         exchanges = parse_exchanges(path)
         assert len(exchanges) == 1
         assert exchanges[0]["prompt"] == "Read file X"
+        # Tool call should be captured
+        assert len(exchanges[0]["tool_calls"]) == 1
+        assert exchanges[0]["tool_calls"][0]["name"] == "Read"
+        assert exchanges[0]["tool_calls"][0]["id"] == "tool-1"
+        assert exchanges[0]["tool_calls"][0]["result"] == "contents of x.py"
 
     def test_tool_use_in_response_summarized(self, tmp_path):
         """Tool use blocks in assistant responses are summarized as [tool:Name]."""
@@ -229,6 +269,11 @@ class TestParseExchanges:
         assert len(exchanges) == 1
         assert "Let me read that." in exchanges[0]["response"]
         assert "[tool:Read]" in exchanges[0]["response"]
+        # Tool use captured in tool_calls (no result yet — pending)
+        assert len(exchanges[0]["tool_calls"]) == 1
+        assert exchanges[0]["tool_calls"][0]["name"] == "Read"
+        assert exchanges[0]["tool_calls"][0]["input"] == {"file_path": "/etc/config"}
+        assert "result" not in exchanges[0]["tool_calls"][0]
 
     def test_multi_assistant_messages_concatenated(self, tmp_path):
         """Multiple assistant messages for one prompt are concatenated."""
@@ -308,6 +353,272 @@ class TestParseExchanges:
         exchanges = parse_exchanges(path)
         assert len(exchanges) == 1
         assert exchanges[0]["prompt"] == "valid prompt"
+
+
+# ---------------------------------------------------------------------------
+# Parsing — full-fidelity fields
+# ---------------------------------------------------------------------------
+
+
+class TestFullFidelity:
+    def test_usage_captured(self, tmp_path):
+        """Usage from the last assistant record in a turn is captured."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("What is a vertex?"),
+            _assistant_record("A vertex is...", ts="2025-01-15T10:00:05Z"),
+        ])
+        exchanges = parse_exchanges(path)
+        assert exchanges[0]["usage"] == {"input_tokens": 100, "output_tokens": 50}
+
+    def test_usage_last_assistant_wins(self, tmp_path):
+        """When multiple assistant records exist, last usage wins (cumulative)."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Explain folds"),
+            {
+                "type": "assistant",
+                "timestamp": "2025-01-15T10:00:05Z",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-20250514",
+                    "content": [{"type": "text", "text": "Part 1."}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                },
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-01-15T10:00:10Z",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-20250514",
+                    "content": [{"type": "text", "text": "Part 2."}],
+                    "usage": {"input_tokens": 200, "output_tokens": 120},
+                },
+            },
+        ])
+        exchanges = parse_exchanges(path)
+        assert exchanges[0]["usage"] == {"input_tokens": 200, "output_tokens": 120}
+
+    def test_thinking_blocks_captured(self, tmp_path):
+        """Thinking blocks are collected as an array of strings."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Solve this problem"),
+            _thinking_assistant_record(
+                "Here is the solution.",
+                ["Let me think about this...", "The key insight is..."],
+            ),
+        ])
+        exchanges = parse_exchanges(path)
+        ex = exchanges[0]
+        assert ex["thinking"] == ["Let me think about this...", "The key insight is..."]
+        assert ex["response"] == "Here is the solution."
+        # Thinking blocks should NOT appear in response text
+        assert "Let me think" not in ex["response"]
+
+    def test_thinking_blocks_omitted_when_empty(self, tmp_path):
+        """No thinking key when there are no thinking blocks."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Simple question"),
+            _assistant_record("Simple answer."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert "thinking" not in exchanges[0]
+
+    def test_tool_calls_paired(self, tmp_path):
+        """Tool use blocks are paired with their results."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Read my config"),
+            _tool_use_record("Read", "t1", {"file_path": "/etc/config"}),
+            _tool_result_record("t1", "key=value"),
+            _assistant_record("Your config contains key=value."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 1
+        assert len(exchanges[0]["tool_calls"]) == 1
+
+        tc = exchanges[0]["tool_calls"][0]
+        assert tc["name"] == "Read"
+        assert tc["id"] == "t1"
+        assert tc["input"] == {"file_path": "/etc/config"}
+        assert tc["result"] == "key=value"
+
+    def test_structured_tool_result_preferred(self, tmp_path):
+        """toolUseResult (structured) is preferred over block content."""
+        structured_result = {
+            "filePath": "/etc/config",
+            "content": "key=value\nother=stuff",
+            "numLines": 2,
+        }
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Read my config"),
+            _tool_use_record("Read", "t1", {"file_path": "/etc/config"}),
+            _tool_result_record(
+                "t1", "key=value\nother=stuff",
+                tool_use_result=structured_result,
+            ),
+            _assistant_record("Done."),
+        ])
+        exchanges = parse_exchanges(path)
+        tc = exchanges[0]["tool_calls"][0]
+        assert tc["result"] == structured_result
+
+    def test_multiple_tool_calls_in_turn(self, tmp_path):
+        """Multiple tool use/result cycles within one turn are all captured."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Check status"),
+            _tool_use_record("Bash", "t1", {"command": "git status"}),
+            _tool_result_record("t1", "On branch main"),
+            _tool_use_record("Read", "t2", {"file_path": "/tmp/f.py"}),
+            _tool_result_record("t2", "print('hello')"),
+            _assistant_record("Branch is main, file prints hello."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 1
+        assert len(exchanges[0]["tool_calls"]) == 2
+        assert exchanges[0]["tool_calls"][0]["name"] == "Bash"
+        assert exchanges[0]["tool_calls"][1]["name"] == "Read"
+
+    def test_unpaired_tool_use_included(self, tmp_path):
+        """Tool use without a matching result is still included (no result key)."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Do something"),
+            _tool_use_record("Bash", "t1", {"command": "echo hi"}),
+            # No tool_result follows — next turn starts
+            _user_record("Next question"),
+            _assistant_record("Next answer."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 2
+        # First turn has the unpaired tool call
+        assert len(exchanges[0]["tool_calls"]) == 1
+        assert exchanges[0]["tool_calls"][0]["name"] == "Bash"
+        assert "result" not in exchanges[0]["tool_calls"][0]
+
+    def test_turn_duration_from_system_record(self, tmp_path):
+        """turn_duration_ms is captured from system records."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("What is X?"),
+            _assistant_record("X is..."),
+            _system_turn_duration_record(5432),
+        ])
+        exchanges = parse_exchanges(path)
+        assert exchanges[0]["turn_duration_ms"] == 5432
+
+    def test_turn_duration_omitted_when_absent(self, tmp_path):
+        """No turn_duration_ms key when no system record exists."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Hi"),
+            _assistant_record("Hello."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert "turn_duration_ms" not in exchanges[0]
+
+    def test_tool_calls_omitted_when_empty(self, tmp_path):
+        """No tool_calls key when no tool use occurred."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Simple question"),
+            _assistant_record("Simple answer."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert "tool_calls" not in exchanges[0]
+
+    def test_usage_omitted_when_absent(self, tmp_path):
+        """No usage key when assistant record has no usage field."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Hi"),
+            {
+                "type": "assistant",
+                "timestamp": "2025-01-15T10:00:05Z",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-20250514",
+                    "content": [{"type": "text", "text": "Hello."}],
+                },
+            },
+        ])
+        exchanges = parse_exchanges(path)
+        assert "usage" not in exchanges[0]
+
+    def test_system_records_ignored_for_exchange_count(self, tmp_path):
+        """System records don't create exchanges or affect turn boundaries."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Q1"),
+            _assistant_record("A1"),
+            _system_turn_duration_record(1000),
+            {"type": "system", "subtype": "other"},
+            _user_record("Q2"),
+            _assistant_record("A2"),
+            _system_turn_duration_record(2000),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 2
+        assert exchanges[0]["turn_duration_ms"] == 1000
+        assert exchanges[1]["turn_duration_ms"] == 2000
+
+    def test_non_exchange_record_types_ignored(self, tmp_path):
+        """progress, file-history-snapshot, queue-operation records are ignored."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Q1"),
+            {"type": "progress", "data": "something"},
+            {"type": "file-history-snapshot", "files": []},
+            {"type": "queue-operation", "op": "enqueue"},
+            _assistant_record("A1"),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 1
+        assert exchanges[0]["prompt"] == "Q1"
+
+    def test_git_branch_captured_when_present(self, tmp_path):
+        """git_branch is captured from user record's gitBranch field."""
+        record = _user_record("Hi")
+        record["gitBranch"] = "feature/new-thing"
+        path = _write_session(tmp_path / "session.jsonl", [
+            record,
+            _assistant_record("Hello."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert exchanges[0]["git_branch"] == "feature/new-thing"
+
+    def test_git_branch_omitted_when_absent(self, tmp_path):
+        """No git_branch key when user record lacks gitBranch field."""
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Hi"),
+            _assistant_record("Hello."),
+        ])
+        exchanges = parse_exchanges(path)
+        assert "git_branch" not in exchanges[0]
+
+    def test_full_fidelity_turn(self, tmp_path):
+        """Integration: a complete turn with all full-fidelity fields."""
+        structured_result = {"stdout": "On branch main", "stderr": "", "interrupted": False}
+        path = _write_session(tmp_path / "session.jsonl", [
+            {
+                **_user_record("Check git status"),
+                "gitBranch": "main",
+            },
+            _thinking_assistant_record(
+                "Let me check.\n[tool:Bash]",
+                ["I should run git status to see the branch."],
+            ),
+            _tool_use_record("Bash", "t1", {"command": "git status", "description": "Show status"}),
+            _tool_result_record(
+                "t1", "On branch main",
+                tool_use_result=structured_result,
+            ),
+            _assistant_record("You're on the main branch."),
+            _system_turn_duration_record(3500),
+        ])
+        exchanges = parse_exchanges(path)
+        assert len(exchanges) == 1
+
+        ex = exchanges[0]
+        assert ex["prompt"] == "Check git status"
+        assert "main branch" in ex["response"]
+        assert ex["git_branch"] == "main"
+        assert ex["turn_duration_ms"] == 3500
+        assert ex["thinking"] == ["I should run git status to see the branch."]
+        assert len(ex["tool_calls"]) == 1
+        assert ex["tool_calls"][0]["result"] == structured_result
+        assert "usage" in ex
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +859,30 @@ class TestIntegration:
         assert fact.payload["prompt"] == "Test integration"
         assert fact.payload["response"] == "Works!"
         assert fact.payload["conversation_id"] == "sess-1"
+
+    def test_full_fidelity_compatible_with_fact_of(self, tmp_path):
+        """Full-fidelity payload (with tool_calls, thinking, usage) works with Fact.of."""
+        from atoms import Fact
+
+        path = _write_session(tmp_path / "session.jsonl", [
+            _user_record("Check status"),
+            _thinking_assistant_record(
+                "Let me check.\n[tool:Bash]",
+                ["Thinking about approach..."],
+            ),
+            _tool_use_record("Bash", "t1", {"command": "git status"}),
+            _tool_result_record("t1", "On branch main", tool_use_result={"stdout": "On branch main"}),
+            _assistant_record("You're on main."),
+            _system_turn_duration_record(2500),
+        ])
+        exchanges = parse_exchanges(path)
+        payload = exchanges[0]
+
+        fact = Fact.of("exchange", "siftd", **payload)
+        assert fact.payload["thinking"] == ["Thinking about approach..."]
+        assert fact.payload["tool_calls"][0]["name"] == "Bash"
+        assert fact.payload["turn_duration_ms"] == 2500
+        assert "usage" in fact.payload
 
     def test_exchange_stored_and_searchable(self, tmp_path):
         """Exchange facts can be stored in SqliteStore and found via vertex_search."""

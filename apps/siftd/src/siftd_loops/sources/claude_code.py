@@ -9,7 +9,8 @@ Usage:
 
 Output format (one JSON object per line):
     {"conversation_id": "...", "prompt": "...", "response": "...",
-     "model": "...", "workspace": "...", "_ts": 1234567890.0}
+     "model": "...", "workspace": "...", "usage": {...},
+     "thinking": [...], "tool_calls": [...], "_ts": 1234567890.0}
 
 The Source declaration provides kind="exchange" and observer="siftd" —
 this script only emits payload fields.
@@ -105,8 +106,9 @@ def _normalize_content(content: object) -> list:
 def _extract_text(blocks: list) -> str:
     """Extract flattened text from content blocks.
 
-    Text blocks are joined. Tool-use/tool-result blocks are summarized
-    as short placeholders so the prompt/response remains readable.
+    Text blocks are joined. Tool-use blocks are summarized as [tool:Name]
+    placeholders for narrative flow. Tool-result and thinking blocks are
+    skipped (their data is captured separately in tool_calls/thinking).
     """
     parts: list[str] = []
     for block in blocks:
@@ -122,9 +124,9 @@ def _extract_text(blocks: list) -> str:
                 name = block.get("name", "tool")
                 parts.append(f"[tool:{name}]")
             elif btype == "tool_result":
-                pass  # skip — tool results are noise in flattened text
+                pass  # skip — captured in tool_calls
             elif btype == "thinking":
-                pass  # skip extended thinking blocks
+                pass  # skip — captured in thinking array
     return "\n".join(parts)
 
 
@@ -149,11 +151,12 @@ def _parse_iso(ts: str | None) -> float | None:
 
 
 def parse_exchanges(path: Path) -> list[dict]:
-    """Parse a Claude Code JSONL file into exchange dicts.
+    """Parse a Claude Code JSONL file into full-fidelity exchange dicts.
 
-    Each exchange is a user prompt paired with the assistant response(s)
-    that follow it. Tool-result messages (user records containing only
-    tool_result blocks) are skipped — they are not real user prompts.
+    Each exchange represents a user turn: starts with a real user prompt
+    (user record with text content, NOT tool_result-only records) and
+    includes all assistant records, tool results, system records, and
+    thinking blocks until the next real user prompt or EOF.
 
     Returns:
         List of exchange dicts ready for NDJSON emission.
@@ -161,15 +164,33 @@ def parse_exchanges(path: Path) -> list[dict]:
     conv_id = conversation_id_from_path(path)
     exchanges: list[dict] = []
 
-    # State for current exchange
+    # State for current turn
     current_prompt_text: str | None = None
     current_ts: float | None = None
     response_parts: list[str] = []
     current_model: str | None = None
     current_workspace: str | None = None
+    current_git_branch: str | None = None
+    current_usage: dict | None = None
+    current_turn_duration_ms: int | None = None
+    thinking_blocks: list[str] = []
+    tool_calls: list[dict] = []
+    pending_tools: dict[str, dict] = {}  # tool_use id -> {name, id, input}
 
     # Global workspace fallback (first cwd seen in file)
     file_workspace: str | None = None
+
+    def _flush_turn():
+        if current_prompt_text is None:
+            return
+        # Include any pending tools that never received results
+        all_tools = tool_calls + list(pending_tools.values())
+        exchanges.append(_build_exchange(
+            conv_id, current_prompt_text, response_parts,
+            current_model, current_workspace or file_workspace,
+            current_git_branch, current_ts, current_usage,
+            current_turn_duration_ms, thinking_blocks, all_tools,
+        ))
 
     try:
         with path.open("r", encoding="utf-8") as f:
@@ -183,6 +204,13 @@ def parse_exchanges(path: Path) -> list[dict]:
                     continue
 
                 record_type = record.get("type")
+
+                # Handle system records (turn_duration)
+                if record_type == "system":
+                    if record.get("subtype") == "turn_duration":
+                        current_turn_duration_ms = record.get("durationMs")
+                    continue
+
                 if record_type not in ("user", "assistant"):
                     continue
 
@@ -191,24 +219,36 @@ def parse_exchanges(path: Path) -> list[dict]:
                 content_blocks = _normalize_content(message.get("content"))
 
                 if role == "user":
-                    # Skip tool_result messages
+                    # Tool result records — match with pending tool_use
                     if _is_tool_result(content_blocks):
+                        tool_use_result = record.get("toolUseResult")
+                        for block in content_blocks:
+                            if isinstance(block, dict) and block.get("type") == "tool_result":
+                                tid = block.get("tool_use_id")
+                                if tid and tid in pending_tools:
+                                    entry = pending_tools.pop(tid)
+                                    if tool_use_result is not None:
+                                        entry["result"] = tool_use_result
+                                    else:
+                                        entry["result"] = block.get("content")
+                                    tool_calls.append(entry)
                         continue
 
-                    # Flush previous exchange if we have one
-                    if current_prompt_text is not None:
-                        exchanges.append(_build_exchange(
-                            conv_id, current_prompt_text, response_parts,
-                            current_model, current_workspace or file_workspace,
-                            current_ts,
-                        ))
+                    # Real user prompt — flush previous turn
+                    _flush_turn()
 
-                    # Start new exchange
+                    # Start new turn
                     current_prompt_text = _extract_text(content_blocks)
                     current_ts = _parse_iso(record.get("timestamp"))
                     response_parts = []
                     current_model = None
                     current_workspace = record.get("cwd") or file_workspace
+                    current_git_branch = record.get("gitBranch")
+                    current_usage = None
+                    current_turn_duration_ms = None
+                    thinking_blocks = []
+                    tool_calls = []
+                    pending_tools = {}
 
                     if file_workspace is None:
                         file_workspace = record.get("cwd")
@@ -217,21 +257,40 @@ def parse_exchanges(path: Path) -> list[dict]:
                     text = _extract_text(content_blocks)
                     if text:
                         response_parts.append(text)
-                    # Capture model from assistant message
+
+                    # Capture model (last wins)
                     model = message.get("model")
                     if model:
                         current_model = model
 
+                    # Capture usage (last assistant record wins — cumulative)
+                    usage = message.get("usage")
+                    if usage:
+                        current_usage = usage
+
+                    # Extract thinking blocks
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "thinking":
+                            thinking_text = block.get("thinking", "")
+                            if thinking_text:
+                                thinking_blocks.append(thinking_text)
+
+                    # Extract tool_use blocks into pending
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            tid = block.get("id")
+                            if tid:
+                                pending_tools[tid] = {
+                                    "name": block.get("name", ""),
+                                    "id": tid,
+                                    "input": block.get("input", {}),
+                                }
+
     except (OSError, UnicodeDecodeError):
         return exchanges
 
-    # Flush last exchange
-    if current_prompt_text is not None:
-        exchanges.append(_build_exchange(
-            conv_id, current_prompt_text, response_parts,
-            current_model, current_workspace or file_workspace,
-            current_ts,
-        ))
+    # Flush last turn
+    _flush_turn()
 
     return exchanges
 
@@ -242,9 +301,14 @@ def _build_exchange(
     response_parts: list[str],
     model: str | None,
     workspace: str | None,
+    git_branch: str | None,
     ts: float | None,
+    usage: dict | None,
+    turn_duration_ms: int | None,
+    thinking: list[str],
+    tool_calls: list[dict],
 ) -> dict:
-    """Assemble an exchange dict from accumulated state."""
+    """Assemble a full-fidelity exchange dict from accumulated turn state."""
     result = {
         "conversation_id": conv_id,
         "prompt": prompt,
@@ -252,8 +316,18 @@ def _build_exchange(
         "model": model or "",
         "workspace": workspace or "",
     }
+    if git_branch:
+        result["git_branch"] = git_branch
     if ts is not None:
         result["_ts"] = ts
+    if usage:
+        result["usage"] = usage
+    if turn_duration_ms is not None:
+        result["turn_duration_ms"] = turn_duration_ms
+    if thinking:
+        result["thinking"] = thinking
+    if tool_calls:
+        result["tool_calls"] = tool_calls
     return result
 
 

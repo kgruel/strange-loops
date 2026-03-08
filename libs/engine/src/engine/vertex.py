@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from .loop import Loop
-from .projection import Projection
+
 from .store import Store
 from .tick import Tick
 
@@ -223,7 +223,8 @@ class Vertex:
         """
         loop = Loop(
             name=kind,
-            projection=Projection(initial, fold=fold),
+            initial=initial,
+            fold=fold,
             boundary_kind=boundary,
             reset=reset,
         )

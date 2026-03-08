@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from atoms import Fact
-from engine import EventStore, FileWriter, Forward, Projection, Stream, Tailer, Tick, Vertex
+from engine import EventStore, FileWriter, Forward, Stream, Tailer, Tick, Vertex
+from engine.projection import Projection
 
 from tests.helpers import (
     CountProjection,

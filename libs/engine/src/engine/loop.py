@@ -1,12 +1,13 @@
 """Loop: explicit fold cycle with boundary semantics.
 
-A Loop wraps a Projection and adds boundary-driven tick emission.
-It represents a single named fold cycle — facts go in, state accumulates,
-and when a boundary fires, a Tick snapshot is produced.
+A Loop takes initial state and a fold function, adding boundary-driven
+tick emission. It represents a single named fold cycle — facts go in,
+state accumulates, and when a boundary fires, a Tick snapshot is produced.
 
-This makes the loop primitive explicit rather than hiding it inside
-Vertex's _FoldEngine. Vertex becomes the routing layer; Loop owns
-the fold-and-fire semantics.
+Projection is an internal implementation detail — callers construct
+Loop(initial=..., fold=...), never touching Projection directly.
+
+Vertex becomes the routing layer; Loop owns the fold-and-fire semantics.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .projection import Projection
 from .tick import Tick
@@ -24,8 +25,13 @@ from .tick import Tick
 class Loop:
     """A named fold cycle with boundary semantics.
 
-    Wraps a Projection and adds:
+    Constructor takes initial state and fold function directly.
+    Projection is constructed internally — callers never touch it.
+
+    Fields:
       - name: identity for the Tick this loop produces
+      - initial: starting state for the fold
+      - fold: (state, payload) -> new_state
       - boundary_kind: the fact kind that triggers a fire()
       - boundary_count: number of facts before count-based boundary fires
       - boundary_mode: "when" (kind-based), "after" (one-shot), "every" (repeating)
@@ -41,22 +47,25 @@ class Loop:
     """
 
     name: str
-    projection: Projection
+    initial: Any
+    fold: Callable[[Any, Any], Any]
     boundary_kind: str | None = None
     boundary_count: int | None = None
     boundary_mode: Literal["when", "after", "every"] = "when"
     boundary_match: tuple[tuple[str, str], ...] = ()
     boundary_conditions: tuple = ()  # BoundaryCondition tuples from lang AST
     reset: bool = True
-    _initial: Any = field(default=None, repr=False)
+    _projection: Projection = field(default=None, repr=False)  # type: ignore[assignment]
+    _initial_snapshot: Any = field(default=None, repr=False)
     _period_start: datetime | None = field(default=None, repr=False)
     _count_since_boundary: int = field(default=0, repr=False)
     _boundary_exhausted: bool = field(default=False, repr=False)
 
     def __post_init__(self):
+        # Construct Projection internally from initial + fold
+        self._projection = Projection(self.initial, fold=self.fold)
         # Capture initial state for reset
-        if self._initial is None:
-            self._initial = copy.deepcopy(self.projection.state)
+        self._initial_snapshot = copy.deepcopy(self.initial)
 
     def receive(self, payload: dict, ts: datetime | None = None) -> bool:
         """Fold a payload into the projection.
@@ -76,7 +85,7 @@ class Loop:
         """
         if self._period_start is None:
             self._period_start = ts if ts is not None else datetime.now(timezone.utc)
-        self.projection.fold_one(payload)
+        self._projection.fold_one(payload)
 
         # Track count for count-based boundaries
         if self.boundary_count is not None and not self._boundary_exhausted:
@@ -108,7 +117,7 @@ class Loop:
         under the `_boundary` key — carrying provenance from the triggering
         fact (e.g. status="ok" or status="error").
         """
-        state = self.projection.state
+        state = self._projection.state
         if boundary_payload is not None and isinstance(state, dict):
             from types import MappingProxyType
             bp = dict(boundary_payload) if isinstance(boundary_payload, MappingProxyType) else boundary_payload
@@ -121,7 +130,7 @@ class Loop:
             since=self._period_start,
         )
         if self.reset:
-            self.projection.reset(copy.deepcopy(self._initial))
+            self._projection.reset(copy.deepcopy(self._initial_snapshot))
             self._period_start = None
 
         # Handle count-based boundary reset
@@ -136,9 +145,9 @@ class Loop:
     @property
     def state(self) -> Any:
         """Current fold state."""
-        return self.projection.state
+        return self._projection.state
 
     @property
     def version(self) -> int:
         """Current fold version."""
-        return self.projection.version
+        return self._projection.version

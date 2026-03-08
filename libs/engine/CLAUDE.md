@@ -95,12 +95,13 @@ v.register("health", {"events": []},
 **Loop** makes boundaries explicit:
 
 ```python
-from engine import Loop, Projection
+from engine import Loop
 
 # Fire every 10 facts
 loop = Loop(
     name="batch",
-    projection=Projection([], fold=lambda s, p: [*s, p]),
+    initial=[],
+    fold=lambda s, p: [*s, p],
     boundary_count=10,
     boundary_mode="every",
     reset=True,

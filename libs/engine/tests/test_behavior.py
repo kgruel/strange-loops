@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from engine import EventStore, FileWriter, Projection, Stream, Tailer
+from engine import EventStore, FileWriter, Stream, Tailer
+from engine.projection import Projection
 
 from tests.helpers import (
     Event,

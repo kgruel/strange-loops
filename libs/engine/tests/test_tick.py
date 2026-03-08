@@ -186,7 +186,8 @@ def test_repr():
 # -- Projection fold callable --
 
 import pytest
-from engine import Projection, EventStore
+from engine import EventStore
+from engine.projection import Projection
 
 
 class TestProjectionFoldCallable:

@@ -6,7 +6,6 @@ import pytest
 
 from atoms import Fact
 from engine import Tick, Vertex, Loop
-from engine.projection import Projection
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -72,7 +71,8 @@ class TestVertexAccepts:
         v = Vertex()
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_kind="flush",
         )
         v.register_loop(loop)
@@ -226,7 +226,8 @@ class TestChildTickToParentFact:
         child = Vertex("child")
         child_loop = Loop(
             name="batch",  # This is the tick name when boundary fires
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_kind="flush",
         )
         child.register_loop(child_loop)
@@ -257,7 +258,8 @@ class TestChildTickToParentFact:
         child = Vertex("child")
         child_loop = Loop(
             name="pulse",  # Tick name matches parent's route
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_kind="tick",
         )
         child.register_loop(child_loop)
@@ -326,7 +328,8 @@ class TestDeepNesting:
         child = Vertex("child")
         child_loop = Loop(
             name="result",
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_kind="done",
         )
         child.register_loop(child_loop)

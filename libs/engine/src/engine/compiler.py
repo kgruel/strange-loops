@@ -856,7 +856,6 @@ def materialize_vertex(
         })
     """
     from .loop import Loop
-    from .projection import Projection
     from .vertex import Vertex
 
     store = None
@@ -906,7 +905,8 @@ def materialize_vertex(
                 # Count-based boundary: use Loop
                 loop = Loop(
                     name=name,
-                    projection=Projection(initial, fold=fold_fn),
+                    initial=initial,
+                    fold=fold_fn,
                     boundary_kind=boundary.kind,
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
@@ -919,7 +919,8 @@ def materialize_vertex(
                 # Kind-based boundary: use Loop for match support
                 loop = Loop(
                     name=name,
-                    projection=Projection(initial, fold=fold_fn),
+                    initial=initial,
+                    fold=fold_fn,
                     boundary_kind=boundary.kind if boundary else None,
                     boundary_match=b_match,
                     boundary_conditions=b_conditions,
@@ -932,7 +933,8 @@ def materialize_vertex(
                 # Count-based boundary: use Loop
                 loop = Loop(
                     name=name,
-                    projection=Projection(spec.initial_state(), fold=spec.apply),
+                    initial=spec.initial_state(),
+                    fold=spec.apply,
                     boundary_kind=boundary.kind,
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
@@ -945,7 +947,8 @@ def materialize_vertex(
                 # Kind-based boundary: use Loop for match support
                 loop = Loop(
                     name=name,
-                    projection=Projection(spec.initial_state(), fold=spec.apply),
+                    initial=spec.initial_state(),
+                    fold=spec.apply,
                     boundary_kind=boundary.kind if boundary else None,
                     boundary_match=b_match,
                     boundary_conditions=b_conditions,

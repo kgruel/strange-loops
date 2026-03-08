@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from engine import Projection
+from engine.projection import Projection
 
 
 # --- Sample event types ---

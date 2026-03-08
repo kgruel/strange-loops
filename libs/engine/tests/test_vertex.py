@@ -576,12 +576,13 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_fires_tick_on_count_boundary(self):
         """Loop with boundary_count fires tick through Vertex."""
-        from engine import Loop, Projection
+        from engine import Loop
 
         v = Vertex("batch-processor")
         loop = Loop(
             name="events",
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_count=3,
             boundary_mode="every",
             reset=True,
@@ -603,12 +604,13 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_count_boundary_repeats_with_every(self):
         """boundary_mode='every' fires tick repeatedly."""
-        from engine import Loop, Projection
+        from engine import Loop
 
         v = Vertex("windowed")
         loop = Loop(
             name="metrics",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             boundary_count=2,
             boundary_mode="every",
             reset=True,
@@ -629,12 +631,13 @@ class TestCountBasedBoundaryIntegration:
 
     def test_vertex_count_boundary_exhausted_with_after(self):
         """boundary_mode='after' fires once then stops."""
-        from engine import Loop, Projection
+        from engine import Loop
 
         v = Vertex("oneshot")
         loop = Loop(
             name="warmup",
-            projection=Projection([], fold=collect_fold),
+            initial=[],
+            fold=collect_fold,
             boundary_count=2,
             boundary_mode="after",
             reset=True,
@@ -678,7 +681,7 @@ class TestReceiveStoresTick:
         store.close()
 
     def test_count_boundary_stores_tick(self, tmp_path):
-        from engine import Loop, Projection
+        from engine import Loop
         from engine.sqlite_store import SqliteStore
         from atoms import Fact
 
@@ -690,7 +693,8 @@ class TestReceiveStoresTick:
         v = Vertex("v1", store=store)
         loop = Loop(
             name="events",
-            projection=Projection(0, fold=count_fold),
+            initial=0,
+            fold=count_fold,
             boundary_count=2,
             boundary_mode="every",
             reset=True,
@@ -839,12 +843,12 @@ class TestPredicateBoundary:
         """Boundary fires when fold target exceeds threshold."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         v = Vertex("weather")
         loop = Loop(
             name="reading",
-            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            initial={"high": 0},
+            fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))},
             boundary_kind="reading",
             boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
             reset=True,
@@ -864,12 +868,12 @@ class TestPredicateBoundary:
         """Boundary suppressed when condition not met."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         v = Vertex("weather")
         loop = Loop(
             name="reading",
-            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            initial={"high": 0},
+            fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))},
             boundary_kind="reading",
             boundary_conditions=(BoundaryCondition(target="high", op=">=", value=100),),
             reset=True,
@@ -887,7 +891,6 @@ class TestPredicateBoundary:
         """All conditions must be true (AND)."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         def weather_fold(state, p):
             return {
@@ -898,7 +901,8 @@ class TestPredicateBoundary:
         v = Vertex("weather")
         loop = Loop(
             name="reading",
-            projection=Projection({"high": 0, "humidity": 0}, fold=weather_fold),
+            initial={"high": 0, "humidity": 0},
+            fold=weather_fold,
             boundary_kind="reading",
             boundary_conditions=(
                 BoundaryCondition(target="high", op=">=", value=80),
@@ -921,12 +925,12 @@ class TestPredicateBoundary:
         """After fire with reset=True, conditions start fresh."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         v = Vertex("weather")
         loop = Loop(
             name="reading",
-            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            initial={"high": 0},
+            fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))},
             boundary_kind="reading",
             boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
             reset=True,
@@ -950,12 +954,12 @@ class TestPredicateBoundary:
         """Conditions compose with payload match — both must pass."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         v = Vertex("weather")
         loop = Loop(
             name="reading",
-            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            initial={"high": 0},
+            fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))},
             boundary_kind="alert",
             boundary_match=(("source", "outdoor"),),
             boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
@@ -997,12 +1001,12 @@ class TestPredicateBoundary:
         """String conditions use == for non-numeric comparison."""
         from lang.ast import BoundaryCondition
         from engine.loop import Loop
-        from engine.projection import Projection
 
         v = Vertex("status")
         loop = Loop(
             name="check",
-            projection=Projection({"status": "unknown"}, fold=lambda s, p: {**s, "status": p.get("status", s["status"])}),
+            initial={"status": "unknown"},
+            fold=lambda s, p: {**s, "status": p.get("status", s["status"])},
             boundary_kind="check",
             boundary_conditions=(BoundaryCondition(target="status", op="==", value="critical"),),
             reset=True,

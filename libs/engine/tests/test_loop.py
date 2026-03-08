@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from engine import Loop, Projection
+from engine import Loop
 
 
 NOW = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -20,7 +20,8 @@ class TestLoopPeriodTracking:
     def test_first_receive_sets_period_start(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         # Period start is None before any receive
@@ -33,7 +34,8 @@ class TestLoopPeriodTracking:
     def test_subsequent_receive_does_not_change_period_start(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         loop.receive({"value": 10}, ts=EARLIER)
@@ -46,7 +48,8 @@ class TestLoopPeriodTracking:
     def test_fire_includes_since_in_tick(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=True,
         )
 
@@ -62,7 +65,8 @@ class TestLoopPeriodTracking:
     def test_reset_clears_period_start(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=True,
         )
 
@@ -79,7 +83,8 @@ class TestLoopPeriodTracking:
     def test_no_reset_preserves_period_start(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=False,
         )
 
@@ -92,7 +97,8 @@ class TestLoopPeriodTracking:
     def test_receive_without_ts_uses_now(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         # receive() without ts argument defaults to now
@@ -108,7 +114,8 @@ class TestLoopPeriodTracking:
         """Tick.since + Tick.ts define a time window for Store.between()."""
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=True,
         )
 
@@ -130,7 +137,8 @@ class TestLoopBasics:
     def test_receive_folds_payload(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         loop.receive({"value": 10})
@@ -141,7 +149,8 @@ class TestLoopBasics:
     def test_fire_produces_tick(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         loop.receive({"value": 10})
@@ -155,7 +164,8 @@ class TestLoopBasics:
     def test_fire_with_reset_clears_state(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=True,
         )
 
@@ -167,7 +177,8 @@ class TestLoopBasics:
     def test_fire_without_reset_preserves_state(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             reset=False,
         )
 
@@ -179,7 +190,8 @@ class TestLoopBasics:
     def test_version_tracks_fold_count(self):
         loop = Loop(
             name="counter",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
         )
 
         assert loop.version == 0
@@ -196,7 +208,8 @@ class TestCountBasedBoundaries:
         """boundary_mode='after' fires once after N facts, then never again."""
         loop = Loop(
             name="batch",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             boundary_count=3,
             boundary_mode="after",
             reset=True,
@@ -223,7 +236,8 @@ class TestCountBasedBoundaries:
         """boundary_mode='every' fires every N facts, repeating."""
         loop = Loop(
             name="windowed",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             boundary_count=2,
             boundary_mode="every",
             reset=True,
@@ -245,7 +259,8 @@ class TestCountBasedBoundaries:
         """Count-based boundary with reset=False preserves state."""
         loop = Loop(
             name="accumulator",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             boundary_count=2,
             boundary_mode="every",
             reset=False,
@@ -266,7 +281,8 @@ class TestCountBasedBoundaries:
         """Kind-based boundaries don't use count tracking."""
         loop = Loop(
             name="events",
-            projection=Projection(0, fold=sum_fold),
+            initial=0,
+            fold=sum_fold,
             boundary_kind="events.done",  # kind-based
             boundary_mode="when",
         )

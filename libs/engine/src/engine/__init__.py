@@ -1,7 +1,7 @@
 """engine — Temporal infrastructure and identity.
 
 Consolidates:
-- ticks: Tick, Vertex, Store, Stream, Projection (temporal primitives)
+- ticks: Tick, Vertex, Loop, Store, Stream (temporal primitives)
 - peers: Peer, Grant (identity and policy)
 
 The respiratory system: Tick atom + Vertex + Store + fold engine.
@@ -19,7 +19,6 @@ from .tick import Tick
 
 # Core
 from .loop import Loop
-from .projection import Projection
 from .stream import Consumer, Stream, Tap
 from .vertex import Vertex
 
@@ -85,7 +84,6 @@ __all__ = [
     "Stream",
     "Tap",
     "Consumer",
-    "Projection",
     # Persistence
     "Store",
     "EventStore",

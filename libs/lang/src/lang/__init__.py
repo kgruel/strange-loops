@@ -3,6 +3,7 @@
 from .ast import (
     Boundary,
     BoundaryAfter,
+    BoundaryCondition,
     BoundaryEvery,
     BoundaryWhen,
     Coerce,
@@ -96,6 +97,7 @@ __all__ = [
     "FoldWindow",
     "Boundary",
     "BoundaryAfter",
+    "BoundaryCondition",
     "BoundaryEvery",
     "BoundaryWhen",
     # AST types - Combinatorial vertices

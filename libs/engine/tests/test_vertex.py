@@ -832,6 +832,197 @@ class TestVertexLevelBoundary:
         store.close()
 
 
+class TestPredicateBoundary:
+    """Predicate boundaries: fire when fold state meets conditions."""
+
+    def test_condition_fires_when_met(self):
+        """Boundary fires when fold target exceeds threshold."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        v = Vertex("weather")
+        loop = Loop(
+            name="reading",
+            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            boundary_kind="reading",
+            boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # Below threshold — no tick
+        tick = v.receive(fact("reading", temp=75))
+        assert tick is None
+
+        # At threshold — fires
+        tick = v.receive(fact("reading", temp=82))
+        assert tick is not None
+        assert tick.payload["high"] == 82
+
+    def test_condition_not_met_no_fire(self):
+        """Boundary suppressed when condition not met."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        v = Vertex("weather")
+        loop = Loop(
+            name="reading",
+            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            boundary_kind="reading",
+            boundary_conditions=(BoundaryCondition(target="high", op=">=", value=100),),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        tick = v.receive(fact("reading", temp=75))
+        assert tick is None
+        tick = v.receive(fact("reading", temp=82))
+        assert tick is None
+        # State still accumulates
+        assert v.state("reading")["high"] == 82
+
+    def test_multiple_conditions_and_semantics(self):
+        """All conditions must be true (AND)."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        def weather_fold(state, p):
+            return {
+                "high": max(state["high"], p.get("temp", 0)),
+                "humidity": p.get("humidity", state["humidity"]),
+            }
+
+        v = Vertex("weather")
+        loop = Loop(
+            name="reading",
+            projection=Projection({"high": 0, "humidity": 0}, fold=weather_fold),
+            boundary_kind="reading",
+            boundary_conditions=(
+                BoundaryCondition(target="high", op=">=", value=80),
+                BoundaryCondition(target="humidity", op=">", value=60),
+            ),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # High but not humid — no fire
+        tick = v.receive(fact("reading", temp=85, humidity=50))
+        assert tick is None
+
+        # Humid but not hot (state reset? no — no fire happened, state persists)
+        # Actually high is still 85 from previous, humidity now 70
+        tick = v.receive(fact("reading", temp=60, humidity=70))
+        assert tick is not None  # high=85 >= 80 AND humidity=70 > 60
+
+    def test_condition_reset_cycle(self):
+        """After fire with reset=True, conditions start fresh."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        v = Vertex("weather")
+        loop = Loop(
+            name="reading",
+            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            boundary_kind="reading",
+            boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        # Fire once
+        tick = v.receive(fact("reading", temp=85))
+        assert tick is not None
+
+        # After reset, high is back to 0 — below threshold
+        tick = v.receive(fact("reading", temp=70))
+        assert tick is None
+        assert v.state("reading")["high"] == 70
+
+        # Exceeds again — fires again
+        tick = v.receive(fact("reading", temp=90))
+        assert tick is not None
+
+    def test_condition_with_match(self):
+        """Conditions compose with payload match — both must pass."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        v = Vertex("weather")
+        loop = Loop(
+            name="reading",
+            projection=Projection({"high": 0}, fold=lambda s, p: {**s, "high": max(s["high"], p.get("temp", 0))}),
+            boundary_kind="alert",
+            boundary_match=(("source", "outdoor"),),
+            boundary_conditions=(BoundaryCondition(target="high", op=">=", value=80),),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        v.receive(fact("reading", temp=85))
+
+        # Wrong payload match — no fire even though condition met
+        tick = v.receive(fact("alert", source="indoor"))
+        assert tick is None
+
+        # Right payload match + condition met — fires
+        tick = v.receive(fact("alert", source="outdoor"))
+        assert tick is not None
+
+    def test_vertex_level_condition(self):
+        """Vertex-level boundary with conditions checks routed loop state."""
+        from lang.ast import BoundaryCondition
+
+        v = Vertex("monitor")
+        v.register("metric", {"high": 0}, lambda s, p: {**s, "high": max(s["high"], p.get("value", 0))})
+        v.register_vertex_boundary(
+            "metric",
+            conditions=(BoundaryCondition(target="high", op=">=", value=100),),
+        )
+
+        # Below threshold
+        tick = v.receive(fact("metric", value=50))
+        assert tick is None
+
+        # Above threshold — vertex-level fires (snapshots all loops)
+        tick = v.receive(fact("metric", value=150))
+        assert tick is not None
+        assert "metric" in tick.payload
+
+    def test_condition_string_equality(self):
+        """String conditions use == for non-numeric comparison."""
+        from lang.ast import BoundaryCondition
+        from engine.loop import Loop
+        from engine.projection import Projection
+
+        v = Vertex("status")
+        loop = Loop(
+            name="check",
+            projection=Projection({"status": "unknown"}, fold=lambda s, p: {**s, "status": p.get("status", s["status"])}),
+            boundary_kind="check",
+            boundary_conditions=(BoundaryCondition(target="status", op="==", value="critical"),),
+            reset=True,
+        )
+        v.register_loop(loop)
+
+        tick = v.receive(fact("check", status="ok"))
+        assert tick is None
+
+        tick = v.receive(fact("check", status="critical"))
+        assert tick is not None
+
+    def test_invalid_operator_rejected(self):
+        """BoundaryCondition rejects invalid operators at construction."""
+        from lang.ast import BoundaryCondition
+
+        with pytest.raises(ValueError, match="Invalid condition operator"):
+            BoundaryCondition(target="high", op="~=", value=80)
+
+
 class TestVertexReplay:
     """Replay rebuilds fold state from stored facts."""
 

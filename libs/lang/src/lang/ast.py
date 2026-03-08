@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 
 # -----------------------------------------------------------------------------
@@ -305,16 +306,41 @@ class FoldDecl:
 
 
 @dataclass(frozen=True)
+class BoundaryCondition:
+    """Predicate on fold state — fires when fold target meets condition.
+
+    Evaluated after fold (state is current), against the loop's fold state.
+    Match checks payload equality (cheap, string); conditions check fold
+    state with comparison operators (numeric).
+    """
+
+    target: str          # fold target name (e.g. "high")
+    op: str              # ">=", "<=", ">", "<", "==", "!="
+    value: float | str   # comparison value
+
+    _VALID_OPS: ClassVar[frozenset[str]] = frozenset({">=", "<=", ">", "<", "==", "!="})
+
+    def __post_init__(self) -> None:
+        if self.op not in self._VALID_OPS:
+            raise ValueError(f"Invalid condition operator: {self.op!r} (valid: {sorted(self._VALID_OPS)})")
+
+
+@dataclass(frozen=True)
 class BoundaryWhen:
     """Kind-based boundary: triggers when fact of given kind arrives.
 
     Optional match conditions: payload fields that must equal the given
     values for the boundary to fire. E.g. boundary when="session" status="closed"
     fires only when a session fact has status=closed in its payload.
+
+    Optional fold-state conditions: predicates on fold targets that must
+    all be true. E.g. condition "high" ">=" 80 fires only when the "high"
+    fold target is >= 80. Evaluated after match passes.
     """
 
     kind: str
     match: tuple[tuple[str, str], ...] = ()  # frozen payload conditions
+    conditions: tuple[BoundaryCondition, ...] = ()  # fold state predicates
 
 
 @dataclass(frozen=True)

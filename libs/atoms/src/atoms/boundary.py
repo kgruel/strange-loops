@@ -22,6 +22,11 @@ class Boundary:
       fact's payload for the boundary to fire. E.g. match=(("status", "closed"),)
       fires only when payload["status"] == "closed".
 
+    Optional fold-state conditions (kind-based only):
+    - conditions: predicates on fold targets evaluated after match passes.
+      E.g. condition "high" ">=" 80 fires only when the "high" fold target >= 80.
+      All conditions must be true (AND semantics).
+
     Attributes:
         kind: The fact kind that triggers the boundary (for mode="when").
         count: Number of facts before boundary fires (for mode="after"/"every").
@@ -30,6 +35,7 @@ class Boundary:
             True = state resets (each cycle starts fresh).
             False = state carries (next cycle continues from current state).
         match: Payload conditions for kind-based boundaries.
+        conditions: Fold-state predicates for kind-based boundaries.
     """
 
     kind: str | None = None
@@ -37,6 +43,7 @@ class Boundary:
     mode: Literal["when", "after", "every"] = "when"
     reset: bool = True
     match: tuple[tuple[str, str], ...] = ()
+    conditions: tuple = ()  # BoundaryCondition tuples from lang AST
 
     def __post_init__(self) -> None:
         if self.kind is None and self.count is None:

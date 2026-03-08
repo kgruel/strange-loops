@@ -288,12 +288,46 @@ def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
         match = tuple(
             (str(k), str(v)) for k, v in props.items() if k != "when"
         )
-        return BoundaryWhen(kind=str(props["when"]), match=match)
+        # Child "condition" nodes are fold-state predicates
+        conditions = tuple(
+            _load_boundary_condition(child, path)
+            for child in node.children
+            if child.name == "condition"
+        )
+        # Reject unknown children
+        for child in node.children:
+            if child.name != "condition":
+                raise _error(
+                    f"unknown boundary child: {child.name!r} (expected 'condition')",
+                    path,
+                )
+        return BoundaryWhen(kind=str(props["when"]), match=match, conditions=conditions)
     if "after" in props:
         return BoundaryAfter(count=int(props["after"]))
     if "every" in props:
         return BoundaryEvery(count=int(props["every"]))
     raise _error("boundary requires when=, after=, or every= property", path)
+
+
+def _load_boundary_condition(node: ckdl.Node, path: Path | None) -> "BoundaryCondition":
+    """Parse: condition "target" "op" value"""
+    from .ast import BoundaryCondition
+
+    args = node.args
+    if len(args) != 3:
+        raise _error(
+            f"condition requires 3 arguments (target op value), got {len(args)}",
+            path,
+        )
+    target = str(args[0])
+    op = str(args[1])
+    raw_value = args[2]
+    # Coerce to float if possible, otherwise keep as string
+    try:
+        value: float | str = float(raw_value)
+    except (ValueError, TypeError):
+        value = str(raw_value)
+    return BoundaryCondition(target=target, op=op, value=value)
 
 
 # ---------------------------------------------------------------------------

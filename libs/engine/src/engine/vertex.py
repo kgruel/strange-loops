@@ -48,6 +48,50 @@ def _json_default(obj: object) -> object:
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def _eval_condition(state: Any, condition: Any) -> bool:
+    """Evaluate a single BoundaryCondition against fold state.
+
+    State can be a dict (named targets) or MappingProxyType. The condition's
+    target is looked up in state, then compared using the operator.
+    """
+    from types import MappingProxyType
+    if isinstance(state, MappingProxyType):
+        state = dict(state)
+    if not isinstance(state, dict):
+        return False
+    value = state.get(condition.target)
+    if value is None:
+        return False
+    try:
+        fval = float(value)
+        fcomp = float(condition.value)
+    except (ValueError, TypeError):
+        # Fall back to string comparison for == and !=
+        if condition.op == "==":
+            return str(value) == str(condition.value)
+        if condition.op == "!=":
+            return str(value) != str(condition.value)
+        return False
+    if condition.op == ">=":
+        return fval >= fcomp
+    if condition.op == "<=":
+        return fval <= fcomp
+    if condition.op == ">":
+        return fval > fcomp
+    if condition.op == "<":
+        return fval < fcomp
+    if condition.op == "==":
+        return fval == fcomp
+    if condition.op == "!=":
+        return fval != fcomp
+    return False
+
+
+def _eval_conditions(state: Any, conditions: tuple) -> bool:
+    """Evaluate all BoundaryConditions — AND semantics."""
+    return all(_eval_condition(state, c) for c in conditions)
+
+
 class Vertex:
     """Where loops meet.
 
@@ -71,8 +115,10 @@ class Vertex:
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._boundary_match: dict[str, tuple[tuple[str, str], ...]] = {}  # boundary_kind → match
+        self._boundary_conditions: dict[str, tuple] = {}  # boundary_kind → conditions
         self._vertex_boundary: str | None = None  # vertex-level boundary kind
         self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
+        self._vertex_boundary_conditions: tuple = ()
         self._vertex_period_start: datetime | None = None
         self._store = store
         self._replaying = False  # suppress boundaries during replay
@@ -201,18 +247,22 @@ class Vertex:
             self._boundary_map[loop.boundary_kind] = kind
             if loop.boundary_match:
                 self._boundary_match[loop.boundary_kind] = loop.boundary_match
+            if loop.boundary_conditions:
+                self._boundary_conditions[loop.boundary_kind] = loop.boundary_conditions
         self._loops[kind] = loop
 
     def register_vertex_boundary(
         self,
         kind: str,
         match: tuple[tuple[str, str], ...] = (),
+        conditions: tuple = (),
     ) -> None:
         """Register a vertex-level boundary.
 
-        When a fact of this kind arrives (and matches payload conditions),
-        ALL loop states are snapshot into a single Tick. This is the
-        vertex's cycle boundary — e.g. session close snapshots everything.
+        When a fact of this kind arrives (and matches payload conditions,
+        and all fold-state conditions are met), ALL loop states are snapshot
+        into a single Tick. This is the vertex's cycle boundary — e.g.
+        session close snapshots everything.
 
         Vertex-level boundaries take precedence over loop-level boundaries
         for the same kind.
@@ -223,6 +273,7 @@ class Vertex:
             )
         self._vertex_boundary = kind
         self._vertex_boundary_match = match
+        self._vertex_boundary_conditions = conditions
 
     def receive(
         self,
@@ -342,6 +393,14 @@ class Vertex:
             if not self._vertex_boundary_match or all(
                 payload.get(k) == v for k, v in self._vertex_boundary_match
             ):
+                # Check fold-state conditions (if any)
+                if self._vertex_boundary_conditions:
+                    # Vertex-level: check conditions against the routed loop's state
+                    cond_loop = self._loops.get(routed_kind)
+                    if cond_loop is None or not _eval_conditions(
+                        cond_loop.state, self._vertex_boundary_conditions
+                    ):
+                        return None
                 tick = self._fire_vertex_boundary(fact_ts, payload)
                 self._store_tick(tick)
                 return tick
@@ -355,6 +414,13 @@ class Vertex:
         match = self._boundary_match.get(kind, ())
         if match and not all(payload.get(k) == v for k, v in match):
             return None
+
+        # Check fold-state conditions (if any)
+        conditions = self._boundary_conditions.get(kind, ())
+        if conditions:
+            target_loop = self._loops[fold_kind]
+            if not _eval_conditions(target_loop.state, conditions):
+                return None
 
         # Fire from the target loop
         target_loop = self._loops[fold_kind]

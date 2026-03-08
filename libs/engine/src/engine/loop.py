@@ -46,6 +46,7 @@ class Loop:
     boundary_count: int | None = None
     boundary_mode: Literal["when", "after", "every"] = "when"
     boundary_match: tuple[tuple[str, str], ...] = ()
+    boundary_conditions: tuple = ()  # BoundaryCondition tuples from lang AST
     reset: bool = True
     _initial: Any = field(default=None, repr=False)
     _period_start: datetime | None = field(default=None, repr=False)

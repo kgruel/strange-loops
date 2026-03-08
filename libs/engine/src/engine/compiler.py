@@ -514,7 +514,7 @@ def map_boundary(boundary: BoundaryWhen | BoundaryAfter | BoundaryEvery) -> Boun
 
     if isinstance(boundary, BoundaryWhen):
         return Boundary(kind=boundary.kind, mode="when", reset=True,
-                        match=boundary.match)
+                        match=boundary.match, conditions=boundary.conditions)
     elif isinstance(boundary, BoundaryAfter):
         return Boundary(count=boundary.count, mode="after", reset=True)
     elif isinstance(boundary, BoundaryEvery):
@@ -897,6 +897,7 @@ def materialize_vertex(
         reset = boundary.reset if boundary else True
 
         b_match = boundary.match if boundary else ()
+        b_conditions = boundary.conditions if boundary else ()
 
         if name in overrides:
             # Use custom fold
@@ -910,6 +911,7 @@ def materialize_vertex(
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
                     boundary_match=b_match,
+                    boundary_conditions=b_conditions,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
@@ -920,6 +922,7 @@ def materialize_vertex(
                     projection=Projection(initial, fold=fold_fn),
                     boundary_kind=boundary.kind if boundary else None,
                     boundary_match=b_match,
+                    boundary_conditions=b_conditions,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
@@ -934,6 +937,7 @@ def materialize_vertex(
                     boundary_count=boundary.count,
                     boundary_mode=boundary.mode,
                     boundary_match=b_match,
+                    boundary_conditions=b_conditions,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
@@ -944,6 +948,7 @@ def materialize_vertex(
                     projection=Projection(spec.initial_state(), fold=spec.apply),
                     boundary_kind=boundary.kind if boundary else None,
                     boundary_match=b_match,
+                    boundary_conditions=b_conditions,
                     reset=reset,
                 )
                 vertex.register_loop(loop)
@@ -958,6 +963,7 @@ def materialize_vertex(
         vertex.register_vertex_boundary(
             kind=b.kind,
             match=b.match,
+            conditions=b.conditions,
         )
 
     # Recursively materialize and attach children

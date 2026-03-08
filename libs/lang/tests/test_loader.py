@@ -296,6 +296,113 @@ loops {
         assert vertex.boundary.kind == "flush"
         assert vertex.boundary.match == ()
 
+    def test_boundary_with_conditions(self):
+        """Boundary with fold-state condition children."""
+        text = """\
+name "weather"
+store "./data/weather.db"
+loops {
+  reading {
+    fold { high "max" "temp_f" }
+    boundary when="reading" {
+      condition "high" ">=" 80
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["reading"].boundary
+        assert isinstance(b, BoundaryWhen)
+        assert b.kind == "reading"
+        assert b.match == ()
+        assert len(b.conditions) == 1
+        assert b.conditions[0].target == "high"
+        assert b.conditions[0].op == ">="
+        assert b.conditions[0].value == 80.0
+
+    def test_boundary_with_multiple_conditions(self):
+        """Boundary with multiple conditions (AND semantics)."""
+        text = """\
+name "weather"
+store "./data/weather.db"
+loops {
+  reading {
+    fold {
+      high "max" "temp_f"
+      humidity "latest" "humidity"
+    }
+    boundary when="reading" {
+      condition "high" ">=" 80
+      condition "humidity" ">" 60
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["reading"].boundary
+        assert len(b.conditions) == 2
+        assert b.conditions[0].target == "high"
+        assert b.conditions[1].target == "humidity"
+        assert b.conditions[1].op == ">"
+        assert b.conditions[1].value == 60.0
+
+    def test_boundary_conditions_with_match(self):
+        """Conditions compose with payload match properties."""
+        text = """\
+name "weather"
+store "./data/weather.db"
+loops {
+  reading {
+    fold { high "max" "temp_f" }
+    boundary when="alert" source="outdoor" {
+      condition "high" ">=" 80
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["reading"].boundary
+        assert b.kind == "alert"
+        assert b.match == (("source", "outdoor"),)
+        assert len(b.conditions) == 1
+
+    def test_vertex_boundary_with_conditions(self):
+        """Vertex-level boundary with fold-state conditions."""
+        text = """\
+name "monitor"
+store "./data/monitor.db"
+loops {
+  metric {
+    fold { high "max" "value" }
+  }
+  boundary when="metric" {
+    condition "high" ">=" 100
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.boundary is not None
+        assert len(vertex.boundary.conditions) == 1
+        assert vertex.boundary.conditions[0].target == "high"
+        assert vertex.boundary.conditions[0].op == ">="
+
+    def test_boundary_unknown_child_rejected(self):
+        """Unknown children in boundary block are rejected."""
+        text = """\
+name "test"
+store "./data/test.db"
+loops {
+  reading {
+    fold { items "collect" 10 }
+    boundary when="reading" {
+      filter "high" ">=" 80
+    }
+  }
+}
+"""
+        with pytest.raises(Exception, match="unknown boundary child"):
+            parse_vertex(text)
+
     def test_every_as_loop_key_still_works(self):
         text = """\
 source "echo test"

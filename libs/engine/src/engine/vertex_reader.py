@@ -434,6 +434,52 @@ def _combined_summary(ast: Any, vertex_path: Path) -> dict:
         conn.close()
 
 
+def _combined_search(
+    ast: Any,
+    vertex_path: Path,
+    query: str,
+    *,
+    kind: str | None = None,
+    since: float | None = None,
+    until: float | None = None,
+    limit: int = 100,
+    observer: str | None = None,
+) -> list[dict]:
+    """Search across combined children by delegating vertex_search to each child."""
+    from lang import resolve_vertex
+
+    home = _loops_home()
+    all_results: list[dict] = []
+
+    entries = ast.combine or []
+    if not entries and ast.discover is not None:
+        # discover vertices also resolve through _resolve_stores
+        store_paths = _resolve_stores(ast, vertex_path)
+        # For discover, we don't have vertex paths — fall back to empty
+        # (discover children need their own vertex files for search fields)
+        if not store_paths:
+            return []
+        # Can't recurse without vertex paths; discover is not yet supported for search
+        return []
+
+    for entry in entries:
+        vpath = resolve_vertex(entry.name, home)
+        if not vpath.is_absolute():
+            vpath = (vertex_path.parent / vpath).resolve()
+        if not vpath.exists():
+            continue
+
+        child_results = vertex_search(
+            vpath, query, kind=kind, since=since, until=until,
+            limit=limit, observer=observer,
+        )
+        all_results.extend(child_results)
+
+    # Sort by ts descending (newest first), apply limit
+    all_results.sort(key=lambda f: f["ts"], reverse=True)
+    return all_results[:limit]
+
+
 # ---------------------------------------------------------------------------
 # Public read API
 # ---------------------------------------------------------------------------
@@ -917,11 +963,27 @@ def vertex_search(
     if not query or not query.strip():
         return []
 
+    from lang import parse_vertex_file
+
     from .compiler import collect_search_fields
     from .store_reader import StoreReader
 
-    ast, store_path = _resolve_store(vertex_path)
-    if store_path is None:
+    ast = parse_vertex_file(vertex_path)
+
+    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+        return _combined_search(
+            ast, vertex_path, query,
+            kind=kind, since=since, until=until, limit=limit, observer=observer,
+        )
+
+    if ast.store is None:
+        return []
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    if not store_path.exists():
         return []
 
     base_dir = vertex_path.parent

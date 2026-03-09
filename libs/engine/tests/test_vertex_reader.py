@@ -1105,22 +1105,136 @@ class TestCombinedVertexSummary:
         assert summary["facts"]["total"] == 3
 
 
+def _setup_search_combine_env(tmp_path: Path, monkeypatch):
+    """Set up a LOOPS_HOME with two search-enabled instance vertices and a combinatorial vertex.
+
+    Returns (combine_vertex_path, alpha_db_path, beta_db_path).
+    """
+    home = tmp_path / "loops_home"
+
+    # alpha vertex with search declaration
+    alpha_dir = home / "alpha"
+    alpha_dir.mkdir(parents=True)
+    alpha_vertex = alpha_dir / "alpha.vertex"
+    alpha_vertex.write_text(
+        'name "alpha"\n'
+        'store "./store.db"\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+        '}\n'
+    )
+    alpha_db = alpha_dir / "store.db"
+
+    # beta vertex with search declaration
+    beta_dir = home / "beta"
+    beta_dir.mkdir(parents=True)
+    beta_vertex = beta_dir / "beta.vertex"
+    beta_vertex.write_text(
+        'name "beta"\n'
+        'store "./store.db"\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+        '}\n'
+    )
+    beta_db = beta_dir / "store.db"
+
+    # combinatorial vertex
+    combine_vertex = tmp_path / "combined.vertex"
+    combine_vertex.write_text(
+        'name "combined"\n'
+        'combine {\n'
+        '    vertex "alpha"\n'
+        '    vertex "beta"\n'
+        '}\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+        '}\n'
+    )
+
+    monkeypatch.setenv("LOOPS_HOME", str(home))
+    return combine_vertex, alpha_db, beta_db
+
+
 class TestCombinedVertexSearch:
-    """vertex_search on combinatorial vertices — not yet supported, returns []."""
+    """vertex_search on combinatorial vertices — delegates to children."""
 
-    def test_search_returns_empty(self, tmp_path, monkeypatch):
-        """Combine vertex search returns [] (no store to search).
-
-        vertex_search delegates to _resolve_store which returns None for
-        combine vertices (no store field). This test documents the behavior
-        so it won't silently change when combine search is implemented.
-        """
+    def test_search_across_children(self, tmp_path, monkeypatch):
+        """Search through aggregation vertex returns results from both child stores."""
         from engine import vertex_search
 
-        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "use JWT tokens"}},
+        ])
+
+        results = vertex_search(combine_vpath, "JWT")
+        assert len(results) == 2
+        # Newest first
+        topics = [r["payload"]["topic"] for r in results]
+        assert topics == ["deploy", "auth"]
+
+    def test_search_single_child_match(self, tmp_path, monkeypatch):
+        """Search returns results only from the child that matches."""
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "use containers"}},
+        ])
+
+        results = vertex_search(combine_vpath, "containers")
+        assert len(results) == 1
+        assert results[0]["payload"]["topic"] == "deploy"
+
+    def test_search_empty_query(self, tmp_path, monkeypatch):
+        """Empty query returns [] even for combine vertices."""
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
 
         _seed_facts(alpha_db, [
             {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
         ])
 
-        assert vertex_search(combine_vpath, "JWT") == []
+        assert vertex_search(combine_vpath, "") == []
+        assert vertex_search(combine_vpath, "  ") == []
+
+    def test_search_respects_limit(self, tmp_path, monkeypatch):
+        """Limit applies to merged results across children."""
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth-a", "message": "token system"}},
+            {"kind": "decision", "ts": 3000.0, "payload": {"topic": "auth-c", "message": "token refresh"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "auth-b", "message": "token rotation"}},
+        ])
+
+        results = vertex_search(combine_vpath, "token", limit=2)
+        assert len(results) == 2
+        # Newest first, limit cuts the oldest
+        topics = [r["payload"]["topic"] for r in results]
+        assert topics == ["auth-c", "auth-b"]
+
+    def test_search_no_results(self, tmp_path, monkeypatch):
+        """No matches returns []."""
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+        ])
+
+        assert vertex_search(combine_vpath, "nonexistent") == []

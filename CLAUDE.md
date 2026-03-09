@@ -49,7 +49,6 @@ libs/
 apps/
   loops/            CLI — emit, fold, stream, store across vertices
   hlab/             Homelab monitoring — DSL-driven status, alerts, media
-  siftd/            Conversation search — exchanges as facts, FTS5
   strange-loops/    Task orchestration — tasks as loops, workers in worktrees
 
 experiments/        Integration explorations and dissolved apps

@@ -1,8 +1,0 @@
-// Claude Code session ingestion
-// Discovers JSONL session files, parses user/assistant pairs, emits NDJSON exchanges
-
-source "python3 -m siftd_loops.sources.claude_code --data-dir ~/.config/loops/siftd/data"
-kind "exchange"
-observer "siftd"
-origin "claude-code"
-format "ndjson"

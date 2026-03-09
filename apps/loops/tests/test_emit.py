@@ -169,6 +169,158 @@ class TestEmit:
         assert facts[0].observer == "human"
 
 
+class TestEntityRefResolution:
+    """Entity address resolution at emit time."""
+
+    def _write_vertex_with_kinds(self, home: Path, name: str) -> Path:
+        """Create a vertex with thread (by name) and decision (by topic) kinds."""
+        vdir = home / name
+        vdir.mkdir(parents=True)
+        vertex_path = vdir / f"{name}.vertex"
+        vertex_path.write_text(
+            f'name "{name}"\n'
+            'store "./data/project.db"\n'
+            "loops {\n"
+            '  thread { fold { items "by" "name" } }\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        return vertex_path
+
+    def test_entity_ref_resolved_to_ulid(self, tmp_path, monkeypatch):
+        """A payload value matching kind/fold_key_value gets a _ref sibling with the ULID."""
+        home = tmp_path / "home"
+        vertex_path = self._write_vertex_with_kinds(home, "project")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # First: emit a thread so there's something to reference
+        result = main(["project", "emit", "thread", "name=cli-dissolution", "status=open"])
+        assert result == 0
+
+        # Second: emit a task that references the thread
+        result = main(["project", "emit", "task", "name=fact-drill-down", "status=parked",
+                        "reason=superseded", "superseded_by=thread/cli-dissolution"])
+        assert result == 0
+
+        db_path = (vertex_path.parent / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        assert len(facts) == 2
+
+        task_fact = facts[1]
+        assert task_fact.kind == "task"
+        payload = dict(task_fact.payload)
+        # Original address preserved
+        assert payload["superseded_by"] == "thread/cli-dissolution"
+        # ULID reference added
+        assert "superseded_by_ref" in payload
+        # The ref should be the ULID of the thread fact
+        thread_ulid = facts[0].payload.get("_id") if hasattr(facts[0].payload, "get") else None
+        # Read the actual ULID from the store
+        from engine import StoreReader
+
+        reader = StoreReader(db_path)
+        try:
+            resolved = reader.resolve_entity_id("thread", "name", "cli-dissolution")
+            assert payload["superseded_by_ref"] == resolved
+        finally:
+            reader.close()
+
+    def test_no_ref_for_nonexistent_entity(self, tmp_path, monkeypatch):
+        """If the referenced entity doesn't exist in the store, no _ref is added."""
+        home = tmp_path / "home"
+        self._write_vertex_with_kinds(home, "project")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # Emit a task referencing a thread that doesn't exist
+        result = main(["project", "emit", "task", "name=orphan-task", "status=parked",
+                        "superseded_by=thread/nonexistent"])
+        assert result == 0
+
+        db_path = (home / "project" / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        assert len(facts) == 1
+        payload = dict(facts[0].payload)
+        assert payload["superseded_by"] == "thread/nonexistent"
+        assert "superseded_by_ref" not in payload
+
+    def test_no_ref_for_undeclared_kind(self, tmp_path, monkeypatch):
+        """Values with slash but non-matching kind are not treated as references."""
+        home = tmp_path / "home"
+        self._write_vertex_with_kinds(home, "project")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # "fix/review" — "fix" is not a declared kind, should pass through unchanged
+        result = main(["project", "emit", "task", "name=fix/review", "status=merged"])
+        assert result == 0
+
+        db_path = (home / "project" / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        payload = dict(facts[0].payload)
+        assert payload["name"] == "fix/review"
+        assert "name_ref" not in payload
+
+    def test_decision_topic_with_slash(self, tmp_path, monkeypatch):
+        """Decision topics containing slashes resolve correctly (split on first / only)."""
+        home = tmp_path / "home"
+        self._write_vertex_with_kinds(home, "project")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # Emit a decision with a slashed topic
+        result = main(["project", "emit", "decision", "topic=design/format-dissolves",
+                        "message=Format dissolves into lens"])
+        assert result == 0
+
+        # Emit a thread that references that decision
+        result = main(["project", "emit", "thread", "name=format-work", "status=resolved",
+                        "decided_by=decision/design/format-dissolves"])
+        assert result == 0
+
+        db_path = (home / "project" / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        thread_fact = facts[1]
+        payload = dict(thread_fact.payload)
+        assert payload["decided_by"] == "decision/design/format-dissolves"
+        assert "decided_by_ref" in payload
+
+        from engine import StoreReader
+
+        reader = StoreReader(db_path)
+        try:
+            resolved = reader.resolve_entity_id("decision", "topic", "design/format-dissolves")
+            assert payload["decided_by_ref"] == resolved
+        finally:
+            reader.close()
+
+    def test_dry_run_shows_resolved_refs(self, tmp_path, monkeypatch, capsys):
+        """--dry-run output includes resolved entity references."""
+        home = tmp_path / "home"
+        self._write_vertex_with_kinds(home, "project")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # Seed a thread
+        main(["project", "emit", "thread", "name=target-thread", "status=open"])
+
+        # Dry-run an emit that references it
+        result = main(["project", "emit", "task", "name=ref-test", "status=open",
+                        "related=thread/target-thread", "--dry-run"])
+        assert result == 0
+
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["related"] == "thread/target-thread"
+        assert "related_ref" in d["payload"]
+
+
 class TestObserverResolution:
     """Observer resolution from .vertex declarations."""
 

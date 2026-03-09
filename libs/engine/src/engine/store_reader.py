@@ -219,6 +219,24 @@ class StoreReader:
             for r in rows
         ]
 
+    def resolve_entity_id(self, kind: str, key: str, value: str) -> str | None:
+        """Return the ULID of the most recent fact of kind where payload[key] == value.
+
+        This is the entity reference primitive: given an entity address
+        (kind + fold key field + fold key value), resolve it to the ULID
+        of the most recent fact contributing to that entity's fold state.
+
+        Returns None if no matching fact exists.
+        """
+        path = "$." + key
+        row = self._conn.execute(
+            "SELECT id FROM facts "
+            "WHERE kind = ? AND json_extract(payload, ?) = ? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (kind, path, value),
+        ).fetchone()
+        return row[0] if row else None
+
     def recent_facts(self, kind: str, n: int) -> list[dict]:
         """Last N facts for a given kind, newest first. Returns raw dicts."""
         rows = self._conn.execute(

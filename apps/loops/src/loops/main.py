@@ -920,6 +920,77 @@ def _warn_missing_fold_key(
             return
 
 
+def _resolve_entity_refs(
+    vertex_path: Path,
+    store_path: Path,
+    payload: dict[str, str],
+) -> dict[str, str]:
+    """Resolve entity addresses in payload values to ULIDs.
+
+    Scans payload values for entity addresses (kind/fold_key_value format).
+    When a value matches a declared kind in the vertex and that kind folds
+    by a key field, looks up the most recent fact ULID for that entity.
+
+    The original field is preserved (navigable address). A sibling field
+    {name}_ref is added with the pinned ULID (provenance anchor).
+
+    Returns the payload with any resolved references added.
+    """
+    from lang import parse_vertex_file
+    from lang.ast import FoldBy
+
+    # Build kind → key_field map from vertex declaration
+    writable = _resolve_writable_vertex(vertex_path)
+    if writable is not None:
+        vertex_path = writable
+
+    try:
+        ast = parse_vertex_file(vertex_path)
+    except Exception:
+        return payload
+
+    kind_keys: dict[str, str] = {}
+    for kind_name, loop_def in ast.loops.items():
+        for fold_decl in loop_def.folds:
+            if isinstance(fold_decl.op, FoldBy):
+                kind_keys[kind_name] = fold_decl.op.key_field
+                break
+
+    if not kind_keys:
+        return payload
+
+    # Scan payload values for entity address pattern: kind/fold_key_value
+    refs: dict[str, str] = {}
+    for field_name, value in payload.items():
+        if not isinstance(value, str) or "/" not in value:
+            continue
+        # Split on first / only: decision/design/format-dissolves → ("decision", "design/format-dissolves")
+        addr_kind, addr_value = value.split("/", 1)
+        if addr_kind not in kind_keys:
+            continue
+
+        # This value matches a declared kind — resolve it
+        key_field = kind_keys[addr_kind]
+        try:
+            from engine import StoreReader
+
+            reader = StoreReader(store_path)
+            try:
+                ulid = reader.resolve_entity_id(addr_kind, key_field, addr_value)
+            finally:
+                reader.close()
+        except (FileNotFoundError, Exception):
+            continue
+
+        if ulid is not None:
+            refs[f"{field_name}_ref"] = ulid
+
+    if refs:
+        payload = {**payload, **refs}
+
+    return payload
+
+
 def _resolve_writable_vertex(vertex_path: Path) -> Path | None:
     """Resolve to the vertex that owns the writable store.
 
@@ -1121,6 +1192,35 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         # Warn if payload is missing the fold key field (data quality)
         _warn_missing_fold_key(vertex_path, kind, payload, show, Block, p)
 
+    # Resolve store path early — needed for entity reference resolution
+    try:
+        writable_path = _resolve_writable_vertex(vertex_path)
+        if writable_path is None:
+            if not args.dry_run:
+                show(
+                    Block.text("Error: vertex has no store configured", p.error),
+                    file=sys.stderr,
+                )
+                return 1
+            store_path = None
+        else:
+            store_path = _resolve_vertex_store_path(writable_path)
+            if store_path is None and not args.dry_run:
+                show(
+                    Block.text("Error: vertex has no store configured", p.error),
+                    file=sys.stderr,
+                )
+                return 1
+    except Exception as e:
+        if not args.dry_run:
+            show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+            return 1
+        store_path = None
+
+    # Resolve entity references in payload values (kind/fold_key_value → ULID)
+    if vertex_path is not None and store_path is not None and store_path.exists():
+        payload = _resolve_entity_refs(vertex_path, store_path, payload)
+
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(
         kind=kind,
@@ -1138,28 +1238,6 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             file=sys.stdout,
         )
         return 0
-
-    try:
-        # Resolve to the vertex that owns the writable store (follow combine)
-        writable_path = _resolve_writable_vertex(vertex_path)
-        if writable_path is None:
-            show(
-                Block.text("Error: vertex has no store configured", p.error),
-                file=sys.stderr,
-            )
-            return 1
-
-        store_path = _resolve_vertex_store_path(writable_path)
-        if store_path is None:
-            show(
-                Block.text("Error: vertex has no store configured", p.error),
-                file=sys.stderr,
-            )
-            return 1
-
-    except Exception as e:
-        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
-        return 1
 
     try:
         from engine import load_vertex_program

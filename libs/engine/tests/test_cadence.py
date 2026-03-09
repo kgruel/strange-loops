@@ -30,14 +30,14 @@ class TestCadenceElapsed:
 
     def test_recently_run_returns_false(self):
         store = _make_store()
-        store.append(Fact.of("disk.complete", "obs", status="ok"))
+        store.append(Fact.of("_sync.disk", "obs", status="ok"))
         cadence = Cadence.elapsed("disk", 60.0)
         assert cadence.should_run(store) is False
 
     def test_interval_elapsed_returns_true(self):
         store = _make_store()
         now = time.time()
-        old_fact = Fact("disk.complete", now - 120, {"status": "ok"}, "obs")
+        old_fact = Fact("_sync.disk", now - 120, {"status": "ok"}, "obs")
         store.append(old_fact)
         cadence = Cadence.elapsed("disk", 60.0)
         assert cadence.should_run(store, now=now) is True
@@ -45,7 +45,7 @@ class TestCadenceElapsed:
     def test_interval_not_elapsed_returns_false(self):
         store = _make_store()
         now = time.time()
-        recent_fact = Fact("disk.complete", now - 30, {"status": "ok"}, "obs")
+        recent_fact = Fact("_sync.disk", now - 30, {"status": "ok"}, "obs")
         store.append(recent_fact)
         cadence = Cadence.elapsed("disk", 60.0)
         assert cadence.should_run(store, now=now) is False
@@ -66,7 +66,7 @@ class TestCadenceTriggered:
     def test_trigger_after_complete_returns_true(self):
         store = _make_store()
         now = time.time()
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
         store.append(Fact("minute", now - 5, {}, "timer"))
         cadence = Cadence.triggered("minute", "disk")
         assert cadence.should_run(store, now=now) is True
@@ -75,23 +75,23 @@ class TestCadenceTriggered:
         store = _make_store()
         now = time.time()
         store.append(Fact("minute", now - 15, {}, "timer"))
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
         cadence = Cadence.triggered("minute", "disk")
         assert cadence.should_run(store, now=now) is False
 
     def test_multi_trigger_or_semantics(self):
         store = _make_store()
         now = time.time()
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
-        store.append(Fact("deploy.complete", now - 5, {}, "ci"))
-        cadence = Cadence.triggered(("minute", "deploy.complete"), "disk")
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.deploy", now - 5, {"status": "ok"}, "ci"))
+        cadence = Cadence.triggered(("minute", "_sync.deploy"), "disk")
         assert cadence.should_run(store, now=now) is True
 
     def test_multi_trigger_none_match(self):
         store = _make_store()
         now = time.time()
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
-        cadence = Cadence.triggered(("minute", "deploy.complete"), "disk")
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
+        cadence = Cadence.triggered(("minute", "_sync.deploy"), "disk")
         assert cadence.should_run(store, now=now) is False
 
     def test_single_string_trigger(self):
@@ -108,9 +108,9 @@ class TestCadenceErrorDoesNotResetClock:
         store = _make_store()
         now = time.time()
         # Successful completion 120s ago
-        store.append(Fact("disk.complete", now - 120, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 120, {"status": "ok"}, "obs"))
         # Recent failed completion — should NOT reset the clock
-        store.append(Fact("disk.complete", now - 5, {"status": "error", "error": "timeout"}, "obs"))
+        store.append(Fact("_sync.disk", now - 5, {"status": "error", "error": "timeout"}, "obs"))
         cadence = Cadence.elapsed("disk", 60.0)
         # 120s since last OK > 60s interval → should run
         assert cadence.should_run(store, now=now) is True
@@ -119,9 +119,9 @@ class TestCadenceErrorDoesNotResetClock:
         store = _make_store()
         now = time.time()
         # Recent OK completion
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
         # Even older error
-        store.append(Fact("disk.complete", now - 5, {"status": "error"}, "obs"))
+        store.append(Fact("_sync.disk", now - 5, {"status": "error"}, "obs"))
         cadence = Cadence.elapsed("disk", 60.0)
         # 10s since last OK < 60s interval → should NOT run
         assert cadence.should_run(store, now=now) is False
@@ -132,7 +132,7 @@ class TestCadenceErrorDoesNotResetClock:
         # Trigger arrived at -15
         store.append(Fact("minute", now - 15, {}, "timer"))
         # Error completion at -10 — should NOT count as "completed"
-        store.append(Fact("disk.complete", now - 10, {"status": "error"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "error"}, "obs"))
         cadence = Cadence.triggered("minute", "disk")
         # No OK completion → trigger at -15 still qualifies
         assert cadence.should_run(store, now=now) is True
@@ -142,7 +142,7 @@ class TestCadenceErrorDoesNotResetClock:
         now = time.time()
         # Trigger at -15, OK completion at -10 → trigger consumed
         store.append(Fact("minute", now - 15, {}, "timer"))
-        store.append(Fact("disk.complete", now - 10, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "ok"}, "obs"))
         cadence = Cadence.triggered("minute", "disk")
         assert cadence.should_run(store, now=now) is False
 
@@ -150,8 +150,8 @@ class TestCadenceErrorDoesNotResetClock:
         store = _make_store()
         now = time.time()
         # Only errors, never succeeded
-        store.append(Fact("disk.complete", now - 30, {"status": "error"}, "obs"))
-        store.append(Fact("disk.complete", now - 10, {"status": "error"}, "obs"))
+        store.append(Fact("_sync.disk", now - 30, {"status": "error"}, "obs"))
+        store.append(Fact("_sync.disk", now - 10, {"status": "error"}, "obs"))
         cadence = Cadence.elapsed("disk", 60.0)
         # No OK completion ever → should run
         assert cadence.should_run(store, now=now) is True
@@ -182,19 +182,19 @@ class TestFileStoreQueryMethods:
 
     def test_latest_by_kind_where(self, tmp_path):
         store = self._make_file_store(tmp_path)
-        store.append(Fact.of("a.complete", "obs", status="ok", v=1))
-        store.append(Fact.of("a.complete", "obs", status="error", v=2))
-        store.append(Fact.of("a.complete", "obs", status="ok", v=3))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=1))
+        store.append(Fact.of("_sync.a", "obs", status="error", v=2))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=3))
 
-        result = store.latest_by_kind_where("a.complete", "status", "ok")
+        result = store.latest_by_kind_where("_sync.a", "status", "ok")
         assert result is not None
         assert result.payload["v"] == 3
 
-        result = store.latest_by_kind_where("a.complete", "status", "error")
+        result = store.latest_by_kind_where("_sync.a", "status", "error")
         assert result is not None
         assert result.payload["v"] == 2
 
-        assert store.latest_by_kind_where("a.complete", "status", "missing") is None
+        assert store.latest_by_kind_where("_sync.a", "status", "missing") is None
         store.close()
 
     def test_has_kind_since(self, tmp_path):
@@ -214,7 +214,7 @@ class TestFileStoreQueryMethods:
         """Cadence.should_run works with FileStore — the former gap."""
         store = self._make_file_store(tmp_path)
         now = time.time()
-        store.append(Fact("disk.complete", now - 120, {"status": "ok"}, "obs"))
+        store.append(Fact("_sync.disk", now - 120, {"status": "ok"}, "obs"))
         cadence = Cadence.elapsed("disk", 60.0)
         assert cadence.should_run(store, now=now) is True
         store.close()
@@ -223,19 +223,19 @@ class TestFileStoreQueryMethods:
 class TestStoreLatestByKindWhere:
     def test_event_store_filters_by_payload(self):
         store = _make_store()
-        store.append(Fact.of("a.complete", "obs", status="ok", v=1))
-        store.append(Fact.of("a.complete", "obs", status="error", v=2))
-        store.append(Fact.of("a.complete", "obs", status="ok", v=3))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=1))
+        store.append(Fact.of("_sync.a", "obs", status="error", v=2))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=3))
 
-        result = store.latest_by_kind_where("a.complete", "status", "ok")
+        result = store.latest_by_kind_where("_sync.a", "status", "ok")
         assert result is not None
         assert result.payload["v"] == 3
 
-        result = store.latest_by_kind_where("a.complete", "status", "error")
+        result = store.latest_by_kind_where("_sync.a", "status", "error")
         assert result is not None
         assert result.payload["v"] == 2
 
-        assert store.latest_by_kind_where("a.complete", "status", "missing") is None
+        assert store.latest_by_kind_where("_sync.a", "status", "missing") is None
 
     def test_sqlite_store_filters_by_payload(self, tmp_path):
         from engine import SqliteStore
@@ -245,19 +245,19 @@ class TestStoreLatestByKindWhere:
             serialize=Fact.to_dict,
             deserialize=Fact.from_dict,
         )
-        store.append(Fact.of("a.complete", "obs", status="ok", v=1))
-        store.append(Fact.of("a.complete", "obs", status="error", v=2))
-        store.append(Fact.of("a.complete", "obs", status="ok", v=3))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=1))
+        store.append(Fact.of("_sync.a", "obs", status="error", v=2))
+        store.append(Fact.of("_sync.a", "obs", status="ok", v=3))
 
-        result = store.latest_by_kind_where("a.complete", "status", "ok")
+        result = store.latest_by_kind_where("_sync.a", "status", "ok")
         assert result is not None
         assert result.payload["v"] == 3
 
-        result = store.latest_by_kind_where("a.complete", "status", "error")
+        result = store.latest_by_kind_where("_sync.a", "status", "error")
         assert result is not None
         assert result.payload["v"] == 2
 
-        assert store.latest_by_kind_where("a.complete", "status", "missing") is None
+        assert store.latest_by_kind_where("_sync.a", "status", "missing") is None
         store.close()
 
 

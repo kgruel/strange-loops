@@ -7,7 +7,13 @@ One-shot execution model. No persistent runtime. External scheduling
 2. Build dependency graph from trigger relationships
 3. Execute in tiers: concurrent within tier, sequential between tiers
 4. Route facts through vertex.receive()
-5. Return ticks that fired
+5. Emit _sync.{kind} after each source (lifecycle observation)
+6. Return ticks that fired
+
+The executor is the observer of source lifecycle. Sources yield only
+domain facts. The executor emits _sync.{kind} facts to record when
+sources ran and whether they succeeded — separating lifecycle from
+domain data via the _ prefix namespace.
 """
 
 from __future__ import annotations
@@ -38,17 +44,17 @@ def _build_dependency_graph(
     """Build {source_index: set of source_indices it depends on}.
 
     Edge: source[i] depends on source[j] when
-    f"{source[j].kind}.complete" is in sources[i].cadence.trigger_kinds.
+    f"_sync.{source[j].kind}" is in sources[i].cadence.trigger_kinds.
 
-    Uses source.kind (not cadence.kind) because Source.collect() emits
-    {source.kind}.complete regardless of cadence mode.
+    The executor emits _sync.{kind} after each source runs, so trigger
+    kinds reference the _sync namespace.
     """
-    # Map complete-kind -> source indices that produce it
+    # Map sync-kind -> source indices that produce it
     producers: dict[str, list[int]] = {}
     for j, (source, cadence) in enumerate(sources):
         if source.kind:
-            complete_kind = f"{source.kind}.complete"
-            producers.setdefault(complete_kind, []).append(j)
+            sync_kind = f"_sync.{source.kind}"
+            producers.setdefault(sync_kind, []).append(j)
 
     deps: dict[int, set[int]] = {}
     for i, (source, cadence) in enumerate(sources):
@@ -118,7 +124,7 @@ class SkippedSource:
     """A source skipped by cadence evaluation."""
 
     kind: str
-    last_run_ts: float | None = None  # epoch of last successful .complete
+    last_run_ts: float | None = None  # epoch of last successful _sync
     cadence_interval: float | None = None  # seconds, for elapsed mode
 
 
@@ -129,7 +135,7 @@ class SyncResult:
     ticks: list[Tick]
     ran: list[str]  # kinds of sources that ran
     skipped: list[SkippedSource]  # sources skipped by cadence
-    errors: list[Fact]  # source.error facts
+    errors: list[Fact]  # _sync facts with status=error
     tiers: list[list[str]]  # execution order: each tier ran concurrently
     fact_counts: dict[str, int] = field(default_factory=dict)  # facts ingested per source kind
 
@@ -173,8 +179,8 @@ class Executor:
             if force or store is None or cadence.should_run(store, start):
                 qualifying_indices.append(i)
             else:
-                complete_kind = f"{source.kind}.complete"
-                last = store.latest_by_kind_where(complete_kind, "status", "ok")
+                sync_kind = f"_sync.{source.kind}"
+                last = store.latest_by_kind_where(sync_kind, "status", "ok")
                 skipped.append(SkippedSource(
                     kind=source.kind,
                     last_run_ts=last.ts if last else None,
@@ -203,12 +209,12 @@ class Executor:
 
             ran = [self.sources[i][0].kind for i in qualifying_indices]
 
-        # Emit sync.complete — same sentinel pattern as source .complete
+        # Emit _sync — executor's own lifecycle observation
         from atoms import Fact
 
         duration_ms = int((time.time() - start) * 1000)
         sync_fact = Fact.of(
-            "sync.complete",
+            "_sync",
             self.vertex.name,
             status="error" if errors else "ok",
             sources_run=len(ran),
@@ -234,49 +240,51 @@ class Executor:
         fact_counts: dict[str, int] | None = None,
         fact_count: list[int] | None = None,
     ) -> None:
-        """Run a single source and route its facts through the vertex."""
+        """Run a single source and route its facts through the vertex.
+
+        After the source completes (success or failure), emits a _sync.{kind}
+        fact through the vertex — the executor's lifecycle observation.
+        """
+        from atoms import Fact, SourceError
+
         count = 0
+        sync_payload: dict[str, Any] = {"command": source.command, "status": "ok"}
+
         try:
             async for fact in source.collect():
                 if fact_count is not None:
                     fact_count[0] += 1
-                if fact.kind == "source.error":
-                    errors.append(fact)
-                    if self.on_error is not None:
-                        self.on_error(fact)
-                elif not fact.kind.endswith(".complete"):
-                    count += 1
+                count += 1
                 tick = self.vertex.receive(fact, grant)
                 if tick is not None:
                     ticks.append(tick)
+        except SourceError as e:
+            sync_payload["status"] = "error"
+            if e.stderr:
+                sync_payload["stderr"] = e.stderr
+            sync_payload["returncode"] = e.returncode
         except Exception as e:
-            from atoms import Fact
+            sync_payload["status"] = "error"
+            sync_payload["error"] = str(e)
+            sync_payload["error_type"] = type(e).__name__
 
-            error_fact = Fact.of(
-                "source.error",
-                source.observer,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            if fact_count is not None:
-                fact_count[0] += 1
-            errors.append(error_fact)
-            self.vertex.receive(error_fact)
+        # Emit _sync.{kind} — lifecycle observation
+        sync_fact = Fact.of(
+            f"_sync.{source.kind}",
+            source.observer,
+            **sync_payload,
+        )
+        if fact_count is not None:
+            fact_count[0] += 1
+        tick = self.vertex.receive(sync_fact, grant)
+        if tick is not None:
+            ticks.append(tick)
+
+        if sync_payload["status"] == "error":
+            errors.append(sync_fact)
             if self.on_error is not None:
-                self.on_error(error_fact)
+                self.on_error(sync_fact)
 
-            complete_fact = Fact.of(
-                f"{source.kind}.complete",
-                source.observer,
-                status="error",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            if fact_count is not None:
-                fact_count[0] += 1
-            tick = self.vertex.receive(complete_fact)
-            if tick is not None:
-                ticks.append(tick)
         if fact_counts is not None:
             fact_counts[source.kind] = count
 

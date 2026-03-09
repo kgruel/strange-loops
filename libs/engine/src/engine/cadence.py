@@ -1,11 +1,15 @@
 """Cadence: store predicate for source scheduling.
 
 Separates *when* to run a source from *what* it does. Three shapes:
-- elapsed(kind, interval) — time since last {kind}.complete
-- triggered(trigger_kinds, source_kind) — event since last complete
+- elapsed(kind, interval) — time since last _sync.{kind}
+- triggered(trigger_kinds, source_kind) — event since last _sync.{kind}
 - always() — run every time (one-shot / cursor-based sources)
 
 Cadence is pure: give it a store and a timestamp, get a boolean.
+
+The executor emits _sync.{kind} facts after each source runs. The _sync
+prefix separates source lifecycle from domain data — cadence reads system
+observations, not domain facts.
 """
 
 from __future__ import annotations
@@ -41,12 +45,12 @@ class Cadence:
 
     @classmethod
     def elapsed(cls, kind: str, interval: float) -> Cadence:
-        """True if interval seconds passed since last {kind}.complete fact."""
+        """True if interval seconds passed since last _sync.{kind} fact."""
         return cls(_kind=kind, _mode="elapsed", _interval=interval)
 
     @classmethod
     def triggered(cls, trigger_kinds: str | tuple[str, ...], source_kind: str) -> Cadence:
-        """True if any trigger_kind fact exists since last {source_kind}.complete.
+        """True if any trigger_kind fact exists since last _sync.{source_kind}.
 
         OR semantics: any matching trigger kind satisfies the predicate.
         """
@@ -73,15 +77,15 @@ class Cadence:
             now = time.time()
 
         if self._mode == "elapsed":
-            complete_kind = f"{self._kind}.complete"
-            last = store.latest_by_kind_where(complete_kind, "status", "ok")
+            sync_kind = f"_sync.{self._kind}"
+            last = store.latest_by_kind_where(sync_kind, "status", "ok")
             if last is None:
                 return True
             return (now - last.ts) >= self._interval
 
         if self._mode == "triggered":
-            complete_kind = f"{self._kind}.complete"
-            last_complete = store.latest_by_kind_where(complete_kind, "status", "ok")
+            sync_kind = f"_sync.{self._kind}"
+            last_complete = store.latest_by_kind_where(sync_kind, "status", "ok")
             if last_complete is None:
                 # Never completed — run if any trigger exists
                 for kind in self._trigger_kinds:

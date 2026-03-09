@@ -110,81 +110,62 @@ def run_sequential_checks(
     *,
     observer: str = "dev-check",
 ) -> list[dict[str, Any]]:
-    """Run a SequentialSource and collect results in health_view format.
+    """Run each source individually and collect results in health_view format.
 
-    Translates Source fact shapes ({kind} data + {kind}.complete signals)
-    into the {status, output, duration_s} payload that health_view expects.
-    Stores each result fact in the vertex store.
+    Runs sources from the sequential block one at a time, catching SourceError
+    to detect failures. Each result is stored as a fact in the vertex store.
 
     Returns the list of result dicts (for rendering via health_view).
     """
-    from atoms import Fact
+    from atoms import Fact, SourceError
     from engine import SqliteStore
 
     store_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Map command -> kind for associating source.error facts
-    cmd_to_kind = {s.command: s.kind for s in seq_source.sources}
-
-    output_lines: dict[str, list[str]] = {}  # kind -> stdout lines
-    error_output: dict[str, str] = {}  # kind -> stderr text
-    start_times: dict[str, float] = {}  # kind -> monotonic start
     results: list[dict[str, Any]] = []
 
-    async def _collect():
-        async for fact in seq_source.collect():
-            kind = fact.kind
+    async def _run_all():
+        for source in seq_source.sources:
+            start = time.monotonic()
+            lines: list[str] = []
+            status = "passed"
+            stderr_text = ""
 
-            if kind == "source.error":
-                cmd = fact.payload.get("command", "")
-                src_kind = cmd_to_kind.get(cmd)
-                if src_kind:
-                    stderr = fact.payload.get("stderr", "")
-                    if stderr:
-                        error_output[src_kind] = stderr
-                continue
+            try:
+                async for fact in source.collect():
+                    line = fact.payload.get("line", "")
+                    if line:
+                        lines.append(line)
+            except SourceError as e:
+                status = "failed"
+                stderr_text = e.stderr
 
-            if kind == "sources.sequential.stopped":
-                continue
+            if stderr_text:
+                lines.append(stderr_text)
 
-            if kind.endswith(".complete"):
-                source_kind = kind.removesuffix(".complete")
-                status = "passed" if fact.payload.get("status") == "ok" else "failed"
-                lines = output_lines.get(source_kind, [])
-                if source_kind in error_output:
-                    lines.append(error_output[source_kind])
-                output = "\n".join(lines)
-                duration_s = round(
-                    time.monotonic() - start_times.get(source_kind, time.monotonic()), 2
-                )
+            duration_s = round(time.monotonic() - start, 2)
+            output = "\n".join(lines)
 
-                result_fact = Fact.of(
-                    source_kind,
-                    observer,
-                    status=status,
-                    output=output,
-                    duration_s=duration_s,
-                )
+            result_fact = Fact.of(
+                source.kind,
+                observer,
+                status=status,
+                output=output,
+                duration_s=duration_s,
+            )
 
-                with SqliteStore(
-                    path=store_path,
-                    serialize=Fact.to_dict,
-                    deserialize=Fact.from_dict,
-                ) as store:
-                    store.append(result_fact)
+            with SqliteStore(
+                path=store_path,
+                serialize=Fact.to_dict,
+                deserialize=Fact.from_dict,
+            ) as store:
+                store.append(result_fact)
 
-                results.append(result_fact.to_dict())
-                continue
+            results.append(result_fact.to_dict())
 
-            # Data fact — accumulate stdout lines
-            if kind not in start_times:
-                start_times[kind] = time.monotonic()
-            output_lines.setdefault(kind, [])
-            line = fact.payload.get("line", "")
-            if line:
-                output_lines[kind].append(line)
+            if status == "failed":
+                break
 
-    asyncio.run(_collect())
+    asyncio.run(_run_all())
     return results
 
 

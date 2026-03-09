@@ -112,7 +112,7 @@ class TestSyncExecution:
         assert result == 0
 
     def test_sync_emits_completion_fact(self, monkeypatch, tmp_path, capsys):
-        """Sync stores a sync.complete fact with expected fields."""
+        """Sync stores a _sync fact with expected fields."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         vertex_path = _make_vertex_with_source(tmp_path)
 
@@ -125,7 +125,7 @@ class TestSyncExecution:
 
         store_path = vertex_path.parent / "data" / "test.db"
         reader = StoreReader(store_path)
-        facts = reader.recent_facts("sync.complete", 5)
+        facts = reader.recent_facts("_sync", 5)
         assert len(facts) == 1
         f = facts[0]
         assert f["payload"]["status"] == "ok"

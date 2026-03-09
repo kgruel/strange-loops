@@ -177,6 +177,7 @@ class _MockSource:
     observer: str
     kind: str
     facts: list[Fact]
+    command: str = "mock-cmd"
 
     async def collect(self) -> AsyncIterator[Fact]:
         for fact in self.facts:
@@ -187,10 +188,10 @@ def _make_program(mock_sources: list[_MockSource]) -> VertexProgram:
     """Build a VertexProgram with two loops (a, b) using mock sources."""
     vertex = Vertex("test")
     vertex.register(
-        "a", 0, lambda s, p: s + p.get("v", 0), boundary="a.complete", reset=True
+        "a", 0, lambda s, p: s + p.get("v", 0), boundary="_sync.a", reset=True
     )
     vertex.register(
-        "b", 0, lambda s, p: s + p.get("v", 0), boundary="b.complete", reset=True
+        "b", 0, lambda s, p: s + p.get("v", 0), boundary="_sync.b", reset=True
     )
     pairs = [(s, Cadence.always()) for s in mock_sources]
     return VertexProgram(vertex=vertex, sources=pairs, expected_ticks=["a", "b"])
@@ -200,17 +201,17 @@ class TestVertexProgramSync:
     """Tests for VertexProgram.sync() via Executor."""
 
     def test_sync_returns_ticks(self) -> None:
-        source = _MockSource(
+        source_a = _MockSource(
             observer="mock",
             kind="a",
-            facts=[
-                Fact.of("a", "mock", v=3),
-                Fact.of("a.complete", "mock"),
-                Fact.of("b", "mock", v=7),
-                Fact.of("b.complete", "mock"),
-            ],
+            facts=[Fact.of("a", "mock", v=3)],
         )
-        program = _make_program([source])
+        source_b = _MockSource(
+            observer="mock",
+            kind="b",
+            facts=[Fact.of("b", "mock", v=7)],
+        )
+        program = _make_program([source_a, source_b])
         result = program.sync(force=True)
         tick_map = {t.name: t.payload for t in result.ticks}
         assert tick_map == {"a": 3, "b": 7}

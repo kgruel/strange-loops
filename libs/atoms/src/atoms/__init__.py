@@ -48,7 +48,7 @@ from atoms.parse import (
 )
 
 # Ingress
-from atoms.source import CommandSource, Source
+from atoms.source import CommandSource, Source, SourceError
 from atoms.sequential import SequentialSource
 from atoms.protocol import SourceProtocol
 
@@ -96,6 +96,7 @@ __all__ = [
     "run_parse_many",
     # Ingress
     "Source",
+    "SourceError",
     "CommandSource",
     "SequentialSource",
     "SourceProtocol",

@@ -106,13 +106,6 @@ def _extract_notes(p: dict) -> str:
     return p.get("message", "") or p.get("text", "")
 
 
-def _extract_error(p: dict) -> str:
-    err = p.get("error", "")
-    etype = p.get("error_type", "")
-    if etype and err:
-        return f"{etype}: {err}"
-    return err or etype
-
 
 _KIND_EXTRACTORS: dict[str, Callable[[dict], str]] = {
     "message": _extract_message,
@@ -121,7 +114,6 @@ _KIND_EXTRACTORS: dict[str, Callable[[dict], str]] = {
     "task": _extract_task,
     "dissolution": _extract_dissolution,
     "notes": _extract_notes,
-    "source.error": _extract_error,
 }
 
 

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from atoms import Source, CommandSource, SequentialSource
+from atoms import Source, CommandSource, SequentialSource, SourceError
 from atoms import Coerce, Pick, Rename, Skip, Split, Transform
 
 
@@ -12,7 +12,7 @@ class TestSource:
     """Tests for Source behavior."""
 
     async def test_echo_single_line(self):
-        """Single line output becomes single fact plus completion."""
+        """Single line output becomes single fact."""
         source = Source(
             command='echo "hello"',
             kind="greeting",
@@ -23,13 +23,10 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
-        # One data fact + one completion fact
-        data_facts = [f for f in facts if f.kind == "greeting"]
-        complete_facts = [f for f in facts if f.kind == "greeting.complete"]
-        assert len(data_facts) == 1
-        assert len(complete_facts) == 1
-        assert data_facts[0].observer == "echo-source"
-        assert data_facts[0].payload["line"] == "hello"
+        assert len(facts) == 1
+        assert facts[0].kind == "greeting"
+        assert facts[0].observer == "echo-source"
+        assert facts[0].payload["line"] == "hello"
 
     async def test_echo_multiple_lines(self):
         """Multiple lines become multiple facts."""
@@ -43,9 +40,8 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "output"]
-        assert len(data_facts) == 3
-        assert [f.payload["line"] for f in data_facts] == ["line1", "line2", "line3"]
+        assert len(facts) == 3
+        assert [f.payload["line"] for f in facts] == ["line1", "line2", "line3"]
 
     async def test_observer_identity(self):
         """Observer is stamped on all produced facts."""
@@ -58,46 +54,36 @@ class TestSource:
         async for fact in source.collect():
             assert fact.observer == "my-observer"
 
-    async def test_command_failure_emits_complete_error(self):
-        """Non-zero exit code logs to stderr and emits complete with status=error."""
+    async def test_command_failure_raises_source_error(self):
+        """Non-zero exit code raises SourceError."""
         source = Source(
             command="exit 1",
             kind="output",
             observer="fail-source",
         )
 
-        facts = []
-        async for fact in source.collect():
-            facts.append(fact)
+        with pytest.raises(SourceError) as exc_info:
+            async for _fact in source.collect():
+                pass
 
-        # Only the .complete fact — no source.error
-        assert len(facts) == 1
-        assert facts[0].kind == "output.complete"
-        assert facts[0].payload["status"] == "error"
-        assert facts[0].observer == "fail-source"
+        assert exc_info.value.returncode == 1
 
     async def test_command_with_stderr(self):
-        """Stderr is logged, not emitted as a fact."""
+        """Stderr is captured in SourceError."""
         source = Source(
             command='echo "error message" >&2 && exit 1',
             kind="output",
             observer="stderr-source",
         )
 
-        facts = []
-        async for fact in source.collect():
-            facts.append(fact)
+        with pytest.raises(SourceError) as exc_info:
+            async for _fact in source.collect():
+                pass
 
-        # No source.error facts — errors go to stderr
-        error_facts = [f for f in facts if f.kind == "source.error"]
-        assert len(error_facts) == 0
-        # .complete still signals the failure
-        complete = [f for f in facts if f.kind == "output.complete"]
-        assert len(complete) == 1
-        assert complete[0].payload["status"] == "error"
+        assert "error message" in exc_info.value.stderr
 
     async def test_empty_output(self):
-        """Command with no output produces only completion fact."""
+        """Command with no output produces no facts."""
         source = Source(
             command="true",  # Exits 0, no output
             kind="silent",
@@ -108,11 +94,7 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
-        # No data facts, just completion
-        data_facts = [f for f in facts if f.kind == "silent"]
-        assert len(data_facts) == 0
-        assert len(facts) == 1
-        assert facts[0].kind == "silent.complete"
+        assert len(facts) == 0
 
     async def test_command_with_arguments(self):
         """Commands with arguments work correctly."""
@@ -126,9 +108,24 @@ class TestSource:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "split"]
-        assert len(data_facts) == 3
-        assert [f.payload["line"] for f in data_facts] == ["a", "b", "c"]
+        assert len(facts) == 3
+        assert [f.payload["line"] for f in facts] == ["a", "b", "c"]
+
+    async def test_no_lifecycle_facts_emitted(self):
+        """Source yields only domain facts — no .complete or source.error."""
+        source = Source(
+            command='echo "hello"',
+            kind="greeting",
+            observer="obs",
+        )
+
+        facts = []
+        async for fact in source.collect():
+            facts.append(fact)
+
+        assert all(f.kind == "greeting" for f in facts)
+        assert not any(f.kind.endswith(".complete") for f in facts)
+        assert not any(f.kind == "source.error" for f in facts)
 
 
 class TestSourceParse:
@@ -297,9 +294,8 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "line"]
-        assert len(data_facts) == 3
-        assert [f.payload["line"] for f in data_facts] == ["a", "b", "c"]
+        assert len(facts) == 3
+        assert [f.payload["line"] for f in facts] == ["a", "b", "c"]
 
     async def test_format_json_parses_output(self):
         """format=json parses stdout as JSON, emits single fact."""
@@ -314,9 +310,8 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "data"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload == {"name": "alice", "score": 42}
+        assert len(facts) == 1
+        assert facts[0].payload == {"name": "alice", "score": 42}
 
     async def test_format_json_with_array(self):
         """format=json wraps top-level arrays/scalars into a dict payload."""
@@ -331,12 +326,8 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "data"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload == {"_json": [1, 2, 3]}
-
-        complete_facts = [f for f in facts if f.kind == "data.complete"]
-        assert len(complete_facts) == 1
+        assert len(facts) == 1
+        assert facts[0].payload == {"_json": [1, 2, 3]}
 
     async def test_format_json_with_scalar(self):
         """format=json wraps top-level scalars into a dict payload."""
@@ -351,9 +342,8 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "data"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload == {"_json": 42}
+        assert len(facts) == 1
+        assert facts[0].payload == {"_json": 42}
 
     async def test_format_ndjson_with_arrays(self):
         """format=ndjson wraps non-object records into a dict payload."""
@@ -368,12 +358,11 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "data"]
-        assert len(data_facts) == 2
-        assert [f.payload for f in data_facts] == [{"_json": [1, 2]}, {"_json": [3, 4]}]
+        assert len(facts) == 2
+        assert [f.payload for f in facts] == [{"_json": [1, 2]}, {"_json": [3, 4]}]
 
-    async def test_format_json_invalid_logs_to_stderr(self):
-        """format=json with invalid JSON logs to stderr, emits only completion."""
+    async def test_format_json_invalid_no_error_fact(self):
+        """format=json with invalid JSON logs to stderr, no domain facts."""
         source = Source(
             command='echo "not valid json"',
             kind="data",
@@ -385,20 +374,11 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        # No source.error facts — JSON errors go to stderr
-        error_facts = [f for f in facts if f.kind == "source.error"]
-        assert len(error_facts) == 0
-        # Command succeeded so .complete has status=ok
-        complete = [f for f in facts if f.kind == "data.complete"]
-        assert len(complete) == 1
-        assert complete[0].payload["status"] == "ok"
+        # No data facts and no lifecycle facts — invalid JSON is logged to stderr
+        assert len(facts) == 0
 
     async def test_format_json_with_parse(self):
-        """format=json applies parse to the parsed dict.
-
-        Note: Parse ops that work with dicts (Coerce, Transform, Skip with field)
-        can be used. Pick/Rename expect lists, so they don't apply to JSON dicts.
-        """
+        """format=json applies parse to the parsed dict."""
         source = Source(
             command='echo \'{"name": "alice", "score": "42"}\'',
             kind="data",
@@ -430,9 +410,8 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "blob"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload == {"text": "line1\nline2\nline3"}
+        assert len(facts) == 1
+        assert facts[0].payload == {"text": "line1\nline2\nline3"}
 
     async def test_format_blob_preserves_whitespace(self):
         """format=blob preserves all whitespace."""
@@ -447,12 +426,11 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "blob"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload["text"] == "  indented\n\nempty line above"
+        assert len(facts) == 1
+        assert facts[0].payload["text"] == "  indented\n\nempty line above"
 
     async def test_format_blob_empty_output(self):
-        """format=blob with no output produces only completion fact."""
+        """format=blob with no output produces no facts."""
         source = Source(
             command="true",
             kind="blob",
@@ -464,11 +442,7 @@ class TestSourceFormat:
         async for fact in source.collect():
             facts.append(fact)
 
-        # No data facts, just completion
-        data_facts = [f for f in facts if f.kind == "blob"]
-        assert len(data_facts) == 0
-        assert len(facts) == 1
-        assert facts[0].kind == "blob.complete"
+        assert len(facts) == 0
 
 
 class TestSourceOrigin:
@@ -490,9 +464,8 @@ class TestSourceOrigin:
         facts = []
         async for fact in source.collect():
             facts.append(fact)
-        data_facts = [f for f in facts if f.kind == "greeting"]
-        assert len(data_facts) == 1
-        assert data_facts[0].origin == "my-source"
+        assert len(facts) == 1
+        assert facts[0].origin == "my-source"
 
     async def test_origin_stamped_on_ndjson(self):
         """Source-level origin is used as default in ndjson format."""
@@ -550,6 +523,28 @@ class TestSourceProtocol:
         assert callable(source.collect)
 
 
+class TestSourceError:
+    """Tests for SourceError exception."""
+
+    def test_basic_construction(self):
+        err = SourceError("echo hi", 1, "something went wrong")
+        assert err.command == "echo hi"
+        assert err.returncode == 1
+        assert err.stderr == "something went wrong"
+
+    def test_defaults(self):
+        err = SourceError("cmd")
+        assert err.returncode == 1
+        assert err.stderr == ""
+
+    def test_from_exception(self):
+        """SourceError wraps general exceptions."""
+        try:
+            raise SourceError("cmd", stderr="boom")
+        except SourceError as e:
+            assert "boom" in str(e)
+
+
 class TestCommandSourceAlias:
     """Verify CommandSource is a deprecated alias for Source."""
 
@@ -569,9 +564,9 @@ class TestCommandSourceAlias:
         async for fact in source.collect():
             facts.append(fact)
 
-        data_facts = [f for f in facts if f.kind == "greeting"]
-        assert len(data_facts) == 1
-        assert data_facts[0].payload["line"] == "hello"
+        assert len(facts) == 1
+        assert facts[0].kind == "greeting"
+        assert facts[0].payload["line"] == "hello"
 
 
 class TestSequentialSource:
@@ -588,47 +583,22 @@ class TestSequentialSource:
         async for fact in seq.collect():
             facts.append(fact)
 
-        # step1 data + step1.complete + step2 data + step2.complete
+        # Only domain facts — no lifecycle artifacts
         step1_data = [f for f in facts if f.kind == "step1"]
         step2_data = [f for f in facts if f.kind == "step2"]
-        step1_complete = [f for f in facts if f.kind == "step1.complete"]
-        step2_complete = [f for f in facts if f.kind == "step2.complete"]
         assert len(step1_data) == 1
         assert len(step2_data) == 1
-        assert len(step1_complete) == 1
-        assert len(step2_complete) == 1
-        assert step1_complete[0].payload["status"] == "ok"
-        assert step2_complete[0].payload["status"] == "ok"
-
-        # No stopped fact
-        stopped = [f for f in facts if f.kind == "sources.sequential.stopped"]
-        assert len(stopped) == 0
 
     async def test_first_fails_skips_second(self):
-        """When first source exits non-zero, second is skipped."""
+        """When first source exits non-zero, second is skipped via SourceError."""
         seq = SequentialSource(sources=(
             Source(command="exit 1", kind="lint", observer="ci"),
             Source(command='echo "should not run"', kind="test", observer="ci"),
         ), _observer="ci")
 
-        facts = []
-        async for fact in seq.collect():
-            facts.append(fact)
-
-        # lint should have error + complete facts
-        lint_complete = [f for f in facts if f.kind == "lint.complete"]
-        assert len(lint_complete) == 1
-        assert lint_complete[0].payload["status"] == "error"
-
-        # test should NOT have run
-        test_data = [f for f in facts if f.kind == "test"]
-        assert len(test_data) == 0
-
-        # Should have a stopped fact
-        stopped = [f for f in facts if f.kind == "sources.sequential.stopped"]
-        assert len(stopped) == 1
-        assert stopped[0].payload["failed_kind"] == "lint"
-        assert stopped[0].payload["status"] == "failed"
+        with pytest.raises(SourceError):
+            async for _fact in seq.collect():
+                pass
 
     async def test_second_fails_third_skipped(self):
         """Failure in the middle stops remaining sources."""
@@ -639,21 +609,20 @@ class TestSequentialSource:
         ), _observer="ci")
 
         facts = []
-        async for fact in seq.collect():
-            facts.append(fact)
+        with pytest.raises(SourceError) as exc_info:
+            async for fact in seq.collect():
+                facts.append(fact)
 
-        # step1 ran
+        # step1 ran and produced a fact
         step1_data = [f for f in facts if f.kind == "step1"]
         assert len(step1_data) == 1
-
-        # step2 ran and failed
-        step2_complete = [f for f in facts if f.kind == "step2.complete"]
-        assert len(step2_complete) == 1
-        assert step2_complete[0].payload["status"] == "error"
 
         # step3 never ran
         step3_data = [f for f in facts if f.kind == "step3"]
         assert len(step3_data) == 0
+
+        # Error carries the failing command info
+        assert exc_info.value.returncode == 42
 
     async def test_observer_property(self):
         """SequentialSource exposes observer."""

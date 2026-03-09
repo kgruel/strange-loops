@@ -14,19 +14,11 @@ sources {
         count "inc"
         updated "latest"
       }
-      boundary when="{{kind}}.complete"
+      boundary when="_sync.{{kind}}"
     }
   }
 }
 
-loops {
-  source.error {
-    fold {
-      errors "collect" 20
-      count "inc"
-      latest_error "latest"
-    }
-  }
-}
+// source errors now carried on _sync.{kind} facts — no separate kind needed
 
 emit "economy.snapshot"

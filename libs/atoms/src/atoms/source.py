@@ -14,6 +14,19 @@ if TYPE_CHECKING:
     from atoms.parse import ParseOp
 
 
+class SourceError(Exception):
+    """Raised when a source command fails (non-zero exit or exception).
+
+    Carries diagnostics for the executor to record as a _sync fact.
+    """
+
+    def __init__(self, command: str, returncode: int = 1, stderr: str = ""):
+        self.command = command
+        self.returncode = returncode
+        self.stderr = stderr
+        super().__init__(f"command failed (rc={returncode}): {stderr or command}")
+
+
 @dataclass
 class Source:
     """Bridge from shell command output to Facts flowing into Vertex.
@@ -32,8 +45,8 @@ class Source:
     - format=json: parse runs on the parsed JSON dict
     - format=blob: parse is ignored (blob is raw text)
 
-    Errors are logged to stderr rather than emitted as facts.
-    The .complete fact carries status="error" so the vertex knows a run failed.
+    Errors raise SourceError for the executor to handle.
+    Source yields only domain facts — no lifecycle artifacts.
 
     Attributes:
         command: Shell command to execute
@@ -205,30 +218,13 @@ class Source:
                     print(f"source: command failed (rc={proc.returncode}): {stderr_text.rstrip()}", file=sys.stderr)
                 else:
                     print(f"source: command failed (rc={proc.returncode}): {self.command}", file=sys.stderr)
-                yield Fact.of(
-                    f"{self.kind}.complete",
-                    self.observer,
-                    command=self.command,
-                    status="error",
-                )
-            else:
-                yield Fact.of(
-                    f"{self.kind}.complete",
-                    self.observer,
-                    command=self.command,
-                    status="ok",
-                )
+                raise SourceError(self.command, proc.returncode, stderr_text.rstrip())
 
+        except SourceError:
+            raise
         except Exception as e:
             print(f"source: {type(e).__name__}: {e} (command: {self.command})", file=sys.stderr)
-            yield Fact.of(
-                f"{self.kind}.complete",
-                self.observer,
-                command=self.command,
-                status="error",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+            raise SourceError(self.command, stderr=str(e)) from e
 
 
 # Deprecated alias for backwards compatibility

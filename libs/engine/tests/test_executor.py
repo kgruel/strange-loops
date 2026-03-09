@@ -23,11 +23,12 @@ from engine.executor import (
 
 
 class StubSource:
-    """Minimal source that records when it ran and emits a .complete fact."""
+    """Minimal source that records when it ran and yields domain facts only."""
 
     def __init__(self, kind: str, observer: str = "test", facts: list | None = None):
         self.kind = kind
         self.observer = observer
+        self.command = f"stub-{kind}"
         self._facts = facts or []
         self.ran_at: float | None = None
 
@@ -35,7 +36,6 @@ class StubSource:
         self.ran_at = time.monotonic()
         for fact in self._facts:
             yield fact
-        yield Fact.of(f"{self.kind}.complete", self.observer, status="ok")
 
 
 def _make_vertex():
@@ -57,10 +57,10 @@ class TestCadenceProperties:
         assert c.trigger_kinds == ()
 
     def test_triggered_properties(self):
-        c = Cadence.triggered(("deploy.complete", "build.complete"), "smoke")
+        c = Cadence.triggered(("_sync.deploy", "_sync.build"), "smoke")
         assert c.kind == "smoke"
         assert c.mode == "triggered"
-        assert c.trigger_kinds == ("deploy.complete", "build.complete")
+        assert c.trigger_kinds == ("_sync.deploy", "_sync.build")
 
     def test_always_properties(self):
         c = Cadence.always()
@@ -89,7 +89,7 @@ class TestBuildDependencyGraph:
         """B triggers on A.complete — B depends on A."""
         sources = [
             (StubSource("deploy"), Cadence.elapsed("deploy", 60)),
-            (StubSource("smoke"), Cadence.triggered("deploy.complete", "smoke")),
+            (StubSource("smoke"), Cadence.triggered("_sync.deploy", "smoke")),
         ]
         deps = _build_dependency_graph(sources)
         assert deps == {1: {0}}
@@ -99,7 +99,7 @@ class TestBuildDependencyGraph:
         sources = [
             (StubSource("a"), Cadence.elapsed("a", 60)),
             (StubSource("b"), Cadence.elapsed("b", 60)),
-            (StubSource("c"), Cadence.triggered(("a.complete", "b.complete"), "c")),
+            (StubSource("c"), Cadence.triggered(("_sync.a", "_sync.b"), "c")),
         ]
         deps = _build_dependency_graph(sources)
         assert deps == {2: {0, 1}}
@@ -108,8 +108,8 @@ class TestBuildDependencyGraph:
         """A -> B -> C: three-tier chain."""
         sources = [
             (StubSource("a"), Cadence.elapsed("a", 60)),
-            (StubSource("b"), Cadence.triggered("a.complete", "b")),
-            (StubSource("c"), Cadence.triggered("b.complete", "c")),
+            (StubSource("b"), Cadence.triggered("_sync.a", "b")),
+            (StubSource("c"), Cadence.triggered("_sync.b", "c")),
         ]
         deps = _build_dependency_graph(sources)
         assert deps == {1: {0}, 2: {1}}
@@ -117,7 +117,7 @@ class TestBuildDependencyGraph:
     def test_no_self_dependency(self):
         """A source triggering on its own .complete kind doesn't create self-edge."""
         sources = [
-            (StubSource("x"), Cadence.triggered("x.complete", "x")),
+            (StubSource("x"), Cadence.triggered("_sync.x", "x")),
         ]
         deps = _build_dependency_graph(sources)
         assert deps == {}
@@ -126,7 +126,7 @@ class TestBuildDependencyGraph:
         """Trigger on a kind no source produces — no edges."""
         sources = [
             (StubSource("a"), Cadence.elapsed("a", 60)),
-            (StubSource("b"), Cadence.triggered("missing.complete", "b")),
+            (StubSource("b"), Cadence.triggered("_sync.missing", "b")),
         ]
         deps = _build_dependency_graph(sources)
         assert deps == {}
@@ -184,14 +184,14 @@ class TestValidateDependencyGraph:
     def test_dag_passes(self):
         sources = [
             (StubSource("a"), Cadence.elapsed("a", 60)),
-            (StubSource("b"), Cadence.triggered("a.complete", "b")),
+            (StubSource("b"), Cadence.triggered("_sync.a", "b")),
         ]
         validate_dependency_graph(sources)  # should not raise
 
     def test_cycle_fails_at_validation_with_kind_names(self):
         sources = [
-            (StubSource("deploy"), Cadence.triggered("smoke.complete", "deploy")),
-            (StubSource("smoke"), Cadence.triggered("deploy.complete", "smoke")),
+            (StubSource("deploy"), Cadence.triggered("_sync.smoke", "deploy")),
+            (StubSource("smoke"), Cadence.triggered("_sync.deploy", "smoke")),
         ]
         with pytest.raises(CyclicDependencyError, match="deploy") as exc_info:
             validate_dependency_graph(sources)
@@ -225,7 +225,7 @@ class TestExecutorTiers:
         source_b = StubSource("smoke")
         sources = [
             (source_a, Cadence.elapsed("deploy", 60)),
-            (source_b, Cadence.triggered("deploy.complete", "smoke")),
+            (source_b, Cadence.triggered("_sync.deploy", "smoke")),
         ]
         executor = Executor(vertex, sources)
         result = asyncio.run(executor.sync_async(force=True))
@@ -240,8 +240,8 @@ class TestExecutorTiers:
         vertex = _make_vertex()
         sources = [
             (StubSource("a"), Cadence.elapsed("a", 60)),
-            (StubSource("b"), Cadence.triggered("a.complete", "b")),
-            (StubSource("c"), Cadence.triggered("b.complete", "c")),
+            (StubSource("b"), Cadence.triggered("_sync.a", "b")),
+            (StubSource("c"), Cadence.triggered("_sync.b", "c")),
         ]
         executor = Executor(vertex, sources)
         result = asyncio.run(executor.sync_async(force=True))
@@ -254,7 +254,7 @@ class TestExecutorTiers:
         sources = [
             (StubSource("a"), Cadence.always()),
             (StubSource("b"), Cadence.always()),
-            (StubSource("c"), Cadence.triggered(("a.complete", "b.complete"), "c")),
+            (StubSource("c"), Cadence.triggered(("_sync.a", "_sync.b"), "c")),
         ]
         executor = Executor(vertex, sources)
         result = asyncio.run(executor.sync_async(force=True))
@@ -263,21 +263,21 @@ class TestExecutorTiers:
         assert set(result.tiers[0]) == {"a", "b"}
         assert result.tiers[1] == ["c"]
 
-    def test_complete_fact_visible_to_later_tier(self):
-        """After tier 0, A's .complete fact is in the store for tier 1."""
+    def test_sync_fact_visible_to_later_tier(self):
+        """After tier 0, A's _sync fact is in the store for tier 1."""
         vertex = _make_vertex()
         source_a = StubSource("deploy")
         source_b = StubSource("smoke")
         sources = [
             (source_a, Cadence.elapsed("deploy", 60)),
-            (source_b, Cadence.triggered("deploy.complete", "smoke")),
+            (source_b, Cadence.triggered("_sync.deploy", "smoke")),
         ]
         executor = Executor(vertex, sources)
         asyncio.run(executor.sync_async(force=True))
 
-        # deploy.complete should be in the store
+        # _sync.deploy should be in the store
         store = vertex._store
-        latest = store.latest_by_kind("deploy.complete")
+        latest = store.latest_by_kind("_sync.deploy")
         assert latest is not None
         assert latest.payload["status"] == "ok"
 
@@ -289,7 +289,7 @@ class TestExecutorTiers:
             (StubSource("b"), Cadence.elapsed("b", 9999)),
         ]
         # Put a recent completion so b is skipped
-        vertex._store.append(Fact.of("b.complete", "test", status="ok"))
+        vertex._store.append(Fact.of("_sync.b", "test", status="ok"))
         executor = Executor(vertex, sources)
         result = asyncio.run(executor.sync_async())
 
@@ -311,13 +311,13 @@ class TestExecutorTiers:
 
 
 # ---------------------------------------------------------------------------
-# sync.complete fact
+# _sync fact (lifecycle observation)
 # ---------------------------------------------------------------------------
 
 
-class TestSyncComplete:
-    def test_sync_complete_emitted_on_success(self):
-        """Sync emits a sync.complete fact with status=ok when all sources succeed."""
+class TestSyncFact:
+    def test_sync_emitted_on_success(self):
+        """Sync emits a _sync fact with status=ok when all sources succeed."""
         vertex = _make_vertex()
         sources = [
             (StubSource("a"), Cadence.always()),
@@ -327,9 +327,9 @@ class TestSyncComplete:
         asyncio.run(executor.sync_async(force=True))
 
         store = vertex._store
-        fact = store.latest_by_kind("sync.complete")
+        fact = store.latest_by_kind("_sync")
         assert fact is not None
-        assert fact.kind == "sync.complete"
+        assert fact.kind == "_sync"
         assert fact.observer == "test"
         assert fact.payload["status"] == "ok"
         assert fact.payload["sources_run"] == 2
@@ -338,8 +338,8 @@ class TestSyncComplete:
         assert fact.payload["total_facts"] > 0
         assert isinstance(fact.payload["duration_ms"], int)
 
-    def test_sync_complete_counts_facts(self):
-        """total_facts counts all facts emitted by sources (including .complete sentinels)."""
+    def test_sync_counts_domain_facts(self):
+        """total_facts counts domain facts plus per-source _sync facts."""
         vertex = _make_vertex()
         extra = [Fact.of("a", "test", value="1"), Fact.of("a", "test", value="2")]
         sources = [
@@ -348,17 +348,18 @@ class TestSyncComplete:
         executor = Executor(vertex, sources)
         asyncio.run(executor.sync_async(force=True))
 
-        fact = vertex._store.latest_by_kind("sync.complete")
-        # 2 data facts + 1 a.complete sentinel = 3
+        fact = vertex._store.latest_by_kind("_sync")
+        # 2 domain facts + 1 _sync.a = 3
         assert fact.payload["total_facts"] == 3
 
-    def test_sync_complete_error_status(self):
-        """sync.complete has status=error when a source emits source.error."""
+    def test_sync_error_status(self):
+        """_sync has status=error when a source raises."""
         vertex = _make_vertex()
 
         class FailSource:
             kind = "broken"
             observer = "test"
+            command = "fail-cmd"
 
             async def collect(self):
                 if False:
@@ -369,35 +370,53 @@ class TestSyncComplete:
         executor = Executor(vertex, sources)
         asyncio.run(executor.sync_async(force=True))
 
-        fact = vertex._store.latest_by_kind("sync.complete")
+        fact = vertex._store.latest_by_kind("_sync")
         assert fact is not None
         assert fact.payload["status"] == "error"
         assert fact.payload["sources_run"] == 1
 
-    def test_sync_complete_with_skipped(self):
-        """sync.complete reflects cadence-skipped sources."""
+    def test_sync_with_skipped(self):
+        """_sync reflects cadence-skipped sources."""
         vertex = _make_vertex()
         sources = [
             (StubSource("a"), Cadence.always()),
             (StubSource("b"), Cadence.elapsed("b", 9999)),
         ]
         # Seed recent completion so b is skipped
-        vertex._store.append(Fact.of("b.complete", "test", status="ok"))
+        vertex._store.append(Fact.of("_sync.b", "test", status="ok"))
         executor = Executor(vertex, sources)
         asyncio.run(executor.sync_async())
 
-        fact = vertex._store.latest_by_kind("sync.complete")
+        fact = vertex._store.latest_by_kind("_sync")
         assert fact.payload["sources_run"] == 1
         assert fact.payload["sources_skipped"] == 1
 
-    def test_sync_complete_no_sources(self):
-        """sync.complete emitted even with no sources."""
+    def test_sync_no_sources(self):
+        """_sync emitted even with no sources."""
         vertex = _make_vertex()
         executor = Executor(vertex, [])
         asyncio.run(executor.sync_async())
 
-        fact = vertex._store.latest_by_kind("sync.complete")
+        fact = vertex._store.latest_by_kind("_sync")
         assert fact is not None
         assert fact.payload["status"] == "ok"
         assert fact.payload["sources_run"] == 0
         assert fact.payload["total_facts"] == 0
+
+    def test_per_source_sync_facts(self):
+        """Each source gets its own _sync.{kind} fact."""
+        vertex = _make_vertex()
+        sources = [
+            (StubSource("a"), Cadence.always()),
+            (StubSource("b"), Cadence.always()),
+        ]
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async(force=True))
+
+        store = vertex._store
+        sync_a = store.latest_by_kind("_sync.a")
+        sync_b = store.latest_by_kind("_sync.b")
+        assert sync_a is not None
+        assert sync_a.payload["status"] == "ok"
+        assert sync_b is not None
+        assert sync_b.payload["status"] == "ok"

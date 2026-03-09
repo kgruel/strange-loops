@@ -16,8 +16,8 @@ class SequentialSource:
     """Runs sources sequentially with exit-on-failure gating.
 
     Each source runs as a subprocess. Facts are yielded as they arrive.
-    If a source exits non-zero (detected via {kind}.complete with status="error"),
-    remaining sources are skipped.
+    If a source raises SourceError, remaining sources are skipped and
+    the error propagates to the caller (executor).
 
     Implements the same collect protocol as Source, so the Executor treats it
     as a single source — no executor changes needed.
@@ -46,19 +46,11 @@ class SequentialSource:
         return self.sources[0].command if self.sources else ""
 
     async def collect(self) -> AsyncIterator[Fact]:
-        """Collect facts from each source in order. Stop on failure."""
+        """Collect facts from each source in order. Stop on failure.
+
+        SourceError propagates naturally — if a source fails, remaining
+        sources are skipped and the executor records the failure.
+        """
         for source in self.sources:
-            failed = False
             async for fact in source.collect():
                 yield fact
-                if fact.kind == f"{source.kind}.complete" and fact.payload.get("status") == "error":
-                    failed = True
-            if failed:
-                yield Fact.of(
-                    "sources.sequential.stopped",
-                    self._observer,
-                    failed_command=source.command,
-                    failed_kind=source.kind,
-                    status="failed",
-                )
-                break

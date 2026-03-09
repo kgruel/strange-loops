@@ -24,3 +24,4 @@ check.vertex
 session.vertex
 !config/**/session.vertex
 !config/**/check.vertex
+.ruff_cache/

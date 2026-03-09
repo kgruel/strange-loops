@@ -965,6 +965,41 @@ parse {
         assert loop.parse[0].op == "not_equals"
         assert loop.parse[0].value == "recording"
 
+    def test_where_in(self):
+        text = """\
+source "cat session.jsonl"
+kind "exchange"
+observer "test"
+format "ndjson"
+parse {
+  where path="type" "in" "user" "assistant"
+}
+"""
+        loop = parse_loop(text)
+        from lang.ast import Where
+
+        assert isinstance(loop.parse[0], Where)
+        assert loop.parse[0].path == "type"
+        assert loop.parse[0].op == "in_"
+        assert loop.parse[0].values == ("user", "assistant")
+
+    def test_where_not_in(self):
+        text = """\
+source "cat session.jsonl"
+kind "exchange"
+observer "test"
+format "ndjson"
+parse {
+  where path="type" "not_in" "system" "tool_result" "tool_use"
+}
+"""
+        loop = parse_loop(text)
+        from lang.ast import Where
+
+        assert isinstance(loop.parse[0], Where)
+        assert loop.parse[0].op == "not_in"
+        assert loop.parse[0].values == ("system", "tool_result", "tool_use")
+
     def test_full_pipeline(self):
         """Full pipeline with where, explode, project."""
         text = """\

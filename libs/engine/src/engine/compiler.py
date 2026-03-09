@@ -193,7 +193,7 @@ def map_where(step: DslWhere) -> "RuntimeParseOp":
     """Map DSL Where to runtime Where."""
     from atoms import Where as RuntimeWhere
 
-    return RuntimeWhere(path=step.path, op=step.op, value=step.value)
+    return RuntimeWhere(path=step.path, op=step.op, value=step.value, values=step.values)
 
 
 def map_flatten(step: DslFlatten) -> "RuntimeParseOp":

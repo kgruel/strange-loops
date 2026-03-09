@@ -189,6 +189,17 @@ def _load_where(node: ckdl.Node, path: Path | None) -> Where:
         return Where(path=str(where_path), op="not_equals", value=str(props["not_equals"]))
     if "exists" in props:
         return Where(path=str(where_path), op="exists")
+    # in/not_in: where path="type" in "user" "assistant"
+    if node.args and str(node.args[0]) == "in":
+        values = tuple(str(a) for a in node.args[1:])
+        if not values:
+            raise _error("where 'in' requires at least one value", path)
+        return Where(path=str(where_path), op="in_", values=values)
+    if node.args and str(node.args[0]) == "not_in":
+        values = tuple(str(a) for a in node.args[1:])
+        if not values:
+            raise _error("where 'not_in' requires at least one value", path)
+        return Where(path=str(where_path), op="not_in", values=values)
     # Default: exists check
     return Where(path=str(where_path), op="exists")
 

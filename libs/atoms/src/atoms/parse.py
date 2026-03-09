@@ -205,18 +205,21 @@ class Where:
 
     Attributes:
         path: Dot-separated path to the value to check.
-        op: Comparison operation (equals, not_equals, exists).
+        op: Comparison operation (equals, not_equals, in_, not_in, exists).
         value: Value to compare against (ignored for exists).
+        values: Tuple of values for in_/not_in operations.
 
     Examples:
         Where(path="status", op="equals", value="success")
         Where(path="type", op="not_equals", value="recording")
+        Where(path="type", op="in_", values=("user", "assistant"))
         Where(path="labels", op="exists")
     """
 
     path: str
     op: str = "equals"
     value: str | None = None
+    values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -441,6 +444,10 @@ def _apply_where(value: dict[str, Any], op: Where) -> dict[str, Any] | None:
         return value if str(resolved) == op.value else None
     elif op.op == "not_equals":
         return value if str(resolved) != op.value else None
+    elif op.op == "in_":
+        return value if str(resolved) in op.values else None
+    elif op.op == "not_in":
+        return value if str(resolved) not in op.values else None
     else:
         return None
 

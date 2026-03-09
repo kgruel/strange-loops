@@ -176,6 +176,7 @@ class Where:
     path: str
     op: str = "equals"
     value: str | None = None
+    values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -589,6 +589,43 @@ class TestWhere:
         pipeline = [Where(path="labels.severity", op="equals", value="critical")]
         assert run_parse(data, pipeline) == data
 
+    def test_in_passes(self):
+        data = {"type": "user", "content": "hello"}
+        pipeline = [Where(path="type", op="in_", values=("user", "assistant"))]
+        assert run_parse(data, pipeline) == data
+
+    def test_in_filters(self):
+        data = {"type": "system", "content": "init"}
+        pipeline = [Where(path="type", op="in_", values=("user", "assistant"))]
+        assert run_parse(data, pipeline) is None
+
+    def test_not_in_passes(self):
+        data = {"type": "user", "content": "hello"}
+        pipeline = [Where(path="type", op="not_in", values=("system", "tool_result"))]
+        assert run_parse(data, pipeline) == data
+
+    def test_not_in_filters(self):
+        data = {"type": "system", "content": "init"}
+        pipeline = [Where(path="type", op="not_in", values=("system", "tool_result"))]
+        assert run_parse(data, pipeline) is None
+
+    def test_in_with_nested_path(self):
+        data = {"message": {"role": "assistant"}, "id": "123"}
+        pipeline = [Where(path="message.role", op="in_", values=("user", "assistant"))]
+        assert run_parse(data, pipeline) == data
+
+    def test_in_single_value(self):
+        """in_ with a single value behaves like equals."""
+        data = {"type": "user"}
+        pipeline = [Where(path="type", op="in_", values=("user",))]
+        assert run_parse(data, pipeline) == data
+
+    def test_in_missing_field_filters(self):
+        """Missing field resolves to None, which is not in the set."""
+        data = {"content": "hello"}
+        pipeline = [Where(path="type", op="in_", values=("user", "assistant"))]
+        assert run_parse(data, pipeline) is None
+
 
 class TestExplode:
     """Tests for Explode parse op."""

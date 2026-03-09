@@ -1,13 +1,11 @@
-// meta — aggregation vertex, combines meta stores
+// meta — cross-cutting patterns and ways of working
+// Pure domain aggregation. Identity and comms are siblings under the root,
+// not children of meta.
 name "meta"
 
 combine {
     vertex "/Users/kaygee/Code/meta-discussion/meta.vertex"
-    vertex "/Users/kaygee/.config/loops/discord/discord.vertex"
-    vertex "/Users/kaygee/.config/loops/identity/identity.vertex"
 }
-
-scope "observer"
 
 observers {
   meta-claude { }
@@ -17,9 +15,7 @@ observers {
 loops {
   decision    { fold { items "by" "topic" } }
   thread      { fold { items "by" "name" } }
-  change      { fold { items "collect" 20 } }
   task        { fold { items "by" "name" } }
-  vision      { fold { items "by" "name" } }
-  dissolution { fold { items "by" "concept" } }
   session     { fold { items "by" "name" } }
+  dissolution { fold { items "by" "concept" } }
 }

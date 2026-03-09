@@ -95,17 +95,11 @@ def _find_local_vertex() -> Path | None:
     return matches[0] if matches else None
 
 
-_AGGREGATION_VERTEX = """\
-// {name} — aggregation vertex, discovers local instances
+_MINIMAL_INSTANCE = """\
 name "{name}"
-
-discover "./instances/**/*.vertex"
+store "./data/{name}.db"
 
 loops {{
-  decision {{ fold {{ items "by" "topic" }} }}
-  thread   {{ fold {{ items "by" "name" }} }}
-  change   {{ fold {{ items "collect" 20 }} }}
-  task     {{ fold {{ items "by" "name" }} }}
 }}
 """
 
@@ -138,58 +132,56 @@ def _extract_loops_text(content: str) -> str | None:
 
 
 def _find_source_vertex(name: str) -> str | None:
-    """Find an existing instance vertex to use as source for init.
+    """Find an existing vertex to use as source for init.
 
     Priority:
-    1. If the aggregation vertex itself declares a loops block, build a
-       synthetic instance from it (name + store + loops).
-    2. Fall back to first sibling instance under instances/.
-    3. Direct config-level instance (has store, not aggregation).
+    1. If the config vertex declares a loops block, build a synthetic
+       instance from it (name + store + loops).
+    2. Direct config-level instance (has store).
     """
     home = loops_home()
     config_dir = home / name
     if not config_dir.exists():
         return None
     leaf = Path(name).name
-    # Try aggregation vertex's own loops block first
     vertex_file = config_dir / f"{leaf}.vertex"
-    if vertex_file.exists():
-        agg_content = vertex_file.read_text()
-        loops_text = _extract_loops_text(agg_content)
-        if loops_text is not None:
-            return f'name "{leaf}"\nstore "./data/{leaf}.db"\n\n{loops_text}\n'
-    # Aggregation pattern: look in instances/
-    instances_dir = config_dir / "instances"
-    if instances_dir.is_dir():
-        matches = sorted(instances_dir.glob("**/*.vertex"))
-        if matches:
-            return matches[0].read_text()
-    # Direct instance at config level
-    if vertex_file.exists():
-        content = vertex_file.read_text()
-        if "store" in content:
-            return content
+    if not vertex_file.exists():
+        return None
+    content = vertex_file.read_text()
+    # Try loops block → synthetic instance
+    loops_text = _extract_loops_text(content)
+    if loops_text is not None:
+        return f'name "{leaf}"\nstore "./data/{leaf}.db"\n\n{loops_text}\n'
+    # Direct instance (has store)
+    if "store" in content:
+        return content
     return None
 
 
-def _init_local_vertex(name: str, source_name: str | None = None) -> Path | None:
-    """Create a vertex + data dir in .loops/ from an existing instance. Returns vertex path."""
+def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
+    """Create a vertex + data dir in .loops/. Returns vertex path.
+
+    Uses an existing config-level vertex as source if available,
+    otherwise creates a minimal stub with store path and empty loops block.
+    """
     import re
 
     source = _find_source_vertex(source_name or name)
     if source is None:
-        return None
-    # Stamp a local copy with the target name and store path
-    content = re.sub(
-        r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE
-    )
-    content = re.sub(
-        r'^store "./data/.*\.db"',
-        f'store "./data/{name}.db"',
-        content,
-        count=1,
-        flags=re.MULTILINE,
-    )
+        # Minimal stub — store + empty loops block for user to fill in
+        content = _MINIMAL_INSTANCE.format(name=name)
+    else:
+        # Stamp from existing vertex, updating name and store path
+        content = re.sub(
+            r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE
+        )
+        content = re.sub(
+            r'^store "./data/.*\.db"',
+            f'store "./data/{name}.db"',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
     loops_dir = Path.cwd() / ".loops"
     loops_dir.mkdir(exist_ok=True)
     vertex_path = loops_dir / f"{name}.vertex"
@@ -200,89 +192,38 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path | None
     return vertex_path
 
 
-def _init_config_vertex(name: str) -> Path:
-    """Create an aggregation vertex + instances dir in LOOPS_HOME. Returns vertex path."""
-    home = loops_home()
-    leaf = Path(name).name
-    config_dir = home / name
-    config_dir.mkdir(parents=True, exist_ok=True)
-    vertex_path = config_dir / f"{leaf}.vertex"
-    if not vertex_path.exists():
-        vertex_path.write_text(_AGGREGATION_VERTEX.format(name=leaf))
-    (config_dir / "instances").mkdir(exist_ok=True)
-    return vertex_path
-
-
-def _register_with_config(name: str, project_dir: Path) -> Path | None:
-    """Register a project directory with the config-level vertex.
-
-    Creates a symlink at LOOPS_HOME/{name}/instances/{slug} -> project_dir.
-    Returns the symlink path, or None if no config-level vertex exists.
-    """
-    home = loops_home()
-    config_dir = home / name
-    if not config_dir.exists():
-        return None
-    instances_dir = config_dir / "instances"
-    instances_dir.mkdir(exist_ok=True)
-    slug = project_dir.name
-    link = instances_dir / slug
-    if link.exists():
-        if link.resolve() == project_dir.resolve():
-            return link  # already registered
-        _err(f"Instance '{slug}' already registered to {link.resolve()}")
-        return None
-    link.symlink_to(project_dir)
-    return link
-
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Initialize a loops config directory, config vertex, or local vertex."""
+    """Initialize a loops vertex.
+
+    No args: create root .vertex in LOOPS_HOME.
+    Name or --template: create local instance in .loops/ from config source or minimal stub.
+    """
     name = getattr(args, "name", None)
     template = getattr(args, "template", None)
 
-    # Slashed name → config-level aggregation vertex
-    if name and "/" in name:
-        vertex_path = _init_config_vertex(name)
-        _msg(f"Created {vertex_path}")
+    # No name + no template → root .vertex in LOOPS_HOME
+    if not name and not template:
+        home = loops_home()
+        root = home / ".vertex"
+        if root.exists():
+            from painted import show, Block
+            from painted.palette import current_palette
+
+            show(
+                Block.text(f"Already initialized: {root}", current_palette().muted),
+                file=sys.stdout,
+            )
+            return 0
+        home.mkdir(parents=True, exist_ok=True)
+        root.write_text(_ROOT_VERTEX)
+        _msg(f"Created {root}")
         return 0
 
-    # Bare name → local instance from existing config vertex + register
-    if name:
-        vertex_path = _init_local_vertex(name, source_name=template)
-        if vertex_path is None:
-            _err(f"No existing vertex found for '{template or name}'")
-            return 1
-        _msg(f"Created {vertex_path}")
-        link = _register_with_config(name, Path.cwd())
-        if link is not None:
-            _msg(f"Registered {Path.cwd()} → {link}")
-        return 0
-
-    # No name + template → local instance in cwd
-    if template:
-        vertex_path = _init_local_vertex(template)
-        if vertex_path is None:
-            _err(f"No existing vertex found for '{template}'")
-            return 1
-        _msg(f"Created {vertex_path}")
-        return 0
-
-    # No name + no template → .vertex in LOOPS_HOME
-    home = loops_home()
-    root = home / ".vertex"
-    if root.exists():
-        from painted import show, Block
-        from painted.palette import current_palette
-
-        show(
-            Block.text(f"Already initialized: {root}", current_palette().muted),
-            file=sys.stdout,
-        )
-        return 0
-    home.mkdir(parents=True, exist_ok=True)
-    root.write_text(_ROOT_VERTEX)
-    _msg(f"Created {root}")
+    # Name and/or template → local instance in .loops/
+    target = name or template
+    vertex_path = _init_local_vertex(target, source_name=template)
+    _msg(f"Created {vertex_path}")
     return 0
 
 

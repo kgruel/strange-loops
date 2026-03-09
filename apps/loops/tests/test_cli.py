@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from loops.main import main, _parse_vars, _extract_loops_text, _AGGREGATION_VERTEX, loops_home
+from loops.main import main, _parse_vars, _extract_loops_text, loops_home
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -295,43 +295,6 @@ class TestInitCommand:
         assert args.name == "project"
         assert args.template is None
 
-    def test_slashed_name_parsed(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args(["dev/project", "-t", "session"])
-        assert args.name == "dev/project"
-        assert args.template == "session"
-
-    def test_slashed_name_creates_config_vertex(self, monkeypatch, tmp_path, capsys):
-        """loops init dev/project --template session creates in LOOPS_HOME."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["init", "dev/project", "-t", "session"])
-        assert result == 0
-        vertex = tmp_path / "dev" / "project" / "project.vertex"
-        assert vertex.exists()
-        content = vertex.read_text()
-        assert 'name "project"' in content
-        assert "discover" in content
-        assert (tmp_path / "dev" / "project" / "instances").is_dir()
-
-    def test_slashed_name_infers_template(self, monkeypatch, tmp_path, capsys):
-        """loops init dev/session infers template from leaf name."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["init", "dev/session"])
-        assert result == 0
-        assert (tmp_path / "dev" / "session" / "session.vertex").exists()
-
-    def test_slashed_name_creates_any_aggregation(self, monkeypatch, tmp_path, capsys):
-        """loops init dev/custom creates aggregation without needing a template."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["init", "dev/custom"])
-        assert result == 0
-        vertex = tmp_path / "dev" / "custom" / "custom.vertex"
-        assert vertex.exists()
-        assert "discover" in vertex.read_text()
-
     def test_bare_name_creates_local_vertex(self, monkeypatch, tmp_path, capsys):
         """loops init project creates vertex in .loops/ from config-level source."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
@@ -348,45 +311,24 @@ class TestInitCommand:
         vertex = tmp_path / "myproject" / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
-        assert 'name "project"' in content
         assert 'store "./data/project.db"' in content
+        assert "decision" in content
         assert (tmp_path / "myproject" / ".loops" / "data").is_dir()
 
-    def test_bare_name_registers_with_config(self, monkeypatch, tmp_path, capsys):
-        """loops init project registers cwd with config-level vertex if it exists."""
+    def test_bare_name_no_source_creates_stub(self, monkeypatch, tmp_path, capsys):
+        """loops init project without config-level source creates minimal stub."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Create config-level aggregation with a source instance
-        config_dir = tmp_path / "project"
-        config_dir.mkdir()
-        (config_dir / "project.vertex").write_text('name "project"\ndiscover "./instances/**/*.vertex"\n')
-        instances_dir = config_dir / "instances" / "seed"
-        instances_dir.mkdir(parents=True)
-        (instances_dir / "project.vertex").write_text(
-            'name "project"\nstore "./data/project.db"\n\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
-        )
-        # Now init local
         project_dir = tmp_path / "myproject"
         project_dir.mkdir()
         monkeypatch.chdir(project_dir)
         result = main(["init", "project"])
         assert result == 0
-        # Vertex created in .loops/
-        assert (project_dir / ".loops" / "project.vertex").exists()
-        # Registered with config
-        link = config_dir / "instances" / "myproject"
-        assert link.is_symlink()
-        assert link.resolve() == project_dir.resolve()
-
-    def test_bare_name_no_source_vertex_errors(self, monkeypatch, tmp_path, capsys):
-        """loops init project without config-level source vertex errors."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        project_dir = tmp_path / "myproject"
-        project_dir.mkdir()
-        monkeypatch.chdir(project_dir)
-        result = main(["init", "project"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "No existing vertex found" in captured.err
+        vertex = project_dir / ".loops" / "project.vertex"
+        assert vertex.exists()
+        content = vertex.read_text()
+        assert 'store "./data/project.db"' in content
+        assert "loops {" in content
+        assert (project_dir / ".loops" / "data").is_dir()
 
     def test_template_project_choice(self):
         import argparse
@@ -796,39 +738,20 @@ class TestExtractLoopsText:
         assert "b {" in result
 
 
-class TestAggregationLoops:
-    """Aggregation vertices as loop schema root."""
-
-    def test_aggregation_template_has_loops(self):
-        """_AGGREGATION_VERTEX includes a loops block."""
-        rendered = _AGGREGATION_VERTEX.format(name="test")
-        assert "loops {" in rendered
-        assert "decision" in rendered
-        assert "thread" in rendered
-        assert "change" in rendered
-        assert "task" in rendered
-
-    def test_init_aggregation_has_default_loops(self, monkeypatch, tmp_path, capsys):
-        """New aggregation vertex from template includes loops block."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["init", "dev/myproject"])
-        assert result == 0
-        vertex = tmp_path / "dev" / "myproject" / "myproject.vertex"
-        content = vertex.read_text()
-        assert "loops {" in content
-        assert "decision" in content
-        assert "task" in content
+class TestInitFromSource:
+    """Init derives local instance from config-level vertex."""
 
     def test_init_from_aggregation_loops(self, monkeypatch, tmp_path, capsys):
         """loops init <name> derives instance from aggregation vertex's loops block."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Create aggregation vertex with loops block (no instances yet)
+        # Create aggregation vertex with loops block
         config_dir = tmp_path / "project"
         config_dir.mkdir()
-        (config_dir / "instances").mkdir()
         (config_dir / "project.vertex").write_text(
             'name "project"\n'
-            'discover "./instances/**/*.vertex"\n\n'
+            'combine {\n'
+            '    vertex "/some/path"\n'
+            '}\n\n'
             'loops {\n'
             '  decision { fold { items "by" "topic" } }\n'
             '  thread   { fold { items "by" "name" } }\n'
@@ -843,7 +766,6 @@ class TestAggregationLoops:
         vertex = project_dir / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
-        assert 'name "project"' in content
         assert 'store "./data/project.db"' in content
         assert "decision" in content
         assert "thread" in content

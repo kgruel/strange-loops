@@ -320,6 +320,125 @@ class TestEntityRefResolution:
         assert d["payload"]["related"] == "thread/target-thread"
         assert "related_ref" in d["payload"]
 
+    def _setup_cross_vertex_workspace(self, tmp_path, monkeypatch, *, meta_kinds: str):
+        """Set up a workspace with project + meta vertices discoverable from root.
+
+        LOOPS_HOME is the workspace .loops/ dir itself, matching production layout:
+          .loops/
+            .vertex              # root discover
+            project/
+              project.vertex     # store "./data/project.db"
+            meta/
+              meta.vertex        # store "./data/meta.db"
+
+        resolve_vertex("project", LOOPS_HOME) → .loops/project/project.vertex
+        discover "./**/*.vertex" finds both project.vertex and meta.vertex
+        Both emit and discover resolve to the same store paths.
+
+        Returns (loops_dir,) where loops_dir is LOOPS_HOME.
+        """
+        workspace = tmp_path / "workspace"
+        loops_dir = workspace / ".loops"
+
+        # Root discover vertex
+        loops_dir.mkdir(parents=True)
+        (loops_dir / ".vertex").write_text('discover "./**/*.vertex"\n')
+
+        # Project vertex — thread/decision/task
+        pdir = loops_dir / "project"
+        pdir.mkdir()
+        (pdir / "project.vertex").write_text(
+            'name "project"\n'
+            'store "./data/project.db"\n'
+            "loops {\n"
+            '  thread { fold { items "by" "name" } }\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+
+        # Meta vertex
+        mdir = loops_dir / "meta"
+        mdir.mkdir()
+        (mdir / "meta.vertex").write_text(
+            'name "meta"\n'
+            'store "./data/meta.db"\n'
+            f"loops {{\n{meta_kinds}}}\n"
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(loops_dir))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(workspace)
+
+        return loops_dir
+
+    def test_cross_vertex_entity_ref(self, tmp_path, monkeypatch):
+        """Entity ref resolves across vertices when kind exists in a sibling store."""
+        loops_dir = self._setup_cross_vertex_workspace(
+            tmp_path, monkeypatch,
+            meta_kinds=(
+                '  dissolution { fold { items "by" "concept" } }\n'
+                '  decision { fold { items "by" "topic" } }\n'
+            ),
+        )
+
+        # Emit a dissolution fact to meta
+        result = main(["meta", "emit", "dissolution", "concept=siftd",
+                        "message=siftd dissolved into config-level vertex"])
+        assert result == 0
+
+        # Emit a thread to project that references the dissolution in meta
+        result = main(["project", "emit", "thread", "name=siftd-redesign",
+                        "status=resolved", "dissolved_by=dissolution/siftd"])
+        assert result == 0
+
+        # Verify the cross-vertex ref was resolved
+        db_path = (loops_dir / "project" / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        thread_fact = [f for f in facts if f.kind == "thread"][0]
+        payload = dict(thread_fact.payload)
+
+        assert payload["dissolved_by"] == "dissolution/siftd"
+        assert "dissolved_by_ref" in payload
+
+        # Verify the ref points to the actual dissolution fact in meta's store
+        from engine import StoreReader
+
+        meta_db = (loops_dir / "meta" / "data" / "meta.db").resolve()
+        reader = StoreReader(meta_db)
+        try:
+            resolved = reader.resolve_entity_id("dissolution", "concept", "siftd")
+            assert payload["dissolved_by_ref"] == resolved
+        finally:
+            reader.close()
+
+    def test_cross_vertex_local_miss_topology_hit(self, tmp_path, monkeypatch):
+        """Same kind declared in both vertices, entity exists only in sibling."""
+        loops_dir = self._setup_cross_vertex_workspace(
+            tmp_path, monkeypatch,
+            meta_kinds='  decision { fold { items "by" "topic" } }\n',
+        )
+
+        # Emit a decision to meta only
+        result = main(["meta", "emit", "decision", "topic=design/scaffold-minimalism",
+                        "message=Scaffold includes only what every project needs"])
+        assert result == 0
+
+        # Emit a thread to project referencing meta's decision
+        result = main(["project", "emit", "thread", "name=scaffold-work",
+                        "status=resolved",
+                        "decided_by=decision/design/scaffold-minimalism"])
+        assert result == 0
+
+        db_path = (loops_dir / "project" / "data" / "project.db").resolve()
+        facts = _read_all_facts(db_path)
+        thread_fact = [f for f in facts if f.kind == "thread"][0]
+        payload = dict(thread_fact.payload)
+
+        # Decision doesn't exist in project store, but was found in meta store
+        assert payload["decided_by"] == "decision/design/scaffold-minimalism"
+        assert "decided_by_ref" in payload
+
 
 class TestObserverResolution:
     """Observer resolution from .vertex declarations."""

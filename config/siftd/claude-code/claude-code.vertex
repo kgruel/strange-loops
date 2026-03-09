@@ -1,21 +1,30 @@
 // Claude Code — instance vertex for claude-code session ingestion
-// Owns the store. Parses JSONL sessions into exchange facts.
+// Owns the store. Raw JSONL records filtered to user/assistant turns.
+// Turn pairing (exchange view) is a lens concern, not a storage concern.
 
 name "claude-code"
 store "./data/claude-code.db"
 
-sources {
-  path "./sources/claude-code.loop"
+sources sequential {
+  source "python3 ~/.config/loops/siftd/claude-code/sources/discover.py --data-dir ~/.config/loops/siftd/data" {
+    kind "record"
+    observer "siftd"
+    origin "claude-code"
+    format "ndjson"
+    parse {
+      where path="type" "in" "user" "assistant"
+    }
+  }
 }
 
 loops {
-  exchange {
+  record {
     fold {
-      items "by" "conversation_id"
+      items "by" "sessionId"
       count "inc"
       updated "latest"
     }
-    search "prompt" "response"
+    search "message.content"
   }
 
   tag {

@@ -16,33 +16,59 @@ def siftd_lens(kind: str, payload: dict, zoom: Zoom) -> str | Block:
     Follows the PayloadLens protocol: (kind, payload, zoom) -> str | Block.
     Returns str for simple cases, Block when styled output is needed.
     """
+    if kind == "record":
+        return _record_lens(payload, zoom)
     if kind == "exchange":
-        return _exchange_lens(payload, zoom)
+        return _record_lens(payload, zoom)  # backwards compat
     if kind == "tag":
         return _tag_lens(payload, zoom)
     return ""
 
 
-def _exchange_lens(payload: dict, zoom: Zoom) -> str | Block:
-    """Render exchange payload — prompt/response from a coding session."""
-    prompt = payload.get("prompt", "")
-    model = payload.get("model", "")
-    workspace = payload.get("workspace", "")
+def _extract_content(payload: dict) -> str:
+    """Extract text content from a raw record payload.
+
+    Handles polymorphic message.content: string or list of content blocks.
+    """
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                if text:
+                    parts.append(text)
+        return " ".join(parts)
+    return ""
+
+
+def _record_lens(payload: dict, zoom: Zoom) -> str | Block:
+    """Render raw record payload — user/assistant turns from a coding session."""
+    content = _extract_content(payload)
+    record_type = payload.get("type", "")
+    workspace = payload.get("cwd", "")
 
     if zoom <= Zoom.MINIMAL:
-        return prompt
+        return content[:120] if content else f"[{record_type}]"
 
     p = current_palette()
     parts: list[Block] = []
 
-    if model and zoom >= Zoom.SUMMARY:
-        parts.append(Block.text(f"({model}) ", p.muted))
-
-    parts.append(Block.text("→ ", p.accent))
-    parts.append(Block.text(prompt, Style()))
+    # Show record type as role indicator
+    marker = "→" if record_type == "user" else "←"
+    parts.append(Block.text(f"{marker} ", p.accent))
+    parts.append(Block.text(content[:200] if content else "(empty)", Style()))
 
     if workspace and zoom >= Zoom.DETAILED:
-        parts.append(Block.text(f"  [{workspace}]", p.muted))
+        short_ws = workspace.rsplit("/", 1)[-1] if "/" in workspace else workspace
+        parts.append(Block.text(f"  [{short_ws}]", p.muted))
 
     return join_horizontal(*parts)
 
@@ -212,18 +238,18 @@ def log_view(facts: list[dict[str, Any]], zoom: Zoom, width: int) -> Block:
             rows.append(Block.text(line, Style(), width=width))
 
         # DETAILED+: show secondary fields
-        if zoom >= Zoom.DETAILED and kind == "exchange":
-            response = payload.get("response", "")
-            if response:
-                resp_line = f"           ← {response}"
-                if len(resp_line) > width:
-                    resp_line = resp_line[: width - 1] + "…"
-                rows.append(Block.text(resp_line, dim, width=width))
+        if zoom >= Zoom.DETAILED and kind == "record":
+            session_id = payload.get("sessionId", "")
+            if session_id:
+                rows.append(Block.text(f"           session: {session_id[:12]}", dim, width=width))
 
         if zoom >= Zoom.FULL:
             for key, val in payload.items():
-                if val and key not in ("prompt", "name"):
-                    rows.append(Block.text(f"           {key}: {val}", dim, width=width))
+                if val and key not in ("message", "type"):
+                    val_str = str(val)
+                    if len(val_str) > 80:
+                        val_str = val_str[:77] + "..."
+                    rows.append(Block.text(f"           {key}: {val_str}", dim, width=width))
 
     return join_vertical(*rows)
 

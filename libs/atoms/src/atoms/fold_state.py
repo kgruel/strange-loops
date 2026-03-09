@@ -13,7 +13,7 @@ these types without pulling in engine.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -60,6 +60,9 @@ class FoldSection:
             (bounded list). Informs lens rendering strategy.
         key_field: For "by" folds, the field used as the grouping key.
             None for "collect" folds.
+        scalars: Non-items fold targets — scalar values computed by the fold
+            (count, updated, sum, etc.). Keyed by fold target name.
+            Empty when no scalar targets are declared.
     """
 
     kind: str
@@ -67,6 +70,7 @@ class FoldSection:
     sections: tuple[FoldSection, ...] = ()
     fold_type: str = "collect"
     key_field: str | None = None
+    scalars: dict[str, Any] = field(default_factory=dict)
 
     @property
     def count(self) -> int:

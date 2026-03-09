@@ -586,11 +586,22 @@ def vertex_fold(
 
         items = tuple(_dict_to_fold_item(d) for d in raw_items)
 
+        # Extract scalar fold targets (count, updated, sum, etc.)
+        # — everything in the fold state that isn't the items target
+        scalars: dict[str, Any] = {}
+        if spec and spec.folds:
+            items_target = spec.folds[0].target
+            for fold_op in spec.folds[1:]:
+                val = state.get(fold_op.target)
+                if val is not None:
+                    scalars[fold_op.target] = val
+
         sections.append(FoldSection(
             kind=kind_name,
             items=items,
             fold_type=fold_type,
             key_field=key_field,
+            scalars=scalars,
         ))
 
     return FoldState(sections=tuple(sections), vertex=ast.name)

@@ -74,6 +74,30 @@ class TestFoldSection:
         assert section.sections == ()
         assert section.fold_type == "collect"
         assert section.key_field is None
+        assert section.scalars == {}
+
+    def test_scalars(self):
+        """Scalar fold targets (count, updated, etc.) are exposed to lenses."""
+        items = (FoldItem(payload={"name": "a"}),)
+        section = FoldSection(
+            kind="record",
+            items=items,
+            fold_type="by",
+            key_field="name",
+            scalars={"count": 500, "updated": 1773022630.0},
+        )
+        assert section.count == 1  # len(items), not the fold counter
+        assert section.scalars["count"] == 500  # fold counter
+        assert section.scalars["updated"] == 1773022630.0
+
+    def test_scalars_default_empty(self):
+        """Sections without scalar targets have empty scalars dict."""
+        s1 = FoldSection(kind="a")
+        s2 = FoldSection(kind="b")
+        # Each instance gets its own dict (no shared default)
+        assert s1.scalars == {}
+        assert s2.scalars == {}
+        assert s1.scalars is not s2.scalars
 
 
 class TestFoldState:

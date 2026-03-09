@@ -12,13 +12,13 @@ combine {
 }
 
 loops {
-  exchange {
+  record {
     fold {
-      items "by" "conversation_id"
+      items "by" "sessionId"
       count "inc"
       updated "latest"
     }
-    search "prompt" "response"
+    search "message.content"
   }
 
   tag {

@@ -261,6 +261,73 @@ class TestSyncLens:
         text = _block_to_text(block)
         assert "nothing to sync" in text
 
+    def test_sync_view_minimal_shows_fact_count(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {"ran": ["ping"], "skipped": [], "errors": [], "ticks": [],
+                "fact_counts": {"ping": 3}}
+        block = sync_view(data, Zoom.MINIMAL, 80)
+        text = _block_to_text(block)
+        assert "3 facts" in text
+
+    def test_sync_view_summary_shows_per_source_counts(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {"ran": ["ping", "health"], "skipped": [], "errors": [], "ticks": [],
+                "fact_counts": {"ping": 3, "health": 1}}
+        block = sync_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "ping (3)" in text
+        assert "health (1)" in text
+
+    def test_sync_view_summary_children_per_child_breakdown(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {
+            "ran": ["child1", "child2"], "skipped": [], "errors": [], "ticks": [],
+            "fact_counts": {"child1": 5, "child2": 3},
+            "children": [
+                {"name": "child1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 5}},
+                {"name": "child2", "ran": ["child2"], "skipped": [], "fact_counts": {"child2": 3}},
+            ],
+        }
+        block = sync_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "child1: 5 facts" in text
+        assert "child2: 3 facts" in text
+        assert "Total: 8 facts" in text
+
+    def test_sync_view_children_skipped(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {
+            "ran": ["child1"], "skipped": ["child2"], "errors": [], "ticks": [],
+            "fact_counts": {"child1": 2},
+            "children": [
+                {"name": "c1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 2}},
+                {"name": "c2", "ran": [], "skipped": ["child2"], "fact_counts": {}},
+            ],
+        }
+        block = sync_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "c1: 2 facts" in text
+        assert "c2: skipped" in text
+
+    def test_sync_view_minimal_singular_fact(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {"ran": ["ping"], "skipped": [], "errors": [], "ticks": [],
+                "fact_counts": {"ping": 1}}
+        block = sync_view(data, Zoom.MINIMAL, 80)
+        text = _block_to_text(block)
+        assert "1 fact" in text
+        assert "1 facts" not in text
+
 
 def _make_aggregation_vertex(tmp_path: Path) -> Path:
     """Create an aggregation vertex that combines two child instance vertices."""
@@ -388,3 +455,43 @@ class TestSyncAggregation:
         # Should show source count, not children count
         assert "sources" in captured.err
         assert "children" not in captured.err
+
+
+class TestSyncFactCounts:
+    """Sync output includes fact counts from source execution."""
+
+    def test_sync_output_shows_fact_count(self, monkeypatch, tmp_path, capsys):
+        """Sync output includes fact count per source."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_vertex_with_source(tmp_path)
+
+        from loops.main import _run_sync
+
+        result = _run_sync(["--force", "--plain"], vertex_path=vertex_path)
+        assert result == 0
+        captured = capsys.readouterr()
+        # echo produces 1 fact; output should show source name with count
+        assert "test" in captured.out  # source kind name
+        assert "(1)" in captured.out  # fact count
+
+    def test_sync_output_shows_source_name(self, monkeypatch, tmp_path, capsys):
+        """Sync output includes the source kind name."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_vertex_with_source(tmp_path)
+
+        from loops.main import _run_sync
+
+        result = _run_sync(["--force", "--plain"], vertex_path=vertex_path)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Ran:" in captured.out
+
+    def test_executor_populates_fact_counts(self, tmp_path):
+        """Executor.sync() populates fact_counts in SyncResult."""
+        from engine import load_vertex_program
+
+        vertex_path = _make_vertex_with_source(tmp_path)
+        program = load_vertex_program(vertex_path)
+        result = program.sync(force=True)
+        assert "test" in result.fact_counts
+        assert result.fact_counts["test"] == 1  # echo produces 1 line = 1 fact

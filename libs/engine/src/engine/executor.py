@@ -122,6 +122,7 @@ class SyncResult:
     skipped: list[str]  # kinds of sources skipped by cadence
     errors: list[Fact]  # source.error facts
     tiers: list[list[str]]  # execution order: each tier ran concurrently
+    fact_counts: dict[str, int] = field(default_factory=dict)  # facts ingested per source kind
 
 
 @dataclass
@@ -169,6 +170,7 @@ class Executor:
         errors: list[Fact] = []
         ran: list[str] = []
         tier_kinds: list[list[str]] = []
+        fact_counts: dict[str, int] = {}
         fact_count = [0]  # mutable counter shared across async tasks
 
         if qualifying_indices:
@@ -178,7 +180,7 @@ class Executor:
             for tier in tiers:
                 tier_sources = [self.sources[i][0] for i in tier]
                 tasks = [
-                    self._run_source(source, grant, ticks, errors, fact_count)
+                    self._run_source(source, grant, ticks, errors, fact_counts, fact_count)
                     for source in tier_sources
                 ]
                 await asyncio.gather(*tasks)
@@ -205,7 +207,7 @@ class Executor:
 
         return SyncResult(
             ticks=ticks, ran=ran, skipped=skipped,
-            errors=errors, tiers=tier_kinds,
+            errors=errors, tiers=tier_kinds, fact_counts=fact_counts,
         )
 
     async def _run_source(
@@ -214,9 +216,11 @@ class Executor:
         grant: Any,
         ticks: list,
         errors: list,
+        fact_counts: dict[str, int] | None = None,
         fact_count: list[int] | None = None,
     ) -> None:
         """Run a single source and route its facts through the vertex."""
+        count = 0
         try:
             async for fact in source.collect():
                 if fact_count is not None:
@@ -225,6 +229,8 @@ class Executor:
                     errors.append(fact)
                     if self.on_error is not None:
                         self.on_error(fact)
+                elif not fact.kind.endswith(".complete"):
+                    count += 1
                 tick = self.vertex.receive(fact, grant)
                 if tick is not None:
                     ticks.append(tick)
@@ -256,6 +262,8 @@ class Executor:
             tick = self.vertex.receive(complete_fact)
             if tick is not None:
                 ticks.append(tick)
+        if fact_counts is not None:
+            fact_counts[source.kind] = count
 
     def sync(self, store: Any = None, grant: Any = None, *, force: bool = False) -> SyncResult:
         """Synchronous wrapper around sync_async."""

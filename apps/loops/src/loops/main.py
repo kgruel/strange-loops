@@ -579,6 +579,8 @@ def _run_sync_aggregate(
         all_skipped: list[str] = []
         all_errors: list[dict] = []
         all_ticks: list[dict] = []
+        all_fact_counts: dict[str, int] = {}
+        children: list[dict] = []
 
         for child_path in child_paths:
             child_program = load_vertex_program(child_path, vars=vars)
@@ -587,6 +589,8 @@ def _run_sync_aggregate(
             result = child_program.sync(on_error=log_error, force=force)
             all_ran.extend(result.ran)
             all_skipped.extend(result.skipped)
+            for kind, count in result.fact_counts.items():
+                all_fact_counts[kind] = all_fact_counts.get(kind, 0) + count
             all_errors.extend(
                 {
                     "kind": e.kind,
@@ -604,12 +608,20 @@ def _run_sync_aggregate(
                 }
                 for tick in result.ticks
             )
+            children.append({
+                "name": child_program.vertex.name,
+                "ran": result.ran,
+                "skipped": result.skipped,
+                "fact_counts": result.fact_counts,
+            })
 
         return {
             "ran": all_ran,
             "skipped": all_skipped,
+            "fact_counts": all_fact_counts,
             "errors": all_errors,
             "ticks": all_ticks,
+            "children": children,
         }
 
     def render(ctx, data):
@@ -713,6 +725,7 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return {
             "ran": result.ran,
             "skipped": result.skipped,
+            "fact_counts": result.fact_counts,
             "errors": [
                 {
                     "kind": e.kind,

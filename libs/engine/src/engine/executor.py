@@ -113,13 +113,22 @@ def validate_dependency_graph(sources: list[tuple[Source, Cadence]]) -> None:
         raise CyclicDependencyError(cycle_kinds) from None
 
 
+@dataclass(frozen=True)
+class SkippedSource:
+    """A source skipped by cadence evaluation."""
+
+    kind: str
+    last_run_ts: float | None = None  # epoch of last successful .complete
+    cadence_interval: float | None = None  # seconds, for elapsed mode
+
+
 @dataclass
 class SyncResult:
     """Result of a sync operation."""
 
     ticks: list[Tick]
     ran: list[str]  # kinds of sources that ran
-    skipped: list[str]  # kinds of sources skipped by cadence
+    skipped: list[SkippedSource]  # sources skipped by cadence
     errors: list[Fact]  # source.error facts
     tiers: list[list[str]]  # execution order: each tier ran concurrently
     fact_counts: dict[str, int] = field(default_factory=dict)  # facts ingested per source kind
@@ -158,13 +167,19 @@ class Executor:
 
         start = time.time()
         qualifying_indices: list[int] = []
-        skipped: list[str] = []
+        skipped: list[SkippedSource] = []
 
         for i, (source, cadence) in enumerate(self.sources):
             if force or store is None or cadence.should_run(store, start):
                 qualifying_indices.append(i)
             else:
-                skipped.append(source.kind)
+                complete_kind = f"{source.kind}.complete"
+                last = store.latest_by_kind_where(complete_kind, "status", "ok")
+                skipped.append(SkippedSource(
+                    kind=source.kind,
+                    last_run_ts=last.ts if last else None,
+                    cadence_interval=cadence._interval,
+                ))
 
         ticks: list[Tick] = []
         errors: list[Fact] = []

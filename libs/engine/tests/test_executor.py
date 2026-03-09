@@ -294,7 +294,10 @@ class TestExecutorTiers:
         result = asyncio.run(executor.sync_async())
 
         assert result.ran == ["a"]
-        assert result.skipped == ["b"]
+        assert len(result.skipped) == 1
+        assert result.skipped[0].kind == "b"
+        assert result.skipped[0].last_run_ts is not None
+        assert result.skipped[0].cadence_interval == 9999
         assert result.tiers == [["a"]]
 
     def test_empty_sources(self):

@@ -221,12 +221,20 @@ class TestSyncLens:
     def test_sync_view_with_skipped(self):
         from loops.lenses.sync import sync_view
         from painted import Zoom
+        import time
 
-        data = {"ran": ["ping"], "skipped": ["health"], "errors": [], "ticks": []}
+        data = {
+            "ran": ["ping"],
+            "skipped": [{"kind": "health", "last_run_ts": time.time() - 180, "cadence_interval": 600}],
+            "errors": [],
+            "ticks": [],
+        }
         block = sync_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
         assert "Ran:" in text
-        assert "Skipped:" in text
+        assert "health" in text
+        assert "fresh" in text
+        assert "cadence" in text
 
     def test_sync_view_no_sources(self):
         from loops.lenses.sync import sync_view
@@ -251,6 +259,40 @@ class TestSyncLens:
         text = _block_to_text(block)
         assert "Errors:" in text
         assert "timeout" in text
+
+    def test_sync_view_minimal_skipped_shows_count(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+        import time
+
+        data = {
+            "ran": [],
+            "skipped": [
+                {"kind": "health", "last_run_ts": time.time() - 60, "cadence_interval": 600},
+                {"kind": "deploy", "last_run_ts": time.time() - 120, "cadence_interval": 300},
+            ],
+            "errors": [],
+            "ticks": [],
+        }
+        block = sync_view(data, Zoom.MINIMAL, 80)
+        text = _block_to_text(block)
+        assert "2 skipped" in text
+        # MINIMAL should NOT show per-source detail
+        assert "fresh" not in text
+
+    def test_sync_view_skipped_no_last_run(self):
+        from loops.lenses.sync import sync_view
+        from painted import Zoom
+
+        data = {
+            "ran": [],
+            "skipped": [{"kind": "health", "last_run_ts": None, "cadence_interval": None}],
+            "errors": [],
+            "ticks": [],
+        }
+        block = sync_view(data, Zoom.SUMMARY, 80)
+        text = _block_to_text(block)
+        assert "health" in text
 
     def test_sync_view_minimal_nothing(self):
         from loops.lenses.sync import sync_view
@@ -305,17 +347,21 @@ class TestSyncLens:
         from painted import Zoom
 
         data = {
-            "ran": ["child1"], "skipped": ["child2"], "errors": [], "ticks": [],
+            "ran": ["child1"],
+            "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}],
+            "errors": [], "ticks": [],
             "fact_counts": {"child1": 2},
             "children": [
                 {"name": "c1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 2}},
-                {"name": "c2", "ran": [], "skipped": ["child2"], "fact_counts": {}},
+                {"name": "c2", "ran": [],
+                 "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}],
+                 "fact_counts": {}},
             ],
         }
         block = sync_view(data, Zoom.SUMMARY, 80)
         text = _block_to_text(block)
         assert "c1: 2 facts" in text
-        assert "c2: skipped" in text
+        assert "child2" in text
 
     def test_sync_view_minimal_singular_fact(self):
         from loops.lenses.sync import sync_view

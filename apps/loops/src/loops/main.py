@@ -576,7 +576,7 @@ def _run_sync_aggregate(
 
     def fetch():
         all_ran: list[str] = []
-        all_skipped: list[str] = []
+        all_skipped: list[dict] = []
         all_errors: list[dict] = []
         all_ticks: list[dict] = []
         all_fact_counts: dict[str, int] = {}
@@ -588,7 +588,10 @@ def _run_sync_aggregate(
                 continue
             result = child_program.sync(on_error=log_error, force=force)
             all_ran.extend(result.ran)
-            all_skipped.extend(result.skipped)
+            all_skipped.extend(
+                {"kind": s.kind, "last_run_ts": s.last_run_ts, "cadence_interval": s.cadence_interval}
+                for s in result.skipped
+            )
             for kind, count in result.fact_counts.items():
                 all_fact_counts[kind] = all_fact_counts.get(kind, 0) + count
             all_errors.extend(
@@ -611,7 +614,10 @@ def _run_sync_aggregate(
             children.append({
                 "name": child_program.vertex.name,
                 "ran": result.ran,
-                "skipped": result.skipped,
+                "skipped": [
+                    {"kind": s.kind, "last_run_ts": s.last_run_ts, "cadence_interval": s.cadence_interval}
+                    for s in result.skipped
+                ],
                 "fact_counts": result.fact_counts,
             })
 
@@ -724,7 +730,10 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         result = program.sync(on_error=log_error, force=force)
         return {
             "ran": result.ran,
-            "skipped": result.skipped,
+            "skipped": [
+                {"kind": s.kind, "last_run_ts": s.last_run_ts, "cadence_interval": s.cadence_interval}
+                for s in result.skipped
+            ],
             "fact_counts": result.fact_counts,
             "errors": [
                 {

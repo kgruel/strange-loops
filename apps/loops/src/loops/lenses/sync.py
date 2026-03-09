@@ -1,11 +1,48 @@
 """Sync lens — render SyncResult showing ran, skipped, errors, and fact counts."""
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from painted import Block, Style, Zoom, join_vertical
 
 from .run import run_ticks_view, _format_ts
+
+
+def _format_ago(epoch_ts: float) -> str:
+    """Format an epoch timestamp as a human-readable 'ago' string."""
+    delta = time.time() - epoch_ts
+    if delta < 60:
+        return f"{int(delta)}s ago"
+    if delta < 3600:
+        return f"{int(delta / 60)}m ago"
+    if delta < 86400:
+        return f"{int(delta / 3600)}h ago"
+    return f"{int(delta / 86400)}d ago"
+
+
+def _format_interval(seconds: float) -> str:
+    """Format a cadence interval as a compact human string."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds / 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds / 3600)}h"
+    return f"{int(seconds / 86400)}d"
+
+
+def _format_skip(skip: dict) -> str:
+    """Format a single skipped source for display."""
+    kind = skip.get("kind", "?")
+    last_ts = skip.get("last_run_ts")
+    interval = skip.get("cadence_interval")
+
+    if last_ts is not None and interval is not None:
+        return f"{kind}: fresh (last run {_format_ago(last_ts)}, cadence {_format_interval(interval)})"
+    if last_ts is not None:
+        return f"{kind}: fresh (last run {_format_ago(last_ts)})"
+    return kind
 
 
 def _fact_label(count: int) -> str:
@@ -61,11 +98,10 @@ def sync_view(data: dict, zoom: Zoom, width: int) -> Block:
                     f"{child_name}: {_fact_label(child_total)} ({kinds_str})",
                     Style(), width=width,
                 ))
-            elif child_skipped:
-                rows.append(Block.text(
-                    f"{child_name}: skipped ({', '.join(child_skipped)})",
-                    dim, width=width,
-                ))
+            if child_skipped:
+                for skip in child_skipped:
+                    label = _format_skip(skip) if isinstance(skip, dict) else str(skip)
+                    rows.append(Block.text(f"  \u23ed {label}", dim, width=width))
 
         if total_facts:
             rows.append(Block.text(f"Total: {_fact_label(total_facts)}", dim, width=width))
@@ -78,7 +114,9 @@ def sync_view(data: dict, zoom: Zoom, width: int) -> Block:
                 parts.append(f"{kind} ({count})")
             rows.append(Block.text(f"Ran: {', '.join(parts)}", Style(), width=width))
         if skipped:
-            rows.append(Block.text(f"Skipped: {', '.join(skipped)}", dim, width=width))
+            for skip in skipped:
+                label = _format_skip(skip) if isinstance(skip, dict) else str(skip)
+                rows.append(Block.text(f"  \u23ed {label}", dim, width=width))
 
     if errors:
         rows.append(Block.text(f"Errors: {len(errors)}", Style(fg="red"), width=width))

@@ -178,7 +178,7 @@ class Source:
                 self.command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                limit=1024 * 1024,  # 1MB line buffer (default 64KB)
+                limit=10 * 1024 * 1024,  # 10MB line buffer (session JSONL lines can be large)
                 env=proc_env,
             )
 

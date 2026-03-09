@@ -305,3 +305,96 @@ class TestExecutorTiers:
 
         assert result.ran == []
         assert result.tiers == []
+
+
+# ---------------------------------------------------------------------------
+# sync.complete fact
+# ---------------------------------------------------------------------------
+
+
+class TestSyncComplete:
+    def test_sync_complete_emitted_on_success(self):
+        """Sync emits a sync.complete fact with status=ok when all sources succeed."""
+        vertex = _make_vertex()
+        sources = [
+            (StubSource("a"), Cadence.always()),
+            (StubSource("b"), Cadence.always()),
+        ]
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async(force=True))
+
+        store = vertex._store
+        fact = store.latest_by_kind("sync.complete")
+        assert fact is not None
+        assert fact.kind == "sync.complete"
+        assert fact.observer == "test"
+        assert fact.payload["status"] == "ok"
+        assert fact.payload["sources_run"] == 2
+        assert fact.payload["sources_skipped"] == 0
+        assert isinstance(fact.payload["total_facts"], int)
+        assert fact.payload["total_facts"] > 0
+        assert isinstance(fact.payload["duration_ms"], int)
+
+    def test_sync_complete_counts_facts(self):
+        """total_facts counts all facts emitted by sources (including .complete sentinels)."""
+        vertex = _make_vertex()
+        extra = [Fact.of("a", "test", value="1"), Fact.of("a", "test", value="2")]
+        sources = [
+            (StubSource("a", facts=extra), Cadence.always()),
+        ]
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async(force=True))
+
+        fact = vertex._store.latest_by_kind("sync.complete")
+        # 2 data facts + 1 a.complete sentinel = 3
+        assert fact.payload["total_facts"] == 3
+
+    def test_sync_complete_error_status(self):
+        """sync.complete has status=error when a source emits source.error."""
+        vertex = _make_vertex()
+
+        class FailSource:
+            kind = "broken"
+            observer = "test"
+
+            async def collect(self):
+                if False:
+                    yield  # make this an async generator
+                raise RuntimeError("boom")
+
+        sources = [(FailSource(), Cadence.always())]
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async(force=True))
+
+        fact = vertex._store.latest_by_kind("sync.complete")
+        assert fact is not None
+        assert fact.payload["status"] == "error"
+        assert fact.payload["sources_run"] == 1
+
+    def test_sync_complete_with_skipped(self):
+        """sync.complete reflects cadence-skipped sources."""
+        vertex = _make_vertex()
+        sources = [
+            (StubSource("a"), Cadence.always()),
+            (StubSource("b"), Cadence.elapsed("b", 9999)),
+        ]
+        # Seed recent completion so b is skipped
+        vertex._store.append(Fact.of("b.complete", "test", status="ok"))
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async())
+
+        fact = vertex._store.latest_by_kind("sync.complete")
+        assert fact.payload["sources_run"] == 1
+        assert fact.payload["sources_skipped"] == 1
+
+    def test_sync_complete_no_sources(self):
+        """sync.complete emitted even with no sources."""
+        vertex = _make_vertex()
+        executor = Executor(vertex, [])
+        asyncio.run(executor.sync_async())
+
+        fact = vertex._store.latest_by_kind("sync.complete")
+        assert fact is not None
+        assert fact.payload["status"] == "ok"
+        assert fact.payload["sources_run"] == 0
+        assert fact.payload["total_facts"] == 0

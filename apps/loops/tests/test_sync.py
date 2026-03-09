@@ -111,6 +111,29 @@ class TestSyncExecution:
         result = _run_sync(["--force"], vertex_path=vertex_path)
         assert result == 0
 
+    def test_sync_emits_completion_fact(self, monkeypatch, tmp_path, capsys):
+        """Sync stores a sync.complete fact with expected fields."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vertex_path = _make_vertex_with_source(tmp_path)
+
+        from engine import load_vertex_program
+
+        program = load_vertex_program(vertex_path)
+        program.sync(force=True)
+
+        from engine import StoreReader
+
+        store_path = vertex_path.parent / "data" / "test.db"
+        reader = StoreReader(store_path)
+        facts = reader.recent_facts("sync.complete", 5)
+        assert len(facts) == 1
+        f = facts[0]
+        assert f["payload"]["status"] == "ok"
+        assert f["payload"]["sources_run"] == 1
+        assert f["payload"]["sources_skipped"] == 0
+        assert f["payload"]["total_facts"] > 0
+        assert "duration_ms" in f["payload"]
+
     def test_sync_default_is_cadence_gated(self, monkeypatch, tmp_path, capsys):
         """Default sync evaluates cadence (first run = always runs)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

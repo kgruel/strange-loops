@@ -155,12 +155,12 @@ class Executor:
         if store is None:
             store = self.vertex._store
 
-        now = time.time()
+        start = time.time()
         qualifying_indices: list[int] = []
         skipped: list[str] = []
 
         for i, (source, cadence) in enumerate(self.sources):
-            if force or store is None or cadence.should_run(store, now):
+            if force or store is None or cadence.should_run(store, start):
                 qualifying_indices.append(i)
             else:
                 skipped.append(source.kind)
@@ -169,6 +169,7 @@ class Executor:
         errors: list[Fact] = []
         ran: list[str] = []
         tier_kinds: list[list[str]] = []
+        fact_count = [0]  # mutable counter shared across async tasks
 
         if qualifying_indices:
             deps = _build_dependency_graph(self.sources)
@@ -177,13 +178,30 @@ class Executor:
             for tier in tiers:
                 tier_sources = [self.sources[i][0] for i in tier]
                 tasks = [
-                    self._run_source(source, grant, ticks, errors)
+                    self._run_source(source, grant, ticks, errors, fact_count)
                     for source in tier_sources
                 ]
                 await asyncio.gather(*tasks)
                 tier_kinds.append([s.kind for s in tier_sources])
 
             ran = [self.sources[i][0].kind for i in qualifying_indices]
+
+        # Emit sync.complete — same sentinel pattern as source .complete
+        from atoms import Fact
+
+        duration_ms = int((time.time() - start) * 1000)
+        sync_fact = Fact.of(
+            "sync.complete",
+            self.vertex.name,
+            status="error" if errors else "ok",
+            sources_run=len(ran),
+            sources_skipped=len(skipped),
+            total_facts=fact_count[0],
+            duration_ms=duration_ms,
+        )
+        tick = self.vertex.receive(sync_fact, grant)
+        if tick is not None:
+            ticks.append(tick)
 
         return SyncResult(
             ticks=ticks, ran=ran, skipped=skipped,
@@ -196,10 +214,13 @@ class Executor:
         grant: Any,
         ticks: list,
         errors: list,
+        fact_count: list[int] | None = None,
     ) -> None:
         """Run a single source and route its facts through the vertex."""
         try:
             async for fact in source.collect():
+                if fact_count is not None:
+                    fact_count[0] += 1
                 if fact.kind == "source.error":
                     errors.append(fact)
                     if self.on_error is not None:
@@ -216,6 +237,8 @@ class Executor:
                 error=str(e),
                 error_type=type(e).__name__,
             )
+            if fact_count is not None:
+                fact_count[0] += 1
             errors.append(error_fact)
             self.vertex.receive(error_fact)
             if self.on_error is not None:
@@ -228,6 +251,8 @@ class Executor:
                 error=str(e),
                 error_type=type(e).__name__,
             )
+            if fact_count is not None:
+                fact_count[0] += 1
             tick = self.vertex.receive(complete_fact)
             if tick is not None:
                 ticks.append(tick)

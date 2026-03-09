@@ -853,6 +853,51 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     return payload
 
 
+def _warn_missing_fold_key(
+    vertex_path: Path,
+    kind: str,
+    payload: dict,
+    show,
+    Block,
+    p,
+) -> None:
+    """Warn on stderr if the payload lacks the fold key field.
+
+    When a kind folds 'by' a key field (e.g. thread folds by 'name'),
+    a fact without that field will be stored but silently skipped by the
+    fold — orphaned data that never appears in the folded state.
+    """
+    from lang import parse_vertex_file
+    from lang.ast import FoldBy
+
+    # Follow combine chain to the vertex with actual loop declarations
+    writable = _resolve_writable_vertex(vertex_path)
+    if writable is not None:
+        vertex_path = writable
+
+    try:
+        ast = parse_vertex_file(vertex_path)
+    except Exception:
+        return
+
+    loop_def = ast.loops.get(kind)
+    if loop_def is None:
+        return
+
+    for fold_decl in loop_def.folds:
+        if isinstance(fold_decl.op, FoldBy) and fold_decl.op.key_field not in payload:
+            key = fold_decl.op.key_field
+            show(
+                Block.text(
+                    f"Warning: kind '{kind}' folds by '{key}' but payload has no "
+                    f"'{key}=' field — fact will be stored but not foldable",
+                    p.warning,
+                ),
+                file=sys.stderr,
+            )
+            return
+
+
 def _resolve_writable_vertex(vertex_path: Path) -> Path | None:
     """Resolve to the vertex that owns the writable store.
 
@@ -1050,6 +1095,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         if err is not None:
             show(Block.text(f"Error: {err}", p.error), file=sys.stderr)
             return 1
+
+        # Warn if payload is missing the fold key field (data quality)
+        _warn_missing_fold_key(vertex_path, kind, payload, show, Block, p)
 
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(

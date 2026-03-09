@@ -773,6 +773,46 @@ def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:
     return ast, store_path
 
 
+def _extract_field(payload: dict, field: str) -> str:
+    """Extract a search field value from a payload, handling nested paths and polymorphic values.
+
+    Supports:
+    - Flat fields: ``"prompt"`` → ``payload["prompt"]``
+    - Dot paths: ``"message.content"`` → ``payload["message"]["content"]``
+    - String values: returned directly
+    - List of dicts: extracts ``"text"`` from each element, concatenates
+    - List of strings: concatenated
+    - Dict values: JSON-serialized (fallback)
+    - Missing fields: empty string
+    """
+    # Traverse dot path
+    value: Any = payload
+    for part in field.split("."):
+        if isinstance(value, dict):
+            value = value.get(part)
+        else:
+            return ""
+        if value is None:
+            return ""
+
+    # Resolve polymorphic value
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return " ".join(parts)
+    if isinstance(value, dict):
+        return json.dumps(value)
+    return str(value)
+
+
 def _ensure_fts(
     store_path: Path, search_fields: dict[str, tuple[str, ...]]
 ) -> None:
@@ -815,7 +855,7 @@ def _ensure_fts(
             if not fields:
                 continue  # Kind has no search declaration — skip
             payload = json.loads(payload_json)
-            text = " ".join(str(payload.get(f, "")) for f in fields)
+            text = " ".join(_extract_field(payload, f) for f in fields)
             if text.strip():
                 conn.execute(
                     "INSERT INTO facts_fts(text_content, fact_rowid, kind, observer) "

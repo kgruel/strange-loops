@@ -540,6 +540,149 @@ class TestVertexSearch:
         assert type(search_result["payload"]) is type(facts_result["payload"])
 
 
+class TestExtractField:
+    """_extract_field: nested paths and polymorphic value extraction for FTS5."""
+
+    def test_flat_string(self):
+        from engine.vertex_reader import _extract_field
+
+        assert _extract_field({"prompt": "hello world"}, "prompt") == "hello world"
+
+    def test_dot_path(self):
+        from engine.vertex_reader import _extract_field
+
+        payload = {"message": {"content": "nested value"}}
+        assert _extract_field(payload, "message.content") == "nested value"
+
+    def test_array_of_content_blocks(self):
+        from engine.vertex_reader import _extract_field
+
+        payload = {"message": {"content": [
+            {"type": "text", "text": "First paragraph."},
+            {"type": "text", "text": "Second paragraph."},
+        ]}}
+        assert _extract_field(payload, "message.content") == "First paragraph. Second paragraph."
+
+    def test_array_of_strings(self):
+        from engine.vertex_reader import _extract_field
+
+        payload = {"tags": ["python", "loops", "vertex"]}
+        assert _extract_field(payload, "tags") == "python loops vertex"
+
+    def test_missing_field(self):
+        from engine.vertex_reader import _extract_field
+
+        assert _extract_field({}, "nonexistent") == ""
+        assert _extract_field({"a": {"b": 1}}, "a.c") == ""
+        assert _extract_field({"a": "flat"}, "a.b") == ""
+
+    def test_dict_fallback(self):
+        from engine.vertex_reader import _extract_field
+
+        payload = {"meta": {"nested": {"key": "val"}}}
+        result = _extract_field(payload, "meta.nested")
+        assert '"key"' in result and '"val"' in result
+
+    def test_mixed_content_blocks(self):
+        """Array with non-text blocks — only text fields extracted."""
+        from engine.vertex_reader import _extract_field
+
+        payload = {"message": {"content": [
+            {"type": "text", "text": "Real content."},
+            {"type": "tool_use", "id": "123", "name": "read"},
+            {"type": "text", "text": "More content."},
+        ]}}
+        assert _extract_field(payload, "message.content") == "Real content. More content."
+
+    def test_plain_string_value(self):
+        """String at dot-path — indexed directly, no array handling."""
+        from engine.vertex_reader import _extract_field
+
+        payload = {"message": {"content": "just a string"}}
+        assert _extract_field(payload, "message.content") == "just a string"
+
+
+class TestFTS5NestedFields:
+    """End-to-end: vertex_search with dot-path and polymorphic fields."""
+
+    def test_dot_path_search(self, tmp_path):
+        """search 'message.content' traverses nested dict."""
+        from engine import vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "message.content"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "exchange", "ts": 1000.0, "payload": {
+                "message": {"role": "user", "content": "explain quantum computing"},
+            }},
+            {"kind": "exchange", "ts": 2000.0, "payload": {
+                "message": {"role": "user", "content": "what is python"},
+            }},
+        ])
+
+        results = vertex_search(vpath, "quantum")
+        assert len(results) == 1
+        assert results[0]["payload"]["message"]["content"] == "explain quantum computing"
+
+    def test_content_blocks_search(self, tmp_path):
+        """Array-of-objects with text fields — concatenated and searchable."""
+        from engine import vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "message.content"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "exchange", "ts": 1000.0, "payload": {
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "Quantum computing uses qubits."},
+                    {"type": "text", "text": "They leverage superposition."},
+                ]},
+            }},
+        ])
+
+        results = vertex_search(vpath, "qubits")
+        assert len(results) == 1
+
+        results2 = vertex_search(vpath, "superposition")
+        assert len(results2) == 1
+
+    def test_missing_nested_field_no_error(self, tmp_path):
+        """Missing nested path produces empty string, not error."""
+        from engine import vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "message.content"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "exchange", "ts": 1000.0, "payload": {"other": "data"}},
+            {"kind": "exchange", "ts": 2000.0, "payload": {
+                "message": {"content": "findable"},
+            }},
+        ])
+
+        results = vertex_search(vpath, "findable")
+        assert len(results) == 1
+
+    def test_flat_field_still_works(self, tmp_path):
+        """Flat fields (no dot) still work — no regression."""
+        from engine import vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+
+        results = vertex_search(vpath, "hello")
+        assert len(results) == 1
+
+
 # ---------------------------------------------------------------------------
 # Combinatorial vertex helpers
 # ---------------------------------------------------------------------------

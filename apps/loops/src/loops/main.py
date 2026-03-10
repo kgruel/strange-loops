@@ -884,14 +884,60 @@ def _extract_kind_keys(vertex_path: Path) -> dict[str, str]:
     return kind_keys
 
 
+def _try_topology_from_store(
+    store_path: Path,
+) -> tuple[dict[str, str], list[Path]] | None:
+    """Try reading _topology fold from a store. Returns None on miss.
+
+    Validates that all cached store paths exist on disk. If any are
+    stale (deleted vertex), returns None to trigger fallback+refresh.
+    """
+    from engine import StoreReader
+
+    try:
+        with StoreReader(store_path) as reader:
+            facts = reader.facts_by_kind("_topology")
+    except Exception:
+        return None
+
+    if not facts:
+        return None
+
+    # Replay upsert fold manually: latest per name wins
+    topology: dict[str, dict] = {}
+    for fact in facts:
+        payload = fact["payload"]
+        name = payload.get("name")
+        if name:
+            topology[name] = payload
+
+    # Validate store paths exist and collect results
+    merged_kind_keys: dict[str, str] = {}
+    store_paths: list[Path] = []
+
+    for entry in topology.values():
+        store_str = entry.get("store", "")
+        if store_str:
+            sp = Path(store_str)
+            if sp.exists():
+                store_paths.append(sp)
+            else:
+                return None  # Stale — trigger fallback
+
+        kind_keys = entry.get("kind_keys", {})
+        merged_kind_keys.update(kind_keys)
+
+    return merged_kind_keys, store_paths
+
+
 def _topology_kind_keys_and_stores(
     root_vertex_path: Path,
 ) -> tuple[dict[str, str], list[Path]]:
     """Collect kind_keys and store paths from a root vertex's topology.
 
-    Walks discover/combine children, extracts fold-by key fields from each,
-    and collects their store paths. Same topology walk as vertex_reader but
-    extracting AST-level kind_keys rather than compiled Specs.
+    Cache-first: tries reading _topology fold from the root's own store.
+    On miss (no store, no _topology facts, or stale store paths), falls
+    back to filesystem walk and refreshes the cache.
     """
     from lang import parse_vertex_file
 
@@ -900,11 +946,21 @@ def _topology_kind_keys_and_stores(
     except Exception:
         return {}, []
 
+    # Fast path: try _topology facts from root's own store
+    if ast.store is not None:
+        own_store = ast.store
+        if not own_store.is_absolute():
+            own_store = (root_vertex_path.parent / own_store).resolve()
+        if own_store.exists():
+            result = _try_topology_from_store(own_store)
+            if result is not None:
+                return result
+
+    # Slow path: filesystem walk
     from engine.vertex_reader import _resolve_stores
 
     store_paths = _resolve_stores(ast, root_vertex_path)
 
-    # Collect kind_keys from each child vertex's declarations
     merged_kind_keys: dict[str, str] = {}
     base_dir = root_vertex_path.parent
 
@@ -923,6 +979,14 @@ def _topology_kind_keys_and_stores(
                 vpath = (base_dir / vpath).resolve()
             if vpath.exists():
                 merged_kind_keys.update(_extract_kind_keys(vpath))
+
+    # Refresh cache for next time
+    from engine.vertex_reader import emit_topology
+
+    try:
+        emit_topology(root_vertex_path)
+    except Exception:
+        pass  # Cache refresh is best-effort
 
     return merged_kind_keys, store_paths
 

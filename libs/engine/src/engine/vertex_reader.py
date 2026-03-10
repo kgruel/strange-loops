@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,118 @@ def _resolve_stores(ast: Any, vertex_path: Path) -> list[Path]:
     if ast.discover is not None:
         return _resolve_discover_stores(ast, vertex_path)
     return []
+
+
+def _child_topology_entry(ref_ast: Any, vpath: Path, base_dir: Path) -> dict:
+    """Build a topology entry dict for a single child vertex."""
+    from lang.ast import FoldBy
+
+    kind_keys: dict[str, str] = {}
+    for kind_name, loop_def in ref_ast.loops.items():
+        for fold_decl in loop_def.folds:
+            if isinstance(fold_decl.op, FoldBy):
+                kind_keys[kind_name] = fold_decl.op.key_field
+                break
+
+    store_str = ""
+    if ref_ast.store is not None:
+        sp = ref_ast.store
+        if not sp.is_absolute():
+            sp = (vpath.parent / sp).resolve()
+        store_str = str(sp)
+
+    try:
+        rel_path = str(vpath.relative_to(base_dir))
+    except ValueError:
+        rel_path = str(vpath)
+
+    return {
+        "name": ref_ast.name,
+        "path": rel_path,
+        "store": store_str,
+        "kind_keys": kind_keys,
+    }
+
+
+def _collect_topology_info(ast: Any, vertex_path: Path) -> list[dict]:
+    """Collect topology info for each child vertex in a discover/combine walk.
+
+    Returns a list of dicts with keys: name, path, store, kind_keys.
+    """
+    from lang import parse_vertex_file, resolve_vertex
+
+    children: list[dict] = []
+    base_dir = vertex_path.parent
+
+    if ast.discover is not None:
+        for match in sorted(base_dir.glob(ast.discover)):
+            if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
+                continue
+            try:
+                ref_ast = parse_vertex_file(match)
+            except Exception:
+                continue
+            children.append(_child_topology_entry(ref_ast, match, base_dir))
+
+    elif ast.combine is not None:
+        home = _loops_home()
+        for entry in ast.combine:
+            vpath = resolve_vertex(entry.name, home)
+            if not vpath.is_absolute():
+                vpath = (base_dir / vpath).resolve()
+            if not vpath.exists():
+                continue
+            try:
+                ref_ast = parse_vertex_file(vpath)
+            except Exception:
+                continue
+            children.append(_child_topology_entry(ref_ast, vpath, base_dir))
+
+    return children
+
+
+def emit_topology(vertex_path: Path) -> None:
+    """Walk discover/combine children and emit _topology facts to the aggregation's store.
+
+    Each discovered child becomes a _topology fact with name, path, store,
+    and kind_keys. Uses upsert fold (by name), so re-emission is idempotent.
+
+    Requires the vertex to have a store declaration.
+    """
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    if ast.store is None:
+        return
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    children = _collect_topology_info(ast, vertex_path)
+    if not children:
+        return
+
+    from .sqlite_store import SqliteStore
+
+    store = SqliteStore(
+        path=store_path,
+        serialize=lambda d: d,
+        deserialize=lambda d: d,
+    )
+
+    try:
+        ts = _time.time()
+        for child in children:
+            store.append({
+                "kind": "_topology",
+                "ts": ts,
+                "observer": ast.name,
+                "origin": "",
+                "payload": child,
+            })
+    finally:
+        store.close()
 
 
 class ConflictingFoldSpec(Exception):
@@ -516,13 +629,36 @@ def vertex_read(
 
     # Combinatorial or aggregation vertex: read across multiple stores.
     # Auto-inherit: source specs are the base, aggregation specs override.
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         source_specs = _collect_source_specs(
             ast, vertex_path, override_kinds=frozenset(specs)
         )
         # Source specs as base, aggregation specs override
         merged = {**source_specs, **specs}
-        return _combined_read(ast, vertex_path, merged, observer=observer)
+        result = _combined_read(ast, vertex_path, merged, observer=observer)
+
+        # Aggregation with own store: overlay self-knowledge from own store
+        if ast.store is not None:
+            own_store = ast.store
+            if not own_store.is_absolute():
+                own_store = (vertex_path.parent / own_store).resolve()
+            if own_store.exists():
+                with StoreReader(own_store) as reader:
+                    for kind, spec in specs.items():
+                        facts = reader.facts_by_kind(kind)
+                        if observer:
+                            facts = [f for f in facts if f["observer"] == observer]
+                        payloads = []
+                        for fact in facts:
+                            p = dict(fact["payload"])
+                            p["_ts"] = fact["ts"]
+                            p["_observer"] = fact["observer"]
+                            p["_origin"] = fact.get("origin", "")
+                            p["_id"] = fact.get("id")
+                            payloads.append(p)
+                        result[kind] = spec.replay(payloads)
+
+        return result
 
     # Resolve store path relative to vertex file
     if ast.store is None:
@@ -593,7 +729,7 @@ def vertex_fold(
     specs = compile_vertex(ast)
     # For combine/discover vertices, merge source specs so fold metadata
     # (fold_type, key_field) is available for inherited kinds too.
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         source_specs = _collect_source_specs(
             ast, vertex_path, override_kinds=frozenset(specs)
         )
@@ -681,7 +817,7 @@ def vertex_fact_by_id(
     ast, store_path = _resolve_store(vertex_path)
 
     # Combinatorial/aggregation vertex: search across stores
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         store_paths = _resolve_stores(ast, vertex_path)
         matches: list[dict] = []
         for sp in store_paths:
@@ -727,7 +863,7 @@ def vertex_facts(
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         facts = _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
     elif ast.store is None:
         facts = []
@@ -764,7 +900,7 @@ def vertex_ticks(
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         return _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
 
     if ast.store is None:
@@ -795,7 +931,7 @@ def vertex_summary(vertex_path: Path) -> dict:
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         return _combined_summary(ast, vertex_path)
 
     if ast.store is None:
@@ -970,7 +1106,7 @@ def vertex_search(
 
     ast = parse_vertex_file(vertex_path)
 
-    if ast.combine is not None or (ast.store is None and ast.discover is not None):
+    if ast.combine is not None or ast.discover is not None:
         return _combined_search(
             ast, vertex_path, query,
             kind=kind, since=since, until=until, limit=limit, observer=observer,

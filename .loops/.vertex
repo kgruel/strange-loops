@@ -1,8 +1,17 @@
 // loops monorepo — workspace root
+store "./data/root.db"
 discover "./**/*.vertex"
 
 observers {
   kyle { }
   loops-claude { }
   meta-claude { }
+}
+
+loops {
+  _topology {
+    fold {
+      items "by" "name"
+    }
+  }
 }

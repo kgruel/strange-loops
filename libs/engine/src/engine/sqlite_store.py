@@ -18,6 +18,14 @@ from typing import Any, Callable, Generic, TypeVar
 
 import sqlite_ulid
 
+
+def _mapping_proxy_default(obj: object) -> object:
+    """Handle MappingProxyType in JSON serialization."""
+    from types import MappingProxyType
+    if isinstance(obj, MappingProxyType):
+        return dict(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 from .tick import Tick
 
 T = TypeVar("T")
@@ -130,7 +138,8 @@ class SqliteStore(Generic[T]):
         d = tick.to_dict()
         self._conn.execute(
             "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (d["name"], d["ts"], d["since"], d["origin"], json.dumps(d["payload"])),
+            (d["name"], d["ts"], d["since"], d["origin"],
+             json.dumps(d["payload"], default=_mapping_proxy_default)),
         )
         self._conn.commit()
 

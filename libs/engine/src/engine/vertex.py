@@ -14,6 +14,12 @@ When a fact with that kind arrives, the engine's state is snapshot
 into a Tick and optionally reset. The boundary fires after the fold
 completes (fold-before-boundary).
 
+Decoupled boundary evaluation: evaluate_boundaries() checks boundary
+triggers for facts that arrived via external emit (between vertex runs).
+Facts folded during replay don't trigger boundaries — evaluate_boundaries()
+scans the current period's facts and fires any matching boundaries against
+the fully-rebuilt fold state. Called by the Executor before source execution.
+
 Grant-aware receive: the Vertex gates facts against an optional Grant's
 potential. Observer-state kinds (focus.{observer}, scroll.{observer},
 selection.{observer}) must match the fact's observer.
@@ -523,6 +529,116 @@ class Vertex:
                     break
 
         return len(facts)
+
+    def evaluate_boundaries(self) -> list[Tick]:
+        """Evaluate boundaries for facts that arrived since the last boundary fire.
+
+        Call after replay() to handle externally-emitted facts. During replay,
+        boundary evaluation is suppressed — the fold state is rebuilt but
+        boundaries don't fire. This method scans facts in the current period
+        and checks them against boundary triggers with the fully-rebuilt fold
+        state.
+
+        Handles kind-based, payload-match, and predicate (fold-state condition)
+        boundaries. Does NOT handle count-based boundaries (inherently
+        event-driven — they count facts as they arrive via receive()).
+
+        Returns list of Ticks produced by fired boundaries.
+        """
+        if self._store is None:
+            return []
+
+        ticks: list[Tick] = []
+
+        # Determine scan window: facts since the most recent tick.
+        # After a boundary fires (or on second evaluate), _vertex_period_start
+        # may be None (reset). Use the latest stored tick's timestamp as the
+        # authoritative scan start — avoids re-scanning already-evaluated facts.
+        since_ts: float = 0.0
+        if hasattr(self._store, 'ticks_since'):
+            stored_ticks = self._store.ticks_since(0)
+            if stored_ticks:
+                since_ts = stored_ticks[-1].ts.timestamp()
+        if self._vertex_period_start is not None:
+            ps_ts = self._vertex_period_start.timestamp()
+            if ps_ts > since_ts:
+                since_ts = ps_ts
+
+        import time as _time
+        period_facts = self._store.between(since_ts, _time.time())
+        if not period_facts:
+            return ticks
+
+        # Exclude facts at exactly the scan start — they were already
+        # evaluated in a previous cycle (the tick that set since_ts was
+        # produced from one of those facts).
+        if since_ts > 0:
+            period_facts = [f for f in period_facts if f.ts > since_ts]
+        if not period_facts:
+            return ticks
+
+        # Track which loop-level boundaries have fired this evaluation
+        # (one fire per boundary per evaluation cycle)
+        fired_boundaries: set[str] = set()
+
+        for fact in period_facts:
+            kind = fact.kind
+            payload = fact.payload
+            fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
+
+            # Track vertex-level period start if not set
+            if (self._vertex_boundary is not None
+                    and self._vertex_period_start is None):
+                self._vertex_period_start = fact_ts
+
+            # --- Vertex-level boundary ---
+            if self._vertex_boundary == kind:
+                if not self._vertex_boundary_match or all(
+                    payload.get(k) == v for k, v in self._vertex_boundary_match
+                ):
+                    if self._vertex_boundary_conditions:
+                        routed_kind = kind
+                        if kind not in self._loops:
+                            resolved = self._resolve_route(kind)
+                            if resolved is not None:
+                                routed_kind = resolved
+                        cond_loop = self._loops.get(routed_kind)
+                        if cond_loop is None or not _eval_conditions(
+                            cond_loop.state, self._vertex_boundary_conditions
+                        ):
+                            continue
+                    tick = self._fire_vertex_boundary(fact_ts, payload)
+                    self._store_tick(tick)
+                    ticks.append(tick)
+                    break  # Vertex-level fire ends the period
+                continue
+
+            # --- Loop-level boundary ---
+            fold_kind = self._boundary_map.get(kind)
+            if fold_kind is None or fold_kind in fired_boundaries:
+                continue
+
+            # Check payload match conditions
+            match = self._boundary_match.get(kind, ())
+            if match and not all(payload.get(k) == v for k, v in match):
+                continue
+
+            # Check fold-state conditions
+            conditions = self._boundary_conditions.get(kind, ())
+            if conditions:
+                target_loop = self._loops[fold_kind]
+                if not _eval_conditions(target_loop.state, conditions):
+                    continue
+
+            # Fire
+            target_loop = self._loops[fold_kind]
+            tick = target_loop.fire(fact_ts, origin=self._name,
+                                    boundary_payload=payload)
+            self._store_tick(tick)
+            ticks.append(tick)
+            fired_boundaries.add(fold_kind)
+
+        return ticks
 
     def to_fact(self, tick: Tick) -> Fact:
         """Convert a Tick to a Fact with this vertex as observer.

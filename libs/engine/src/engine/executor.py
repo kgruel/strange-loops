@@ -194,6 +194,13 @@ class Executor:
         fact_counts: dict[str, int] = {}
         fact_count = [0]  # mutable counter shared across async tasks
 
+        # Evaluate boundaries for externally-emitted facts (arrived via
+        # loops emit from another session, folded during replay but boundaries
+        # were suppressed). This runs before sources so boundary actions can
+        # trigger before new source data arrives.
+        boundary_ticks = self.vertex.evaluate_boundaries()
+        ticks.extend(boundary_ticks)
+
         if qualifying_indices:
             deps = _build_dependency_graph(self.sources)
             tiers = _toposort_tiers(set(qualifying_indices), deps)

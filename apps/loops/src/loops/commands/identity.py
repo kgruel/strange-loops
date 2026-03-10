@@ -175,10 +175,12 @@ def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
     if not all_observers:
         return None
 
-    # Find the observer declaration
+    # Find the observer declaration (supports namespaced observers)
+    from engine.observer import observer_matches
+
     decl = None
     for obs in all_observers:
-        if obs.name == observer:
+        if observer_matches(obs.name, observer):
             decl = obs
             break
 

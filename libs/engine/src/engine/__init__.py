@@ -38,6 +38,7 @@ from .source_protocol import ClosableSource
 from .source_protocol import Source as VertexSource
 
 # Identity & Policy
+from .observer import observer_leaf, observer_matches
 from .peer import (
     Grant,
     Peer,
@@ -100,6 +101,8 @@ __all__ = [
     "VertexSource",
     "ClosableSource",
     # Identity & Policy
+    "observer_leaf",
+    "observer_matches",
     "Peer",
     "Grant",
     "grant",

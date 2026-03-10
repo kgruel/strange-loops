@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .observer import observer_matches
 from .tick import Tick
 
 
@@ -359,7 +360,7 @@ def _combined_read(
             rows = conn.execute(sql, params).fetchall()
             payloads = []
             for r in rows:
-                if observer and r[3] != observer:
+                if observer and not observer_matches(r[3], observer):
                     continue
                 p = json.loads(r[5])
                 p["_id"] = r[0]
@@ -647,7 +648,7 @@ def vertex_read(
                     for kind, spec in specs.items():
                         facts = reader.facts_by_kind(kind)
                         if observer:
-                            facts = [f for f in facts if f["observer"] == observer]
+                            facts = [f for f in facts if observer_matches(f["observer"], observer)]
                         payloads = []
                         for fact in facts:
                             p = dict(fact["payload"])
@@ -676,7 +677,7 @@ def vertex_read(
         for kind, spec in specs.items():
             facts = reader.facts_by_kind(kind)
             if observer:
-                facts = [f for f in facts if f["observer"] == observer]
+                facts = [f for f in facts if observer_matches(f["observer"], observer)]
             # Inject fact metadata into payloads for folds that need it
             # (_ts for Latest fold, _observer for potential future use)
             payloads = []
@@ -879,7 +880,7 @@ def vertex_facts(
                 facts = reader.facts_between(since_ts, until_ts, kind=kind)
 
     if observer:
-        facts = [f for f in facts if f["observer"] == observer]
+        facts = [f for f in facts if observer_matches(f["observer"], observer)]
     return facts
 
 
@@ -1134,5 +1135,5 @@ def vertex_search(
             query, kind=kind, since=since, until=until, limit=limit
         )
         if observer:
-            facts = [f for f in facts if f["observer"] == observer]
+            facts = [f for f in facts if observer_matches(f["observer"], observer)]
         return facts

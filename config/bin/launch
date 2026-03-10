@@ -14,6 +14,7 @@ if [[ ! -x "$LOOPS" ]]; then
 fi
 
 # Identity belongs to the agent, not the delegation path
+# Read identity using the bare agent name (identity store is observer-scoped)
 identity=$("$LOOPS" read identity --observer "$agent" --plain 2>/dev/null || true)
 
 if [[ -z "$identity" ]]; then
@@ -23,6 +24,11 @@ fi
 # Emit session start — principal=kyle, agent name in payload for provenance
 "$LOOPS" emit session session principal=kyle agent="$agent" status=open 2>/dev/null || true
 
-# Start claude as the agent — observer matches declarations and stored facts
+# Namespaced observer: principal/agent — carries delegation provenance.
+# Matching at all sites understands that kyle/loops-claude matches
+# a bare declaration of loops-claude (backward compatible).
+observer="kyle/$agent"
+
+# Start claude as the agent — namespaced observer for full provenance
 cd "$workdir"
-exec env LOOPS_OBSERVER="$agent" claude --system-prompt "$identity"
+exec env LOOPS_OBSERVER="$observer" claude --system-prompt "$identity"

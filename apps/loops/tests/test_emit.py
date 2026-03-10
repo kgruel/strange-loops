@@ -595,6 +595,88 @@ class TestObserverResolution:
         assert "not declared" in err
         assert "unknown-user" in err
 
+    def test_namespaced_observer_matches_bare_declaration(self, tmp_path, monkeypatch, capsys):
+        """Namespaced observer kyle/loops-claude matches bare declaration loops-claude."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  loops-claude { }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "kyle/loops-claude",
+                "count=1",
+            ]
+        )
+        assert result == 0
+
+    def test_namespaced_observer_via_env(self, tmp_path, monkeypatch, capsys):
+        """LOOPS_OBSERVER=kyle/loops-claude accepted when loops-claude is declared."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  loops-claude { }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setenv("LOOPS_OBSERVER", "kyle/loops-claude")
+
+        result = main(
+            ["session", "emit", "counter", "count=1", "--dry-run"]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["observer"] == "kyle/loops-claude"
+
+    def test_namespaced_observer_wrong_agent_rejected(self, tmp_path, monkeypatch, capsys):
+        """kyle/unknown-agent is rejected when only loops-claude is declared."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  loops-claude { }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "kyle/unknown-agent",
+                "count=1",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "not declared" in err
+
+    def test_namespaced_grant_potential_enforced(self, tmp_path, monkeypatch, capsys):
+        """Grant potential is still enforced for namespaced observers."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  ci-bot {\n    grant {\n      potential "change" "log"\n    }\n  }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "--observer", "kyle/ci-bot",
+                "topic=test",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "cannot emit kind" in err
+
     def test_combine_cascade_inherits_source_observers(self, tmp_path, monkeypatch, capsys):
         """Aggregation vertex inherits observers from combine source vertices."""
         home = tmp_path / "home"

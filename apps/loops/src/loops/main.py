@@ -488,6 +488,30 @@ def _resolve_combine_vertex_paths(vertex_path: Path) -> list[Path]:
     return child_paths
 
 
+def _execute_boundary_run(command: str, tick_name: str, vertex_path: Path) -> None:
+    """Execute a boundary run clause — fire and forget.
+
+    Engine produces ticks with run metadata. This function executes
+    the command as a subprocess, inheriting the vertex directory as cwd.
+    The command runs asynchronously — sync continues without waiting.
+
+    Errors are logged to stderr but don't fail the sync.
+    """
+    import subprocess
+
+    cwd = vertex_path.parent
+    _err(f"  boundary {tick_name} → run: {command}")
+    try:
+        subprocess.Popen(
+            command,
+            shell=True,
+            cwd=str(cwd),
+            start_new_session=True,  # detach from parent process group
+        )
+    except OSError as e:
+        _err(f"  [ERROR] boundary run failed: {e}")
+
+
 def _run_sync_aggregate(
     child_paths: list[Path],
     *,
@@ -528,6 +552,12 @@ def _run_sync_aggregate(
             if not child_program.sources:
                 continue
             result = child_program.sync(on_error=log_error, force=force)
+
+            # Execute boundary run clauses — fire and forget
+            for tick in result.ticks:
+                if tick.run:
+                    _execute_boundary_run(tick.run, tick.name, child_path)
+
             all_ran.extend(result.ran)
             all_skipped.extend(
                 {"kind": s.kind, "last_run_ts": s.last_run_ts, "cadence_interval": s.cadence_interval}
@@ -549,6 +579,7 @@ def _run_sync_aggregate(
                     "ts": tick.ts,
                     "payload": tick.payload,
                     "origin": getattr(tick, "origin", ""),
+                    **({"run": tick.run} if tick.run else {}),
                 }
                 for tick in result.ticks
             )
@@ -669,6 +700,13 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     def fetch():
         result = program.sync(on_error=log_error, force=force)
+
+        # Execute boundary run clauses — fire and forget.
+        # Engine produces ticks with run metadata; app layer executes.
+        for tick in result.ticks:
+            if tick.run:
+                _execute_boundary_run(tick.run, tick.name, vertex_path)
+
         return {
             "ran": result.ran,
             "skipped": [
@@ -690,6 +728,7 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
                     "ts": tick.ts,
                     "payload": tick.payload,
                     "origin": getattr(tick, "origin", ""),
+                    **({"run": tick.run} if tick.run else {}),
                 }
                 for tick in result.ticks
             ],

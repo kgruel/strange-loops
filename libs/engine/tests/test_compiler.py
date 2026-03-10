@@ -1019,6 +1019,54 @@ loops {
         # State was reset
         assert runtime.state("batch") == {"count": 0}
 
+    def test_materialize_boundary_run_clause(self):
+        """Run clause flows through: KDL → AST → Boundary → Loop → Tick."""
+        from engine.compiler import materialize_vertex
+
+        vertex = parse_vertex("""\
+name "orchestration"
+loops {
+  task {
+    fold { items "by" "name" }
+    boundary when="task.done" {
+      run "scripts/dispatch.sh"
+    }
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        from atoms import Fact
+
+        runtime.receive(Fact.of("task", "test", name="job1"))
+        tick = runtime.receive(Fact.of("task.done", "test"))
+        assert tick is not None
+        assert tick.run == "scripts/dispatch.sh"
+
+    def test_materialize_vertex_boundary_run_clause(self):
+        """Vertex-level boundary run clause flows through to tick."""
+        from engine.compiler import materialize_vertex
+
+        vertex = parse_vertex("""\
+name "project"
+loops {
+  decision { fold { items "by" "topic" } }
+  boundary when="session" status="closed" {
+    run "scripts/session-close.sh"
+  }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        from atoms import Fact
+
+        runtime.receive(Fact.of("decision", "test", topic="auth", position="JWT"))
+        tick = runtime.receive(Fact.of("session", "test", status="closed"))
+        assert tick is not None
+        assert tick.run == "scripts/session-close.sh"
+
     def test_materialize_with_fold_override(self):
         """Custom fold functions override Spec.apply."""
         from engine.compiler import materialize_vertex

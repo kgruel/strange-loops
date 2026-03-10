@@ -294,6 +294,14 @@ def _load_fold_block(node: ckdl.Node, path: Path | None) -> tuple[FoldDecl, ...]
 
 def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
     props = node.properties
+    # Extract optional run clause from children (valid for all boundary modes)
+    run_cmd: str | None = None
+    for child in node.children:
+        if child.name == "run":
+            if not child.args:
+                raise _error("run requires a command argument: run \"command\"", path)
+            run_cmd = str(child.args[0])
+
     if "when" in props:
         # Extra properties beyond when= are payload match conditions
         match = tuple(
@@ -306,17 +314,32 @@ def _load_boundary(node: ckdl.Node, path: Path | None) -> Boundary:
             if child.name == "condition"
         )
         # Reject unknown children
+        _boundary_children = {"condition", "run"}
         for child in node.children:
-            if child.name != "condition":
+            if child.name not in _boundary_children:
                 raise _error(
-                    f"unknown boundary child: {child.name!r} (expected 'condition')",
+                    f"unknown boundary child: {child.name!r} (expected 'condition' or 'run')",
                     path,
                 )
-        return BoundaryWhen(kind=str(props["when"]), match=match, conditions=conditions)
+        return BoundaryWhen(kind=str(props["when"]), match=match,
+                            conditions=conditions, run=run_cmd)
     if "after" in props:
-        return BoundaryAfter(count=int(props["after"]))
+        # Reject non-run children for count-based boundaries
+        for child in node.children:
+            if child.name != "run":
+                raise _error(
+                    f"unknown boundary child: {child.name!r} (count-based boundaries only support 'run')",
+                    path,
+                )
+        return BoundaryAfter(count=int(props["after"]), run=run_cmd)
     if "every" in props:
-        return BoundaryEvery(count=int(props["every"]))
+        for child in node.children:
+            if child.name != "run":
+                raise _error(
+                    f"unknown boundary child: {child.name!r} (count-based boundaries only support 'run')",
+                    path,
+                )
+        return BoundaryEvery(count=int(props["every"]), run=run_cmd)
     raise _error("boundary requires when=, after=, or every= property", path)
 
 

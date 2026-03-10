@@ -35,15 +35,19 @@ class Tick(Generic[T]):
     payload: T
     origin: str = ""
     since: datetime | None = None
+    run: str | None = None  # boundary run clause — command to execute on fire
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "ts": self.ts.timestamp(),
             "payload": self.payload,
             "origin": self.origin,
             "since": self.since.timestamp() if self.since else None,
         }
+        if self.run is not None:
+            d["run"] = self.run
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Tick:
@@ -53,4 +57,5 @@ class Tick(Generic[T]):
             payload=d["payload"],
             origin=d.get("origin", ""),
             since=datetime.fromtimestamp(d["since"], tz=timezone.utc) if d.get("since") else None,
+            run=d.get("run"),
         )

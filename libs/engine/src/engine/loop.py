@@ -54,6 +54,7 @@ class Loop:
     boundary_mode: Literal["when", "after", "every"] = "when"
     boundary_match: tuple[tuple[str, str], ...] = ()
     boundary_conditions: tuple = ()  # BoundaryCondition tuples from lang AST
+    boundary_run: str | None = None  # shell command to execute on fire
     reset: bool = True
     _projection: Projection = field(default=None, repr=False)  # type: ignore[assignment]
     _initial_snapshot: Any = field(default=None, repr=False)
@@ -128,6 +129,7 @@ class Loop:
             payload=state,
             origin=origin,
             since=self._period_start,
+            run=self.boundary_run,
         )
         if self.reset:
             self._projection.reset(copy.deepcopy(self._initial_snapshot))

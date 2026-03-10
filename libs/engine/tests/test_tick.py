@@ -284,3 +284,30 @@ class TestTickSerialization:
         d = {"name": "test", "ts": NOW.timestamp(), "payload": 1, "since": None}
         restored = Tick.from_dict(d)
         assert restored.origin == ""
+
+    def test_run_defaults_none(self):
+        tick = Tick(name="test", ts=NOW, payload=42)
+        assert tick.run is None
+
+    def test_run_on_tick(self):
+        tick = Tick(name="test", ts=NOW, payload=42, run="scripts/dispatch.sh")
+        assert tick.run == "scripts/dispatch.sh"
+
+    def test_run_round_trip(self):
+        tick = Tick(name="test", ts=NOW, payload={"x": 1}, run="scripts/alert.sh")
+        d = tick.to_dict()
+        assert d["run"] == "scripts/alert.sh"
+        restored = Tick.from_dict(d)
+        assert restored.run == "scripts/alert.sh"
+
+    def test_run_none_not_in_dict(self):
+        """Run=None is excluded from to_dict to avoid noise in storage."""
+        tick = Tick(name="test", ts=NOW, payload=42)
+        d = tick.to_dict()
+        assert "run" not in d
+
+    def test_run_from_dict_missing_defaults_none(self):
+        """Existing serialized ticks (no run field) deserialize with run=None."""
+        d = {"name": "test", "ts": NOW.timestamp(), "payload": 1, "since": None}
+        restored = Tick.from_dict(d)
+        assert restored.run is None

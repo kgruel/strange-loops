@@ -36,6 +36,8 @@ class Boundary:
             False = state carries (next cycle continues from current state).
         match: Payload conditions for kind-based boundaries.
         conditions: Fold-state predicates for kind-based boundaries.
+        run: Shell command to execute when boundary fires. Engine carries
+            this on the Tick; app layer executes fire-and-forget.
     """
 
     kind: str | None = None
@@ -44,6 +46,7 @@ class Boundary:
     reset: bool = True
     match: tuple[tuple[str, str], ...] = ()
     conditions: tuple = ()  # BoundaryCondition tuples from lang AST
+    run: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind is None and self.count is None:

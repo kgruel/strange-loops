@@ -403,6 +403,112 @@ loops {
         with pytest.raises(Exception, match="unknown boundary child"):
             parse_vertex(text)
 
+    def test_boundary_run_clause(self):
+        """Run clause parsed as child of boundary."""
+        text = """\
+name "orchestration"
+store "./data/orchestration.db"
+loops {
+  task {
+    fold { items "by" "name" }
+    boundary when="task" status="open" {
+      run "scripts/dispatch.sh"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["task"].boundary
+        assert b.run == "scripts/dispatch.sh"
+        assert b.kind == "task"
+        assert b.match == (("status", "open"),)
+
+    def test_boundary_run_with_conditions(self):
+        """Run clause composes with conditions."""
+        text = """\
+name "monitor"
+store "./data/monitor.db"
+loops {
+  reading {
+    fold { count "inc" }
+    boundary when="reading" {
+      condition "count" ">=" 100
+      run "scripts/alert.sh"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["reading"].boundary
+        assert b.run == "scripts/alert.sh"
+        assert len(b.conditions) == 1
+
+    def test_boundary_run_count_based(self):
+        """Run clause on count-based boundary."""
+        text = """\
+name "batch"
+store "./data/batch.db"
+loops {
+  event {
+    fold { items "collect" 50 }
+    boundary every="50" {
+      run "scripts/process-batch.sh"
+    }
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        b = vertex.loops["event"].boundary
+        assert b.run == "scripts/process-batch.sh"
+        assert b.count == 50
+
+    def test_vertex_boundary_run_clause(self):
+        """Run clause on vertex-level boundary."""
+        text = """\
+name "project"
+store "./data/project.db"
+loops {
+  decision { fold { items "by" "topic" } }
+  boundary when="session" status="closed" {
+    run "scripts/session-close.sh"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.boundary.run == "scripts/session-close.sh"
+
+    def test_boundary_no_run_clause(self):
+        """Boundary without run clause has run=None."""
+        text = """\
+name "test"
+store "./data/test.db"
+loops {
+  item {
+    fold { items "by" "name" }
+    boundary when="session" status="closed"
+  }
+}
+"""
+        vertex = parse_vertex(text)
+        assert vertex.loops["item"].boundary.run is None
+
+    def test_boundary_run_requires_argument(self):
+        """Run clause without command argument is rejected."""
+        text = """\
+name "test"
+store "./data/test.db"
+loops {
+  item {
+    fold { items "by" "name" }
+    boundary when="task" {
+      run
+    }
+  }
+}
+"""
+        with pytest.raises(Exception, match="run requires a command argument"):
+            parse_vertex(text)
+
     def test_every_as_loop_key_still_works(self):
         text = """\
 source "echo test"

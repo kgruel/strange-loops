@@ -337,11 +337,16 @@ class BoundaryWhen:
     Optional fold-state conditions: predicates on fold targets that must
     all be true. E.g. condition "high" ">=" 80 fires only when the "high"
     fold target is >= 80. Evaluated after match passes.
+
+    Optional run clause: shell command to execute when the boundary fires.
+    Declared in KDL as a child node: run "scripts/dispatch.sh"
+    Engine carries the command on the Tick; app layer executes fire-and-forget.
     """
 
     kind: str
     match: tuple[tuple[str, str], ...] = ()  # frozen payload conditions
     conditions: tuple[BoundaryCondition, ...] = ()  # fold state predicates
+    run: str | None = None  # shell command to execute on fire
 
 
 @dataclass(frozen=True)
@@ -349,6 +354,7 @@ class BoundaryAfter:
     """Count-based boundary: fire after N facts (one-shot)."""
 
     count: int
+    run: str | None = None  # shell command to execute on fire
 
 
 @dataclass(frozen=True)
@@ -356,6 +362,7 @@ class BoundaryEvery:
     """Count-based boundary: fire every N facts (repeating)."""
 
     count: int
+    run: str | None = None  # shell command to execute on fire
 
 
 Boundary = BoundaryWhen | BoundaryAfter | BoundaryEvery

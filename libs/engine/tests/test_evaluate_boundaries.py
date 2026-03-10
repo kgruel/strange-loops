@@ -313,6 +313,99 @@ class TestEvaluateBoundaries:
         store.close()
 
 
+class TestBoundaryRunClause:
+    """Test that the run clause propagates from boundary to Tick."""
+
+    def test_vertex_boundary_run_on_tick(self, tmp_path):
+        """Vertex-level boundary run clause carried on produced Tick."""
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("task", "kyle", name="job1", status="open"))
+
+        v = Vertex("orchestration", store=store)
+        v.register("task", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary(
+            "task", match=(("status", "open"),),
+            run="scripts/dispatch.sh",
+        )
+        v.replay()
+
+        ticks = v.evaluate_boundaries()
+        assert len(ticks) == 1
+        assert ticks[0].run == "scripts/dispatch.sh"
+        store.close()
+
+    def test_loop_boundary_run_on_tick(self, tmp_path):
+        """Loop-level boundary run clause carried on produced Tick."""
+        from engine.loop import Loop
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("task", "kyle", name="job1", status="open"))
+
+        v = Vertex("test", store=store)
+        loop = Loop(
+            name="task",
+            initial={},
+            fold=lambda s, p: {**s, p["name"]: p},
+            boundary_kind="task",
+            boundary_match=(("status", "open"),),
+            boundary_run="scripts/dispatch.sh",
+        )
+        v.register_loop(loop)
+        v.replay()
+
+        ticks = v.evaluate_boundaries()
+        assert len(ticks) == 1
+        assert ticks[0].run == "scripts/dispatch.sh"
+        store.close()
+
+    def test_no_run_clause_tick_run_is_none(self, tmp_path):
+        """Ticks from boundaries without run clause have run=None."""
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("task", "kyle", name="job1", status="open"))
+
+        v = Vertex("test", store=store)
+        v.register("task", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("task", match=(("status", "open"),))
+        v.replay()
+
+        ticks = v.evaluate_boundaries()
+        assert len(ticks) == 1
+        assert ticks[0].run is None
+        store.close()
+
+    def test_run_through_receive_path(self):
+        """Run clause also set on ticks produced via receive()."""
+        from engine.loop import Loop
+
+        v = Vertex("test")
+        loop = Loop(
+            name="task",
+            initial={},
+            fold=lambda s, p: {**s, p.get("name", "x"): p},
+            boundary_kind="task.done",
+            boundary_run="scripts/on-done.sh",
+        )
+        v.register_loop(loop)
+
+        # Fold some facts, then trigger the boundary
+        v.receive(_fact("task", name="job1"))
+        tick = v.receive(_fact("task.done"))
+        assert tick is not None
+        assert tick.run == "scripts/on-done.sh"
+
+
 class TestEvaluateBoundariesWithExecutor:
     """Test that the Executor calls evaluate_boundaries during sync."""
 

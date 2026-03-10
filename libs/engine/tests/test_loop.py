@@ -291,3 +291,52 @@ class TestCountBasedBoundaries:
         assert loop.receive({"value": 1}) is False
         assert loop.receive({"value": 2}) is False
         assert loop.receive({"value": 3}) is False
+
+
+class TestLoopRunClause:
+    """Loop propagates boundary_run to produced Ticks."""
+
+    def test_fire_sets_tick_run(self):
+        loop = Loop(
+            name="task",
+            initial={},
+            fold=lambda s, p: {**s, p.get("name", "x"): p},
+            boundary_kind="task",
+            boundary_run="scripts/dispatch.sh",
+        )
+        loop.receive({"name": "job1"}, ts=EARLIER)
+        tick = loop.fire(NOW, origin="test")
+        assert tick.run == "scripts/dispatch.sh"
+
+    def test_fire_without_run_clause(self):
+        loop = Loop(
+            name="task",
+            initial={},
+            fold=lambda s, p: {**s, p.get("name", "x"): p},
+            boundary_kind="task",
+        )
+        loop.receive({"name": "job1"}, ts=EARLIER)
+        tick = loop.fire(NOW, origin="test")
+        assert tick.run is None
+
+    def test_run_survives_reset(self):
+        """Run clause is a loop property, persists across fire/reset cycles."""
+        loop = Loop(
+            name="batch",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=2,
+            boundary_mode="every",
+            boundary_run="scripts/process.sh",
+            reset=True,
+        )
+        loop.receive({"x": 1}, ts=EARLIER)
+        loop.receive({"x": 2}, ts=NOW)
+        tick1 = loop.fire(NOW, origin="test")
+        assert tick1.run == "scripts/process.sh"
+
+        # After reset, next fire still carries run
+        loop.receive({"x": 3}, ts=LATER)
+        loop.receive({"x": 4}, ts=LATER)
+        tick2 = loop.fire(LATER, origin="test")
+        assert tick2.run == "scripts/process.sh"

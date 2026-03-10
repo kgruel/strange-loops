@@ -125,6 +125,7 @@ class Vertex:
         self._vertex_boundary: str | None = None  # vertex-level boundary kind
         self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
         self._vertex_boundary_conditions: tuple = ()
+        self._vertex_boundary_run: str | None = None  # boundary run clause
         self._vertex_period_start: datetime | None = None
         self._store = store
         self._replaying = False  # suppress boundaries during replay
@@ -263,6 +264,7 @@ class Vertex:
         kind: str,
         match: tuple[tuple[str, str], ...] = (),
         conditions: tuple = (),
+        run: str | None = None,
     ) -> None:
         """Register a vertex-level boundary.
 
@@ -273,6 +275,9 @@ class Vertex:
 
         Vertex-level boundaries take precedence over loop-level boundaries
         for the same kind.
+
+        Optional run clause: shell command carried on the Tick for app-layer
+        execution when the boundary fires.
         """
         if kind in self._boundary_map:
             raise ValueError(
@@ -281,6 +286,7 @@ class Vertex:
         self._vertex_boundary = kind
         self._vertex_boundary_match = match
         self._vertex_boundary_conditions = conditions
+        self._vertex_boundary_run = run
 
     def receive(
         self,
@@ -457,6 +463,7 @@ class Vertex:
             payload=state,
             origin=self._name,
             since=self._vertex_period_start,
+            run=self._vertex_boundary_run,
         )
         self._vertex_period_start = None  # reset for next period
         return tick

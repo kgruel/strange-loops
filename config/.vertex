@@ -6,6 +6,7 @@ observers {
   kyle { }
   loops-claude { }
   meta-claude { }
+  orchestrator { }
 }
 
 loops {

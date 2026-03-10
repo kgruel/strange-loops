@@ -1,0 +1,21 @@
+// orchestration — task dispatch via boundary run clauses.
+//
+// Emit a task with status=open, sync, boundary fires, dispatch script
+// creates a worktree and launches a worker. Worker emits status=completed
+// when done. No daemon, no polling — boundaries + sync heartbeat.
+name "orchestration"
+store "./data/orchestration.db"
+
+observers {
+  kyle { }
+  loops-claude { }
+}
+
+loops {
+  task {
+    fold { items "by" "name" }
+    boundary when="task" status="open" {
+      run "./scripts/dispatch.sh"
+    }
+  }
+}

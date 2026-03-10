@@ -674,14 +674,17 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # Aggregation vertex: no own sources but has combine children — sync each child
     if not program.sources:
         child_paths = _resolve_combine_vertex_paths(vertex_path)
-        if not child_paths:
+        if child_paths:
+            return _run_sync_aggregate(
+                child_paths, vars=vars or None, force=known.force,
+                parent_name=program.vertex.name, rest=rest,
+            )
+        # Sourceless vertex with a store: still sync to evaluate boundaries.
+        # Vertices like orchestration have no sources but boundaries with
+        # run clauses that fire on externally-emitted facts.
+        if program.vertex._store is None:
             _err("No sources configured")
             return 1
-
-        return _run_sync_aggregate(
-            child_paths, vars=vars or None, force=known.force,
-            parent_name=program.vertex.name, rest=rest,
-        )
 
     force = known.force
 
@@ -1519,6 +1522,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                         p.muted,
                     ),
                 )
+                # Execute boundary run clause if present — fire and forget
+                if tick.run:
+                    _execute_boundary_run(tick.run, tick.name, writable_path)
         finally:
             # Clean up the store connection
             if hasattr(program.vertex, '_store') and program.vertex._store is not None:

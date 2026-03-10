@@ -85,17 +85,20 @@ class TestSyncDispatch:
         result = main(["sync", "nonexistent"])
         assert result == 1
 
-    def test_sync_no_sources_errors(self, monkeypatch, tmp_path, capsys):
-        """loops sync on a vertex with no sources errors."""
+    def test_sync_no_sources_with_store_succeeds(self, monkeypatch, tmp_path, capsys):
+        """loops sync on a sourceless vertex with a store succeeds.
+
+        Sourceless vertices still benefit from sync — evaluate_boundaries()
+        fires run clauses for externally-emitted facts. Orchestration
+        vertices use this pattern.
+        """
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         vertex_path = _make_vertex_no_sources(tmp_path)
 
         from loops.main import _run_sync
 
         result = _run_sync([], vertex_path=vertex_path)
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "No sources" in captured.err
+        assert result == 0
 
 
 class TestSyncExecution:

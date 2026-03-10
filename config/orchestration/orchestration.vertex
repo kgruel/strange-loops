@@ -2,10 +2,12 @@
 //
 // The orchestrator agent manages implementation work: dispatches tasks
 // to workers, selects models, triages questions, coordinates merges.
-// Boundaries fire on task status transitions, run clauses execute dispatch.
+//
+// Two-phase dispatch:
+//   status=open    → orchestrator assesses (model selection, context gathering)
+//   status=assigned → dispatch script creates worktree, launches worker
 //
 // No daemon. Sync heartbeat from session hooks evaluates boundaries.
-// Emit a task with status=open, boundary fires, dispatch runs.
 name "orchestration"
 store "./data/orchestration.db"
 
@@ -17,11 +19,13 @@ observers {
 
 loops {
   // Tasks — the work items. Fold by name, latest status wins.
-  // Status lifecycle: open → assigned → running → review → completed → merged
+  // Lifecycle: open → assessed → assigned → running → review → completed → merged
   task {
     fold { items "by" "name" }
+
+    // Phase 1: orchestrator assesses — model selection, context enrichment
     boundary when="task" status="open" {
-      run "./scripts/dispatch.sh"
+      run "./scripts/assess.sh"
     }
   }
 
@@ -29,6 +33,11 @@ loops {
   // Fold by name: model, branch, worktree path, status.
   worker {
     fold { items "by" "name" }
+
+    // Phase 2: mechanical dispatch — create worktree, launch worker
+    boundary when="worker" status="assigned" {
+      run "./scripts/dispatch.sh"
+    }
   }
 
   // Questions — worker questions needing triage.

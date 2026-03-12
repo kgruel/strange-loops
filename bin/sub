@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# sub — commit and push a submodule change, then update the parent ref
+#
+# Usage:
+#   bin/sub libs/painted "commit message"
+#   bin/sub libs/painted                    # uses submodule's last commit message
+#
+# What it does:
+#   1. Commits staged changes in the submodule (if any unstaged, warns)
+#   2. Pushes the submodule to its origin
+#   3. Updates the submodule ref in the parent
+#   4. Commits and pushes the parent
+
+set -euo pipefail
+
+SUB_PATH="${1:?Usage: bin/sub <submodule-path> [message]}"
+MESSAGE="${2:-}"
+
+MONO_ROOT="$(git rev-parse --show-toplevel)"
+SUB_DIR="$MONO_ROOT/$SUB_PATH"
+
+if [ ! -d "$SUB_DIR/.git" ] && [ ! -f "$SUB_DIR/.git" ]; then
+    echo "error: $SUB_PATH is not a submodule" >&2
+    exit 1
+fi
+
+# Step 1: commit in submodule if there are staged changes
+cd "$SUB_DIR"
+if ! git diff --cached --quiet; then
+    if [ -z "$MESSAGE" ]; then
+        echo "error: staged changes in $SUB_PATH but no commit message provided" >&2
+        exit 1
+    fi
+    git commit -m "$MESSAGE"
+elif [ -n "$MESSAGE" ]; then
+    echo "warning: no staged changes in $SUB_PATH, skipping commit" >&2
+fi
+
+# Grab the message from the submodule's HEAD for the parent commit
+SUB_MSG="$(git log -1 --format=%s)"
+SUB_NAME="$(basename "$SUB_PATH")"
+
+# Step 2: push submodule
+git push origin main
+
+# Step 3+4: update parent ref, commit, push
+cd "$MONO_ROOT"
+git add "$SUB_PATH"
+if ! git diff --cached --quiet; then
+    git commit -m "Update $SUB_NAME submodule: $SUB_MSG"
+    git push origin main
+    echo "done: $SUB_NAME pushed, parent updated"
+else
+    echo "parent already tracks this submodule commit"
+fi

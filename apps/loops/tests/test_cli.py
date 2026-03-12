@@ -769,3 +769,30 @@ class TestInitFromSource:
         assert 'store "./data/project.db"' in content
         assert "decision" in content
         assert "thread" in content
+        # Registration: config-level vertex should now include this instance
+        updated_config = (config_dir / "project.vertex").read_text()
+        abs_path = str((project_dir / ".loops" / "project.vertex").resolve())
+        assert abs_path in updated_config
+
+    def test_init_aggregation_no_loops_no_store(self, monkeypatch, tmp_path, capsys):
+        """Aggregation vertex without loops block should produce minimal stub, not copy raw combine."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        config_dir = tmp_path / "project"
+        config_dir.mkdir()
+        # Comment contains "store" but there's no store directive — should not copy
+        (config_dir / "project.vertex").write_text(
+            '// project — aggregation vertex, combines project stores\n'
+            'name "project"\n'
+            'combine {\n'
+            '    vertex "/some/path"\n'
+            '}\n'
+        )
+        project_dir = tmp_path / "myproject"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        result = main(["init", "project"])
+        assert result == 0
+        content = (project_dir / ".loops" / "project.vertex").read_text()
+        # Should have a store directive (from minimal stub), not a combine block
+        assert 'store "./data/project.db"' in content
+        assert "combine" not in content

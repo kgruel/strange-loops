@@ -1,0 +1,20 @@
+// project — aggregation vertex + instance template
+// init stamps local instances from the loops block below.
+// Instances can diverge after creation.
+name "project"
+
+// combine block is populated automatically by `loops init project`
+// each registered project instance appears as a vertex line here
+combine {
+}
+
+loops {
+  decision { fold { items "by" "topic" } }
+  thread   { fold { items "by" "name" } }
+  change   { fold { items "collect" 20 } }
+  task     { fold { items "by" "name" } }
+  session  { fold { items "by" "name" } }
+  log      { fold { items "collect" 20 } }
+
+  boundary when="session" status="closed"
+}

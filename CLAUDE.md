@@ -18,7 +18,7 @@ config (declare)  →  loops CLI (use)  →  engine (runtime)  →  atoms (data)
 ```
 
 - **Query or emit** → `apps/loops/CLAUDE.md` Level 0
-- **New vertex, lens, or data domain** → `config/CLAUDE.md` Levels 1–2
+- **New vertex, lens, or data domain** → `experiments/config-reference/CLAUDE.md` Levels 1–2
 - **Modify a CLI command** → `apps/loops/CLAUDE.md` Level 2
 - **Change data primitives** → `libs/atoms/CLAUDE.md`
 - **Change runtime behavior** → `libs/engine/CLAUDE.md`
@@ -37,7 +37,7 @@ Each lib and app with a `./dev` script also supports `./dev check` (the CI gate)
 ## Structure
 
 ```
-config/             User-level vertex declarations, lenses, hooks (mirrors ~/.config/loops/)
+experiments/config-reference/  Reference vertex declarations and lenses (see ~/.config/loops/)
 
 libs/
   atoms/            Fact, Spec, Source, Parse, Fold — the three shapes and ingress

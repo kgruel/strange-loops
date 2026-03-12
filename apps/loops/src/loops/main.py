@@ -137,8 +137,10 @@ def _find_source_vertex(name: str) -> str | None:
     Priority:
     1. If the config vertex declares a loops block, build a synthetic
        instance from it (name + store + loops).
-    2. Direct config-level instance (has store).
+    2. Direct config-level instance (has a store directive).
     """
+    import re as _re
+
     home = loops_home()
     config_dir = home / name
     if not config_dir.exists():
@@ -152,8 +154,8 @@ def _find_source_vertex(name: str) -> str | None:
     loops_text = _extract_loops_text(content)
     if loops_text is not None:
         return f'name "{leaf}"\nstore "./data/{leaf}.db"\n\n{loops_text}\n'
-    # Direct instance (has store)
-    if "store" in content:
+    # Direct instance (has a store directive, not just the word in a comment)
+    if _re.search(r'^store\s', content, _re.MULTILINE):
         return content
     return None
 
@@ -163,6 +165,8 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
 
     Uses an existing config-level vertex as source if available,
     otherwise creates a minimal stub with store path and empty loops block.
+    After creating the local instance, registers it with the config-level
+    vertex's combine block (if one exists).
     """
     import re
 
@@ -189,7 +193,62 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
         vertex_path.write_text(content)
     data_dir = loops_dir / "data"
     data_dir.mkdir(exist_ok=True)
+
+    # Register with config-level aggregator
+    _register_with_aggregator(source_name or name, vertex_path)
+
     return vertex_path
+
+
+def _register_with_aggregator(name: str, local_vertex: Path) -> None:
+    """Add local instance to the config-level vertex's combine block.
+
+    If the config-level vertex has a combine block, add a vertex line
+    pointing to the new local instance. Idempotent — skips if already
+    registered or if no combine block exists.
+    """
+    home = loops_home()
+    leaf = Path(name).name
+    config_vertex = home / name / f"{leaf}.vertex"
+    if not config_vertex.exists():
+        return
+
+    content = config_vertex.read_text()
+    abs_path = str(local_vertex.resolve())
+
+    # Already registered?
+    if abs_path in content:
+        return
+
+    # Find the combine block and add the vertex line
+    combine_idx = content.find("\ncombine {")
+    if combine_idx == -1:
+        if content.startswith("combine {"):
+            combine_idx = -1  # will add 1 to get 0
+        else:
+            # No combine block — this vertex doesn't aggregate.
+            # Nothing to register with.
+            return
+
+    # Find the closing brace of the combine block
+    start = combine_idx + 1 if combine_idx >= 0 else 0
+    brace_start = content.index("{", start)
+    depth = 0
+    close_idx = brace_start
+    for i in range(brace_start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                close_idx = i
+                break
+
+    # Insert new vertex line before the closing brace
+    indent = "    "
+    new_line = f'{indent}vertex "{abs_path}"\n'
+    updated = content[:close_idx] + new_line + content[close_idx:]
+    config_vertex.write_text(updated)
 
 
 
@@ -1272,24 +1331,29 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
 
         if vertex_ref is not None:
-            # Try resolving the full name first (handles slashed names like comms/native)
-            candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
-
-            if not candidate.exists() and "/" in vertex_ref and not _is_path_like(vertex_ref):
-                # Full name didn't resolve — try splitting as vertex/template
-                vertex_ref, template_qualifier = vertex_ref.split("/", 1)
-                candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
-            if candidate.exists():
-                vertex_path = candidate
-            elif _is_path_like(vertex_ref):
-                # Explicit path that doesn't exist — error
-                show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
-                return 1
+            # Local-first resolution (matches vertex-first dispatch behavior)
+            local_candidate = _resolve_vertex_for_dispatch(vertex_ref)
+            if local_candidate is not None:
+                vertex_path = local_candidate
             else:
-                # vertex_ref doesn't resolve — reinterpret as kind, shift args
-                parts = [kind] + parts
-                kind = vertex_ref
-                vertex_ref = None
+                # Try config-level resolution (handles slashed names like comms/native)
+                candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
+
+                if not candidate.exists() and "/" in vertex_ref and not _is_path_like(vertex_ref):
+                    # Full name didn't resolve — try splitting as vertex/template
+                    vertex_ref, template_qualifier = vertex_ref.split("/", 1)
+                    candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
+                if candidate.exists():
+                    vertex_path = candidate
+                elif _is_path_like(vertex_ref):
+                    # Explicit path that doesn't exist — error
+                    show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
+                    return 1
+                else:
+                    # vertex_ref doesn't resolve — reinterpret as kind, shift args
+                    parts = [kind] + parts
+                    kind = vertex_ref
+                    vertex_ref = None
 
         if vertex_ref is None:
             # No vertex: try local
@@ -1737,7 +1801,9 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             from .commands.identity import resolve_local_vertex as _resolve_local_vertex
             vname = getattr(known, "vertex", None)
             if vname is not None:
-                vertex_path = _resolve_named_vertex(vname)
+                # Local-first: .loops/name.vertex → cwd → config-level
+                local = _resolve_vertex_for_dispatch(vname)
+                vertex_path = local if local is not None else _resolve_named_vertex(vname)
             else:
                 vertex_path = _resolve_local_vertex()
         # Apply vertex scope — deferred until vertex_path is known

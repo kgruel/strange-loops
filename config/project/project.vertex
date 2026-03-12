@@ -1,8 +1,0 @@
-// project — aggregation vertex, combines project stores
-// Loop declarations auto-inherited from combined sources.
-// Add a loops {} block here only to override source fold specs.
-name "project"
-
-combine {
-    vertex "/Users/kaygee/Code/loops/.loops/project.vertex"
-}

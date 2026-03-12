@@ -22,6 +22,6 @@ uv.lock
 *.tape
 check.vertex
 session.vertex
-!config/**/session.vertex
-!config/**/check.vertex
+!experiments/**/session.vertex
+!experiments/**/check.vertex
 .ruff_cache/

@@ -1,3 +1,0 @@
-✓ layers demo: 3 scenarios
-actions: Stay=2 Push=3 Pop=4 Quit=3
-invariants: base_never_pops ✓

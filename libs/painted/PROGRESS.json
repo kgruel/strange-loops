@@ -1,7 +1,0 @@
-[
-  { "step": "Create PROGRESS.json checklist", "done": true },
-  { "step": "Audit and update layers demo", "done": true },
-  { "step": "Add golden test for layers app", "done": true },
-  { "step": "Bootstrap golden output", "done": true },
-  { "step": "Run ./dev check", "done": true }
-]

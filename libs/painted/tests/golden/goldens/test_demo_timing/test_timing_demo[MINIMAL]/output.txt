@@ -1,1 +1,0 @@
-9 frames, avg 0.15ms/frame, max 0.42ms

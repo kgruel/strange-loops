@@ -1,6 +1,0 @@
-✓ postgres      db-1.internal:5432  300ms
-✓ redis         cache-1.internal:6379  200ms
-! api-gateway   gw-1.internal:8443  1400ms
-✓ worker        worker-1.internal:9090  500ms
-✗ scheduler     cron-1.internal:8080  1800ms
-✓ metrics       prom-1.internal:9091  700ms

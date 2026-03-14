@@ -166,7 +166,7 @@ def _render_item_rows(
         obs_suffix = f" ({item.observer})" if show_observer and item.observer else ""
 
         # SUMMARY: label + body snippet (first non-label payload field)
-        body = _find_body(payload, used_label_field)
+        body_field, body = _find_body_entry(payload, used_label_field)
         if body:
             reserved = len(label) + len(obs_suffix) + 6  # "  label (obs): snippet"
             if width is not None:
@@ -187,9 +187,8 @@ def _render_item_rows(
                 rows.append((f"    id:{item.id[:8]}", meta_style))
             skip = {used_label_field} if used_label_field else set()
             # Also skip the body field already shown in the summary line
-            body_field = _find_body_field(payload, used_label_field)
             if body_field:
-                skip = skip | {body_field}
+                skip.add(body_field)
             for k, v in payload.items():
                 if k in skip or not v:
                     continue
@@ -215,24 +214,14 @@ def _first_field(payload: dict) -> tuple[str, str | None]:
     return "?", None
 
 
-def _find_body(payload: dict, used_label_field: str | None) -> str | None:
-    """Find the first non-label field value — the 'body' of the item."""
+def _find_body_entry(payload: dict, used_label_field: str | None) -> tuple[str | None, str | None]:
+    """Return the first non-label payload field as (field_name, value)."""
     skip = {used_label_field} if used_label_field else set()
     for k, v in payload.items():
         if k in skip or not v:
             continue
-        return str(v)
-    return None
-
-
-def _find_body_field(payload: dict, used_label_field: str | None) -> str | None:
-    """Return the field name of the body, or None."""
-    skip = {used_label_field} if used_label_field else set()
-    for k, v in payload.items():
-        if k in skip or not v:
-            continue
-        return k
-    return None
+        return k, str(v)
+    return None, None
 
 
 def _truncate(text: str, max_len: int) -> str:

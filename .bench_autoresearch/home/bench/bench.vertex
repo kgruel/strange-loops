@@ -1,0 +1,15 @@
+name "bench"
+store "./data/bench.db"
+
+loops {
+  task {
+    fold {
+      items "by" "name"
+    }
+  }
+  decision {
+    fold {
+      items "by" "topic"
+    }
+  }
+}

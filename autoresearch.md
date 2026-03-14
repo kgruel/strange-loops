@@ -39,3 +39,4 @@ The workload is intentionally in-process so experiments can run quickly, but it 
 ## What's Been Tried
 - Initial benchmark selection: mixed `loops read` workload focused on fold + facts paths.
 - Big win: collapsed many per-line `Block.text(...)` allocations in `apps/loops/src/loops/lenses/fold.py` into batched `Block.column(...)` construction. This substantially reduced fold rendering overhead in piped/plain mode without changing output structure.
+- Follow-up win: applied the same batching approach to `apps/loops/src/loops/lenses/stream.py`, reducing the remaining stream rendering overhead while preserving emitted plain-text layout.

@@ -49,7 +49,7 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         parts = [f"{count} {kind}" for kind, count in counts.items()]
         return _block(", ".join(parts), Style(), width)
 
-    rows: list[Block] = []
+    rows: list[tuple[str, Style]] = []
     dim_style = Style(dim=True)
     id_style = Style(dim=True)
     current_date = None
@@ -69,8 +69,8 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         date_str = dt.strftime("%Y-%m-%d")
         if date_str != current_date:
             if current_date is not None:
-                rows.append(_block("", Style(), width))
-            rows.append(_block(f"{date_str}:", Style(bold=True), width))
+                rows.append(("", Style()))
+            rows.append((f"{date_str}:", Style(bold=True)))
             current_date = date_str
 
         time_str = dt.strftime("%H:%M")
@@ -89,30 +89,30 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         # Use fold_meta key_field for summary, fall back to heuristic
         key_field = fold_meta.get(kind_str, {}).get("key_field")
         summary = _stream_summary(payload, key_field)
-        rows.append(_block(f"  {time_str} [{kind_str}] {summary}", Style(), width))
+        rows.append((f"  {time_str} [{kind_str}] {summary}", Style()))
 
         # Show ID on a detail line when present
         if id_suffix:
-            rows.append(_block(f"           id:{id_suffix.strip()}", id_style, width))
+            rows.append((f"           id:{id_suffix.strip()}", id_style))
 
         if is_id_lookup or zoom >= Zoom.FULL:
             # --id lookup or FULL: show all fields — no truncation
             if f.get("observer"):
-                rows.append(Block.text(f"           observer: {f['observer']}", dim_style))
+                rows.append((f"           observer: {f['observer']}", dim_style))
             if f.get("origin"):
-                rows.append(Block.text(f"           origin: {f['origin']}", dim_style))
+                rows.append((f"           origin: {f['origin']}", dim_style))
             for key, val in payload.items():
                 if val:
-                    rows.append(Block.text(f"           {key}: {val}", dim_style))
+                    rows.append((f"           {key}: {val}", dim_style))
         elif zoom >= Zoom.DETAILED:
             # DETAILED: show non-summary fields on next line
             summary_fields = _summary_fields(payload, key_field)
             for key, val in payload.items():
                 if key in summary_fields or not val:
                     continue
-                rows.append(_block(f"           {key}: {val}", dim_style, width))
+                rows.append((f"           {key}: {val}", dim_style))
 
-    return join_vertical(*rows)
+    return Block.column(rows, width=width)
 
 
 # --- Heuristic label fields (same priority as fold lens) ---

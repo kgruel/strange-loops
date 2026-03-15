@@ -108,6 +108,7 @@ def load_vertex_program(
     fold_overrides: dict[str, FoldOverride] | None = None,
     default_fold_override: FoldOverride | None = None,
     validate_ast: bool = True,
+    skip_sources: bool = False,
 ) -> VertexProgram:
     """Load a .vertex file into a runnable (vertex, sources) program.
 
@@ -134,13 +135,16 @@ def load_vertex_program(
         validate(ast)
 
     compiled = compile_vertex_recursive(ast)
-    sources, template_specs = collect_all_sources(compiled)
-    compiled.specs.update(template_specs)
+    if skip_sources:
+        sources: list = []
+    else:
+        sources, template_specs = collect_all_sources(compiled)
+        compiled.specs.update(template_specs)
 
-    # Validate trigger dependencies form a DAG — fail early on cycles
-    from .executor import validate_dependency_graph
+        # Validate trigger dependencies form a DAG — fail early on cycles
+        from .executor import validate_dependency_graph
 
-    validate_dependency_graph(sources)
+        validate_dependency_graph(sources)
 
     overrides: dict[str, FoldOverride] = {}
     if default_fold_override is not None:

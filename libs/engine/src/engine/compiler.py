@@ -896,73 +896,25 @@ def materialize_vertex(
     # Register specs (or overrides) as fold engines
     for name, spec in compiled.specs.items():
         boundary = spec.boundary
-        reset = boundary.reset if boundary else True
-
-        b_match = boundary.match if boundary else ()
-        b_conditions = boundary.conditions if boundary else ()
-        b_run = boundary.run if boundary else None
 
         if name in overrides:
-            # Use custom fold
             initial, fold_fn = overrides[name]
-            if boundary and boundary.count is not None:
-                # Count-based boundary: use Loop
-                loop = Loop(
-                    name=name,
-                    initial=initial,
-                    fold=fold_fn,
-                    boundary_kind=boundary.kind,
-                    boundary_count=boundary.count,
-                    boundary_mode=boundary.mode,
-                    boundary_match=b_match,
-                    boundary_conditions=b_conditions,
-                    boundary_run=b_run,
-                    reset=reset,
-                )
-                vertex.register_loop(loop)
-            else:
-                # Kind-based boundary: use Loop for match support
-                loop = Loop(
-                    name=name,
-                    initial=initial,
-                    fold=fold_fn,
-                    boundary_kind=boundary.kind if boundary else None,
-                    boundary_match=b_match,
-                    boundary_conditions=b_conditions,
-                    boundary_run=b_run,
-                    reset=reset,
-                )
-                vertex.register_loop(loop)
         else:
-            # Use declarative Spec.apply
-            if boundary and boundary.count is not None:
-                # Count-based boundary: use Loop
-                loop = Loop(
-                    name=name,
-                    initial=spec.initial_state(),
-                    fold=spec.apply,
-                    boundary_kind=boundary.kind,
-                    boundary_count=boundary.count,
-                    boundary_mode=boundary.mode,
-                    boundary_match=b_match,
-                    boundary_conditions=b_conditions,
-                    boundary_run=b_run,
-                    reset=reset,
-                )
-                vertex.register_loop(loop)
-            else:
-                # Kind-based boundary: use Loop for match support
-                loop = Loop(
-                    name=name,
-                    initial=spec.initial_state(),
-                    fold=spec.apply,
-                    boundary_kind=boundary.kind if boundary else None,
-                    boundary_match=b_match,
-                    boundary_conditions=b_conditions,
-                    boundary_run=b_run,
-                    reset=reset,
-                )
-                vertex.register_loop(loop)
+            initial, fold_fn = spec.initial_state(), spec.apply
+
+        loop = Loop(
+            name=name,
+            initial=initial,
+            fold=fold_fn,
+            boundary_kind=boundary.kind if boundary else None,
+            boundary_count=boundary.count if boundary and boundary.count is not None else None,
+            boundary_mode=boundary.mode if boundary and boundary.count is not None else "when",
+            boundary_match=boundary.match if boundary else (),
+            boundary_conditions=boundary.conditions if boundary else (),
+            boundary_run=boundary.run if boundary else None,
+            reset=boundary.reset if boundary else True,
+        )
+        vertex.register_loop(loop)
 
     # Register per-kind parse pipelines
     if compiled.parse_pipelines:

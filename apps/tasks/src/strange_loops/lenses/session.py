@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
 
 
 def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
@@ -21,8 +21,8 @@ def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
     FULL: + ISO timestamps instead of short dates
     """
     from painted import Zoom
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     p = current_palette()

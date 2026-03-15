@@ -14,7 +14,7 @@ from painted.views import (
     list_view,
     shape_lens,
 )
-from painted.span import Line, Span
+from painted.core.span import Line, Span
 from painted.tui import Surface
 
 

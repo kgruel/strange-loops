@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
 
 
 def task_status_view(data: dict | list[dict], zoom: "Zoom", width: int) -> "Block":

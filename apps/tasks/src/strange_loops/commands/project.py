@@ -113,7 +113,7 @@ def cmd_project_emit(args: argparse.Namespace) -> int:
     emit_fact(sp, kind, obs, payload)
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     summary = " ".join(f"{k}={v}" for k, v in payload.items())
@@ -193,7 +193,7 @@ def cmd_project_bridge(args: argparse.Namespace) -> int:
 
     if not ticks:
         from painted import show
-        from painted.block import Block
+        from painted.core.block import Block
         from painted.palette import current_palette
 
         p = current_palette()
@@ -238,7 +238,7 @@ def cmd_project_bridge(args: argparse.Namespace) -> int:
         bridged.append(task_name)
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()

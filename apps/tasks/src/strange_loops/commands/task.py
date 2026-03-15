@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from painted.block import Block
+    from painted.core.block import Block
 
 from strange_loops import harness, worktree
 from strange_loops.lifecycle import fold_all_tasks, fold_task_state, tasks_vertex_path
@@ -40,8 +40,8 @@ def render_task(state: dict, zoom=None) -> "Block":
     FULL: + raw state dict dump below separator
     """
     from painted import Zoom
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     if zoom is None:
@@ -94,8 +94,8 @@ def render_task_list(tasks: list[dict], zoom=None) -> "Block":
     SUMMARY/DETAILED/FULL: header + each task at corresponding zoom.
     """
     from painted import Zoom
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     if zoom is None:
@@ -195,7 +195,7 @@ def cmd_task_create(args: argparse.Namespace) -> int:
     )
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -237,7 +237,7 @@ def cmd_task_assign(args: argparse.Namespace) -> int:
     )
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -269,7 +269,7 @@ def cmd_task_send(args: argparse.Namespace) -> int:
     emit_fact(sp, "task.stage", obs, {"name": name, "status": "working"})
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -439,7 +439,7 @@ def cmd_task_merge(args: argparse.Namespace) -> int:
     )
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -507,7 +507,7 @@ def cmd_task_run(args: argparse.Namespace) -> int:
     pid = harness.spawn(sp, name, wt_path, description, harness_type, obs)
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -538,7 +538,7 @@ def cmd_task_close(args: argparse.Namespace) -> int:
     emit_fact(sp, "task.stage", obs, {"name": name, "status": "closed"})
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -680,7 +680,7 @@ def cmd_task_stop(args: argparse.Namespace) -> int:
         emit_fact(sp, "task.stage", obs, {"name": name, "status": "stopped"})
 
         from painted import show
-        from painted.block import Block
+        from painted.core.block import Block
         from painted.palette import current_palette
 
         p = current_palette()
@@ -723,7 +723,7 @@ def cmd_task_stop(args: argparse.Namespace) -> int:
     emit_fact(sp, "task.stage", obs, {"name": name, "status": "stopped"})
 
     from painted import show
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()

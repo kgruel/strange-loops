@@ -2358,7 +2358,7 @@ def _render_main_help(argv: list[str]) -> int:
         render_help,
         scan_help_args,
     )
-    from painted.writer import print_block
+    from painted.core.writer import print_block
 
     zoom, fmt = scan_help_args(argv)
 

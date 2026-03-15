@@ -358,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         emit_fact(sp, "session.note", obs, {"message": message})
 
         from painted import show
-        from painted.block import Block
+        from painted.core.block import Block
         from painted.palette import current_palette
 
         p = current_palette()

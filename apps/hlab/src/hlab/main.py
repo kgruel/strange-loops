@@ -38,7 +38,7 @@ from painted.fidelity import (
     parse_format,
     detect_context,
 )
-from painted.writer import print_block
+from painted.core.writer import print_block
 
 from .theme import DEFAULT_THEME
 

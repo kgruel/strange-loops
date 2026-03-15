@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from painted import CliContext
-    from painted.block import Block
+    from painted.core.block import Block
 
 from strange_loops.lifecycle import fold_all_tasks, project_vertex_path, tasks_vertex_path
 from strange_loops.store import filter_task_facts
@@ -312,7 +312,7 @@ def _render(ctx: CliContext, state: DashboardState) -> Block:
 def _render_minimal(state: DashboardState, width: int) -> Block:
     """Zoom 0: one-line status counts."""
     from painted import truncate
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -343,7 +343,7 @@ def _sort_recent_first(tasks: list[TaskRow]) -> list[TaskRow]:
 
 def _separator(p) -> "Block":
     """Horizontal rule spanning the table width."""
-    from painted.block import Block
+    from painted.core.block import Block
 
     total_width = _COL_TASK + _COL_STATUS + _COL_CHANGES + _COL_ACTIVITY
     return Block.text("  " + "\u2500" * (total_width - 2), p.muted)
@@ -359,8 +359,8 @@ def _render_task_table(
 ) -> None:
     """Render tasks as a columnar table. Mutates blocks list."""
     from painted import Style
-    from painted.block import Block
-    from painted.compose import join_horizontal
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal
 
     if not tasks:
         return
@@ -399,8 +399,8 @@ def _render_task_table(
 
 def _render_summary(state: DashboardState, width: int) -> Block:
     """Zoom 1 (default): table for visible tasks, closed collapsed."""
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -428,8 +428,8 @@ def _render_summary(state: DashboardState, width: int) -> Block:
 
 def _render_detailed(state: DashboardState, width: int) -> Block:
     """Zoom 2 (-v): table with metadata, closed listed individually."""
-    from painted.block import Block
-    from painted.compose import join_horizontal, join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal, join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -463,8 +463,8 @@ def _render_detailed(state: DashboardState, width: int) -> Block:
 
 def _render_full(state: DashboardState, width: int) -> Block:
     """Zoom 3 (-vv): all tasks in table with metadata + store stats."""
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -497,8 +497,8 @@ _MIN_INTERACTIVE_WIDTH = 80
 def _render_header_block(state: DashboardState, w: int) -> "Block":
     """Header row: session status + fact count + key hints + clock."""
     from painted import Style
-    from painted.block import Block
-    from painted.compose import join_horizontal
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal
     from painted.palette import current_palette
 
     p = current_palette()
@@ -522,8 +522,8 @@ def _render_tasks_pane_block(
 ) -> "Block":
     """Left pane: scrollable task table with selection highlight."""
     from painted import Style
-    from painted.block import Block
-    from painted.compose import join_horizontal, join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal, join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -618,7 +618,7 @@ def _render_tasks_pane_block(
 def _render_fact_row_block(fact: dict, w: int) -> "Block":
     """Render a single fact as a Block row for the detail pane."""
     from painted import Style
-    from painted.block import Block
+    from painted.core.block import Block
 
     ts = fact["ts"]
     if isinstance(ts, datetime):
@@ -650,8 +650,8 @@ def _render_detail_pane_block(
 ) -> "Block":
     """Right pane: selected task detail with fact log."""
     from painted import Style
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -691,8 +691,8 @@ def _render_detail_pane_block(
 def _render_status_block(state: DashboardState, w: int) -> "Block":
     """Bottom status bar: project summary + last-updated."""
     from painted import Style
-    from painted.block import Block
-    from painted.compose import join_horizontal
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal
 
     proj = state.project
     proj_str = _project_header(proj) if proj else "No project store"
@@ -789,7 +789,7 @@ class DashboardSurface:
                 # Below minimum width: can't render interactive
                 if w < _MIN_INTERACTIVE_WIDTH:
                     self._buf.fill(0, 0, w, h, " ", Style())
-                    from painted.block import Block
+                    from painted.core.block import Block
 
                     msg = Block.text(
                         "Terminal too narrow for interactive mode.", Style(dim=True), width=w
@@ -805,7 +805,7 @@ class DashboardSurface:
                 _render_header_block(dashboard._state, w).paint(self._buf.region(0, 0, w, 1), 0, 0)
 
                 # HSep (row 1)
-                from painted.block import Block
+                from painted.core.block import Block
 
                 Block.text("\u2500" * w, Style(dim=True), width=w).paint(
                     self._buf.region(0, 1, w, 1), 0, 0

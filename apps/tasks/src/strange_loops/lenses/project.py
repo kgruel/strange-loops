@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
 
 
 def project_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
@@ -22,8 +22,8 @@ def project_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
     FULL: + ISO timestamps, + all payload fields individually
     """
     from painted import Zoom
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
@@ -99,7 +99,7 @@ def _render_project_item(
     Returns a list of Block lines.
     """
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
 
     dt = (
         f["ts"]

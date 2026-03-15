@@ -35,7 +35,7 @@ from painted import (
     MONO_PALETTE,
     DEFAULT_PALETTE,
 )
-from painted.compose import join_horizontal, join_vertical, pad
+from painted.core.compose import join_horizontal, join_vertical, pad
 
 
 # ---------------------------------------------------------------------------

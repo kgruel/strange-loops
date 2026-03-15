@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from painted.block import Block
+    from painted.core.block import Block
 
 _PKG_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -101,7 +101,7 @@ def format_date(dt: datetime) -> str:
 
 def fact_line(fact: dict) -> "Block":
     """Render a single fact as a styled Block."""
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     p = current_palette()
@@ -170,8 +170,8 @@ def tick_line(tick: dict) -> "Block":
     The ⚡ and status color distinguish ticks from regular fact lines.
     Accepts a tick dict (from tick_to_dict or fetch functions).
     """
-    from painted.block import Block
-    from painted.compose import join_horizontal
+    from painted.core.block import Block
+    from painted.core.compose import join_horizontal
     from painted.palette import current_palette
 
     p = current_palette()
@@ -220,8 +220,8 @@ def log_block(facts: list[dict], ticks: list[dict] | None = None) -> "Block":
 
     Returns a Block. Pass ticks=None or [] for fact-only logs.
     """
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     ticks = ticks or []
@@ -291,7 +291,7 @@ def fact_line_zoom(fact: dict, zoom) -> "list[Block]":
     FULL: ISO timestamp, each payload field on its own indented line.
     """
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     if zoom <= Zoom.SUMMARY:
@@ -349,7 +349,7 @@ def tick_line_zoom(tick: dict, zoom) -> "list[Block]":
     FULL: ISO timestamp, all payload fields individually.
     """
     from painted import Zoom
-    from painted.block import Block
+    from painted.core.block import Block
     from painted.palette import current_palette
 
     if zoom <= Zoom.SUMMARY:
@@ -390,8 +390,8 @@ def log_block_zoom(facts: list[dict], ticks: list[dict] | None, zoom) -> "Block"
     SUMMARY/DETAILED/FULL: date-grouped timeline using fact_line_zoom/tick_line_zoom.
     """
     from painted import Zoom
-    from painted.block import Block
-    from painted.compose import join_vertical
+    from painted.core.block import Block
+    from painted.core.compose import join_vertical
     from painted.palette import current_palette
 
     ticks = ticks or []

@@ -11,7 +11,7 @@ from engine import SqliteStore
 from engine.compiler import compile_sources_block
 from lang.ast import InlineSource, SourcesBlock
 from painted import Zoom
-from painted.writer import print_block
+from painted.core.writer import print_block
 
 import importlib.util
 import sys

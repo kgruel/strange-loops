@@ -16,7 +16,7 @@ from pathlib import Path
 from painted import Block, Style, Zoom, join_vertical
 from painted.fidelity import CliContext
 from painted.inplace import InPlaceRenderer
-from painted.writer import print_block
+from painted.core.writer import print_block
 
 from ..infra import HostConfig, run_ssh_streaming, ssh_base_args
 from ..inventory import (

@@ -120,17 +120,23 @@ class Vertex:
         self._name = name
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
+        self._has_loop_boundaries = False
         self._boundary_match: dict[str, tuple[tuple[str, str], ...]] = {}  # boundary_kind → match
         self._boundary_conditions: dict[str, tuple] = {}  # boundary_kind → conditions
         self._vertex_boundary: str | None = None  # vertex-level boundary kind
+        self._has_vertex_boundary = False
         self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
         self._vertex_boundary_conditions: tuple = ()
         self._vertex_boundary_run: str | None = None  # boundary run clause
         self._vertex_period_start: datetime | None = None
         self._store = store
         self._replaying = False  # suppress boundaries during replay
+        self._has_children = False
         self._children: list[Vertex] = []
         self._routes: dict[str, str] = {}  # pattern → loop_name
+        self._has_routes = False
+        self._route_cache: dict[str, str | None] = {}
+        self._accepts_cache: dict[str, bool] = {}
         self._parse_pipelines: dict[str, list] = {}  # kind → compiled ParseOp list
 
     @property
@@ -151,6 +157,8 @@ class Vertex:
         re-enter this vertex.
         """
         self._children.append(child)
+        self._has_children = True
+        self._accepts_cache.clear()
 
     def set_routes(self, routes: dict[str, str]) -> None:
         """Set pattern-based routing rules.
@@ -173,6 +181,9 @@ class Vertex:
             routes: Dict mapping glob patterns to loop names
         """
         self._routes = routes.copy()
+        self._has_routes = bool(self._routes)
+        self._route_cache.clear()
+        self._accepts_cache.clear()
 
     def set_parse_pipelines(self, pipelines: dict[str, list]) -> None:
         """Set per-kind parse pipelines.
@@ -190,10 +201,17 @@ class Vertex:
 
         Returns the loop name if a route matches, None otherwise.
         Patterns are checked in dict order (Python 3.7+ preserves insertion order).
+        Caches per-kind results because receive() and accepts() often see the
+        same kinds repeatedly.
         """
+        cached = self._route_cache.get(kind, None)
+        if kind in self._route_cache:
+            return cached
         for pattern, loop_name in self._routes.items():
             if fnmatch.fnmatch(kind, pattern):
+                self._route_cache[kind] = loop_name
                 return loop_name
+        self._route_cache[kind] = None
         return None
 
     def accepts(self, kind: str) -> bool:
@@ -204,12 +222,19 @@ class Vertex:
         child accepts it. Used by parent vertices to determine whether
         to forward facts to this child.
         """
-        if kind in self._loops or kind in self._boundary_map or kind == self._vertex_boundary:
-            return True
-        # Check pattern-based routes
-        if self._resolve_route(kind) is not None:
-            return True
-        return any(child.accepts(kind) for child in self._children)
+        cached = self._accepts_cache.get(kind)
+        if cached is not None:
+            return cached
+
+        accepted = (
+            kind in self._loops
+            or kind in self._boundary_map
+            or kind == self._vertex_boundary
+            or (self._has_routes and self._resolve_route(kind) is not None)
+            or (self._has_children and any(child.accepts(kind) for child in self._children))
+        )
+        self._accepts_cache[kind] = accepted
+        return accepted
 
     def register(
         self,
@@ -253,11 +278,31 @@ class Vertex:
             if loop.boundary_kind in self._boundary_map:
                 raise ValueError(f"Boundary kind already registered: {loop.boundary_kind}")
             self._boundary_map[loop.boundary_kind] = kind
+            self._has_loop_boundaries = True
             if loop.boundary_match:
                 self._boundary_match[loop.boundary_kind] = loop.boundary_match
             if loop.boundary_conditions:
                 self._boundary_conditions[loop.boundary_kind] = loop.boundary_conditions
         self._loops[kind] = loop
+        self._accepts_cache.clear()
+
+    def _routed_kind(self, kind: str) -> str:
+        """Resolve incoming fact kind to the target loop name, if any."""
+        if kind in self._loops or not self._has_routes:
+            return kind
+        resolved = self._resolve_route(kind)
+        return resolved if resolved is not None else kind
+
+    def _apply_parse_pipeline(self, routed_kind: str, payload: Any) -> Any:
+        """Apply per-kind parse pipeline, returning None when the fact is dropped."""
+        parse_pipeline = self._parse_pipelines.get(routed_kind)
+        if parse_pipeline is None:
+            return payload
+
+        from atoms import run_parse
+
+        parse_input = dict(payload) if hasattr(payload, "keys") else payload
+        return run_parse(parse_input, parse_pipeline)
 
     def register_vertex_boundary(
         self,
@@ -284,9 +329,11 @@ class Vertex:
                 f"Boundary kind '{kind}' already registered at loop level"
             )
         self._vertex_boundary = kind
+        self._has_vertex_boundary = True
         self._vertex_boundary_match = match
         self._vertex_boundary_conditions = conditions
         self._vertex_boundary_run = run
+        self._accepts_cache.clear()
 
     def receive(
         self,
@@ -330,10 +377,9 @@ class Vertex:
             return None
 
         # Gate 2: observer-state ownership
-        match = _OBSERVER_STATE_PATTERN.match(kind)
-        if match:
-            owner_name = match.group(2)
-            if owner_name != observer:
+        if kind[:6] in {"focus.", "scroll"} or kind.startswith("selection."):
+            _, _, owner_name = kind.partition(".")
+            if owner_name and owner_name != observer:
                 return None
 
         # Store the full fact (not just kind/payload) for replay
@@ -345,32 +391,23 @@ class Vertex:
 
         # Track vertex-level period start (first fact after reset)
         # Suppressed during replay — replay sets period from last tick instead
-        if (self._vertex_boundary is not None
+        if (self._has_vertex_boundary
                 and self._vertex_period_start is None
                 and not self._replaying):
             self._vertex_period_start = fact_ts
 
-        # Resolve routing: exact match first, then pattern-based routes
-        routed_kind = kind  # Default: route to same name as fact kind
-        if kind not in self._loops:
-            # No exact match — try pattern-based routes
-            resolved = self._resolve_route(kind)
-            if resolved is not None:
-                routed_kind = resolved
+        if self._has_routes:
+            routed_kind = self._routed_kind(kind)
+        else:
+            routed_kind = kind
 
-        # Apply per-kind parse pipeline (transforms payload before fold)
-        parse_pipeline = self._parse_pipelines.get(routed_kind)
-        if parse_pipeline is not None:
-            from atoms import run_parse
-            # Convert MappingProxyType to dict for parse pipeline
-            parse_input = dict(payload) if hasattr(payload, 'keys') else payload
-            parsed = run_parse(parse_input, parse_pipeline)
-            if parsed is None:
+        if self._parse_pipelines:
+            payload = self._apply_parse_pipeline(routed_kind, payload)
+            if payload is None:
                 # Parse rejected this fact — skip fold and routing,
                 # consistent with source-level parse where None means
                 # "drop the record." Fact is already stored for audit.
                 return None
-            payload = parsed
 
         # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire
@@ -381,34 +418,61 @@ class Vertex:
 
         # Forward to children that accept this kind
         # Skip the child that produced this fact (prevents loopback)
-        for child in self._children:
-            if child.name == _from_child:
-                continue
-            if child.accepts(kind):
-                child_tick = child.receive(fact, grant)
-                if child_tick is not None:
-                    # Child produced a tick — convert to fact and re-enter parent
-                    child_fact = self._tick_to_fact(child_tick, child.name)
-                    self.receive(child_fact, grant, _from_child=child.name)
+        if self._has_children:
+            for child in self._children:
+                if child.name == _from_child:
+                    continue
+                if child.accepts(kind):
+                    child_tick = child.receive(fact, grant)
+                    if child_tick is not None:
+                        # Child produced a tick — convert to fact and re-enter parent
+                        child_fact = self._tick_to_fact(child_tick, child.name)
+                        self.receive(child_fact, grant, _from_child=child.name)
 
-        # During replay, fold only — no boundaries fire
+        # Phase: boundary (live only — replay bypasses receive entirely)
         if self._replaying:
             return None
 
-        # Check count-based boundary trigger (Loop returned True)
+        return self._fire_live_boundaries(
+            kind, routed_kind, payload, loop, count_boundary_fire, fact_ts,
+        )
+
+    def _fire_live_boundaries(
+        self,
+        kind: str,
+        routed_kind: str,
+        payload: Any,
+        loop: Loop | None,
+        count_boundary_fire: bool,
+        fact_ts: datetime,
+    ) -> Tick | None:
+        """Fire boundaries after a live fact fold.
+
+        Handles count-based, vertex-level, and loop-level boundary triggers.
+        Only called on the live path — replay reconstructs fold state without
+        firing boundaries.
+
+        Extracted from receive() — the autoresearch proved empirically that
+        boundary evaluation is a distinct phase from fold routing. Every
+        optimization that skipped boundary work on the hot path improved
+        performance, because the cost is in deciding whether to fire, not
+        in folding.
+        """
+        # Count-based boundary trigger (Loop returned True during fold)
         if count_boundary_fire and loop is not None:
             tick = loop.fire(fact_ts, origin=self._name)
             self._store_tick(tick)
             return tick
 
-        # Check vertex-level boundary first (fires all loops)
-        if self._vertex_boundary == kind:
+        if not self._has_vertex_boundary and not self._has_loop_boundaries:
+            return None
+
+        # Vertex-level boundary (fires all loops)
+        if self._has_vertex_boundary and self._vertex_boundary == kind:
             if not self._vertex_boundary_match or all(
                 payload.get(k) == v for k, v in self._vertex_boundary_match
             ):
-                # Check fold-state conditions (if any)
                 if self._vertex_boundary_conditions:
-                    # Vertex-level: check conditions against the routed loop's state
                     cond_loop = self._loops.get(routed_kind)
                     if cond_loop is None or not _eval_conditions(
                         cond_loop.state, self._vertex_boundary_conditions
@@ -418,24 +482,21 @@ class Vertex:
                 self._store_tick(tick)
                 return tick
 
-        # Check loop-level kind-based boundary trigger
+        # Loop-level kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
             return None
 
-        # Check payload match conditions (if any)
         match = self._boundary_match.get(kind, ())
         if match and not all(payload.get(k) == v for k, v in match):
             return None
 
-        # Check fold-state conditions (if any)
         conditions = self._boundary_conditions.get(kind, ())
         if conditions:
             target_loop = self._loops[fold_kind]
             if not _eval_conditions(target_loop.state, conditions):
                 return None
 
-        # Fire from the target loop
         target_loop = self._loops[fold_kind]
         tick = target_loop.fire(fact_ts, origin=self._name,
                                 boundary_payload=payload)
@@ -520,8 +581,30 @@ class Vertex:
         store = self._store
         self._store = None  # suppress re-append during replay
         self._replaying = True  # suppress boundary firing and period tracking
-        for fact in facts:
-            self.receive(fact)
+        has_parse_pipelines = bool(self._parse_pipelines)
+        if not self._has_routes and not has_parse_pipelines and not self._has_children:
+            loops = self._loops
+            dt_fromtimestamp = datetime.fromtimestamp
+            tz = timezone.utc
+            for fact in facts:
+                loop = loops.get(fact.kind)
+                if loop is not None:
+                    loop.receive(fact.payload, ts=dt_fromtimestamp(fact.ts, tz=tz))
+        else:
+            for fact in facts:
+                routed_kind = self._routed_kind(fact.kind)
+                payload = fact.payload
+                if has_parse_pipelines:
+                    payload = self._apply_parse_pipeline(routed_kind, payload)
+                    if payload is None:
+                        continue
+                loop = self._loops.get(routed_kind)
+                if loop is not None:
+                    loop.receive(payload, ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc))
+                if self._has_children:
+                    for child in self._children:
+                        if child.accepts(fact.kind):
+                            child.receive(fact)
         self._replaying = False
         self._store = store  # restore
 
@@ -529,7 +612,7 @@ class Vertex:
         # Vertex-level boundary ticks use self._name as tick name.
         # The last such tick's ts is the end of the previous period —
         # the next boundary's since should start from there.
-        if self._vertex_boundary is not None and hasattr(store, 'ticks_since'):
+        if self._has_vertex_boundary and hasattr(store, 'ticks_since'):
             for tick in reversed(store.ticks_since(0)):
                 if tick.name == self._name:
                     self._vertex_period_start = tick.ts
@@ -579,10 +662,13 @@ class Vertex:
         # Exclude facts at exactly the scan start — they were already
         # evaluated in a previous cycle (the tick that set since_ts was
         # produced from one of those facts).
-        if since_ts > 0:
+        if since_ts > 0 and not self._has_vertex_boundary:
             period_facts = [f for f in period_facts if f.ts > since_ts]
-        if not period_facts:
-            return ticks
+            if not period_facts:
+                return ticks
+
+        if self._has_vertex_boundary and not self._boundary_map:
+            return self._evaluate_vertex_only_boundaries(period_facts, since_ts)
 
         # Track which loop-level boundaries have fired this evaluation
         # (one fire per boundary per evaluation cycle)
@@ -594,21 +680,16 @@ class Vertex:
             fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
 
             # Track vertex-level period start if not set
-            if (self._vertex_boundary is not None
-                    and self._vertex_period_start is None):
+            if self._has_vertex_boundary and self._vertex_period_start is None:
                 self._vertex_period_start = fact_ts
 
             # --- Vertex-level boundary ---
-            if self._vertex_boundary == kind:
+            if self._has_vertex_boundary and self._vertex_boundary == kind:
                 if not self._vertex_boundary_match or all(
                     payload.get(k) == v for k, v in self._vertex_boundary_match
                 ):
                     if self._vertex_boundary_conditions:
-                        routed_kind = kind
-                        if kind not in self._loops:
-                            resolved = self._resolve_route(kind)
-                            if resolved is not None:
-                                routed_kind = resolved
+                        routed_kind = self._routed_kind(kind)
                         cond_loop = self._loops.get(routed_kind)
                         if cond_loop is None or not _eval_conditions(
                             cond_loop.state, self._vertex_boundary_conditions
@@ -645,6 +726,69 @@ class Vertex:
             ticks.append(tick)
             fired_boundaries.add(fold_kind)
 
+        return ticks
+
+    def _evaluate_vertex_only_boundaries(
+        self, period_facts: list, since_ts: float,
+    ) -> list[Tick]:
+        """Evaluate boundaries when only a vertex-level boundary exists.
+
+        Fast path with no loop-level boundary scanning. Further specializes
+        for the common case where the vertex boundary has no fold-state
+        conditions — the majority of real vertices (project stores, identity
+        stores, session lifecycle).
+        """
+        ticks: list[Tick] = []
+        vertex_boundary = self._vertex_boundary
+        vertex_boundary_match = self._vertex_boundary_match
+        vertex_boundary_conditions = self._vertex_boundary_conditions
+
+        if not vertex_boundary_conditions:
+            for fact in period_facts:
+                if since_ts > 0 and fact.ts <= since_ts:
+                    continue
+                kind = fact.kind
+                payload = fact.payload
+                if kind != vertex_boundary:
+                    continue
+                fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
+                if self._vertex_period_start is None:
+                    self._vertex_period_start = fact_ts
+                if vertex_boundary_match and not all(
+                    payload.get(k) == v for k, v in vertex_boundary_match
+                ):
+                    continue
+                tick = self._fire_vertex_boundary(fact_ts, payload)
+                self._store_tick(tick)
+                ticks.append(tick)
+                return ticks
+            return ticks
+
+        loops = self._loops
+        routed_kind = self._routed_kind
+        for fact in period_facts:
+            if since_ts > 0 and fact.ts <= since_ts:
+                continue
+            kind = fact.kind
+            payload = fact.payload
+            if kind != vertex_boundary:
+                continue
+            fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
+            if self._vertex_period_start is None:
+                self._vertex_period_start = fact_ts
+            if vertex_boundary_match and not all(
+                payload.get(k) == v for k, v in vertex_boundary_match
+            ):
+                continue
+            cond_loop = loops.get(routed_kind(kind))
+            if cond_loop is None or not _eval_conditions(
+                cond_loop.state, vertex_boundary_conditions
+            ):
+                continue
+            tick = self._fire_vertex_boundary(fact_ts, payload)
+            self._store_tick(tick)
+            ticks.append(tick)
+            return ticks
         return ticks
 
     def to_fact(self, tick: Tick) -> Fact:

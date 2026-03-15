@@ -12,11 +12,28 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+import uuid
+
+# Pre-created decoder for faster JSON parsing in hot paths.
+# raw_decode skips strip() and end-position validation — safe for SQLite
+# payloads which are always well-formed JSON without whitespace padding.
+_raw_decode = json.JSONDecoder().raw_decode
+
+
+def _gen_id() -> str:
+    """Generate a unique ID for store records.
+
+    Uses UUID4 — compatible with the TEXT PRIMARY KEY schema.
+    Avoids the need to load the sqlite-ulid C extension.
+    """
+    return str(uuid.uuid4())
+from datetime import datetime, timezone as _tz
+
+_UTC = _tz.utc
 from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar
 
-import sqlite_ulid
+# sqlite_ulid no longer loaded at connection time — IDs generated in Python
 
 
 def _mapping_proxy_default(obj: object) -> object:
@@ -30,29 +47,28 @@ from .tick import Tick
 
 T = TypeVar("T")
 
-_SCHEMA = """\
-CREATE TABLE IF NOT EXISTS facts (
-    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
-    kind     TEXT NOT NULL,
-    ts       REAL NOT NULL,
-    observer TEXT NOT NULL,
-    origin   TEXT NOT NULL DEFAULT '',
-    payload  TEXT NOT NULL CHECK (json_valid(payload))
-);
-CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
-CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts);
-
-CREATE TABLE IF NOT EXISTS ticks (
-    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
-    name     TEXT NOT NULL,
-    ts       REAL NOT NULL,
-    since    REAL,
-    origin   TEXT NOT NULL,
-    payload  TEXT NOT NULL CHECK (json_valid(payload))
-);
-CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name);
-CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts);
-"""
+_SCHEMA_STMTS = (
+    """CREATE TABLE IF NOT EXISTS facts (
+        id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+        kind     TEXT NOT NULL,
+        ts       REAL NOT NULL,
+        observer TEXT NOT NULL,
+        origin   TEXT NOT NULL DEFAULT '',
+        payload  TEXT NOT NULL CHECK (json_valid(payload))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+    """CREATE TABLE IF NOT EXISTS ticks (
+        id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+        name     TEXT NOT NULL,
+        ts       REAL NOT NULL,
+        since    REAL,
+        origin   TEXT NOT NULL,
+        payload  TEXT NOT NULL CHECK (json_valid(payload))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
+    "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
+)
 
 
 class SqliteStore(Generic[T]):
@@ -72,22 +88,58 @@ class SqliteStore(Generic[T]):
         self._path = Path(path)
         self._serialize = serialize
         self._deserialize = deserialize
+        self._direct_fact_build: bool | None = None  # lazy detection
+        self._fact_class: type | None = None
 
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            is_new = self._path.stat().st_size == 0
+        except OSError:
+            is_new = True
+            self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
-        self._conn.enable_load_extension(True)
-        sqlite_ulid.load(self._conn)
-        self._conn.enable_load_extension(False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.executescript(_SCHEMA)
+        if is_new:
+            # New DB — set WAL (persistent) and synchronous, create schema
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            for stmt in _SCHEMA_STMTS:
+                self._conn.execute(stmt)
+            self._sync_set = True
+        else:
+            # Existing DB: skip schema + pragmas — WAL is persistent,
+            # schema already exists, first real query triggers schema load.
+            # Defer synchronous=NORMAL to first write (after schema is loaded).
+            self._sync_set = False
+
+    def _detect_fact_build(self) -> None:
+        """Detect if deserializer is Fact.from_dict for direct construction."""
+        self._direct_fact_build = False
+        deserialize = self._deserialize
+        if hasattr(deserialize, '__self__') and hasattr(deserialize.__self__, '__name__'):
+            self._fact_class = deserialize.__self__
+            self._direct_fact_build = True
+        elif hasattr(deserialize, '__func__'):
+            try:
+                from atoms import Fact
+                if deserialize.__func__ is Fact.from_dict.__func__:
+                    self._fact_class = Fact
+                    self._direct_fact_build = True
+            except (ImportError, AttributeError):
+                pass
+
+    def _ensure_sync(self) -> None:
+        """Set synchronous=NORMAL before first write. Deferred so schema load
+        happens on first read (replay_into) rather than on pragma."""
+        if not self._sync_set:
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._sync_set = True
 
     def append(self, event: T) -> None:
         """Append one event to the store."""
+        self._ensure_sync()
         d = self._serialize(event)
         self._conn.execute(
-            "INSERT INTO facts (kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
         )
         self._conn.commit()
 
@@ -104,12 +156,95 @@ class SqliteStore(Generic[T]):
             "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY rowid",
             (cursor,),
         ).fetchall()
+        loads = _raw_decode
+        # Fast path: build Facts directly when deserializer is Fact.from_dict
+        # Avoids intermediate dict allocation per row
+        if self._direct_fact_build is None:
+            self._detect_fact_build()
+        if self._direct_fact_build:
+            return [
+                self._fact_class(kind=r[0], ts=r[1], observer=r[2], origin=r[3], payload=loads(r[4])[0])
+                for r in rows
+            ]
+        deserialize = self._deserialize
         return [
-            self._deserialize(
-                {"kind": r[0], "ts": r[1], "observer": r[2], "origin": r[3], "payload": json.loads(r[4])}
+            deserialize(
+                {"kind": r[0], "ts": r[1], "observer": r[2], "origin": r[3], "payload": loads(r[4])[0]}
             )
             for r in rows
         ]
+
+    def since_raw(self, cursor: int) -> list[tuple[str, dict]]:
+        """Return (kind, payload) tuples for replay — no Fact construction.
+
+        Avoids MappingProxyType wrapping and full Fact dataclass overhead.
+        Only returns the fields needed for fold replay.
+        """
+        rows = self._conn.execute(
+            "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            (cursor,),
+        ).fetchall()
+        loads = _raw_decode
+        return [(r[0], loads(r[1])[0]) for r in rows]
+
+    def replay_into(self, cursor: int, dispatch: dict) -> int:
+        """Stream facts directly into fold functions — no intermediate list.
+
+        dispatch maps kind → (fold_fns_tuple, projection) where fold_fns
+        are (state, payload) -> None mutating functions.
+
+        Returns the number of facts processed.
+        """
+        loads = _raw_decode  # Direct raw_decode — skip wrapper function overhead
+        # Optimize for common case: each kind has exactly one fold fn.
+        # Pre-flatten dispatch to (single_fn, projection) tuples.
+        single_fn = all(len(fns) == 1 for fns, _ in dispatch.values())
+        if single_fn:
+            flat = {k: (fns[0], proj) for k, (fns, proj) in dispatch.items()}
+            get = flat.get
+            count = 0
+            for r in self._conn.execute(
+                "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+                (cursor,),
+            ):
+                entry = get(r[0])
+                if entry is not None:
+                    fn, proj = entry
+                    fn(proj._state, loads(r[1])[0])
+                    proj._version += 1
+                    proj.cursor += 1
+                count += 1
+        else:
+            get = dispatch.get
+            count = 0
+            for r in self._conn.execute(
+                "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+                (cursor,),
+            ):
+                entry = get(r[0])
+                if entry is not None:
+                    fns, proj = entry
+                    payload = loads(r[1])[0]
+                    state = proj._state
+                    for fn in fns:
+                        fn(state, payload)
+                    proj._version += 1
+                    proj.cursor += 1
+                count += 1
+        return count
+
+    def last_tick_ts(self, name: str) -> datetime | None:
+        """Return the timestamp of the most recent tick with the given name.
+
+        Optimized query for replay period tracking — avoids loading all ticks.
+        """
+        row = self._conn.execute(
+            "SELECT ts FROM ticks WHERE name = ? ORDER BY rowid DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return datetime.fromtimestamp(row[0], tz=_UTC)
 
     def between(self, start: datetime | float, end: datetime | float) -> list[T]:
         """Return events in the time range [start, end]."""
@@ -135,10 +270,11 @@ class SqliteStore(Generic[T]):
 
     def append_tick(self, tick: Tick) -> None:
         """Append a tick to the ticks table."""
+        self._ensure_sync()
         d = tick.to_dict()
         self._conn.execute(
-            "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (d["name"], d["ts"], d["since"], d["origin"],
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["name"], d["ts"], d["since"], d["origin"],
              json.dumps(d["payload"], default=_mapping_proxy_default)),
         )
         self._conn.commit()

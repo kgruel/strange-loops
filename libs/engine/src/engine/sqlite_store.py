@@ -187,51 +187,20 @@ class SqliteStore(Generic[T]):
         loads = _raw_decode
         return [(r[0], loads(r[1])[0]) for r in rows]
 
-    def replay_into(self, cursor: int, dispatch: dict) -> int:
-        """Stream facts directly into fold functions — no intermediate list.
+    def replay_cursor(self, cursor: int):
+        """Yield (kind, payload) pairs by streaming from the SQL cursor.
 
-        dispatch maps kind → (fold_fns_tuple, projection) where fold_fns
-        are (state, payload) -> None mutating functions.
-
-        Returns the number of facts processed.
+        No intermediate list allocation — rows are decoded and yielded
+        one at a time. The caller handles fold dispatch; the store just
+        provides data. This keeps fold logic in the Projection layer
+        where it belongs.
         """
-        loads = _raw_decode  # Direct raw_decode — skip wrapper function overhead
-        # Optimize for common case: each kind has exactly one fold fn.
-        # Pre-flatten dispatch to (single_fn, projection) tuples.
-        single_fn = all(len(fns) == 1 for fns, _ in dispatch.values())
-        if single_fn:
-            flat = {k: (fns[0], proj) for k, (fns, proj) in dispatch.items()}
-            get = flat.get
-            count = 0
-            for r in self._conn.execute(
-                "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
-                (cursor,),
-            ):
-                entry = get(r[0])
-                if entry is not None:
-                    fn, proj = entry
-                    fn(proj._state, loads(r[1])[0])
-                    proj._version += 1
-                    proj.cursor += 1
-                count += 1
-        else:
-            get = dispatch.get
-            count = 0
-            for r in self._conn.execute(
-                "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
-                (cursor,),
-            ):
-                entry = get(r[0])
-                if entry is not None:
-                    fns, proj = entry
-                    payload = loads(r[1])[0]
-                    state = proj._state
-                    for fn in fns:
-                        fn(state, payload)
-                    proj._version += 1
-                    proj.cursor += 1
-                count += 1
-        return count
+        loads = _raw_decode
+        for r in self._conn.execute(
+            "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            (cursor,),
+        ):
+            yield r[0], loads(r[1])[0]
 
     def last_tick_ts(self, name: str) -> datetime | None:
         """Return the timestamp of the most recent tick with the given name.

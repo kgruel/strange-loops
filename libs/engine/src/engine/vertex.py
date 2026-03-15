@@ -587,24 +587,28 @@ class Vertex:
 
         if use_raw:
             loops = self._loops
-            # Pre-build fold fns for each loop to avoid deep-copy during replay
-            loop_fns: dict[str, tuple] = {}
+            # Pre-build mutating fold dispatch: kind → (fns, projection)
+            # Uses Projection.fold_one_mut — fold logic stays in Projection.
+            mut_dispatch: dict[str, tuple] = {}
             for kind, loop in loops.items():
                 fold_fn = loop._projection._fold
                 if fold_fn is not None and hasattr(fold_fn, '__self__'):
                     spec = fold_fn.__self__
                     if hasattr(spec, 'folds') and hasattr(spec, '_cached_fold_fns'):
-                        loop_fns[kind] = spec._cached_fold_fns
+                        mut_dispatch[kind] = (spec._cached_fold_fns, loop._projection)
 
-            # Stream path: fold directly from SQL cursor — no intermediate list
-            if loop_fns and hasattr(store, 'replay_into'):
-                dispatch = {
-                    kind: (fns, loops[kind]._projection)
-                    for kind, fns in loop_fns.items()
-                }
+            # Stream path: store provides data, vertex dispatches to projections
+            if mut_dispatch and hasattr(store, 'replay_cursor'):
                 self._store = None
                 self._replaying = True
-                count = store.replay_into(0, dispatch)
+                get = mut_dispatch.get
+                count = 0
+                for kind, payload in store.replay_cursor(0):
+                    entry = get(kind)
+                    if entry is not None:
+                        fns, proj = entry
+                        proj.fold_one_mut(payload, fns)
+                    count += 1
                 if count == 0:
                     self._replaying = False
                     self._store = store
@@ -616,15 +620,12 @@ class Vertex:
                 count = len(raw_facts)
                 self._store = None
                 self._replaying = True
-                if loop_fns:
+                if mut_dispatch:
                     for kind, payload in raw_facts:
-                        fns = loop_fns.get(kind)
-                        if fns is not None:
-                            proj = loops[kind]._projection
-                            for fn in fns:
-                                fn(proj._state, payload)
-                            proj._version += 1
-                            proj.cursor += 1
+                        entry = mut_dispatch.get(kind)
+                        if entry is not None:
+                            fns, proj = entry
+                            proj.fold_one_mut(payload, fns)
                 else:
                     for kind, payload in raw_facts:
                         loop = loops.get(kind)

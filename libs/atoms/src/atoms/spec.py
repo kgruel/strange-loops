@@ -89,6 +89,17 @@ class Spec:
         """Deprecated: use state_field instead."""
         return self.state_field(name)
 
+    @property
+    def _cached_fold_fns(self):
+        """Lazily cache compiled fold functions."""
+        try:
+            return self.__dict__["_fold_fns"]
+        except KeyError:
+            fns = build_fold_fns(self.folds)
+            # Bypass frozen by writing to __dict__ directly
+            object.__setattr__(self, "_fold_fns", fns)
+            return fns
+
     def apply(self, state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         """Apply fold rules to state given a payload, return new state.
 
@@ -96,7 +107,7 @@ class Spec:
         the input dict or its nested containers. Pure.
         """
         new = copy.deepcopy(state)
-        for fn in build_fold_fns(self.folds):
+        for fn in self._cached_fold_fns:
             fn(new, payload)
         return new
 
@@ -107,7 +118,7 @@ class Spec:
         state dict across all payloads. Use when replaying stored facts where
         intermediate states are not needed.
         """
-        fns = build_fold_fns(self.folds)
+        fns = self._cached_fold_fns
         state = self.initial_state()
         for payload in payloads:
             for fn in fns:

@@ -575,24 +575,71 @@ class Vertex:
         """
         if self._store is None:
             return 0
-        facts = self._store.since(0)
-        if not facts:
-            return 0
+
         store = self._store
-        self._store = None  # suppress re-append during replay
-        self._replaying = True  # suppress boundary firing and period tracking
         has_parse_pipelines = bool(self._parse_pipelines)
-        if not self._has_routes and not has_parse_pipelines and not self._has_children:
+        use_raw = (
+            not self._has_routes
+            and not has_parse_pipelines
+            and not self._has_children
+            and hasattr(store, 'since_raw')
+        )
+
+        if use_raw:
             loops = self._loops
-            dt_fromtimestamp = datetime.fromtimestamp
-            tz = timezone.utc
-            for fact in facts:
-                loop = loops.get(fact.kind)
-                if loop is not None:
-                    loop.receive(fact.payload, ts=dt_fromtimestamp(fact.ts, tz=tz))
+            # Pre-build fold fns for each loop to avoid deep-copy during replay
+            loop_fns: dict[str, tuple] = {}
+            for kind, loop in loops.items():
+                fold_fn = loop._projection._fold
+                if fold_fn is not None and hasattr(fold_fn, '__self__'):
+                    spec = fold_fn.__self__
+                    if hasattr(spec, 'folds') and hasattr(spec, '_cached_fold_fns'):
+                        loop_fns[kind] = spec._cached_fold_fns
+
+            # Stream path: fold directly from SQL cursor — no intermediate list
+            if loop_fns and hasattr(store, 'replay_into'):
+                dispatch = {
+                    kind: (fns, loops[kind]._projection)
+                    for kind, fns in loop_fns.items()
+                }
+                self._store = None
+                self._replaying = True
+                count = store.replay_into(0, dispatch)
+                if count == 0:
+                    self._replaying = False
+                    self._store = store
+                    return 0
+            else:
+                raw_facts = store.since_raw(0)
+                if not raw_facts:
+                    return 0
+                count = len(raw_facts)
+                self._store = None
+                self._replaying = True
+                if loop_fns:
+                    for kind, payload in raw_facts:
+                        fns = loop_fns.get(kind)
+                        if fns is not None:
+                            proj = loops[kind]._projection
+                            for fn in fns:
+                                fn(proj._state, payload)
+                            proj._version += 1
+                            proj.cursor += 1
+                else:
+                    for kind, payload in raw_facts:
+                        loop = loops.get(kind)
+                        if loop is not None:
+                            loop._projection.fold_one(payload)
         else:
+            # Fallback: full Fact objects needed for routes/parse/children
+            facts = store.since(0)
+            if not facts:
+                return 0
+            count = len(facts)
+            self._store = None
+            self._replaying = True
             for fact in facts:
-                routed_kind = self._routed_kind(fact.kind)
+                routed_kind = self._routed_kind(fact.kind) if self._has_routes else fact.kind
                 payload = fact.payload
                 if has_parse_pipelines:
                     payload = self._apply_parse_pipeline(routed_kind, payload)
@@ -612,13 +659,18 @@ class Vertex:
         # Vertex-level boundary ticks use self._name as tick name.
         # The last such tick's ts is the end of the previous period —
         # the next boundary's since should start from there.
-        if self._has_vertex_boundary and hasattr(store, 'ticks_since'):
-            for tick in reversed(store.ticks_since(0)):
-                if tick.name == self._name:
-                    self._vertex_period_start = tick.ts
-                    break
+        if self._has_vertex_boundary:
+            if hasattr(store, 'last_tick_ts'):
+                ts = store.last_tick_ts(self._name)
+                if ts is not None:
+                    self._vertex_period_start = ts
+            elif hasattr(store, 'ticks_since'):
+                for tick in reversed(store.ticks_since(0)):
+                    if tick.name == self._name:
+                        self._vertex_period_start = tick.ts
+                        break
 
-        return len(facts)
+        return count
 
     def evaluate_boundaries(self) -> list[Tick]:
         """Evaluate boundaries for facts that arrived since the last boundary fire.
@@ -744,8 +796,10 @@ class Vertex:
         vertex_boundary_conditions = self._vertex_boundary_conditions
 
         if not vertex_boundary_conditions:
+            # Add 1μs tolerance for float→datetime→float round-trip precision loss
+            adjusted_since = since_ts + 1e-6 if since_ts > 0 else 0
             for fact in period_facts:
-                if since_ts > 0 and fact.ts <= since_ts:
+                if adjusted_since > 0 and fact.ts <= adjusted_since:
                     continue
                 kind = fact.kind
                 payload = fact.payload
@@ -766,8 +820,9 @@ class Vertex:
 
         loops = self._loops
         routed_kind = self._routed_kind
+        adjusted_since_cond = since_ts + 1e-6 if since_ts > 0 else 0
         for fact in period_facts:
-            if since_ts > 0 and fact.ts <= since_ts:
+            if adjusted_since_cond > 0 and fact.ts <= adjusted_since_cond:
                 continue
             kind = fact.kind
             payload = fact.payload

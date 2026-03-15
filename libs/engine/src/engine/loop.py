@@ -67,6 +67,20 @@ class Loop:
         self._projection = Projection(self.initial, fold=self.fold)
         # Capture initial state for reset
         self._initial_snapshot = copy.deepcopy(self.initial)
+        # Cache fold fns for mutating receive path
+        self._mut_fns: tuple | None = None
+        fold_fn = self._projection._fold
+        if fold_fn is not None and hasattr(fold_fn, '__self__'):
+            spec = fold_fn.__self__
+            if hasattr(spec, '_cached_fold_fns'):
+                self._mut_fns = spec._cached_fold_fns
+
+    def receive_mut(self, payload: dict, fns: tuple) -> None:
+        """Fold payload in place using pre-built fold functions.
+
+        Fast path for replay — no deep copy, no period tracking, no count.
+        """
+        self._projection.fold_one_mut(payload, fns)
 
     def receive(self, payload: dict, ts: datetime | None = None) -> bool:
         """Fold a payload into the projection.
@@ -86,7 +100,12 @@ class Loop:
         """
         if self._period_start is None:
             self._period_start = ts if ts is not None else datetime.now(timezone.utc)
-        self._projection.fold_one(payload)
+        # Use mutating fold when cached fold fns are available (Spec-based folds).
+        # This avoids deepcopy on every receive — fold fns mutate state in place.
+        if self._mut_fns is not None:
+            self._projection.fold_one_mut(payload, self._mut_fns)
+        else:
+            self._projection.fold_one(payload)
 
         # Track count for count-based boundaries
         if self.boundary_count is not None and not self._boundary_exhausted:

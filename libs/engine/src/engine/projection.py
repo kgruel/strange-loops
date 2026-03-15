@@ -75,6 +75,19 @@ class Projection(Generic[S, T]):
             self._version += 1
         self.cursor += 1
 
+    def fold_one_mut(self, event: T, fns: tuple) -> None:
+        """Fold a single event in place using pre-built fold functions.
+
+        Skips deep-copy — mutates state directly. Use only when intermediate
+        states are not needed (e.g. replay). The fns are (state, payload) -> None
+        mutating functions from build_fold_fns.
+        """
+        state = self._state
+        for fn in fns:
+            fn(state, event)
+        self._version += 1
+        self.cursor += 1
+
     async def consume(self, event: T) -> None:
         """Consumer protocol: fold a single event into state."""
         self.fold_one(event)

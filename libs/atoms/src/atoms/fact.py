@@ -36,7 +36,7 @@ class Fact(Generic[T]):
         """Wrap dict payloads in MappingProxyType for immutability."""
         if isinstance(self.payload, dict):
             object.__setattr__(
-                self, "payload", MappingProxyType(dict(self.payload))
+                self, "payload", MappingProxyType(self.payload)
             )
 
     @classmethod

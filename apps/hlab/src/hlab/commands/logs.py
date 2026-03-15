@@ -14,7 +14,7 @@ from collections import deque
 from pathlib import Path
 
 from painted import Block, Style, Zoom, join_vertical
-from painted.fidelity import CliContext
+from painted.cli import CliContext
 from painted.inplace import InPlaceRenderer
 from painted.core.writer import print_block
 

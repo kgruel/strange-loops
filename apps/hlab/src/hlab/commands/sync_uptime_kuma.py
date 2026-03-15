@@ -15,7 +15,7 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from painted.fidelity import CliContext
+from painted.cli import CliContext
 
 from ..config import resolve_vars
 from ..inventory import GRUEL_NETWORK_ROOT

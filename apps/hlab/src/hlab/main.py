@@ -28,7 +28,7 @@ from collections.abc import Callable
 from typing import Any
 
 from painted import Block
-from painted.fidelity import (
+from painted.cli import (
     CliContext,
     OutputMode,
     Format,

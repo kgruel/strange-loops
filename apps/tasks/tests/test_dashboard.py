@@ -237,7 +237,7 @@ class TestRender:
 
     def test_summary_contains_task_names(self):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
@@ -258,7 +258,7 @@ class TestRender:
 
     def test_minimal_one_liner(self):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         ctx = CliContext(
             zoom=Zoom.MINIMAL,
@@ -275,7 +275,7 @@ class TestRender:
 
     def test_project_header_in_output(self):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         ctx = CliContext(
             zoom=Zoom.SUMMARY,
@@ -659,7 +659,7 @@ class TestRenderStatusBar:
 class TestDashboardSurfaceState:
     def test_construction(self, workspace: Path, monkeypatch):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
         main(["session", "start"])
@@ -682,7 +682,7 @@ class TestDashboardSurfaceState:
 
     def test_selected_name(self, workspace: Path, monkeypatch):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
         main(["session", "start"])
@@ -704,7 +704,7 @@ class TestDashboardSurfaceState:
 
     def test_selected_name_empty(self, workspace: Path, monkeypatch):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
         main(["session", "start"])
@@ -722,7 +722,7 @@ class TestDashboardSurfaceState:
 
     def test_move_selection_clamps(self, workspace: Path, monkeypatch):
         from painted import CliContext, Zoom
-        from painted.fidelity import OutputMode
+        from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
         main(["session", "start"])

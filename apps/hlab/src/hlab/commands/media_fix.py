@@ -14,7 +14,7 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from painted.fidelity import CliContext
+from painted.cli import CliContext
 
 from ..config import resolve_vars
 from ..radarr import RadarrClient, RadarrError, format_size

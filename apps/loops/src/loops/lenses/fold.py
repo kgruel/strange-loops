@@ -58,24 +58,63 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
         return Block.text(", ".join(parts), Style(), width=width)
 
     piped = width is None
-    rows: list[Block] = []
     header_style = Style(bold=True)
     dim_style = Style(dim=True)
     meta_style = Style(dim=True)
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
+    if piped:
+        text_rows: list[tuple[str, Style]] = []
+        for s in populated:
+            if text_rows:
+                text_rows.append(("", Style()))
+
+            header = _section_header(s.kind, s.count, piped=True)
+            text_rows.append((header, header_style))
+
+            observers = {item.observer for item in s.items if item.observer}
+            show_observer = len(observers) > 1
+            _render_item_rows(
+                text_rows,
+                s.items,
+                s.key_field,
+                s.fold_type,
+                zoom,
+                fmt,
+                dim_style,
+                meta_style,
+                None,
+                show_observer=show_observer,
+            )
+
+        return Block.column(text_rows)
+
+    rows: list[Block] = []
     for s in populated:
         if rows:
             rows.append(Block.text("", Style(), width=width))
 
-        header = _section_header(s.kind, s.count, piped=piped)
+        header = _section_header(s.kind, s.count, piped=False)
         rows.append(Block.text(header, header_style, width=width))
 
         # Show observer attribution when items come from multiple observers
         observers = {item.observer for item in s.items if item.observer}
         show_observer = len(observers) > 1
 
-        _render_items(rows, s.items, s.key_field, s.fold_type, zoom, fmt, dim_style, meta_style, width, show_observer=show_observer)
+        item_rows: list[tuple[str, Style]] = []
+        _render_item_rows(
+            item_rows,
+            s.items,
+            s.key_field,
+            s.fold_type,
+            zoom,
+            fmt,
+            dim_style,
+            meta_style,
+            width,
+            show_observer=show_observer,
+        )
+        rows.append(Block.column(item_rows, width=width))
 
     return join_vertical(*rows)
 
@@ -89,8 +128,8 @@ def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     return f"{label} ({count}):"
 
 
-def _render_items(
-    rows: list[Block],
+def _render_item_rows(
+    rows: list[tuple[str, Style]],
     items: tuple[FoldItem, ...],
     key_field: str | None,
     fold_type: str,
@@ -127,7 +166,7 @@ def _render_items(
         obs_suffix = f" ({item.observer})" if show_observer and item.observer else ""
 
         # SUMMARY: label + body snippet (first non-label payload field)
-        body = _find_body(payload, used_label_field)
+        body_field, body = _find_body_entry(payload, used_label_field)
         if body:
             reserved = len(label) + len(obs_suffix) + 6  # "  label (obs): snippet"
             if width is not None:
@@ -139,33 +178,32 @@ def _render_items(
             line = f"  {label}{obs_suffix} ({date})"
         else:
             line = f"  {label}{obs_suffix}"
-        rows.append(Block.text(line, Style(), width=width))
+        rows.append((line, Style()))
 
         # DETAILED: show remaining payload fields as continuation lines
         if zoom >= Zoom.DETAILED:
             # Show short ID for reference
             if item.id:
-                rows.append(Block.text(f"    id:{item.id[:8]}", meta_style, width=width))
+                rows.append((f"    id:{item.id[:8]}", meta_style))
             skip = {used_label_field} if used_label_field else set()
             # Also skip the body field already shown in the summary line
-            body_field = _find_body_field(payload, used_label_field)
             if body_field:
-                skip = skip | {body_field}
+                skip.add(body_field)
             for k, v in payload.items():
                 if k in skip or not v:
                     continue
-                rows.append(Block.text(f"    {k}: {v}", dim_style, width=width))
+                rows.append((f"    {k}: {v}", dim_style))
 
         # FULL: show metadata fields (ts, observer, origin, full id)
         if zoom >= Zoom.FULL:
             if item.id:
-                rows.append(Block.text(f"    _id: {item.id}", meta_style, width=width))
+                rows.append((f"    _id: {item.id}", meta_style))
             if date:
-                rows.append(Block.text(f"    _ts: {fmt(item.ts)}", meta_style, width=width))
+                rows.append((f"    _ts: {fmt(item.ts)}", meta_style))
             if item.observer:
-                rows.append(Block.text(f"    _observer: {item.observer}", meta_style, width=width))
+                rows.append((f"    _observer: {item.observer}", meta_style))
             if item.origin:
-                rows.append(Block.text(f"    _origin: {item.origin}", meta_style, width=width))
+                rows.append((f"    _origin: {item.origin}", meta_style))
 
 
 def _first_field(payload: dict) -> tuple[str, str | None]:
@@ -176,24 +214,14 @@ def _first_field(payload: dict) -> tuple[str, str | None]:
     return "?", None
 
 
-def _find_body(payload: dict, used_label_field: str | None) -> str | None:
-    """Find the first non-label field value — the 'body' of the item."""
+def _find_body_entry(payload: dict, used_label_field: str | None) -> tuple[str | None, str | None]:
+    """Return the first non-label payload field as (field_name, value)."""
     skip = {used_label_field} if used_label_field else set()
     for k, v in payload.items():
         if k in skip or not v:
             continue
-        return str(v)
-    return None
-
-
-def _find_body_field(payload: dict, used_label_field: str | None) -> str | None:
-    """Return the field name of the body, or None."""
-    skip = {used_label_field} if used_label_field else set()
-    for k, v in payload.items():
-        if k in skip or not v:
-            continue
-        return k
-    return None
+        return k, str(v)
+    return None, None
 
 
 def _truncate(text: str, max_len: int) -> str:

@@ -389,41 +389,91 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
             script.chmod(0o755)
             _msg(f"Created {script}")
 
+    if not vertex_name:
+        return
+
+    vertex_path = f".loops/{vertex_name}.vertex"
+    primary_metric = config.get("primary_metric", "metric")
+    benchmark_cmd = config.get("benchmark", "./autoresearch.sh")
+
+    # Run wrapper — the boundary calls this. Handles agent invocation,
+    # benchmark measurement, and deterministic emit. The agent never
+    # touches loops emit — it just implements, tests, and commits.
+    script = cwd / "autoresearch.run.sh"
+    if not script.exists():
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "\n"
+            f'VERTEX="{vertex_path}"\n'
+            f'BENCHMARK="{benchmark_cmd}"\n'
+            f'METRIC="{primary_metric}"\n'
+            "\n"
+            "BEFORE=$(git rev-parse HEAD)\n"
+            "\n"
+            '# Agent works — one-shot, exits when done\n'
+            'claude --dangerously-skip-permissions -p \\\n'
+            '  "$(uv run loops read $VERTEX --lens autoresearch_prompt --plain)"\n'
+            "\n"
+            "AFTER=$(git rev-parse HEAD)\n"
+            "\n"
+            'if [ "$BEFORE" != "$AFTER" ]; then\n'
+            "  # Agent committed — benchmark the result\n"
+            '  RESULT=$($BENCHMARK 2>&1)\n'
+            '  VALUE=$(echo "$RESULT" | grep "^${METRIC}=" | head -1 | cut -d= -f2)\n'
+            '  DESC=$(git log -1 --format=%s)\n'
+            '  if [ -n "$VALUE" ]; then\n'
+            '    uv run loops emit "$VERTEX" experiment \\\n'
+            '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
+            '      ${METRIC}="$VALUE" description="$DESC"\n'
+            "  else\n"
+            '    uv run loops emit "$VERTEX" experiment \\\n'
+            '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
+            '      description="$DESC (benchmark parse failed)"\n'
+            "  fi\n"
+            "else\n"
+            "  # Agent didn't commit — record as discard\n"
+            '  uv run loops emit "$VERTEX" experiment \\\n'
+            '    commit="$(git rev-parse --short HEAD)" status=discard \\\n'
+            '    description="No changes committed"\n'
+            "fi\n"
+        )
+        script.chmod(0o755)
+        _msg(f"Created {script}")
+
     # Launch script — creates worktree, syncs deps, kicks off first experiment.
-    if vertex_name:
-        script = cwd / "autoresearch.start.sh"
-        if not script.exists():
-            vertex_path = f".loops/{vertex_name}.vertex"
-            script.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -euo pipefail\n"
-                "\n"
-                f'NAME="{vertex_name}"\n'
-                f'VERTEX="{vertex_path}"\n'
-                'BRANCH="$(git rev-parse --abbrev-ref HEAD)"\n'
-                'WORKTREE="/tmp/loops-ar-$(echo $NAME | tr / -)"\n'
-                "\n"
-                "# Create isolated workspace from current branch\n"
-                'echo "Creating worktree at $WORKTREE from $BRANCH..."\n'
-                'git worktree add "$WORKTREE" -b "autoresearch/$NAME-$(date +%Y%m%d)" "$BRANCH"\n'
-                'cd "$WORKTREE"\n'
-                "\n"
-                "# Init submodules and sync deps\n"
-                'MAIN_REPO="$(git worktree list | head -1 | awk \'{print $1}\')"\n'
-                'git submodule update --init --recursive --reference "$MAIN_REPO/libs/painted" 2>/dev/null \\\n'
-                "  || git submodule update --init --recursive\n"
-                "uv sync --package loops\n"
-                "\n"
-                "# Kick off the first experiment — the boundary run clause sustains the loop\n"
-                'echo "Starting autoresearch loop..."\n'
-                'uv run loops emit "$VERTEX" experiment status=baseline description="Initial baseline"\n'
-                "\n"
-                'echo "Autoresearch running in $WORKTREE"\n'
-                'echo "Watch with: loops read $NAME --live"\n'
-                'echo "Clean up with: git worktree remove $WORKTREE"\n'
-            )
-            script.chmod(0o755)
-            _msg(f"Created {script}")
+    script = cwd / "autoresearch.start.sh"
+    if not script.exists():
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "\n"
+            f'NAME="{vertex_name}"\n'
+            f'VERTEX="{vertex_path}"\n'
+            'BRANCH="$(git rev-parse --abbrev-ref HEAD)"\n'
+            'WORKTREE="/tmp/loops-ar-$(echo $NAME | tr / -)"\n'
+            "\n"
+            "# Create isolated workspace from current branch\n"
+            'echo "Creating worktree at $WORKTREE from $BRANCH..."\n'
+            'git worktree add "$WORKTREE" -b "autoresearch/$NAME-$(date +%Y%m%d)" "$BRANCH"\n'
+            'cd "$WORKTREE"\n'
+            "\n"
+            "# Init submodules and sync deps\n"
+            'MAIN_REPO="$(git worktree list | head -1 | awk \'{print $1}\')"\n'
+            'git submodule update --init --recursive --reference "$MAIN_REPO/libs/painted" 2>/dev/null \\\n'
+            "  || git submodule update --init --recursive\n"
+            "uv sync --package loops\n"
+            "\n"
+            "# Kick off — the run wrapper handles agent + benchmark + emit\n"
+            'echo "Starting autoresearch loop..."\n'
+            "./autoresearch.run.sh\n"
+            "\n"
+            'echo "Autoresearch running in $WORKTREE"\n'
+            'echo "Watch with: cd $WORKTREE && loops read autoresearch --live"\n'
+            'echo "Clean up with: git worktree remove $WORKTREE"\n'
+        )
+        script.chmod(0o755)
+        _msg(f"Created {script}")
 
 
 def cmd_init(args: argparse.Namespace) -> int:

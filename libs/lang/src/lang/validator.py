@@ -9,9 +9,8 @@ Validates:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+TYPE_CHECKING = False
 
 from .ast import (
     Coerce,
@@ -47,13 +46,24 @@ class ShapeKind(Enum):
     DICT = auto()  # dict with named fields (after pick with names)
 
 
-@dataclass
 class Shape:
     """Data shape at a point in the parse pipeline."""
 
-    kind: ShapeKind
-    fields: tuple[str, ...] | None = None  # Field names if DICT
-    field_types: dict[str, str] | None = None  # Field name -> type if known
+    __slots__ = ("kind", "fields", "field_types")
+
+    def __init__(self, kind: ShapeKind, fields: tuple[str, ...] | None = None,
+                 field_types: dict[str, str] | None = None):
+        self.kind = kind
+        self.fields = fields
+        self.field_types = field_types
+
+    def __repr__(self):
+        return f"Shape(kind={self.kind!r}, fields={self.fields!r}, field_types={self.field_types!r})"
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return (self.kind, self.fields, self.field_types) == (other.kind, other.fields, other.field_types)
 
     @classmethod
     def string(cls) -> Shape:
@@ -84,16 +94,14 @@ class Shape:
 # -----------------------------------------------------------------------------
 
 
-@dataclass
 class ValidationContext:
     """Context for validation, tracking state and errors."""
 
-    path: str | None = None
-    errors: list[ValidationError] | None = None
+    __slots__ = ("path", "errors")
 
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
+    def __init__(self, path: str | None = None, errors: list[ValidationError] | None = None):
+        self.path = path
+        self.errors = errors if errors is not None else []
 
     def error(self, message: str, line: int = 1, hint: str | None = None) -> None:
         """Record a validation error."""

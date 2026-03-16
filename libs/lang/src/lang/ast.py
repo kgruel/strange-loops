@@ -2,9 +2,119 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import ClassVar
+# pathlib deferred — Path only used in annotations (strings with __future__)
+
+
+_setattr = object.__setattr__
+
+
+def _frozen(cls):
+    """Minimal frozen-dataclass decorator — avoids importing dataclasses (~12ms).
+
+    Generates __init__, __repr__, __eq__, __hash__ for classes with
+    __annotations__. Fields with class-level defaults are optional in __init__.
+    ClassVar annotations are excluded from instance fields.
+    """
+    annotations = {}
+    for klass in reversed(cls.__mro__):
+        annotations.update(getattr(klass, '__annotations__', {}))
+    # Filter out ClassVar fields
+    fields = tuple(
+        name for name, ann in annotations.items()
+        if not (isinstance(ann, str) and 'ClassVar' in ann)
+    )
+    defaults = {}
+    for f in fields:
+        if hasattr(cls, f):
+            val = getattr(cls, f)
+            if not callable(val) or isinstance(val, (type, frozenset)):
+                defaults[f] = val
+
+    has_post_init = hasattr(cls, '__post_init__')
+    post_init = cls.__post_init__ if has_post_init else None
+
+    # Build __init__ via closure (avoids exec overhead at import time).
+    # Uses *args/**kwargs dispatch — slightly slower per-call than exec'd
+    # positional params, but saves ~1.3ms at import for 42 classes.
+    n_req = len(fields) - len(defaults)
+    _req = fields[:n_req]
+    _opt = fields[n_req:]
+    _defs = defaults
+    _pi = post_init
+    _n_fields = len(fields)
+
+    def __init__(self, *args, **kwargs):
+        i = 0
+        for f in _req:
+            if i < len(args):
+                _setattr(self, f, args[i]); i += 1
+            elif f in kwargs:
+                _setattr(self, f, kwargs[f])
+            else:
+                raise TypeError(f'{cls.__name__}() missing required argument: {f!r}')
+        for f in _opt:
+            if i < len(args):
+                _setattr(self, f, args[i]); i += 1
+            elif f in kwargs:
+                _setattr(self, f, kwargs[f])
+            else:
+                _setattr(self, f, _defs[f])
+        if _pi:
+            _pi(self)
+
+    cls.__init__ = __init__
+
+    # Frozen
+    cls.__setattr__ = _frozen_setattr
+    cls.__delattr__ = _frozen_delattr
+
+    # __eq__ / __hash__
+    cls.__eq__ = lambda self, other: (
+        tuple(getattr(self, f) for f in fields) == tuple(getattr(other, f) for f in fields)
+        if type(self) is type(other) else NotImplemented
+    )
+    cls.__hash__ = lambda self: hash(tuple(getattr(self, f) for f in fields))
+
+    # __repr__ via closure (avoids exec)
+    _name = cls.__name__
+    _fields = fields
+    def __repr__(self, _n=_name, _f=_fields):
+        parts = ', '.join(f'{f}={getattr(self, f)!r}' for f in _f)
+        return f'{_n}({parts})'
+    cls.__repr__ = __repr__
+
+    cls.__match_args__ = fields
+
+    # Clean up class-level defaults
+    for f in defaults:
+        try:
+            delattr(cls, f)
+        except AttributeError:
+            pass
+
+    # Rebuild class with real __slots__ (like dataclasses slots=True)
+    # This makes instances use slot descriptors instead of __dict__
+    qualname = cls.__qualname__
+    new_cls = type(cls)(cls.__name__, cls.__bases__, {
+        **{k: v for k, v in cls.__dict__.items() if k != '__dict__'},
+        '__slots__': fields,
+    })
+    new_cls.__qualname__ = qualname
+    new_cls.__module__ = cls.__module__
+    return new_cls
+
+
+def _frozen_setattr(self, name, value):
+    raise AttributeError(f"cannot assign to field '{name}'")
+
+def _frozen_delattr(self, name):
+    raise AttributeError(f"cannot delete field '{name}'")
+
+
+def dataclass(frozen=True):
+    """Drop-in replacement for @dataclass(frozen=True) without importing dataclasses."""
+    assert frozen, "Only frozen=True is supported"
+    return _frozen
 
 
 # -----------------------------------------------------------------------------
@@ -427,7 +537,7 @@ class TemplateSource:
 
 
 # Union type for sources: entries
-SourceEntry = Path | TemplateSource
+# SourceEntry = Path | TemplateSource  — deferred, only used in annotations
 
 
 # -----------------------------------------------------------------------------

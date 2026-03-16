@@ -6,9 +6,7 @@ Populations are the parameter rows that instantiate a .loop template N times.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-from pathlib import Path
+# re deferred to function bodies (avoids enum ~5ms import)
 
 from .ast import FromFile, SourceParams, TemplateSource, VertexFile
 
@@ -18,24 +16,60 @@ from .ast import FromFile, SourceParams, TemplateSource, VertexFile
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
 class PopulationRow:
     """One row in a template population."""
 
-    key: str  # first column value
-    values: dict[str, str]  # all columns including key
+    __slots__ = ("key", "values")
+
+    def __init__(self, key: str, values: dict[str, str]):
+        object.__setattr__(self, "key", key)
+        object.__setattr__(self, "values", values)
+
+    def __repr__(self):
+        return f"PopulationRow(key={self.key!r}, values={self.values!r})"
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return (self.key, self.values) == (other.key, other.values)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field '{name}'")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field '{name}'")
 
 
-@dataclass(frozen=True)
 class PopulationInfo:
     """Complete population for a template source."""
 
-    template_name: str
-    header: list[str]
-    rows: list[PopulationRow]
-    storage: str  # "file" | "inline" | "both"
-    file_path: Path | None
-    vertex_path: Path
+    __slots__ = ("template_name", "header", "rows", "storage", "file_path", "vertex_path")
+
+    def __init__(self, template_name: str, header: list[str], rows: list[PopulationRow],
+                 storage: str, file_path: Path | None, vertex_path: Path):
+        object.__setattr__(self, "template_name", template_name)
+        object.__setattr__(self, "header", header)
+        object.__setattr__(self, "rows", rows)
+        object.__setattr__(self, "storage", storage)
+        object.__setattr__(self, "file_path", file_path)
+        object.__setattr__(self, "vertex_path", vertex_path)
+
+    def __repr__(self):
+        return (f"PopulationInfo(template_name={self.template_name!r}, "
+                f"header={self.header!r}, rows={self.rows!r}, "
+                f"storage={self.storage!r}, file_path={self.file_path!r}, "
+                f"vertex_path={self.vertex_path!r})")
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return all(getattr(self, f) == getattr(other, f) for f in self.__slots__)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field '{name}'")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field '{name}'")
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +84,7 @@ def resolve_vertex(name_or_path: str, home: Path) -> Path:
     - Starts with . or / -> use as-is (filesystem path)
     - Otherwise -> home / name / name.vertex
     """
+    from pathlib import Path
     if (
         name_or_path.endswith(".vertex")
         or name_or_path.startswith("./")
@@ -296,6 +331,7 @@ def _find_template_block(
     Scans for 'template "path" {' and tracks brace nesting.
     Compares paths via Path() to handle ./ normalization.
     """
+    from pathlib import Path
     target = Path(template_path_str)
     start = -1
     depth = 0
@@ -304,6 +340,7 @@ def _find_template_block(
         stripped = line.strip()
         if start == -1:
             if stripped.startswith("template") and "{" in stripped:
+                import re
                 match = re.search(r'"([^"]+)"', stripped)
                 if match and Path(match.group(1)) == target:
                     start = i

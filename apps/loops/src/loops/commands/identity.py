@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 
 def _loops_home() -> Path:
@@ -20,6 +19,7 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
     2. ~/.config/loops/.vertex (global)
     Returns None if not found.
     """
+    from pathlib import Path
     current = (start or Path.cwd()).resolve()
     # Walk up from start
     for d in [current, *current.parents]:
@@ -65,6 +65,7 @@ def resolve_observer(explicit: str | None = None, start: Path | None = None) -> 
         return env
 
     # 3. Project-level .vertex (walk up)
+    from pathlib import Path
     current = (start or Path.cwd()).resolve()
     for d in [current, *current.parents]:
         candidate = d / ".loops" / ".vertex"

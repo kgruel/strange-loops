@@ -6,13 +6,11 @@ and vertices together.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+# pathlib deferred to function bodies
+TYPE_CHECKING = False
 
 from .compiler import FoldOverride, collect_all_sources, compile_vertex_recursive, materialize_vertex, substitute_vars
 from lang import parse_vertex_file
-from lang import validate
 from lang.ast import SourceParams, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
@@ -23,13 +21,22 @@ if TYPE_CHECKING:
     from .vertex import Vertex
 
 
-@dataclass(frozen=True)
 class VertexProgram:
     """A fully-materialized vertex plus its compiled sources with cadences."""
 
-    vertex: Vertex
-    sources: list[tuple[Source, Cadence]]
-    expected_ticks: list[str]
+    __slots__ = ("vertex", "sources", "expected_ticks")
+
+    def __init__(self, vertex: Vertex, sources: list[tuple[Source, Cadence]],
+                 expected_ticks: list[str]):
+        object.__setattr__(self, "vertex", vertex)
+        object.__setattr__(self, "sources", sources)
+        object.__setattr__(self, "expected_ticks", expected_ticks)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field '{name}'")
+
+    def __repr__(self):
+        return f"VertexProgram(vertex={self.vertex!r}, sources={self.sources!r})"
 
     async def sync_async(
         self,
@@ -132,6 +139,7 @@ def load_vertex_program(
     if vars:
         ast = _substitute_vertex_vars(ast, vars)
     if validate_ast:
+        from lang import validate
         validate(ast)
 
     compiled = compile_vertex_recursive(ast)

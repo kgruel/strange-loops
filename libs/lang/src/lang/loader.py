@@ -5,10 +5,8 @@ Parses KDL text via ckdl, maps nodes to AST dataclasses.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-import ckdl
+# ckdl deferred to parse functions to avoid loading enum (~3ms) at import time
+ckdl = None
 
 from .ast import (
     BoundaryAfter,
@@ -54,7 +52,7 @@ from .ast import (
 )
 from .errors import Location, ParseError
 
-if TYPE_CHECKING:
+if False:  # TYPE_CHECKING — avoid importing typing (~1.4ms)
     from .ast import Boundary, FoldOp, ParseStep, SourceEntry, TransformOp
 
 
@@ -399,6 +397,7 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
 
 
 def _load_template_source(node: ckdl.Node, path: Path | None) -> TemplateSource:
+    from pathlib import Path
     template_path = Path(_require_arg(node, 0, "template path", path))
     params: list[SourceParams] = []
     loop_def: LoopDef | None = None
@@ -434,6 +433,7 @@ def _load_template_source(node: ckdl.Node, path: Path | None) -> TemplateSource:
 
 
 def _load_sources_block(node: ckdl.Node, path: Path | None) -> tuple[SourceEntry, ...]:
+    from pathlib import Path
     sources: list[SourceEntry] = []
     for child in node.children:
         if child.name == "path":
@@ -654,6 +654,7 @@ def _load_loop_file(doc: ckdl.Document, path: Path | None) -> LoopFile:
 
 
 def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
+    from pathlib import Path
     name: str | None = None
     store: Path | None = None
     discover: str | None = None
@@ -766,8 +767,16 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_ckdl():
+    global ckdl
+    if ckdl is None:
+        import ckdl as _ckdl
+        ckdl = _ckdl
+
+
 def parse_loop(text: str, path: Path | None = None) -> LoopFile:
     """Parse a .loop file from KDL text."""
+    _ensure_ckdl()
     try:
         doc = ckdl.parse(text)
     except ckdl.ParseError as e:
@@ -777,6 +786,7 @@ def parse_loop(text: str, path: Path | None = None) -> LoopFile:
 
 def parse_vertex(text: str, path: Path | None = None) -> VertexFile:
     """Parse a .vertex file from KDL text."""
+    _ensure_ckdl()
     try:
         doc = ckdl.parse(text)
     except ckdl.ParseError as e:

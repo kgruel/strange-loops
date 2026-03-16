@@ -10,9 +10,8 @@ Maps:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+# pathlib deferred to function bodies
+TYPE_CHECKING = False
 
 from lang.ast import (
     BoundaryAfter,
@@ -591,7 +590,6 @@ def compile_parse_pipelines(vertex: VertexFile) -> dict[str, list["RuntimeParseO
 # -----------------------------------------------------------------------------
 
 
-@dataclass
 class CompiledVertex:
     """A compiled vertex with specs and nested children.
 
@@ -599,16 +597,36 @@ class CompiledVertex:
     and all its child vertices.
     """
 
-    name: str
-    specs: dict[str, Spec]
-    children: dict[str, "CompiledVertex"]
-    routes: dict[str, str] | None = None
-    store: Path | None = None
-    path: Path | None = None
-    sources: list | None = None
-    template_specs: dict | None = None
-    boundary: "Boundary | None" = None  # vertex-level boundary (fires all loops)
-    parse_pipelines: dict[str, list["RuntimeParseOp"]] | None = None  # kind → compiled ParseOp list
+    __slots__ = ("name", "specs", "children", "routes", "store", "path",
+                 "sources", "template_specs", "boundary", "parse_pipelines")
+
+    def __init__(self, name: str, specs: dict[str, Spec],
+                 children: dict[str, CompiledVertex],
+                 routes: dict[str, str] | None = None,
+                 store: Path | None = None, path: Path | None = None,
+                 sources: list | None = None,
+                 template_specs: dict | None = None,
+                 boundary=None,
+                 parse_pipelines=None):
+        self.name = name
+        self.specs = specs
+        self.children = children
+        self.routes = routes
+        self.store = store
+        self.path = path
+        self.sources = sources
+        self.template_specs = template_specs
+        self.boundary = boundary
+        self.parse_pipelines = parse_pipelines
+
+    def __repr__(self):
+        return (f"CompiledVertex(name={self.name!r}, specs={self.specs!r}, "
+                f"children={self.children!r})")
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return all(getattr(self, f) == getattr(other, f) for f in self.__slots__)
 
 
 def collect_all_sources(compiled: CompiledVertex) -> tuple[list, dict]:
@@ -656,6 +674,7 @@ def compile_vertex_recursive(
         - discover: glob pattern matching .vertex files
     """
     from glob import glob as globfn
+    from pathlib import Path
 
     from lang import parse_vertex_file
 

@@ -28,13 +28,11 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TextIO
+# typing deferred — TextIO only used in annotations (strings with __future__)
 
 
 def _err(msg: str, file: TextIO | None = None) -> None:
@@ -483,6 +481,7 @@ def _run_test(argv: list[str]) -> int:
                     if limit and count >= limit:
                         break
 
+            import asyncio
             asyncio.run(_collect())
             return collected
 
@@ -921,9 +920,6 @@ def _warn_missing_fold_key(
     vertex_path: Path,
     kind: str,
     payload: dict,
-    show,
-    Block,
-    p,
 ) -> None:
     """Warn on stderr if the payload lacks the fold key field.
 
@@ -951,13 +947,9 @@ def _warn_missing_fold_key(
     for fold_decl in loop_def.folds:
         if isinstance(fold_decl.op, FoldBy) and fold_decl.op.key_field not in payload:
             key = fold_decl.op.key_field
-            show(
-                Block.text(
-                    f"Warning: kind '{kind}' folds by '{key}' but payload has no "
-                    f"'{key}=' field — fact will be stored but not foldable",
-                    p.warning,
-                ),
-                file=sys.stderr,
+            _err(
+                f"Warning: kind '{kind}' folds by '{key}' but payload has no "
+                f"'{key}=' field — fact will be stored but not foldable"
             )
             return
 
@@ -1294,24 +1286,40 @@ def _resolve_vertex_for_dispatch(name: str) -> Path | None:
 def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     from atoms import Fact
-    from lang import parse_vertex_file
-    from lang.population import (
-        list_file_header,
-        list_file_read,
-        resolve_template,
-        resolve_vertex,
-    )
     from loops.commands.identity import resolve_observer, validate_emit
-    from loops.pop_store import (
-        POP_ADD_KIND,
-        POP_RM_KIND,
-        pop_materialize_list,
-        pop_store_has_facts,
-    )
-    from painted import show, Block
-    from painted.palette import current_palette
+    from loops.pop_store import POP_ADD_KIND, POP_RM_KIND
+    # painted deferred — only imported when display is needed (error/tick paths).
+    # _lp caches the lazy-loaded (show, Block, palette) tuple.
+    _lp: list = []
 
-    p = current_palette()
+    def _show(*args, **kwargs):
+        if not _lp:
+            from painted import show as _s, Block as _B
+            from painted.palette import current_palette
+            _lp.extend([_s, _B, current_palette()])
+        return _lp[0](*args, **kwargs)
+
+    class _BlockProxy:
+        """Proxy that loads painted.Block on first attribute access."""
+        def __getattr__(self, name):
+            if not _lp:
+                from painted import show as _s, Block as _B
+                from painted.palette import current_palette
+                _lp.extend([_s, _B, current_palette()])
+            return getattr(_lp[1], name)
+
+    class _PaletteProxy:
+        """Proxy that loads painted palette on first attribute access."""
+        def __getattr__(self, name):
+            if not _lp:
+                from painted import show as _s, Block as _B
+                from painted.palette import current_palette
+                _lp.extend([_s, _B, current_palette()])
+            return getattr(_lp[2], name)
+
+    show = _show
+    Block = _BlockProxy()
+    p = _PaletteProxy()
 
     # Resolve observer from flag → env → .vertex declaration
     observer = resolve_observer(args.observer)
@@ -1337,6 +1345,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                 vertex_path = local_candidate
             else:
                 # Try config-level resolution (handles slashed names like comms/native)
+                from lang.population import resolve_vertex
                 candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
 
                 if not candidate.exists() and "/" in vertex_ref and not _is_path_like(vertex_ref):
@@ -1386,7 +1395,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             return 1
 
         # Warn if payload is missing the fold key field (data quality)
-        _warn_missing_fold_key(vertex_path, kind, payload, show, Block, p)
+        _warn_missing_fold_key(vertex_path, kind, payload)
 
     # Resolve store path early — needed for entity reference resolution
     try:
@@ -1429,6 +1438,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
     )
 
     if args.dry_run:
+        import json
         show(
             Block.text(
                 json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
@@ -1449,6 +1459,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         template = None
 
         if is_pop:
+            from lang import parse_vertex_file
+            from lang.population import resolve_template, list_file_header, list_file_read
+            from loops.pop_store import pop_materialize_list, pop_store_has_facts
             ast = parse_vertex_file(vertex_path)
 
             # Resolve template target:
@@ -2421,6 +2434,7 @@ def _render_main_help(argv: list[str]) -> int:
     )
 
     if fmt == Format.JSON:
+        import json
         from dataclasses import asdict
         print(json.dumps(asdict(help_data), default=str))
         return 0

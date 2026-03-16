@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
+# pathlib deferred — only used in Location.__str__ and ValidationContext.error
 
 
-@dataclass
 class Location:
     """Source location for error reporting."""
 
-    path: Path | None
-    line: int
-    column: int = 0
+    __slots__ = ("path", "line", "column")
+
+    def __init__(self, path: Path | None, line: int, column: int = 0):
+        self.path = path
+        self.line = line
+        self.column = column
+
+    def __repr__(self):
+        return f"Location(path={self.path!r}, line={self.line!r}, column={self.column!r})"
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return (self.path, self.line, self.column) == (other.path, other.line, other.column)
 
     def __str__(self) -> str:
         name = self.path.name if self.path else "<input>"

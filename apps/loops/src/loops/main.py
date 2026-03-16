@@ -355,11 +355,12 @@ def _seed_config_facts(vertex_path: Path, config: dict[str, str]) -> None:
     _msg(f"Seeded {len(config)} config facts")
 
 
-def _scaffold_artifacts(config: dict[str, str]) -> None:
+def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> None:
     """Scaffold executable artifacts based on config values.
 
     If 'benchmark' is provided, creates autoresearch.sh.
     If 'checks' is provided, creates autoresearch.checks.sh.
+    If vertex_name is provided, creates autoresearch.start.sh (launch script).
     Idempotent — won't overwrite existing scripts.
     """
     cwd = Path.cwd()
@@ -384,6 +385,42 @@ def _scaffold_artifacts(config: dict[str, str]) -> None:
                 "#!/usr/bin/env bash\n"
                 "set -euo pipefail\n"
                 f"{checks}\n"
+            )
+            script.chmod(0o755)
+            _msg(f"Created {script}")
+
+    # Launch script — creates worktree, syncs deps, kicks off first experiment.
+    if vertex_name:
+        script = cwd / "autoresearch.start.sh"
+        if not script.exists():
+            vertex_path = f".loops/{vertex_name}.vertex"
+            script.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "\n"
+                f'NAME="{vertex_name}"\n'
+                f'VERTEX="{vertex_path}"\n'
+                'BRANCH="$(git rev-parse --abbrev-ref HEAD)"\n'
+                'WORKTREE="/tmp/loops-ar-$(echo $NAME | tr / -)"\n'
+                "\n"
+                "# Create isolated workspace from current branch\n"
+                'echo "Creating worktree at $WORKTREE from $BRANCH..."\n'
+                'git worktree add "$WORKTREE" -b "autoresearch/$NAME-$(date +%Y%m%d)" "$BRANCH"\n'
+                'cd "$WORKTREE"\n'
+                "\n"
+                "# Init submodules and sync deps\n"
+                'MAIN_REPO="$(git worktree list | head -1 | awk \'{print $1}\')"\n'
+                'git submodule update --init --recursive --reference "$MAIN_REPO/libs/painted" 2>/dev/null \\\n'
+                "  || git submodule update --init --recursive\n"
+                "uv sync --package loops\n"
+                "\n"
+                "# Kick off the first experiment — the boundary run clause sustains the loop\n"
+                'echo "Starting autoresearch loop..."\n'
+                'uv run loops emit "$VERTEX" experiment status=baseline description="Initial baseline"\n'
+                "\n"
+                'echo "Autoresearch running in $WORKTREE"\n'
+                'echo "Watch with: loops read $NAME --live"\n'
+                'echo "Clean up with: git worktree remove $WORKTREE"\n'
             )
             script.chmod(0o755)
             _msg(f"Created {script}")
@@ -438,7 +475,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     if seed_config:
         _seed_config_facts(vertex_path, seed_config)
-        _scaffold_artifacts(seed_config)
+        _scaffold_artifacts(seed_config, vertex_name=target)
 
     return 0
 

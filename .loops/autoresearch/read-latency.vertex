@@ -1,0 +1,31 @@
+name "autoresearch/read-latency"
+store "/Users/kaygee/Code/loops/.loops/data/autoresearch/read-latency.db"
+
+loops {
+  // Each experiment result: commit, status, metric values, description
+  // Collected in order — the full history drives the dashboard
+  experiment {
+    fold { items "collect" 500; n "count" }
+    boundary after=30  // completion tick — fires when a batch finishes
+  }
+
+  // Key-value configuration: objective, primary_metric, direction, scope
+  config {
+    fold { items "by" "key" }
+  }
+
+  // Ideas to try — tracked by name, can be updated (tried/untried/rejected)
+  idea {
+    fold { items "by" "name" }
+  }
+
+  // Boundary fires on each experiment result, up to max iterations
+  boundary when="experiment" {
+    condition "n" "<" 30
+    run "claude --dangerously-skip-permissions -p \"$(uv run loops read /Users/kaygee/Code/loops/.loops/autoresearch/read-latency.vertex --lens autoresearch_prompt --plain)\""
+  }
+}
+
+lens {
+  fold "autoresearch"
+}

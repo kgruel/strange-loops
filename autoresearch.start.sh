@@ -17,10 +17,10 @@ git submodule update --init --recursive --reference "$MAIN_REPO/libs/painted" 2>
   || git submodule update --init --recursive
 uv sync --package loops
 
-# Kick off the first experiment — the boundary run clause sustains the loop
+# Kick off — the run wrapper handles agent + benchmark + emit
 echo "Starting autoresearch loop..."
-uv run loops emit "$VERTEX" experiment status=baseline description="Initial baseline"
+./autoresearch.run.sh
 
 echo "Autoresearch running in $WORKTREE"
-echo "Watch with: loops read $NAME --live"
+echo "Watch with: cd $WORKTREE && loops read autoresearch --live"
 echo "Clean up with: git worktree remove $WORKTREE"

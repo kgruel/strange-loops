@@ -6,7 +6,7 @@ loops {
   // Collected in order — the full history drives the dashboard
   experiment {
     fold { items "collect" 500; n "count" }
-    boundary after=30  // completion tick — fires when a batch finishes
+    boundary after=15  // completion tick — fires when a batch finishes
   }
 
   // Key-value configuration: objective, primary_metric, direction, scope
@@ -19,10 +19,12 @@ loops {
     fold { items "by" "name" }
   }
 
-  // Boundary fires on each experiment result, up to max iterations
+  // Boundary fires on each experiment result, up to max iterations.
+  // Run clause calls the wrapper script — handles agent invocation,
+  // benchmark measurement, and deterministic emit.
   boundary when="experiment" {
-    condition "n" "<" 30
-    run "claude --dangerously-skip-permissions -p \"$(uv run loops read /Users/kaygee/Code/loops/.loops/autoresearch/read-latency.vertex --lens autoresearch_prompt --plain)\""
+    condition "n" "<" 15
+    run "./autoresearch.run.sh"
   }
 }
 

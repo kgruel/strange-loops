@@ -311,7 +311,9 @@ class TestInitCommand:
         vertex = tmp_path / "myproject" / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
-        assert 'store "./data/project.db"' in content
+        # Store path is absolute — survives worktree access
+        expected_store = str((tmp_path / "myproject" / ".loops" / "data" / "project.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert "decision" in content
         assert (tmp_path / "myproject" / ".loops" / "data").is_dir()
 
@@ -326,7 +328,8 @@ class TestInitCommand:
         vertex = project_dir / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
-        assert 'store "./data/project.db"' in content
+        expected_store = str((project_dir / ".loops" / "data" / "project.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert "loops {" in content
         assert (project_dir / ".loops" / "data").is_dir()
 
@@ -766,7 +769,8 @@ class TestInitFromSource:
         vertex = project_dir / ".loops" / "project.vertex"
         assert vertex.exists()
         content = vertex.read_text()
-        assert 'store "./data/project.db"' in content
+        expected_store = str((project_dir / ".loops" / "data" / "project.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert "decision" in content
         assert "thread" in content
         # Registration: config-level vertex should now include this instance
@@ -794,5 +798,6 @@ class TestInitFromSource:
         assert result == 0
         content = (project_dir / ".loops" / "project.vertex").read_text()
         # Should have a store directive (from minimal stub), not a combine block
-        assert 'store "./data/project.db"' in content
+        expected_store = str((project_dir / ".loops" / "data" / "project.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert "combine" not in content

@@ -95,7 +95,7 @@ def _find_local_vertex() -> Path | None:
 
 _MINIMAL_INSTANCE = """\
 name "{name}"
-store "./data/{name}.db"
+store "{store}"
 
 loops {{
 }}
@@ -188,18 +188,24 @@ def _init_local_vertex(
     import re
     import shutil
 
+    # Resolve store path as absolute — survives worktree access.
+    # Project-local stores are durable data; the path is a connection string,
+    # not a relative reference that assumes cwd.
+    loops_dir = Path.cwd() / ".loops"
+    abs_store = str((loops_dir / "data" / f"{name}.db").resolve())
+
     source = _find_source_vertex(source_name or name)
     if source is None:
         # Minimal stub — store + empty loops block for user to fill in
-        content = _MINIMAL_INSTANCE.format(name=name)
+        content = _MINIMAL_INSTANCE.format(name=name, store=abs_store)
     else:
         # Stamp from existing vertex, updating name and store path
         content = re.sub(
             r'^name ".*"', f'name "{name}"', source, count=1, flags=re.MULTILINE
         )
         content = re.sub(
-            r'^store "./data/.*\.db"',
-            f'store "./data/{name}.db"',
+            r'^store ".*\.db"',
+            f'store "{abs_store}"',
             content,
             count=1,
             flags=re.MULTILINE,

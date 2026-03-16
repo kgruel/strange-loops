@@ -352,7 +352,8 @@ class TestInitTemplate:
         assert vertex.exists()
         content = vertex.read_text()
         assert 'name "session"' in content
-        assert 'store "./data/session.db"' in content
+        expected_store = str((tmp_path / ".loops" / "data" / "session.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert (tmp_path / ".loops" / "data").is_dir()
 
     def test_tasks_template(self, tmp_path, monkeypatch, capsys):
@@ -368,7 +369,8 @@ class TestInitTemplate:
         assert vertex.exists()
         content = vertex.read_text()
         assert 'name "tasks"' in content
-        assert 'store "./data/tasks.db"' in content
+        expected_store = str((tmp_path / ".loops" / "data" / "tasks.db").resolve())
+        assert f'store "{expected_store}"' in content
         assert (tmp_path / ".loops" / "data").is_dir()
 
     def test_no_template_is_root(self, tmp_path, monkeypatch, capsys):

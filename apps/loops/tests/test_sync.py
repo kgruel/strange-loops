@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from .helpers import block_to_text
 from loops.main import main
 
 
@@ -50,15 +53,6 @@ def _make_vertex_no_sources(tmp_path: Path) -> Path:
         "}\n"
     )
     return vertex_dir / "empty.vertex"
-
-
-def _block_to_text(block) -> str:
-    """Extract plain text from a Block."""
-    lines = []
-    for row_idx in range(block.height):
-        line = "".join(cell.char for cell in block.row(row_idx))
-        lines.append(line.rstrip())
-    return "\n".join(lines)
 
 
 class TestSyncDispatch:
@@ -212,170 +206,115 @@ class TestSyncHelp:
 class TestSyncLens:
     """Sync lens renders SyncResult data."""
 
-    def test_sync_view_minimal_ran(self):
+    @staticmethod
+    def _render(data, zoom):
         from loops.lenses.sync import sync_view
         from painted import Zoom
 
-        data = {"ran": ["ping"], "skipped": [], "errors": [], "ticks": []}
-        block = sync_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
-        assert "1 ran" in text
+        return block_to_text(sync_view(data, zoom, 80))
+
+    @pytest.mark.parametrize(
+        ("data", "zoom", "present", "absent"),
+        [
+            ({"ran": ["ping"], "skipped": [], "errors": [], "ticks": []}, "MINIMAL", ["1 ran"], []),
+            ({"ran": [], "skipped": [], "errors": [], "ticks": []}, "MINIMAL", ["nothing to sync"], []),
+            ({"ran": [], "skipped": [], "errors": [], "ticks": []}, "SUMMARY", ["No sources"], []),
+            ({"ran": ["ping"], "skipped": [], "errors": [], "ticks": [], "fact_counts": {"ping": 3}}, "MINIMAL", ["3 facts"], []),
+            ({"ran": ["ping"], "skipped": [], "errors": [], "ticks": [], "fact_counts": {"ping": 1}}, "MINIMAL", ["1 fact"], ["1 facts"]),
+            ({"ran": ["ping", "health"], "skipped": [], "errors": [], "ticks": [], "fact_counts": {"ping": 3, "health": 1}}, "SUMMARY", ["ping (3)", "health (1)"], []),
+            ({"ran": ["ping"], "skipped": [], "errors": [{"kind": "source.error", "observer": "test", "payload": {"error": "timeout"}}], "ticks": []}, "DETAILED", ["Errors:", "timeout"], []),
+        ],
+    )
+    def test_sync_view_core_cases(self, data, zoom, present, absent):
+        from painted import Zoom
+
+        text = self._render(data, getattr(Zoom, zoom))
+        for needle in present:
+            assert needle in text
+        for needle in absent:
+            assert needle not in text
 
     def test_sync_view_with_skipped(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
         import time
-
-        data = {
-            "ran": ["ping"],
-            "skipped": [{"kind": "health", "last_run_ts": time.time() - 180, "cadence_interval": 600}],
-            "errors": [],
-            "ticks": [],
-        }
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "Ran:" in text
-        assert "health" in text
-        assert "fresh" in text
-        assert "cadence" in text
-
-    def test_sync_view_no_sources(self):
-        from loops.lenses.sync import sync_view
         from painted import Zoom
 
-        data = {"ran": [], "skipped": [], "errors": [], "ticks": []}
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "No sources" in text
-
-    def test_sync_view_with_errors(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
-
-        data = {
-            "ran": ["ping"],
-            "skipped": [],
-            "errors": [{"kind": "source.error", "observer": "test", "payload": {"error": "timeout"}}],
-            "ticks": [],
-        }
-        block = sync_view(data, Zoom.DETAILED, 80)
-        text = _block_to_text(block)
-        assert "Errors:" in text
-        assert "timeout" in text
+        text = self._render(
+            {
+                "ran": ["ping"],
+                "skipped": [{"kind": "health", "last_run_ts": time.time() - 180, "cadence_interval": 600}],
+                "errors": [],
+                "ticks": [],
+            },
+            Zoom.SUMMARY,
+        )
+        assert all(part in text for part in ["Ran:", "health", "fresh", "cadence"])
 
     def test_sync_view_minimal_skipped_shows_count(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
         import time
+        from painted import Zoom
 
-        data = {
-            "ran": [],
-            "skipped": [
-                {"kind": "health", "last_run_ts": time.time() - 60, "cadence_interval": 600},
-                {"kind": "deploy", "last_run_ts": time.time() - 120, "cadence_interval": 300},
-            ],
-            "errors": [],
-            "ticks": [],
-        }
-        block = sync_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
+        text = self._render(
+            {
+                "ran": [],
+                "skipped": [
+                    {"kind": "health", "last_run_ts": time.time() - 60, "cadence_interval": 600},
+                    {"kind": "deploy", "last_run_ts": time.time() - 120, "cadence_interval": 300},
+                ],
+                "errors": [],
+                "ticks": [],
+            },
+            Zoom.MINIMAL,
+        )
         assert "2 skipped" in text
-        # MINIMAL should NOT show per-source detail
         assert "fresh" not in text
 
     def test_sync_view_skipped_no_last_run(self):
-        from loops.lenses.sync import sync_view
         from painted import Zoom
 
-        data = {
-            "ran": [],
-            "skipped": [{"kind": "health", "last_run_ts": None, "cadence_interval": None}],
-            "errors": [],
-            "ticks": [],
-        }
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
+        text = self._render(
+            {"ran": [], "skipped": [{"kind": "health", "last_run_ts": None, "cadence_interval": None}], "errors": [], "ticks": []},
+            Zoom.SUMMARY,
+        )
         assert "health" in text
 
-    def test_sync_view_minimal_nothing(self):
-        from loops.lenses.sync import sync_view
+    def test_sync_view_summary_children_breakdown(self):
         from painted import Zoom
 
-        data = {"ran": [], "skipped": [], "errors": [], "ticks": []}
-        block = sync_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
-        assert "nothing to sync" in text
-
-    def test_sync_view_minimal_shows_fact_count(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
-
-        data = {"ran": ["ping"], "skipped": [], "errors": [], "ticks": [],
-                "fact_counts": {"ping": 3}}
-        block = sync_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
-        assert "3 facts" in text
-
-    def test_sync_view_summary_shows_per_source_counts(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
-
-        data = {"ran": ["ping", "health"], "skipped": [], "errors": [], "ticks": [],
-                "fact_counts": {"ping": 3, "health": 1}}
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "ping (3)" in text
-        assert "health (1)" in text
-
-    def test_sync_view_summary_children_per_child_breakdown(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
-
-        data = {
-            "ran": ["child1", "child2"], "skipped": [], "errors": [], "ticks": [],
-            "fact_counts": {"child1": 5, "child2": 3},
-            "children": [
-                {"name": "child1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 5}},
-                {"name": "child2", "ran": ["child2"], "skipped": [], "fact_counts": {"child2": 3}},
-            ],
-        }
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "child1: 5 facts" in text
-        assert "child2: 3 facts" in text
-        assert "Total: 8 facts" in text
+        text = self._render(
+            {
+                "ran": ["child1", "child2"],
+                "skipped": [],
+                "errors": [],
+                "ticks": [],
+                "fact_counts": {"child1": 5, "child2": 3},
+                "children": [
+                    {"name": "child1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 5}},
+                    {"name": "child2", "ran": ["child2"], "skipped": [], "fact_counts": {"child2": 3}},
+                ],
+            },
+            Zoom.SUMMARY,
+        )
+        assert all(part in text for part in ["child1: 5 facts", "child2: 3 facts", "Total: 8 facts"])
 
     def test_sync_view_children_skipped(self):
-        from loops.lenses.sync import sync_view
         from painted import Zoom
 
-        data = {
-            "ran": ["child1"],
-            "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}],
-            "errors": [], "ticks": [],
-            "fact_counts": {"child1": 2},
-            "children": [
-                {"name": "c1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 2}},
-                {"name": "c2", "ran": [],
-                 "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}],
-                 "fact_counts": {}},
-            ],
-        }
-        block = sync_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
+        text = self._render(
+            {
+                "ran": ["child1"],
+                "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}],
+                "errors": [],
+                "ticks": [],
+                "fact_counts": {"child1": 2},
+                "children": [
+                    {"name": "c1", "ran": ["child1"], "skipped": [], "fact_counts": {"child1": 2}},
+                    {"name": "c2", "ran": [], "skipped": [{"kind": "child2", "last_run_ts": None, "cadence_interval": None}], "fact_counts": {}},
+                ],
+            },
+            Zoom.SUMMARY,
+        )
         assert "c1: 2 facts" in text
         assert "child2" in text
-
-    def test_sync_view_minimal_singular_fact(self):
-        from loops.lenses.sync import sync_view
-        from painted import Zoom
-
-        data = {"ran": ["ping"], "skipped": [], "errors": [], "ticks": [],
-                "fact_counts": {"ping": 1}}
-        block = sync_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
-        assert "1 fact" in text
-        assert "1 facts" not in text
 
 
 def _make_aggregation_vertex(tmp_path: Path) -> Path:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import time
 from pathlib import Path
 
@@ -11,7 +10,8 @@ from engine import SqliteStore
 from engine.compiler import compile_sources_block
 from lang.ast import InlineSource, SourcesBlock
 from painted import Zoom
-from painted.core.writer import print_block
+
+from .helpers import block_to_text
 
 import importlib.util
 import sys
@@ -28,13 +28,6 @@ health_lens = _health_mod.health_lens
 health_view = _health_mod.health_view
 run_checks = _health_mod.run_checks
 run_sequential_checks = _health_mod.run_sequential_checks
-
-
-def _block_text(block) -> str:
-    """Render a Block into plain text."""
-    buf = io.StringIO()
-    print_block(block, buf, use_ansi=False)
-    return buf.getvalue()
 
 
 def _read_all_facts(db_path: Path) -> list[Fact]:
@@ -159,7 +152,7 @@ class TestHealthLens:
         result = health_lens("test.result", payload, Zoom.DETAILED)
         from painted import Block
         assert isinstance(result, Block)
-        text = _block_text(result)
+        text = block_to_text(result)
         # Lens returns name + status + duration, NOT the output
         assert "test" in text
         assert "passed" in text
@@ -169,7 +162,7 @@ class TestHealthLens:
         """FULL lens returns summary — record_line handles full field rendering."""
         payload = self._result_payload(output="line1\nline2")
         result = health_lens("test.result", payload, Zoom.FULL)
-        text = _block_text(result)
+        text = block_to_text(result)
         assert "test" in text
         assert "passed" in text
         assert "line1" not in text
@@ -190,12 +183,12 @@ class TestHealthView:
 
     def test_empty_results(self):
         block = health_view([], Zoom.SUMMARY, 80)
-        assert "No check results" in _block_text(block)
+        assert "No check results" in block_to_text(block)
 
     def test_minimal_shows_all_names(self):
         results = self._make_results("passed", "passed")
         block = health_view(results, Zoom.MINIMAL, 80)
-        text = _block_text(block)
+        text = block_to_text(block)
         assert "lint" in text
         assert "test" in text
 
@@ -306,6 +299,6 @@ class TestRunSequentialChecks:
         view = health_view(results, Zoom.SUMMARY, 80)
 
         assert view is not None
-        text = _block_text(view)
+        text = block_to_text(view)
         assert "lint" in text
         assert "test" in text

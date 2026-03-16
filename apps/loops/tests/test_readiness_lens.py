@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from atoms import FoldItem, FoldSection, FoldState
-from painted import Block, Zoom
+from painted import Zoom
+
+from .helpers import block_to_text
 
 # readiness.py lives under config/lenses/ — add to path so import works
 _CONFIG_LENSES = str(Path(__file__).resolve().parents[3] / "config" / "lenses")
@@ -41,18 +43,9 @@ def _decision_section(*items: FoldItem) -> FoldSection:
     return FoldSection(kind="decision", fold_type="by", key_field="topic", items=items)
 
 
-def _block_to_text(block: Block) -> str:
-    result = []
-    for y in range(block.height):
-        row = block.row(y)
-        line = "".join(cell.char for cell in row)
-        result.append(line)
-    return "\n".join(result)
-
-
 def _render_text(data: FoldState, zoom: Zoom = Zoom.SUMMARY) -> str:
     block = fold_view(data, zoom, width=None)
-    return _block_to_text(block)
+    return block_to_text(block)
 
 
 # ---------------------------------------------------------------------------

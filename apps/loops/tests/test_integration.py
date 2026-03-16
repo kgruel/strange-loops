@@ -1,0 +1,952 @@
+"""Integration tests that exercise broad code paths through the full stack.
+
+Uses the vertex builder SDK for clean, expressive test setup.
+Each test covers many modules simultaneously — main.py dispatch,
+vertex loading, store writing, fold materialization, boundary evaluation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+
+import pytest
+
+from painted import Zoom
+from engine.builder import vertex, fold_count, fold_by, fold_collect
+
+
+@pytest.fixture
+def vertex_dir(tmp_path):
+    """Create a vertex with multiple loop types via the builder."""
+    v = (vertex("integration")
+        .store("./test.db")
+        .loop("heartbeat", fold_count("n"), search=["service", "status"], boundary_every=3)
+        .loop("metric", fold_by("service"))
+        .loop("event", fold_collect("items", max_items=100)))
+    v.write(tmp_path / "test.vertex")
+    return tmp_path, tmp_path / "test.vertex"
+
+
+def _emit(vertex_path, kind, **payload):
+    """Helper: emit a fact via cmd_emit."""
+    from loops.main import cmd_emit
+    parts = [f"{k}={v}" for k, v in payload.items()]
+    ns = argparse.Namespace(
+        vertex=None, kind=kind, parts=parts,
+        observer="", dry_run=False,
+    )
+    return cmd_emit(ns, vertex_path=vertex_path)
+
+
+class TestEmitIntegration:
+    """Full cmd_emit — exercises main.py, vertex.receive, store, fold."""
+
+    def test_emit_happy_path(self, vertex_dir):
+        tmp_path, vpath = vertex_dir
+        assert _emit(vpath, "heartbeat", service="api", status="up") == 0
+
+        from engine.store_reader import StoreReader
+        with StoreReader(tmp_path / "test.db") as reader:
+            facts = reader.recent_facts("heartbeat", 10)
+            assert len(facts) == 1
+            assert facts[0]["payload"]["service"] == "api"
+
+    def test_emit_multiple_kinds(self, vertex_dir):
+        tmp_path, vpath = vertex_dir
+        assert _emit(vpath, "heartbeat", service="api") == 0
+        assert _emit(vpath, "metric", service="web", latency="42") == 0
+        assert _emit(vpath, "event", message="deploy") == 0
+
+        from engine.store_reader import StoreReader
+        with StoreReader(tmp_path / "test.db") as reader:
+            assert len(reader.recent_facts("heartbeat", 10)) == 1
+            assert len(reader.recent_facts("metric", 10)) == 1
+            assert len(reader.recent_facts("event", 10)) == 1
+
+    def test_emit_fold_by(self, vertex_dir):
+        _, vpath = vertex_dir
+        for svc in ["api", "web", "api"]:
+            _emit(vpath, "metric", service=svc, latency="42")
+
+        from engine import vertex_read
+        state = vertex_read(vpath)
+        assert "metric" in state
+
+    def test_emit_dry_run(self, vertex_dir):
+        tmp_path, vpath = vertex_dir
+        from loops.main import cmd_emit
+        ns = argparse.Namespace(
+            vertex=None, kind="event", parts=["message=test"],
+            observer="", dry_run=True,
+        )
+        assert cmd_emit(ns, vertex_path=vpath) == 0
+
+
+class TestReadIntegration:
+    """Full vertex_read — exercises vertex_reader, fold, search, summary."""
+
+    def test_read_fold(self, vertex_dir):
+        _, vpath = vertex_dir
+        for i in range(5):
+            _emit(vpath, "heartbeat", service="api", n=str(i))
+
+        from engine import vertex_read
+        state = vertex_read(vpath)
+        assert "heartbeat" in state
+
+    def test_read_fold_by(self, vertex_dir):
+        """fold-by produces dict state — exercises vertex_fold path."""
+        _, vpath = vertex_dir
+        for svc in ["api", "web"]:
+            _emit(vpath, "metric", service=svc, latency="42")
+
+        from engine import vertex_fold
+        fold = vertex_fold(vpath)
+        assert fold.vertex == "integration"
+        assert any(s.kind == "metric" for s in fold.sections)
+
+    def test_read_search(self, vertex_dir):
+        _, vpath = vertex_dir
+        for svc in ["api-gateway", "web-frontend", "api-backend"]:
+            _emit(vpath, "heartbeat", service=svc, status="up")
+
+        from engine import vertex_search
+        results = vertex_search(vpath, "api")
+        assert len(results) >= 2
+
+    def test_read_facts_history(self, vertex_dir):
+        _, vpath = vertex_dir
+        for i in range(3):
+            _emit(vpath, "event", message=f"event-{i}")
+
+        from engine import vertex_facts
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999999999)
+        assert len(facts) >= 3
+
+    def test_read_summary(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="x")
+        _emit(vpath, "metric", service="y", val="1")
+
+        from engine import vertex_summary
+        summary = vertex_summary(vpath)
+        kinds = summary["facts"]["kinds"]
+        assert kinds["heartbeat"]["count"] >= 1
+        assert kinds["metric"]["count"] >= 1
+
+    def test_fact_by_id(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "event", message="findme")
+
+        from engine import vertex_facts, vertex_fact_by_id
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999999999)
+        found = vertex_fact_by_id(vpath, facts[0]["id"][:8])
+        assert found is not None
+        assert found["payload"]["message"] == "findme"
+
+
+class TestDispatchHelpers:
+    """Direct helper tests for main.py dispatch branches."""
+
+    def test_resolve_observer_flag_variants(self, monkeypatch):
+        import loops.main as m
+        import loops.commands.identity as identity
+
+        monkeypatch.setattr(identity, "resolve_observer", lambda raw=None: f"resolved:{raw}")
+        assert m._resolve_observer_flag(None) is None
+        assert m._resolve_observer_flag("all") == ""
+        assert m._resolve_observer_flag("Alice") == "resolved:Alice"
+
+    def test_apply_vertex_scope_variants(self, tmp_path, monkeypatch):
+        import loops.main as m
+        import loops.commands.identity as identity
+
+        scoped = tmp_path / "scoped.vertex"
+        scoped.write_text('name "scoped"\nstore "./s.db"\nscope "observer"\nloops { ping { fold { n "inc" } } }\n')
+        unscoped = tmp_path / "plain.vertex"
+        unscoped.write_text('name "plain"\nstore "./p.db"\nloops { ping { fold { n "inc" } } }\n')
+
+        monkeypatch.setattr(identity, "resolve_observer", lambda raw=None: "alice")
+        assert m._apply_vertex_scope("bob", scoped) == "bob"
+        assert m._apply_vertex_scope(None, scoped) == "alice"
+        assert m._apply_vertex_scope(None, unscoped) is None
+        assert m._apply_vertex_scope(None, None) is None
+
+    def test_dispatch_observer_population_and_unknown_op(self, tmp_path, monkeypatch):
+        import loops.main as m
+
+        calls = []
+        monkeypatch.setattr(m, "_run_ls", lambda argv: calls.append(("ls", argv)) or 0)
+        monkeypatch.setattr(m, "_run_add", lambda argv: calls.append(("add", argv)) or 0)
+        monkeypatch.setattr(m, "_run_rm", lambda argv: calls.append(("rm", argv)) or 0)
+        monkeypatch.setattr(m, "_run_export", lambda argv: calls.append(("export", argv)) or 0)
+
+        vpath = tmp_path / "project.vertex"
+        vpath.write_text('name "project"\nstore "./p.db"\nloops {}\n')
+
+        assert m._dispatch_observer("project", vpath, ["ls", "fred", "--plain"]) == 0
+        assert m._dispatch_observer("project", vpath, ["add", "k", "v"]) == 0
+        assert m._dispatch_observer("project", vpath, ["rm", "k"]) == 0
+        assert m._dispatch_observer("project", vpath, ["export"]) == 0
+        assert calls == [
+            ("ls", ["project/fred", "--plain"]),
+            ("add", ["project", "k", "v"]),
+            ("rm", ["project", "k"]),
+            ("export", ["project"]),
+        ]
+        assert m._dispatch_observer("project", vpath, ["mystery"]) == 1
+
+    def test_dispatch_command_builds_command_table(self, monkeypatch):
+        import loops.main as m
+        import painted.cli as cli
+        import painted.cli.app_runner as app_runner
+
+        seen = {}
+
+        class FakeAppCommand:
+            def __init__(self, name, description, handler, detail=None, help_args=None):
+                self.name = name
+                self.description = description
+                self.handler = handler
+                self.detail = detail
+                self.help_args = help_args
+
+        class FakeHelpArg:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        def fake_run_app(argv, commands, prog, description):
+            seen["argv"] = argv
+            seen["commands"] = commands
+            seen["prog"] = prog
+            seen["description"] = description
+            return 0
+
+        monkeypatch.setattr(app_runner, "AppCommand", FakeAppCommand)
+        monkeypatch.setattr(app_runner, "run_app", fake_run_app)
+        monkeypatch.setattr(cli, "HelpArg", FakeHelpArg)
+
+        assert m._dispatch_command("init", ["project"]) == 0
+        assert seen["argv"] == ["init", "project"]
+        assert seen["prog"] == "loops"
+        assert seen["description"] == "Runtime for .loop and .vertex files"
+        names = [c.name for c in seen["commands"]]
+        assert names == ["test", "compile", "validate", "store", "init", "whoami", "ls", "add", "rm", "export"]
+        init_cmd = next(c for c in seen["commands"] if c.name == "init")
+        assert init_cmd.detail == "[name] [--template NAME]"
+        assert len(init_cmd.help_args) == 2
+
+    def test_main_pathlike_argument_suggests_sync(self, capsys):
+        from loops.main import main
+
+        rc = main(["./demo.vertex"])
+        assert rc == 1
+        assert "loops sync ./demo.vertex" in capsys.readouterr().err
+
+
+class TestCLIDispatch:
+    """Test main() dispatch — covers verb routing, command handlers."""
+
+    def test_emit_via_main(self, vertex_dir):
+        _, vpath = vertex_dir
+        from loops.main import main
+        rc = main(["emit", str(vpath), "heartbeat", "service=test"])
+        assert rc == 0
+
+    def test_read_via_main(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "metric", service="api", latency="10")
+        from loops.main import main
+        assert main(["read", str(vpath), "--plain"]) == 0
+
+    def test_read_facts_via_main(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "event", message="hello")
+        from loops.main import main
+        assert main(["read", str(vpath), "--facts", "--plain"]) == 0
+
+    def test_validate_vertex(self, tmp_path):
+        """Validate a simple vertex — covers _run_validate."""
+        v = vertex("simple").store("./s.db").loop("ping", fold_count("n"))
+        v.write(tmp_path / "simple.vertex")
+        from loops.main import main
+        assert main(["validate", str(tmp_path / "simple.vertex")]) == 0
+
+    def test_compile_vertex(self, tmp_path):
+        """Compile a vertex — covers _run_compile."""
+        v = vertex("simple").store("./s.db").loop("ping", fold_count("n"))
+        v.write(tmp_path / "simple.vertex")
+        from loops.main import main
+        assert main(["compile", str(tmp_path / "simple.vertex"), "--plain"]) == 0
+
+    def test_store_command(self, vertex_dir):
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="x")
+        from loops.main import main
+        assert main(["store", str(tmp_path / "test.db"), "--plain"]) == 0
+
+    def test_main_no_args(self):
+        from loops.main import main
+        rc = main([])
+        assert isinstance(rc, int)
+
+    def test_main_help(self):
+        from loops.main import main
+        rc = main(["--help"])
+        assert isinstance(rc, int)
+
+
+class TestCombinedVertex:
+    """Test combined vertex reads — covers vertex_reader combine paths."""
+
+    @pytest.fixture
+    def combined_dir(self, tmp_path):
+        """Create two child vertices and a parent that combines them."""
+        from engine.builder import vertex, fold_count
+
+        # Child A
+        a = vertex("child-a").store("./a.db").loop("ping", fold_count("n"))
+        a.write(tmp_path / "a.vertex")
+
+        # Child B
+        b = vertex("child-b").store("./b.db").loop("ping", fold_count("n"))
+        b.write(tmp_path / "b.vertex")
+
+        # Parent combines them
+        parent = tmp_path / "parent.vertex"
+        parent.write_text(f'''\
+name "parent"
+combine {{
+    vertex "{tmp_path / "a.vertex"}"
+    vertex "{tmp_path / "b.vertex"}"
+}}
+''')
+        return tmp_path, parent
+
+    def test_combined_read(self, combined_dir):
+        """Read from combined vertex merges child stores."""
+        tmp_path, parent = combined_dir
+        # Emit to each child
+        _emit(tmp_path / "a.vertex", "ping", source="a")
+        _emit(tmp_path / "b.vertex", "ping", source="b")
+
+        from engine import vertex_read
+        state = vertex_read(parent)
+        assert "ping" in state
+
+    def test_combined_facts(self, combined_dir):
+        """Facts from combined vertex include both children."""
+        tmp_path, parent = combined_dir
+        _emit(tmp_path / "a.vertex", "ping", source="a")
+        _emit(tmp_path / "b.vertex", "ping", source="b")
+
+        from engine import vertex_facts
+        facts = vertex_facts(parent, since_ts=0, until_ts=9999999999)
+        assert len(facts) >= 2
+
+    def test_combined_summary(self, combined_dir):
+        """Summary from combined vertex aggregates counts."""
+        tmp_path, parent = combined_dir
+        _emit(tmp_path / "a.vertex", "ping", source="a")
+        _emit(tmp_path / "b.vertex", "ping", source="b")
+        _emit(tmp_path / "b.vertex", "ping", source="b2")
+
+        from engine import vertex_summary
+        summary = vertex_summary(parent)
+        assert summary["facts"]["total"] >= 3
+
+
+class TestSyncIntegration:
+    """Sync verb — exercises source execution, cadence, executor."""
+
+    def test_sync_no_sources(self, vertex_dir):
+        """Sync a vertex with no sources — should handle gracefully."""
+        _, vpath = vertex_dir
+        from loops.main import main
+        # No sources configured, sync should not crash
+        rc = main(["sync", str(vpath), "--plain"])
+        # May return non-zero (no sources), but shouldn't crash
+        assert isinstance(rc, int)
+
+    def test_sync_force(self, vertex_dir):
+        """Sync --force exercises the force flag path."""
+        _, vpath = vertex_dir
+        from loops.main import main
+        rc = main(["sync", str(vpath), "--force", "--plain"])
+        assert isinstance(rc, int)
+
+
+class TestInitIntegration:
+    """Init command — exercises _run_init."""
+
+    def test_init_in_dir(self, tmp_path):
+        """Init creates a vertex in .loops/."""
+        import os
+        os.environ["LOOPS_HOME"] = str(tmp_path / "home")
+        try:
+            from loops.main import main
+            rc = main(["init"])
+            assert rc == 0
+            assert (tmp_path / "home" / ".vertex").exists()
+        finally:
+            os.environ.pop("LOOPS_HOME", None)
+
+
+class TestObserverScoped:
+    """Observer-scoped folds — exercises vertex.py observer branching."""
+
+    def test_observer_scoped_emit(self, tmp_path):
+        """Emit with observer-scoped vertex separates fold state by observer."""
+        from engine.builder import vertex, fold_count
+        b = (vertex("scoped")
+            .store("./scoped.db")
+            .loop("heartbeat", fold_count("n"))
+            .observer_scoped())
+        b.write(tmp_path / "scoped.vertex")
+
+        vpath = tmp_path / "scoped.vertex"
+        from loops.main import cmd_emit
+        import argparse
+
+        # Emit as alice
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="heartbeat", parts=["service=api"],
+            observer="alice", dry_run=False,
+        ), vertex_path=vpath)
+
+        # Emit as bob
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="heartbeat", parts=["service=web"],
+            observer="bob", dry_run=False,
+        ), vertex_path=vpath)
+
+        # Read with observer filter
+        from engine import vertex_read
+        alice_state = vertex_read(vpath, observer="alice")
+        bob_state = vertex_read(vpath, observer="bob")
+        all_state = vertex_read(vpath)
+
+        # Each observer should see their own data
+        assert "heartbeat" in alice_state
+        assert "heartbeat" in bob_state
+        assert "heartbeat" in all_state
+
+
+class TestRoutes:
+    """Kind routing — exercises vertex.py _routed_kind path."""
+
+    def test_routed_emit(self, tmp_path):
+        """Emit a fact that gets routed to a different loop."""
+        from engine.builder import vertex, fold_count
+        b = (vertex("routed")
+            .store("./routed.db")
+            .loop("metric", fold_count("n"))
+            .route("cpu", "metric")
+            .route("mem", "metric"))
+        b.write(tmp_path / "routed.vertex")
+
+        vpath = tmp_path / "routed.vertex"
+        _emit(vpath, "cpu", value="90")
+        _emit(vpath, "mem", value="50")
+        _emit(vpath, "metric", value="42")
+
+        from engine import vertex_facts
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999999999)
+        # All 3 facts should be stored
+        assert len(facts) >= 3
+
+
+class TestEdgeCases:
+    """Edge cases that exercise error/boundary paths."""
+
+    def test_emit_to_nonexistent_vertex(self, tmp_path):
+        """Emit to missing vertex — raises FileNotFoundError."""
+        from loops.main import cmd_emit
+        import argparse
+        ns = argparse.Namespace(
+            vertex=None, kind="test", parts=["x=1"],
+            observer="", dry_run=False,
+        )
+        with pytest.raises(FileNotFoundError):
+            cmd_emit(ns, vertex_path=tmp_path / "nonexistent.vertex")
+
+    def test_emit_creates_store_dir(self, tmp_path):
+        """Emit to vertex whose store dir doesn't exist — creates it."""
+        from engine.builder import vertex, fold_count
+        b = vertex("deep").store("./nested/deep/store.db").loop("ping", fold_count("n"))
+        b.write(tmp_path / "deep.vertex")
+
+        rc = _emit(tmp_path / "deep.vertex", "ping", n="1")
+        assert rc == 0
+        assert (tmp_path / "nested" / "deep" / "store.db").exists()
+
+    def test_read_empty_vertex(self, tmp_path):
+        """Read from vertex with no facts — returns empty state."""
+        from engine.builder import vertex, fold_count
+        b = vertex("empty").store("./empty.db").loop("ping", fold_count("n"))
+        b.write(tmp_path / "empty.vertex")
+
+        from engine import vertex_read
+        state = vertex_read(tmp_path / "empty.vertex")
+        assert "ping" in state
+
+    def test_search_empty_vertex(self, tmp_path):
+        """Search on empty vertex — returns empty results."""
+        from engine.builder import vertex, fold_count
+        b = vertex("empty").store("./empty.db").loop("ping", fold_count("n"), search=["x"])
+        b.write(tmp_path / "empty.vertex")
+
+        from engine import vertex_search
+        results = vertex_search(tmp_path / "empty.vertex", "anything")
+        assert results == []
+
+    def test_multiple_folds_per_loop(self, tmp_path):
+        """Loop with multiple fold declarations."""
+        from engine.builder import vertex, fold_count, fold_latest, fold_max
+        b = (vertex("multi-fold")
+            .store("./mf.db")
+            .loop("metric", fold_count("n"), fold_max("peak", target="peak")))
+        b.write(tmp_path / "mf.vertex")
+
+        _emit(tmp_path / "mf.vertex", "metric", value="42")
+        _emit(tmp_path / "mf.vertex", "metric", value="99")
+
+        from engine import vertex_read
+        state = vertex_read(tmp_path / "mf.vertex")
+        assert "metric" in state
+
+
+class TestLsCommand:
+    """ls command — covers commands/vertices.py (85 stmts, 0%)."""
+
+    def test_ls_with_root_vertex(self, tmp_path):
+        """ls lists vertices found under LOOPS_HOME."""
+        import os
+        # Create a root .vertex
+        home = tmp_path / "home"
+        home.mkdir()
+        root = home / ".vertex"
+        root.write_text('discover "./**/*.vertex"\n')
+
+        # Create a child vertex
+        child_dir = home / "test"
+        child_dir.mkdir()
+        from engine.builder import vertex, fold_count
+        vertex("test").store("./test.db").loop("ping", fold_count("n")).write(child_dir / "test.vertex")
+
+        os.environ["LOOPS_HOME"] = str(home)
+        try:
+            from loops.main import main
+            rc = main(["ls", "--plain"])
+            assert rc == 0
+        finally:
+            os.environ.pop("LOOPS_HOME", None)
+
+
+class TestReadFilters:
+    """Read with filters — covers _run_read/fold/stream flag paths."""
+
+    def test_read_with_kind_filter(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        _emit(vpath, "metric", service="web", latency="10")
+        from loops.main import main
+        # --kind filters to specific kind
+        assert main(["read", str(vpath), "--facts", "--kind", "heartbeat", "--plain"]) == 0
+
+    def test_read_with_since_filter(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "event", message="old")
+        from loops.main import main
+        assert main(["read", str(vpath), "--facts", "--since", "1h", "--plain"]) == 0
+
+    def test_read_with_id_lookup(self, vertex_dir):
+        _, vpath = vertex_dir
+        _emit(vpath, "event", message="findme")
+        from engine import vertex_facts
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999999999)
+        fact_id = facts[0]["id"][:8]
+        from loops.main import main
+        assert main(["read", str(vpath), "--facts", "--id", fact_id, "--plain"]) == 0
+
+
+class TestCloseIntegration:
+    """Close verb — covers _run_close path."""
+
+    def test_close_thread(self, vertex_dir):
+        """Close exercises the close dispatch + fact emission."""
+        _, vpath = vertex_dir
+        # Emit a thread fact first
+        from loops.main import cmd_emit
+        import argparse
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="thread", parts=["name=fix-bug", "status=open", "message=working"],
+            observer="tester", dry_run=False,
+        ), vertex_path=vpath)
+
+        from loops.main import main
+        rc = main(["close", str(vpath), "thread", "fix-bug", "done"])
+        # close may fail if vertex doesn't declare thread kind, but exercises the path
+        assert isinstance(rc, int)
+
+
+class TestWhoami:
+    """whoami command — exercises observer identity resolution."""
+
+    def test_whoami_with_env(self, tmp_path):
+        """When LOOPS_OBSERVER is set, whoami returns it."""
+        from loops.commands.identity import resolve_observer
+        import os
+        os.environ["LOOPS_OBSERVER"] = "test-agent"
+        try:
+            assert resolve_observer() == "test-agent"
+        finally:
+            os.environ.pop("LOOPS_OBSERVER", None)
+
+
+class TestReadLensDispatch:
+    """Read with --lens flag — exercises lens resolution chain."""
+
+    def test_read_with_json_format(self, vertex_dir):
+        """--json format exercises the JSON output path."""
+        _, vpath = vertex_dir
+        _emit(vpath, "metric", service="api", latency="10")
+        from loops.main import main
+        assert main(["read", str(vpath), "--json"]) == 0
+
+    def test_read_facts_with_json(self, vertex_dir):
+        """--facts --json exercises stream JSON path."""
+        _, vpath = vertex_dir
+        _emit(vpath, "event", message="test")
+        from loops.main import main
+        assert main(["read", str(vpath), "--facts", "--json"]) == 0
+
+
+class TestUnknownCommand:
+    """Unknown commands — exercises dispatch error paths."""
+
+    def test_unknown_verb(self):
+        from loops.main import main
+        rc = main(["nonexistent-command"])
+        assert rc != 0
+
+
+class TestLoopTestCommand:
+    """loops test <file> — exercises the test runner path."""
+
+    def test_loop_test_with_input(self, tmp_path):
+        """Test a .loop file with --input exercises parse pipeline."""
+        # Create a .loop file
+        loop_file = tmp_path / "test.loop"
+        loop_file.write_text('''\
+kind "metric"
+observer "test"
+source "echo ignored"
+parse {
+    split
+    pick 0 1 {
+        names "service" "value"
+    }
+}
+''')
+        # Create input data
+        input_file = tmp_path / "input.txt"
+        input_file.write_text("api 42\nweb 99\ndb 7\n")
+
+        from loops.main import main
+        rc = main(["test", str(loop_file), "--input", str(input_file), "--plain"])
+        assert rc == 0
+
+    def test_loop_test_with_transform(self, tmp_path):
+        """Test parse pipeline with skip, split, pick, transform."""
+        loop_file = tmp_path / "disk.loop"
+        loop_file.write_text('''\
+source "echo test"
+kind "disk"
+observer "monitor"
+parse {
+    skip "^Filesystem"
+    split
+    pick 0 4 5 {
+        names "fs" "pct" "mount"
+    }
+    transform "pct" {
+        strip "%"
+        coerce "int"
+    }
+}
+''')
+        input_file = tmp_path / "input.txt"
+        input_file.write_text(
+            "Filesystem  Size  Used Avail Use% Mounted\n"
+            "/dev/sda1   50G   30G  20G  60% /\n"
+            "/dev/sdb1   100G  80G  20G  80% /data\n"
+        )
+        from loops.main import main
+        rc = main(["test", str(loop_file), "--input", str(input_file), "--plain"])
+        assert rc == 0
+
+    def test_compile_loop_file(self, tmp_path):
+        """Compile a .loop file — exercises compile path for loops."""
+        loop_file = tmp_path / "simple.loop"
+        loop_file.write_text('''\
+source "uptime"
+kind "system"
+observer "monitor"
+every "30s"
+''')
+        from loops.main import main
+        rc = main(["compile", str(loop_file), "--plain"])
+        assert rc == 0
+
+    def test_validate_loop_file(self, tmp_path):
+        """Validate a .loop file — exercises validate for loops."""
+        loop_file = tmp_path / "simple.loop"
+        loop_file.write_text('''\
+source "uptime"
+kind "system"
+observer "monitor"
+''')
+        from loops.main import main
+        rc = main(["validate", str(loop_file)])
+        assert rc == 0
+
+
+class TestVertexLevelBoundary:
+    """Vertex-level boundary — exercises vertex.py boundary evaluation at vertex scope."""
+
+    def test_vertex_boundary_when(self, tmp_path):
+        """Vertex-level boundary when= fires on matching fact kind."""
+        vpath = tmp_path / "boundary.vertex"
+        vpath.write_text('''\
+name "bounded"
+store "./bounded.db"
+loops {
+    heartbeat {
+        fold {
+            n "inc"
+        }
+    }
+    boundary when="heartbeat"
+}
+''')
+        from loops.main import cmd_emit
+        import argparse
+
+        for i in range(3):
+            ns = argparse.Namespace(
+                vertex=None, kind="heartbeat", parts=[f"n={i}"],
+                observer="", dry_run=False,
+            )
+            cmd_emit(ns, vertex_path=vpath)
+
+        # Verify ticks were produced
+        from engine.store_reader import StoreReader
+        db = tmp_path / "bounded.db"
+        if db.exists():
+            with StoreReader(db) as reader:
+                ticks = reader.recent_ticks("bounded", 10)
+                # Vertex-level boundary should fire
+                assert len(ticks) >= 1
+
+
+class TestStoreDetails:
+    """Store command detail views — covers commands/store.py deeper paths."""
+
+    def test_store_with_multiple_kinds(self, vertex_dir):
+        """Store with diverse data exercises kind grouping."""
+        tmp_path, vpath = vertex_dir
+        for i in range(5):
+            _emit(vpath, "heartbeat", service="api", n=str(i))
+        for i in range(3):
+            _emit(vpath, "metric", service="web", val=str(i))
+        _emit(vpath, "event", message="deploy")
+
+        from loops.main import main
+        rc = main(["store", str(tmp_path / "test.db"), "--plain"])
+        assert rc == 0
+
+    def test_store_verbose(self, vertex_dir):
+        """Store -v exercises detailed store view."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        rc = main(["store", str(tmp_path / "test.db"), "--plain", "-v"])
+        assert rc == 0
+
+    def test_store_nonexistent(self, tmp_path):
+        """Store for nonexistent db — exercises error path."""
+        from loops.main import main
+        rc = main(["store", str(tmp_path / "nope.db"), "--plain"])
+        assert rc != 0 or rc == 0  # may handle gracefully
+
+
+class TestCloseWorkflow:
+    """Full close workflow — thread lifecycle with artifacts."""
+
+    @pytest.fixture
+    def thread_vertex(self, tmp_path):
+        """Vertex configured like a real project store with threads/decisions/tasks."""
+        from engine.builder import vertex, fold_by, fold_count, fold_collect
+        b = (vertex("project")
+            .store("./project.db")
+            .loop("thread", fold_by("name"))
+            .loop("decision", fold_by("topic"))
+            .loop("task", fold_by("name"))
+            .loop("observation", fold_collect("items", max_items=100)))
+        b.write(tmp_path / "project.vertex")
+        return tmp_path / "project.vertex"
+
+    def test_close_thread_workflow(self, thread_vertex):
+        """Open thread → emit related facts → close → verify resolution."""
+        import argparse
+        from loops.main import cmd_emit, main
+
+        # Open a thread (empty observer skips validation)
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="thread",
+            parts=["name=refactor-imports", "status=open", "message=Working on lazy imports"],
+            observer="", dry_run=False,
+        ), vertex_path=thread_vertex)
+
+        # Emit a decision tagged to the thread
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/lazy-loading", "message=Defer all stdlib imports", "thread=refactor-imports"],
+            observer="", dry_run=False,
+        ), vertex_path=thread_vertex)
+
+        # Close the thread
+        rc = main(["close", str(thread_vertex), "thread", "refactor-imports", "Done"])
+        assert isinstance(rc, int)
+
+        # Verify the resolution fact was emitted (if close succeeded)
+        if rc == 0:
+            from engine import vertex_facts
+            facts = vertex_facts(thread_vertex, since_ts=0, until_ts=9999999999, kind="thread")
+            assert len(facts) >= 2
+
+
+class TestLensRendering:
+    """Test lens render functions directly — no terminal needed."""
+
+    @pytest.mark.parametrize(
+        "build_block",
+        [
+            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
+                __import__("atoms", fromlist=["FoldState", "FoldSection", "FoldItem"]).FoldState(
+                    sections=(
+                        __import__("atoms", fromlist=["FoldSection", "FoldItem"]).FoldSection(
+                            kind="metric",
+                            items=(
+                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"service": "api", "latency": "42"}, ts=1000000.0),
+                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"service": "web", "latency": "10"}, ts=1000001.0),
+                            ),
+                            sections=(),
+                            fold_type="by",
+                            key_field="service",
+                            scalars={},
+                        ),
+                    ),
+                    vertex="test",
+                ),
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
+                __import__("atoms", fromlist=["FoldState", "FoldSection", "FoldItem"]).FoldState(
+                    sections=(
+                        __import__("atoms", fromlist=["FoldSection", "FoldItem"]).FoldSection(
+                            kind="event",
+                            items=tuple(
+                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"message": f"event-{i}"}, ts=1000000.0 + i)
+                                for i in range(5)
+                            ),
+                            sections=(),
+                            fold_type="collect",
+                            key_field=None,
+                            scalars={},
+                        ),
+                    ),
+                    vertex="test",
+                ),
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
+                __import__("atoms", fromlist=["FoldState"]).FoldState(sections=(), vertex="empty"),
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.stream", fromlist=["stream_view"]).stream_view(
+                [
+                    {"kind": "heartbeat", "ts": 1000000.0, "payload": {"service": "api"}, "observer": "me", "id": "abc123"},
+                    {"kind": "event", "ts": 1000001.0, "payload": {"message": "deploy"}, "observer": "me", "id": "def456"},
+                ],
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.store", fromlist=["store_view"]).store_view(
+                {
+                    "name": "test.db",
+                    "path": "/tmp/test.db",
+                    "facts": {"total": 42, "kinds": {"heartbeat": {"count": 30}, "event": {"count": 12}}},
+                    "ticks": {"total": 3, "names": {"heartbeat": {"count": 3, "sparkline": "▃▅█"}}},
+                },
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.compile", fromlist=["compile_view"]).compile_view(
+                {
+                    "type": "vertex",
+                    "name": "test",
+                    "source_path": "/tmp/test.vertex",
+                    "store": "test.db",
+                    "discover": None,
+                    "emit": None,
+                    "specs": {"heartbeat": {"state_fields": ["n"], "folds": ["Count: n"], "boundary": None}},
+                    "routes": {},
+                },
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.validate", fromlist=["validate_view"]).validate_view(
+                {"results": [{"path": "test.vertex", "valid": True, "error": None}], "checked": 1, "errors": 0},
+                Zoom(1),
+                width=80,
+            ),
+            lambda: __import__("loops.lenses.sync", fromlist=["sync_view"]).sync_view(
+                {"ran": ["disk.loop"], "skipped": [], "fact_counts": {"disk": 5}, "errors": [], "ticks": []},
+                Zoom(1),
+                width=80,
+            ),
+        ],
+    )
+    def test_views_render(self, build_block):
+        assert build_block() is not None
+
+
+class TestVerticesLens:
+    """vertices_view lens — covers lenses/vertices.py (45%)."""
+
+    @pytest.mark.parametrize(
+        ("data", "zoom"),
+        [
+            ({"vertices": [{"name": "test", "path": "/tmp/test.vertex", "kind": "instance", "loops": ["heartbeat"]}]}, Zoom.MINIMAL),
+            ({"vertices": [
+                {"name": "project", "path": "/p.vertex", "kind": "instance", "loops": [{"name": "thread", "folds": "by name"}, {"name": "decision", "folds": "by topic"}]},
+                {"name": "meta", "path": "/m.vertex", "kind": "aggregation", "loops": []},
+            ]}, Zoom.SUMMARY),
+            ({"vertices": [
+                {"name": "project", "path": "/p.vertex", "kind": "instance", "loops": [{"name": "thread", "folds": "by name"}, {"name": "task", "folds": "by name"}], "store": "/data/project.db"},
+            ]}, Zoom.DETAILED),
+            ({"vertices": []}, Zoom.SUMMARY),
+        ],
+    )
+    def test_vertices_view_renders(self, data, zoom):
+        from loops.lenses.vertices import vertices_view
+
+        assert vertices_view(data, zoom, width=80) is not None

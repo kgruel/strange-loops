@@ -11,6 +11,8 @@ from loops.commands.store import _bucket_timestamps, _sparkline_str
 from loops.lenses.store import store_view, _relative_time
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
 
+from .helpers import block_to_text
+
 
 def _make_summary(*, freshness=None):
     """Build a minimal summary dict matching StoreReader.summary() shape."""
@@ -65,132 +67,39 @@ def _make_summary(*, freshness=None):
     }
 
 
-def _block_to_text(block) -> str:
-    """Extract text content from a block for testing."""
-    result = []
-    for y in range(block.height):
-        row = block.row(y)
-        line = "".join(cell.char for cell in row)
-        result.append(line)
-    return "\n".join(result)
+class TestStoreViewRendering:
+    @staticmethod
+    def _render(zoom):
+        block = store_view(_make_summary(), zoom, 80)
+        return block, block_to_text(block)
 
+    @pytest.mark.parametrize(
+        ("zoom", "present", "min_height"),
+        [
+            (Zoom.SUMMARY, ["hn.story", "rss.item", "3.2k", "2.8k", "ago"], 3),
+            (Zoom.DETAILED, ["hn.story", "rss.item", "3.2k"], 5),
+            (Zoom.FULL, ["3 kinds", "facts"], 5),
+        ],
+    )
+    def test_zoom_levels_render_expected_content(self, zoom, present, min_height):
+        block, text = self._render(zoom)
+        for needle in present:
+            assert needle in text
+        assert "Show HN" in text or "Episode 42" in text
+        assert block.height >= min_height
 
-class TestMinimal:
-    def test_shows_counts(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
+    def test_minimal_summary_is_dense_and_ordered(self):
+        block, text = self._render(Zoom.MINIMAL)
         assert "3 kinds" in text
         assert "6.5k facts" in text or "6462" in text or "6.4k" in text
-
-    def test_kinds_before_facts(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
-        kinds_pos = text.index("kinds")
-        fact_pos = text.index("facts")
-        assert kinds_pos < fact_pos
-
-    def test_shows_freshness(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.MINIMAL, 80)
-        text = _block_to_text(block)
         assert "fresh" in text
         assert "ago" in text
-
-    def test_non_empty(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.MINIMAL, 80)
+        assert text.index("kinds") < text.index("facts")
         assert block.height >= 1
 
-
-class TestSummary:
-    def test_shows_kind_names(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "hn.story" in text
-        assert "rss.item" in text
-
-    def test_shows_counts(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "3.2k" in text  # hn.story count
-        assert "2.8k" in text  # rss.item count
-
-    def test_shows_content_gist(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        # Content gist from sample_payload title field
-        assert "Show HN" in text or "Episode 42" in text
-
-    def test_shows_freshness(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        text = _block_to_text(block)
-        assert "ago" in text
-
-    def test_non_empty(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.SUMMARY, 80)
-        assert block.height >= 3
-
-
-class TestDetailed:
-    def test_shows_kind_sections(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.DETAILED, 80)
-        text = _block_to_text(block)
-        assert "hn.story" in text
-        assert "rss.item" in text
-
-    def test_shows_kind_counts(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.DETAILED, 80)
-        text = _block_to_text(block)
-        assert "3.2k" in text  # hn.story count
-
-    def test_shows_content_gist(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.DETAILED, 80)
-        text = _block_to_text(block)
-        # sample_payload gist appears under kind section
-        assert "Show HN" in text or "Episode 42" in text
-
-    def test_non_empty(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.DETAILED, 80)
-        assert block.height >= 5
-
-
-class TestFull:
-    def test_shows_content_gist(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.FULL, 80)
-        text = _block_to_text(block)
-        # Content gist from sample_payload
-        assert "Show HN" in text or "Episode 42" in text
-
-    def test_has_border(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.FULL, 80)
-        text = _block_to_text(block)
-        # ROUNDED border chars
+    def test_full_has_border(self):
+        _, text = self._render(Zoom.FULL)
         assert "╭" in text or "│" in text
-
-    def test_shows_topline_summary(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.FULL, 80)
-        text = _block_to_text(block)
-        assert "3 kinds" in text
-        assert "facts" in text
-
-    def test_non_empty(self):
-        data = _make_summary()
-        block = store_view(data, Zoom.FULL, 80)
-        assert block.height >= 5
 
 
 class TestRelativeTime:

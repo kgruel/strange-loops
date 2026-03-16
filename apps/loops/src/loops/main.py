@@ -210,6 +210,19 @@ def _init_local_vertex(
             count=1,
             flags=re.MULTILINE,
         )
+        # Substitute vertex name references in run clauses with the absolute
+        # vertex file path. The run clause executes from arbitrary cwd (worktrees),
+        # so name-based resolution may fail. Absolute path always works.
+        source_key = source_name or name
+        abs_vertex = str((loops_dir / f"{name}.vertex").resolve())
+        content = content.replace(
+            f"loops read {source_key} ",
+            f"loops read {abs_vertex} ",
+        )
+        content = content.replace(
+            f"loops emit {source_key} ",
+            f"loops emit {abs_vertex} ",
+        )
         # TODO: This init-time substitution is too specific — it pattern-matches
         # autoresearch's boundary shape rather than being a general mechanism.
         # Remove when cross-loop condition references land (thread:

@@ -656,6 +656,26 @@ class Vertex:
         self._replaying = False
         self._store = store  # restore
 
+        # Reconcile count-based boundary state after replay.
+        # During replay, loop.receive() may or may not have been called
+        # (fast path bypasses it). Either way, the count needs to reflect
+        # how many facts of the loop's kind were replayed, modulo the
+        # boundary threshold. For "after" mode: if threshold was reached,
+        # mark exhausted. For "every" mode: keep the residual count.
+        for loop in self._loops.values():
+            if loop.boundary_count is not None:
+                replayed = loop._projection.cursor
+                if loop.boundary_mode == "after":
+                    if replayed >= loop.boundary_count:
+                        loop._boundary_exhausted = True
+                        loop._count_since_boundary = 0
+                    else:
+                        loop._count_since_boundary = replayed
+                elif loop.boundary_mode == "every":
+                    loop._count_since_boundary = replayed % loop.boundary_count
+                else:
+                    loop._count_since_boundary = replayed
+
         # Initialize period start from last vertex-level tick.
         # Vertex-level boundary ticks use self._name as tick name.
         # The last such tick's ts is the end of the previous period —

@@ -169,13 +169,21 @@ def _find_source_vertex(name: str) -> str | None:
     return None
 
 
-def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
+def _init_local_vertex(
+    name: str,
+    source_name: str | None = None,
+    *,
+    iterations: int | None = None,
+) -> Path:
     """Create a vertex + data dir in .loops/. Returns vertex path.
 
     Uses an existing config-level vertex as source if available,
     otherwise creates a minimal stub with store path and empty loops block.
     Copies vertex-local lenses from source so they travel with the instance.
     Registers with the config-level aggregator if one exists.
+
+    If iterations is provided, substitutes boundary count and condition limits
+    in the stamped vertex content (e.g. count=30 → count=50).
     """
     import re
     import shutil
@@ -196,13 +204,33 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
             count=1,
             flags=re.MULTILINE,
         )
+        # TODO: This init-time substitution is too specific — it pattern-matches
+        # autoresearch's boundary shape rather than being a general mechanism.
+        # Remove when cross-loop condition references land (thread:
+        # cross-loop-condition-ref), which lets boundaries read limits from
+        # config fold state at runtime instead of baking literals at init.
+        if iterations is not None:
+            content = re.sub(
+                r'boundary after=\d+',
+                f'boundary after={iterations}',
+                content,
+            )
+            content = re.sub(
+                r'condition "n" "<" \d+',
+                f'condition "n" "<" {iterations}',
+                content,
+            )
     loops_dir = Path.cwd() / ".loops"
     loops_dir.mkdir(exist_ok=True)
     vertex_path = loops_dir / f"{name}.vertex"
+    vertex_path.parent.mkdir(parents=True, exist_ok=True)
     if not vertex_path.exists():
         vertex_path.write_text(content)
     data_dir = loops_dir / "data"
     data_dir.mkdir(exist_ok=True)
+    # For slashed names like autoresearch/emit-latency, ensure data subdir exists
+    store_dir = (loops_dir / "data" / name).parent
+    store_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy vertex-local lenses from source vertex directory
     source_key = source_name or name
@@ -373,11 +401,21 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     # Name and/or template → local instance in .loops/
     target = name or template
-    vertex_path = _init_local_vertex(target, source_name=template)
-    _msg(f"Created {vertex_path}")
 
-    # Parse seed key=value pairs
+    # Parse seed key=value pairs (before init so iterations= can be extracted)
     seed_config = _parse_emit_parts(seed_parts) if seed_parts else {}
+
+    # Extract iterations — vertex-level parameter, not a config fact.
+    # TODO: Remove when cross-loop-condition-ref lands (see above).
+    iterations = None
+    if "iterations" in seed_config:
+        try:
+            iterations = int(seed_config.pop("iterations"))
+        except ValueError:
+            pass
+
+    vertex_path = _init_local_vertex(target, source_name=template, iterations=iterations)
+    _msg(f"Created {vertex_path}")
 
     if seed_config:
         _seed_config_facts(vertex_path, seed_config)

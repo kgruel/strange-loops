@@ -251,6 +251,7 @@ def _load_parse_block(node: ckdl.Node, path: Path | None) -> tuple[ParseStep, ..
 
 _FOLD_OP_SPECS: dict[str, tuple[type, list[tuple[str, type]]]] = {
     "inc":     (FoldCount,   []),
+    "count":   (FoldCount,   []),
     "latest":  (FoldLatest,  []),
     "by":      (FoldBy,      [("key_field", str)]),
     "sum":     (FoldSum,     [("field", str)]),

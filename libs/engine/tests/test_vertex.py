@@ -1174,6 +1174,102 @@ class TestVertexReplay:
         assert tick2.since > tick1.since  # tick1.since < tick1.ts always
         store2.close()
 
+    def test_replay_reconciles_after_boundary_exhaustion(self, tmp_path):
+        """After replaying N >= threshold facts, 'after' boundary is exhausted.
+
+        Without reconciliation, the count accumulates during replay but
+        _boundary_exhausted is never set. This causes the boundary to fire
+        again on subsequent live facts — it should fire exactly once.
+        """
+        from engine.loop import Loop
+        from engine.sqlite_store import SqliteStore
+
+        db_path = tmp_path / "test.db"
+
+        # Session 1: emit 3 experiments, after=3 boundary fires
+        store1 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v1 = Vertex("test", store=store1)
+        loop1 = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="after",
+        )
+        v1.register_loop(loop1)
+        v1.receive(fact("experiment", n=1))
+        v1.receive(fact("experiment", n=2))
+        tick1 = v1.receive(fact("experiment", n=3))
+        assert tick1 is not None  # after=3 fires
+        store1.close()
+
+        # Session 2: fresh vertex, replay, then emit — should NOT fire again
+        store2 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v2 = Vertex("test", store=store2)
+        loop2 = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="after",
+        )
+        v2.register_loop(loop2)
+        v2.replay()
+
+        # After replay, the after=3 boundary should be marked exhausted
+        tick2 = v2.receive(fact("experiment", n=4))
+        assert tick2 is None  # must NOT fire — already exhausted
+        store2.close()
+
+    def test_replay_reconciles_every_boundary_count(self, tmp_path):
+        """After replaying N facts, 'every' boundary count is the residual.
+
+        every=3 with 5 replayed facts: fired at 3 (reset), count continued
+        to 2. On next live fact, count should be 3 → fires.
+        """
+        from engine.loop import Loop
+        from engine.sqlite_store import SqliteStore
+
+        db_path = tmp_path / "test.db"
+
+        # Session 1: emit 5 experiments (every=3 fires at 3, count resumes)
+        store1 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v1 = Vertex("test", store=store1)
+        loop1 = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="every",
+        )
+        v1.register_loop(loop1)
+        for i in range(5):
+            v1.receive(fact("experiment", n=i))
+        store1.close()
+
+        # Session 2: replay 5, count residual should be 5 % 3 = 2
+        store2 = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        v2 = Vertex("test", store=store2)
+        loop2 = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="every",
+        )
+        v2.register_loop(loop2)
+        v2.replay()
+
+        # After replay: _count_since_boundary = 5 % 3 = 2
+        # 6th experiment (1st live): count → 3, fires (correct: 6 is next multiple of 3)
+        tick_6 = v2.receive(fact("experiment", n=5))
+        assert tick_6 is not None  # fires — 6th experiment is a multiple of 3
+
+        # 7th experiment: count reset to 0 by fire(), now → 1, doesn't fire
+        tick_7 = v2.receive(fact("experiment", n=6))
+        assert tick_7 is None
+        store2.close()
+
 
 class TestParseAtVertex:
     """Per-kind parse pipelines applied at Vertex.receive() time."""

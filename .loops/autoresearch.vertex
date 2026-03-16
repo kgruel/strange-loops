@@ -18,8 +18,10 @@ loops {
     fold { items "by" "name" }
   }
 
-  // Boundary fires on each experiment result
-  boundary when="experiment"
+  // Boundary fires on each experiment result, triggers next iteration
+  boundary when="experiment" {
+    run "claude --dangerously-skip-permissions -p \"$(loops read autoresearch --lens autoresearch_prompt --plain)\""
+  }
 }
 
 lens {

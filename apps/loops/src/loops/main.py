@@ -1943,10 +1943,19 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             vertex_name=_vertex_name(vertex_path),
         )
 
+    async def fetch_stream():
+        """Poll the store for updates — enables --live mode."""
+        import asyncio
+        yield fetch()
+        while True:
+            await asyncio.sleep(2)
+            yield fetch()
+
     return run_cli(
         rest,
         fetch=fetch,
         render=render,
+        fetch_stream=fetch_stream,
         prog="loops fold",
         description="Show folded state",
         help_args=[

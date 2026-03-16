@@ -102,15 +102,16 @@ loops {{
 """
 
 
-def _extract_loops_text(content: str) -> str | None:
-    """Extract the ``loops { ... }`` block from raw vertex file text.
+def _extract_block_text(content: str, keyword: str) -> str | None:
+    """Extract a ``keyword { ... }`` block from raw vertex file text.
 
-    Uses brace-matching so nested ``{ }`` inside loop definitions are handled.
-    Returns the raw text including the ``loops`` keyword, or ``None``.
+    Uses brace-matching so nested ``{ }`` are handled.
+    Returns the raw text including the keyword, or ``None``.
     """
-    idx = content.find("\nloops {")
+    marker = f"\n{keyword} " + "{"
+    idx = content.find(marker)
     if idx == -1:
-        if content.startswith("loops {"):
+        if content.startswith(f"{keyword} " + "{"):
             idx = 0
         else:
             return None
@@ -127,6 +128,11 @@ def _extract_loops_text(content: str) -> str | None:
             if depth == 0:
                 return content[start : i + 1]
     return None
+
+
+def _extract_loops_text(content: str) -> str | None:
+    """Extract the ``loops { ... }`` block from raw vertex file text."""
+    return _extract_block_text(content, "loops")
 
 
 def _find_source_vertex(name: str) -> str | None:
@@ -148,10 +154,15 @@ def _find_source_vertex(name: str) -> str | None:
     if not vertex_file.exists():
         return None
     content = vertex_file.read_text()
-    # Try loops block → synthetic instance
+    # Try loops block → synthetic instance (preserving lens block if present)
     loops_text = _extract_loops_text(content)
     if loops_text is not None:
-        return f'name "{leaf}"\nstore "./data/{leaf}.db"\n\n{loops_text}\n'
+        lens_text = _extract_block_text(content, "lens")
+        parts = [f'name "{leaf}"', f'store "./data/{leaf}.db"', "", loops_text]
+        if lens_text is not None:
+            parts.append("")
+            parts.append(lens_text)
+        return "\n".join(parts) + "\n"
     # Direct instance (has a store directive, not just the word in a comment)
     if _re.search(r'^store\s', content, _re.MULTILINE):
         return content
@@ -163,10 +174,11 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
 
     Uses an existing config-level vertex as source if available,
     otherwise creates a minimal stub with store path and empty loops block.
-    After creating the local instance, registers it with the config-level
-    vertex's combine block (if one exists).
+    Copies vertex-local lenses from source so they travel with the instance.
+    Registers with the config-level aggregator if one exists.
     """
     import re
+    import shutil
 
     source = _find_source_vertex(source_name or name)
     if source is None:
@@ -192,8 +204,20 @@ def _init_local_vertex(name: str, source_name: str | None = None) -> Path:
     data_dir = loops_dir / "data"
     data_dir.mkdir(exist_ok=True)
 
+    # Copy vertex-local lenses from source vertex directory
+    source_key = source_name or name
+    home = loops_home()
+    source_lens_dir = home / source_key / "lenses"
+    if source_lens_dir.is_dir():
+        local_lens_dir = loops_dir / "lenses"
+        local_lens_dir.mkdir(exist_ok=True)
+        for lens_file in source_lens_dir.glob("*.py"):
+            dest = local_lens_dir / lens_file.name
+            if not dest.exists():
+                shutil.copy2(lens_file, dest)
+
     # Register with config-level aggregator
-    _register_with_aggregator(source_name or name, vertex_path)
+    _register_with_aggregator(source_key, vertex_path)
 
     return vertex_path
 
@@ -250,14 +274,84 @@ def _register_with_aggregator(name: str, local_vertex: Path) -> None:
 
 
 
+def _seed_config_facts(vertex_path: Path, config: dict[str, str]) -> None:
+    """Emit config facts into a newly-created vertex store.
+
+    Each key=value pair becomes a fact with kind="config" and
+    payload={"key": k, "value": v}. Short init args are mapped
+    to canonical config keys (e.g. metric → primary_metric).
+    """
+    from atoms import Fact
+    from engine import load_vertex_program
+
+    key_aliases = {"metric": "primary_metric"}
+
+    program = load_vertex_program(vertex_path, validate_ast=False, skip_sources=True)
+    v = program.vertex
+    ts = datetime.now(timezone.utc).timestamp()
+
+    for key, value in config.items():
+        key = key_aliases.get(key, key)
+        fact = Fact(
+            kind="config",
+            ts=ts,
+            payload={"key": key, "value": value},
+            observer="init",
+            origin="",
+        )
+        v.receive(fact)
+        ts += 0.001
+
+    if hasattr(v, '_store') and v._store is not None:
+        v._store.close()
+
+    _msg(f"Seeded {len(config)} config facts")
+
+
+def _scaffold_artifacts(config: dict[str, str]) -> None:
+    """Scaffold executable artifacts based on config values.
+
+    If 'benchmark' is provided, creates autoresearch.sh.
+    If 'checks' is provided, creates autoresearch.checks.sh.
+    Idempotent — won't overwrite existing scripts.
+    """
+    cwd = Path.cwd()
+
+    benchmark = config.get("benchmark")
+    if benchmark:
+        script = cwd / "autoresearch.sh"
+        if not script.exists():
+            script.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                f"{benchmark}\n"
+            )
+            script.chmod(0o755)
+            _msg(f"Created {script}")
+
+    checks = config.get("checks")
+    if checks:
+        script = cwd / "autoresearch.checks.sh"
+        if not script.exists():
+            script.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                f"{checks}\n"
+            )
+            script.chmod(0o755)
+            _msg(f"Created {script}")
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize a loops vertex.
 
     No args: create root .vertex in LOOPS_HOME.
     Name or --template: create local instance in .loops/ from config source or minimal stub.
+    With key=value seed args: emit config facts and scaffold executable artifacts.
     """
     name = getattr(args, "name", None)
     template = getattr(args, "template", None)
+    seed_parts = getattr(args, "seed", None) or []
 
     # No name + no template → root .vertex in LOOPS_HOME
     if not name and not template:
@@ -281,6 +375,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     target = name or template
     vertex_path = _init_local_vertex(target, source_name=template)
     _msg(f"Created {vertex_path}")
+
+    # Parse seed key=value pairs
+    seed_config = _parse_emit_parts(seed_parts) if seed_parts else {}
+
+    if seed_config:
+        _seed_config_facts(vertex_path, seed_config)
+        _scaffold_artifacts(seed_config)
+
     return 0
 
 
@@ -1984,7 +2086,11 @@ def _run_ls_root(argv: list[str]) -> int:
 
 
 def _run_init(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for init, delegate to cmd_init."""
+    """Thin wrapper: parse argv for init, delegate to cmd_init.
+
+    Accepts key=value pairs after the name for seeding config facts:
+        loops init autoresearch objective="Reduce latency" metric=emit_ms
+    """
     parser = argparse.ArgumentParser(prog="loops init", add_help=False)
     parser.add_argument(
         "name",
@@ -1996,6 +2102,11 @@ def _run_init(argv: list[str]) -> int:
         "--template",
         "-t",
         help="Source vertex name to use as template (defaults to init name)",
+    )
+    parser.add_argument(
+        "seed",
+        nargs="*",
+        help="key=value pairs to emit as config facts after creation",
     )
     args = parser.parse_args(argv)
     return cmd_init(args)
@@ -2573,7 +2684,7 @@ def _dispatch_observer(
 
 def _dispatch_command(cmd: str, argv: list[str]) -> int:
     """Dispatch dev tools and setup commands."""
-    from painted.app_runner import run_app, AppCommand
+    from painted.cli.app_runner import run_app, AppCommand
     from painted.cli import HelpArg
 
     commands = [

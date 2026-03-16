@@ -1,0 +1,27 @@
+name "autoresearch"
+store "./data/autoresearch.db"
+
+loops {
+  // Each experiment result: commit, status, metric values, description
+  // Collected in order — the full history drives the dashboard
+  experiment {
+    fold { items "collect" 500 }
+  }
+
+  // Key-value configuration: objective, primary_metric, direction, scope
+  config {
+    fold { items "by" "key" }
+  }
+
+  // Ideas to try — tracked by name, can be updated (tried/untried/rejected)
+  idea {
+    fold { items "by" "name" }
+  }
+
+  // Boundary fires on each experiment result
+  boundary when="experiment"
+}
+
+lens {
+  fold "autoresearch"
+}

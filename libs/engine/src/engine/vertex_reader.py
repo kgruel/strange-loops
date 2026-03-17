@@ -332,44 +332,65 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
 def _combined_read(
     ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None
 ) -> dict[str, dict[str, Any]]:
-    """Fold state across multiple stores (combinatorial vertex_read)."""
+    """Fold state across multiple stores (combinatorial vertex_read).
+
+    Fetches all facts in a single SQL query across attached stores,
+    then groups by kind and replays through specs. Single query avoids
+    the SQLite cold-start penalty (~10ms) that would hit the first of
+    N per-kind queries.
+    """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return {kind: spec.initial_state() for kind, spec in specs.items()}
 
     conn, aliases = _open_combined(store_paths)
     try:
-        result: dict[str, dict[str, Any]] = {}
-        for kind, spec in specs.items():
-            # UNION ALL facts of this kind from all attached stores, ordered by ts.
-            # NOTE: ORDER BY ts has undefined row order at timestamp ties across
-            # stores — there is no global ordering column. For idempotent folds
-            # (Upsert, Latest, Max, Min) this is harmless. For order-sensitive
-            # folds (Collect, Window) ties may produce non-deterministic ordering.
-            selects = [
-                f"SELECT id, kind, ts, observer, origin, payload "
-                f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
-                f"WHERE kind = ? OR kind LIKE ? || '.%'"
-                for a in aliases
-            ]
-            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
-            params: list[Any] = []
-            for _ in aliases:
-                params.extend([kind, kind])
+        # Single query for all facts, ordered by ts.
+        # NOTE: ORDER BY ts has undefined row order at timestamp ties across
+        # stores — there is no global ordering column. For idempotent folds
+        # (Upsert, Latest, Max, Min) this is harmless. For order-sensitive
+        # folds (Collect, Window) ties may produce non-deterministic ordering.
+        selects = [
+            f"SELECT id, kind, ts, observer, origin, payload "
+            f"FROM {'[' + a + '].' if a != 'main' else ''}facts"
+            for a in aliases
+        ]
+        sql = " UNION ALL ".join(selects) + " ORDER BY ts"
 
-            rows = conn.execute(sql, params).fetchall()
-            payloads = []
-            for r in rows:
-                if observer and not observer_matches(r[3], observer):
+        rows = conn.execute(sql).fetchall()
+
+        # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
+        # "thread.foo" → "thread" if "thread" is a spec kind.
+        spec_kinds = set(specs)
+        kind_payloads: dict[str, list] = {k: [] for k in specs}
+
+        for r in rows:
+            kind = r[1]
+            if observer and not observer_matches(r[3], observer):
+                continue
+            # Exact match
+            if kind in spec_kinds:
+                target = kind
+            else:
+                # Sub-kind: "foo.bar" → check "foo"
+                dot = kind.find(".")
+                if dot < 0:
                     continue
-                p = json.loads(r[5])
-                p["_id"] = r[0]
-                p["_ts"] = r[2]
-                p["_observer"] = r[3]
-                p["_origin"] = r[4] or ""
-                payloads.append(p)
-            result[kind] = spec.replay(payloads)
-        return result
+                prefix = kind[:dot]
+                if prefix not in spec_kinds:
+                    continue
+                target = prefix
+            p = json.loads(r[5])
+            p["_id"] = r[0]
+            p["_ts"] = r[2]
+            p["_observer"] = r[3]
+            p["_origin"] = r[4] or ""
+            kind_payloads[target].append(p)
+
+        return {
+            kind: spec.replay(kind_payloads[kind])
+            for kind, spec in specs.items()
+        }
     finally:
         conn.close()
 

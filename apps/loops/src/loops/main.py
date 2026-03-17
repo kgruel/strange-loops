@@ -2566,6 +2566,44 @@ _VERTEX_OPS = frozenset({
 })
 
 
+def _tick_drill_header(tick_meta: dict, width: int | None) -> "Block":
+    """Render a compact header for tick drill-down.
+
+    Shows tick index, boundary trigger, and time window. Returns a
+    Block that can be composed above the fold/lens output.
+    """
+    from painted import Block, Style, join_vertical
+
+    if not tick_meta:
+        return Block.text("", Style())
+
+    boundary = tick_meta.get("boundary", {})
+    bname = boundary.get("name", "")
+    bstatus = boundary.get("status", "")
+    trigger = f" — {bname} {bstatus}" if bname else ""
+
+    range_end = tick_meta.get("range_end")
+    if range_end is not None:
+        # Range mode: "Ticks #0:3 of 120"
+        range_boundaries = tick_meta.get("range_boundaries", [])
+        observers = list(dict.fromkeys(
+            b.get("name", "") for b in range_boundaries if b.get("name")
+        ))
+        if observers:
+            trigger = f" — {', '.join(observers)}"
+        title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}{trigger}"
+    else:
+        title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
+
+    rows: list[tuple[str, Style]] = [(title, Style(bold=True))]
+
+    if tick_meta.get("since") and tick_meta.get("ts"):
+        rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", Style(dim=True)))
+
+    rows.append(("", Style()))
+    return Block.column(rows, width=width)
+
+
 def _run_ticks(
     argv: list[str],
     *,
@@ -2631,40 +2669,55 @@ def _run_ticks(
     else:
         _try_index(known.index)
 
-    # Drill-down: show facts for a specific tick or range
+    # Drill-down: show fold state snapshot from tick payload
     if tick_index is not None or tick_range is not None:
         resolved_render_fn = None
 
         def fetch():
             if tick_range is not None:
-                from .commands.fetch import fetch_tick_range
-                return fetch_tick_range(
+                from .commands.fetch import fetch_tick_range_fold
+                return fetch_tick_range_fold(
                     vertex_path, tick_range[0], tick_range[1], since=known.since,
                 )
             else:
-                from .commands.fetch import fetch_tick_facts
-                return fetch_tick_facts(vertex_path, tick_index, since=known.since)
+                from .commands.fetch import fetch_tick_fold
+                return fetch_tick_fold(vertex_path, tick_index, since=known.since)
 
         def render(ctx, data):
             nonlocal resolved_render_fn
-            # Render drill-down using stream lens (facts in tick window)
+            from painted import Block, Style, join_vertical
+
+            w = ctx.width if ctx.is_tty else None
+
+            # Error case
+            if data.get("_tick_error"):
+                return Block.text(data["_tick_error"], Style(dim=True))
+
+            fold_state = data["fold_state"]
+            tick_meta = data.get("_tick", {})
+
+            # Resolve fold lens (not stream — tick payload is fold state)
             if resolved_render_fn is None:
                 resolved_render_fn = _resolve_render_fn(
-                    known.lens, vertex_path, "stream_view",
+                    known.lens, vertex_path, "fold_view",
                 )
-            w = ctx.width if ctx.is_tty else None
+
             from .lens_resolver import call_lens
-            return call_lens(
-                resolved_render_fn, data, ctx.zoom, w,
+            body = call_lens(
+                resolved_render_fn, fold_state, ctx.zoom, w,
                 vertex_name=_vertex_name(vertex_path),
             )
+
+            # Compose tick header + fold rendering
+            header = _tick_drill_header(tick_meta, w)
+            return join_vertical(header, body) if header else body
 
         return run_cli(
             rest,
             fetch=fetch,
             render=render,
             prog="loops ticks",
-            description="Show facts in tick window",
+            description="Show fold state at tick boundary",
             help_args=[
                 HelpArg("index", "Tick index or range (0, 0:3)", positional=True),
                 HelpArg("--since", "Time window for tick search (30d)", default="30d"),

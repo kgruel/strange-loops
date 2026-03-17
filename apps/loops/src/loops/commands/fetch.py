@@ -432,3 +432,110 @@ def fetch_tick_range(
             "range_boundaries": boundaries,
         },
     }
+
+
+def _tick_metadata(tick, *, index: int, total: int) -> dict:
+    """Build tick metadata dict for a single tick."""
+    boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
+    return {
+        "name": tick.name,
+        "ts": tick.ts.isoformat(),
+        "since": tick.since.isoformat() if tick.since else None,
+        "boundary": boundary,
+        "index": index,
+        "total": total,
+    }
+
+
+def _tick_range_metadata(selected, *, start: int, end: int, total: int) -> dict:
+    """Build tick metadata dict for a range of ticks."""
+    boundaries = []
+    for tick in selected:
+        boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
+        boundaries.append({
+            "name": boundary.get("name", tick.name),
+            "status": boundary.get("status", ""),
+        })
+    return {
+        "name": selected[0].name,
+        "ts": selected[0].ts.isoformat(),
+        "since": selected[-1].since.isoformat() if selected[-1].since else None,
+        "boundary": boundaries[0] if boundaries else {},
+        "index": start,
+        "total": total,
+        "range_end": end,
+        "range_boundaries": boundaries,
+    }
+
+
+def fetch_tick_fold(
+    vertex_path: Path,
+    tick_index: int,
+    *,
+    since: str | None = None,
+) -> dict:
+    """Fetch the fold state snapshot from a tick's payload.
+
+    Unlike ``fetch_tick_facts`` which re-queries the facts table for the
+    tick's time window, this returns the actual fold state stored in the
+    tick — the full accumulated state at that boundary.
+
+    Returns ``{"fold_state": FoldState, "_tick": {...}}``.
+    """
+    from engine import vertex_tick_fold
+
+    ticks_newest = _load_ticks_newest(vertex_path, since)
+
+    if tick_index < 0 or tick_index >= len(ticks_newest):
+        return {
+            "fold_state": None,
+            "_tick_error": f"Tick index {tick_index} out of range (have {len(ticks_newest)} ticks)",
+        }
+
+    tick = ticks_newest[tick_index]
+    fold_state = vertex_tick_fold(vertex_path, tick)
+
+    return {
+        "fold_state": fold_state,
+        "_tick": _tick_metadata(tick, index=tick_index, total=len(ticks_newest)),
+    }
+
+
+def fetch_tick_range_fold(
+    vertex_path: Path,
+    start: int,
+    end: int,
+    *,
+    since: str | None = None,
+) -> dict:
+    """Fetch fold state from the most recent tick in a range.
+
+    For ``--ticks 0:3``, returns the fold snapshot from tick 0 (most recent).
+    The range metadata captures all ticks for header rendering.
+    """
+    from engine import vertex_tick_fold
+
+    ticks_newest = _load_ticks_newest(vertex_path, since)
+
+    if not ticks_newest:
+        return {
+            "fold_state": None,
+            "_tick_error": "No ticks in the given time range",
+        }
+
+    end = min(end, len(ticks_newest))
+    if start >= end or start < 0:
+        return {
+            "fold_state": None,
+            "_tick_error": f"Tick range {start}:{end} out of range (have {len(ticks_newest)} ticks)",
+        }
+
+    selected = ticks_newest[start:end]
+    # Use the most recent tick (index `start`) for fold state
+    tick = selected[0]
+    fold_state = vertex_tick_fold(vertex_path, tick)
+
+    return {
+        "fold_state": fold_state,
+        "_tick": _tick_range_metadata(selected, start=start, end=end, total=len(ticks_newest)),
+    }

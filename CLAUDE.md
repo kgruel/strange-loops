@@ -23,6 +23,7 @@ config (declare)  →  loops CLI (use)  →  engine (runtime)  →  atoms (data)
 - **Change data primitives** → `libs/atoms/CLAUDE.md`
 - **Change runtime behavior** → `libs/engine/CLAUDE.md`
 - **Change rendering** → `libs/painted/src/painted/CLAUDE.md` (consumer) or `libs/painted/CLAUDE.md` (contributor)
+- **CLI syntax reference** → `docs/CLI-CHEATSHEET.md`
 
 ## Build & Test
 

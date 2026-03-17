@@ -713,30 +713,39 @@ def vertex_read(
         return result
 
 
-def vertex_fold(
-    vertex_path: Path,
+def _resolve_full_specs(ast: Any, vertex_path: Path) -> dict:
+    """Compile specs for a vertex, merging source specs for combine/discover."""
+    from .compiler import compile_vertex
+
+    specs = compile_vertex(ast)
+    if ast.combine is not None or ast.discover is not None:
+        source_specs = _collect_source_specs(
+            ast, vertex_path, override_kinds=frozenset(specs)
+        )
+        specs = {**source_specs, **specs}
+    return specs
+
+
+def _raw_to_fold_state(
+    raw: dict[str, dict[str, Any]],
+    ast: Any,
+    specs: dict,
     *,
-    observer: str | None = None,
     kind: str | None = None,
 ) -> Any:
-    """Read fold state as a typed ``FoldState``.
+    """Convert a raw fold state dict to typed ``FoldState``.
 
-    This is the primary read interface for fold state — returns a typed
-    contract (``FoldState`` from atoms) instead of raw dicts.
+    Shared conversion for both live fold reads (``vertex_fold``) and
+    historical snapshots (tick payloads). The raw dict has the same shape
+    as ``vertex_read()`` output: ``{kind_name: fold_state_for_kind}``.
 
-    Parses the vertex declaration for fold metadata (fold_type, key_field,
-    declaration order), replays facts through specs, and produces typed
-    ``FoldItem``/``FoldSection`` objects with metadata separated from payload.
-
-    When *observer* is provided, only that observer's facts are folded.
-    When *kind* is provided, only that kind is included.
+    Items from tick payloads won't have ``_ts``/``_observer``/``_id`` metadata
+    (those are injected during live reads but not stored in fold snapshots).
+    The typed ``FoldItem`` fields will be None/empty in that case — the
+    payload content is preserved either way.
     """
-    from atoms import FoldItem, FoldSection, FoldState
+    from atoms import FoldSection, FoldState
     from atoms.fold import Collect, Upsert
-    from lang import parse_vertex_file
-
-    ast = parse_vertex_file(vertex_path)
-    raw = vertex_read(vertex_path, observer=observer)
 
     # Declaration order from AST, not alphabetical
     if kind:
@@ -745,17 +754,6 @@ def vertex_fold(
         declared = list(ast.loops.keys())
         undeclared = [k for k in raw if k not in ast.loops]
         ordered_kinds = declared + undeclared
-
-    from .compiler import compile_vertex
-
-    specs = compile_vertex(ast)
-    # For combine/discover vertices, merge source specs so fold metadata
-    # (fold_type, key_field) is available for inherited kinds too.
-    if ast.combine is not None or ast.discover is not None:
-        source_specs = _collect_source_specs(
-            ast, vertex_path, override_kinds=frozenset(specs)
-        )
-        specs = {**source_specs, **specs}
 
     sections: list[FoldSection] = []
     for kind_name in ordered_kinds:
@@ -809,6 +807,60 @@ def vertex_fold(
         ))
 
     return FoldState(sections=tuple(sections), vertex=ast.name)
+
+
+def vertex_fold(
+    vertex_path: Path,
+    *,
+    observer: str | None = None,
+    kind: str | None = None,
+) -> Any:
+    """Read fold state as a typed ``FoldState``.
+
+    This is the primary read interface for fold state — returns a typed
+    contract (``FoldState`` from atoms) instead of raw dicts.
+
+    Parses the vertex declaration for fold metadata (fold_type, key_field,
+    declaration order), replays facts through specs, and produces typed
+    ``FoldItem``/``FoldSection`` objects with metadata separated from payload.
+
+    When *observer* is provided, only that observer's facts are folded.
+    When *kind* is provided, only that kind is included.
+    """
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    raw = vertex_read(vertex_path, observer=observer)
+    specs = _resolve_full_specs(ast, vertex_path)
+    return _raw_to_fold_state(raw, ast, specs, kind=kind)
+
+
+def vertex_tick_fold(
+    vertex_path: Path,
+    tick: "Tick",
+    *,
+    kind: str | None = None,
+) -> Any:
+    """Convert a tick's payload to typed ``FoldState``.
+
+    The tick payload is a fold snapshot — the accumulated state at the
+    boundary that produced this tick. This function converts it to the
+    same typed contract that ``vertex_fold()`` returns, so existing lenses
+    can render it.
+
+    Items won't have ``_ts``/``_observer``/``_id`` metadata (not stored
+    in fold snapshots). Content fields are preserved.
+    """
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    payload = tick.payload if isinstance(tick.payload, dict) else {}
+
+    # Filter out tick-internal keys (e.g. _boundary)
+    raw = {k: v for k, v in payload.items() if not k.startswith("_")}
+
+    specs = _resolve_full_specs(ast, vertex_path)
+    return _raw_to_fold_state(raw, ast, specs, kind=kind)
 
 
 def _dict_to_fold_item(d: dict) -> Any:

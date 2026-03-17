@@ -18,8 +18,9 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 
 # --- Collect context ---
 # Identity is already in the system prompt header (via agent config).
-# additionalContext carries project state + comms only.
+# additionalContext carries: prior session tick + current state + comms.
 # Read comms BEFORE emitting check — so "new" means "since last session."
+prior=$($LOOPS read project --ticks 0:10 --lens prompt --plain 2>/dev/null || true)
 project=$($LOOPS read project --lens prompt --plain 2>/dev/null || true)
 comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 
@@ -27,6 +28,7 @@ comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || 
 $LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
 context=""
+[[ -n "$prior" && "$prior" != "(no substantive facts)" ]] && context+="$prior"$'\n\n'
 [[ -n "$project" ]]  && context+="$project"$'\n\n'
 [[ -n "$comms" && "$comms" != "(quiet)" ]] && context+="$comms"
 

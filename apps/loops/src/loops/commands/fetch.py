@@ -205,3 +205,230 @@ def fetch_fact_by_id(
     from engine import vertex_fact_by_id
 
     return vertex_fact_by_id(vertex_path, fact_id)
+
+
+def fetch_ticks(
+    vertex_path: Path,
+    *,
+    since: str | None = None,
+) -> dict:
+    """Fetch tick history from a vertex's store.
+
+    Returns ``{"ticks": list[dict], "vertex": str}``.
+    Each tick dict has: name, ts, since, origin, payload, fact_count, kind_counts.
+    Ticks are returned newest-first.
+    """
+    from engine import vertex_ticks
+    from lang import parse_vertex_file
+
+    since_secs = _parse_duration(since or "30d")
+    now = datetime.now(timezone.utc)
+    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+
+    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp())
+
+    ast = parse_vertex_file(vertex_path)
+
+    # Convert Tick objects to dicts with summary info derived from payload
+    tick_dicts = []
+    for tick in reversed(ticks):  # newest first
+        payload = tick.payload if isinstance(tick.payload, dict) else {}
+        # Derive kind counts from payload keys (fold state has kind -> items)
+        kind_counts: dict[str, int] = {}
+        for k, v in payload.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, dict) and "items" in v:
+                items = v["items"]
+                kind_counts[k] = len(items) if isinstance(items, (dict, list)) else 0
+            elif isinstance(v, list):
+                kind_counts[k] = len(v)
+        boundary = payload.get("_boundary", {})
+
+        tick_dicts.append({
+            "name": tick.name,
+            "ts": tick.ts.isoformat(),
+            "since": tick.since.isoformat() if tick.since else None,
+            "origin": tick.origin,
+            "boundary": boundary,
+            "kind_counts": kind_counts,
+        })
+
+    return {"ticks": tick_dicts, "vertex": ast.name}
+
+
+def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
+    """Extract fold key_field metadata from a vertex's loop declarations."""
+    from lang import parse_vertex_file
+    from lang.ast import FoldBy
+
+    ast = parse_vertex_file(vertex_path)
+    fold_meta: dict[str, dict] = {}
+    for k, loop_def in ast.loops.items():
+        key_field = None
+        if loop_def.folds:
+            fold_decl = loop_def.folds[0]
+            if isinstance(fold_decl.op, FoldBy):
+                key_field = fold_decl.op.key_field
+        fold_meta[k] = {"key_field": key_field}
+    return fold_meta
+
+
+def _load_ticks_newest(vertex_path: Path, since: str | None = None):
+    """Load ticks newest-first from a vertex store."""
+    from engine import vertex_ticks
+
+    since_secs = _parse_duration(since or "30d")
+    now = datetime.now(timezone.utc)
+    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+
+    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp())
+    return list(reversed(ticks))
+
+
+def fetch_tick_facts(
+    vertex_path: Path,
+    tick_index: int,
+    *,
+    since: str | None = None,
+) -> dict:
+    """Fetch the facts that contributed to a specific tick (drill-down).
+
+    *tick_index* is 0-based from most recent. Returns the same shape as
+    ``fetch_stream`` so the stream lens can render it, plus tick metadata.
+    """
+    from engine import vertex_facts
+    from lang import parse_vertex_file
+
+    ticks_newest = _load_ticks_newest(vertex_path, since)
+
+    if tick_index < 0 or tick_index >= len(ticks_newest):
+        return {
+            "facts": [], "fold_meta": {}, "vertex": "",
+            "_tick_error": f"Tick index {tick_index} out of range (have {len(ticks_newest)} ticks)",
+        }
+
+    tick = ticks_newest[tick_index]
+
+    # Retrieve facts in the tick's window
+    if tick.since is not None:
+        facts = vertex_facts(
+            vertex_path,
+            tick.since.timestamp(),
+            tick.ts.timestamp(),
+        )
+    else:
+        facts = []
+
+    facts.sort(key=lambda f: f["ts"], reverse=True)
+
+    for f in facts:
+        if isinstance(f["ts"], datetime):
+            f["ts"] = f["ts"].isoformat()
+
+    ast = parse_vertex_file(vertex_path)
+    boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
+
+    return {
+        "facts": facts,
+        "fold_meta": _get_fold_meta(vertex_path),
+        "vertex": ast.name,
+        "_tick": {
+            "name": tick.name,
+            "ts": tick.ts.isoformat(),
+            "since": tick.since.isoformat() if tick.since else None,
+            "boundary": boundary,
+            "index": tick_index,
+            "total": len(ticks_newest),
+        },
+    }
+
+
+def fetch_tick_range(
+    vertex_path: Path,
+    start: int,
+    end: int,
+    *,
+    since: str | None = None,
+) -> dict:
+    """Fetch facts across a range of ticks (e.g. 0:3 = ticks 0, 1, 2).
+
+    Unions the fact windows from all ticks in [start, end). Returns the
+    same shape as ``fetch_tick_facts`` with ``_tick`` metadata covering
+    the range.
+    """
+    from engine import vertex_facts
+    from lang import parse_vertex_file
+
+    ticks_newest = _load_ticks_newest(vertex_path, since)
+
+    if not ticks_newest:
+        return {
+            "facts": [], "fold_meta": {}, "vertex": "",
+            "_tick_error": "No ticks in the given time range",
+        }
+
+    # Clamp range to available ticks
+    end = min(end, len(ticks_newest))
+    if start >= end or start < 0:
+        return {
+            "facts": [], "fold_meta": {}, "vertex": "",
+            "_tick_error": f"Tick range {start}:{end} out of range (have {len(ticks_newest)} ticks)",
+        }
+
+    selected = ticks_newest[start:end]
+
+    # Union facts across all tick windows
+    all_facts: list[dict] = []
+    for tick in selected:
+        if tick.since is not None:
+            facts = vertex_facts(
+                vertex_path,
+                tick.since.timestamp(),
+                tick.ts.timestamp(),
+            )
+            all_facts.extend(facts)
+
+    # Deduplicate by fact ID (overlapping windows could repeat)
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for f in all_facts:
+        fid = f.get("id", "")
+        if fid and fid in seen:
+            continue
+        if fid:
+            seen.add(fid)
+        deduped.append(f)
+
+    deduped.sort(key=lambda f: f["ts"], reverse=True)
+
+    for f in deduped:
+        if isinstance(f["ts"], datetime):
+            f["ts"] = f["ts"].isoformat()
+
+    ast = parse_vertex_file(vertex_path)
+
+    # Collect boundary info from all ticks in range
+    boundaries = []
+    for tick in selected:
+        boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
+        boundaries.append({
+            "name": boundary.get("name", tick.name),
+            "status": boundary.get("status", ""),
+        })
+
+    return {
+        "facts": deduped,
+        "fold_meta": _get_fold_meta(vertex_path),
+        "vertex": ast.name,
+        "_tick": {
+            "name": selected[0].name,
+            "ts": selected[0].ts.isoformat(),
+            "since": selected[-1].since.isoformat() if selected[-1].since else None,
+            "boundary": boundaries[0] if boundaries else {},
+            "index": start,
+            "total": len(ticks_newest),
+            "range_end": end,
+            "range_boundaries": boundaries,
+        },
+    }

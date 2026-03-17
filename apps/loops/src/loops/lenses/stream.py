@@ -38,7 +38,14 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         facts = data
         fold_meta = {}
 
-    if not facts:
+    # Tick drill-down metadata
+    tick_meta = data.get("_tick") if isinstance(data, dict) else None
+    tick_error = data.get("_tick_error") if isinstance(data, dict) else None
+
+    if tick_error:
+        return _block(tick_error, Style(dim=True), width)
+
+    if not facts and tick_meta is None:
         return _block("No facts in the given time range.", Style(dim=True), width)
 
     # MINIMAL: just counts
@@ -47,12 +54,41 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         for f in facts:
             counts[f["kind"]] = counts.get(f["kind"], 0) + 1
         parts = [f"{count} {kind}" for kind, count in counts.items()]
-        return _block(", ".join(parts), Style(), width)
+        summary = ", ".join(parts) if parts else "0 facts"
+        if tick_meta:
+            summary = f"tick #{tick_meta['index']}: {summary}"
+        return _block(summary, Style(), width)
 
     rows: list[tuple[str, Style]] = []
     dim_style = Style(dim=True)
     id_style = Style(dim=True)
     current_date = None
+
+    # Tick drill-down header
+    if tick_meta is not None:
+        boundary = tick_meta.get("boundary", {})
+        trigger = ""
+        if boundary:
+            bname = boundary.get("name", "")
+            bstatus = boundary.get("status", "")
+            trigger = f" — {bname} {bstatus}" if bname else ""
+
+        range_end = tick_meta.get("range_end")
+        if range_end is not None:
+            title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}"
+        else:
+            title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
+        rows.append((
+            title,
+            Style(bold=True),
+        ))
+        if tick_meta.get("since") and tick_meta.get("ts"):
+            rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", dim_style))
+        rows.append((f"  {len(facts)} facts", dim_style))
+        rows.append(("", Style()))
+
+    if not facts:
+        return Block.column(rows, width=width) if rows else _block("No facts.", Style(dim=True), width)
 
     # Detect single-fact lookup (--id mode) — show full detail
     is_id_lookup = isinstance(data, dict) and "_id_lookup" in data

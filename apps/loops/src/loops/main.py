@@ -396,82 +396,57 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
     primary_metric = config.get("primary_metric", "metric")
     benchmark_cmd = config.get("benchmark", "./autoresearch.sh")
 
-    # Run wrapper — the boundary calls this. Handles agent invocation,
-    # benchmark measurement, and deterministic emit. The agent never
-    # touches loops emit — it just implements, tests, and commits.
-    script = cwd / "autoresearch.run.sh"
+    # Iterate script — the boundary run clause target. One bounded agent turn.
+    # Copy from config-level template and stamp placeholders.
+    script = cwd / "iterate.sh"
     if not script.exists():
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "\n"
-            f'VERTEX="{vertex_path}"\n'
-            f'BENCHMARK="{benchmark_cmd}"\n'
-            f'METRIC="{primary_metric}"\n'
-            "\n"
-            "BEFORE=$(git rev-parse HEAD)\n"
-            "\n"
-            '# Agent works — one-shot, exits when done\n'
-            'claude --dangerously-skip-permissions -p \\\n'
-            '  "$(uv run loops read $VERTEX --lens autoresearch_prompt --plain)"\n'
-            "\n"
-            "AFTER=$(git rev-parse HEAD)\n"
-            "\n"
-            'if [ "$BEFORE" != "$AFTER" ]; then\n'
-            "  # Agent committed — benchmark the result\n"
-            '  RESULT=$($BENCHMARK 2>&1)\n'
-            '  VALUE=$(echo "$RESULT" | grep "^${METRIC}=" | head -1 | cut -d= -f2)\n'
-            '  DESC=$(git log -1 --format=%s)\n'
-            '  if [ -n "$VALUE" ]; then\n'
-            '    uv run loops emit "$VERTEX" experiment \\\n'
-            '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
-            '      ${METRIC}="$VALUE" description="$DESC"\n'
-            "  else\n"
-            '    uv run loops emit "$VERTEX" experiment \\\n'
-            '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
-            '      description="$DESC (benchmark parse failed)"\n'
-            "  fi\n"
-            "else\n"
-            "  # Agent didn't commit — record as discard\n"
-            '  uv run loops emit "$VERTEX" experiment \\\n'
-            '    commit="$(git rev-parse --short HEAD)" status=discard \\\n'
-            '    description="No changes committed"\n'
-            "fi\n"
-        )
-        script.chmod(0o755)
-        _msg(f"Created {script}")
+        template_dir = loops_home() / vertex_name.split("/")[0]
+        template = template_dir / "iterate.sh"
+        system_prompt = template_dir / "system-prompt.md"
 
-    # Launch script — creates worktree, syncs deps, kicks off first experiment.
-    script = cwd / "autoresearch.start.sh"
-    if not script.exists():
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "\n"
-            f'NAME="{vertex_name}"\n'
-            f'VERTEX="{vertex_path}"\n'
-            'BRANCH="$(git rev-parse --abbrev-ref HEAD)"\n'
-            'WORKTREE="/tmp/loops-ar-$(echo $NAME | tr / -)"\n'
-            "\n"
-            "# Create isolated workspace from current branch\n"
-            'echo "Creating worktree at $WORKTREE from $BRANCH..."\n'
-            'git worktree add "$WORKTREE" -b "autoresearch/$NAME-$(date +%Y%m%d)" "$BRANCH"\n'
-            'cd "$WORKTREE"\n'
-            "\n"
-            "# Init submodules and sync deps\n"
-            'MAIN_REPO="$(git worktree list | head -1 | awk \'{print $1}\')"\n'
-            'git submodule update --init --recursive --reference "$MAIN_REPO/libs/painted" 2>/dev/null \\\n'
-            "  || git submodule update --init --recursive\n"
-            "uv sync --package loops\n"
-            "\n"
-            "# Kick off — the run wrapper handles agent + benchmark + emit\n"
-            'echo "Starting autoresearch loop..."\n'
-            "./autoresearch.run.sh\n"
-            "\n"
-            'echo "Autoresearch running in $WORKTREE"\n'
-            'echo "Watch with: cd $WORKTREE && loops read autoresearch --live"\n'
-            'echo "Clean up with: git worktree remove $WORKTREE"\n'
-        )
+        if template.exists():
+            content = template.read_text()
+            content = content.replace("__VERTEX__", vertex_path)
+            content = content.replace("__BENCHMARK__", benchmark_cmd)
+            content = content.replace("__METRIC__", primary_metric)
+            content = content.replace("__SYSTEM_PROMPT__", str(system_prompt))
+            script.write_text(content)
+        else:
+            # Fallback: minimal inline script
+            script.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "\n"
+                f'VERTEX="{vertex_path}"\n'
+                f'BENCHMARK="{benchmark_cmd}"\n'
+                f'METRIC="{primary_metric}"\n'
+                "\n"
+                "BEFORE=$(git rev-parse HEAD)\n"
+                "\n"
+                "claude --dangerously-skip-permissions -p \\\n"
+                '  "$(uv run loops read $VERTEX --lens autoresearch_prompt --plain)"\n'
+                "\n"
+                "AFTER=$(git rev-parse HEAD)\n"
+                "\n"
+                'if [ "$BEFORE" != "$AFTER" ]; then\n'
+                '  RESULT=$($BENCHMARK 2>&1) || true\n'
+                '  VALUE=$(echo "$RESULT" | grep "^${METRIC}=" | head -1 | cut -d= -f2)\n'
+                '  DESC=$(git log -1 --format=%s)\n'
+                '  if [ -n "$VALUE" ]; then\n'
+                '    uv run loops emit "$VERTEX" experiment \\\n'
+                '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
+                '      "${METRIC}=${VALUE}" description="$DESC"\n'
+                "  else\n"
+                '    uv run loops emit "$VERTEX" experiment \\\n'
+                '      commit="$(git rev-parse --short HEAD)" status=keep \\\n'
+                '      description="$DESC (no ${METRIC} in output)"\n'
+                "  fi\n"
+                "else\n"
+                '  uv run loops emit "$VERTEX" experiment \\\n'
+                '    commit="$(git rev-parse --short HEAD)" status=discard \\\n'
+                '    description="No changes committed"\n'
+                "fi\n"
+            )
         script.chmod(0o755)
         _msg(f"Created {script}")
 
@@ -1910,6 +1885,9 @@ def _resolve_render_fn(
     elif view_name == "stream_view":
         from .lenses.stream import stream_view
         return stream_view
+    elif view_name == "ticks_view":
+        from .lenses.ticks import ticks_view
+        return ticks_view
 
     from .lenses.fold import fold_view
     return fold_view
@@ -2588,6 +2566,147 @@ _VERTEX_OPS = frozenset({
 })
 
 
+def _run_ticks(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+) -> int:
+    """Tick history and drill-down.
+
+    ``loops read project --ticks``       — list recent ticks
+    ``loops read project --ticks 0``     — drill into most recent tick
+    ``loops read project --ticks 0:3``   — drill into last 3 ticks (range)
+    ``loops read project --ticks 3``     — drill into 4th most recent tick
+    """
+    from painted import run_cli
+    from painted.cli import HelpArg
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("vertex_or_index", nargs="?", default=None)
+        pre.add_argument("index", nargs="?", default=None)
+    else:
+        pre.add_argument("index", nargs="?", default=None)
+    pre.add_argument("--since", default=None)
+    pre.add_argument("--lens", default=None)
+    known, rest = pre.parse_known_args(argv)
+
+    # Parse index: int for single, "start:end" for range
+    tick_index: int | None = None
+    tick_range: tuple[int, int] | None = None
+
+    def _try_index(s: str | None) -> bool:
+        """Try parsing s as single index or range. Returns True if parsed."""
+        nonlocal tick_index, tick_range
+        if s is None:
+            return False
+        if ":" in s:
+            parts = s.split(":", 1)
+            try:
+                tick_range = (int(parts[0]), int(parts[1]))
+                return True
+            except ValueError:
+                return False
+        try:
+            tick_index = int(s)
+            return True
+        except ValueError:
+            return False
+
+    if vertex_path is None:
+        first = getattr(known, "vertex_or_index", None)
+        if first is not None:
+            if not _try_index(first):
+                # Not an index — try as vertex name
+                resolved = _resolve_vertex_for_dispatch(first)
+                if resolved is not None:
+                    vertex_path = resolved
+                    _try_index(known.index)
+        if tick_index is None and tick_range is None:
+            _try_index(known.index)
+        if vertex_path is None:
+            from .commands.identity import resolve_local_vertex as _rlv
+            vertex_path = _rlv()
+    else:
+        _try_index(known.index)
+
+    # Drill-down: show facts for a specific tick or range
+    if tick_index is not None or tick_range is not None:
+        resolved_render_fn = None
+
+        def fetch():
+            if tick_range is not None:
+                from .commands.fetch import fetch_tick_range
+                return fetch_tick_range(
+                    vertex_path, tick_range[0], tick_range[1], since=known.since,
+                )
+            else:
+                from .commands.fetch import fetch_tick_facts
+                return fetch_tick_facts(vertex_path, tick_index, since=known.since)
+
+        def render(ctx, data):
+            nonlocal resolved_render_fn
+            # Render drill-down using stream lens (facts in tick window)
+            if resolved_render_fn is None:
+                resolved_render_fn = _resolve_render_fn(
+                    known.lens, vertex_path, "stream_view",
+                )
+            w = ctx.width if ctx.is_tty else None
+            from .lens_resolver import call_lens
+            return call_lens(
+                resolved_render_fn, data, ctx.zoom, w,
+                vertex_name=_vertex_name(vertex_path),
+            )
+
+        return run_cli(
+            rest,
+            fetch=fetch,
+            render=render,
+            prog="loops ticks",
+            description="Show facts in tick window",
+            help_args=[
+                HelpArg("index", "Tick index or range (0, 0:3)", positional=True),
+                HelpArg("--since", "Time window for tick search (30d)", default="30d"),
+                HelpArg("--lens", "Render lens"),
+            ],
+        )
+
+    # Listing mode: show tick history
+    from .commands.fetch import fetch_ticks
+
+    resolved_render_fn = None
+
+    def fetch_listing():
+        return fetch_ticks(vertex_path, since=known.since)
+
+    def render_listing(ctx, data):
+        nonlocal resolved_render_fn
+        if resolved_render_fn is None:
+            resolved_render_fn = _resolve_render_fn(
+                known.lens, vertex_path, "ticks_view",
+            )
+        w = ctx.width if ctx.is_tty else None
+        from .lens_resolver import call_lens
+        return call_lens(
+            resolved_render_fn, data, ctx.zoom, w,
+            vertex_name=_vertex_name(vertex_path),
+        )
+
+    return run_cli(
+        rest,
+        fetch=fetch_listing,
+        render=render_listing,
+        prog="loops ticks",
+        description="Show tick history",
+        help_args=[
+            HelpArg("index", "Tick index to drill into (0 = most recent)", positional=True),
+            HelpArg("--since", "Time window (30d, 7d, 1h)", default="30d"),
+            HelpArg("--lens", "Render lens"),
+        ],
+    )
+
+
 def _run_read(
     argv: list[str],
     *,
@@ -2614,10 +2733,8 @@ def _run_read(
         # Fact history mode — delegate to stream (without --facts flag)
         return _run_stream(rest, vertex_path=vertex_path, observer=observer)
     elif known.ticks:
-        # Tick history mode — delegate to stream with --kind tick
-        if "--kind" not in rest:
-            rest.extend(["--kind", "tick"])
-        return _run_stream(rest, vertex_path=vertex_path, observer=observer)
+        # Tick history mode — dedicated tick fetch and lens
+        return _run_ticks(rest, vertex_path=vertex_path, observer=observer)
     else:
         # Default: fold state
         return _run_fold(rest, vertex_path=vertex_path, observer=observer)

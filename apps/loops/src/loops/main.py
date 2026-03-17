@@ -1472,6 +1472,34 @@ def _resolve_named_vertex(name: str) -> Path:
     return vertex_path
 
 
+def _resolve_combine_child(parent_vertex: Path, alias: str) -> Path | None:
+    """Resolve a combine child by alias.
+
+    Given a combine vertex and an alias string, find the child entry
+    with a matching alias and return its resolved vertex path.
+    Returns None if the parent isn't a combine vertex or no alias matches.
+    """
+    from lang import parse_vertex_file
+    from lang.population import resolve_vertex
+
+    try:
+        ast = parse_vertex_file(parent_vertex)
+    except Exception:
+        return None
+
+    if ast.combine is None:
+        return None
+
+    for entry in ast.combine:
+        if entry.alias == alias:
+            ref = resolve_vertex(entry.name, loops_home())
+            if not ref.is_absolute():
+                ref = (parent_vertex.parent / ref).resolve()
+            if ref.exists():
+                return ref.resolve()
+    return None
+
+
 def _resolve_vertex_for_dispatch(name: str) -> Path | None:
     """Try to resolve a name as a vertex for CLI dispatch. Returns None to fall through.
 
@@ -1480,6 +1508,7 @@ def _resolve_vertex_for_dispatch(name: str) -> Path | None:
     2. Local: .loops/name.vertex
     3. Local: cwd/name.vertex
     4. Config-level: LOOPS_HOME/name/name.vertex
+    5. Combine alias: parent/alias → parent's combine child with that alias
     """
     if name.endswith(".vertex") or name.startswith("./") or name.startswith("/"):
         return None
@@ -1500,6 +1529,26 @@ def _resolve_vertex_for_dispatch(name: str) -> Path | None:
     candidate = resolve_vertex(name, loops_home())
     if candidate.exists():
         return candidate.resolve()
+
+    # Combine alias: project/loops → resolve "project" then find child "loops"
+    # Combine vertices live at config level, so we try both local and
+    # config-level resolution for the parent.
+    if "/" in name:
+        parent_name, child_alias = name.split("/", 1)
+
+        # Try local resolution first (might be a local combine vertex)
+        parent = _resolve_vertex_for_dispatch(parent_name)
+        if parent is not None:
+            child = _resolve_combine_child(parent, child_alias)
+            if child is not None:
+                return child
+
+        # Try config-level explicitly (combine vertices typically live here)
+        config_parent = resolve_vertex(parent_name, loops_home())
+        if config_parent.exists() and (parent is None or config_parent.resolve() != parent):
+            child = _resolve_combine_child(config_parent.resolve(), child_alias)
+            if child is not None:
+                return child
 
     return None
 

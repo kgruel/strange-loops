@@ -549,7 +549,11 @@ def _load_combine_block(node: ckdl.Node, path: Path | None) -> tuple[CombineEntr
     for child in node.children:
         if child.name == "vertex":
             name = _require_arg(child, 0, "vertex name", path)
-            entries.append(CombineEntry(name=name))
+            # Optional: vertex "/path" as="alias"
+            alias = None
+            if "as" in child.properties:
+                alias = str(child.properties["as"])
+            entries.append(CombineEntry(name=name, alias=alias))
         else:
             raise _error(f"Unknown combine entry: {child.name}", path)
     if not entries:

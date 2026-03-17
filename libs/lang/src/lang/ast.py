@@ -585,9 +585,15 @@ class SourcesBlock:
 
 @dataclass(frozen=True)
 class CombineEntry:
-    """A vertex reference in a combine block."""
+    """A vertex reference in a combine block.
+
+    ``alias`` is an optional short name for qualifying reads/emits
+    through the parent combine vertex: ``loops read project/alias``.
+    When omitted, init derives it from the folder name.
+    """
 
     name: str  # vertex name (resolved via resolve_vertex)
+    alias: str | None = None  # short name for slash-qualified access
 
 
 # -----------------------------------------------------------------------------

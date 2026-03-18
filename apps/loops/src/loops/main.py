@@ -2132,12 +2132,34 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
 
     from painted.cli import OutputMode
 
+    # Interactive handler for autoresearch TUI
+    handlers: dict | None = None
+    if known.lens == "autoresearch":
+        def _handle_autoresearch_interactive(ctx):
+            nonlocal vertex_path, observer
+            if vertex_path is None:
+                from .commands.identity import resolve_local_vertex as _rlv
+                vname = getattr(known, "vertex", None)
+                if vname is not None:
+                    local = _resolve_vertex_for_dispatch(vname)
+                    vertex_path = local if local is not None else _resolve_named_vertex(vname)
+                else:
+                    vertex_path = _rlv()
+            observer = _apply_vertex_scope(observer, vertex_path)
+            import asyncio as _asyncio
+            from .tui.autoresearch_app import AutoresearchApp
+            app = AutoresearchApp(vertex_path, observer=observer)
+            _asyncio.run(app.run())
+            return 0
+        handlers = {OutputMode.INTERACTIVE: _handle_autoresearch_interactive}
+
     return run_cli(
         rest,
         fetch=fetch,
         render=render,
         fetch_stream=fetch_stream,
         default_mode=OutputMode.STATIC,
+        handlers=handlers,
         prog="loops fold",
         description="Show folded state",
         help_args=[

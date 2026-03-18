@@ -149,9 +149,55 @@ def _detect_in_progress(
     return last_support_ts > last_exp_ts
 
 
+def _status_style(status: str) -> Style:
+    """Color for experiment status: keep=green, discard=yellow, crash/checks_failed=red."""
+    if status == "keep":
+        return Style(fg="green")
+    if status in ("crash", "checks_failed"):
+        return Style(fg="red")
+    return Style(dim=True)  # discard
+
+
+def _secondary_metrics_line(
+    experiments: list[dict], metric_cols: list[str], primary_metric: str, direction: str,
+) -> str | None:
+    """One-line summary of secondary metric deltas from baseline."""
+    secondary = [m for m in metric_cols if m != primary_metric]
+    if not secondary or len(experiments) < 2:
+        return None
+
+    parts: list[str] = []
+    for m in secondary:
+        bl = None
+        best = None
+        for exp in experiments:
+            try:
+                v = float(exp.get(m, ""))
+            except (ValueError, TypeError):
+                continue
+            if bl is None:
+                bl = v
+            if best is None or _is_better(v, best, direction):
+                best = v
+        if bl is not None and best is not None:
+            parts.append(f"{m}: {_format_metric(best)} {_format_delta(bl, best)}")
+    return "  ".join(parts) if parts else None
+
+
+def _boundary_state(data: "FoldState") -> str | None:
+    """Extract boundary iteration limit from experiment section scalars."""
+    for section in data.sections:
+        if section.kind == "experiment":
+            n = section.scalars.get("n")
+            if n is not None:
+                return str(int(n))
+    return None
+
+
 def _render_header_panels(
     config: dict[str, str],
     experiments: list[dict],
+    metric_cols: list[str],
     primary_metric: str,
     direction: str,
     baseline_val: float | None,
@@ -159,6 +205,8 @@ def _render_header_panels(
     best_run: int,
     w: int,
     in_progress: bool = False,
+    iteration_count: str | None = None,
+    boundary_limit: str | None = None,
 ) -> Block:
     """Two bordered panels: status (left) + config (right)."""
     muted = Style(dim=True)
@@ -167,13 +215,24 @@ def _render_header_panels(
     total = len(experiments)
     kept = sum(1 for e in experiments if e.get("status") == "keep")
     discarded = total - kept
+    crashed = sum(1 for e in experiments if e.get("status") in ("crash", "checks_failed"))
 
     # Border adds 2, pad adds 2 = 4 per panel, 1 gap between
     gap = 1
     inner_total = w - gap - 8
 
-    status_texts = [
-        (f"Runs: {total}   {kept} kept   {discarded} discarded", Style(bold=True)),
+    # Runs line with boundary progress
+    run_parts = [f"Runs: {total}"]
+    run_parts.append(f"{kept} kept")
+    if discarded > 0:
+        run_parts.append(f"{discarded} discarded")
+    if crashed > 0:
+        run_parts.append(f"{crashed} failed")
+    if boundary_limit:
+        run_parts.append(f"({total}/{boundary_limit})")
+
+    status_texts: list[tuple[str, Style]] = [
+        ("   ".join(run_parts), Style(bold=True)),
     ]
     if in_progress:
         status_texts.append((f">> iteration #{total + 1} in progress", Style(fg="yellow")))
@@ -186,6 +245,11 @@ def _render_header_panels(
         improved = _is_better(best_val, baseline_val, direction)
         color = Style(fg="green", bold=True) if improved else Style(fg="red", bold=True)
         status_texts.append((f"Progress: * {primary_metric}: {best_s} #{best_run} ({delta})", color))
+
+    # Secondary metrics
+    sec_line = _secondary_metrics_line(experiments, metric_cols, primary_metric, direction)
+    if sec_line:
+        status_texts.append((f"         {sec_line}", muted))
 
     left_inner = max(len(t) for t, _ in status_texts)
     left_inner = min(left_inner, inner_total * 60 // 100)
@@ -271,7 +335,7 @@ def _render_experiments(
         parts.append(desc)
 
         line = "  ".join(parts)
-        style = plain if status == "keep" else muted
+        style = _status_style(status)
         rows.append(Block.text(line, style))
 
     return rows
@@ -281,51 +345,75 @@ def _render_experiments(
 # Findings — compact list (SUMMARY) or two-column detail (DETAILED+)
 # ---------------------------------------------------------------------------
 
+def _group_by_namespace(items: list["FoldItem"]) -> dict[str, list["FoldItem"]]:
+    """Group findings by namespace prefix (part before '/')."""
+    groups: dict[str, list["FoldItem"]] = {}
+    for item in items:
+        target = str(item.payload.get("target", "?"))
+        ns = target.split("/")[0] if "/" in target else target
+        groups.setdefault(ns, []).append(item)
+    return groups
+
+
 def _render_findings_compact(
     items: list["FoldItem"], col_w: int,
 ) -> Block:
-    """Compact list of finding targets for side-by-side display."""
+    """Compact findings grouped by namespace prefix."""
     accent = Style(fg="cyan")
-    lines = [
-        Block.text(f"  {str(item.payload.get('target', '?'))}", accent, width=col_w)
-        for item in items
-    ]
+    muted = Style(dim=True)
+    lines: list[Block] = []
+
+    groups = _group_by_namespace(items)
+    for ns, group in groups.items():
+        # Namespace header
+        names = [str(f.payload.get("target", "?")).split("/", 1)[-1] if "/" in str(f.payload.get("target", "")) else str(f.payload.get("target", "?")) for f in group]
+        lines.append(Block.text(f"  {ns}/  {', '.join(names)}", accent, width=col_w))
+
     return join_vertical(*lines) if lines else Block.empty(col_w, 1)
 
 
 def _render_findings_detail(
     items: list["FoldItem"], w: int, show_ids: bool,
 ) -> list[Block]:
-    """Two-column findings with row spacing."""
+    """Two-column findings grouped by namespace, with row spacing."""
     plain = Style()
+    muted = Style(dim=True)
     accent = Style(fg="cyan")
     rows: list[Block] = []
 
-    targets = [str(item.payload.get("target", "?")) for item in items]
-    col_w = min(max(len(t) for t in targets) + 2, 30)
+    groups = _group_by_namespace(items)
+    all_targets = [str(item.payload.get("target", "?")) for item in items]
+    col_w = min(max(len(t) for t in all_targets) + 2, 30) if all_targets else 20
     msg_w = max(20, w - col_w - 4)
 
-    for i, (item, target) in enumerate(zip(items, targets)):
-        message = str(item.payload.get("message", ""))
-
-        left_lines = [target]
-        if show_ids and item.id:
-            left_lines.append(f"id:{item.id[:8]}")
-
-        left_block = join_vertical(
-            *[Block.text(l, accent, width=col_w) for l in left_lines]
-        )
-
-        if message:
-            right_block = Block.text(message, plain, width=msg_w, wrap=Wrap.WORD)
-            row = pad(join_horizontal(left_block, right_block, gap=2), left=2)
-        else:
-            row = pad(left_block, left=2)
-
-        rows.append(row)
-        # Row spacing between items (not after last)
-        if i < len(items) - 1:
+    first_group = True
+    for ns, group in groups.items():
+        if not first_group:
             rows.append(_spacer())
+        first_group = False
+
+        for i, item in enumerate(group):
+            target = str(item.payload.get("target", "?"))
+            message = str(item.payload.get("message", ""))
+
+            left_lines = [target]
+            if show_ids and item.id:
+                left_lines.append(f"id:{item.id[:8]}")
+
+            left_block = join_vertical(
+                *[Block.text(l, accent, width=col_w) for l in left_lines]
+            )
+
+            if message:
+                right_block = Block.text(message, plain, width=msg_w, wrap=Wrap.WORD)
+                row = pad(join_horizontal(left_block, right_block, gap=2), left=2)
+            else:
+                row = pad(left_block, left=2)
+
+            rows.append(row)
+            # Row spacing between items within group
+            if i < len(group) - 1:
+                rows.append(_spacer())
 
     return rows
 
@@ -554,11 +642,15 @@ def fold_view(data: "FoldState", zoom: Zoom, width: int | None, **kwargs) -> Blo
     # --- SUMMARY and above ---
     rows: list[Block] = []
 
+    # Boundary state from vertex
+    boundary_limit = _boundary_state(data)
+
     # Header panels: status + config
     rows.append(_render_header_panels(
-        config, experiments, primary_metric, direction,
+        config, experiments, metric_cols, primary_metric, direction,
         baseline_val, best_val, best_run, w,
         in_progress=in_progress,
+        boundary_limit=boundary_limit,
     ))
 
     # Experiments

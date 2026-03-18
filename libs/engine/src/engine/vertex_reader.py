@@ -355,9 +355,12 @@ def _combined_read(
             f"FROM {'[' + a + '].' if a != 'main' else ''}facts"
             for a in aliases
         ]
-        sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+        sql = " UNION ALL ".join(selects)
 
         rows = conn.execute(sql).fetchall()
+        # Sort in Python — avoids SQLite index scan for ORDER BY ts
+        # which causes random I/O (~14ms vs ~1ms for unsorted read).
+        rows.sort(key=lambda r: r[2])
 
         # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
         # "thread.foo" → "thread" if "thread" is a spec kind.
@@ -829,10 +832,71 @@ def vertex_fold(
     """
     from lang import parse_vertex_file
 
+    from .compiler import compile_vertex
+    from .store_reader import StoreReader
+
     ast = parse_vertex_file(vertex_path)
-    raw = vertex_read(vertex_path, observer=observer)
-    specs = _resolve_full_specs(ast, vertex_path)
-    return _raw_to_fold_state(raw, ast, specs, kind=kind)
+    specs = compile_vertex(ast)
+
+    # Resolve full specs (merge source specs for combine/discover)
+    full_specs = dict(specs)
+    if ast.combine is not None or ast.discover is not None:
+        source_specs = _collect_source_specs(
+            ast, vertex_path, override_kinds=frozenset(specs)
+        )
+        full_specs = {**source_specs, **specs}
+
+    # Inline vertex_read logic — avoids redundant parse/compile
+    if ast.combine is not None or ast.discover is not None:
+        raw = _combined_read(ast, vertex_path, full_specs, observer=observer)
+
+        # Aggregation with own store: overlay self-knowledge
+        if ast.store is not None:
+            own_store = ast.store
+            if not own_store.is_absolute():
+                own_store = (vertex_path.parent / own_store).resolve()
+            if own_store.exists():
+                with StoreReader(own_store) as reader:
+                    for k, spec in specs.items():
+                        facts = reader.facts_by_kind(k)
+                        if observer:
+                            facts = [f for f in facts if observer_matches(f["observer"], observer)]
+                        payloads = []
+                        for fact in facts:
+                            p = dict(fact["payload"])
+                            p["_ts"] = fact["ts"]
+                            p["_observer"] = fact["observer"]
+                            p["_origin"] = fact.get("origin", "")
+                            p["_id"] = fact.get("id")
+                            payloads.append(p)
+                        raw[k] = spec.replay(payloads)
+    elif ast.store is None:
+        raw = {k: spec.initial_state() for k, spec in full_specs.items()}
+    else:
+        store_path = ast.store
+        if not store_path.is_absolute():
+            store_path = (vertex_path.parent / store_path).resolve()
+
+        if not store_path.exists():
+            raw = {k: spec.initial_state() for k, spec in full_specs.items()}
+        else:
+            with StoreReader(store_path) as reader:
+                raw = {}
+                for k, spec in full_specs.items():
+                    facts = reader.facts_by_kind(k)
+                    if observer:
+                        facts = [f for f in facts if observer_matches(f["observer"], observer)]
+                    payloads = []
+                    for fact in facts:
+                        p = dict(fact["payload"])
+                        p["_ts"] = fact["ts"]
+                        p["_observer"] = fact["observer"]
+                        p["_origin"] = fact.get("origin", "")
+                        p["_id"] = fact.get("id")
+                        payloads.append(p)
+                    raw[k] = spec.replay(payloads)
+
+    return _raw_to_fold_state(raw, ast, full_specs, kind=kind)
 
 
 def vertex_tick_fold(

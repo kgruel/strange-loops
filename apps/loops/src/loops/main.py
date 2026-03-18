@@ -2159,6 +2159,78 @@ def _is_static_plain(rest: list[str]) -> bool:
     return has_static and has_plain and not has_help and not has_json and not has_live and not has_interactive
 
 
+def _render_fold_plain(data: Any, zoom_level: int, width: int) -> str:
+    """Render fold state as plain text without importing painted (~15ms saved).
+
+    Produces identical output to fold_view + print_block(use_ansi=False)
+    for MINIMAL and SUMMARY zoom levels. Falls back to None for DETAILED/FULL
+    which need the full lens for metadata rendering.
+
+    This avoids the painted.core.block → _text_width → wcwidth import chain
+    (~13ms) and the writer/icon_set imports (~2ms).
+    """
+    populated = [s for s in data.sections if s.items]
+    if not populated:
+        return "No data yet."
+
+    # MINIMAL: one-liner counts
+    if zoom_level == 0:
+        parts = [f"{s.count} {s.kind}s" for s in populated]
+        return ", ".join(parts)
+
+    # SUMMARY: section headers + item lines
+    lines: list[str] = []
+    for s in populated:
+        if lines:
+            lines.append("")
+
+        # Header
+        label = s.kind.title()
+        if not s.kind.endswith("s"):
+            label += "s"
+        lines.append(f"{label} ({s.count}):")
+
+        # Items
+        is_by = s.fold_type == "by"
+        for item in s.items:
+            payload = item.payload
+            if is_by and s.key_field:
+                item_label = str(payload.get(s.key_field, ""))
+                used_label_field = s.key_field
+            else:
+                item_label = "?"
+                used_label_field = None
+                for k, v in payload.items():
+                    if v:
+                        item_label = str(v)
+                        used_label_field = k
+                        break
+
+            # Body: first non-label payload field
+            body = None
+            skip = {used_label_field} if used_label_field else set()
+            for k, v in payload.items():
+                if k in skip or not v:
+                    continue
+                body = str(v)
+                break
+
+            if body:
+                # Truncate body to fit within width (matches fold_view logic)
+                reserved = len(item_label) + 6  # "  label: snippet"
+                max_body = width - reserved
+                if max_body < 10:
+                    max_body = 10
+                if len(body) > max_body:
+                    body = body[: max_body - 1] + "\u2026"
+                line = f"  {item_label}: {body}"
+            else:
+                line = f"  {item_label}"
+            lines.append(line)
+
+    return "\n".join(lines)
+
+
 def _run_fold_fast(
     known, rest: list[str],
     *,
@@ -2167,9 +2239,10 @@ def _run_fold_fast(
 ) -> int:
     """Fast path for --static --plain: skip CLI framework import.
 
-    Identical behavior to run_cli(static+plain) but avoids importing
-    painted.cli (saves ~7ms). Imports only painted core (Block, Zoom)
-    which the fold lens needs anyway.
+    For MINIMAL/SUMMARY zoom with no custom lens, renders fold state
+    directly as plain text — skipping the entire painted import chain
+    (~15ms: Block→wcwidth, writer, icons). Falls back to painted for
+    DETAILED/FULL zoom or custom lenses.
     """
     import shutil
 
@@ -2203,10 +2276,15 @@ def _run_fold_fast(
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # Resolve lens — fast path skips the full 3-tier resolution (~1ms
-    # re-parse of vertex file to check lens{} declaration). When --lens
-    # is given, use the full resolver. Otherwise go straight to built-in
-    # default — the fast path already trades flexibility for speed.
+    # Text-only rendering for MINIMAL/SUMMARY with default lens —
+    # skips the entire painted import chain (~15ms).
+    if known.lens is None and zoom_level <= 1:
+        width = shutil.get_terminal_size().columns
+        text = _render_fold_plain(data, zoom_level, width)
+        print(text)
+        return 0
+
+    # DETAILED/FULL or custom lens: fall back to painted rendering
     if known.lens is not None:
         render_fn = _resolve_render_fn(known.lens, vertex_path, "fold_view")
     else:

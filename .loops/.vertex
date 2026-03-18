@@ -1,17 +1,9 @@
 // loops monorepo — workspace root
-store "./data/root.db"
-discover "./**/*.vertex"
+// Local resolution target: `loops read` with no vertex name finds this.
+// Delegates to project.vertex for all fold state.
 
 observers {
   kyle { }
   loops-claude { }
   meta-claude { }
-}
-
-loops {
-  _topology {
-    fold {
-      items "by" "name"
-    }
-  }
 }

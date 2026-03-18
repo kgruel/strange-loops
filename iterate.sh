@@ -10,22 +10,18 @@ set -euo pipefail
 # Variables below are stamped by `loops init`. To change config
 # after init, edit this file or re-init.
 
-VERTEX=".loops/autoresearch/prompt-test.vertex"
+VERTEX=".loops/autoresearch/read-latency.vertex"
 BENCHMARK="uv run python benchmarks/benchmark_read.py"
 METRIC="read_ms"
 SYSTEM_PROMPT="/Users/kaygee/.config/loops/autoresearch/system-prompt.md"
 
-cd /Users/kaygee/Code/loops
 BEFORE=$(git rev-parse HEAD)
 
 # --- Agent turn ---
 # System prompt cached; user prompt is current fold state (XML).
-# Agent may exit non-zero (killed, timeout, error) — don't fail the script.
-claude --dangerously-skip-permissions --model sonnet \
-  --max-turns 50 \
+claude --dangerously-skip-permissions \
   --system-prompt "$(cat "$SYSTEM_PROMPT")" \
-  -p "$(uv run loops read "$VERTEX" --lens autoresearch_prompt --plain)" \
-  || true
+  -p "$(uv run loops read "$VERTEX" --lens autoresearch_prompt --plain)"
 
 AFTER=$(git rev-parse HEAD)
 

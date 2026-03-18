@@ -2,32 +2,58 @@ name "autoresearch/read-latency"
 store "/Users/kaygee/Code/loops/.loops/data/autoresearch/read-latency.db"
 
 loops {
-  // Each experiment result: commit, status, metric values, description
-  // Collected in order — the full history drives the dashboard
+  // --- Turn-completing fact (SYSTEM EMITS ONLY) ---
+  // The experiment fact signals iteration-complete. Boundary fires on it.
+  // One experiment = one tick = one agent turn.
   experiment {
-    fold { items "collect" 500; n "count" }
-    boundary after=15  // completion tick — fires when a batch finishes
+    fold { items "collect" 50; n "count" }
+    boundary after=10  // completion tick at batch end
   }
 
-  // Key-value configuration: objective, primary_metric, direction, scope
-  config {
-    fold { items "by" "key" }
+  // --- Supporting facts (AGENT EMITS) ---
+
+  // Knowledge map — current understanding of each code area.
+  // Folded by target — upserts as understanding deepens across turns.
+  // target is namespaced: "fold/computation", "import/chain", "store/queries"
+  finding {
+    fold { items "by" "target" }
   }
 
-  // Ideas to try — tracked by name, can be updated (tried/untried/rejected)
+  // Sequential narrative — what happened this iteration.
+  // type=approach|result|observation, message, files, ref (cross-link)
+  // Ephemeral: recent history for context, not durable knowledge.
+  log {
+    fold { items "collect" 20 }
+  }
+
+  // Testable predictions — folded by name, status updates in place.
+  // proposed → confirmed|rejected as evidence accumulates across turns.
+  // Namespaced: "fold/batch-query", "lens/column-overhead"
+  hypothesis {
+    fold { items "by" "name" }
+  }
+
+  // Things to try — folded by name, status updates in place.
+  // untried → tried|rejected as iterations proceed.
   idea {
     fold { items "by" "name" }
   }
 
-  // Boundary fires on each experiment result, up to max iterations.
-  // Run clause calls the wrapper script — handles agent invocation,
-  // benchmark measurement, and deterministic emit.
+  // --- Configuration (SEEDED AT INIT) ---
+  // objective, primary_metric, direction, scope, benchmark, checks
+  config {
+    fold { items "by" "key" }
+  }
+
+  // --- Iteration control ---
+  // Boundary fires when experiment fact lands and count < limit.
+  // Run clause is the iterate script — spawns agent, benchmarks, emits.
+  // This IS the agent loop. Vertex orchestrates the cycle.
   boundary when="experiment" {
-    condition "n" "<" 15
-    run "./autoresearch.run.sh"
+    condition "n" "<" 10
+    run "./iterate.sh"
   }
 }
 
-lens {
-  fold "autoresearch"
-}
+// Dashboard: loops read VERTEX --lens autoresearch
+// Agent prompt: loops read VERTEX --lens autoresearch_prompt --plain

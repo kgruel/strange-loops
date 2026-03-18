@@ -2068,15 +2068,20 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
 
 def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Run fold command — show collapsed vertex state."""
-    from painted import run_cli
-    from painted.cli import HelpArg
-
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
+
+    # Fast path: --static --plain bypasses the CLI framework import (~7ms).
+    # Detect these flags before importing painted.cli.
+    if _is_static_plain(rest):
+        return _run_fold_fast(known, rest, vertex_path=vertex_path, observer=observer)
+
+    from painted import run_cli
+    from painted.cli import HelpArg
 
     # Render function resolved lazily — vertex_path may not be known until fetch()
     resolved_render_fn = None
@@ -2136,6 +2141,88 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             HelpArg("--lens", "Render lens (prompt)"),
         ],
     )
+
+
+def _is_static_plain(rest: list[str]) -> bool:
+    """Check if rest args contain --static --plain without help flags."""
+    has_static = "--static" in rest
+    has_plain = "--plain" in rest
+    has_help = "-h" in rest or "--help" in rest
+    has_json = "--json" in rest
+    has_live = "--live" in rest
+    has_interactive = "-i" in rest
+    return has_static and has_plain and not has_help and not has_json and not has_live and not has_interactive
+
+
+def _run_fold_fast(
+    known, rest: list[str],
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+) -> int:
+    """Fast path for --static --plain: skip CLI framework import.
+
+    Identical behavior to run_cli(static+plain) but avoids importing
+    painted.cli (saves ~7ms). Imports only painted core (Block, Zoom)
+    which the fold lens needs anyway.
+    """
+    import shutil
+
+    # Resolve zoom from rest args (lightweight, no painted import)
+    zoom_level = 1  # SUMMARY default
+    for arg in rest:
+        if arg == "-q" or arg == "--quiet":
+            zoom_level = 0
+        elif arg == "-vv":
+            zoom_level = 3
+        elif arg == "-v" or arg == "--verbose":
+            zoom_level = 2
+
+    # Fetch data
+    if vertex_path is None:
+        from .commands.identity import resolve_local_vertex as _resolve_local_vertex
+        vname = getattr(known, "vertex", None)
+        if vname is not None:
+            local = _resolve_vertex_for_dispatch(vname)
+            vertex_path = local if local is not None else _resolve_named_vertex(vname)
+        else:
+            vertex_path = _resolve_local_vertex()
+
+    observer = _apply_vertex_scope(observer, vertex_path)
+    obs_for_engine = observer if observer else None
+
+    from .commands.fetch import fetch_fold
+    try:
+        data = fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # Resolve lens and render — imports painted core here
+    render_fn = _resolve_render_fn(known.lens, vertex_path, "fold_view")
+    from painted.core.zoom import Zoom
+
+    zoom = Zoom(zoom_level)
+    width = shutil.get_terminal_size().columns
+
+    from .lens_resolver import call_lens
+    try:
+        block = call_lens(
+            render_fn, data, zoom, width,
+            vertex_name=_vertex_name(vertex_path),
+            vertex_path=str(vertex_path) if vertex_path else None,
+        )
+    except Exception as exc:
+        print(f"Render error: {exc}", file=sys.stderr)
+        return 2
+
+    # Output — plain text, no ANSI
+    from painted.core.writer import print_block
+    from painted.icon_set import ASCII_ICONS, use_icons
+
+    with use_icons(ASCII_ICONS):
+        print_block(block, use_ansi=False)
+    return 0
 
 
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:

@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from .observer import observer_matches
-from .tick import Tick
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +490,8 @@ def _combined_ticks(
                 params.extend([since_ts, until_ts])
 
         rows = conn.execute(sql, params).fetchall()
+        from .tick import Tick  # deferred: not needed on fold path
+
         return [
             Tick.from_dict({
                 "name": r[0],
@@ -833,7 +834,6 @@ def vertex_fold(
     from lang import parse_vertex_file
 
     from .compiler import compile_vertex
-    from .store_reader import StoreReader
 
     ast = parse_vertex_file(vertex_path)
     specs = compile_vertex(ast)
@@ -856,6 +856,8 @@ def vertex_fold(
             if not own_store.is_absolute():
                 own_store = (vertex_path.parent / own_store).resolve()
             if own_store.exists():
+                from .store_reader import StoreReader  # deferred: not needed for combine-only
+
                 with StoreReader(own_store) as reader:
                     for k, spec in specs.items():
                         facts = reader.facts_by_kind(k)
@@ -880,6 +882,8 @@ def vertex_fold(
         if not store_path.exists():
             raw = {k: spec.initial_state() for k, spec in full_specs.items()}
         else:
+            from .store_reader import StoreReader  # deferred: not needed for combine-only
+
             with StoreReader(store_path) as reader:
                 raw = {}
                 for k, spec in full_specs.items():

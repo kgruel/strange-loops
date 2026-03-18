@@ -27,12 +27,12 @@ Commands:
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 # typing deferred — TextIO only used in annotations (strings with __future__)
+# argparse deferred — imported lazily in main() after fast-path check (~3ms cold)
 
 
 def _err(msg: str, file: TextIO | None = None) -> None:
@@ -3160,6 +3160,16 @@ def _apply_vertex_scope(observer: str | None, vertex_path: Path | None) -> str |
 
     # No flag: check vertex scope
     if vertex_path is not None:
+        # Fast check: scan file text for scope declaration before full parse.
+        # Full KDL parse costs ~1.5ms; text scan is ~0.1ms. Only parse if
+        # the scope keyword is present (rare — most vertices are unscoped).
+        try:
+            text = vertex_path.read_text()
+        except OSError:
+            return None
+        if 'scope "observer"' not in text:
+            return None  # unscoped — show all
+        # Keyword found — confirm with full parse (handles comments, etc.)
         from lang import parse_vertex_file
         ast = parse_vertex_file(vertex_path)
         if ast.observer_scoped:
@@ -3302,6 +3312,62 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
     )
 
 
+def _try_fast_read(argv: list[str]) -> int | None:
+    """Ultra-fast path for ``read <vertex> --static --plain``.
+
+    Detects the common read pattern before importing argparse (~3ms) or
+    entering the 4-parser dispatch chain (~2ms). Returns exit code on match,
+    None to fall through to regular dispatch.
+
+    Matches: ``read <vertex> [--static] [--plain] [-q|-v|-vv]``
+    Excludes: --facts, --ticks, --kind, --lens, --observer, --help, --json, --live, -i
+    """
+    # Must be verb-first read with at least: read <vertex> --static --plain
+    if len(argv) < 4 or argv[0] != "read":
+        return None
+
+    rest = argv[1:]
+
+    # Check for flags that require full dispatch
+    has_static = False
+    has_plain = False
+    vertex_name = None
+
+    for arg in rest:
+        if arg == "--static":
+            has_static = True
+        elif arg == "--plain":
+            has_plain = True
+        elif arg in ("--facts", "--ticks", "--kind", "--lens", "--observer",
+                      "-h", "--help", "--json", "--live", "-i"):
+            return None  # needs full dispatch
+        elif arg.startswith("--") and "=" in arg:
+            # --kind=X, --lens=X, --observer=X etc
+            return None
+        elif not arg.startswith("-") and vertex_name is None:
+            vertex_name = arg
+        elif not arg.startswith("-"):
+            return None  # unexpected positional
+
+    if not (has_static and has_plain and vertex_name):
+        return None
+
+    # Resolve vertex path (no argparse needed)
+    vertex_path = _resolve_vertex_for_dispatch(vertex_name)
+    if vertex_path is None:
+        vertex_path = _resolve_named_vertex(vertex_name)
+
+    # Build fast args — kind=None, lens=None, observer=None (no --observer flag)
+    class _Ns:
+        __slots__ = ("kind", "lens")
+    known = _Ns()
+    known.kind = None
+    known.lens = None
+
+    # Pass remaining flags (--static, --plain, -q, -v, -vv) as rest
+    return _run_fold_fast(known, rest, vertex_path=vertex_path, observer=None)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point — three-tier dispatch.
 
@@ -3319,6 +3385,19 @@ def main(argv: list[str] | None = None) -> int:
     # Top-level help: -h/--help only when it's the first arg (no command yet)
     if argv[0] in ("-h", "--help"):
         return _render_main_help(argv)
+
+    # Ultra-fast path: skip argparse + dispatch chain for common read pattern.
+    # Must be checked before importing argparse (~3ms) and before entering
+    # the 4-parser dispatch chain (~2ms).
+    if argv[0] == "read":
+        fast_result = _try_fast_read(argv)
+        if fast_result is not None:
+            return fast_result
+
+    # Lazy argparse import — only pay the ~3ms cost when actually needed.
+    # Injected into module globals so all functions in this module can use it.
+    import argparse
+    globals()["argparse"] = argparse
 
     # Tier 1: Known verbs → verb-first dispatch
     if argv[0] in _VERBS:

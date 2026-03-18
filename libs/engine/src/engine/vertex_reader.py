@@ -838,9 +838,13 @@ def vertex_fold(
     ast = parse_vertex_file(vertex_path)
     specs = compile_vertex(ast)
 
-    # Resolve full specs (merge source specs for combine/discover)
+    # Resolve full specs (merge source specs for combine/discover).
+    # When the main vertex declares its own loops, those ARE the fold
+    # contracts — skip the child-spec walk (~2-3ms of parse+compile).
+    # Only collect from children when the main vertex has no loops block,
+    # meaning it relies entirely on child specs (union semantics).
     full_specs = dict(specs)
-    if ast.combine is not None or ast.discover is not None:
+    if (ast.combine is not None or ast.discover is not None) and not specs:
         source_specs = _collect_source_specs(
             ast, vertex_path, override_kinds=frozenset(specs)
         )

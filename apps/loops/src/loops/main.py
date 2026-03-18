@@ -1952,6 +1952,8 @@ def _get_vertex_lens_decl(vertex_path: Path):
         return None
 
 
+
+
 def _vertex_name(vertex_path: Path | None) -> str | None:
     """Extract vertex name from path — stem without extension."""
     if vertex_path is None:
@@ -2128,11 +2130,14 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             await asyncio.sleep(2)
             yield fetch()
 
+    from painted.cli import OutputMode
+
     return run_cli(
         rest,
         fetch=fetch,
         render=render,
         fetch_stream=fetch_stream,
+        default_mode=OutputMode.STATIC,
         prog="loops fold",
         description="Show folded state",
         help_args=[
@@ -2198,8 +2203,15 @@ def _run_fold_fast(
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # Resolve lens and render — imports painted core here
-    render_fn = _resolve_render_fn(known.lens, vertex_path, "fold_view")
+    # Resolve lens — fast path skips the full 3-tier resolution (~1ms
+    # re-parse of vertex file to check lens{} declaration). When --lens
+    # is given, use the full resolver. Otherwise go straight to built-in
+    # default — the fast path already trades flexibility for speed.
+    if known.lens is not None:
+        render_fn = _resolve_render_fn(known.lens, vertex_path, "fold_view")
+    else:
+        from .lenses.fold import fold_view
+        render_fn = fold_view
     from painted.core.zoom import Zoom
 
     zoom = Zoom(zoom_level)

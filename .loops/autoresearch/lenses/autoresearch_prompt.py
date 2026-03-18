@@ -272,11 +272,19 @@ def _render_ideas(items: list["FoldItem"]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def fold_view(
-    data: "FoldState", zoom: Zoom, width: int | None, *, vertex_name: str | None = None, **kwargs,
+    data: "FoldState", zoom: Zoom, width: int | None, *, vertex_name: str | None = None, vertex_path: str | None = None, **kwargs,
 ) -> Block:
     """Render XML-structured experiment state for agent consumption."""
     config = _get_config(data)
+    # Prefer path over name — agents need a resolvable target for `loops emit`.
+    # Use relative path when under cwd for portability.
     vertex = vertex_name or data.vertex or "VERTEX"
+    if vertex_path:
+        from pathlib import Path
+        try:
+            vertex = str(Path(vertex_path).relative_to(Path.cwd()))
+        except ValueError:
+            vertex = vertex_path  # absolute fallback if not under cwd
     primary_metric = config.get("primary_metric", "")
     direction = config.get("direction", "lower")
 

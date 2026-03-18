@@ -2112,6 +2112,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         return call_lens(
             resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
+            vertex_path=str(vertex_path) if vertex_path else None,
         )
 
     async def fetch_stream():

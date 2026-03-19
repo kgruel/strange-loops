@@ -35,6 +35,10 @@ class FoldItem:
         id: ULID of the source fact. For "by" folds, the ID of the most
             recent contributing fact. For "collect" folds, the exact fact.
             None for computed/synthetic items.
+        n: Number of facts compressed into this item. For "by" folds,
+            how many times this key has been upserted. For "collect" folds,
+            always 1 (each item is one fact). Reconstructed on replay —
+            reads produce the same n as the emit history.
     """
 
     payload: dict[str, Any]
@@ -42,6 +46,7 @@ class FoldItem:
     observer: str = ""
     origin: str = ""
     id: str | None = None
+    n: int = 1
 
 
 @dataclass(frozen=True)

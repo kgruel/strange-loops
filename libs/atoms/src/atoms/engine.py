@@ -66,12 +66,15 @@ def _make_collect(target: str, max_size: int) -> Callable[[dict, dict], None]:
 
 
 def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
-    """Insert/update in dict keyed by key_field."""
+    """Insert/update in dict keyed by key_field, tracking observation count."""
     def fold(state: dict, payload: dict) -> None:
         key_value = payload.get(key_field)
         if key_value is not None:
-            # Convert to dict in case payload is MappingProxyType
-            state[target][key_value] = dict(payload)
+            existing = state[target].get(key_value)
+            n = (existing.get("_n", 0) if existing else 0) + 1
+            entry = dict(payload)
+            entry["_n"] = n
+            state[target][key_value] = entry
     return fold
 
 

@@ -54,11 +54,13 @@ class FoldPalette:
     group_header: Style     # "design/ (88)"
     key: Style              # "n-on-fold-item"
     n_indicator: Style      # "×4" — revision density
-    ref_indicator: Style    # "←2" — structural importance
+    ref_indicator: Style    # "←2" — structural importance (inbound)
+    ref_outbound: Style     # "→2" — outbound refs (dimmer)
     observer: Style         # "(kyle/loops-claude)"
     body: Style             # message/body text
     collapse: Style         # "(83 more)"
-    ref_arrow: Style        # "→ decision/auth"
+    ref_edge_in: Style      # "← decision/auth" — inbound edge expansion
+    ref_edge_out: Style     # "→ decision/auth" — outbound edge expansion
     meta: Style             # metadata fields at FULL zoom
     unfolded: Style         # "Unfolded: 26 observation"
 
@@ -72,12 +74,14 @@ def _default_fold_palette() -> FoldPalette:
         section_header=Style(bold=True),
         group_header=Style(bold=True),
         key=Style(),
-        n_indicator=p.accent,            # cyan — revision density
-        ref_indicator=Style(fg="yellow"), # yellow — structural importance (different axis)
+        n_indicator=p.accent,             # cyan — revision density
+        ref_indicator=Style(fg="yellow"), # yellow — inbound importance (badge ←N)
+        ref_outbound=Style(fg=179),       # muted gold — outbound count (badge →N)
         observer=p.muted,
         body=body_style,
         collapse=p.muted,
-        ref_arrow=Style(fg="yellow"),     # match ref_indicator
+        ref_edge_in=Style(fg="yellow"),   # yellow — inbound edges (← source)
+        ref_edge_out=Style(fg=245),       # gray — outbound edges (→ target), dimmer
         meta=p.muted,
         unfolded=p.muted,
     )
@@ -88,8 +92,16 @@ def _default_fold_palette() -> FoldPalette:
 # ---------------------------------------------------------------------------
 
 
-def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
-    """Render fold data at the given zoom level."""
+def fold_view(
+    data: FoldState, zoom: Zoom, width: int | None,
+    *, vertex_name: str | None = None, vertex_path: str | None = None,
+    visible: frozenset[str] = frozenset(),
+) -> Block:
+    """Render fold data at the given zoom level.
+
+    visible gates which concern layers are rendered:
+      - "refs": show per-item edge expansion (← inbound, → outbound)
+    """
     populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
@@ -104,15 +116,36 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 
     # Compute once for the whole render
     inbound = _compute_inbound_refs(data)
+    inbound_edges = _compute_inbound_edges(data) if "refs" in visible else {}
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
+    refs_filter = "refs" in visible
     blocks: list[Block] = []
+    skipped_sections: list[tuple[str, int]] = []
+
     for s in populated:
+        # When --refs is active, count connected items and track disconnected
+        if refs_filter:
+            connected_count = sum(
+                1 for i in s.items
+                if i.refs or _item_full_key(i, s.key_field, s.kind) in inbound_edges
+            )
+            disconnected = s.count - connected_count
+            if connected_count == 0:
+                skipped_sections.append((s.kind, s.count))
+                continue
+            elif disconnected > 0:
+                skipped_sections.append((s.kind, disconnected))
+
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        header = _section_header(s.kind, s.count, piped=width is None)
+        # Header: show connected/total when --refs is filtering
+        if refs_filter:
+            header = _section_header(s.kind, connected_count, piped=width is None)
+        else:
+            header = _section_header(s.kind, s.count, piped=width is None)
         blocks.append(Block.text(header, fp.section_header, width=width))
 
         observers = {item.observer for item in s.items if item.observer}
@@ -120,14 +153,24 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
 
         section_block = _render_section(
             s, zoom, fmt, width,
-            inbound=inbound, fp=fp, show_observer=show_observer,
+            inbound=inbound, inbound_edges=inbound_edges,
+            fp=fp, show_observer=show_observer, visible=visible,
         )
         blocks.append(section_block)
 
+    # Footer: unfolded kinds + skipped-by-refs sections
+    footer_parts: list[str] = []
+    if skipped_sections:
+        parts = [f"{count} {kind}" for kind, count in skipped_sections]
+        footer_parts.append(f"No refs: {', '.join(parts)}")
     if data.unfolded:
-        blocks.append(Block.text("", Style(), width=width))
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
-        blocks.append(Block.text(f"Unfolded: {loose}", fp.unfolded, width=width))
+        footer_parts.append(f"Unfolded: {loose}")
+    if footer_parts:
+        blocks.append(Block.text("", Style(), width=width))
+        blocks.append(Block.text(
+            "  ".join(footer_parts), fp.unfolded, width=width,
+        ))
 
     return join_vertical(*blocks)
 
@@ -144,8 +187,10 @@ def _render_section(
     width: int | None,
     *,
     inbound: Counter,
+    inbound_edges: dict[str, list[str]],
     fp: FoldPalette,
     show_observer: bool,
+    visible: frozenset[str] = frozenset(),
 ) -> Block:
     """Render a section's items — grouped by namespace or flat."""
     is_by = section.fold_type == "by"
@@ -153,13 +198,17 @@ def _render_section(
     if is_by and section.key_field and _has_namespaces(section.items, section.key_field):
         return _render_grouped(
             section.items, section.key_field, zoom, fmt, width,
-            inbound=inbound, fp=fp, show_observer=show_observer,
+            inbound=inbound, inbound_edges=inbound_edges,
+            fp=fp, show_observer=show_observer, visible=visible,
+            section_kind=section.kind,
         )
     else:
         return _render_flat(
             section.items, section.key_field, section.fold_type,
             zoom, fmt, width,
-            inbound=inbound, fp=fp, show_observer=show_observer,
+            inbound=inbound, inbound_edges=inbound_edges,
+            fp=fp, show_observer=show_observer, visible=visible,
+            section_kind=section.kind,
         )
 
 
@@ -178,10 +227,22 @@ def _render_grouped(
     width: int | None,
     *,
     inbound: Counter,
+    inbound_edges: dict[str, list[str]],
     fp: FoldPalette,
     show_observer: bool,
+    visible: frozenset[str] = frozenset(),
+    section_kind: str = "",
 ) -> Block:
     """Render by-fold items grouped by namespace prefix."""
+    # When --refs is active, filter to only connected items
+    if "refs" in visible:
+        items = tuple(
+            i for i in items
+            if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
+        )
+        if not items:
+            return Block.text("  (no connected items)", fp.collapse, width=width)
+
     groups = _group_by_namespace(items, key_field)
 
     sorted_groups = sorted(
@@ -203,7 +264,11 @@ def _render_grouped(
             reverse=True,
         )
 
-        if len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
+        # When --refs is active, show all connected items (refs filter already reduced the set).
+        # Otherwise, apply salience windowing.
+        if "refs" in visible:
+            show_items = sorted_items
+        elif len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
             show_items = sorted_items
         else:
             show_items = [
@@ -216,8 +281,9 @@ def _render_grouped(
         for item in show_items:
             blocks.append(_render_item_line(
                 item, key_field, zoom, fmt, width,
-                inbound=inbound, fp=fp, show_observer=show_observer,
-                indent=4, strip_namespace=True,
+                inbound=inbound, inbound_edges=inbound_edges,
+                fp=fp, show_observer=show_observer, visible=visible,
+                indent=4, strip_namespace=True, section_kind=section_kind,
             ))
 
         remaining = len(sorted_items) - len(show_items)
@@ -243,11 +309,23 @@ def _render_flat(
     width: int | None,
     *,
     inbound: Counter,
+    inbound_edges: dict[str, list[str]],
     fp: FoldPalette,
     show_observer: bool,
+    visible: frozenset[str] = frozenset(),
+    section_kind: str = "",
 ) -> Block:
     """Render items as a flat list — sorted by salience for by-folds."""
     is_by = fold_type == "by"
+
+    # When --refs is active, filter to only connected items
+    if "refs" in visible and is_by:
+        items = tuple(
+            i for i in items
+            if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
+        )
+        if not items:
+            return Block.text("  (no connected items)", fp.collapse, width=width)
 
     if is_by:
         sorted_items: tuple[FoldItem, ...] | list[FoldItem] = sorted(
@@ -262,8 +340,9 @@ def _render_flat(
     for item in sorted_items:
         blocks.append(_render_item_line(
             item, key_field, zoom, fmt, width,
-            inbound=inbound, fp=fp, show_observer=show_observer,
-            indent=2, strip_namespace=False, is_by=is_by,
+            inbound=inbound, inbound_edges=inbound_edges,
+            fp=fp, show_observer=show_observer, visible=visible,
+            indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
         ))
 
     return join_vertical(*blocks) if blocks else Block.empty(0, 0)
@@ -282,16 +361,20 @@ def _render_item_line(
     width: int | None,
     *,
     inbound: Counter,
+    inbound_edges: dict[str, list[str]],
     fp: FoldPalette,
     show_observer: bool,
+    visible: frozenset[str] = frozenset(),
     indent: int = 2,
     strip_namespace: bool = False,
     is_by: bool = True,
+    section_kind: str = "",
 ) -> Block:
     """Render a single fold item as a composed Block with multi-style.
 
-    SUMMARY layout: key ×N ←N [recency]: body… [+Nc]
+    SUMMARY layout: key [×N ←N →N recency]: body… [+Nc]
     DETAILED adds:  observer, remaining payload fields, outbound refs
+    DETAILED+refs:  per-item edge expansion (← inbound sources, → outbound targets)
     FULL adds:      all metadata (_id, _ts, _observer, _origin, _n, _inbound_refs)
     """
     payload = item.payload
@@ -309,7 +392,8 @@ def _render_item_line(
     # Indicators (before body, always visible)
     n_text = f" ×{item.n}" if is_by and item.n > 1 else ""
     ref_count = _inbound_count(item, key_field, inbound)
-    ref_text = f" ←{ref_count}" if ref_count > 0 else ""
+    ref_in_text = f" ←{ref_count}" if ref_count > 0 else ""
+    ref_out_text = f" →{len(item.refs)}" if item.refs else ""
 
     # Recency tag
     recency_text = ""
@@ -325,9 +409,12 @@ def _render_item_line(
 
     # Calculate available width for body (reserve space for badge + truncation hint)
     # Badge: " [" + indicators + "]" = 3 chars + content
-    badge_content_len = len(n_text.lstrip()) + len(ref_text.lstrip()) + len(recency_text.lstrip())
+    badge_content_len = (
+        len(n_text.lstrip()) + len(ref_in_text.lstrip())
+        + len(ref_out_text.lstrip()) + len(recency_text.lstrip())
+    )
     # Add spaces between badge parts
-    badge_part_count = sum(1 for x in [n_text, ref_text, recency_text] if x)
+    badge_part_count = sum(1 for x in [n_text, ref_in_text, ref_out_text, recency_text] if x)
     badge_len = (3 + badge_content_len + max(0, badge_part_count - 1)) if badge_part_count else 0
     fixed_len = len(pad) + len(label) + badge_len + len(separator)
     truncation_hint = ""
@@ -344,7 +431,7 @@ def _render_item_line(
                 body_text = body
         else:
             body_text = body
-    elif item.ts and not n_text and not ref_text:
+    elif item.ts and not n_text and not ref_in_text:
         body_text = ""
     else:
         body_text = ""
@@ -353,14 +440,18 @@ def _render_item_line(
     # SUMMARY: key [×N ←N recency]: body… [+Nc]
     parts: list[Block] = [Block.text(f"{pad}{label}", fp.key)]
 
-    # Metadata badge: [×N ←N recency] — always present (at minimum recency)
+    # Metadata badge: [×N ←N →N recency] — always present (at minimum recency)
     badge_parts: list[Block] = []
     if n_text:
         badge_parts.append(Block.text(n_text.lstrip(), fp.n_indicator))
-    if ref_text:
+    if ref_in_text:
         if badge_parts:
             badge_parts.append(Block.text(" ", fp.collapse))
-        badge_parts.append(Block.text(ref_text.lstrip(), fp.ref_indicator))
+        badge_parts.append(Block.text(ref_in_text.lstrip(), fp.ref_indicator))
+    if ref_out_text:
+        if badge_parts:
+            badge_parts.append(Block.text(" ", fp.collapse))
+        badge_parts.append(Block.text(ref_out_text.lstrip(), fp.ref_outbound))
     if recency_text:
         if badge_parts:
             badge_parts.append(Block.text(" ", fp.collapse))
@@ -402,8 +493,19 @@ def _render_item_line(
             if k in skip or not v:
                 continue
             lines.append(Block.text(f"{detail_pad}{k}: {v}", fp.meta, width=width))
+        # Outbound refs gated on "refs" visibility — not shown at DETAILED by default
+
+    # Edge expansion: gated on "refs" in visible, shown at any zoom >= SUMMARY
+    if "refs" in visible and zoom >= Zoom.SUMMARY:
+        edge_pad = " " * (indent + 2)
+        # Inbound edges: who references this item?
+        item_key = _item_full_key(item, key_field, section_kind)
+        if item_key and item_key in inbound_edges:
+            for source in inbound_edges[item_key]:
+                lines.append(Block.text(f"{edge_pad}← {source}", fp.ref_edge_in, width=width))
+        # Outbound edges
         for ref in item.refs:
-            lines.append(Block.text(f"{detail_pad}→ {ref}", fp.ref_arrow, width=width))
+            lines.append(Block.text(f"{edge_pad}→ {ref}", fp.ref_edge_out, width=width))
 
     # FULL: metadata
     if zoom >= Zoom.FULL:
@@ -437,6 +539,32 @@ def _compute_inbound_refs(data: FoldState) -> Counter:
             for ref in item.refs:
                 inbound[ref] += 1
     return inbound
+
+
+def _compute_inbound_edges(data: FoldState) -> dict[str, list[str]]:
+    """Build adjacency map: target → [source, ...] for edge expansion."""
+    edges: dict[str, list[str]] = {}
+    for section in data.sections:
+        kf = section.key_field
+        for item in section.items:
+            if not item.refs:
+                continue
+            source = _item_full_key(item, kf, section.kind)
+            if not source:
+                continue
+            for ref in item.refs:
+                edges.setdefault(ref, []).append(source)
+    return edges
+
+
+def _item_full_key(item: FoldItem, key_field: str | None, kind: str = "") -> str:
+    """Build the full kind/key reference for an item (e.g. 'decision/atoms/n-on-fold-item')."""
+    if not key_field:
+        return ""
+    key = item.payload.get(key_field, "")
+    if not key:
+        return ""
+    return f"{kind}/{key}" if kind else str(key)
 
 
 def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:

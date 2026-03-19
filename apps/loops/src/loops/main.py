@@ -2123,7 +2123,22 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
             vertex_path=str(vertex_path) if vertex_path else None,
+            visible=ctx.fidelity.visible,
         )
+
+    def _add_fold_args(parser):
+        """Add fold-specific flags: visibility layers."""
+        parser.add_argument("--refs", action="store_true", default=False,
+                            help="Show reference connections")
+
+    def _build_fold_fidelity(parsed, base):
+        """Inject visibility tags from fold-specific flags."""
+        visible = set()
+        if getattr(parsed, "refs", False):
+            visible.add("refs")
+        if not visible:
+            return base
+        return base.with_visible(*visible)
 
     async def fetch_stream():
         """Poll the store for updates — enables --live mode."""
@@ -2163,6 +2178,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         fetch_stream=fetch_stream,
         default_mode=OutputMode.STATIC,
         handlers=handlers,
+        add_args=_add_fold_args,
+        build_fidelity=_build_fold_fidelity,
         prog="loops fold",
         description="Show folded state",
         help_args=[
@@ -3345,7 +3362,7 @@ def _try_fast_read(argv: list[str]) -> int | None:
             has_static = True
         elif arg == "--plain":
             has_plain = True
-        elif arg in ("--facts", "--ticks", "--kind", "--lens", "--observer",
+        elif arg in ("--facts", "--ticks", "--refs", "--kind", "--lens", "--observer",
                       "-h", "--help", "--json", "--live", "-i"):
             return None  # needs full dispatch
         elif arg.startswith("--") and "=" in arg:

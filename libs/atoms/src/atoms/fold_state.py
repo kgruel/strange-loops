@@ -39,6 +39,10 @@ class FoldItem:
             how many times this key has been upserted. For "collect" folds,
             always 1 (each item is one fact). Reconstructed on replay —
             reads produce the same n as the emit history.
+        refs: Accumulated outbound references from this item. Union of all
+            ``ref`` payload values across all upserts to this key. Each ref
+            is a ``kind/key`` entity reference (e.g. ``decision/auth``).
+            Empty for items that never carried a ``ref`` field.
     """
 
     payload: dict[str, Any]
@@ -47,6 +51,7 @@ class FoldItem:
     origin: str = ""
     id: str | None = None
     n: int = 1
+    refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -66,14 +66,24 @@ def _make_collect(target: str, max_size: int) -> Callable[[dict, dict], None]:
 
 
 def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
-    """Insert/update in dict keyed by key_field, tracking observation count."""
+    """Insert/update in dict keyed by key_field, tracking observation count and refs."""
     def fold(state: dict, payload: dict) -> None:
         key_value = payload.get(key_field)
         if key_value is not None:
             existing = state[target].get(key_value)
             n = (existing.get("_n", 0) if existing else 0) + 1
+            # Accumulate refs across upserts
+            prev_refs = set(existing.get("_refs", ())) if existing else set()
+            new_ref = payload.get("ref", "")
+            if new_ref:
+                for r in new_ref.split(","):
+                    r = r.strip()
+                    if r:
+                        prev_refs.add(r)
             entry = dict(payload)
             entry["_n"] = n
+            if prev_refs:
+                entry["_refs"] = sorted(prev_refs)
             state[target][key_value] = entry
     return fold
 

@@ -938,7 +938,7 @@ def vertex_tick_fold(
 def _dict_to_fold_item(d: dict) -> Any:
     """Convert a raw fold output dict to a typed FoldItem.
 
-    Separates metadata (_ts, _observer, _origin, _id, _n) from payload fields.
+    Separates metadata (_ts, _observer, _origin, _id, _n, _refs) from payload.
     """
     from atoms import FoldItem
 
@@ -947,7 +947,8 @@ def _dict_to_fold_item(d: dict) -> Any:
     origin = d.pop("_origin", "")
     fact_id = d.pop("_id", None)
     n = d.pop("_n", 1)
-    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin, id=fact_id, n=n)
+    refs = tuple(d.pop("_refs", ()))
+    return FoldItem(payload=d, ts=ts, observer=observer, origin=origin, id=fact_id, n=n, refs=refs)
 
 
 def vertex_fact_by_id(

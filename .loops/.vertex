@@ -1,9 +1,8 @@
-// loops monorepo — workspace root
-// Local resolution target: `loops read` with no vertex name finds this.
-// Delegates to project.vertex for all fold state.
+// Root workspace vertex — aggregates all workspace concerns
+// loops read . shows the combined view
+name "loops"
 
-observers {
-  kyle { }
-  loops-claude { }
-  meta-claude { }
+combine {
+    vertex "./project.vertex"
+    vertex "./docs.vertex"
 }

@@ -1,0 +1,53 @@
+name "docs"
+store "/Users/kaygee/Code/loops/.loops/data/docs.db"
+
+loops {
+  // Vocabulary — what primitives exist and what they do
+  // fold ops, parse ops, boundary types, structure declarations
+  vocab {
+    fold {
+      items "by" "name"
+    }
+    search "name" "message"
+  }
+
+  // Contracts — API signatures, data shapes, guarantees
+  // "what does this type/function promise"
+  contract {
+    fold {
+      items "by" "name"
+    }
+    search "name" "message"
+  }
+
+  // Conventions — invariants and rules that hold across the system
+  // "frozen types", "no cross-lib imports", "errors are facts"
+  convention {
+    fold {
+      items "by" "name"
+    }
+    search "name" "message"
+  }
+
+  // Patterns — composition and usage patterns
+  // "knowledge vertex shape", "fetch-then-render", "config-first"
+  pattern {
+    fold {
+      items "by" "topic"
+    }
+    search "topic" "message"
+  }
+
+  // Guides — concrete workflows, step-by-step
+  // "how to add a command", "how to write a lens"
+  guide {
+    fold {
+      items "by" "name"
+    }
+    search "name" "message"
+  }
+}
+
+lens {
+  fold "docs"
+}

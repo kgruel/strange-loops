@@ -736,6 +736,7 @@ def _raw_to_fold_state(
     specs: dict,
     *,
     kind: str | None = None,
+    unfolded: dict[str, int] | None = None,
 ) -> Any:
     """Convert a raw fold state dict to typed ``FoldState``.
 
@@ -810,7 +811,11 @@ def _raw_to_fold_state(
             scalars=scalars,
         ))
 
-    return FoldState(sections=tuple(sections), vertex=ast.name)
+    return FoldState(
+        sections=tuple(sections),
+        vertex=ast.name,
+        unfolded=unfolded or {},
+    )
 
 
 def vertex_fold(
@@ -851,6 +856,7 @@ def vertex_fold(
         full_specs = {**source_specs, **specs}
 
     # Inline vertex_read logic — avoids redundant parse/compile
+    unfolded: dict[str, int] = {}
     if ast.combine is not None or ast.discover is not None:
         raw = _combined_read(ast, vertex_path, full_specs, observer=observer)
 
@@ -904,7 +910,15 @@ def vertex_fold(
                         payloads.append(p)
                     raw[k] = spec.replay(payloads)
 
-    return _raw_to_fold_state(raw, ast, full_specs, kind=kind)
+                # Detect unfolded kinds — in store but not declared
+                store_kinds = reader.fact_kind_stats()
+                unfolded = {
+                    k: v["count"]
+                    for k, v in store_kinds.items()
+                    if k not in full_specs
+                }
+
+    return _raw_to_fold_state(raw, ast, full_specs, kind=kind, unfolded=unfolded)
 
 
 def vertex_tick_fold(

@@ -55,6 +55,9 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
     # MINIMAL: one-liner
     if zoom == Zoom.MINIMAL:
         parts = [f"{s.count} {s.kind}s" for s in populated]
+        if data.unfolded:
+            loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
+            parts.append(f"unfolded: {loose}")
         return Block.text(", ".join(parts), Style(), width=width)
 
     piped = width is None
@@ -87,6 +90,11 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
                 show_observer=show_observer,
             )
 
+        if data.unfolded:
+            text_rows.append(("", Style()))
+            loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
+            text_rows.append((f"Unfolded: {loose}", dim_style))
+
         return Block.column(text_rows)
 
     rows: list[Block] = []
@@ -115,6 +123,11 @@ def fold_view(data: FoldState, zoom: Zoom, width: int | None) -> Block:
             show_observer=show_observer,
         )
         rows.append(Block.column(item_rows, width=width))
+
+    if data.unfolded:
+        rows.append(Block.text("", Style(), width=width))
+        loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
+        rows.append(Block.text(f"Unfolded: {loose}", dim_style, width=width))
 
     return join_vertical(*rows)
 

@@ -105,10 +105,15 @@ class FoldState:
     Attributes:
         sections: Ordered fold sections (declaration order from vertex AST).
         vertex: Name of the vertex that produced this state.
+        unfolded: Kinds present in the store but not declared in the vertex.
+            Maps kind name to fact count. Empty when all store kinds are
+            declared. Signals incomplete vertex coverage — data exists
+            but isn't being folded (no n, no key, no accumulation).
     """
 
     sections: tuple[FoldSection, ...]
     vertex: str
+    unfolded: dict[str, int] = field(default_factory=dict)
 
     @property
     def is_empty(self) -> bool:

@@ -1,5 +1,5 @@
 Decisions (2):
-  Use SQLite for persistence: Chose SQLite over filesystem for atomic writes …
+  Use SQLite for persistence: Chose SQLite over filesystem for atomic writes an…
   KDL for config format: KDL is human-friendly and supports nested structure.
 
 Threads (2):

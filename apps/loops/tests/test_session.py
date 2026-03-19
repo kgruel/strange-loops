@@ -125,7 +125,7 @@ class TestStatus:
 
         out = capsys.readouterr().out
         assert "## TASK" in out
-        assert "fix/review" in out
+        assert "review" in out  # rendered under fix/ namespace group
 
     def test_shows_changes(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)

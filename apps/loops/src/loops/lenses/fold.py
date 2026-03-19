@@ -323,8 +323,13 @@ def _render_item_line(
     body_len = len(body) if body else 0
     separator = ": " if body else ""
 
-    # Calculate available width for body (reserve space for truncation hint)
-    fixed_len = len(pad) + len(label) + len(n_text) + len(ref_text) + len(recency_text) + len(separator)
+    # Calculate available width for body (reserve space for badge + truncation hint)
+    # Badge: " [" + indicators + "]" = 3 chars + content
+    badge_content_len = len(n_text.lstrip()) + len(ref_text.lstrip()) + len(recency_text.lstrip())
+    # Add spaces between badge parts
+    badge_part_count = sum(1 for x in [n_text, ref_text, recency_text] if x)
+    badge_len = (3 + badge_content_len + max(0, badge_part_count - 1)) if badge_part_count else 0
+    fixed_len = len(pad) + len(label) + badge_len + len(separator)
     truncation_hint = ""
 
     if body:
@@ -345,15 +350,27 @@ def _render_item_line(
         body_text = ""
 
     # Build composed line with distinct styles per segment
-    # SUMMARY: key ×N ←N [recency]: body… [+Nc]
+    # SUMMARY: key [×N ←N recency]: body… [+Nc]
     parts: list[Block] = [Block.text(f"{pad}{label}", fp.key)]
 
+    # Metadata badge: [×N ←N recency] — always present (at minimum recency)
+    badge_parts: list[Block] = []
     if n_text:
-        parts.append(Block.text(n_text, fp.n_indicator))
+        badge_parts.append(Block.text(n_text.lstrip(), fp.n_indicator))
     if ref_text:
-        parts.append(Block.text(ref_text, fp.ref_indicator))
+        if badge_parts:
+            badge_parts.append(Block.text(" ", fp.collapse))
+        badge_parts.append(Block.text(ref_text.lstrip(), fp.ref_indicator))
     if recency_text:
-        parts.append(Block.text(recency_text, fp.collapse))
+        if badge_parts:
+            badge_parts.append(Block.text(" ", fp.collapse))
+        badge_parts.append(Block.text(recency_text.lstrip(), fp.collapse))
+
+    if badge_parts:
+        parts.append(Block.text(" [", fp.collapse))
+        parts.extend(badge_parts)
+        parts.append(Block.text("]", fp.collapse))
+
     if separator and body_text:
         parts.append(Block.text(separator, fp.body))
         parts.append(Block.text(body_text, fp.body))

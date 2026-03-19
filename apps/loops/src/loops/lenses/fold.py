@@ -122,10 +122,13 @@ def fold_view(
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
     refs_filter = "refs" in visible
+    facts_filter = "facts" in visible
     blocks: list[Block] = []
     skipped_sections: list[tuple[str, int]] = []
 
     for s in populated:
+        display_count = s.count
+
         # When --refs is active, count connected items and track disconnected
         if refs_filter:
             connected_count = sum(
@@ -138,15 +141,20 @@ def fold_view(
                 continue
             elif disconnected > 0:
                 skipped_sections.append((s.kind, disconnected))
+            display_count = connected_count
+
+        # When --facts is active, minimize sections without compression history
+        # Collect folds and by-folds where no item has n>1 have nothing to drill into
+        if facts_filter:
+            has_history = s.fold_type == "by" and any(i.n > 1 for i in s.items)
+            if not has_history:
+                skipped_sections.append((s.kind, s.count))
+                continue
 
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        # Header: show connected/total when --refs is filtering
-        if refs_filter:
-            header = _section_header(s.kind, connected_count, piped=width is None)
-        else:
-            header = _section_header(s.kind, s.count, piped=width is None)
+        header = _section_header(s.kind, display_count, piped=width is None)
         blocks.append(Block.text(header, fp.section_header, width=width))
 
         observers = {item.observer for item in s.items if item.observer}
@@ -160,11 +168,19 @@ def fold_view(
         )
         blocks.append(section_block)
 
-    # Footer: unfolded kinds + skipped-by-refs sections
+    # Footer: skipped sections + unfolded kinds
     footer_parts: list[str] = []
     if skipped_sections:
         parts = [f"{count} {kind}" for kind, count in skipped_sections]
-        footer_parts.append(f"No refs: {', '.join(parts)}")
+        if refs_filter and facts_filter:
+            label = "Filtered"
+        elif refs_filter:
+            label = "No refs"
+        elif facts_filter:
+            label = "No history"
+        else:
+            label = "Skipped"
+        footer_parts.append(f"{label}: {', '.join(parts)}")
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
         footer_parts.append(f"Unfolded: {loose}")

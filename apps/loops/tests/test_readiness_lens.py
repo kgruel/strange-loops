@@ -11,8 +11,8 @@ from painted import Zoom
 
 from .helpers import block_to_text
 
-# readiness.py lives under config/lenses/ — add to path so import works
-_CONFIG_LENSES = str(Path(__file__).resolve().parents[3] / "config" / "lenses")
+# readiness.py lives under experiments/config-reference/lenses/
+_CONFIG_LENSES = str(Path(__file__).resolve().parents[3] / "experiments" / "config-reference" / "lenses")
 if _CONFIG_LENSES not in sys.path:
     sys.path.insert(0, _CONFIG_LENSES)
 

@@ -1504,13 +1504,16 @@ def _resolve_vertex_for_dispatch(name: str) -> Path | None:
     """Try to resolve a name as a vertex for CLI dispatch. Returns None to fall through.
 
     Resolution chain (local instance wins over config template):
-    1. Skip path-like strings — those are file args for root commands
+    1. Path-like strings (.vertex suffix, ./ or / prefix) — resolve directly if file exists
     2. Local: .loops/name.vertex
     3. Local: cwd/name.vertex
     4. Config-level: LOOPS_HOME/name/name.vertex
     5. Combine alias: parent/alias → parent's combine child with that alias
     """
     if name.endswith(".vertex") or name.startswith("./") or name.startswith("/"):
+        p = Path(name)
+        if p.exists():
+            return p.resolve()
         return None
 
     # Local .loops/
@@ -3187,6 +3190,8 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
     delegates to the appropriate ``_run_*`` function with ``vertex_path=None``
     so they resolve the vertex from context (optional positional or local).
     """
+    import argparse
+
     # Pre-parse --observer from rest (same pattern as _dispatch_observer)
     obs_parser = argparse.ArgumentParser(add_help=False)
     obs_parser.add_argument("--observer", default=None)
@@ -3218,6 +3223,8 @@ def _dispatch_observer(
 
     Default (no subcommand or flags only) → read (fold by default).
     """
+    import argparse
+
     # Pre-parse --observer from rest (before subcommand dispatch)
     obs_parser = argparse.ArgumentParser(add_help=False)
     obs_parser.add_argument("--observer", default=None)

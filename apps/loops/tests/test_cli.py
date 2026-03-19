@@ -557,13 +557,10 @@ class TestEmitFoldKeyWarning:
 
     def test_warns_missing_name_field(self, tmp_path, capsys):
         from loops.main import _warn_missing_fold_key
-        from painted import show, Block
-        from painted.palette import current_palette
 
         vf = self._make_vertex(tmp_path)
-        p = current_palette()
 
-        _warn_missing_fold_key(vf, "thread", {"status": "open"}, show, Block, p)
+        _warn_missing_fold_key(vf, "thread", {"status": "open"})
 
         captured = capsys.readouterr()
         assert "folds by 'name'" in captured.err
@@ -571,52 +568,40 @@ class TestEmitFoldKeyWarning:
 
     def test_warns_missing_topic_field(self, tmp_path, capsys):
         from loops.main import _warn_missing_fold_key
-        from painted import show, Block
-        from painted.palette import current_palette
 
         vf = self._make_vertex(tmp_path)
-        p = current_palette()
 
-        _warn_missing_fold_key(vf, "decision", {"message": "test"}, show, Block, p)
+        _warn_missing_fold_key(vf, "decision", {"message": "test"})
 
         captured = capsys.readouterr()
         assert "folds by 'topic'" in captured.err
 
     def test_no_warning_when_key_present(self, tmp_path, capsys):
         from loops.main import _warn_missing_fold_key
-        from painted import show, Block
-        from painted.palette import current_palette
 
         vf = self._make_vertex(tmp_path)
-        p = current_palette()
 
-        _warn_missing_fold_key(vf, "thread", {"name": "test", "status": "open"}, show, Block, p)
+        _warn_missing_fold_key(vf, "thread", {"name": "test", "status": "open"})
 
         captured = capsys.readouterr()
         assert captured.err == ""
 
     def test_no_warning_for_collect_fold(self, tmp_path, capsys):
         from loops.main import _warn_missing_fold_key
-        from painted import show, Block
-        from painted.palette import current_palette
 
         vf = self._make_vertex(tmp_path)
-        p = current_palette()
 
-        _warn_missing_fold_key(vf, "change", {"message": "something"}, show, Block, p)
+        _warn_missing_fold_key(vf, "change", {"message": "something"})
 
         captured = capsys.readouterr()
         assert captured.err == ""
 
     def test_no_warning_for_undeclared_kind(self, tmp_path, capsys):
         from loops.main import _warn_missing_fold_key
-        from painted import show, Block
-        from painted.palette import current_palette
 
         vf = self._make_vertex(tmp_path)
-        p = current_palette()
 
-        _warn_missing_fold_key(vf, "unknown", {"message": "test"}, show, Block, p)
+        _warn_missing_fold_key(vf, "unknown", {"message": "test"})
 
         captured = capsys.readouterr()
         assert captured.err == ""

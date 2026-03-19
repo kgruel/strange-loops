@@ -66,16 +66,18 @@ class FoldPalette:
 def _default_fold_palette() -> FoldPalette:
     """Build FoldPalette from the ambient painted palette."""
     p = current_palette()
+    # Body: not white, not dim — a middle ground (256-color 252 = light gray)
+    body_style = Style(fg=252)
     return FoldPalette(
         section_header=Style(bold=True),
         group_header=Style(bold=True),
         key=Style(),
-        n_indicator=p.accent,
-        ref_indicator=p.accent,
+        n_indicator=p.accent,            # cyan — revision density
+        ref_indicator=Style(fg="yellow"), # yellow — structural importance (different axis)
         observer=p.muted,
-        body=p.muted,
+        body=body_style,
         collapse=p.muted,
-        ref_arrow=p.accent,
+        ref_arrow=Style(fg="yellow"),     # match ref_indicator
         meta=p.muted,
         unfolded=p.muted,
     )
@@ -286,7 +288,12 @@ def _render_item_line(
     strip_namespace: bool = False,
     is_by: bool = True,
 ) -> Block:
-    """Render a single fold item as a composed Block with multi-style."""
+    """Render a single fold item as a composed Block with multi-style.
+
+    SUMMARY layout: key ×N ←N [recency]: body… [+Nc]
+    DETAILED adds:  observer, remaining payload fields, outbound refs
+    FULL adds:      all metadata (_id, _ts, _observer, _origin, _n, _inbound_refs)
+    """
     payload = item.payload
     pad = " " * indent
 
@@ -304,45 +311,54 @@ def _render_item_line(
     ref_count = _inbound_count(item, key_field, inbound)
     ref_text = f" ←{ref_count}" if ref_count > 0 else ""
 
-    # Observer
-    obs_text = f" ({item.observer})" if show_observer and item.observer else ""
+    # Recency tag
+    recency_text = ""
+    if item.ts:
+        recency_text = f" {_recency_tag(item.ts)}"
 
     # Body
     body_field, body = _find_body_entry(payload, used_label_field)
-    date = fmt(item.ts) if item.ts else ""
 
-    # Compose the line: pad + key + indicators + observer + separator + body
-    # Layout: "    key ×4 ←2 (observer): body text…"
-    prefix = f"{pad}{label}"
+    # Truncation hint: show character count when body is truncated
+    body_len = len(body) if body else 0
     separator = ": " if body else ""
 
-    # Calculate available width for body
-    fixed_len = len(prefix) + len(n_text) + len(ref_text) + len(obs_text) + len(separator)
+    # Calculate available width for body (reserve space for truncation hint)
+    fixed_len = len(pad) + len(label) + len(n_text) + len(ref_text) + len(recency_text) + len(separator)
+    truncation_hint = ""
 
     if body:
         if width is not None:
-            body_budget = max(10, width - fixed_len)
-            body_text = _truncate(body, body_budget)
+            # Reserve space for potential truncation hint " [+NNNc]"
+            hint_reserve = 10
+            body_budget = max(10, width - fixed_len - hint_reserve)
+            if body_len > body_budget:
+                body_text = _truncate(body, body_budget)
+                truncation_hint = f" [+{body_len - body_budget}c]"
+            else:
+                body_text = body
         else:
             body_text = body
-    elif date and not n_text and not ref_text:
-        body_text = f"({date})"
-        separator = " "
+    elif item.ts and not n_text and not ref_text:
+        body_text = ""
     else:
         body_text = ""
 
     # Build composed line with distinct styles per segment
+    # SUMMARY: key ×N ←N [recency]: body… [+Nc]
     parts: list[Block] = [Block.text(f"{pad}{label}", fp.key)]
 
     if n_text:
         parts.append(Block.text(n_text, fp.n_indicator))
     if ref_text:
         parts.append(Block.text(ref_text, fp.ref_indicator))
-    if obs_text:
-        parts.append(Block.text(obs_text, fp.observer))
+    if recency_text:
+        parts.append(Block.text(recency_text, fp.collapse))
     if separator and body_text:
         parts.append(Block.text(separator, fp.body))
         parts.append(Block.text(body_text, fp.body))
+    if truncation_hint:
+        parts.append(Block.text(truncation_hint, fp.collapse))
 
     main_line = join_horizontal(*parts)
 
@@ -353,9 +369,13 @@ def _render_item_line(
 
     lines: list[Block] = [main_line]
 
-    # DETAILED: remaining payload fields + outbound refs
+    # DETAILED: observer + remaining payload fields + outbound refs
     if zoom >= Zoom.DETAILED:
         detail_pad = " " * (indent + 2)
+        if item.observer:
+            lines.append(Block.text(
+                f"{detail_pad}observer: {item.observer}", fp.observer, width=width
+            ))
         if item.id:
             lines.append(Block.text(f"{detail_pad}id:{item.id[:8]}", fp.meta, width=width))
         skip = {used_label_field} if used_label_field else set()
@@ -373,7 +393,7 @@ def _render_item_line(
         meta_pad = " " * (indent + 2)
         if item.id:
             lines.append(Block.text(f"{meta_pad}_id: {item.id}", fp.meta, width=width))
-        if date:
+        if item.ts:
             lines.append(Block.text(f"{meta_pad}_ts: {fmt(item.ts)}", fp.meta, width=width))
         if item.observer:
             lines.append(Block.text(f"{meta_pad}_observer: {item.observer}", fp.meta, width=width))
@@ -489,6 +509,40 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "\u2026"
+
+
+def _recency_tag(ts) -> str:
+    """Compact recency indicator from timestamp.
+
+    Returns relative time like '2h', '3d', '2w' for recent items,
+    month abbreviation for older ones.
+    """
+    import time
+
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        try:
+            epoch = datetime.fromisoformat(ts).timestamp()
+        except ValueError:
+            return ""
+    elif isinstance(ts, (int, float)):
+        epoch = ts
+    else:
+        return ""
+    age = time.time() - epoch
+    if age < 0:
+        return "now"
+    if age < 3600:
+        return f"{int(age / 60)}m"
+    if age < 86400:
+        return f"{int(age / 3600)}h"
+    if age < 604800:
+        return f"{int(age / 86400)}d"
+    if age < 2592000:
+        return f"{int(age / 604800)}w"
+    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    return f"{dt.strftime('%b')} {dt.day}"
 
 
 def _format_date(ts) -> str:

@@ -117,6 +117,7 @@ def fold_view(
     # Compute once for the whole render
     inbound = _compute_inbound_refs(data)
     inbound_edges = _compute_inbound_edges(data) if "refs" in visible else {}
+    facts_by_key = data.source_facts if "facts" in visible else {}
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
@@ -154,6 +155,7 @@ def fold_view(
         section_block = _render_section(
             s, zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
         )
         blocks.append(section_block)
@@ -188,6 +190,7 @@ def _render_section(
     *,
     inbound: Counter,
     inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
@@ -199,6 +202,7 @@ def _render_section(
         return _render_grouped(
             section.items, section.key_field, zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
         )
@@ -207,6 +211,7 @@ def _render_section(
             section.items, section.key_field, section.fold_type,
             zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
         )
@@ -228,6 +233,7 @@ def _render_grouped(
     *,
     inbound: Counter,
     inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
@@ -282,6 +288,7 @@ def _render_grouped(
             blocks.append(_render_item_line(
                 item, key_field, zoom, fmt, width,
                 inbound=inbound, inbound_edges=inbound_edges,
+                facts_by_key=facts_by_key,
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
             ))
@@ -310,6 +317,7 @@ def _render_flat(
     *,
     inbound: Counter,
     inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
@@ -341,6 +349,7 @@ def _render_flat(
         blocks.append(_render_item_line(
             item, key_field, zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
         ))
@@ -362,6 +371,7 @@ def _render_item_line(
     *,
     inbound: Counter,
     inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
@@ -373,8 +383,9 @@ def _render_item_line(
     """Render a single fold item as a composed Block with multi-style.
 
     SUMMARY layout: key [×N ←N →N recency]: body… [+Nc]
-    DETAILED adds:  observer, remaining payload fields, outbound refs
-    DETAILED+refs:  per-item edge expansion (← inbound sources, → outbound targets)
+    DETAILED adds:  observer, remaining payload fields
+    +refs:          per-item edge expansion (← inbound sources, → outbound targets)
+    +facts:         source facts that built this fold item
     FULL adds:      all metadata (_id, _ts, _observer, _origin, _n, _inbound_refs)
     """
     payload = item.payload
@@ -506,6 +517,40 @@ def _render_item_line(
         # Outbound edges
         for ref in item.refs:
             lines.append(Block.text(f"{edge_pad}→ {ref}", fp.ref_edge_out, width=width))
+
+    # Source facts: gated on "facts" in visible, shown at any zoom >= SUMMARY
+    if "facts" in visible and zoom >= Zoom.SUMMARY:
+        fact_pad = " " * (indent + 2)
+        item_key = _item_full_key(item, key_field, section_kind)
+        item_facts = facts_by_key.get(item_key, [])
+        if item_facts:
+            # Show in reverse chronological order (most recent first)
+            sorted_facts = sorted(item_facts, key=lambda f: f.get("_ts", 0), reverse=True)
+            # At SUMMARY: show last 3. At DETAILED+: show all.
+            limit = 3 if zoom <= Zoom.SUMMARY else len(sorted_facts)
+            for sf in sorted_facts[:limit]:
+                ts = sf.get("_ts")
+                ts_str = _format_date(ts) if ts else "?"
+                # Find the body: first non-key, non-metadata field
+                sf_body = ""
+                for fk, fv in sf.items():
+                    if fk.startswith("_") or fk == (key_field or ""):
+                        continue
+                    if fv:
+                        sf_body = str(fv)
+                        break
+                if sf_body and width is not None:
+                    max_body = max(10, width - len(fact_pad) - len(ts_str) - 3)
+                    if len(sf_body) > max_body:
+                        sf_body = sf_body[:max_body - 1] + "…"
+                lines.append(Block.text(
+                    f"{fact_pad}▸ {ts_str} {sf_body}", fp.meta, width=width
+                ))
+            remaining_facts = len(sorted_facts) - limit
+            if remaining_facts > 0:
+                lines.append(Block.text(
+                    f"{fact_pad}({remaining_facts} earlier)", fp.collapse, width=width
+                ))
 
     # FULL: metadata
     if zoom >= Zoom.FULL:

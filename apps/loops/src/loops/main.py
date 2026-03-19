@@ -2080,6 +2080,9 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
+    # Pre-check --facts for fetch (it stays in rest for painted's parser too)
+    want_facts = "--facts" in rest
+
     # Fast path: --static --plain bypasses the CLI framework import (~7ms).
     # Detect these flags before importing painted.cli.
     if _is_static_plain(rest):
@@ -2106,7 +2109,10 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
         from .commands.fetch import fetch_fold
-        return fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
+        return fetch_fold(
+            vertex_path, kind=known.kind, observer=obs_for_engine,
+            retain_facts=want_facts,
+        )
 
     def render(ctx, data):
         nonlocal resolved_render_fn
@@ -2130,12 +2136,16 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         """Add fold-specific flags: visibility layers."""
         parser.add_argument("--refs", action="store_true", default=False,
                             help="Show reference connections")
+        parser.add_argument("--facts", action="store_true", default=False,
+                            help="Show source facts per item")
 
     def _build_fold_fidelity(parsed, base):
         """Inject visibility tags from fold-specific flags."""
         visible = set()
         if getattr(parsed, "refs", False):
             visible.add("refs")
+        if getattr(parsed, "facts", False):
+            visible.add("facts")
         if not visible:
             return base
         return base.with_visible(*visible)
@@ -3035,31 +3045,38 @@ def _run_read(
     vertex_path: Path | None = None,
     observer: str | None = None,
 ) -> int:
-    """Unified read verb — routes to fold (default) or stream (--facts/--ticks).
+    """Unified read verb — routes to fold (default, with visibility layers) or stream/ticks.
 
     ``loops read [vertex] [flags]`` is the primary read interface.
-    Default (no flags) shows fold state. ``--facts`` shows filtered fact
-    history. ``--ticks`` shows tick history.
+    Default (no flags) shows fold state. ``--facts`` and ``--refs`` are
+    visibility layers on the fold view. ``--ticks`` routes to tick history.
+    ``--facts`` with ``--since`` or ``--id`` routes to stream (temporal query).
 
-    This is a thin router — delegates to ``_run_fold`` or ``_run_stream``
-    which handle their own argument parsing, fetch, and rendering.
+    This is a thin router — delegates to ``_run_fold``, ``_run_stream``,
+    or ``_run_ticks``.
     """
-    # Pre-parse only the mode flags to decide which path to take.
-    # Strip mode flags before delegating — delegates don't know about them.
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--facts", action="store_true", default=False)
     pre.add_argument("--ticks", action="store_true", default=False)
+    pre.add_argument("--since", default=None)
+    pre.add_argument("--id", default=None, dest="fact_id")
     known, rest = pre.parse_known_args(argv)
 
-    if known.facts:
-        # Fact history mode — delegate to stream (without --facts flag)
-        return _run_stream(rest, vertex_path=vertex_path, observer=observer)
+    if known.facts and (known.since or known.fact_id):
+        # Temporal query — delegate to stream (without --facts flag)
+        stream_rest = rest
+        if known.since:
+            stream_rest = [*stream_rest, "--since", known.since]
+        if known.fact_id:
+            stream_rest = [*stream_rest, "--id", known.fact_id]
+        return _run_stream(stream_rest, vertex_path=vertex_path, observer=observer)
     elif known.ticks:
         # Tick history mode — dedicated tick fetch and lens
         return _run_ticks(rest, vertex_path=vertex_path, observer=observer)
     else:
-        # Default: fold state
-        return _run_fold(rest, vertex_path=vertex_path, observer=observer)
+        # Default: fold state (re-inject --facts if present — it's a visibility layer)
+        fold_rest = [*rest, "--facts"] if known.facts else rest
+        return _run_fold(fold_rest, vertex_path=vertex_path, observer=observer)
 
 
 def _render_main_help(argv: list[str]) -> int:

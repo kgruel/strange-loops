@@ -55,6 +55,7 @@ def fetch_fold(
     vertex_path: Path,
     kind: str | None = None,
     observer: str | None = None,
+    retain_facts: bool = False,
 ) -> "FoldState":
     """Fetch fold state, with optional key drill-down.
 
@@ -66,7 +67,10 @@ def fetch_fold(
     from engine import vertex_fold
 
     kind_filter, key_filter = _split_kind_key(kind)
-    state = vertex_fold(vertex_path, observer=observer, kind=kind_filter)
+    state = vertex_fold(
+        vertex_path, observer=observer, kind=kind_filter,
+        retain_facts=retain_facts,
+    )
 
     if key_filter is None:
         return state

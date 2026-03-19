@@ -114,6 +114,9 @@ class FoldState:
     sections: tuple[FoldSection, ...]
     vertex: str
     unfolded: dict[str, int] = field(default_factory=dict)
+    source_facts: dict[str, list[dict]] = field(default_factory=dict)
+    """When retain_facts=True, maps ``kind/key`` to the source facts that
+    were compressed into each fold item. Empty by default."""
 
     @property
     def is_empty(self) -> bool:

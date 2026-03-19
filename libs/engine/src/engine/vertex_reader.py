@@ -737,6 +737,7 @@ def _raw_to_fold_state(
     *,
     kind: str | None = None,
     unfolded: dict[str, int] | None = None,
+    source_facts: dict[str, list[dict]] | None = None,
 ) -> Any:
     """Convert a raw fold state dict to typed ``FoldState``.
 
@@ -784,7 +785,10 @@ def _raw_to_fold_state(
             items_raw = state
 
         # Normalize items to list[dict], then convert to typed FoldItems
-        if fold_type == "by" and isinstance(items_raw, dict):
+        # Scalar fold targets (Count, Sum) produce int/float — not item data
+        if isinstance(items_raw, (int, float, str, bool)):
+            raw_items = []
+        elif fold_type == "by" and isinstance(items_raw, dict):
             raw_items = [dict(v) for v in items_raw.values()]
         elif isinstance(items_raw, list):
             raw_items = [dict(v) for v in items_raw]
@@ -815,6 +819,7 @@ def _raw_to_fold_state(
         sections=tuple(sections),
         vertex=ast.name,
         unfolded=unfolded or {},
+        source_facts=source_facts or {},
     )
 
 
@@ -823,6 +828,7 @@ def vertex_fold(
     *,
     observer: str | None = None,
     kind: str | None = None,
+    retain_facts: bool = False,
 ) -> Any:
     """Read fold state as a typed ``FoldState``.
 
@@ -857,6 +863,7 @@ def vertex_fold(
 
     # Inline vertex_read logic — avoids redundant parse/compile
     unfolded: dict[str, int] = {}
+    source_facts: dict[str, list[dict]] = {}
     if ast.combine is not None or ast.discover is not None:
         raw = _combined_read(ast, vertex_path, full_specs, observer=observer)
 
@@ -893,6 +900,7 @@ def vertex_fold(
             raw = {k: spec.initial_state() for k, spec in full_specs.items()}
         else:
             from .store_reader import StoreReader  # deferred: not needed for combine-only
+            from atoms.fold import Upsert
 
             with StoreReader(store_path) as reader:
                 raw = {}
@@ -908,6 +916,15 @@ def vertex_fold(
                         p["_origin"] = fact.get("origin", "")
                         p["_id"] = fact.get("id")
                         payloads.append(p)
+
+                    # Retain source facts grouped by fold position
+                    if retain_facts and spec.folds:
+                        fold_op = spec.folds[0]
+                        if isinstance(fold_op, Upsert):
+                            for p in payloads:
+                                fk = f"{k}/{p.get(fold_op.key, '')}"
+                                source_facts.setdefault(fk, []).append(p)
+
                     raw[k] = spec.replay(payloads)
 
                 # Detect unfolded kinds — in store but not declared
@@ -918,7 +935,10 @@ def vertex_fold(
                     if k not in full_specs
                 }
 
-    return _raw_to_fold_state(raw, ast, full_specs, kind=kind, unfolded=unfolded)
+    return _raw_to_fold_state(
+        raw, ast, full_specs, kind=kind, unfolded=unfolded,
+        source_facts=source_facts if retain_facts else None,
+    )
 
 
 def vertex_tick_fold(

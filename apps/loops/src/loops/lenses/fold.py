@@ -151,7 +151,15 @@ def _render_item_rows(
     """
     is_by = fold_type == "by"
 
-    for item in items:
+    # Sort by-fold items by observation count — most-touched first
+    if is_by:
+        sorted_items: tuple[FoldItem, ...] | list[FoldItem] = sorted(
+            items, key=lambda i: i.n, reverse=True
+        )
+    else:
+        sorted_items = items
+
+    for item in sorted_items:
         payload = item.payload
         if is_by and key_field:
             label = str(payload.get(key_field, ""))
@@ -165,10 +173,13 @@ def _render_item_rows(
         # Observer suffix when multi-observer fold
         obs_suffix = f" ({item.observer})" if show_observer and item.observer else ""
 
+        # Observation count for items touched more than once
+        n_suffix = f" ×{item.n}" if is_by and item.n > 1 else ""
+
         # SUMMARY: label + body snippet (first non-label payload field)
         body_field, body = _find_body_entry(payload, used_label_field)
         if body:
-            reserved = len(label) + len(obs_suffix) + 6  # "  label (obs): snippet"
+            reserved = len(label) + len(obs_suffix) + len(n_suffix) + 6
             if width is not None:
                 snippet = _truncate(body, width - reserved)
             else:
@@ -178,7 +189,8 @@ def _render_item_rows(
             line = f"  {label}{obs_suffix} ({date})"
         else:
             line = f"  {label}{obs_suffix}"
-        rows.append((line, Style()))
+
+        rows.append((line + n_suffix, Style()))
 
         # DETAILED: show remaining payload fields as continuation lines
         if zoom >= Zoom.DETAILED:
@@ -194,7 +206,7 @@ def _render_item_rows(
                     continue
                 rows.append((f"    {k}: {v}", dim_style))
 
-        # FULL: show metadata fields (ts, observer, origin, full id)
+        # FULL: show metadata fields (ts, observer, origin, n, full id)
         if zoom >= Zoom.FULL:
             if item.id:
                 rows.append((f"    _id: {item.id}", meta_style))
@@ -204,6 +216,8 @@ def _render_item_rows(
                 rows.append((f"    _observer: {item.observer}", meta_style))
             if item.origin:
                 rows.append((f"    _origin: {item.origin}", meta_style))
+            if item.n > 1:
+                rows.append((f"    _n: {item.n}", meta_style))
 
 
 def _first_field(payload: dict) -> tuple[str, str | None]:

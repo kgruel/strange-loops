@@ -81,6 +81,7 @@ def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
                     if r:
                         prev_refs.add(r)
             entry = dict(payload)
+            entry.pop("ref", None)  # consumed into _refs
             entry["_n"] = n
             if prev_refs:
                 entry["_refs"] = sorted(prev_refs)

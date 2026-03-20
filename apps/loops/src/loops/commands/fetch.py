@@ -56,12 +56,17 @@ def fetch_fold(
     kind: str | None = None,
     observer: str | None = None,
     retain_facts: bool = False,
+    tick_name: str | None = None,
 ) -> "FoldState":
-    """Fetch fold state, with optional key drill-down.
+    """Fetch fold state, with optional key drill-down and tick windows.
 
     Supports ``kind/key`` syntax: ``thread/fold-state-types`` filters
     to the single item whose key field matches. The fold section is
     preserved (one item instead of many) so lenses render normally.
+
+    When *tick_name* is provided (or empty string for vertex-level default),
+    fetches tick windows and attaches them to the FoldState for temporal
+    window grouping in the lens.
     """
     from atoms import FoldSection, FoldState
     from engine import vertex_fold
@@ -71,6 +76,17 @@ def fetch_fold(
         vertex_path, observer=observer, kind=kind_filter,
         retain_facts=retain_facts,
     )
+
+    # Attach tick windows when requested
+    if tick_name is not None:
+        windows = _fetch_tick_windows(vertex_path, tick_name)
+        state = FoldState(
+            sections=state.sections,
+            vertex=state.vertex,
+            unfolded=state.unfolded,
+            source_facts=state.source_facts,
+            tick_windows=windows,
+        )
 
     if key_filter is None:
         return state
@@ -93,7 +109,10 @@ def fetch_fold(
                 key_field=section.key_field,
             ))
 
-    return FoldState(sections=tuple(filtered), vertex=state.vertex)
+    return FoldState(
+        sections=tuple(filtered), vertex=state.vertex,
+        tick_windows=state.tick_windows,
+    )
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:
@@ -195,6 +214,171 @@ def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:
             if val.lower() == key.lower():
                 return True
     return False
+
+
+def _fetch_tick_windows(
+    vertex_path: Path,
+    tick_name: str,
+    since: str = "30d",
+) -> "tuple[TickWindow, ...]":
+    """Build TickWindow objects from a vertex's tick history.
+
+    When *tick_name* is empty string, resolves to the vertex name
+    (vertex-level boundary ticks). Otherwise filters to the named
+    loop's ticks.
+
+    Computes per-tick statistics from payloads: item/fact counts,
+    compression ratios, ref counts, and deltas vs previous tick.
+
+    Returns newest-first tuple of TickWindow.
+    """
+    from atoms.fold_state import TickWindow
+    from engine import vertex_ticks
+    from lang import parse_vertex_file
+
+    # Resolve tick name: empty string → vertex name (vertex-level boundary)
+    if not tick_name:
+        ast = parse_vertex_file(vertex_path)
+        tick_name = ast.name
+
+    since_secs = _parse_duration(since)
+    now = datetime.now(timezone.utc)
+    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+
+    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp(), name=tick_name)
+    ticks_newest = list(reversed(ticks))  # newest first
+
+    # Compute stats from payloads
+    payload_stats: list[dict] = []
+    for tick in ticks_newest:
+        payload_stats.append(_tick_payload_stats(
+            tick.payload if isinstance(tick.payload, dict) else {}
+        ))
+
+    windows: list[TickWindow] = []
+    for i, tick in enumerate(ticks_newest):
+        ts_epoch = tick.ts.timestamp()
+        since_epoch = tick.since.timestamp() if tick.since else None
+        duration = (ts_epoch - since_epoch) if since_epoch is not None else None
+
+        # Extract observer from boundary payload
+        payload = tick.payload if isinstance(tick.payload, dict) else {}
+        boundary = payload.get("_boundary", {})
+        observer = boundary.get("name", "")
+        status = boundary.get("status", "")
+        trigger = f"{observer} {status}".strip() if observer else ""
+
+        stats = payload_stats[i]
+
+        # Compute delta vs previous tick (i+1 in newest-first order)
+        delta_added = 0
+        delta_updated = 0
+        if i + 1 < len(payload_stats):
+            prev = payload_stats[i + 1]
+            delta_added, delta_updated = _tick_delta(stats, prev)
+
+        windows.append(TickWindow(
+            index=i,
+            name=tick.name,
+            ts=ts_epoch,
+            since=since_epoch,
+            observer=observer,
+            duration_secs=duration,
+            boundary_trigger=trigger,
+            total_items=stats["total_items"],
+            total_facts=stats["total_facts"],
+            kind_summary=stats["kind_counts"],
+            kind_compression=stats["kind_compression"],
+            ref_count=stats["ref_count"],
+            delta_added=delta_added,
+            delta_updated=delta_updated,
+        ))
+
+    return tuple(windows)
+
+
+def _tick_payload_stats(payload: dict) -> dict:
+    """Extract statistics from a tick's fold state payload.
+
+    Works directly with the raw payload dict — no FoldState conversion.
+    """
+    total_items = 0
+    total_facts = 0
+    ref_count = 0
+    kind_counts: dict[str, int] = {}
+    kind_compression: dict[str, float] = {}
+    kind_keys: dict[str, set] = {}  # for delta computation
+
+    for kind, kind_data in payload.items():
+        if kind.startswith("_"):
+            continue
+        if not isinstance(kind_data, dict):
+            continue
+
+        items_raw = kind_data.get("items")
+        if items_raw is None:
+            continue
+
+        # "by" folds: items is a dict keyed by fold key
+        # "collect" folds: items is a list
+        items: list[dict] = []
+        keys: set[str] = set()
+        if isinstance(items_raw, dict):
+            items = list(items_raw.values())
+            keys = set(items_raw.keys())
+        elif isinstance(items_raw, list):
+            items = items_raw
+
+        count = len(items)
+        kind_counts[kind] = count
+        total_items += count
+        kind_keys[kind] = keys
+
+        # Sum _n for compression stats
+        n_sum = 0
+        for item in items:
+            if isinstance(item, dict):
+                n = item.get("_n", 1)
+                n_sum += n if isinstance(n, int) else 1
+                if item.get("_refs"):
+                    ref_count += 1
+            else:
+                n_sum += 1
+
+        total_facts += n_sum
+        if count > 0:
+            kind_compression[kind] = round(n_sum / count, 1)
+
+    return {
+        "total_items": total_items,
+        "total_facts": total_facts,
+        "kind_counts": kind_counts,
+        "kind_compression": kind_compression,
+        "ref_count": ref_count,
+        "kind_keys": kind_keys,  # internal, for delta computation
+    }
+
+
+def _tick_delta(current: dict, previous: dict) -> tuple[int, int]:
+    """Compute delta between two tick payload stats.
+
+    Returns (added_count, updated_count) across all kinds.
+    Added = new keys in by-folds. Updated = item count growth minus
+    new keys (collect folds grew, or existing keys accumulated).
+    """
+    added = 0
+
+    all_kinds = set(current["kind_keys"].keys()) | set(previous["kind_keys"].keys())
+    for kind in all_kinds:
+        curr_keys = current["kind_keys"].get(kind, set())
+        prev_keys = previous["kind_keys"].get(kind, set())
+        added += len(curr_keys - prev_keys)
+
+    # Updated = total item growth minus new items
+    item_growth = current["total_items"] - previous["total_items"]
+    updated = max(0, item_growth - added)
+
+    return added, updated
 
 
 def fetch_fact_by_id(

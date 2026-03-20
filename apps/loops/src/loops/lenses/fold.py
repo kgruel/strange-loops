@@ -29,10 +29,12 @@ from typing import TYPE_CHECKING
 from datetime import datetime, timezone
 
 from painted import Block, Style, Zoom, join_horizontal, join_vertical
+from painted.core.compose import border, pad, ROUNDED
 from painted.palette import current_palette
 
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldSection, FoldState
+    from atoms.fold_state import TickWindow
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,8 @@ class FoldPalette:
     ref_edge_out: Style     # "→ decision/auth" — outbound edge expansion
     meta: Style             # metadata fields at FULL zoom
     unfolded: Style         # "Unfolded: 26 observation"
+    tick_header: Style      # "#0 kyle/loops-claude (1h9m, 4h ago):"
+    tick_summary: Style     # "3 decision, 1 thread"
 
 
 def _default_fold_palette() -> FoldPalette:
@@ -84,6 +88,8 @@ def _default_fold_palette() -> FoldPalette:
         ref_edge_out=Style(fg=245),       # gray — outbound edges (→ target), dimmer
         meta=p.muted,
         unfolded=p.muted,
+        tick_header=Style(bold=True),
+        tick_summary=p.muted,
     )
 
 
@@ -101,18 +107,24 @@ def fold_view(
 
     visible gates which concern layers are rendered:
       - "refs": show per-item edge expansion (← inbound, → outbound)
+      - "facts": show source facts per fold item
+      - "ticks": reorganize fold items by tick temporal windows
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
-    # MINIMAL: one-liner
+    # MINIMAL: one-liner (same regardless of ticks)
     if zoom == Zoom.MINIMAL:
         parts = [f"{s.count} {s.kind}s" for s in populated]
         if data.unfolded:
             loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
             parts.append(f"unfolded: {loose}")
         return Block.text(", ".join(parts), Style(), width=width)
+
+    # Tick-windowed rendering: group by temporal window instead of kind
+    if "ticks" in visible and data.tick_windows:
+        return _render_tick_windowed(data, zoom, width, visible=visible)
 
     # Compute once for the whole render
     inbound = _compute_inbound_refs(data)
@@ -191,6 +203,386 @@ def fold_view(
         ))
 
     return join_vertical(*blocks)
+
+
+# ---------------------------------------------------------------------------
+# Tick-windowed rendering — group fold items by temporal boundary windows
+# ---------------------------------------------------------------------------
+
+
+def _render_tick_windowed(
+    data: FoldState, zoom: Zoom, width: int | None,
+    *, visible: frozenset[str] = frozenset(),
+) -> Block:
+    """Render tick output perspective — vertex metadata dashboard.
+
+    SUMMARY: per-kind stats with bars, cadence sparkline, current period.
+    DETAILED: add per-tick breakdown with deltas.
+    FULL: add per-tick snapshot details, items when --facts active.
+    """
+    import time
+    from painted.views import sparkline as painted_sparkline
+
+    fp = _default_fold_palette()
+    fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
+    inbound = _compute_inbound_refs(data)
+
+    windows = data.tick_windows
+    if not windows:
+        return Block.text("No tick data.", Style(dim=True), width=width)
+
+    now = time.time()
+    piped = width is None
+    show_items = "facts" in visible
+    effective_width = width or 80
+
+    latest = windows[0]
+    total_ticks = len(windows)
+    span = _format_age(now - windows[-1].ts) if total_ticks > 1 else ""
+
+    # Bound the rendering width for visual consistency
+    TICK_MAX_WIDTH = 80
+    effective_width = min(effective_width, TICK_MAX_WIDTH)
+
+    # --- Compute per-kind aggregate stats from FoldState ---
+    kind_stats: dict[str, dict] = {}
+    for s in data.sections:
+        if not s.items:
+            continue
+        n_total = sum(i.n for i in s.items)
+        refs_out = sum(len(i.refs) for i in s.items)
+        refs_in = sum(
+            _inbound_count(i, s.key_field, inbound)
+            for i in s.items
+        )
+        kind_stats[s.kind] = {
+            "items": len(s.items),
+            "facts": n_total,
+            "compression": round(n_total / len(s.items), 1) if s.items else 1.0,
+            "refs_in": refs_in,
+            "refs_out": refs_out,
+        }
+
+    total_items = sum(ks["items"] for ks in kind_stats.values())
+    total_facts = sum(ks["facts"] for ks in kind_stats.values())
+    compression_ratio = round(total_facts / total_items, 1) if total_items else 1.0
+
+    blocks: list[Block] = []
+    p = current_palette()
+
+    # --- Header: vertex name + stats on one line ---
+    subtitle_parts = [f"{total_ticks} ticks"]
+    if span:
+        subtitle_parts[0] += f" over {span}"
+    subtitle_parts.append(f"{total_items} items")
+    subtitle_parts.append(f"{total_facts} facts")
+    subtitle_parts.append(f"{compression_ratio}x")
+    subtitle = "  ".join(subtitle_parts)
+
+    if piped:
+        blocks.append(Block.text(f"## {latest.name}", fp.tick_header, width=width))
+        blocks.append(Block.text(subtitle, fp.tick_summary, width=width))
+    else:
+        name_block = Block.text(f"{latest.name}  ", Style(bold=True, fg="cyan"))
+        stats_block = Block.text(subtitle, fp.tick_summary)
+        blocks.append(join_horizontal(name_block, stats_block))
+
+    blocks.append(Block.text("", Style(), width=width))
+
+    # --- Per-kind compression bars ---
+    # Layout: [count] kind  ████░░░░  ×ratio
+    bar_style = Style(fg="cyan")
+    bar_empty_style = Style(fg=238)  # dark gray
+
+    if kind_stats:
+        BAR_CAP = 5.0
+        max_kind_len = max(len(k) for k in kind_stats)
+        count_col = 6     # "[244] "
+        kind_col = min(max_kind_len + 1, 12)
+        comp_col = 8      # "  ×31.8"
+        bar_width = max(8, effective_width - count_col - kind_col - comp_col - 4)
+
+        sorted_kinds = sorted(kind_stats.items(), key=lambda x: -x[1]["compression"])
+        for kind, ks in sorted_kinds:
+            comp = ks["compression"]
+            capped = min(comp, BAR_CAP)
+            ratio = capped / BAR_CAP
+            filled = max(1, int(ratio * bar_width))
+            bar_filled = "\u2588" * filled
+            bar_empty = "\u2591" * (bar_width - filled)
+
+            # Compression label (right side)
+            if comp > 1.05:
+                comp_str = f"\u00d7{comp}"
+            else:
+                comp_str = ""
+
+            # Compose: [count] kind  bar  ×ratio
+            count_label = f"[{ks['items']}]".rjust(count_col - 1)
+            kind_label = kind.ljust(kind_col)[:kind_col]
+
+            parts: list[Block] = [
+                Block.text(f"  {count_label} ", fp.n_indicator),
+                Block.text(kind_label, fp.key),
+                Block.text(bar_filled, bar_style),
+                Block.text(bar_empty, bar_empty_style),
+            ]
+            if comp_str:
+                parts.append(Block.text(f"  {comp_str}", fp.collapse))
+
+            composed = join_horizontal(*parts)
+            if width is not None:
+                from painted import truncate as block_truncate
+                composed = block_truncate(composed, width)
+            blocks.append(composed)
+
+    blocks.append(Block.text("", Style(), width=width))
+
+    # --- Ref graph section ---
+    # Build outbound edge map: source_kind → {target: count}
+    edge_map: dict[str, Counter] = defaultdict(Counter)
+    items_with_refs = 0
+    total_edges = 0
+    for s in data.sections:
+        for item in s.items:
+            if item.refs:
+                items_with_refs += 1
+                total_edges += len(item.refs)
+                for ref in item.refs:
+                    target = ref.split("/")[0] if "/" in ref else "?"
+                    edge_map[s.kind][target] += 1
+
+    if total_edges > 0:
+        blocks.append(Block.text(
+            f"  refs  {items_with_refs} items  {total_edges} edges",
+            Style(fg="yellow", bold=True), width=width,
+        ))
+
+        # Render as tree: each source kind with its outbound targets
+        source_kinds = sorted(edge_map.items(), key=lambda x: -sum(x[1].values()))
+        for idx, (source, targets) in enumerate(source_kinds):
+            is_last_source = idx == len(source_kinds) - 1
+            out_count = sum(targets.values())
+            in_count = kind_stats.get(source, {}).get("refs_in", 0)
+
+            # Source line with ← and → counts
+            ref_label_parts = []
+            if in_count > 0:
+                ref_label_parts.append(f"\u2190{in_count}")
+            ref_label_parts.append(f"\u2192{out_count}")
+            ref_label = " ".join(ref_label_parts)
+
+            branch = "\u2514" if is_last_source else "\u251c"
+            blocks.append(join_horizontal(
+                Block.text(f"  {branch}\u2500 ", fp.collapse),
+                Block.text(source, fp.key),
+                Block.text(f"  {ref_label}", fp.ref_indicator),
+            ))
+
+            # Target lines
+            sorted_targets = targets.most_common()
+            for tidx, (target, count) in enumerate(sorted_targets):
+                is_last_target = tidx == len(sorted_targets) - 1
+                vert = " " if is_last_source else "\u2502"
+                tbranch = "\u2514" if is_last_target else "\u251c"
+                blocks.append(join_horizontal(
+                    Block.text(f"  {vert}  {tbranch}\u2500\u2192 ", fp.collapse),
+                    Block.text(target, fp.ref_edge_out),
+                    Block.text(f" ({count})", fp.collapse),
+                ))
+
+    blocks.append(Block.text("", Style(), width=width))
+
+    # --- Density sparkline (TTY only) ---
+    if not piped and total_ticks >= 3:
+        density = [
+            float(tw.total_facts / tw.total_items) if tw.total_items else 1.0
+            for tw in reversed(windows)
+        ]
+        spark_width = min(total_ticks, effective_width - 12)
+        if spark_width >= 3:
+            spark_block = painted_sparkline(density, spark_width)
+            label = Block.text("  density ", fp.collapse)
+            blocks.append(join_horizontal(label, spark_block))
+            blocks.append(Block.text("", Style(), width=width))
+
+    # --- Current period ---
+    # Assign items to windows for current bucket
+    newest_ts = windows[0].ts
+    current_items: list[tuple[FoldItem, FoldSection]] = []
+    for s in data.sections:
+        for item in s.items:
+            if item.ts is not None and item.ts > newest_ts:
+                current_items.append((item, s))
+
+    if current_items:
+        trigger = latest.boundary_trigger or latest.name
+        age_str = _format_age(now - latest.ts)
+
+        kind_counts: Counter = Counter()
+        for item, section in current_items:
+            kind_counts[section.kind] += 1
+        kinds_str = ", ".join(f"{c} {k}" for k, c in kind_counts.most_common())
+
+        blocks.append(Block.text(
+            f"  Current (since {trigger}, {age_str} ago):",
+            fp.tick_header, width=width,
+        ))
+        blocks.append(Block.text(
+            f"    +{len(current_items)} facts: {kinds_str}",
+            fp.tick_summary, width=width,
+        ))
+
+        if show_items or zoom >= Zoom.FULL:
+            _append_tick_items(blocks, current_items, zoom, width, fp=fp, piped=piped, indent=6)
+
+    # --- DETAILED+: per-tick breakdown ---
+    if zoom >= Zoom.DETAILED:
+        blocks.append(Block.text("", Style(), width=width))
+        RECENT_LIMIT = 5 if zoom == Zoom.DETAILED else len(windows)
+
+        for tw in windows[:RECENT_LIMIT]:
+            trigger = tw.boundary_trigger or tw.name
+            age_str = _format_age(now - tw.ts)
+            dur_str = _format_age(tw.duration_secs) if tw.duration_secs else "?"
+
+            # Delta
+            delta_parts = []
+            if tw.delta_added > 0:
+                delta_parts.append(f"+{tw.delta_added} new")
+            if tw.delta_updated > 0:
+                delta_parts.append(f"{tw.delta_updated} updated")
+            if not delta_parts:
+                delta_parts.append("no changes")
+            delta_str = ", ".join(delta_parts)
+
+            blocks.append(Block.text(
+                f"  #{tw.index}  {trigger}  {dur_str}  {age_str} ago  {delta_str}",
+                fp.tick_summary, width=width,
+            ))
+
+            # FULL: per-kind snapshot
+            if zoom >= Zoom.FULL and tw.kind_summary:
+                for kind, count in sorted(tw.kind_summary.items(), key=lambda x: -x[1]):
+                    comp = tw.kind_compression.get(kind, 1.0)
+                    comp_str = f" ({comp:.1f}x)" if comp > 1.05 else ""
+                    blocks.append(Block.text(
+                        f"      {kind}: {count}{comp_str}", fp.meta, width=width,
+                    ))
+
+        remaining = len(windows) - RECENT_LIMIT
+        if remaining > 0:
+            blocks.append(Block.text(
+                f"  ({remaining} older ticks)", fp.collapse, width=width,
+            ))
+
+    # Footer: unfolded
+    if data.unfolded:
+        loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
+        blocks.append(Block.text("", Style(), width=width))
+        blocks.append(Block.text(f"Unfolded: {loose}", fp.unfolded, width=width))
+
+    return join_vertical(*blocks) if blocks else Block.text("No data yet.", Style(dim=True), width=width)
+
+
+def _append_tick_items(
+    blocks: list[Block],
+    items: list[tuple[FoldItem, FoldSection]],
+    zoom: Zoom,
+    width: int | None,
+    *,
+    fp: FoldPalette,
+    piped: bool = False,
+    indent: int = 4,
+) -> None:
+    """Append kind-prefixed item lines for tick-windowed display.
+
+    Lighter than _render_item_line — no badges, no recency tags (the tick
+    window already provides temporal context). Shows [kind] key: body.
+    """
+    pad = " " * indent
+    for item, section in items:
+        # Key
+        key_field = section.key_field
+        if section.fold_type == "by" and key_field:
+            label = str(item.payload.get(key_field, ""))
+        else:
+            label = next(
+                (str(v) for v in item.payload.values() if v), "?"
+            )
+
+        # Body (first non-key field)
+        body = ""
+        skip = {key_field} if key_field else set()
+        for k, v in item.payload.items():
+            if k in skip or not v:
+                continue
+            body = str(v)
+            break
+
+        # Compose line: [kind] key: body
+        kind_label = f"[{section.kind}]"
+
+        parts: list[Block] = [
+            Block.text(f"{pad}{kind_label} ", fp.tick_summary),
+            Block.text(label, fp.key),
+        ]
+        if body:
+            parts.append(Block.text(": ", fp.body))
+            max_body = max(10, (width or 200) - len(pad) - len(kind_label) - len(label) - 4)
+            parts.append(Block.text(
+                body if width is None else _truncate(body, max_body),
+                fp.body,
+            ))
+
+        composed = join_horizontal(*parts)
+        if width is not None:
+            from painted import truncate as block_truncate
+            composed = block_truncate(composed, width)
+        blocks.append(composed)
+
+
+def _tick_summary_row(
+    tw: TickWindow, now: float, item_count: int, kinds_str: str,
+) -> str:
+    """Format a compact one-line tick window summary.
+
+    ``#1  kyle/loops-claude  8h28m  9 dec 15 thr 1 task  2h ago``
+    """
+    age_str = _format_age(now - tw.ts) + " ago"
+
+    duration_str = ""
+    if tw.duration_secs is not None:
+        duration_str = _format_age(tw.duration_secs)
+
+    parts = [f"#{tw.index}"]
+    if tw.observer:
+        parts.append(tw.observer)
+    if duration_str:
+        parts.append(duration_str)
+    parts.append(f"{item_count} items")
+    if kinds_str:
+        parts.append(f"({kinds_str})")
+    parts.append(age_str)
+
+    return "  ".join(parts)
+
+
+
+def _format_age(seconds: float) -> str:
+    """Compact age string: '2m', '1h9m', '3d', etc."""
+    secs = int(seconds)
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    if secs < 86400:
+        hours = secs // 3600
+        mins = (secs % 3600) // 60
+        return f"{hours}h{mins}m" if mins else f"{hours}h"
+    days = secs // 86400
+    hours = (secs % 86400) // 3600
+    return f"{days}d{hours}h" if hours else f"{days}d"
 
 
 # ---------------------------------------------------------------------------

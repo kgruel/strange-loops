@@ -2080,12 +2080,26 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
-    # Pre-check --facts for fetch (it stays in rest for painted's parser too)
+    # Pre-check --facts and --ticks for fetch (they stay in rest for painted's parser too)
     want_facts = "--facts" in rest
+    # --ticks may have an optional value (tick name): --ticks or --ticks experiment
+    want_ticks = "--ticks" in rest
+    tick_name: str | None = None
+    if want_ticks:
+        tick_idx = rest.index("--ticks")
+        # Check if next arg looks like a tick name (not another flag, not a number/range)
+        if tick_idx + 1 < len(rest):
+            next_arg = rest[tick_idx + 1]
+            if not next_arg.startswith("-") and not next_arg[0].isdigit():
+                tick_name = next_arg
+            else:
+                tick_name = ""  # vertex-level default
+        else:
+            tick_name = ""  # vertex-level default
 
     # Fast path: --static --plain bypasses the CLI framework import (~7ms).
     # Detect these flags before importing painted.cli.
-    if _is_static_plain(rest):
+    if _is_static_plain(rest) and not want_ticks:
         return _run_fold_fast(known, rest, vertex_path=vertex_path, observer=observer)
 
     from painted import run_cli
@@ -2112,6 +2126,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         return fetch_fold(
             vertex_path, kind=known.kind, observer=obs_for_engine,
             retain_facts=want_facts,
+            tick_name=tick_name if want_ticks else None,
         )
 
     def render(ctx, data):
@@ -2138,6 +2153,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
                             help="Show reference connections")
         parser.add_argument("--facts", action="store_true", default=False,
                             help="Show source facts per item")
+        parser.add_argument("--ticks", nargs="?", const=True, default=False,
+                            help="Group by tick windows (optionally specify tick name)")
 
     def _build_fold_fidelity(parsed, base):
         """Inject visibility tags from fold-specific flags."""
@@ -2146,6 +2163,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             visible.add("refs")
         if getattr(parsed, "facts", False):
             visible.add("facts")
+        if getattr(parsed, "ticks", False) is not False:
+            visible.add("ticks")
         if not visible:
             return base
         return base.with_visible(*visible)
@@ -3045,19 +3064,19 @@ def _run_read(
     vertex_path: Path | None = None,
     observer: str | None = None,
 ) -> int:
-    """Unified read verb — routes to fold (default, with visibility layers) or stream/ticks.
+    """Unified read verb — routes to fold (default, with visibility layers) or stream.
 
     ``loops read [vertex] [flags]`` is the primary read interface.
-    Default (no flags) shows fold state. ``--facts`` and ``--refs`` are
-    visibility layers on the fold view. ``--ticks`` routes to tick history.
-    ``--facts`` with ``--since`` or ``--id`` routes to stream (temporal query).
+    Default (no flags) shows fold state. ``--facts``, ``--refs``, and
+    ``--ticks`` are visibility layers on the fold view. ``--ticks``
+    reorganizes the fold by temporal windows. ``--facts`` with ``--since``
+    or ``--id`` routes to stream (temporal query).
 
-    This is a thin router — delegates to ``_run_fold``, ``_run_stream``,
-    or ``_run_ticks``.
+    This is a thin router — delegates to ``_run_fold`` or ``_run_stream``.
     """
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--facts", action="store_true", default=False)
-    pre.add_argument("--ticks", action="store_true", default=False)
+    pre.add_argument("--ticks", nargs="?", const=True, default=False)
     pre.add_argument("--since", default=None)
     pre.add_argument("--id", default=None, dest="fact_id")
     known, rest = pre.parse_known_args(argv)
@@ -3070,12 +3089,17 @@ def _run_read(
         if known.fact_id:
             stream_rest = [*stream_rest, "--id", known.fact_id]
         return _run_stream(stream_rest, vertex_path=vertex_path, observer=observer)
-    elif known.ticks:
-        # Tick history mode — dedicated tick fetch and lens
-        return _run_ticks(rest, vertex_path=vertex_path, observer=observer)
     else:
-        # Default: fold state (re-inject --facts if present — it's a visibility layer)
-        fold_rest = [*rest, "--facts"] if known.facts else rest
+        # Default: fold state with visibility layers
+        # Re-inject visibility flags so _run_fold sees them
+        fold_rest = list(rest)
+        if known.facts:
+            fold_rest.append("--facts")
+        if known.ticks is not False:
+            fold_rest.append("--ticks")
+            # Pass tick name if it's a string (not just True)
+            if isinstance(known.ticks, str):
+                fold_rest.append(known.ticks)
         return _run_fold(fold_rest, vertex_path=vertex_path, observer=observer)
 
 

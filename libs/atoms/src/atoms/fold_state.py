@@ -18,6 +18,52 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class TickWindow:
+    """Tick metadata for temporal window rendering.
+
+    Not the full engine Tick — the fields a lens needs to render
+    the output perspective. Each window defines a ``since → ts``
+    interval with computed statistics from the tick payload.
+
+    Attributes:
+        index: Position in newest-first ordering (0 = most recent).
+        name: Tick identity — vertex name for vertex-level boundaries,
+            loop name for loop-level boundaries.
+        ts: Boundary timestamp (epoch seconds). End of the window.
+        since: Period start (epoch seconds). Beginning of the window.
+            None for the first tick (no prior boundary).
+        observer: Who triggered this boundary (from boundary payload).
+        duration_secs: Window duration in seconds (ts - since). None
+            when since is unknown.
+        boundary_trigger: What fired this boundary (e.g. "session closed").
+        total_items: Total fold items in the snapshot at this tick.
+        total_facts: Sum of _n across all items (facts compressed).
+        kind_summary: Per-kind item counts, e.g. {"decision": 240, "thread": 95}.
+        kind_compression: Per-kind avg compression, e.g. {"decision": 1.1, "thread": 3.1}.
+        ref_count: Number of items with outbound references.
+        delta_added: Items present in this tick but not in previous.
+        delta_updated: Items with changed _n vs previous tick.
+    """
+
+    index: int
+    name: str
+    ts: float
+    since: float | None = None
+    observer: str = ""
+    duration_secs: float | None = None
+    boundary_trigger: str = ""
+    # Computed from tick payload
+    total_items: int = 0
+    total_facts: int = 0
+    kind_summary: dict[str, int] = field(default_factory=dict)
+    kind_compression: dict[str, float] = field(default_factory=dict)
+    ref_count: int = 0
+    # Delta vs previous tick
+    delta_added: int = 0
+    delta_updated: int = 0
+
+
+@dataclass(frozen=True)
 class FoldItem:
     """A single item that survived fold computation.
 
@@ -117,6 +163,11 @@ class FoldState:
     source_facts: dict[str, list[dict]] = field(default_factory=dict)
     """When retain_facts=True, maps ``kind/key`` to the source facts that
     were compressed into each fold item. Empty by default."""
+    tick_windows: tuple[TickWindow, ...] = ()
+    """When populated, tick boundaries for temporal window grouping.
+    Newest-first ordering. Each FoldItem's ts determines which window
+    it belongs to. Empty by default — populated when ticks visibility
+    layer is active."""
 
     @property
     def is_empty(self) -> bool:

@@ -20,8 +20,10 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 # Identity is already in the system prompt header (via agent config).
 # additionalContext carries: prior session tick + current state + comms.
 # Read comms BEFORE emitting check — so "new" means "since last session."
-prior=$($LOOPS read project --ticks 0:10 --lens prompt --plain 2>/dev/null || true)
-project=$($LOOPS read project --lens prompt --plain 2>/dev/null || true)
+# Prior sessions: listing mode shows when, who, duration — temporal context.
+# Drill-down (0:N) re-folds the same data as the fold view, so use listing.
+prior=$($LOOPS read project --ticks --since 3d --plain 2>/dev/null | head -15 || true)
+project=$($LOOPS read project --lens session_start --plain 2>/dev/null || true)
 comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 
 # Advance cursor after reading — marks what we've seen

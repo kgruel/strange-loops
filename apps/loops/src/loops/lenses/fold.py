@@ -338,8 +338,7 @@ def _render_tick_windowed(
 
     blocks.append(Block.text("", Style(), width=width))
 
-    # --- Ref graph section ---
-    # Build outbound edge map: source_kind → {target: count}
+    # --- Refs: collapsed summary or expanded tree ---
     edge_map: dict[str, Counter] = defaultdict(Counter)
     items_with_refs = 0
     total_edges = 0
@@ -353,45 +352,47 @@ def _render_tick_windowed(
                     edge_map[s.kind][target] += 1
 
     if total_edges > 0:
-        blocks.append(Block.text(
-            f"  refs  {items_with_refs} items  {total_edges} edges",
-            Style(fg="yellow", bold=True), width=width,
-        ))
-
-        # Render as tree: each source kind with its outbound targets
-        source_kinds = sorted(edge_map.items(), key=lambda x: -sum(x[1].values()))
-        for idx, (source, targets) in enumerate(source_kinds):
-            is_last_source = idx == len(source_kinds) - 1
-            out_count = sum(targets.values())
-            in_count = kind_stats.get(source, {}).get("refs_in", 0)
-
-            # Source line with ← and → counts
-            ref_label_parts = []
-            if in_count > 0:
-                ref_label_parts.append(f"\u2190{in_count}")
-            ref_label_parts.append(f"\u2192{out_count}")
-            ref_label = " ".join(ref_label_parts)
-
-            branch = "\u2514" if is_last_source else "\u251c"
-            blocks.append(join_horizontal(
-                Block.text(f"  {branch}\u2500 ", fp.collapse),
-                Block.text(source, fp.key),
-                Block.text(f"  {ref_label}", fp.ref_indicator),
+        if "refs" in visible:
+            # Expanded tree
+            blocks.append(Block.text(
+                f"  refs  {items_with_refs} items  {total_edges} edges",
+                Style(fg="yellow", bold=True), width=width,
             ))
+            source_kinds = sorted(edge_map.items(), key=lambda x: -sum(x[1].values()))
+            for idx, (source, targets) in enumerate(source_kinds):
+                is_last_source = idx == len(source_kinds) - 1
+                out_count = sum(targets.values())
+                in_count = kind_stats.get(source, {}).get("refs_in", 0)
 
-            # Target lines
-            sorted_targets = targets.most_common()
-            for tidx, (target, count) in enumerate(sorted_targets):
-                is_last_target = tidx == len(sorted_targets) - 1
-                vert = " " if is_last_source else "\u2502"
-                tbranch = "\u2514" if is_last_target else "\u251c"
+                ref_label_parts = []
+                if in_count > 0:
+                    ref_label_parts.append(f"\u2190{in_count}")
+                ref_label_parts.append(f"\u2192{out_count}")
+                ref_label = " ".join(ref_label_parts)
+
+                branch = "\u2514" if is_last_source else "\u251c"
                 blocks.append(join_horizontal(
-                    Block.text(f"  {vert}  {tbranch}\u2500\u2192 ", fp.collapse),
-                    Block.text(target, fp.ref_edge_out),
-                    Block.text(f" ({count})", fp.collapse),
+                    Block.text(f"  {branch}\u2500 ", fp.collapse),
+                    Block.text(source, fp.key),
+                    Block.text(f"  {ref_label}", fp.ref_indicator),
                 ))
 
-    blocks.append(Block.text("", Style(), width=width))
+                sorted_targets = targets.most_common()
+                for tidx, (target, count) in enumerate(sorted_targets):
+                    is_last_target = tidx == len(sorted_targets) - 1
+                    vert = " " if is_last_source else "\u2502"
+                    tbranch = "\u2514" if is_last_target else "\u251c"
+                    blocks.append(join_horizontal(
+                        Block.text(f"  {vert}  {tbranch}\u2500\u2192 ", fp.collapse),
+                        Block.text(target, fp.ref_edge_out),
+                        Block.text(f" ({count})", fp.collapse),
+                    ))
+        else:
+            # Collapsed: one-line summary
+            blocks.append(Block.text(
+                f"  refs  {items_with_refs} items  {total_edges} edges",
+                fp.ref_indicator, width=width,
+            ))
 
     # --- Density sparkline (TTY only) ---
     if not piped and total_ticks >= 3:
@@ -476,11 +477,10 @@ def _render_tick_windowed(
                 f"  ({remaining} older ticks)", fp.collapse, width=width,
             ))
 
-    # Footer: unfolded
+    # Footer: unfolded (aligned with rest of dashboard)
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
-        blocks.append(Block.text("", Style(), width=width))
-        blocks.append(Block.text(f"Unfolded: {loose}", fp.unfolded, width=width))
+        blocks.append(Block.text(f"  unfolded: {loose}", fp.unfolded, width=width))
 
     return join_vertical(*blocks) if blocks else Block.text("No data yet.", Style(dim=True), width=width)
 

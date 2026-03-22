@@ -101,10 +101,9 @@ def test_stream_no_width_error():
     assert block is not None
 
 
-def test_stream_summary_last_resort_payload():
-    """_primary_label falls back to str(payload) when no standard field present (L192)."""
-    from loops.lenses.stream import stream_view
-    from painted import Zoom
-    facts = [{"kind": "metric", "ts": 1.0, "observer": "", "payload": {"value": "42", "unit": "ms"}}]
-    block = stream_view({"facts": facts, "vertex": "test", "kind": None, "tick": None, "error": None}, Zoom.SUMMARY, 80)
-    assert block.height >= 1
+def test_stream_summary_last_resort_str_payload():
+    """_stream_summary returns str(payload) when payload has no standard label fields (L192)."""
+    payload = {"value": "42", "unit": "ms"}  # no topic/name/summary/message
+    result = _stream_summary(payload)
+    # Last resort: str(payload) is returned
+    assert "42" in result or "ms" in result or result == str(payload)

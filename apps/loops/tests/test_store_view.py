@@ -509,22 +509,21 @@ class TestStoreSummaryNarrowFill:
         """fill_len <= 2 → fill='  ' (two spaces, L211) when header leaves no room for dots."""
         from loops.lenses.store import store_view
         from painted import Zoom
-        # Build a data dict with a kind whose name + count leaves fill_len ≤ 2
-        # at very narrow inner_w. Use inner_w = width - 4 where width is narrow.
-        # kind="abc" (3) + right="5 · 1d ago" (10) + 2 = 15 → fill_len = inner_w - 15
-        # At width=20, inner_w=16 → fill_len=1 (≤ 2) → L211
+        # fill_len code is in _render_full (zoom=FULL).
+        # inner_w = width - 2. left="abc"(3), right="5 · never"(9)
+        # fill_len = inner_w - 3 - 9 - 2 = inner_w - 14
+        # width=18 → inner_w=16 → fill_len=2 → not >2 → L211 (fill="  ")
         data = {
             "facts": {
                 "total": 5,
                 "kinds": {
                     "abc": {
                         "count": 5,
-                        "freshness": None,
-                        "sample_payload": {},
+                        "recent": [],
                     }
                 },
             },
             "ticks": {"total": 0, "names": {}},
         }
-        block = store_view(data, Zoom.SUMMARY, width=20)
+        block = store_view(data, Zoom.FULL, width=18)
         assert block.height >= 1

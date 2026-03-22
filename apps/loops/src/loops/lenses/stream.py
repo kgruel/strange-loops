@@ -186,10 +186,8 @@ def _stream_summary(payload: dict, key_field: str | None = None) -> str:
     if primary:
         return primary
 
-    # Last resort: first non-empty field
-    for key in ("topic", "name", "summary", "message"):
-        if key in payload and payload[key]:
-            return payload[key]
+    # _LABEL_FIELDS covers all of (topic, name, summary, message), so if
+    # primary is None here none of those fields are truthy — fall through.
     return str(payload)
 
 

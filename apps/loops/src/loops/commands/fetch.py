@@ -76,10 +76,10 @@ def fetch_fold(
         return state
 
     # Filter sections to items matching the key value
+    # (vertex_fold(kind=kind_filter) always returns a single-kind state,
+    # so all sections already have kind == kind_filter)
     filtered: list[FoldSection] = []
     for section in state.sections:
-        if section.kind != kind_filter:
-            continue
         matches = tuple(
             item for item in section.items
             if _item_matches_key(item, section.key_field, key_filter)

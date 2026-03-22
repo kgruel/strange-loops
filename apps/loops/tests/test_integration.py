@@ -1929,14 +1929,13 @@ class TestFetchFunctions:
         # tick has _boundary in payload → L244 fires
 
     def test_fetch_ticks_with_items(self, tmp_path, monkeypatch):
-        """fetch_ticks with by-fold payload covers kind_counts (L244-249)."""
+        """fetch_ticks with collect-fold payload covers kind_counts items (L246-247)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        from engine.builder import vertex, fold_by
-        v = vertex("t").store("./t.db").loop("event", fold_by("svc"), boundary_every=2)
+        v = vertex("t").store("./t.db").loop("event", fold_collect("items", max_items=5), boundary_every=2)
         vpath = tmp_path / "t.vertex"
         v.write(vpath)
-        _emit(vpath, "event", svc="api", msg="v1")
-        _emit(vpath, "event", svc="web", msg="v0")
+        _emit(vpath, "event", msg="ev1")
+        _emit(vpath, "event", msg="ev2")  # triggers boundary
         result = fetch_ticks(vpath)
         assert "ticks" in result
 

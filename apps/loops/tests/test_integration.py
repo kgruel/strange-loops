@@ -2077,3 +2077,19 @@ class TestCmdEmitSlashSplit:
         # 'parent/native' → full name not found → splits to vertex="parent" + qualifier="native"
         rc = main(["emit", "parent/native", "ping", "x=1"])
         assert rc == 0
+
+
+class TestRunStoreNameResolution:
+    """Exercise _run_store vertex name resolution (L2391-2393)."""
+
+    def test_store_by_vertex_name(self, tmp_path, monkeypatch):
+        """'store myproject' resolves via vertex name (L2391-2393)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        proj_dir = tmp_path / "myproject"
+        proj_dir.mkdir()
+        vpath = proj_dir / "myproject.vertex"
+        vertex("myproject").store("./myproject.db").loop("ping", fold_count("n")).write(vpath)
+        _emit(vpath, "ping", x="1")
+        rc = main(["store", "myproject", "--plain"])
+        assert rc == 0

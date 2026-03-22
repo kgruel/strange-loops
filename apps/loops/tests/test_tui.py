@@ -1063,3 +1063,85 @@ class TestStoreExplorerRemainingMiss:
             _initial_state=store_explorer_state_with_fidelity,
         )
         app.on_key("x")  # unknown in fidelity → L253 else: return
+
+
+class TestStoreExplorerFinalMiss:
+    def test_handle_list_navigation_to_empty_tick(self, tmp_path):
+        """Navigation to tick not in summary → detail=None (L189)."""
+        from painted.views import ListState
+        # tick_names has a name that summary dict doesn't have
+        summary = {
+            "facts": {"total": 1, "kinds": {}},
+            "ticks": {"total": 1, "names": {"real-tick": {"count": 1, "sparkline": ""}}},
+        }
+        # Manually craft state with extra tick_names entry not in summary
+        state = StoreExplorerState.from_summary(summary)
+        # Add an extra tick name that has no summary entry
+        from dataclasses import replace as dc_replace
+        state = dc_replace(state,
+            tick_names=["real-tick", "ghost-tick"],
+            cursor=ListState().with_count(2),
+        )
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        app.on_key("j")  # navigate to "ghost-tick" → selected_data() returns {} → L189
+
+    def test_handle_fidelity_key_direct_no_state(self, tmp_path):
+        """_handle_fidelity_key called directly with state=None (L253)."""
+        app = StoreExplorerApp(tmp_path / "t.db")
+        app._handle_fidelity_key("j")  # state is None → L253 return
+
+    def test_handle_fidelity_key_direct_no_fidelity(self, tmp_path, store_explorer_state):
+        """_handle_fidelity_key called directly with fidelity=None (L253)."""
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
+        app._handle_fidelity_key("j")  # fidelity is None → L253 return
+
+    def test_fidelity_filter_cursor_out_of_bounds(self, tmp_path):
+        """'a' filter when cursor.selected >= len(fid.facts) but facts exist → L267-268."""
+        from painted.views import ListState
+        facts = make_fidelity_facts(["thread", "decision"])
+        # cursor.selected=99, len(facts)=2 → 0 <= 99 < 2 is False → elif fid.facts: L267-268
+        fid = FidelityState(
+            facts=facts,
+            tick_name="t",
+            since=0.0, until=1.0,
+            cursor=ListState().with_count(len(facts)).move_to(99),  # clamped, might not be OOB
+        )
+        # Force cursor out of bounds by putting more items in cursor than facts
+        from painted.views import ListState as LS2
+        fid2 = FidelityState(
+            facts=facts,
+            tick_name="t",
+            since=0.0, until=1.0,
+            cursor=LS2().with_count(10).move_to(9),  # cursor at 9, but only 2 facts
+        )
+        summary = make_store_summary(tick_names=["t"])
+        state = replace(StoreExplorerState.from_summary(summary), fidelity=fid2)
+
+        def _fetch(since, until, kind=None):
+            return [f for f in facts if f["kind"] == kind] if kind else facts
+
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
+        app.on_key("a")  # cursor OOB → elif fid.facts → L267-268
+
+    def test_fidelity_filter_empty_facts(self, tmp_path):
+        """'a' filter when facts is empty → else: return (L270)."""
+        from painted.views import ListState
+        fid = FidelityState(
+            facts=[],  # no facts → L270
+            tick_name="t",
+            since=0.0, until=1.0,
+            cursor=ListState().with_count(0),
+        )
+        summary = make_store_summary(tick_names=["t"])
+        state = replace(StoreExplorerState.from_summary(summary), fidelity=fid)
+
+        def _fetch(since, until, kind=None):
+            return []
+
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
+        app.on_key("a")  # no facts → L270 return
+
+    def test_render_no_buf(self, tmp_path):
+        """render() returns early when _buf is None (L367)."""
+        app = StoreExplorerApp(tmp_path / "t.db")
+        app.render()  # L367: _buf is None → return early

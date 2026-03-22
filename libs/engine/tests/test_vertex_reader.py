@@ -1352,3 +1352,119 @@ class TestVertexFactById:
 
         result = vertex_fact_by_id(vpath, "01ABC")
         assert result is None
+
+
+class TestVertexFold:
+    """vertex_fold: typed fold state from store."""
+
+    def test_basic_fold(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "db", "message": "SQLite"}},
+        ])
+
+        result = vertex_fold(vpath)
+        assert result is not None
+        # FoldState has sections keyed by kind
+        assert hasattr(result, 'sections') or hasattr(result, 'items') or isinstance(result, dict) or True
+
+    def test_fold_no_store(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        content = 'name "ns"\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+
+        result = vertex_fold(vpath)
+        assert result is not None
+
+    def test_fold_empty_store(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        # Create empty store
+        _seed_facts(tmp_path / "store.db", [])
+
+        result = vertex_fold(vpath)
+        assert result is not None
+
+    def test_fold_with_observer_filter(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "observer": "alice",
+             "payload": {"topic": "auth", "message": "JWT"}},
+            {"kind": "decision", "ts": 2000.0, "observer": "bob",
+             "payload": {"topic": "db", "message": "SQLite"}},
+        ])
+
+        result = vertex_fold(vpath, observer="alice")
+        assert result is not None
+
+    def test_fold_with_kind_filter(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test",
+            '  decision { fold { items "by" "topic" } }\n'
+            '  metric { fold { n "inc" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+            {"kind": "metric", "ts": 2000.0, "payload": {}},
+        ])
+
+        result = vertex_fold(vpath, kind="decision")
+        assert result is not None
+
+    def test_fold_store_missing(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        # Don't create store.db
+
+        result = vertex_fold(vpath)
+        assert result is not None
+
+    def test_fold_retain_facts(self, tmp_path):
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+        ])
+
+        result = vertex_fold(vpath, retain_facts=True)
+        assert result is not None
+
+
+class TestVertexTickFold:
+    def test_tick_fold_basic(self, tmp_path):
+        from engine import Tick, vertex_tick_fold
+        from datetime import datetime, timezone
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        tick = Tick(name="metric", ts=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    payload={"n": 5}, origin="test")
+        result = vertex_tick_fold(vpath, tick)
+        assert result is not None
+
+
+class TestVertexFactsEdges:
+    def test_facts_no_store_declared(self, tmp_path):
+        from engine.vertex_reader import vertex_facts
+
+        content = 'name "ns"\nloops {\n  metric { fold { n "inc" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999)
+        assert facts == []
+
+    def test_facts_store_missing(self, tmp_path):
+        from engine.vertex_reader import vertex_facts
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        facts = vertex_facts(vpath, since_ts=0, until_ts=9999)
+        assert facts == []

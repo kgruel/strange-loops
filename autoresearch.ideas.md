@@ -1,34 +1,44 @@
-# Autoresearch Ideas: atoms Coverage Efficiency
+# Autoresearch Ideas: engine Coverage Efficiency
 
-## Current state: 98.1% line, 95.6% branch — 8 lines uncovered
+## Current state: 88.0% line, 79.9% branch — 231 miss
 
-## Remaining uncovered lines (diminishing returns)
+## Remaining by file
 
-### parse.py L536-538 (3 lines)
-`_apply_single_op` Select branch + fallthrough `return None`. Structurally unreachable:
-`run_parse_many` dispatches Select explicitly at L508 before falling through to
-`_apply_single_op`. Would need to refactor dispatch to hit these. Not worth it.
+### vertex_reader.py (~138 miss)
+- vertex_fold (31 miss) — fold state reconstruction from store
+- _collect_topology_info (15 miss) — needs combine/discover .vertex files
+- _specs_match (10 miss) — spec comparison for merge validation
+- _resolve_store (10 miss) — already partially covered
+- _collect_source_specs (8 miss) — merge source specs
+- _combined_read/search/ticks/summary (19 miss) — combine paths
+- _raw_to_fold_state (7 miss) — raw-to-typed fold conversion
+- vertex_tick_fold (6 miss) — tick fold state
+- _resolve_discover_stores (5 miss) — discover glob resolution
+- Smaller functions: _loops_home, _resolve_combine_stores, etc.
 
-### source.py L91 (1 line)
-`_parse_data` non-str/non-dict defensive return. Test exists and calls it correctly,
-but coverage.py doesn't register the hit — likely a bytecode/branch instrumentation quirk.
+### vertex.py (~57 miss)
+- replay fast paths: since_raw (L617-633), already partially covered
+- evaluate_boundaries (16 miss) — complex state machine
+- _evaluate_vertex_only_boundaries (24 miss) — vertex-level boundary eval
+- replay vertex period reconciliation (L683-692)
 
-### source.py L225-227 (3 lines)
-Generic exception handler in `collect()`. Only fires for non-SourceError exceptions
-(e.g., OSError if subprocess creation fails). Would need to mock
-`asyncio.create_subprocess_shell` to raise OSError — expensive for 3 defensive lines.
+### Other files (~36 miss total)
+- compiler.py: 23 miss — map_transform, fold_op edges, compile_source, collect_search_fields, materialize_vertex
+- sqlite_store.py: 8 miss — _detect_fact_build __func__ path, _mapping_proxy_default TypeError
+- executor.py: 3 miss — sync_fact tick (L234), fact tick (L267)
+- builder/cadence/loop/program: 6 miss — mostly dead code or unreachable
 
-### types.py L90 (1 line)
-`coerce_value(True, "bool")` return path. Test exists, value is correct, but coverage.py
-match-case instrumentation doesn't register it.
+## Test SDK
+Created `libs/engine/tests/vertex_test_sdk.py` — fluent builder for test vertices.
+Supports count_loop, sum_loop, latest_loop, with_store, routes, parse_pipelines.
 
 ## Compression opportunities
-- test_shapes.py (505 LOC) and test_fact.py (281 LOC) have some overlapping Spec/Fact
-  construction patterns — shared fixtures could reduce ~50 LOC
-- test_parse.py (694 LOC) has repeated pipeline construction — a builder helper could
-  compress ~80 LOC
-- test_source.py (521 LOC) has repeated Source construction — fixture extraction possible
+- test_vertex.py (1037 LOC) has heavy repetition in boundary tests — many create
+  Loop() with similar parameters. Could extract shared fixtures.
+- test_compiler.py (1829 LOC) has repeated KDL parsing patterns — builder helpers.
+- test_vertex_reader.py (944 LOC) repeats _create_vertex_file + _seed_facts pattern.
 
-## Strategy going forward
-atoms is at 98.1% — effectively complete. Remaining 8 lines are coverage tool quirks
-or structurally unreachable code. Time to move up the chain to engine.
+## Strategy
+- vertex_reader: vertex_fold and _specs_match are high-value, testable with tmp files
+- vertex.py: evaluate_boundaries needs careful state setup but SDK makes it feasible
+- Compression pass: look for LOC reduction in test_vertex.py boundary tests

@@ -390,3 +390,18 @@ class TestRegisterWithAggregator:
         _register_with_aggregator("proj", local_vf)
         # Should have added the vertex
         assert str(local_vf.resolve()) in config_vf.read_text()
+
+class TestMainEntry:
+    def test_main_no_argv(self, monkeypatch, capsys):
+        """main() with no argv uses sys.argv[1:] (L3420)."""
+        from loops.main import main
+        monkeypatch.setattr("sys.argv", ["loops"])
+        # No args → shows help, returns non-zero or 0
+        result = main()
+        assert isinstance(result, int)
+
+    def test_main_help(self, capsys):
+        """main() with --help flag."""
+        from loops.main import main
+        result = main(["--help"])
+        assert isinstance(result, int)

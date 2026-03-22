@@ -502,3 +502,29 @@ class TestStoreViewEdges:
         }}, "ticks": {"kinds": {}}}
         t = block_text(store_view(data, Zoom.DETAILED, 80))
         assert "cpu" in t or "mem" in t or "metric" in t
+
+
+class TestStoreSummaryNarrowFill:
+    def test_narrow_kind_header_fill(self):
+        """fill_len <= 2 → fill='  ' (two spaces, L211) when header leaves no room for dots."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        # Build a data dict with a kind whose name + count leaves fill_len ≤ 2
+        # at very narrow inner_w. Use inner_w = width - 4 where width is narrow.
+        # kind="abc" (3) + right="5 · 1d ago" (10) + 2 = 15 → fill_len = inner_w - 15
+        # At width=20, inner_w=16 → fill_len=1 (≤ 2) → L211
+        data = {
+            "facts": {
+                "total": 5,
+                "kinds": {
+                    "abc": {
+                        "count": 5,
+                        "freshness": None,
+                        "sample_payload": {},
+                    }
+                },
+            },
+            "ticks": {"total": 0, "names": {}},
+        }
+        block = store_view(data, Zoom.SUMMARY, width=20)
+        assert block.height >= 1

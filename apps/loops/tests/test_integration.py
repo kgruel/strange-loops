@@ -1248,6 +1248,14 @@ class TestScaffoldArtifacts:
         content = created.read_text()
         assert ".loops/myv.vertex" in content
 
+    def test_scaffold_no_vertex_name_returns_early(self, tmp_path, monkeypatch):
+        """_scaffold_artifacts with empty vertex_name returns early before vertex_path (L320)."""
+        from loops.commands.init import _scaffold_artifacts
+        monkeypatch.chdir(tmp_path)
+        _scaffold_artifacts({}, vertex_name="")
+        # Early return hit — no .loops/vertex file created
+        assert not list(tmp_path.glob(".loops/*.vertex"))
+
 
 @pytest.fixture
 def fold_by_vertex(tmp_path):
@@ -2286,6 +2294,3 @@ class TestTopologyKindKeys:
         result = _topology_kind_keys_and_stores(agg_vpath)
         assert isinstance(result, tuple)
         assert len(result) == 2
-
-
-

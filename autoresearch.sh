@@ -20,8 +20,10 @@ NUM_RUNS=2
 PYTEST_EXTRA="--ignore=apps/loops/tests/golden"
 
 # --- Pre-check: syntax errors in test files ---
+# uv --quiet suppresses install/uninstall chatter while keeping subprocess stderr
+# (py_compile errors) visible.
 for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
-    uv run python -c "import py_compile; py_compile.compile('$f', doraise=True)"
+    uv --quiet run python -c "import py_compile; py_compile.compile('$f', doraise=True)"
 done
 
 # --- Count test LOC (non-empty, non-comment lines) ---
@@ -34,15 +36,15 @@ done
 # --- Warmup run (no coverage, primes caches + imports) ---
 echo "Warmup run..."
 rm -f .coverage coverage.json
-uv run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short 2>&1 | tail -3
+uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short | tail -3
 
 # --- Timed runs: parse pytest internal duration from output ---
 TIMES=()
 for i in $(seq 1 $NUM_RUNS); do
     rm -f .coverage coverage.json
     echo "Timed run $i/$NUM_RUNS..."
-    OUTPUT=$(uv run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short \
-        --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1)
+    OUTPUT=$(uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short \
+        --cov="$SRC_DIR" --cov-branch --cov-report=json)
     echo "$OUTPUT" | tail -3
     # Extract pytest duration: "711 passed in 2.73s" or "711 passed, 1 warning in 2.73s"
     T=$(echo "$OUTPUT" | grep -oE 'in [0-9]+\.[0-9]+s' | tail -1 | sed 's/in //; s/s//')

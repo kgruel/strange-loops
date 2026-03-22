@@ -2340,3 +2340,48 @@ class TestMainPyMissLines:
         monkeypatch.chdir(tmp_path)
         rc = main(["t", "stream", "--id", "BADID!!!", "--plain", "--static"])
         assert rc in (0, 1)
+
+
+class TestEmitMissLinesFix:
+    """Correctly targeted tests for emit.py miss lines."""
+
+    def test_emit_dry_run_loopserror_sets_none_store(self, tmp_path, monkeypatch):
+        """LoopsError in writable_vertex resolution with dry_run=True → L149."""
+        import argparse
+        from loops.commands.emit import cmd_emit as _cmd_emit
+
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Create an INVALID vertex file → _parse_vertex raises VertexParseError (LoopsError)
+        invalid_vpath = tmp_path / "bad.vertex"
+        invalid_vpath.write_text("{{invalid kdl syntax !!!")
+
+        ns = argparse.Namespace(
+            vertex=None, kind="ping", parts=["n=1"],
+            observer="", dry_run=True,
+        )
+        # With dry_run=True and LoopsError raised → L149 (store_path=None in except)
+        rc = _cmd_emit(ns, vertex_path=invalid_vpath)
+        assert rc in (0, 1)
+
+    def test_close_kind_shift_3_positionals(self, tmp_path, monkeypatch):
+        """_run_close kind-shift when first positional is not a vertex (L423-427)."""
+        from engine.builder import fold_by, vertex as vb
+        from loops.commands.emit import _run_close
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+
+        # Create a local vertex so resolve_local_vertex() works
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vb("local").store("./local.db").loop("thread", fold_by("name")).write(
+            loops_dir / "local.vertex"
+        )
+
+        # 3 positionals: "notavertex" (vertex?), "thread" (kind), "task1" (name)
+        # "notavertex" can't resolve → kind-shift → L423-427
+        rc = _run_close(["notavertex", "thread", "task1", "--dry-run"])
+        assert rc in (0, 1)

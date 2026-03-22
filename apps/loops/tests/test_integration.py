@@ -1596,3 +1596,80 @@ class TestCloseCommand:
         from loops.main import main
         rc = main(["close", "thread", "task1", "--dry-run"])
         assert rc == 0
+
+
+class TestResolveCombineChild:
+    """Exercise _resolve_combine_child (L1475-1500)."""
+
+    def test_resolve_child_by_alias(self, tmp_path, monkeypatch):
+        """_resolve_combine_child finds a child by alias (L1493-1499)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Create child vertex
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+
+        # Create parent with combine + alias
+        parent_vpath = tmp_path / "parent.vertex"
+        parent_vpath.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{str(child_vpath)}" as="kid"\n'
+            '}\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+
+        from loops.main import _resolve_combine_child
+        result = _resolve_combine_child(parent_vpath, "kid")
+        assert result is not None
+        assert result == child_vpath.resolve()
+
+    def test_resolve_child_no_alias_match(self, tmp_path, monkeypatch):
+        """_resolve_combine_child with non-matching alias returns None (L1500)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        parent_vpath = tmp_path / "parent.vertex"
+        parent_vpath.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{str(child_vpath)}" as="kid"\n'
+            '}\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+
+        from loops.main import _resolve_combine_child
+        result = _resolve_combine_child(parent_vpath, "notexist")
+        assert result is None
+
+    def test_resolve_child_no_combine(self, tmp_path, monkeypatch):
+        """_resolve_combine_child with no combine block returns None (L1490-1491)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vpath = tmp_path / "simple.vertex"
+        vpath.write_text(
+            'name "simple"\nstore "./s.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        from loops.main import _resolve_combine_child
+        result = _resolve_combine_child(vpath, "any")
+        assert result is None
+
+    def test_resolve_child_bad_file(self, tmp_path, monkeypatch):
+        """_resolve_combine_child with bad vertex file returns None (L1487-1488)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        from loops.main import _resolve_combine_child
+        result = _resolve_combine_child(bad, "any")
+        assert result is None

@@ -2175,3 +2175,32 @@ class TestTopologyKindKeys:
         result = _topology_kind_keys_and_stores(agg_vpath)
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+
+class TestStoreLensZoom:
+    """Exercise lenses/store.py paths at various zoom levels."""
+
+    @pytest.fixture
+    def store_with_ticks(self, tmp_path, monkeypatch):
+        """Vertex with ticks and fact data for store view."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("t").store("./t.db").loop("ping", fold_count("n"), boundary_every=2)
+        vpath = tmp_path / "t.vertex"
+        v.write(vpath)
+        _emit(vpath, "ping", x="1")
+        _emit(vpath, "ping", x="2")  # triggers boundary
+        return tmp_path / "t.db"
+
+    def test_store_view_verbose(self, store_with_ticks):
+        """Store view with -vv gets recent tick payloads (L222-225)."""
+        rc = main(["store", str(store_with_ticks), "-vv", "--plain"])
+        assert rc == 0
+
+    def test_store_view_narrow(self, store_with_ticks):
+        """Store view with very narrow fill shows '  ' (L211)."""
+        from loops.lenses.store import store_view
+        from loops.commands.store import make_fetcher
+        data = make_fetcher(store_with_ticks, zoom=3)()
+        from painted import Zoom
+        block = store_view(data, Zoom.SUMMARY, width=20)
+        assert block is not None

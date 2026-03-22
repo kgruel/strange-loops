@@ -1,61 +1,34 @@
 # Autoresearch Ideas: atoms Coverage Efficiency
 
-## Current state: 89.5% line, 83.5% branch — 74 lines uncovered
+## Current state: 98.1% line, 95.6% branch — 8 lines uncovered
 
-## Uncovered lines by file (priority order)
+## Remaining uncovered lines (diminishing returns)
 
-### parse.py — 31 miss (biggest opportunity)
-- L266: Skip with `field` mode on non-dict value
-- L291: Split on non-string value
-- L308: Pick on non-list value
-- L323: Rename on non-list value  
-- L338: Transform on non-dict value
-- L345: Transform field not in dict
-- L384: Coerce on non-dict value
-- L390: Coerce field missing from dict
-- L452,514-516: _apply_where/explode/project edge cases
-- Several lines in run_parse_many stream pipeline dispatch
-- Key insight: most misses are type-guard "return None" branches on non-dict/non-list inputs. 
-  A single parametrized test with wrong-type inputs could cover many.
+### parse.py L536-538 (3 lines)
+`_apply_single_op` Select branch + fallthrough `return None`. Structurally unreachable:
+`run_parse_many` dispatches Select explicitly at L508 before falling through to
+`_apply_single_op`. Would need to refactor dispatch to hit these. Not worth it.
 
-### source.py — 19 miss
-- L91,103-113: _emit_lines, _emit_json — async process-based emission (needs subprocess mock)
-- L133-134,162: _emit_json JSON parse paths
-- More subprocess/async boundaries
-- Harder to test efficiently — async + subprocess mocking
+### source.py L91 (1 line)
+`_parse_data` non-str/non-dict defensive return. Test exists and calls it correctly,
+but coverage.py doesn't register the hit — likely a bytecode/branch instrumentation quirk.
 
-### fact.py — 8 miss
-- L64: __class_getitem__ (Fact[str] syntax)
-- L81-82: __setattr__ raising FrozenInstanceError
-- L86: __delattr__ raising FrozenInstanceError
-- L93-94,97,102: __eq__ NotImplemented, __hash__ with unhashable payload
-- All cheap to test — pure data class protocol methods
+### source.py L225-227 (3 lines)
+Generic exception handler in `collect()`. Only fires for non-SourceError exceptions
+(e.g., OSError if subprocess creation fails). Would need to mock
+`asyncio.create_subprocess_shell` to raise OSError — expensive for 3 defensive lines.
 
-### types.py — 7 miss
-- L76,87,90: coerce_value edge cases (int-from-float, bool coercion)
-- L104,110-112: type_matches for set/list/datetime/unknown types
-- Cheap parametrized tests
-
-### engine.py — 6 miss
-- L79-82,87: fold function builder edge cases (Avg, Window folds)
-- L216: Unknown fold type ValueError
-- Moderate — need fold op construction
-
-### sequential.py — 2 miss
-- L41,46: kind/command properties when sources list is empty
-- Trivial to test
-
-### __init__.py — 1 miss
-- L130: lazy import AttributeError for unknown attribute
-- Trivial
-
-## Strategy
-1. Start with fact.py + types.py + sequential.py + __init__.py — trivial wins, ~18 lines
-2. Then parse.py type-guard branches — one parametrized test covers many
-3. Then engine.py fold edges
-4. source.py last — async subprocess mocking is expensive in LOC
+### types.py L90 (1 line)
+`coerce_value(True, "bool")` return path. Test exists, value is correct, but coverage.py
+match-case instrumentation doesn't register it.
 
 ## Compression opportunities
-- test_parse.py is 694 LOC — look for repeated setup patterns
-- test_source.py is 521 LOC — fixture extraction potential
-- test_shapes.py is 505 LOC — may overlap with test_fact.py + test_parse.py
+- test_shapes.py (505 LOC) and test_fact.py (281 LOC) have some overlapping Spec/Fact
+  construction patterns — shared fixtures could reduce ~50 LOC
+- test_parse.py (694 LOC) has repeated pipeline construction — a builder helper could
+  compress ~80 LOC
+- test_source.py (521 LOC) has repeated Source construction — fixture extraction possible
+
+## Strategy going forward
+atoms is at 98.1% — effectively complete. Remaining 8 lines are coverage tool quirks
+or structurally unreachable code. Time to move up the chain to engine.

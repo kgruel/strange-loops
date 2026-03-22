@@ -15,9 +15,9 @@ set -euo pipefail
 # See autoresearch.md for full methodology.
 
 # --- Target configuration ---
-PKG="atoms"
-TEST_DIR="libs/atoms/tests"
-SRC_DIR="libs/atoms/src/atoms"
+PKG="engine"
+TEST_DIR="libs/engine/tests"
+SRC_DIR="libs/engine/src/engine"
 
 # --- Pre-check: syntax errors in test files ---
 for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
@@ -75,7 +75,7 @@ d=json.load(sys.stdin)
 for fname, fdata in sorted(d['files'].items()):
     lines = fdata.get('missing_lines', [])
     if lines:
-        short = fname.replace('libs/atoms/src/', '')
+        short = fname.replace('libs/engine/src/', '')
         print(f'  {short}: {len(lines)} miss — L{\",\".join(str(l) for l in lines[:10])}{\"...\" if len(lines)>10 else \"\"}')
 ")
 

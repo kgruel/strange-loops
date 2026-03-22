@@ -1950,6 +1950,28 @@ class TestResolveVertexForDispatch:
         result = _resolve_vertex_for_dispatch("nonexistent/kid")
         assert result is None
 
+    def test_resolve_combine_relative_path(self, tmp_path, monkeypatch):
+        """_resolve_combine_child with relative child path resolves correctly (L1497)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create child vertex
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        # Parent with RELATIVE combine path
+        parent_vpath = tmp_path / "parent.vertex"
+        parent_vpath.write_text(
+            'name "parent"\n'
+            'combine {\n  vertex "child/child.vertex" as="kid"\n}\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        result = _resolve_combine_child(parent_vpath, "kid")
+        assert result is not None
+
 
 class TestTryFastRead:
     """Exercise _try_fast_read paths."""

@@ -1752,6 +1752,31 @@ class TestFetchFunctions:
         assert "event" in meta
         assert meta["event"]["key_field"] == "kind"
 
+    def test_fetch_tick_range(self, tmp_path, monkeypatch):
+        """fetch_tick_range fetches facts across multiple ticks (L364-420)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        from engine.builder import vertex, fold_count
+        v = vertex("t").store("./t.db").loop("ping", fold_count("n"), boundary_every=2)
+        vpath = tmp_path / "t.vertex"
+        v.write(vpath)
+        for i in range(4):
+            _emit(vpath, "ping", i=str(i))
+        from loops.commands.fetch import fetch_tick_range
+        result = fetch_tick_range(vpath, 0, 2)
+        assert "facts" in result
+        assert "_tick_error" not in result
+
+    def test_fetch_tick_range_no_ticks(self, tmp_path, monkeypatch):
+        """fetch_tick_range with no ticks returns error (L369-373)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        from engine.builder import vertex, fold_count
+        v = vertex("empty").store("./e.db").loop("ping", fold_count("n"))
+        vpath = tmp_path / "empty.vertex"
+        v.write(vpath)
+        from loops.commands.fetch import fetch_tick_range
+        result = fetch_tick_range(vpath, 0, 1)
+        assert "_tick_error" in result
+
     def test_fetch_ticks_with_items(self, tmp_path, monkeypatch):
         """fetch_ticks with by-fold payload covers kind_counts (L244-249)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

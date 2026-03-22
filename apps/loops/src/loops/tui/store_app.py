@@ -85,11 +85,17 @@ class StoreExplorerState:
 class StoreExplorerApp(Surface):
     """Interactive store explorer TUI."""
 
-    def __init__(self, store_path: Path) -> None:
+    def __init__(
+        self,
+        store_path: Path,
+        *,
+        _initial_state: "StoreExplorerState | None" = None,
+        _fidelity_fetch=None,
+    ) -> None:
         super().__init__(fps_cap=30, on_start=self._on_start)
         self._store_path = store_path
-        self._state: StoreExplorerState | None = None
-        self._fidelity_fetch = None  # set during _load_store
+        self._state: StoreExplorerState | None = _initial_state
+        self._fidelity_fetch = _fidelity_fetch  # set during _load_store or injected
         self._error: str | None = None
         self._w = 80
         self._h = 24

@@ -540,15 +540,23 @@ def _render_footer(state: AppState, w: int) -> Block:
 class AutoresearchApp(Surface):
     """Interactive autoresearch iteration explorer."""
 
-    def __init__(self, vertex_path: Path, observer: str | None = None) -> None:
+    def __init__(
+        self,
+        vertex_path: Path,
+        observer: str | None = None,
+        *,
+        _initial_state: "AppState | None" = None,
+    ) -> None:
         super().__init__(fps_cap=10, on_start=self._on_start)
         self._vertex_path = vertex_path
         self._observer = observer
-        self._state: AppState | None = None
+        self._state: AppState | None = _initial_state
         self._error: str | None = None
         self._w = 80
         self._h = 24
-        self._last_refresh = 0.0
+        # If initial state is injected (e.g. for testing), skip the first
+        # auto-refresh so the injected state isn't immediately overwritten.
+        self._last_refresh = time.monotonic() if _initial_state is not None else 0.0
         self._refresh_interval = 2.0
 
     def layout(self, width: int, height: int) -> None:

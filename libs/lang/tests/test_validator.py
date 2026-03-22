@@ -530,3 +530,87 @@ loops {
 """)
         with pytest.raises(ValidationError, match="skip.*requires string input"):
             validate_vertex(vertex)
+
+
+class TestValidatorEdgeCoverage:
+    """Tests for uncovered validator.py paths."""
+
+    def test_shape_repr(self):
+        from lang.validator import Shape, ShapeKind
+        s = Shape.dict_shape(("a", "b"))
+        r = repr(s)
+        assert "Shape" in r
+
+    def test_shape_eq_different_type(self):
+        from lang.validator import Shape, ShapeKind
+        s = Shape(ShapeKind.DICT)
+        assert s.__eq__("not a shape") is NotImplemented
+
+    def test_shape_with_field_type_non_dict_raises(self):
+        from lang.validator import Shape, ShapeKind
+        s = Shape(ShapeKind.STRING)
+        with pytest.raises(ValueError, match="Cannot set field type on non-dict"):
+            s.with_field_type("x", "int")
+
+    def test_validation_context_has_errors(self):
+        from lang.validator import ValidationContext
+        ctx = ValidationContext()
+        assert not ctx.has_errors()
+        ctx.error("test error")
+        assert ctx.has_errors()
+
+    def test_raise_if_errors(self):
+        from lang.validator import ValidationContext, ValidationError
+        ctx = ValidationContext()
+        ctx.error("test error")
+        with pytest.raises(ValidationError):
+            ctx.raise_if_errors()
+
+    def test_where_on_non_dict_input(self):
+        """where step on string input → validation error."""
+        from lang import parse_loop
+        from lang.validator import validate_loop, ValidationError
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "lines"
+parse {
+    where path="status"
+}
+""")
+        with pytest.raises(ValidationError, match="where.*requires dict input"):
+            validate_loop(loop)
+
+    def test_explode_on_non_dict_input(self):
+        from lang import parse_loop
+        from lang.validator import validate_loop, ValidationError
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "lines"
+parse {
+    explode path="items"
+}
+""")
+        with pytest.raises(ValidationError, match="explode.*requires dict input"):
+            validate_loop(loop)
+
+    def test_flatten_on_non_dict_input(self):
+        from lang import parse_loop
+        from lang.validator import validate_loop, ValidationError
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "lines"
+parse {
+    flatten "items" into="flat" { extract "a" }
+}
+""")
+        with pytest.raises(ValidationError, match="flatten.*requires dict input"):
+            validate_loop(loop)

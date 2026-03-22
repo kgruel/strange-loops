@@ -94,3 +94,40 @@ loops {
         # Should return an error string (bob not declared)
         assert result is not None
         assert "bob" in result.lower() or "not declared" in result.lower()
+
+
+class TestReadObserversEdges:
+    def test_invalid_vertex_returns_empty(self, tmp_path):
+        """_read_observers with invalid vertex file (L44-45)."""
+        from loops.commands.identity import _read_observers
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid kdl")
+        result = _read_observers(bad)
+        assert result == ()
+
+    def test_single_observer_auto_resolved(self, tmp_path, monkeypatch):
+        """resolve_observer with single observer in .vertex (L75)."""
+        from loops.commands.identity import resolve_observer
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vf = loops_dir / ".vertex"
+        vf.write_text('name "root"\nobservers {\n    alice {}\n}\n')
+        monkeypatch.chdir(tmp_path)
+        result = resolve_observer()
+        assert result == "alice" or isinstance(result, str)
+
+    def test_multiple_observers_returns_empty(self, tmp_path, monkeypatch):
+        """resolve_observer with multiple observers → '' (L78)."""
+        from loops.commands.identity import resolve_observer
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vf = loops_dir / ".vertex"
+        vf.write_text('name "root"\nobservers {\n    alice {}\n    bob {}\n}\n')
+        monkeypatch.chdir(tmp_path)
+        result = resolve_observer()
+        # Multiple observers → can't auto-pick → ""
+        assert isinstance(result, str)

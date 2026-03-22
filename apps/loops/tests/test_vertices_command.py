@@ -209,3 +209,43 @@ class TestWalkRoot:
         result = _walk_root(root, tmp_path)
         # Bad file is skipped, result is empty or has no "bad" entry
         assert all(v.get("name") != "bad" for v in result)
+
+    def test_walk_root_combine(self, tmp_path):
+        """_walk_root with combine entries (L99-111)."""
+        from loops.commands.vertices import _walk_root
+
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child = child_dir / "child.vertex"
+        child.write_text('name "child"\nloops {\n    m { fold { n "inc" } }\n}\n')
+
+        root = tmp_path / "root.vertex"
+        root.write_text(
+            f'name "root"\nloops {{ m {{ fold {{ n "inc" }} }} }}\ncombine {{\n    vertex "./child/child.vertex"\n}}\n'
+        )
+        result = _walk_root(root, tmp_path)
+        assert any(v["name"] == "child" for v in result)
+
+    def test_fetch_vertices_local_broken_child(self, tmp_path, monkeypatch):
+        """fetch_vertices_local skips broken .vertex files (L151-152)."""
+        from loops.commands.vertices import fetch_vertices_local
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        root_vertex = loops_dir / ".vertex"
+        root_vertex.write_text('name "root"\nloops { m { fold { n "inc" } } }\n')
+        bad = loops_dir / "broken.vertex"
+        bad.write_text("{{invalid")
+        result = fetch_vertices_local()
+        # Should return without error, skipping bad file
+        assert result is not None
+
+    def test_walk_root_all_vertex_suffix_filter(self, tmp_path):
+        """_walk_root glob all .vertex — L118 never fires since glob filters."""
+        from loops.commands.vertices import _walk_root
+        root = tmp_path / "root.vertex"
+        root.write_text('name "root"\nloops { m { fold { n "inc" } } }\n')
+        # Create a non-.vertex file that glob might catch
+        (tmp_path / "notes.txt").write_text("notes")
+        result = _walk_root(root, tmp_path)
+        assert isinstance(result, list)

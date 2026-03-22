@@ -3,29 +3,30 @@
 ## Completed packages
 - **atoms**: 98.1% | **engine**: 92.5% | **store**: 99.6% | **lang**: 98.4%
 
-## Current: loops app (68.4%, 1410 miss)
+## Current: loops app (69.2%, 1371 miss)
 
-### Remaining testable main.py helpers
-- `_resolve_combine_vertex_paths` L764: relative path resolution in combine
-- `_resolve_vertex_store_path` L1443-1447: combine path resolution
-- `_apply_vertex_scope` L3207+: reading scoped vertex text
-- `_parse_emit_parts` — pure string parsing, zero dependencies
+### Remaining testable main.py functions
+- `_find_source_vertex` L168: store-directive path (already covered with store directive test)
+- Small exception paths throughout main.py
+- Look for more pure functions that take dict/path args
 
-### After main.py helpers
-- `commands/identity.py`: 13 miss — find_workspace_root fallback paths
-- `commands/pop.py`: 18 miss — needs real store with pop history  
+### Other remaining
+- `commands/identity.py`: 15 miss — some from find_workspace_root returns None path
+- `commands/pop.py`: 18 miss — needs real store with pop history
 - `lenses/fold.py`: 9 miss — very deep rendering paths
 - main.py large functions (cmd_emit 62 miss, etc.) — need full CLI setup
 
 ### Blocked (695 miss TUI apps)
-- `tui/autoresearch_app.py` + `tui/store_app.py` — needs TUI event loop
+- `tui/autoresearch_app.py` + `tui/store_app.py` — TUI event loop required
+
+## Architecture insights from this session
+- Pure helper functions in main.py are gold: exception paths, path resolution,
+  _dispatch errors, _add_produced — all testable with just mock/tmp_path
+- `subprocess.Popen` can be mocked to test error paths
+- LOOPS_HOME env var is the key to isolating helper tests
+- Combine vertex paths work with relative `./subdir/name.vertex` format
 
 ## Flaky test note
-- `test_mixed_boundary_with_conditions_met` in engine — timing-dependent, pre-existing
-- Test timing ~1.7-2.1s now; efficiency ~3.1 (31% below baseline 4.53)
-
-## Architecture insight
-The main.py pure helpers are very testable since they don't need real vertex/store:
-- Exception paths (L1189-1190, L1954-1955, L1457-1458, etc.)
-- Path resolution with mocked LOOPS_HOME
-- Error/dispatch paths that just return an int
+- `test_mixed_boundary_with_conditions_met` in engine — timing/state issue in full suite
+  Passes in isolation and in per-package runs. The checks.sh runs each package separately
+  so this only shows up intermittently.

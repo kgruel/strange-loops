@@ -94,3 +94,8 @@ def test_stream_summary_helper():
 def test_summary_fields():
     result = _summary_fields({"topic": "a", "message": "b"})
     assert "topic" in result and "message" in result
+
+def test_stream_no_width_error():
+    """stream_view with width=None hits _block (L14)."""
+    block = stream_view({"_tick_error": "bad"}, Zoom.SUMMARY, None)
+    assert block is not None

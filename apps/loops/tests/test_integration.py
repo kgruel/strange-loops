@@ -1867,3 +1867,34 @@ class TestStreamQueryPath:
         # We need first arg that doesn't resolve as a vertex
         rc = main(["read", "--facts", "--since", "1h", "--plain"])
         assert isinstance(rc, int)
+
+
+class TestRenderFoldPlainEdges:
+    """Exercise remaining _render_fold_plain paths."""
+
+    def test_multi_section_separator(self, tmp_path, monkeypatch):
+        """Multiple sections get blank-line separator (L2237)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Vertex with 2 loop kinds → 2 sections in fold view
+        v = (vertex("multi")
+             .store("./multi.db")
+             .loop("event", fold_by("svc"))
+             .loop("metric", fold_by("host")))
+        vpath = tmp_path / "multi.vertex"
+        v.write(vpath)
+        _emit(vpath, "event", svc="api")
+        _emit(vpath, "metric", host="web1")
+        # --static --plain triggers _render_fold_plain with 2 sections
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_narrow_width_body_truncation(self, fold_collect_vertex):
+        """Very narrow width triggers body truncation (L2275-2277)."""
+        tmp_path, vpath = fold_collect_vertex
+        _emit(vpath, "event", service="a-very-long-name-here", action="deploy-action")
+        from loops.main import _render_fold_plain
+        from loops.commands.fetch import fetch_fold
+        data = fetch_fold(vpath)
+        # Width=15 is small enough to trigger truncation of body
+        text = _render_fold_plain(data, zoom_level=1, width=15)
+        assert text is not None

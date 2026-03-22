@@ -649,11 +649,12 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
             await asyncio.sleep(2.0)
 
     def handle_interactive(ctx):
+        import asyncio as _asyncio
         from .tui import StoreExplorerApp
 
         path = _resolve_store_target().resolve()
         app = StoreExplorerApp(path)
-        asyncio.run(app.run())
+        _asyncio.run(app.run())
         return 0
 
     return run_cli(

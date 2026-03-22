@@ -459,7 +459,12 @@ class TestEvaluateBoundariesMixed:
         store2.close()
 
     def test_mixed_boundary_with_conditions_met(self, tmp_path):
-        """Mixed mode: vertex boundary with conditions met → fires."""
+        """Mixed mode: vertex boundary with conditions met → fires.
+
+        Uses past-timestamp facts so they fall within evaluate_boundaries'
+        between(0, now) window.  replay() builds fold state (session.n=2)
+        without firing boundaries; evaluate_boundaries fires on the pending facts.
+        """
         from lang.ast import BoundaryCondition
         from engine.sqlite_store import SqliteStore
 
@@ -481,13 +486,15 @@ class TestEvaluateBoundariesMixed:
         v.register_vertex_boundary("session",
             conditions=(BoundaryCondition(target="n", op=">=", value=1),))
 
-        # Receive a metric fact to build fold state (n=1)
-        v.receive(fact("metric", v=1))
-        # Use a generous future offset to avoid flakiness under load
-        inject_fact(store, "session", status="closed", ts=_time.time() + 60.0)
+        # Pre-populate store with past facts so they fall inside between(0, now).
+        # replay() builds session.n=2 without firing boundaries.
+        t0 = _time.time() - 10
+        inject_fact(store, "session", ts=t0)        # session n→1
+        inject_fact(store, "session", ts=t0 + 1)   # session n→2; boundary candidate
+        v.replay()
 
         ticks = v.evaluate_boundaries()
-        assert len(ticks) >= 1  # Should fire — conditions met (n>=1)
+        assert len(ticks) >= 1  # Vertex boundary fires: n=2 >= 1
         store.close()
 
     def test_mixed_boundary_with_conditions_not_met(self, tmp_path):

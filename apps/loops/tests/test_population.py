@@ -428,3 +428,58 @@ class TestRmErrorPaths:
         assert result == 1
         captured = capsys.readouterr()
         assert "Error" in captured.err
+
+
+class TestPopNoHeaderErrors:
+    """Tests for no-list-header error paths in cmd_add, cmd_rm, cmd_export."""
+
+    def _setup_empty_list(self, home: Path) -> Path:
+        """Vertex with template but empty .list file (no header)."""
+        reading = home / "reading"
+        reading.mkdir(parents=True)
+        (reading / "reading.vertex").write_text(
+            'name "reading"\n'
+            'store "./data/reading.db"\n'
+            'sources {\n'
+            '  template "./sources/feed.loop" {\n'
+            '    from file "./feeds.list"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+        )
+        (reading / "feeds.list").write_text("")  # EMPTY — no header
+        (reading / "sources").mkdir()
+        (reading / "sources" / "feed.loop").write_text(
+            'source "curl"\nkind "feed"\nobserver "feed"\n'
+        )
+        return reading
+
+    def test_add_no_header_error(self, tmp_path, monkeypatch, capsys):
+        """cmd_add with empty .list file → no header error (L202-203)."""
+        home = tmp_path / "home"
+        self._setup_empty_list(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["reading", "add", "key", "value"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "no .list header" in captured.err
+
+    def test_rm_no_header_error(self, tmp_path, monkeypatch, capsys):
+        """cmd_rm with empty .list file → no header error (L270-271)."""
+        home = tmp_path / "home"
+        self._setup_empty_list(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["reading", "rm", "key"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "no .list header" in captured.err
+
+    def test_export_no_header_error(self, tmp_path, monkeypatch, capsys):
+        """cmd_export with empty .list file → no header error (L320-321)."""
+        home = tmp_path / "home"
+        self._setup_empty_list(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        result = main(["reading", "export"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "no .list header" in captured.err

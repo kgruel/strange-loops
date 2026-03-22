@@ -367,3 +367,16 @@ class TestStoreHasKindSince:
         assert store.has_kind_since("a", now - 3) is False
         assert store.has_kind_since("b", now - 15) is True
         assert store.has_kind_since("b", now - 5) is False
+
+
+class TestCadenceStr:
+    def test_always_str(self):
+        assert str(Cadence.always()) == "always"
+
+    def test_elapsed_str(self):
+        s = str(Cadence.elapsed("disk", 60.0))
+        assert "elapsed" in s and "disk" in s
+
+    def test_triggered_str(self):
+        s = str(Cadence.triggered("minute", "disk"))
+        assert "triggered" in s and "minute" in s

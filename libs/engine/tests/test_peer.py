@@ -207,3 +207,14 @@ class TestRestrictGrant:
         g2 = restrict_grant(g, horizon={"a", "b"})
         assert g2.horizon == frozenset({"a", "b"})
         assert g2.potential is None  # untouched
+
+    def test_restrict_potential_from_unrestricted(self):
+        g = Grant()
+        g2 = restrict_grant(g, potential={"x", "y"})
+        assert g2.potential == frozenset({"x", "y"})
+        assert g2.horizon is None
+
+    def test_restrict_potential_narrows_explicit(self):
+        g = Grant(potential=frozenset({"x", "y", "z"}))
+        g2 = restrict_grant(g, potential={"x", "z"})
+        assert g2.potential == frozenset({"x", "z"})

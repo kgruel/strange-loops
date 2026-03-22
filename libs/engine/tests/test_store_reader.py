@@ -244,3 +244,44 @@ class TestReadOnly:
                     "INSERT INTO facts (kind, ts, observer, payload) VALUES (?, ?, ?, ?)",
                     ("x", 1.0, "x", "{}"),
                 )
+
+
+class TestTickTimestamps:
+    def test_returns_timestamps_desc(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ts = reader.tick_timestamps("scrape")
+            assert ts == [2000.0, 1000.0]
+
+    def test_with_limit(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            ts = reader.tick_timestamps("scrape", limit=1)
+            assert ts == [2000.0]
+
+    def test_unknown_name(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            assert reader.tick_timestamps("missing") == []
+
+
+class TestFreshness:
+    def test_returns_latest_ts(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            f = reader.freshness
+            assert f is not None
+            assert isinstance(f, datetime)
+            # ts=200.0 is the max fact ts in populated_db
+            assert f.timestamp() == pytest.approx(200.0, abs=1)
+
+    def test_empty_store_returns_none(self, tmp_db: Path):
+        with StoreReader(tmp_db) as reader:
+            assert reader.freshness is None
+
+
+class TestResolveEntityId:
+    def test_finds_matching_fact(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            id_ = reader.resolve_entity_id("page", "url", "b")
+            assert id_ == "01FACT_PAGE_B"
+
+    def test_returns_none_when_no_match(self, populated_db: Path):
+        with StoreReader(populated_db) as reader:
+            assert reader.resolve_entity_id("page", "url", "missing") is None

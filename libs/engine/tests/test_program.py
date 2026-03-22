@@ -257,3 +257,40 @@ def test_substitute_vertex_vars_preserves_from(tmp_path: Path) -> None:
     assert isinstance(entry, TemplateSource)
     assert entry.from_ is from_source
     assert entry.params[0].values["kind"] == "resolved"
+
+
+class TestVertexProgramProtocol:
+    def test_setattr_raises(self):
+        program = _make_program([])
+        with pytest.raises(AttributeError, match="cannot assign"):
+            program.vertex = None
+
+    def test_repr(self):
+        program = _make_program([])
+        r = repr(program)
+        assert "VertexProgram" in r
+
+
+def test_substitute_no_sources():
+    """_substitute_vertex_vars with empty sources returns ast unchanged."""
+    from engine.program import _substitute_vertex_vars
+    from lang.ast import VertexFile
+
+    ast = VertexFile(name="test", loops={}, sources=())
+    result = _substitute_vertex_vars(ast, {"k": "v"})
+    assert result is ast
+
+
+def test_substitute_non_template_passthrough():
+    """Non-template sources pass through _substitute_vertex_vars unchanged."""
+    from engine.program import _substitute_vertex_vars
+    from lang.ast import VertexFile
+
+    # A plain source (non-TemplateSource) entry
+    class PlainSource:
+        pass
+
+    plain = PlainSource()
+    ast = VertexFile(name="test", loops={}, sources=(plain,))
+    result = _substitute_vertex_vars(ast, {"k": "v"})
+    assert result.sources[0] is plain

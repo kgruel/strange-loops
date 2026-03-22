@@ -52,3 +52,11 @@ class TestLensMethods:
         lens = Lens()
         with pytest.raises(AttributeError):
             lens.zoom = 5
+
+
+class TestModuleLazyImport:
+    def test_unknown_attribute_raises(self):
+        import engine
+        import pytest
+        with pytest.raises(AttributeError, match="no attribute"):
+            engine.NoSuchThing

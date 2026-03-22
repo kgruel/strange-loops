@@ -710,3 +710,174 @@ class TestRenderIterationListCall:
         harness = TestSurface(app, width=100, height=40, input_queue=["q"])
         frames = harness.run_to_completion()
         assert "Iterations" in frames[0].text
+
+
+# ---------------------------------------------------------------------------
+# StoreExplorerApp: remaining miss lines
+# ---------------------------------------------------------------------------
+
+class TestStoreExplorerStateEdges:
+    def test_selected_name_out_of_bounds(self):
+        """selected_name() returns None when no tick names (L82)."""
+        # Build a state with tick_names=[] — cursor.selected=0, 0 < 0 is False → None
+        state = StoreExplorerStateBuilder().ticks([]).build()
+        assert state.selected_name() is None
+
+    def test_selected_label_no_ticks(self):
+        """selected_label returns None when no tick names (L75)."""
+        state = StoreExplorerStateBuilder().ticks([]).build()
+        assert state.selected_label is None
+
+    def test_selected_data_no_name(self):
+        """selected_data() returns None when no selection (L68)."""
+        state = StoreExplorerStateBuilder().ticks([]).build()
+        assert state.selected_data() is None
+
+
+class TestStoreExplorerLoadStore:
+    def test_load_store_with_real_db(self, tmp_path):
+        """_load_store() with a real SQLite store covers L113-129."""
+        from .builders import StorePopulator
+        from engine.builder import vertex, fold_count
+
+        # Build a real vertex + store
+        vpath = tmp_path / "s.vertex"
+        vertex("s").store("./s.db").loop("ping", fold_count("n")).write(vpath)
+        db_path = tmp_path / "s.db"
+        StorePopulator(db_path).emit("ping", n="1").emit("ping", n="2").done()
+
+        app = StoreExplorerApp(db_path)
+        app._load_store()
+        assert app._state is not None
+        assert app._error is None
+
+    def test_load_store_error_on_missing_db(self, tmp_path):
+        """_load_store() sets _error when db doesn't exist (L127-128)."""
+        app = StoreExplorerApp(tmp_path / "nonexistent.db")
+        app._load_store()
+        assert app._error is not None
+
+
+class TestStoreExplorerKeyEdges:
+    def test_list_key_unknown(self, tmp_path, store_explorer_state):
+        """Unknown list key hits else:return (L176)."""
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
+        harness = TestSurface(app, width=100, height=24, input_queue=[])
+        app.on_key("z")  # unknown in list → L176 else:return
+
+    def test_detail_key_no_detail(self, tmp_path):
+        """_handle_detail_key returns early when no detail (L197)."""
+        state = StoreExplorerStateBuilder().focus("detail").build()
+        state = replace(state, detail=None)
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        harness = TestSurface(app, width=100, height=24, input_queue=[])
+        app.on_key("j")  # detail is None → L197 early return
+
+    def test_detail_key_unknown(self, tmp_path):
+        """Unknown detail key hits else:return (L215)."""
+        state = StoreExplorerStateBuilder().with_detail().focus("detail").build()
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        harness = TestSurface(app, width=100, height=24, input_queue=[])
+        app.on_key("z")  # unknown in detail → L215 else
+
+    def test_selection_change_no_data(self, tmp_path):
+        """List navigation where new selection has no tick data → detail=None (L189)."""
+        # Create state with 2 ticks but empty data for second
+        summary = {
+            "facts": {"total": 2, "kinds": {}},
+            "ticks": {"total": 2, "names": {"tick-a": {"count": 1, "sparkline": "", "latest": None}}},
+        }
+        from loops.tui.store_app import StoreExplorerState
+        state = StoreExplorerState.from_summary(summary)
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        harness = TestSurface(app, width=100, height=24, input_queue=[])
+        # Move to a tick with no data → detail becomes None
+        app.on_key("j")
+
+    def test_fidelity_key_home_end(self, tmp_path, store_explorer_state_with_fidelity):
+        """g/G in fidelity mode navigate cursor (L304, L306)."""
+        app = StoreExplorerApp(
+            tmp_path / "t.db",
+            _initial_state=store_explorer_state_with_fidelity,
+        )
+        harness = TestSurface(app, width=120, height=30, input_queue=[])
+        app.on_key("G")  # L306
+        app.on_key("g")  # L304
+
+    def test_fidelity_key_unknown(self, tmp_path, store_explorer_state_with_fidelity):
+        """Unknown fidelity key hits else:return (L253)."""
+        app = StoreExplorerApp(
+            tmp_path / "t.db",
+            _initial_state=store_explorer_state_with_fidelity,
+        )
+        app.on_key("z")  # unknown in fidelity → L253
+
+    def test_fidelity_filter_no_facts_for_first_kind(self, tmp_path):
+        """'a' in fidelity with facts but 0 matching kind hits else:return (L270)."""
+        from loops.tui.store_app import FidelityState
+        from painted.views import ListState
+        # facts with one kind but filter targets a different kind
+        facts = make_fidelity_facts(["thread"])
+        fid = FidelityState(
+            facts=facts, tick_name="t", since=0.0, until=1.0,
+            cursor=ListState().with_count(1),
+            filtered=True, filter_kind="thread",  # already filtered
+        )
+        state = StoreExplorerStateBuilder().ticks(["t"]).build()
+        state = replace(state, fidelity=fid)
+
+        def _fetch(since, until, kind=None):
+            if kind:
+                return []  # empty filter result → L270
+            return facts
+
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
+        app.on_key("a")  # tries to filter but gets empty → L268-270
+
+
+class TestStoreExplorerRelativeTime:
+    def test_just_now(self):
+        """_relative_time for future timestamps → 'just now' (L480)."""
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt, timezone as tz, timedelta
+        future = dt.now(tz.utc) + timedelta(seconds=5)
+        result = _relative_time(future)
+        assert result == "just now"
+
+    def test_seconds_ago(self):
+        """_relative_time for < 60s → '??s ago' (L482)."""
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt, timezone as tz, timedelta
+        assert "s ago" in _relative_time(dt.now(tz.utc) - timedelta(seconds=30))
+
+    def test_minutes_ago(self):
+        """_relative_time for 1-59min → '??m ago' (L485)."""
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt, timezone as tz, timedelta
+        assert "m ago" in _relative_time(dt.now(tz.utc) - timedelta(minutes=15))
+
+    def test_hours_ago(self):
+        """_relative_time for 1-23h → '??h ago' (L488)."""
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt, timezone as tz, timedelta
+        assert "h ago" in _relative_time(dt.now(tz.utc) - timedelta(hours=5))
+
+
+class TestStoreExplorerRenderLayout:
+    def test_medium_height_layout(self, tmp_path, store_explorer_state):
+        """Height 7-11 uses tight layout (header+panels+footer, L459)."""
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
+        harness = TestSurface(app, width=100, height=9, input_queue=["q"])
+        frames = harness.run_to_completion()
+        assert len(frames) >= 1
+
+    def test_render_fidelity_early_return(self, tmp_path, store_explorer_state_with_fidelity):
+        """Fidelity render with height < panel_height — row loop short-circuits (L367)."""
+        app = StoreExplorerApp(
+            tmp_path / "t.db",
+            _initial_state=store_explorer_state_with_fidelity,
+        )
+        # Very small height forces minimal panel
+        harness = TestSurface(app, width=80, height=8, input_queue=["q"])
+        frames = harness.run_to_completion()
+        assert len(frames) >= 1

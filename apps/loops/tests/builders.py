@@ -221,7 +221,8 @@ def make_store_summary(
 
     The summary format mirrors what make_fetcher() returns from the store command.
     """
-    tick_names = tick_names or ["2024-01-01", "2024-01-02"]
+    if tick_names is None:
+        tick_names = ["2024-01-01", "2024-01-02"]
     kinds = kinds or {"thread": 5, "decision": 5}
     freshness = freshness or datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 

@@ -2206,3 +2206,40 @@ class TestMapBoundaryUnknown:
 
         with pytest.raises(ValueError, match="Unknown boundary type"):
             map_boundary(FakeBoundary())
+
+
+class TestCompileSourceEdges:
+    def test_both_every_and_on_raises(self):
+        from lang.ast import LoopFile, Trigger
+        from engine.compiler import compile_source
+
+        loop = LoopFile(
+            kind="metric",
+            observer="test",
+            source="echo test",
+            every="5m",
+            on=Trigger(kinds=("other",)),
+        )
+        with pytest.raises(ValueError, match="Cannot specify both every and on"):
+            compile_source(loop)
+
+    def test_materialize_vertex_with_parse_pipelines(self, tmp_path):
+        from lang import parse_vertex_file
+        from engine.compiler import compile_vertex_recursive, materialize_vertex
+
+        vpath = tmp_path / "test.vertex"
+        vpath.write_text("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        parse {
+            transform "value" { strip "/" }
+        }
+    }
+}
+""")
+        vertex_ast = parse_vertex_file(vpath)
+        compiled = compile_vertex_recursive(vertex_ast)
+        runtime = materialize_vertex(compiled)
+        assert runtime._parse_pipelines  # parse pipelines registered

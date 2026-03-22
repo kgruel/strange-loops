@@ -950,3 +950,113 @@ class TestVerticesLens:
         from loops.lenses.vertices import vertices_view
 
         assert vertices_view(data, zoom, width=80) is not None
+
+
+class TestMainEdgePaths:
+    """Exercise remaining main.py dispatch paths."""
+
+    def test_render_main_help_json(self, capsys):
+        """_render_main_help with --json flag hits JSON branch (L3156-3159)."""
+        from loops.main import _render_main_help
+        rc = _render_main_help(["--json"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        import json
+        data = json.loads(out)
+        assert "prog" in data or "groups" in data or isinstance(data, dict)
+
+    def test_run_sync_nonexistent_vertex(self, tmp_path):
+        """_run_sync with non-existent .vertex path errors (L942-943).
+
+        Passing a .vertex-suffixed path bypasses named lookup and hits
+        the vertex_path.exists() guard directly.
+        """
+        from loops.main import main
+        ghost = str(tmp_path / "ghost.vertex")
+        rc = main(["sync", ghost])
+        assert rc == 1
+
+    def test_run_sync_invalid_var(self, tmp_path):
+        """_run_sync with bad --var format hits ValueError path (L947-949)."""
+        from loops.main import main
+        from engine.builder import vertex, fold_count
+        v = vertex("vtest").store("./v.db").loop("ping", fold_count("n"))
+        vpath = tmp_path / "v.vertex"
+        v.write(vpath)
+        rc = main(["sync", str(vpath), "--var", "NOEQUALS"])
+        assert rc == 1
+
+    def test_run_validate_bad_vertex(self, tmp_path):
+        """_run_validate with a malformed vertex file hits exception path (L570-572)."""
+        from loops.main import _run_validate
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{not-valid-kdl")
+        rc = _run_validate([str(bad)])
+        assert rc == 1
+
+    def test_run_validate_bad_loop(self, tmp_path):
+        """_run_validate with a malformed .loop file hits exception path (L570-572)."""
+        from loops.main import _run_validate
+        bad = tmp_path / "bad.loop"
+        bad.write_text("{{not-valid-kdl")
+        rc = _run_validate([str(bad)])
+        assert rc == 1
+
+    def test_cmd_init_invalid_iterations(self, tmp_path, monkeypatch):
+        """cmd_init with non-integer iterations silently skips it (L493-496)."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        ns = argparse.Namespace(
+            name="myvertex",
+            template="session",
+            set=["iterations=not-a-number"],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+
+    def test_cmd_init_with_seed_config(self, tmp_path, monkeypatch):
+        """cmd_init with seed config (key=value args) hits L501-503."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        ns = argparse.Namespace(
+            name="myvertex2",
+            template="session",
+            set=["author=alice"],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+
+
+class TestSyncEdgePaths:
+    """Exercise remaining _run_sync and _run_sync_aggregate paths."""
+
+    def test_sync_aggregate_child_no_sources(self, tmp_path, monkeypatch, capsys):
+        """Aggregate sync where a combine child has no sources gets skipped (L832)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Create a child vertex with no sources (just a store)
+        child_dir = tmp_path / "empty_child"
+        child_dir.mkdir()
+        (child_dir / "empty_child.vertex").write_text(
+            'name "empty_child"\nstore "./data/ec.db"\n'
+            "loops {\n  ping {\n    fold {\n      count \"inc\"\n    }\n  }\n}\n"
+        )
+        child_path = child_dir / "empty_child.vertex"
+
+        # Create aggregate root with combine pointing to the sourceless child
+        root_dir = tmp_path / "root"
+        root_dir.mkdir()
+        root_vf = root_dir / "root.vertex"
+        root_vf.write_text(
+            'name "root"\n'
+            f'combine {{\n  vertex "{str(child_path)}"\n}}\n'
+            "loops {\n  ping {\n    fold {\n      count \"inc\"\n    }\n  }\n}\n"
+        )
+
+        from loops.main import main
+        rc = main(["sync", "--force", str(root_vf)])
+        assert rc == 0

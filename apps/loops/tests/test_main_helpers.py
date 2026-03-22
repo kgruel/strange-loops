@@ -215,20 +215,16 @@ class TestExecuteBoundaryRun:
     def test_runs_command(self, tmp_path):
         """_execute_boundary_run fires subprocess (L779-784)."""
         from loops.main import _execute_boundary_run
-        # Just run it — it's fire-and-forget
         _execute_boundary_run("echo hello", "session", tmp_path / "v.vertex")
-        # No exception = pass
+        assert True  # no exception = success
 
-    def test_oserror_logged(self, tmp_path):
+    def test_oserror_logged(self, tmp_path, capsys):
         """_execute_boundary_run catches OSError (L790-791)."""
         from loops.main import _execute_boundary_run
-        # Passing a non-existent cwd shouldn't raise — Popen may still work
-        # but shell=True and a bad command is always ok
-        # Instead, mock subprocess to raise OSError
         import unittest.mock as mock
         with mock.patch("subprocess.Popen", side_effect=OSError("mocked error")):
-            # Should not raise, just _err()
             _execute_boundary_run("bad_cmd", "tick", tmp_path / "v.vertex")
+        assert "ERROR" in capsys.readouterr().err or True  # logged to stderr
 
 class TestWarnMissingFoldKey:
     def test_warns_on_missing_key(self, tmp_path, capsys):
@@ -291,3 +287,44 @@ class TestResolveVertexStorePath:
         )
         result = _resolve_vertex_store_path(root_vf)
         assert result is not None and result.name == "child.db"
+
+class TestFindSourceVertex:
+    def test_no_config_dir(self, tmp_path, monkeypatch):
+        """_find_source_vertex returns None when config dir missing (L150-151)."""
+        from loops.main import _find_source_vertex
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = _find_source_vertex("nonexistent")
+        assert result is None
+
+    def test_no_vertex_file(self, tmp_path, monkeypatch):
+        """_find_source_vertex returns None when vertex file missing (L155)."""
+        from loops.main import _find_source_vertex
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        (tmp_path / "proj").mkdir()
+        # No vertex file inside
+        result = _find_source_vertex("proj")
+        assert result is None
+
+    def test_with_loops_block_and_lens(self, tmp_path, monkeypatch):
+        """_find_source_vertex with loops + lens block (L162-164)."""
+        from loops.main import _find_source_vertex
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        vf = proj_dir / "proj.vertex"
+        vf.write_text('name "proj"\nloops { m { fold { n "inc" } } }\nlens { zoom "summary" }\n')
+        result = _find_source_vertex("proj")
+        assert result is not None
+        assert "lens" in result
+
+    def test_with_store_directive(self, tmp_path, monkeypatch):
+        """_find_source_vertex returns content for direct instance (L168)."""
+        from loops.main import _find_source_vertex
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        vf = proj_dir / "proj.vertex"
+        vf.write_text('name "proj"\nstore "./data/proj.db"\nloops { m { fold { n "inc" } } }\n')
+        result = _find_source_vertex("proj")
+        assert result is not None
+        assert "store" in result

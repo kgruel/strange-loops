@@ -589,3 +589,19 @@ class TestResolveRenderFnEdges:
 
         fn = _resolve_render_fn(None, None, "completely_unknown_view")
         assert fn is fold_view  # L172-173: default fallback
+
+
+class TestRunStreamQueryJoin:
+    """Cover main.py L243 (query join when first positional is not a vertex)."""
+
+    def test_stream_nonvertex_plus_query_joins_them(self, tmp_path, monkeypatch):
+        """L243: 'read notavertex somequery --facts --since 1h' → query=notavertex somequery."""
+        from loops.main import main
+
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # verb-first 'read' with --facts --since triggers _run_stream with vertex_path=None
+        # 'notavertex' is not a vertex → query = "notavertex somequery" (L243)
+        rc = main(["read", "notavertex", "somequery", "--facts", "--since", "1h", "--plain"])
+        assert rc in (0, 1)

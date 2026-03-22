@@ -1,41 +1,49 @@
 # Autoresearch Ideas
 
-## Completed packages
+## Progress Summary
 - **atoms**: 98.1% | **engine**: 92.5% | **store**: 99.6% | **lang**: 98.4%
-- **loops**: 69.7% (1352 miss) — best efficiency 2.64 (41.7% below baseline)
+- **loops**: 75.6% (3615 covered) — best efficiency 2.49 (exp 44)
+- 49 consecutive keep experiments out of 50 total (1 discard was noise)
 
-## Remaining loops app (1352 miss)
+## Remaining loops app (1063 miss)
 
 ### Blocked (695 miss TUI apps)
 - `tui/autoresearch_app.py` + `tui/store_app.py` — needs async TUI event loop
 
-### Remaining testable (657 miss)
-- `main.py`: ~500 miss (70.9%) — large functions need real vertex/store
-  - `cmd_init`, `cmd_emit`, `_run_read`, `_run_fold`, `_run_sync` etc.
-  - Could test with real tmp vertex + SQLite store (complex setup)
-  - `_try_fast_read` (L3436): needs a valid vertex + read args
-- `commands/fetch.py`: 105 miss — subprocess/network calls
-- `commands/identity.py`: ~6 miss — L34, L75, L78 (walkup observer resolution)
-- `commands/pop.py`: 18 miss — needs real pop store
-- `lenses/fold.py`: 9 miss — deep item rendering paths
-- `lenses/store.py`: 5 miss — needs real SQLite store with data
-- `commands/vertices.py`: 2 miss — L106 (duplicate combine), L118 (unreachable suffix filter)
+### Main.py remaining testable (~368 miss after TUI exclusion)
+- `cmd_emit` (large complex function) — more paths:
+  - Template qualifier (slash-split vertex_ref like "comms/native") L1626-1627
+  - Vertex-kind ambiguity resolution path L1635-1665
+  - Dry-run path L1730+ (various branches)
+  - `_ensure_vertex_store_db` call L1740+
+- `_resolve_combine_child` (16 miss, 61%) — vertex/template resolution chain
+- `_run_close` (22 miss, 12%) — needs real fact with fold state + close args
+- `_try_topology_from_store` (26 miss, 59%) — needs store with _topology facts
+  - Could be set up by running `emit_topology` first then calling this
+- `_whoami_from_identity_store` (10 miss, 45%) — needs identity store
+- `_run_fold_fast` (still ~9 miss) — some paths remaining
+- `_run_test` (9 miss) — --input mode (parse pipeline with input file)
 
-### Path forward
-1. Integration tests with real vertex + store:
-   - Create tmp SQLite stores with atoms facts
-   - Test _run_read, fold, stream with those stores
-   - Would cover large swaths of main.py
-2. `_try_fast_read` with argv like ["read", "proj", "--plain"]
-   when LOOPS_HOME has a valid vertex
+### Integration test patterns that work well
+- `main(["read", str(vpath), "--static", "--plain", "--kind=KIND"])` → bypasses _try_fast_read
+- `main(["sync", "--force", str(vpath)])` → triggers sync + boundary evaluation
+- `main(["test", str(loop_file), "--plain"])` → runs .loop sources
+- Vertex with `fold_collect` → fold_view gets sections with items
+- Vertex with `boundary after=1` + run clause → triggers run during sync
 
-## Architecture insights
-- Pure helpers tested: _parse_emit_parts, _add_produced, _run_whoami, 
-  _find_source_vertex, _register_with_aggregator, _execute_boundary_run,
-  _resolve_named_store, _dispatch_verb_first, _apply_vertex_scope, main()
-- Mock pattern works: `mock.patch("loops.main._run_close", return_value=0)`
-- LOOPS_HOME env var is the key isolation mechanism
+### try_topology_from_store approach
+1. Create vertex with store
+2. Emit facts to populate store
+3. Call `emit_topology(vpath)` to write _topology facts to the store
+4. Then call `_try_topology_from_store(store_path)` directly
+5. This would cover L1209-1244 (26 lines)
 
-## Flaky test note
-- `test_mixed_boundary_with_conditions_met` in engine — timing-dependent, pre-existing
-  Only shows up when multiple pytest processes run concurrently
+### _run_close approach
+- Needs: vertex with `close` kind in a loops block + real fact data
+- Call `main(["close", str(vpath), "kind", "name", "message"])`
+
+### Next step-up targets (in order of bang-for-buck)
+1. `_try_topology_from_store` via emit_topology + direct test (26 lines)
+2. `cmd_emit` template qualifier path (slash-split)
+3. `_run_test --input` mode (parse pipeline test)
+4. `_run_close` with minimal setup

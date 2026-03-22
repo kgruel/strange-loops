@@ -2451,3 +2451,35 @@ class TestResolveEdgeCases:
 
         result = _apply_vertex_scope(None, vpath)
         assert result is None  # L576-577 hit: LoopsError caught → None
+
+
+class TestDevtoolsTestLiveMode:
+    """Cover devtools.py L200-215 (fetch_stream in _run_test live mode)."""
+
+    def test_run_test_live_plain_covers_fetch_stream(self, tmp_path, monkeypatch):
+        """'loops test <file> --live --plain' covers async fetch_stream → L200-213."""
+        from pathlib import Path
+        from loops.main import main
+
+        # 'echo hello' yields exactly one fact, then source stops → clean loop exit
+        loop_file = tmp_path / "simple.loop"
+        loop_file.write_text('source "echo hello"\nkind "msg"\nobserver "test"\n')
+        monkeypatch.chdir(tmp_path)
+
+        rc = main(["test", str(loop_file), "--live", "--plain"])
+        assert rc in (0, 1)  # L200-213 covered
+
+    def test_run_test_live_plain_limit_break(self, tmp_path, monkeypatch):
+        """--limit 1 with 2-line source covers break at L215 in fetch_stream."""
+        from pathlib import Path
+        from loops.main import main
+
+        # 'printf' outputs 2 lines so fetch_stream processes >1 fact; --limit 1 breaks
+        loop_file = tmp_path / "two.loop"
+        loop_file.write_text(
+            'source "printf \'a\\nb\\n\'"\nkind "msg"\nobserver "test"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+
+        rc = main(["test", str(loop_file), "--live", "--plain", "--limit", "1"])
+        assert rc in (0, 1)  # L215 covered

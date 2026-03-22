@@ -1,0 +1,182 @@
+"""Tests for uncovered Vertex replay paths using the test SDK.
+
+Targets: vertex.py replay fast paths (since_raw, replay_cursor),
+         fallback paths (routes, parse_pipelines, children),
+         boundary reconciliation edges, and ingest().
+"""
+import pytest
+
+from atoms import Fact
+from engine import Loop, Vertex
+from engine.sqlite_store import SqliteStore
+
+from tests.vertex_test_sdk import VertexTestBuilder, fact, reopen_store
+
+
+class TestReplayWithRoutes:
+    """Replay fallback path: routes force full-Fact replay (L634-655)."""
+
+    def test_replay_with_routes(self, tmp_path):
+        v1, store = (VertexTestBuilder("routed")
+            .with_store(tmp_path)
+            .count_loop("events")
+            .routes({"deploy.*": "events"})
+            .build())
+
+        v1.receive(fact("deploy.prod", type="release"))
+        v1.receive(fact("deploy.staging", type="test"))
+        store.close()
+
+        # Replay with routes — takes the full-Fact path
+        v2, store2 = (VertexTestBuilder("routed")
+            .with_store(tmp_path)
+            .count_loop("events")
+            .routes({"deploy.*": "events"})
+            .build())
+        count = v2.replay()
+        assert count == 2
+        assert v2.state("events")["n"] == 2
+        store2.close()
+
+    def test_replay_with_parse_pipeline(self, tmp_path):
+        from atoms import Transform
+
+        v1, store = (VertexTestBuilder("parsed")
+            .with_store(tmp_path)
+            .count_loop("log")
+            .parse_pipelines({"log": [Transform(field="msg", strip=" ")]})
+            .build())
+
+        v1.receive(fact("log", msg="  hello  "))
+        v1.receive(fact("log", msg="  world  "))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("parsed")
+            .with_store(tmp_path)
+            .count_loop("log")
+            .parse_pipelines({"log": [Transform(field="msg", strip=" ")]})
+            .build())
+        count = v2.replay()
+        assert count == 2
+        assert v2.state("log")["n"] == 2
+        store2.close()
+
+
+class TestReplayWithChildren:
+    """Replay with child vertices takes the full-Fact fallback path."""
+
+    def test_replay_forwards_to_children(self, tmp_path):
+        parent, store = (VertexTestBuilder("parent")
+            .with_store(tmp_path)
+            .count_loop("metric")
+            .build())
+
+        child = (VertexTestBuilder("child")
+            .count_loop("metric")
+            .build_vertex())
+        parent.add_child(child)
+
+        parent.receive(fact("metric", v=1))
+        parent.receive(fact("metric", v=2))
+        store.close()
+
+        # Rebuild with child — takes fallback path
+        parent2, store2 = (VertexTestBuilder("parent")
+            .with_store(tmp_path)
+            .count_loop("metric")
+            .build())
+        child2 = (VertexTestBuilder("child")
+            .count_loop("metric")
+            .build_vertex())
+        parent2.add_child(child2)
+
+        count = parent2.replay()
+        assert count == 2
+        assert parent2.state("metric")["n"] == 2
+        # Child also received the facts
+        assert child2.state("metric")["n"] == 2
+        store2.close()
+
+
+class TestReplayEmptyStore:
+    """Replay on empty store returns 0 immediately."""
+
+    def test_replay_empty_raw_path(self, tmp_path):
+        """Empty store with since_raw available → L618-619."""
+        v, store = (VertexTestBuilder("empty")
+            .with_store(tmp_path)
+            .count_loop("metric")
+            .build())
+        count = v.replay()
+        assert count == 0
+        store.close()
+
+
+class TestReplayBoundaryReconciliation:
+    """Boundary count reconciliation after replay (L665-677)."""
+
+    def test_replay_every_boundary_residual(self, tmp_path):
+        """After replaying 5 facts with boundary_count=3, residual = 5 % 3 = 2."""
+        v1, store = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=3, boundary_mode="every")
+            .build())
+
+        for i in range(5):
+            v1.receive(fact("events", i=i))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=3, boundary_mode="every")
+            .build())
+        v2.replay()
+        # After replay of 5, residual should be 5 % 3 = 2
+        loop = v2._loops["events"]
+        assert loop._count_since_boundary == 2
+        store2.close()
+
+    def test_replay_after_boundary_exhaustion(self, tmp_path):
+        """After boundary with mode='after' reached, marks exhausted."""
+        v1, store = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=2, boundary_mode="after")
+            .build())
+
+        for i in range(5):
+            v1.receive(fact("events", i=i))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=2, boundary_mode="after")
+            .build())
+        v2.replay()
+        loop = v2._loops["events"]
+        assert loop._boundary_exhausted is True
+        store2.close()
+
+
+class TestIngest:
+    """Vertex.ingest() is a thin wrapper around receive (L931-934)."""
+
+    def test_ingest_creates_fact_and_receives(self):
+        v = (VertexTestBuilder()
+            .count_loop("metric")
+            .build_vertex())
+        v.ingest("metric", {"value": 42}, "alice")
+        assert v.state("metric")["n"] == 1
+
+
+class TestEvalConditionFallthrough:
+    """_eval_condition returns False for unknown operators (L93)."""
+
+    def test_unknown_operator_returns_false(self):
+        from engine.vertex import _eval_condition
+
+        class FakeCondition:
+            target = "n"
+            op = "???"
+            value = 5
+
+        assert _eval_condition({"n": 10}, FakeCondition()) is False

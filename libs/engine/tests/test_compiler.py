@@ -2161,3 +2161,48 @@ class TestCompiledVertexProtocol:
         from engine.compiler import CompiledVertex
         cv = CompiledVertex(name="a", specs={}, children={})
         assert cv.__eq__("not a vertex") is NotImplemented
+
+
+class TestMapTransformOps:
+    def test_lstrip(self):
+        from engine.compiler import map_transform
+        from lang.ast import Transform as DslTransform, LStrip
+        step = DslTransform(field="x", operations=(LStrip(chars="/"),))
+        ops = map_transform(step)
+        assert any(getattr(op, 'lstrip', None) == "/" for op in ops)
+
+    def test_rstrip(self):
+        from engine.compiler import map_transform
+        from lang.ast import Transform as DslTransform, RStrip
+        step = DslTransform(field="x", operations=(RStrip(chars="/"),))
+        ops = map_transform(step)
+        assert any(getattr(op, 'rstrip', None) == "/" for op in ops)
+
+    def test_replace(self):
+        from engine.compiler import map_transform
+        from lang.ast import Transform as DslTransform, Replace
+        step = DslTransform(field="x", operations=(Replace(old="a", new="b"),))
+        ops = map_transform(step)
+        assert any(getattr(op, 'replace', None) == ("a", "b") for op in ops)
+
+
+class TestMapFoldOpUnknown:
+    def test_unknown_fold_op_raises(self):
+        from engine.compiler import map_fold_op
+
+        class FakeOp:
+            pass
+
+        with pytest.raises(ValueError, match="Unknown fold op type"):
+            map_fold_op("target", FakeOp())
+
+
+class TestMapBoundaryUnknown:
+    def test_unknown_boundary_raises(self):
+        from engine.compiler import map_boundary
+
+        class FakeBoundary:
+            pass
+
+        with pytest.raises(ValueError, match="Unknown boundary type"):
+            map_boundary(FakeBoundary())

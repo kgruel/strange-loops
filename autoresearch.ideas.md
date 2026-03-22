@@ -2,38 +2,41 @@
 
 ## Progress Summary
 - **atoms**: 98.1% | **engine**: 92.5% | **store**: 99.6% | **lang**: 98.4%
-- **loops**: 79.0% (3764 covered, 914 miss) — best efficiency 2.49 (exp 44)
-- 69 experiments, 67 keeps!
+- **loops**: 79.8% (3792 covered, 886 miss) — 88 experiments, 84 keeps
+- Session 3 best efficiency: 2.49 (exp 44), current 4.21
 
-## Remaining loops app (914 miss)
+## Remaining loops (886 miss non-TUI)
 
 ### Blocked TUI (695 miss)
-- `tui/autoresearch_app.py` + `tui/store_app.py` — async TUI, not testable
+- Not testable without async TUI harness
 
-### Main.py remaining (~200 miss after TUI)
-- `cmd_emit` (54 miss, 16%) — complex vertex resolution + lazy painted proxies
-- `_run_fold` L2155-2181 — async fetch_stream + autoresearch TUI handler body
-- `_run_sync_aggregate` L818-819, 837-838 — log_error callback + run boundary in aggregate
-- `_run_store` L2384, 2391-2397 — dispatch via vertex-first ("myproject store")
-- `commands/fetch.py` L2013-2015 — query shift when first arg isn't a vertex
+### main.py remaining ~140 miss
+- `cmd_emit` (41 miss):
+  - L1570-1590: Lazy proxy loading — likely dead code (Block always loaded before show)
+  - L1756-1777: Population template error paths (complex, needs .list file)
+  - L1687-1696: store_path None + exception in _resolve_writable (harder paths)
+- `_run_fold` L2155-2182: async fetch_stream + autoresearch TUI — not testable
+- `_run_store` L2414-2429: async + TUI paths — not testable
+- `_run_close` L2620-2721: requires actually doing a close (non-dry-run) 
+  - L2620: fallback key check for collect-fold items
+  - L2657: artifact kind filtering
+  - L2720: error output on store exception
+- `_topology_kind_keys_and_stores` L1260-1271: needs parse error + topology caching
+  - L1260-1261: bad vertex file → return {}, []
+  - L1265-1271: fast path with existing store + _topology facts
 
-### Targets by bang-for-buck
-1. **`cmd_emit` lazy proxy** (L1570-1590) — _BlockProxy/__getattr__ fires on first error in emit
-   - Trigger: emit with invalid/failing data that shows error block
-2. **`_run_store` L2391-2393** — vertex name resolution (e.g., `main(["myv", "store"])`)
-   - Use vertex named NOT in `_COMMANDS` (not "test", "compile", etc.)
-3. **`_run_sync_aggregate` L818-819** — source that produces error facts
-   - Complex: requires a source script that exits with code 1 (error)
-4. **`commands/pop.py`** (18 miss) — population commands (add, rm, export error paths)
-5. **`lenses/fold.py`** (9 miss) — deep rendering paths  
+### Accessible new targets
+1. `_topology_kind_keys_and_stores` L1260-1261 (exception path) — pass bad vertex file
+2. `_topology_kind_keys_and_stores` L1265-1271 (fast path with topology) — via emit_topology  
+3. `_run_close` non-dry-run (L2620, 2657) — full commit of close command
+4. `_run_test` async stream paths (L710-725) — hard, needs async test
+5. `commands/pop.py` (18 miss) — add/rm/export error paths
 
-### Architecture insight: _COMMANDS excludes
-- `_DEV_COMMANDS = {"test", "compile", "validate", "store"}` — go through direct dispatch
-- `_SETUP_COMMANDS = {"init", "whoami", "ls", "add", "rm", "export"}` — also direct
-- For vertex-first dispatch, vertex name must NOT be in _COMMANDS
-- So `main(["myv", "store"])` where "myv" resolves → _dispatch_observer("myv", vpath, ["store"]) → _run_store([], vertex_path=vpath) → L2384!
+### Architecture: _topology_kind_keys_and_stores L1265
+Called via `_resolve_entity_refs` in `cmd_emit` when payload has "kind/value" references.
+OR called via `_ensure_topology()` closure in `_resolve_entity_refs`.
+To test: emit with payload containing "thread/my-task" style cross-reference.
 
-### Quick wins remaining in fetch.py
-- L2013-2015: `query = first` when first arg isn't a vertex in _run_stream
-  - Use `main(["read", "--facts", "--since", "1h"])` → route to stream via facts+since
-  - But this needs local vertex to be resolved  
+### _run_close non-dry-run
+- Requires vertex with fold_by loop + fact with matching name + close without --dry-run
+- L2657: artifact kinds filtering (needs facts of kinds: decision, task, thread, change)

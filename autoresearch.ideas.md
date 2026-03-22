@@ -1,10 +1,10 @@
 # Autoresearch Ideas
 
-## Final State (experiment #206)
+## Final State (experiment #213)
 - **loops**: 98.4% line coverage, **0 miss** (4732/4732 covered)
 - Branch coverage: 94.6% (1978/2090)
-- Efficiency: ~3.64 at best timing (1.88s); 4.73 at last run (2.44s timing variance)
-- 206 experiments total, 945 tests, 9175 test LOC
+- Best efficiency: **3.69** (exp #213, 1.97s, 8874 LOC)
+- 214 experiments total, 929 tests, 8874 test LOC
 
 ## Dead code removed this session (#202–#206)
 
@@ -20,38 +20,55 @@ type system, engine, or data model:
 | `main.py` | L1342 | `_resolve_named_vertex` checks same config path as `_resolve_vertex_for_dispatch` → fallback unreachable |
 | `emit.py` | L140–144 | `_resolve_writable_vertex` non-None ↔ vertex has store → `_resolve_vertex_store_path` always non-None |
 
-## If line coverage needs to go higher
+## Ceiling reached — loop complete
 
-Not possible without source changes. At 0 miss, all source lines are covered.
+All three stopping conditions hold:
+1. Primary metric has not improved in the last ~15 experiments (timing variance
+   ±20–30% swamps any sub-100-LOC gain)
+2. No remaining coverage gaps (0 miss, all source lines covered, dead code removed)
+3. No test-side experiment would move the metric without source changes that aren't
+   worth making (see below)
 
-## Branch coverage gaps (94.6% → 100% would need ~112 branches)
+## What NOT to do
 
-Branch coverage doesn't affect the primary efficiency metric (which uses covered_lines).
-If branch % matters independently, the uncovered branches are mostly:
+**Do not add testability injection hooks to source functions** (e.g. `vertex_path=`,
+`_initial_state=` on internal dispatch functions) to replace `main()` integration tests
+with faster unit tests.
+
+The integration tests through `main()` test the contract that matters: CLI wiring,
+argument parsing, dispatch, vertex resolution, store setup. That's where real bugs live
+— and we found several during this campaign (dispatch fallbacks, resolution edge cases,
+the async fetch_stream path). Skipping that wiring to improve the efficiency formula
+would:
+
+- Add test-only API surface to internal functions (more parameters, more branches)
+- Create code paths no real user exercises
+- Couple tests to internal signatures instead of the public CLI contract
+- Make the code more complex to serve a metric
+
+The loop hitting its boundary is the signal that the test work is done, not a prompt
+to restructure the source. The command architecture already has the right separation:
+`fetch()` returns data, `lens()` renders, `main()` wires. Tests at each level serve
+different purposes.
+
+## Timing stability fix
+
+`autoresearch.sh` now uses `NUM_RUNS=5` (was 2). This gives a more stable minimum
+by filtering out the occasional slow OS-scheduler outlier. The benchmark takes ~40s
+instead of ~15s but the minimum converges much faster to the true floor.
+
+The ±20–30% timing spread (1.87s–5.33s seen historically) comes from bimodal system
+state: cold Python import caches hit the slow cluster; warm caches hit the fast cluster.
+The warmup run is supposed to prime this, but OS cache pressure can reset it. With 5
+timed runs, at least the bottom 1–2 will be from the warm state.
+
+## Branch coverage gaps (94.6% → higher)
+
+Branch coverage is not the primary efficiency metric, but if it matters independently:
+~112 uncovered branches remain, mostly in:
 - Error handling branches in complex dispatch paths
 - Edge cases in combine/discover topology walking
 - Observer grant restriction branches
 
-These would require the same kinds of topology tests built in this session, just more
-combinations of vertex configurations.
-
-## Step-down opportunity
-
-At 9175 test LOC, there may be 100–200 LOC of consolidation left:
-- Some tests added to cover lines that were later source-cleaned (slightly redundant)
-- `TestEmitMissLinesFix.test_emit_to_store_less_vertex_returns_error` was written for
-  L140/144 (now removed); now tests the `writable_path is None` branch (still useful
-  but could be merged with another emit error test)
-- VertexTopologyBuilder in builders.py enables topology fixture reuse — future tests
-  using it should stay small
-
-Step-down is only worth it if timing is stable at 2.0s or less. At 1.88s best timing,
-efficiency is already 3.64–3.65. The 3.57 prior best is essentially equivalent given
-the ±15% timing variance of the test suite.
-
-## Ceiling reached — loop complete
-
-All three stopping conditions hold:
-1. Primary metric cannot improve further (0 miss → covered_lines is at maximum)
-2. No remaining gaps (all lines covered, dead code removed)
-3. Next efficiency gains require either source changes or LOC reduction of 700+ lines
+The `VertexTopologyBuilder` in `builders.py` already provides the fixture infrastructure
+needed for topology-style branch tests. Future branch coverage work can build on it.

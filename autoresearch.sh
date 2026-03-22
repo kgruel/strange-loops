@@ -17,7 +17,7 @@ set -euo pipefail
 PKG="loops"
 TEST_DIR="apps/loops/tests"
 SRC_DIR="apps/loops/src/loops"
-NUM_RUNS=2
+NUM_RUNS=5
 PYTEST_EXTRA="--ignore=apps/loops/tests/golden"
 
 # --- Pre-check: syntax errors in test files ---

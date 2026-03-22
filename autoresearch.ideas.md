@@ -43,3 +43,24 @@
 - 94 out of 100 experiments kept (94% success rate!) 
 - We've reduced miss from 1878 → 859 (54.3% reduction!)
 - main.py went from 71% → 93.2% coverage
+
+## Dead code candidates (confirmed by coverage exhaustion)
+- `stream.py L192`: `return payload[key]` in second "last resort" loop — unreachable because the first loop (L165-178) already checks the same `_LABEL_FIELDS` keys; second loop can never find something first loop missed
+- `lenses/fold.py L182`: `label = "Skipped"` — `skipped_sections` only populated inside `refs_filter` or `facts_filter` blocks, so the `else: label = "Skipped"` branch requires neither filter but non-empty skipped_sections, which is structurally impossible
+- `commands/store.py L91`: `info["payload_keys"] = []` — only hit when `recent[0].payload` is not a dict; `Fact.payload` is always a dict in practice
+- `commands/vertices.py L118`: `continue` — inside `sorted(base_dir.glob("**/*.vertex"))` loop, suffix check `!= ".vertex"` is always False since glob only returns .vertex files
+
+## Remaining TUI misses (64 lines)
+- `tui/autoresearch_app.py` 23 miss — most are render branches for empty/edge states and _on_start async path
+- `tui/store_app.py` 41 miss — similar pattern; many are _load_store async path lines
+
+## emit.py (39 miss) — hardest cluster
+- Population template paths (multi-template, from-file) require complex vertex setup
+- Store resolution error paths (no writable vertex in dry-run vs non-dry-run)
+- Entity ref resolution paths need cross-vertex topology with refs in payloads
+
+## resolve.py (14 miss) — topology cache paths
+- L191: stale store path (topology cache entry has path that no longer exists)
+- L253-254: emit_topology exception catch (best-effort cache refresh)
+- L284-285: _resolve_entity_refs LoopsError on writable vertex
+- L297: topology cache hit (fast path in _topology_kind_keys_and_stores)

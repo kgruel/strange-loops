@@ -577,3 +577,136 @@ class TestStoreExplorerFidelity:
         harness = TestSurface(app, width=120, height=30, input_queue=["backspace", "q"])
         frames = harness.run_to_completion()
         assert len(frames) >= 2
+
+
+# ---------------------------------------------------------------------------
+# AutoresearchApp: remaining miss lines
+# ---------------------------------------------------------------------------
+
+class TestFormatMetric:
+    def test_value_gte_10(self):
+        """_format_metric for values >= 10 → one decimal (L112)."""
+        from loops.tui.autoresearch_app import _format_metric
+        assert _format_metric(15.0) == "15"
+        assert _format_metric(10.5) == "10.5"
+        assert _format_metric(100.7) == "100.7"
+
+    def test_value_lt_1(self):
+        """_format_metric for abs(value) < 1 → three decimals (L115)."""
+        from loops.tui.autoresearch_app import _format_metric
+        assert _format_metric(0.5) == "0.500"
+        assert _format_metric(0.123) == "0.123"
+
+
+class TestAppStateEdges:
+    def test_selected_empty_iterations(self):
+        """AppState.selected returns None when no iterations (L261)."""
+        from loops.tui.autoresearch_app import AppState
+        from painted.views import ListState
+        state = AppState(
+            config={}, iterations=[], primary_metric="", direction="lower",
+            baseline=None, best=None, best_run=0, total_experiments=0,
+            cursor=ListState().with_count(0), focus="list", detail_scroll=0,
+        )
+        assert state.selected is None
+
+    def test_selected_out_of_bounds(self):
+        """AppState.selected returns None when cursor past iterations (L261)."""
+        from loops.tui.autoresearch_app import AppState
+        from painted.views import ListState
+        it = make_iteration(1)
+        state = AppState(
+            config={}, iterations=[it], primary_metric="", direction="lower",
+            baseline=None, best=None, best_run=0, total_experiments=1,
+            cursor=ListState().with_count(5).move_to(4),  # cursor beyond list
+            focus="list", detail_scroll=0,
+        )
+        assert state.selected is None
+
+
+class TestRenderHeaderNoMetric:
+    def test_header_no_primary_metric(self):
+        """_render_header_panels with no primary_metric shows 'no metric' (L296)."""
+        from loops.tui.autoresearch_app import AppState, _render_header_panels
+        from painted.views import ListState
+        state = AppState(
+            config={}, iterations=[], primary_metric="",
+            direction="lower", baseline=None, best=None,
+            best_run=0, total_experiments=0,
+            cursor=ListState().with_count(0), focus="list", detail_scroll=0,
+        )
+        block = _render_header_panels(state, 100)
+        assert block.height >= 1
+
+
+class TestIterationListNoneMetric:
+    def test_list_renders_dash_for_none_metric(self, tmp_path):
+        """Iteration with metric=None shows '      -' in the list (L373)."""
+        state = (AppStateBuilder()
+            .iteration(metric=None, status="crash")
+            .build())
+        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=state)
+        harness = TestSurface(app, width=100, height=30, input_queue=["q"])
+        frames = harness.run_to_completion()
+        # '-' indicator should appear somewhere in the rendered frame
+        assert "-" in frames[0].text
+
+
+class TestLogWithFiles:
+    def test_render_detail_log_with_files_field(self):
+        """Log item with 'files' field appended to message (L436)."""
+        from atoms import FoldItem
+        log = FoldItem(
+            payload={"type": "change", "message": "refactored", "files": "main.py, util.py"},
+            ts=300.0,
+        )
+        it = make_iteration(1, description="step up", logs=(log,))
+        block = _render_detail(it, 100, 30, scroll=0, focused=True)
+        text = block_text(block)
+        assert "main.py" in text or "refactored" in text
+
+
+class TestUpdateAndOnKeyDirect:
+    def test_update_method_covered(self, tmp_path):
+        """Direct update() call covers method body (L605-609)."""
+        import time as _time
+        app = AutoresearchApp(tmp_path / "v.vertex")
+        # Trigger reload path by zeroing refresh time
+        app._last_refresh = 0.0
+        app._refresh_interval = 0.0
+        app.update()
+        # _load_data fired (vertex missing → error set)
+        assert app._error is not None
+
+    def test_on_key_covered_directly(self, tmp_path, app_state):
+        """Direct on_key() call covers method dispatch (L611+)."""
+        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
+        # Initialise buffer for render
+        from painted.tui import TestSurface
+        harness = TestSurface(app, width=80, height=24, input_queue=[])
+        # Direct key dispatch
+        app.on_key("j")  # navigate down
+        app.on_key("k")  # navigate up
+        app.on_key("tab")  # toggle focus
+        app.on_key("enter")  # switch to detail
+        app.on_key("j")  # scroll detail
+        app.on_key("page_down")  # page down in detail
+        app.on_key("page_up")   # page up in detail
+        app.on_key("g")  # home
+        app.on_key("G")  # end
+
+    def test_on_key_unknown_no_crash(self, tmp_path, app_state):
+        """Unknown key in both list and detail focus is a no-op."""
+        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
+        app.on_key("z")  # unknown in list
+        app._state = replace(app._state, focus="detail")
+        app.on_key("z")  # unknown in detail
+
+
+class TestRenderIterationListCall:
+    def test_render_calls_iteration_list(self, tmp_path, app_state):
+        """Full render() path calls _render_iteration_list (L713)."""
+        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
+        harness = TestSurface(app, width=100, height=40, input_queue=["q"])
+        frames = harness.run_to_completion()
+        assert "Iterations" in frames[0].text

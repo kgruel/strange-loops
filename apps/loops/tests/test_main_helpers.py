@@ -161,3 +161,18 @@ class TestResolveNamedStore:
         vf.write_text('name "proj"\nloops { m { fold { n "inc" } } }\n')
         with pytest.raises(FileNotFoundError, match="has no store"):
             _resolve_named_store("proj")
+
+class TestDispatchVerbFirst:
+    def test_unknown_verb_returns_error(self, tmp_path, monkeypatch, capsys):
+        """_dispatch_verb_first with unknown verb returns 1 (L3244-3245)."""
+        from loops.main import _dispatch_verb_first
+        result = _dispatch_verb_first("bazinga", [])
+        assert result == 1
+
+class TestApplyVertexScope:
+    def test_ioerror_returns_none(self, tmp_path):
+        """_apply_vertex_scope with OSError reading file (L3205-3206)."""
+        from loops.main import _apply_vertex_scope
+        # non-existent path → OSError
+        result = _apply_vertex_scope(None, tmp_path / "nonexistent.vertex")
+        assert result is None

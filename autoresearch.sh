@@ -5,12 +5,8 @@ set -euo pipefail
 #
 # Primary metric: efficiency = test_LOC × test_time_s / covered_lines (lower = better)
 #
-# Current target: atoms library
-#
-# Keep/discard rule (applied by caller, not this script):
-#   covered_lines increased → keep (coverage gained)
-#   covered_lines unchanged AND efficiency improved → keep
-#   otherwise → discard
+# Noise reduction: 1 warmup run + 3 timed runs, take minimum time.
+# Coverage is deterministic — parsed from the last run only.
 #
 # See autoresearch.md for full methodology.
 
@@ -18,6 +14,7 @@ set -euo pipefail
 PKG="engine"
 TEST_DIR="libs/engine/tests"
 SRC_DIR="libs/engine/src/engine"
+NUM_RUNS=3
 
 # --- Pre-check: syntax errors in test files ---
 for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
@@ -31,47 +28,49 @@ for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
     TEST_LOC=$((TEST_LOC + LOC))
 done
 
-# --- Clean previous coverage data ---
+# --- Warmup run (no coverage, primes caches) ---
+echo "Warmup run..."
 rm -f .coverage coverage.json
+uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short 2>&1 | tail -3
 
-# --- Run tests with coverage ---
-echo "Running $PKG tests with coverage..."
-START=$(uv run python -c "import time; print(time.monotonic())")
+# --- Timed runs: collect times, keep coverage from last ---
+TIMES=()
+for i in $(seq 1 $NUM_RUNS); do
+    rm -f .coverage coverage.json
+    echo "Timed run $i/$NUM_RUNS..."
+    START=$(python3 -c "import time; print(time.monotonic())")
+    uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short \
+        --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1 | tail -3
+    END=$(python3 -c "import time; print(time.monotonic())")
+    T=$(python3 -c "print(round($END - $START, 3))")
+    TIMES+=("$T")
+    echo "  run $i: ${T}s"
+done
 
-uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short \
-    --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1 | tail -5
+# --- Take minimum time ---
+TEST_TIME=$(python3 -c "print(min($( IFS=,; echo "${TIMES[*]}" )))")
+echo "Times: ${TIMES[*]} → min: ${TEST_TIME}s"
 
-END=$(uv run python -c "import time; print(time.monotonic())")
-TEST_TIME=$(uv run python -c "print(round($END - $START, 3))")
-
-# --- Parse coverage results ---
+# --- Parse coverage from last run (deterministic, same across runs) ---
 COVERAGE_JSON=$(cat coverage.json)
 rm -f coverage.json .coverage
 
-COVERED=$(echo "$COVERAGE_JSON" | uv run python -c "import json,sys; d=json.load(sys.stdin); print(d['totals']['covered_lines'])")
-TOTAL=$(  echo "$COVERAGE_JSON" | uv run python -c "import json,sys; d=json.load(sys.stdin); print(d['totals']['num_statements'])")
-MISS=$(   echo "$COVERAGE_JSON" | uv run python -c "import json,sys; d=json.load(sys.stdin); print(d['totals']['missing_lines'])")
-PCT=$(    echo "$COVERAGE_JSON" | uv run python -c "import json,sys; d=json.load(sys.stdin); print(round(d['totals']['percent_covered'], 1))")
-
-BRANCH_COV=$(echo "$COVERAGE_JSON" | uv run python -c "
-import json,sys; d=json.load(sys.stdin)
-print(d['totals'].get('covered_branches', 0))
-")
-BRANCH_TOTAL=$(echo "$COVERAGE_JSON" | uv run python -c "
-import json,sys; d=json.load(sys.stdin)
-print(d['totals'].get('num_branches', 0))
-")
-BRANCH_PCT=$(echo "$COVERAGE_JSON" | uv run python -c "
-import json,sys; d=json.load(sys.stdin)
+# Parse all coverage fields in one Python call
+read COVERED TOTAL MISS PCT BRANCH_COV BRANCH_TOTAL BRANCH_PCT <<< $(echo "$COVERAGE_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
 t = d['totals']
-nb = t.get('num_branches', 0); cb = t.get('covered_branches', 0)
-print(round(100 * cb / nb, 1) if nb > 0 else 0)
+nb = t.get('num_branches', 0)
+cb = t.get('covered_branches', 0)
+bpct = round(100 * cb / nb, 1) if nb > 0 else 0
+print(t['covered_lines'], t['num_statements'], t['missing_lines'],
+      round(t['percent_covered'], 1), cb, nb, bpct)
 ")
 
 # Per-file miss breakdown
-MISSING=$(echo "$COVERAGE_JSON" | uv run python -c "
-import json,sys
-d=json.load(sys.stdin)
+MISSING=$(echo "$COVERAGE_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
 for fname, fdata in sorted(d['files'].items()):
     lines = fdata.get('missing_lines', [])
     if lines:
@@ -83,13 +82,13 @@ for fname, fdata in sorted(d['files'].items()):
 if [ "$COVERED" -eq 0 ]; then
     EFFICIENCY=99999
 else
-    EFFICIENCY=$(uv run python -c "print(round($TEST_LOC * $TEST_TIME / $COVERED, 2))")
+    EFFICIENCY=$(python3 -c "print(round($TEST_LOC * $TEST_TIME / $COVERED, 2))")
 fi
 
 echo ""
 echo "=== Coverage Efficiency ($PKG) ==="
 echo "Test LOC:        $TEST_LOC"
-echo "Test time:       ${TEST_TIME}s"
+echo "Test time:       ${TEST_TIME}s (min of $NUM_RUNS runs)"
 echo "Covered lines:   $COVERED / $TOTAL"
 echo "Missing lines:   $MISS"
 echo "Coverage:        ${PCT}%"

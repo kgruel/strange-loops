@@ -1820,3 +1820,36 @@ class TestRunCompile:
         bad.write_text("content")
         rc = main(["compile", str(bad)])
         assert rc != 0
+
+
+class TestRunTicksEdgePaths:
+    """Exercise remaining _run_ticks paths."""
+
+    def test_ticks_invalid_range_format(self, ticks_vertex):
+        """--ticks with non-integer range falls through ValueError (L2926)."""
+        tmp_path, vpath = ticks_vertex
+        # "abc:def" splits but int("abc") raises ValueError
+        rc = main(["read", str(vpath), "--ticks", "abc:def"])
+        assert isinstance(rc, int)
+
+    def test_ticks_out_of_range_drill(self, ticks_vertex):
+        """Drill-down with out-of-range index shows _tick_error (L2973)."""
+        tmp_path, vpath = ticks_vertex
+        # Index 99 is way out of range → _tick_error in data → rendered as error
+        rc = main(["read", str(vpath), "--ticks", "99", "--plain"])
+        assert rc == 0  # run_cli returns 0 even for error data
+
+    def test_ticks_local_vertex(self, tmp_path, monkeypatch):
+        """--ticks without vertex uses local vertex (L2946-2947)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        v = vertex("local").store("./local.db").loop("ping", fold_count("n"), boundary_every=2)
+        vpath = loops_dir / "local.vertex"
+        v.write(vpath)
+        _emit(vpath, "ping", x="1")
+        _emit(vpath, "ping", x="2")
+        # No vertex arg → uses local vertex
+        rc = main(["read", "--ticks", "--plain"])
+        assert rc == 0

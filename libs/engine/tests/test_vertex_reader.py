@@ -1586,3 +1586,70 @@ class TestExtractField:
 
         result = _extract_field({"active": True}, "active")
         assert result == "True"
+
+
+class TestVertexFoldCombine:
+    """Cover vertex_fold combine path (L859-891)."""
+
+    def test_fold_combine_vertex(self, tmp_path):
+        """Combine vertex folds across children."""
+        from engine.vertex_reader import vertex_fold
+
+        # Create child vertex with its own store
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vertex = child_dir / "child.vertex"
+        child_vertex.write_text(
+            'name "child"\n'
+            'store "store.db"\n'
+            'loops {\n'
+            '  metric { fold { n "inc" } }\n'
+            '}\n'
+        )
+        _seed_facts(child_dir / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "payload": {}},
+            {"kind": "metric", "ts": 2000.0, "payload": {}},
+        ])
+
+        # Create parent combine vertex (no own loops → uses child specs)
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{child_vertex}"\n'
+            '}\n'
+        )
+
+        result = vertex_fold(parent_vertex)
+        assert result is not None
+
+    def test_fold_combine_with_observer_filter(self, tmp_path):
+        """Combine vertex with observer filter."""
+        from engine.vertex_reader import vertex_fold
+
+        # Create child vertex
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vertex = child_dir / "child.vertex"
+        child_vertex.write_text(
+            'name "child"\n'
+            'store "store.db"\n'
+            'loops {\n'
+            '  metric { fold { n "inc" } }\n'
+            '}\n'
+        )
+        _seed_facts(child_dir / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "observer": "alice", "payload": {}},
+            {"kind": "metric", "ts": 2000.0, "observer": "bob", "payload": {}},
+        ])
+
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{child_vertex}"\n'
+            '}\n'
+        )
+
+        result = vertex_fold(parent_vertex, observer="alice")
+        assert result is not None

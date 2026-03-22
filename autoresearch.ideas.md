@@ -1,46 +1,47 @@
 # Autoresearch Ideas: engine Coverage Efficiency
 
-## Current state: 89.2% line, 81.6% branch — 205 miss
-
-## Progress: 83.4% → 89.2% (+136 lines covered, efficiency 6.97 → 5.51)
+## Current state: 91.6% line, 85.0% branch — 152 miss
+## Progress: 83.4% → 91.6% (+189 lines covered)
 
 ## Remaining by file
 
-### vertex_reader.py (~117 miss)
-- vertex_fold combine/overlay paths (23 miss)
-- _collect_topology_info (15 miss) — needs discover/combine .vertex files
-- vertex_fact_by_id combine path (15 miss)
-- _specs_match (10 miss) — spec comparison for merge validation
-- _collect_source_specs (8 miss) — merge source specs
-- _combined_read (8 miss) — combine read paths
-- Various combine/discover functions (~38 miss total)
-- These all need setup with multiple .vertex files + stores — moderate cost
+### vertex_reader.py (108 miss — 71% of remaining)
+- vertex_fold combine/overlay paths (23 miss) — needs combine vertex + store
+- _collect_topology_info (15 miss) — multi-vertex topology info
+- vertex_fact_by_id combine path (15 miss) — combined fact lookup
+- _specs_match: DONE ✓
+- _collect_source_specs (8 miss) — merge source specs from children
+- _combined_read (8 miss) — combine read path
+- _combined_search (6 miss) — combine search path
+- _resolve_discover_stores (5 miss) — glob resolution for discover
+- _raw_to_fold_state (5 miss) — edges in fold normalization
+- Various small: _combined_summary(4), _merge_from(3), _loops_home(2), etc.
+- **All combine/discover paths need multi-vertex file + store setups**
 
-### vertex.py (~57 miss)
-- evaluate_boundaries (16 miss) — complex state machine
-- _evaluate_vertex_only_boundaries (24 miss) — vertex-level boundary eval
-- replay fast path edges (L617-633)
-- These need careful state setup with stored ticks + facts
+### compiler.py (15 miss)
+- collect_search_fields template source (14 miss, L824-837) — needs template + params
+- compile_sources relative path (L450) — needs .loop file
 
-### compiler.py (~16 miss)
-- collect_search_fields template source (14 miss) — needs template + from_file
-- compile_sources simple path (L450)
-- materialize_vertex parse_pipelines (L940)
+### vertex.py (14 miss)
+- L434: receive child route miss
+- L648: parse pipeline None in replay
+- L688-692: ticks_since for period start (5 lines)
+- L728: period_start > since_ts
+- L765-770: mixed boundary conditions in evaluate_boundaries
 
-### Other files (~15 miss)
-- sqlite_store.py: 8 miss — _detect_fact_build __func__ path
-- executor.py: 2 miss — sync_fact/fact tick appends
-- builder/cadence/loop/program: 5 miss — mostly dead code/unreachable
+### sqlite_store.py (8 miss)
+- L44: _mapping_proxy_default TypeError
+- L121-127: _detect_fact_build __func__ edge case
 
-## Test SDK
-`libs/engine/tests/vertex_test_sdk.py` — fluent builder for runtime Vertex objects.
+### Small files (7 miss)
+- builder.py (2), cadence.py (2), executor.py (2), loop.py (1)
 
-## Compression opportunities (step-down candidates)
-- test_vertex.py boundary tests: heavy Loop() construction repetition
-- test_compiler.py KDL parsing patterns  
-- test_vertex_reader.py vertex file + seed patterns
+## Active approaches
+- inject_fact helper — reduces boilerplate for store-based tests
+- VertexTestBuilder SDK — fluent builder for Vertex+Store+Loop combos
 
-## Strategy
-- combine/discover paths in vertex_reader: test with real multi-vertex setups
-- vertex evaluate_boundaries: use SDK with boundary configurations
-- Or: shift to step-down (compression) to improve efficiency before pushing deeper
+## Diminishing returns
+Most remaining lines need multi-vertex file setups (combine/discover in vertex_reader)
+or template source configurations (compiler). ROI is ~10+ LOC per covered line.
+
+Consider moving to the next package (lang, store, or loops) for fresh gains.

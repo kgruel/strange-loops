@@ -585,3 +585,99 @@ class TestExportImport:
         assert 'containers "collect" 50' in result
         assert "boundary" in result
         assert 'emit "test"' in result
+
+
+class TestPopulationEdgeCoverage:
+    """Cover population.py frozen types + list_file_header edges."""
+
+    def test_population_row_repr(self):
+        from lang.population import PopulationRow
+        row = PopulationRow.__new__(PopulationRow)
+        object.__setattr__(row, "key", "test")
+        object.__setattr__(row, "values", {"a": "1"})
+        r = repr(row)
+        assert "PopulationRow" in r
+
+    def test_population_row_eq_different_type(self):
+        from lang.population import PopulationRow
+        row = PopulationRow.__new__(PopulationRow)
+        object.__setattr__(row, "key", "test")
+        object.__setattr__(row, "values", {"a": "1"})
+        assert row.__eq__("not a row") is NotImplemented
+
+    def test_population_row_setattr_raises(self):
+        from lang.population import PopulationRow
+        row = PopulationRow.__new__(PopulationRow)
+        object.__setattr__(row, "key", "test")
+        object.__setattr__(row, "values", {})
+        with pytest.raises(AttributeError, match="cannot assign"):
+            row.key = "x"
+
+    def test_population_row_delattr_raises(self):
+        from lang.population import PopulationRow
+        row = PopulationRow.__new__(PopulationRow)
+        object.__setattr__(row, "key", "test")
+        object.__setattr__(row, "values", {})
+        with pytest.raises(AttributeError, match="cannot delete"):
+            del row.key
+
+    def test_population_info_repr(self):
+        from lang.population import PopulationInfo
+        info = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        r = repr(info)
+        assert "PopulationInfo" in r
+
+    def test_population_info_eq_different_type(self):
+        from lang.population import PopulationInfo
+        info = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        assert info.__eq__("not info") is NotImplemented
+
+    def test_population_info_setattr_raises(self):
+        from lang.population import PopulationInfo
+        info = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        with pytest.raises(AttributeError, match="cannot assign"):
+            info.template_name = "x"
+
+    def test_population_info_delattr_raises(self):
+        from lang.population import PopulationInfo
+        info = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        with pytest.raises(AttributeError, match="cannot delete"):
+            del info.template_name
+
+    def test_list_file_header_missing_file(self, tmp_path):
+        from lang.population import list_file_header
+        result = list_file_header(tmp_path / "nonexistent.list")
+        assert result == []
+
+    def test_list_file_header_empty_file(self, tmp_path):
+        from lang.population import list_file_header
+        f = tmp_path / "empty.list"
+        f.write_text("")
+        result = list_file_header(f)
+        assert result == []
+
+    def test_list_file_header_with_comments(self, tmp_path):
+        from lang.population import list_file_header
+        f = tmp_path / "data.list"
+        f.write_text("# comment\n\nkind host port\n")
+        result = list_file_header(f)
+        assert result == ["kind", "host", "port"]
+
+    def test_list_file_header_only_comments(self, tmp_path):
+        from lang.population import list_file_header
+        f = tmp_path / "comments.list"
+        f.write_text("# comment 1\n# comment 2\n")
+        result = list_file_header(f)
+        assert result == []

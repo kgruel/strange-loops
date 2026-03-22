@@ -466,8 +466,8 @@ class TestEvaluateBoundariesMixed:
 
         # Receive a metric fact to build fold state (n=1)
         v.receive(fact("metric", v=1))
-        # Insert a session fact directly into store (bypass receive to avoid live-fire)
-        now = _time.time()
+        # Insert a session fact slightly in the future to ensure it's in the scan window
+        now = _time.time() + 1.0
         d = Fact.to_dict(Fact.of("session", "test", status="closed"))
         d["ts"] = now
         from engine.sqlite_store import _gen_id
@@ -508,7 +508,7 @@ class TestEvaluateBoundariesMixed:
             conditions=(BoundaryCondition(target="n", op=">=", value=999),))
 
         # Insert session fact directly — conditions won't be met (n=0 < 999)
-        now = _time.time()
+        now = _time.time() + 1.0
         d = Fact.to_dict(Fact.of("session", "test", status="closed"))
         d["ts"] = now
         from engine.sqlite_store import _gen_id
@@ -715,19 +715,22 @@ class TestEvaluateVertexOnlyConditionsFiring:
             deserialize=Fact.from_dict,
         )
         v = Vertex("proj", store=store)
-        spec = Spec(name="metric", folds=(Count(target="n"),))
+        # Session loop accumulates count; boundary on session checks session.n
+        spec_s = Spec(name="session", folds=(Count(target="n"),))
         v.register_loop(Loop(
-            name="metric", initial=spec.initial_state(), fold=spec.apply,
+            name="session", initial=spec_s.initial_state(), fold=spec_s.apply,
         ))
-        # Vertex-only boundary (no loop boundaries)
-        v.register_vertex_boundary("metric",
+        # Vertex-only boundary on "session" with condition on session.n>=1
+        v.register_vertex_boundary("session",
             conditions=(BoundaryCondition(target="n", op=">=", value=1),))
 
-        # Receive a metric fact to build fold state (n=1)
-        v.receive(fact("metric", v=1))
-        # Insert another metric fact to be found by evaluate_boundaries
+        # Receive a session fact via receive to build fold state (n=1)
+        # This won't fire boundary because conditions are checked DURING receive
+        # and n=0 before fold → condition not met at that point
+        v.receive(fact("session", status="open"))
+        # Now session.n=1. Insert another session fact for evaluate_boundaries
         now = _time.time()
-        d = Fact.to_dict(Fact.of("metric", "test", v=2))
+        d = Fact.to_dict(Fact.of("session", "test", status="closed"))
         d["ts"] = now
         from engine.sqlite_store import _gen_id
         store._ensure_sync()
@@ -738,7 +741,7 @@ class TestEvaluateVertexOnlyConditionsFiring:
         store._conn.commit()
 
         ticks = v.evaluate_boundaries()
-        assert len(ticks) >= 1
+        assert len(ticks) >= 1  # Should fire — conditions met (counter.n>=1)
         store.close()
 
     def test_conditions_skip_non_matching_kind(self, tmp_path):
@@ -762,7 +765,7 @@ class TestEvaluateVertexOnlyConditionsFiring:
             conditions=(BoundaryCondition(target="n", op=">=", value=1),))
 
         # Insert a metric fact (wrong kind for boundary)
-        now = _time.time()
+        now = _time.time() + 1.0
         d = Fact.to_dict(Fact.of("metric", "test", v=1))
         d["ts"] = now
         from engine.sqlite_store import _gen_id

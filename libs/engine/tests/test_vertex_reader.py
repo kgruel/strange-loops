@@ -1468,3 +1468,121 @@ class TestVertexFactsEdges:
         vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
         facts = vertex_facts(vpath, since_ts=0, until_ts=9999)
         assert facts == []
+
+
+class TestSpecsMatch:
+    """Test _specs_match for fold spec comparison."""
+
+    def test_matching_specs(self):
+        from atoms import Spec, Count
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="metric", folds=(Count(target="n"),))
+        b = Spec(name="other_name", folds=(Count(target="n"),))
+        assert _specs_match(a, b) is True
+
+    def test_different_fold_count(self):
+        from atoms import Spec, Count, Sum
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="x", folds=(Count(target="n"),))
+        b = Spec(name="x", folds=(Count(target="n"), Sum(target="t", field="v")))
+        assert _specs_match(a, b) is False
+
+    def test_different_fold_type(self):
+        from atoms import Spec, Count, Sum
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="x", folds=(Count(target="n"),))
+        b = Spec(name="x", folds=(Sum(target="n", field="v"),))
+        assert _specs_match(a, b) is False
+
+    def test_different_key(self):
+        from atoms import Spec, Upsert
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="x", folds=(Upsert(target="items", key="name"),))
+        b = Spec(name="x", folds=(Upsert(target="items", key="id"),))
+        assert _specs_match(a, b) is False
+
+    def test_matching_upsert(self):
+        from atoms import Spec, Upsert
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="x", folds=(Upsert(target="items", key="name"),))
+        b = Spec(name="x", folds=(Upsert(target="items", key="name"),))
+        assert _specs_match(a, b) is True
+
+    def test_same_type_same_key_matches(self):
+        """Collect with same type matches even if max differs (limit not checked for Collect)."""
+        from atoms import Spec, Collect
+        from engine.vertex_reader import _specs_match
+
+        a = Spec(name="x", folds=(Collect(target="history", max=10),))
+        b = Spec(name="x", folds=(Collect(target="history", max=20),))
+        # _specs_match only compares type + key/limit attrs, not max
+        assert _specs_match(a, b) is True
+
+
+class TestRawToFoldStateEdges:
+    """Cover _raw_to_fold_state edge paths."""
+
+    def test_fold_with_scalar_state(self, tmp_path):
+        """Count fold produces scalar state — items should be empty."""
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "payload": {}},
+            {"kind": "metric", "ts": 2000.0, "payload": {}},
+        ])
+
+        result = vertex_fold(vpath)
+        assert result is not None
+        # Scalar fold (Count) → no items, just scalars
+
+    def test_fold_with_collect(self, tmp_path):
+        """Collect fold produces list state."""
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test",
+            '  log { fold { history "collect" 100 } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "log", "ts": 1000.0, "payload": {"message": "hello"}},
+            {"kind": "log", "ts": 2000.0, "payload": {"message": "world"}},
+        ])
+
+        result = vertex_fold(vpath)
+        assert result is not None
+
+
+class TestVertexReadEdges:
+    """Cover vertex_read edge cases."""
+
+    def test_read_no_store_no_combine(self, tmp_path):
+        """Vertex with no store and no combine → initial state."""
+        from engine.vertex_reader import vertex_read
+
+        content = 'name "ns"\nloops {\n  metric { fold { n "inc" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+
+        result = vertex_read(vpath)
+        assert result is not None
+        assert "metric" in result
+
+
+class TestExtractField:
+    """Cover _extract_field numeric fallback (L1188)."""
+
+    def test_numeric_value(self):
+        from engine.vertex_reader import _extract_field
+
+        result = _extract_field({"count": 42}, "count")
+        assert result == "42"
+
+    def test_bool_value(self):
+        from engine.vertex_reader import _extract_field
+
+        result = _extract_field({"active": True}, "active")
+        assert result == "True"

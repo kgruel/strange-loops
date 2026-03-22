@@ -2087,6 +2087,18 @@ class TestRunTicksEdgePaths:
 class TestRenderFoldPlainEdges:
     """Exercise remaining _render_fold_plain paths."""
 
+    def test_grouped_fold_salience_threshold(self, tmp_path, monkeypatch):
+        """Fold view with namespaced items >5 hits salience threshold (L301)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("threads").store("./threads.db").loop("thread", fold_by("name"))
+        vpath = tmp_path / "threads.vertex"
+        v.write(vpath)
+        # Emit 7 items with slash prefix (namespaced) — all salience=1 → L301 fires
+        for i in range(7):
+            _emit(vpath, "thread", name=f"design/item{i}")
+        rc = main(["read", str(vpath), "--plain", "-v"])
+        assert rc == 0
+
     def test_multi_section_separator(self, tmp_path, monkeypatch):
         """Multiple sections get blank-line separator (L2237)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

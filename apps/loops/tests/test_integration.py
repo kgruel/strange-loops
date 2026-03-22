@@ -1931,3 +1931,22 @@ class TestCmdEmitReinterpreteKind:
         v.write(loops_dir / "local.vertex")
         rc = main(["emit", "ping", "x=1"])
         assert rc == 0
+
+
+class TestCmdEmitMorePaths:
+    """Exercise more cmd_emit edge paths."""
+
+    def test_emit_no_vertex_errors(self, tmp_path, monkeypatch):
+        """emit with no vertex found shows error (L1646-1652)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # No .loops directory → no local vertex
+        rc = main(["emit", "ping", "x=1"])
+        assert rc == 1
+
+    def test_emit_with_thread_env(self, vertex_dir, monkeypatch):
+        """emit with LOOPS_THREAD set auto-tags payload (L1661)."""
+        tmp_path, vpath = vertex_dir
+        monkeypatch.setenv("LOOPS_THREAD", "my-feature-thread")
+        rc = main(["emit", str(vpath), "heartbeat", "service=api"])
+        assert rc == 0

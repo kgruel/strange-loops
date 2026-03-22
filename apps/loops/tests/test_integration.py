@@ -2057,3 +2057,19 @@ class TestSyncLogError:
         assert rc == 0
         out = capsys.readouterr()
         assert "Errors" in out.err or True
+
+
+class TestStreamLensVertex:
+    """Exercise _resolve_render_fn Tier 2 stream_view via vertex lens{} (L1928-1931)."""
+
+    def test_vertex_with_stream_lens_decl(self, vertex_dir):
+        """A vertex with lens { stream 'stream' } uses the declared stream lens (L1928-1931)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        # Append a stream lens block
+        content = vpath.read_text()
+        content += '\nlens {\n  stream "stream"\n}\n'
+        vpath.write_text(content)
+        # --facts mode uses stream view
+        rc = main(["read", str(vpath), "--facts", "--plain"])
+        assert rc == 0

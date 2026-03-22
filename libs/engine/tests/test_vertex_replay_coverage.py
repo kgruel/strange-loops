@@ -6,7 +6,7 @@ Targets: vertex.py replay fast paths (since_raw, replay_cursor),
 """
 import pytest
 
-from atoms import Fact
+from atoms import Fact, Spec, Count
 from engine import Loop, Vertex
 from engine.sqlite_store import SqliteStore
 
@@ -439,33 +439,89 @@ class TestEvaluateBoundariesMixed:
         assert isinstance(ticks, list)
         store2.close()
 
-    def test_mixed_boundary_with_conditions(self, tmp_path):
-        """Vertex boundary with conditions in mixed mode."""
+    def test_mixed_boundary_with_conditions_met(self, tmp_path):
+        """Mixed mode: vertex boundary with conditions met → fires."""
+        import time as _time
         from lang.ast import BoundaryCondition
+        from engine.sqlite_store import SqliteStore
+        import json
 
-        v, store = (VertexTestBuilder("proj")
-            .with_store(tmp_path)
-            .count_loop("metric", boundary_kind="metric", boundary_count=1)
-            .count_loop("session")
-            .build())
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("proj", store=store)
+        spec_m = Spec(name="metric", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="metric", initial=spec_m.initial_state(), fold=spec_m.apply,
+            boundary_kind="metric", boundary_count=100,
+        ))
+        spec_s = Spec(name="session", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="session", initial=spec_s.initial_state(), fold=spec_s.apply,
+        ))
         v.register_vertex_boundary("session",
             conditions=(BoundaryCondition(target="n", op=">=", value=1),))
 
+        # Receive a metric fact to build fold state (n=1)
         v.receive(fact("metric", v=1))
-        v.receive(fact("session", status="closed"))
+        # Insert a session fact directly into store (bypass receive to avoid live-fire)
+        now = _time.time()
+        d = Fact.to_dict(Fact.of("session", "test", status="closed"))
+        d["ts"] = now
+        from engine.sqlite_store import _gen_id
+        store._ensure_sync()
+        store._conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        )
+        store._conn.commit()
+
+        ticks = v.evaluate_boundaries()
+        assert len(ticks) >= 1  # Should fire — conditions met (n>=1)
         store.close()
 
-        v2, store2 = (VertexTestBuilder("proj")
-            .with_store(tmp_path)
-            .count_loop("metric", boundary_kind="metric", boundary_count=1)
-            .count_loop("session")
-            .build())
-        v2.register_vertex_boundary("session",
-            conditions=(BoundaryCondition(target="n", op=">=", value=1),))
-        v2.replay()
-        ticks = v2.evaluate_boundaries()
-        assert isinstance(ticks, list)
-        store2.close()
+    def test_mixed_boundary_with_conditions_not_met(self, tmp_path):
+        """Mixed mode: vertex boundary with conditions NOT met → skips."""
+        import time as _time
+        from lang.ast import BoundaryCondition
+        from engine.sqlite_store import SqliteStore
+        import json
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("proj", store=store)
+        spec_m = Spec(name="metric", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="metric", initial=spec_m.initial_state(), fold=spec_m.apply,
+            boundary_kind="metric", boundary_count=100,
+        ))
+        spec_s = Spec(name="session", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="session", initial=spec_s.initial_state(), fold=spec_s.apply,
+        ))
+        v.register_vertex_boundary("session",
+            conditions=(BoundaryCondition(target="n", op=">=", value=999),))
+
+        # Insert session fact directly — conditions won't be met (n=0 < 999)
+        now = _time.time()
+        d = Fact.to_dict(Fact.of("session", "test", status="closed"))
+        d["ts"] = now
+        from engine.sqlite_store import _gen_id
+        store._ensure_sync()
+        store._conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        )
+        store._conn.commit()
+
+        ticks = v.evaluate_boundaries()
+        assert ticks == []  # Conditions not met
+        store.close()
 
 
 class TestReplaySinceRawFastPath:
@@ -580,3 +636,143 @@ class TestReplaySinceRawFastPath:
         assert count == 2
         assert v2.state("metric")["n"] == 2
         store2.close()
+
+
+class TestReplayFallbackPath:
+    """Cover L636-648: replay fallback with routes/parse_pipelines."""
+
+    def test_replay_with_routes_empty_store(self, tmp_path):
+        """Routes set → fallback path, empty store → return 0."""
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("test", store=store)
+        v.register_loop(Loop(
+            name="metric", initial={"n": 0},
+            fold=lambda s, p: {**s, "n": s["n"] + 1},
+        ))
+        v.set_routes({"raw_metric": "metric"})
+        count = v.replay()
+        assert count == 0
+        store.close()
+
+    def test_replay_with_routes_hits_fallback(self, tmp_path):
+        """Routes set → fallback path, facts in store → routes applied during replay."""
+        from engine.sqlite_store import SqliteStore
+        import json
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # Insert facts with raw kind that routes to "metric"
+        from engine.sqlite_store import _gen_id
+        import time as _time
+        store._ensure_sync()
+        for i in range(2):
+            store._conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+                (_gen_id(), "raw_metric", _time.time() - 10 + i, "test", "", json.dumps({"value": i})),
+            )
+        store._conn.commit()
+        store.close()
+
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v2 = Vertex("test", store=store2)
+        v2.register_loop(Loop(
+            name="metric", initial={"n": 0},
+            fold=lambda s, p: {**s, "n": s["n"] + 1},
+        ))
+        v2.set_routes({"raw_metric": "metric"})
+        count = v2.replay()
+        assert count == 2
+        assert v2.state("metric")["n"] == 2
+        store2.close()
+
+
+class TestEvaluateVertexOnlyConditionsFiring:
+    """Cover L851-867: _evaluate_vertex_only_boundaries with conditions that fire."""
+
+    def test_conditions_fire_on_vertex_only_boundary(self, tmp_path):
+        """Vertex-only boundary with conditions met → tick fires (L864-867)."""
+        import time as _time
+        from lang.ast import BoundaryCondition
+        from engine.sqlite_store import SqliteStore
+        import json
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("proj", store=store)
+        spec = Spec(name="metric", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="metric", initial=spec.initial_state(), fold=spec.apply,
+        ))
+        # Vertex-only boundary (no loop boundaries)
+        v.register_vertex_boundary("metric",
+            conditions=(BoundaryCondition(target="n", op=">=", value=1),))
+
+        # Receive a metric fact to build fold state (n=1)
+        v.receive(fact("metric", v=1))
+        # Insert another metric fact to be found by evaluate_boundaries
+        now = _time.time()
+        d = Fact.to_dict(Fact.of("metric", "test", v=2))
+        d["ts"] = now
+        from engine.sqlite_store import _gen_id
+        store._ensure_sync()
+        store._conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        )
+        store._conn.commit()
+
+        ticks = v.evaluate_boundaries()
+        assert len(ticks) >= 1
+        store.close()
+
+    def test_conditions_skip_non_matching_kind(self, tmp_path):
+        """Non-matching kind gets skipped in vertex-only conditions path (L851)."""
+        import time as _time
+        from lang.ast import BoundaryCondition
+        from engine.sqlite_store import SqliteStore
+        import json
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("proj", store=store)
+        spec = Spec(name="metric", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="metric", initial=spec.initial_state(), fold=spec.apply,
+        ))
+        v.register_vertex_boundary("session",
+            conditions=(BoundaryCondition(target="n", op=">=", value=1),))
+
+        # Insert a metric fact (wrong kind for boundary)
+        now = _time.time()
+        d = Fact.to_dict(Fact.of("metric", "test", v=1))
+        d["ts"] = now
+        from engine.sqlite_store import _gen_id
+        store._ensure_sync()
+        store._conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        )
+        store._conn.commit()
+
+        ticks = v.evaluate_boundaries()
+        assert ticks == []  # wrong kind → skipped
+        store.close()

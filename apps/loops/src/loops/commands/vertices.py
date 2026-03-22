@@ -114,8 +114,6 @@ def _walk_root(root_path: Path, home: Path) -> list[dict[str, Any]]:
     if not vertices:
         base_dir = root_path.parent
         for match in sorted(base_dir.glob("**/*.vertex")):
-            if match.suffix != ".vertex":
-                continue
             if match.resolve() == root_path.resolve():
                 continue
             try:

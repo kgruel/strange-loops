@@ -172,14 +172,13 @@ def fold_view(
     footer_parts: list[str] = []
     if skipped_sections:
         parts = [f"{count} {kind}" for kind, count in skipped_sections]
+        # skipped_sections only populates via refs_filter or facts_filter paths
         if refs_filter and facts_filter:
             label = "Filtered"
         elif refs_filter:
             label = "No refs"
-        elif facts_filter:
-            label = "No history"
         else:
-            label = "Skipped"
+            label = "No history"
         footer_parts.append(f"{label}: {', '.join(parts)}")
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
@@ -257,13 +256,12 @@ def _render_grouped(
 ) -> Block:
     """Render by-fold items grouped by namespace prefix."""
     # When --refs is active, filter to only connected items
+    # (fold_view already skips fully-disconnected sections, so items is non-empty)
     if "refs" in visible:
         items = tuple(
             i for i in items
             if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
         )
-        if not items:
-            return Block.text("  (no connected items)", fp.collapse, width=width)
 
     groups = _group_by_namespace(items, key_field)
 
@@ -343,13 +341,12 @@ def _render_flat(
     is_by = fold_type == "by"
 
     # When --refs is active, filter to only connected items
+    # (fold_view already skips fully-disconnected sections, so items is non-empty)
     if "refs" in visible and is_by:
         items = tuple(
             i for i in items
             if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
         )
-        if not items:
-            return Block.text("  (no connected items)", fp.collapse, width=width)
 
     if is_by:
         sorted_items: tuple[FoldItem, ...] | list[FoldItem] = sorted(

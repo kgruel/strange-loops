@@ -5,10 +5,11 @@ set -euo pipefail
 #
 # Primary metric: efficiency = test_LOC × test_time_s / covered_lines (lower = better)
 #
-# Noise reduction: 1 warmup run + 3 timed runs, take minimum time.
-# Parses pytest's internal duration from output ("N passed in X.XXs") to
-# exclude uv startup overhead.
-# Coverage is deterministic — parsed from the last run only.
+# Timing and coverage are measured separately — coverage instrumentation adds
+# ~1.7x overhead that would inflate the efficiency metric.
+# Noise reduction: 1 warmup + N clean timed runs, take minimum.
+# Parses pytest's internal duration ("N passed in X.XXs") to exclude uv overhead.
+# Coverage is deterministic — one instrumented run, parsed separately.
 #
 # See autoresearch.md for full methodology.
 
@@ -38,13 +39,13 @@ echo "Warmup run..."
 rm -f .coverage coverage.json
 uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short | tail -3
 
-# --- Timed runs: parse pytest internal duration from output ---
+# --- Timed runs: clean pytest (no coverage instrumentation) ---
+# Timing and coverage are measured separately. Coverage instrumentation adds
+# ~1.7x overhead, which inflates the efficiency metric and distorts decisions.
 TIMES=()
 for i in $(seq 1 $NUM_RUNS); do
-    rm -f .coverage coverage.json
     echo "Timed run $i/$NUM_RUNS..."
-    OUTPUT=$(uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short \
-        --cov="$SRC_DIR" --cov-branch --cov-report=json)
+    OUTPUT=$(uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short)
     echo "$OUTPUT" | tail -3
     # Extract pytest duration: "711 passed in 2.73s" or "711 passed, 1 warning in 2.73s"
     T=$(echo "$OUTPUT" | grep -oE 'in [0-9]+\.[0-9]+s' | tail -1 | sed 's/in //; s/s//')
@@ -60,7 +61,11 @@ done
 TEST_TIME=$(python3 -c "print(min($( IFS=,; echo "${TIMES[*]}" )))")
 echo "Times: ${TIMES[*]} → min: ${TEST_TIME}s"
 
-# --- Parse coverage from last run (deterministic, same across runs) ---
+# --- Coverage run: separate from timing (instrumentation adds ~1.7x overhead) ---
+echo "Coverage run..."
+rm -f .coverage coverage.json
+uv --quiet run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short \
+    --cov="$SRC_DIR" --cov-branch --cov-report=json | tail -3
 COVERAGE_JSON=$(cat coverage.json)
 rm -f coverage.json .coverage
 
@@ -97,7 +102,7 @@ fi
 echo ""
 echo "=== Coverage Efficiency ($PKG) ==="
 echo "Test LOC:        $TEST_LOC"
-echo "Test time:       ${TEST_TIME}s (min of $NUM_RUNS runs, pytest internal)"
+echo "Test time:       ${TEST_TIME}s (min of $NUM_RUNS runs, no coverage overhead)"
 echo "Covered lines:   $COVERED / $TOTAL"
 echo "Missing lines:   $MISS"
 echo "Coverage:        ${PCT}%"

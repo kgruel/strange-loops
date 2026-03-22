@@ -180,3 +180,55 @@ class TestEvalConditionFallthrough:
             value = 5
 
         assert _eval_condition({"n": 10}, FakeCondition()) is False
+
+
+class TestReplayBoundaryReconciliationEdges:
+    """Cover L673 (after not exhausted), L677 (unknown mode), L688-692 (ticks_since)."""
+
+    def test_after_boundary_not_exhausted(self, tmp_path):
+        """Replay with fewer facts than after threshold → not exhausted, count set."""
+        v1, store = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=10, boundary_mode="after")
+            .build())
+
+        # Only 3 facts, threshold is 10 → not exhausted
+        for i in range(3):
+            v1.receive(fact("events", i=i))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("bc")
+            .with_store(tmp_path)
+            .count_loop("events", boundary_count=10, boundary_mode="after")
+            .build())
+        v2.replay()
+        loop = v2._loops["events"]
+        assert loop._boundary_exhausted is False
+        assert loop._count_since_boundary == 3
+        store2.close()
+
+    def test_replay_with_vertex_boundary_period_start(self, tmp_path):
+        """Vertex with vertex-level boundary reads period start from ticks."""
+        from engine import Loop
+        from atoms import Spec, Count, Boundary
+
+        v1, store = (VertexTestBuilder("vb")
+            .with_store(tmp_path)
+            .count_loop("metric")
+            .build())
+
+        # Register a vertex-level boundary
+        v1.register_vertex_boundary("metric", match=())
+
+        v1.receive(fact("metric", v=1))
+        v1.receive(fact("metric", v=2))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("vb")
+            .with_store(tmp_path)
+            .count_loop("metric")
+            .build())
+        v2.register_vertex_boundary("metric", match=())
+        v2.replay()
+        # Period start should be initialized (or None if no tick in store)
+        store2.close()

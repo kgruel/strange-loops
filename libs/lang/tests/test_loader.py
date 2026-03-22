@@ -2834,3 +2834,93 @@ sources "sequential" {
     bazinga "hello"
 }
 """)
+
+
+class TestLoaderFinalEdges:
+    """Final 15 miss lines in lang."""
+
+    def test_require_arg_missing(self):
+        """_require_arg when node has no args (L71)."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        # kind with no argument → _require_arg raises
+        with pytest.raises(ParseError, match="missing required"):
+            parse_loop("""\
+kind
+observer "test"
+source "echo test"
+""")
+
+    def test_where_exists_explicit(self):
+        """where with explicit exists= property (L189)."""
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="status" exists=true
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+        assert w[0].op == "exists"
+
+    def test_where_in_with_values(self):
+        """where with in operator and values (L191-195)."""
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="role" "in" "user" "assistant"
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+        assert w[0].op == "in_"
+        assert w[0].values == ("user", "assistant")
+
+    def test_where_not_in_with_values(self):
+        """where with not_in operator (L196-200)."""
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="role" "not_in" "system"
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+        assert w[0].op == "not_in"
+
+    def test_boundary_after_unknown_child_raises(self):
+        """Boundary after= with unknown child (L328-329)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="unknown boundary child"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary after=10 {
+            bazinga "hello"
+        }
+    }
+}
+""")

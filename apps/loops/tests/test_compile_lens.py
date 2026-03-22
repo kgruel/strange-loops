@@ -65,3 +65,11 @@ def test_compile_unknown_type():
     from loops.lenses.compile import compile_view
     t = _text(compile_view({"type": "mystery"}, Zoom.SUMMARY, 80))
     assert "Unknown type" in t
+
+def test_compile_vertex_full_with_path():
+    """Vertex FULL zoom with source_path (L94-96)."""
+    from loops.lenses.compile import compile_view
+    data = {"type": "vertex", "name": "proj", "specs": {}, "routes": {},
+            "source_path": "/etc/proj.vertex"}
+    t = _text(compile_view(data, Zoom.FULL, 80))
+    assert "path: /etc/proj.vertex" in t

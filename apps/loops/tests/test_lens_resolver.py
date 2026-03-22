@@ -136,3 +136,36 @@ class TestCallLens:
 
         result = call_lens(lens, "d", "z", 80)
         assert result == "ok"
+
+
+class TestLensResolverEdges:
+    """Edge cases for lens_resolver not previously covered."""
+
+    def test_resolve_path_style_no_vertex_dir(self, tmp_path):
+        """Path-style lens name with no vertex_dir → resolve() relative to cwd (L64)."""
+        from loops.lens_resolver import resolve_lens
+        # Create a real lens file at tmp_path
+        lens_file = tmp_path / "custom_lens.py"
+        lens_file.write_text("""
+def fold_view(data, zoom, width):
+    from painted import Block, Style
+    return Block.text("ok", Style(), width=width)
+""")
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = resolve_lens("./custom_lens.py", "fold_view", vertex_dir=None)
+            assert result is not None
+        finally:
+            os.chdir(old_cwd)
+
+    def test_load_from_file_spec_none(self, tmp_path):
+        """_load_from_file returns None when spec is None (L134-135) — covered indirectly
+        via nonexistent path, or test the import-error fallback path (L141-143)."""
+        from loops.lens_resolver import resolve_lens
+        # A file with a syntax error triggers exec_module to fail → L141-143
+        bad_lens = tmp_path / "broken.py"
+        bad_lens.write_text("def fold_view(: :\n    pass\n")  # syntax error
+        result = resolve_lens(str(bad_lens), "fold_view", vertex_dir=None)
+        assert result is None

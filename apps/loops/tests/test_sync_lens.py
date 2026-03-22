@@ -57,3 +57,32 @@ def test_sync_summary_instance():
     t = _text(sync_view(data, Zoom.SUMMARY, 80))
     assert "Ran:" in t
     assert "metric (3)" in t
+
+def test_sync_with_errors():
+    """Errors list in sync data (L78)."""
+    from loops.lenses.sync import sync_view
+    data = {"ran": ["metric"], "fact_counts": {"metric": 1}, "errors": [{"payload": {"error": "timeout"}}]}
+    t = _text(sync_view(data, Zoom.MINIMAL, 80))
+    assert "1 errors" in t
+
+def test_sync_with_ticks():
+    """sync_view with ticks (L135-136 — tick rendering path)."""
+    from loops.lenses.sync import sync_view
+    data = {
+        "ran": ["metric"], "fact_counts": {"metric": 3},
+        "ticks": [{"name": "session", "payload": {}, "ts": 1e9}],
+    }
+    t = _text(sync_view(data, Zoom.SUMMARY, 80))
+    assert "Ran:" in t
+
+def test_sync_aggregation_children():
+    """Aggregation path with children."""
+    from loops.lenses.sync import sync_view
+    data = {
+        "children": [
+            {"name": "proj", "ran": ["metric"], "skipped": [], "fact_counts": {"metric": 5}},
+        ],
+        "fact_counts": {"metric": 5},
+    }
+    t = _text(sync_view(data, Zoom.SUMMARY, 80))
+    assert "proj:" in t or "5 facts" in t

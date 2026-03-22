@@ -111,3 +111,43 @@ def test_summary_fields():
     result = _summary_fields({"topic": "a", "message": "b"})
     assert "topic" in result
     assert "message" in result
+
+def test_stream_no_width():
+    """_block with width=None (L14)."""
+    from loops.lenses.stream import stream_view
+    # width=None means piped/unbounded
+    block = stream_view({"facts": [_fact("m", {"name": "x"})]}, Zoom.SUMMARY, None)
+    assert block is not None
+
+def test_stream_tick_no_facts():
+    """tick_meta present but no facts → column block (L91)."""
+    from loops.lenses.stream import stream_view
+    data = {"facts": [], "_tick": {"index": 0, "total": 5}}
+    block = stream_view(data, Zoom.SUMMARY, 80)
+    assert block is not None
+
+def test_stream_summary_key_not_in_labels():
+    """key_field that is NOT in _LABEL_FIELDS (L167 branch)."""
+    from loops.lenses.stream import _stream_summary
+    # custom_id is not in _LABEL_FIELDS — goes L166→167
+    result = _stream_summary({"custom_id": "X", "name": "foo"}, key_field="custom_id")
+    assert "X" in result
+
+def test_stream_summary_fallback_to_known_field():
+    """After primary+secondary exhausted, fallback to known fields (L192)."""
+    from loops.lenses.stream import _stream_summary
+    # payload with no _LABEL_FIELDS but has "name" as a fallback match
+    result = _stream_summary({"z_extra": "", "name": "fallback"})
+    assert result == "fallback"
+
+def test_summary_fields_key_not_in_labels():
+    """_summary_fields with key_field not in _LABEL_FIELDS (L199)."""
+    from loops.lenses.stream import _summary_fields
+    result = _summary_fields({"custom": "v", "name": "n"}, key_field="custom")
+    assert "custom" in result
+
+def test_summary_fields_key_in_labels_with_reorder():
+    """_summary_fields with key_field in _LABEL_FIELDS (L201)."""
+    from loops.lenses.stream import _summary_fields
+    result = _summary_fields({"name": "n", "topic": "t"}, key_field="name")
+    assert "name" in result

@@ -1304,6 +1304,14 @@ class TestFoldFastPath:
         rc = main(["read", str(vpath), "--static", "--plain", "-vv"])
         assert rc == 0
 
+    def test_read_static_plain_with_lens(self, fold_by_vertex):
+        """--static --plain --lens uses custom lens in fast path (L2341)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        # --lens makes _try_fast_read fall through, then _run_fold -> _run_fold_fast
+        rc = main(["read", str(vpath), "--static", "--plain", "--lens", "reconcile"])
+        assert rc == 0
+
     def test_read_static_plain_via_full_dispatch(self, fold_by_vertex):
         """--static --plain --kind=X bypasses _try_fast_read → enters _run_fold L2089."""
         tmp_path, vpath = fold_by_vertex

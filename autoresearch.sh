@@ -13,10 +13,11 @@ set -euo pipefail
 # See autoresearch.md for full methodology.
 
 # --- Target configuration ---
-PKG="lang"
-TEST_DIR="libs/lang/tests"
-SRC_DIR="libs/lang/src/lang"
+PKG="loops"
+TEST_DIR="apps/loops/tests"
+SRC_DIR="apps/loops/src/loops"
 NUM_RUNS=2
+PYTEST_EXTRA="--ignore=apps/loops/tests/golden"
 
 # --- Pre-check: syntax errors in test files ---
 for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
@@ -33,14 +34,14 @@ done
 # --- Warmup run (no coverage, primes caches + imports) ---
 echo "Warmup run..."
 rm -f .coverage coverage.json
-uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short 2>&1 | tail -3
+uv run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short 2>&1 | tail -3
 
 # --- Timed runs: parse pytest internal duration from output ---
 TIMES=()
 for i in $(seq 1 $NUM_RUNS); do
     rm -f .coverage coverage.json
     echo "Timed run $i/$NUM_RUNS..."
-    OUTPUT=$(uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short \
+    OUTPUT=$(uv run --package "$PKG" pytest "$TEST_DIR" ${PYTEST_EXTRA:-} -x -q --tb=short \
         --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1)
     echo "$OUTPUT" | tail -3
     # Extract pytest duration: "711 passed in 2.73s" or "711 passed, 1 warning in 2.73s"

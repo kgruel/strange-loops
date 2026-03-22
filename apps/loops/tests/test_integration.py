@@ -1950,3 +1950,15 @@ class TestCmdEmitMorePaths:
         monkeypatch.setenv("LOOPS_THREAD", "my-feature-thread")
         rc = main(["emit", str(vpath), "heartbeat", "service=api"])
         assert rc == 0
+
+    def test_emit_no_store_dry_run(self, tmp_path, monkeypatch):
+        """emit --dry-run on vertex without store sets store_path=None (L1683)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Create vertex without a store
+        vpath = tmp_path / "nostorev.vertex"
+        vpath.write_text(
+            'name "nostorev"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        rc = main(["emit", str(vpath), "ping", "x=1", "--dry-run"])
+        assert rc == 0

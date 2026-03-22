@@ -433,3 +433,110 @@ class TestDispatchObserver:
             result = _dispatch_observer("proj", vf, ["store"])
             if m.called:
                 assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# errors.py — CLI error hierarchy
+# ---------------------------------------------------------------------------
+
+class TestLoopsErrorHierarchy:
+    def test_resolution_failed_no_searched(self):
+        """ResolutionFailed without searched list — short message."""
+        from loops.errors import ResolutionFailed
+        e = ResolutionFailed("my-vertex")
+        assert e.name == "my-vertex"
+        assert e.searched == []
+        assert "Cannot resolve vertex: my-vertex" in str(e)
+
+    def test_resolution_failed_with_searched(self):
+        """ResolutionFailed with searched list appends paths to message."""
+        from loops.errors import ResolutionFailed
+        e = ResolutionFailed("proj", searched=["/home/.config/loops", "/local"])
+        assert e.searched == ["/home/.config/loops", "/local"]
+        assert "searched:" in str(e)
+        assert "/local" in str(e)
+
+    def test_store_not_found_with_detail(self):
+        """StoreNotFound with detail appends detail to message."""
+        from loops.errors import StoreNotFound
+        e = StoreNotFound("my-vertex", detail="path missing")
+        assert "path missing" in str(e)
+        assert "my-vertex" in str(e)
+
+    def test_store_access_error(self):
+        """StoreAccessError stores path and cause."""
+        from pathlib import Path
+        from loops.errors import StoreAccessError
+        cause = PermissionError("denied")
+        e = StoreAccessError(Path("/some/db"), cause)
+        assert e.path == Path("/some/db")
+        assert e.cause is cause
+        assert "Store access failed" in str(e)
+
+    def test_emit_error_with_vertex(self):
+        """EmitError with vertex= includes vertex path in message."""
+        from pathlib import Path
+        from loops.errors import EmitError
+        e = EmitError("bad payload", vertex=Path("/proj/proj.vertex"))
+        assert e.vertex == Path("/proj/proj.vertex")
+        assert "proj.vertex" in str(e)
+        assert "bad payload" in str(e)
+
+    def test_emit_error_without_vertex(self):
+        """EmitError without vertex uses generic message."""
+        from loops.errors import EmitError
+        e = EmitError("something went wrong")
+        assert e.vertex is None
+        assert "Emit failed" in str(e)
+
+    def test_all_are_loops_error_subclasses(self):
+        """All domain errors inherit from LoopsError."""
+        from pathlib import Path
+        from loops.errors import (
+            LoopsError, VertexNotFound, VertexParseError,
+            ResolutionFailed, StoreNotFound, StoreAccessError, EmitError,
+        )
+        assert issubclass(VertexNotFound, LoopsError)
+        assert issubclass(VertexParseError, LoopsError)
+        assert issubclass(ResolutionFailed, LoopsError)
+        assert issubclass(StoreNotFound, LoopsError)
+        assert issubclass(StoreAccessError, LoopsError)
+        assert issubclass(EmitError, LoopsError)
+
+
+# ---------------------------------------------------------------------------
+# commands/resolve.py — _err helper
+# ---------------------------------------------------------------------------
+
+class TestResolveErr:
+    def test_err_writes_to_stderr(self, capsys):
+        """_err renders a painted block to stderr."""
+        from loops.commands.resolve import _err
+        import sys
+        _err("something went wrong")
+        captured = capsys.readouterr()
+        assert "something went wrong" in captured.err
+
+    def test_err_custom_file(self, tmp_path):
+        """_err accepts an explicit file argument."""
+        import io
+        from loops.commands.resolve import _err
+        buf = io.StringIO()
+        _err("custom target", file=buf)
+        assert "custom target" in buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# commands/devtools.py — _run_validate exit code propagation
+# ---------------------------------------------------------------------------
+
+class TestRunValidateExitCode:
+    def test_validate_errors_returns_1(self, tmp_path, monkeypatch):
+        """_run_validate returns 1 when validation finds errors (L84)."""
+        from loops.commands.devtools import _run_validate
+        # A .loop file with invalid syntax produces errors > 0
+        bad_loop = tmp_path / "bad.loop"
+        bad_loop.write_text("this is not valid kdl !!!")
+        monkeypatch.chdir(tmp_path)
+        result = _run_validate(["--plain", str(bad_loop)])
+        assert result == 1

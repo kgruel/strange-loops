@@ -1336,10 +1336,12 @@ def _try_fast_read(argv: list[str]) -> int | None:
     if not (has_static and has_plain and vertex_name):
         return None
 
-    # Resolve vertex path (no argparse needed)
+    # Resolve vertex path (no argparse needed).
+    # _resolve_named_vertex checks the same config-level path as _resolve_vertex_for_dispatch,
+    # so the fallback was unreachable — fall through to full dispatch instead.
     vertex_path = _resolve_vertex_for_dispatch(vertex_name)
     if vertex_path is None:
-        vertex_path = _resolve_named_vertex(vertex_name)
+        return None
 
     # Build fast args — kind=None, lens=None, observer=None (no --observer flag)
     class _Ns:

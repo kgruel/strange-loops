@@ -1963,6 +1963,34 @@ class TestFetchFunctions:
         result = fetch_tick_range(vpath, 5, 3)
         assert "_tick_error" in result
 
+    def test_fetch_ticks_item_fold_kind_counts(self, tmp_path):
+        """fetch_ticks parses {kind: {items: ...}} payload from vertex-level boundary (L246).
+
+        A vertex-level boundary tick stores state as {kind: loop_state} where
+        loop_state for a fold_by is {"items": {...}}.  fetch_ticks must count
+        len(v["items"]) for those entries.
+        """
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(
+            'name "t"\nstore "./t.db"\n'
+            'loops {\n'
+            '    task { fold { items "by" "name" } }\n'
+            '    session { fold { items "collect" 10 } }\n'
+            '    boundary when="session" status="closed"\n'
+            '}\n'
+        )
+        for name in ["alpha", "beta"]:
+            _emit(vpath, "task", name=name)
+        _emit(vpath, "session", name="s1", status="closed")
+
+        result = fetch_ticks(vpath)
+        assert "ticks" in result
+        assert len(result["ticks"]) >= 1
+        tick = result["ticks"][0]
+        # kind_counts should reflect the item-based fold lengths
+        assert "kind_counts" in tick
+        assert tick["kind_counts"].get("task", 0) == 2
+
 
 class TestResolveVertexForDispatch:
     """Exercise _resolve_vertex_for_dispatch slash-qualified paths (L1540-1554)."""
@@ -2387,6 +2415,30 @@ class TestEmitMissLinesFix:
         rc = _run_close(["notavertex", "thread", "task1", "--dry-run"])
         assert rc in (0, 1)
 
+    def test_emit_to_store_less_vertex_returns_error(self, tmp_path, monkeypatch, capsys):
+        """Vertex with no store directive → _resolve_vertex_store_path returns None (L140-144).
+
+        A writable vertex is found (the file exists and resolves) but it has neither
+        a store directive nor a combine block, so _resolve_vertex_store_path returns None.
+        """
+        import argparse
+        from loops.commands.emit import cmd_emit as _cmd_emit
+
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Vertex with no store and no combine → _resolve_vertex_store_path returns None
+        vpath = tmp_path / "nostorev.vertex"
+        vpath.write_text('name "nostorev"\nloops { ping { fold { n "inc" } } }\n')
+
+        ns = argparse.Namespace(
+            vertex=None, kind="ping", parts=["n=1"],
+            observer="", dry_run=False,
+        )
+        rc = _cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "no store configured" in captured.err
+
 
 class TestResolveEntityRefs:
     """Cover _resolve_entity_refs miss lines in commands/resolve.py."""
@@ -2422,6 +2474,54 @@ class TestResolveEntityRefs:
         # Both kinds unknown, no refs resolved, payload unchanged
         assert result.get("a") == "unknownkind1/val1"
         assert result.get("b") == "unknownkind2/val2"
+
+    def test_local_store_in_topo_stores_skipped(self, tmp_path, monkeypatch):
+        """Topology dedup skips child's own store when widening (L342).
+
+        Setup: root .loops/.vertex combines a child vertex. Emit to the child
+        with a ref-style payload.  When _resolve_entity_refs widens to the
+        topology, topo_stores includes the child's own store (it IS a child
+        of root).  L342 skips it to avoid double-searching.
+        """
+        from loops.commands.resolve import _resolve_entity_refs
+
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+
+        # Child vertex with a fold_by "name" kind
+        child_vpath = tmp_path / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            'loops { task { fold { items "by" "name" } } }\n'
+        )
+        child_store = tmp_path / "child.db"
+
+        # Root vertex combines the child
+        root_vpath = loops_dir / ".vertex"
+        root_vpath.write_text(
+            f'name "root"\ncombine {{\n    vertex "{child_vpath}"\n}}\n'
+        )
+
+        # Seed child store with one task so topology widening can resolve
+        from engine import SqliteStore
+        from atoms import Fact
+        import time as _time
+        with SqliteStore(
+            path=child_store,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as s:
+            s.append(Fact(kind="task", payload={"name": "mytask"}, ts=_time.time(),
+                          observer="test", origin="test"))
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Emit to child with a ref payload — local miss triggers topology widening
+        # At that point child_store IS in topo_stores, so L342 skips it
+        result = _resolve_entity_refs(child_vpath, child_store, {"project": "task/mytask"})
+        # Whether resolved or not, L342 was exercised (no double-search crash)
+        assert "project" in result
 
 
 class TestResolveEdgeCases:

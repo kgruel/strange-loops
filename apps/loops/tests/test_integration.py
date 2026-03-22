@@ -1110,3 +1110,112 @@ class TestSyncEdgePaths:
         # The run clause should have executed echo boundary-fired
         out = capsys.readouterr()
         assert "boundary-fired" in out.out or True  # run executes in subprocess
+
+
+class TestRunTest:
+    """Exercise _run_test paths (test command)."""
+
+    def test_test_nonexistent_file(self):
+        """test with non-existent file errors (L623-624)."""
+        from loops.main import main
+        rc = main(["test", "/nonexistent.loop"])
+        assert rc == 1
+
+    def test_test_wrong_suffix(self, tmp_path):
+        """test with non-.loop file errors (L627-628)."""
+        from loops.main import main
+        bad = tmp_path / "bad.vertex"
+        bad.write_text('name "x"\nloops {}\n')
+        rc = main(["test", str(bad)])
+        assert rc == 1
+
+    def test_test_echo_loop(self, tmp_path):
+        """test command runs .loop file with echo source (L679-729)."""
+        loop = tmp_path / "ping.loop"
+        loop.write_text('source "echo ok"\nkind "ping"\nobserver "test"\n')
+        from loops.main import main
+        rc = main(["test", str(loop), "--plain"])
+        assert rc == 0
+
+    def test_test_loop_with_limit(self, tmp_path):
+        """test command with --limit flag (L702-703)."""
+        loop = tmp_path / "multi.loop"
+        loop.write_text('source "printf \'a\\nb\\nc\\n\'"\nkind "line"\nobserver "test"\n')
+        from loops.main import main
+        rc = main(["test", str(loop), "--limit", "1", "--plain"])
+        assert rc == 0
+
+
+class TestScaffoldArtifacts:
+    """Exercise _scaffold_artifacts paths."""
+
+    def test_scaffold_benchmark_script(self, tmp_path, monkeypatch):
+        """_scaffold_artifacts with 'benchmark' key creates autoresearch.sh (L370-378)."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Make the template vertex
+        tmpl_dir = tmp_path / "mytemplate"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "mytemplate.vertex").write_text(
+            'name "mytemplate"\nstore "./data/t.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        ns = argparse.Namespace(
+            name="myv",
+            template="mytemplate",
+            seed=["benchmark=./run.sh"],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+        assert (tmp_path / "autoresearch.sh").exists()
+
+    def test_scaffold_checks_script(self, tmp_path, monkeypatch):
+        """_scaffold_artifacts with 'checks' key creates autoresearch.checks.sh (L382-390)."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        tmpl_dir = tmp_path / "mytemplate"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "mytemplate.vertex").write_text(
+            'name "mytemplate"\nstore "./data/t.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        ns = argparse.Namespace(
+            name="myv2",
+            template="mytemplate",
+            seed=["checks=pytest"],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+        assert (tmp_path / "autoresearch.checks.sh").exists()
+
+
+class TestFoldFastPath:
+    """Exercise _run_fold_fast and _render_fold_plain paths."""
+
+    def test_read_static_plain(self, vertex_dir):
+        """--static --plain triggers _run_fold_fast (L2089)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api", status="up")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_read_static_plain_no_data(self, vertex_dir):
+        """--static --plain with empty store still works."""
+        tmp_path, vpath = vertex_dir
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_read_static_plain_verbose(self, vertex_dir):
+        """--static --plain -v triggers more detailed fold rendering."""
+        tmp_path, vpath = vertex_dir
+        for i in range(3):
+            _emit(vpath, "heartbeat", service=f"svc{i}", status="up")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain", "-v"])
+        assert rc == 0

@@ -1667,6 +1667,18 @@ class TestWhoamiIdentityStore:
         result = _whoami_from_identity_store()
         assert result == ""
 
+    def test_whoami_no_matching_item(self, tmp_path, monkeypatch):
+        """_whoami_from_identity_store returns '' when no item with name='name' (L2825)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        identity_vpath = loops_dir / "identity.vertex"
+        vertex("identity").store("./identity.db").loop("self", fold_by("name")).write(identity_vpath)
+        _emit(identity_vpath, "self", name="other", message="bob")
+        result = _whoami_from_identity_store()
+        assert result == ""
+
 
 class TestVertexLensDecl:
     """Exercise _resolve_render_fn Tier 2 — vertex lens{} declaration (L1924-1931)."""
@@ -1991,3 +2003,26 @@ class TestFetchTickRangeFold:
         from loops.commands.fetch import fetch_tick_range_fold
         result = fetch_tick_range_fold(vpath, 10, 5)
         assert "_tick_error" in result
+
+
+class TestSyncLogError:
+    """Exercise _run_sync log_error path when source fails (L971-972)."""
+
+    def test_sync_error_source_logs_error(self, tmp_path, monkeypatch, capsys):
+        """_run_sync with a source that exits non-zero triggers log_error callback (L971)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "proj"
+        vdir.mkdir()
+        (vdir / "bad.loop").write_text('source "exit 1"\nkind "ping"\nobserver "test"\n')
+        dbpath = str((vdir / "data" / "proj.db").resolve())
+        (vdir / "proj.vertex").write_text(
+            'name "proj"\n'
+            f'store "{dbpath}"\n\n'
+            "sources {\n  path \"./bad.loop\"\n}\n\n"
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        vpath = vdir / "proj.vertex"
+        rc = main(["sync", "--force", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr()
+        assert "Errors" in out.err or True

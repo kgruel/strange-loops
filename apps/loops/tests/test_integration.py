@@ -1581,3 +1581,18 @@ class TestCloseCommand:
         from loops.main import main
         rc = main(["close", str(vpath), "thread", "no-such-task"])
         assert rc == 1
+
+    def test_close_without_vertex(self, tmp_path, monkeypatch):
+        """close without explicit vertex resolves local vertex (L2601)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create local .loops/.vertex
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vpath = loops_dir / "local.vertex"
+        v = vertex("local").store("./local.db").loop("thread", fold_by("name"))
+        v.write(vpath)
+        _emit(vpath, "thread", name="task1")
+        from loops.main import main
+        rc = main(["close", "thread", "task1", "--dry-run"])
+        assert rc == 0

@@ -2870,3 +2870,98 @@ class TestEmitMultiTemplate:
         rc = cmd_emit(ns2, vertex_path=None)
         assert rc == 1  # L275-284: mismatch → error
         assert "template" in capsys.readouterr().err.lower()
+
+
+class TestEmitAbsoluteListPath:
+    """Cover emit.py L236 (absolute 'from file' path in template → else branch)."""
+
+    def test_pop_add_with_absolute_list_path(self, tmp_path, monkeypatch):
+        """Template with absolute 'from file' path → L236 (else: list_path=Path(...))."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        # Create list file at an absolute path
+        list_file = tmp_path / "feeds.list"
+        list_file.write_text("key url\n")
+
+        src_dir = tmp_path / "sources"
+        src_dir.mkdir()
+        (src_dir / "feed.loop").write_text(
+            'source "echo hi"\nkind "feed"\nobserver "test"\n'
+        )
+        vpath = tmp_path / "v.vertex"
+        # Use absolute path in 'from file' clause → L236 fires
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            f'  template "./sources/feed.loop" {{\n'
+            f'    from file "{list_file}"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add",
+            parts=["key=mysite", "url=https://example.com"],
+            observer="", dry_run=False,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 0  # L236: absolute path → else branch
+
+
+class TestPopMultiTemplateAddRm:
+    """Cover pop.py L222 (cmd_add multi-template assignment) and L289 (cmd_rm)."""
+
+    def _setup_multi_vertex(self, home):
+        vdir = home / "v"
+        vdir.mkdir(parents=True)
+        src = vdir / "sources"
+        src.mkdir()
+        for name in ("feed1", "feed2"):
+            (src / f"{name}.loop").write_text(
+                f'source "echo hi"\nkind "{name}"\nobserver "test"\n'
+            )
+            (vdir / f"{name}.list").write_text("key url\n")
+        (vdir / "v.vertex").write_text(
+            'name "v"\nstore "./v.db"\nsources {\n'
+            '  template "./sources/feed1.loop" { from file "./feed1.list"\n'
+            '    loop { fold { count "inc" } } }\n'
+            '  template "./sources/feed2.loop" { from file "./feed2.list"\n'
+            '    loop { fold { count "inc" } } }\n'
+            '}\nloops { ping { fold { n "inc" } } }\n'
+        )
+
+    def test_cmd_add_multi_template_sets_template_name(self, tmp_path, monkeypatch):
+        """cmd_add on multi-template vertex with qualifier → L222 (template assigned)."""
+        import argparse
+        from loops.commands.pop import cmd_add
+
+        home = tmp_path / "home"
+        self._setup_multi_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+
+        ns = argparse.Namespace(target="v/feed1", values=["mysite", "https://example.com"])
+        rc = cmd_add(ns)
+        assert rc == 0  # L222: payload["template"] = "feed1"
+
+    def test_cmd_rm_multi_template_sets_template_name(self, tmp_path, monkeypatch):
+        """cmd_rm on multi-template vertex with qualifier → L289 (template assigned)."""
+        import argparse
+        from loops.commands.pop import cmd_add, cmd_rm
+
+        home = tmp_path / "home"
+        self._setup_multi_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+
+        # First add, then remove
+        cmd_add(argparse.Namespace(target="v/feed1", values=["mysite", "https://x.com"]))
+        ns = argparse.Namespace(target="v/feed1", key="mysite")
+        rc = cmd_rm(ns)
+        assert rc == 0  # L289: payload["template"] = "feed1"

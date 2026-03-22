@@ -6,6 +6,8 @@ set -euo pipefail
 # Primary metric: efficiency = test_LOC × test_time_s / covered_lines (lower = better)
 #
 # Noise reduction: 1 warmup run + 3 timed runs, take minimum time.
+# Parses pytest's internal duration from output ("N passed in X.XXs") to
+# exclude uv startup overhead.
 # Coverage is deterministic — parsed from the last run only.
 #
 # See autoresearch.md for full methodology.
@@ -28,21 +30,25 @@ for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do
     TEST_LOC=$((TEST_LOC + LOC))
 done
 
-# --- Warmup run (no coverage, primes caches) ---
+# --- Warmup run (no coverage, primes caches + imports) ---
 echo "Warmup run..."
 rm -f .coverage coverage.json
 uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short 2>&1 | tail -3
 
-# --- Timed runs: collect times, keep coverage from last ---
+# --- Timed runs: parse pytest internal duration from output ---
 TIMES=()
 for i in $(seq 1 $NUM_RUNS); do
     rm -f .coverage coverage.json
     echo "Timed run $i/$NUM_RUNS..."
-    START=$(python3 -c "import time; print(time.monotonic())")
-    uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short \
-        --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1 | tail -3
-    END=$(python3 -c "import time; print(time.monotonic())")
-    T=$(python3 -c "print(round($END - $START, 3))")
+    OUTPUT=$(uv run --package "$PKG" pytest "$TEST_DIR" -x -q --tb=short \
+        --cov="$SRC_DIR" --cov-branch --cov-report=json 2>&1)
+    echo "$OUTPUT" | tail -3
+    # Extract pytest duration: "711 passed in 2.73s" or "711 passed, 1 warning in 2.73s"
+    T=$(echo "$OUTPUT" | grep -oE 'in [0-9]+\.[0-9]+s' | tail -1 | sed 's/in //; s/s//')
+    if [ -z "$T" ]; then
+        echo "ERROR: Could not parse pytest duration"
+        exit 1
+    fi
     TIMES+=("$T")
     echo "  run $i: ${T}s"
 done
@@ -88,7 +94,7 @@ fi
 echo ""
 echo "=== Coverage Efficiency ($PKG) ==="
 echo "Test LOC:        $TEST_LOC"
-echo "Test time:       ${TEST_TIME}s (min of $NUM_RUNS runs)"
+echo "Test time:       ${TEST_TIME}s (min of $NUM_RUNS runs, pytest internal)"
 echo "Covered lines:   $COVERED / $TOTAL"
 echo "Missing lines:   $MISS"
 echo "Coverage:        ${PCT}%"

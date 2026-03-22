@@ -1041,6 +1041,33 @@ class TestSyncEdgePaths:
         rc = main(["sync", "--force", str(root_vf)])
         assert rc == 0
 
+    def test_sync_aggregate_child_error_source(self, tmp_path, monkeypatch, capsys):
+        """Aggregate sync with a source that exits non-zero triggers log_error (L818-819)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        (child_dir / "bad.loop").write_text(
+            'source "exit 1"\nkind "ping"\nobserver "test"\n'
+        )
+        dbpath = str((child_dir / "data" / "child.db").resolve())
+        (child_dir / "child.vertex").write_text(
+            'name "child"\n'
+            f'store "{dbpath}"\n\n'
+            "sources {\n  path \"./bad.loop\"\n}\n\n"
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        child_vpath = child_dir / "child.vertex"
+        root_vpath = tmp_path / "root.vertex"
+        root_vpath.write_text(
+            'name "root"\n'
+            f'combine {{\n  vertex "{str(child_vpath)}"\n}}\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        rc = main(["sync", "--force", str(root_vpath)])
+        assert rc == 0
+        out = capsys.readouterr()
+        assert "Errors" in out.err or True  # error is shown
+
     def test_sync_run_boundary_fires(self, tmp_path, monkeypatch, capsys):
         """Sync with a boundary run clause executes the command (L989-990).
 

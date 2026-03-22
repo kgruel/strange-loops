@@ -236,3 +236,25 @@ class TestValidateEmitProjectObservers:
         )
         result = validate_emit(proj_dir / "project.vertex", "alice", "thread")
         assert result is None
+
+
+class TestCollectCombineObservers:
+    def test_combine_relative_path(self, tmp_path, monkeypatch):
+        """_collect_combine_observers with relative combine path (L114)."""
+        from loops.commands.identity import _collect_combine_observers
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        (child_dir / "child.vertex").write_text(
+            'name "child"\nstore "./child.db"\n'
+            'observers {\n    alice {}\n}\n'
+            'loops { m { fold { n "inc" } } }\n'
+        )
+        parent_vpath = tmp_path / "parent.vertex"
+        parent_vpath.write_text(
+            'name "parent"\n'
+            'combine {\n  vertex "child/child.vertex"\n}\n'
+            'loops { m { fold { n "inc" } } }\n'
+        )
+        result = _collect_combine_observers(parent_vpath)
+        assert isinstance(result, list)

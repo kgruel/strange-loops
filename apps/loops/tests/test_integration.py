@@ -403,7 +403,6 @@ class TestObserverScoped:
         b.write(tmp_path / "scoped.vertex")
 
         vpath = tmp_path / "scoped.vertex"
-        import argparse
 
         # Emit as alice
         cmd_emit(argparse.Namespace(
@@ -458,7 +457,6 @@ class TestEdgeCases:
 
     def test_emit_to_nonexistent_vertex(self, tmp_path):
         """Emit to missing vertex — returns error code 1."""
-        import argparse
         ns = argparse.Namespace(
             vertex=None, kind="test", parts=["x=1"],
             observer="", dry_run=False,
@@ -569,7 +567,6 @@ class TestCloseIntegration:
         """Close exercises the close dispatch + fact emission."""
         _, vpath = vertex_dir
         # Emit a thread fact first
-        import argparse
         cmd_emit(argparse.Namespace(
             vertex=None, kind="thread", parts=["name=fix-bug", "status=open", "message=working"],
             observer="tester", dry_run=False,
@@ -713,7 +710,6 @@ loops {
     boundary when="heartbeat"
 }
 ''')
-        import argparse
 
         for i in range(3):
             ns = argparse.Namespace(
@@ -799,7 +795,6 @@ class TestCloseWorkflow:
 
     def test_close_thread_workflow(self, thread_vertex):
         """Open thread → emit related facts → close → verify resolution."""
-        import argparse
 
 
         # Open a thread (empty observer skips validation)
@@ -937,7 +932,6 @@ class TestMainEdgePaths:
 
     def test_cmd_init_invalid_iterations(self, tmp_path, monkeypatch):
         """cmd_init with non-integer iterations silently skips it (L493-496)."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template(tmp_path)
@@ -951,7 +945,6 @@ class TestMainEdgePaths:
 
     def test_cmd_init_with_seed_config(self, tmp_path, monkeypatch):
         """cmd_init with seed config (key=value args) hits L501-503."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template(tmp_path)
@@ -1121,7 +1114,6 @@ class TestScaffoldArtifacts:
 
     def test_scaffold_benchmark_script(self, tmp_path, monkeypatch):
         """_scaffold_artifacts with 'benchmark' key creates autoresearch.sh (L370-378)."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         # Make the template vertex
@@ -1142,7 +1134,6 @@ class TestScaffoldArtifacts:
 
     def test_scaffold_checks_script(self, tmp_path, monkeypatch):
         """_scaffold_artifacts with 'checks' key creates autoresearch.checks.sh (L382-390)."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         tmpl_dir = tmp_path / "mytemplate"
@@ -1162,7 +1153,6 @@ class TestScaffoldArtifacts:
 
     def test_scaffold_with_iterate_template(self, tmp_path, monkeypatch):
         """_scaffold_artifacts copies iterate.sh from template if present (L407-413)."""
-        import argparse
         from loops.main import _scaffold_artifacts
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
@@ -1409,7 +1399,6 @@ class TestInitLocalVertex:
 
     def test_cmd_init_valid_iterations(self, tmp_path, monkeypatch):
         """cmd_init with valid integer iterations substitutes boundary (L232, L237)."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template_with_boundary(tmp_path)
@@ -1426,7 +1415,6 @@ class TestInitLocalVertex:
 
     def test_cmd_init_copy_lenses(self, tmp_path, monkeypatch):
         """cmd_init copies vertex-local lenses (L259-264)."""
-        import argparse
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template_with_boundary(tmp_path)
@@ -1659,73 +1647,27 @@ class TestResolveCombineChild:
     """Exercise _resolve_combine_child (L1475-1500)."""
 
     def test_resolve_child_by_alias(self, tmp_path, monkeypatch):
-        """_resolve_combine_child finds a child by alias (L1493-1499)."""
+        """Alias match returns child path; non-matching alias returns None."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-
-        # Create child vertex
-        child_dir = tmp_path / "child"
-        child_dir.mkdir()
-        child_vpath = child_dir / "child.vertex"
-        child_vpath.write_text(
-            'name "child"\nstore "./child.db"\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        child_dir = tmp_path / "child"; child_dir.mkdir()
+        child_vp = child_dir / "child.vertex"
+        child_vp.write_text('name "child"\nstore "./c.db"\nloops { ping { fold { n "inc" } } }\n')
+        parent_vp = tmp_path / "parent.vertex"
+        parent_vp.write_text(
+            f'name "parent"\ncombine {{\n  vertex "{child_vp}" as="kid"\n}}\n'
+            'loops { ping { fold { n "inc" } } }\n'
         )
+        assert _resolve_combine_child(parent_vp, "kid") == child_vp.resolve()
+        assert _resolve_combine_child(parent_vp, "notexist") is None
 
-        # Create parent with combine + alias
-        parent_vpath = tmp_path / "parent.vertex"
-        parent_vpath.write_text(
-            'name "parent"\n'
-            'combine {\n'
-            f'  vertex "{str(child_vpath)}" as="kid"\n'
-            '}\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-
-        result = _resolve_combine_child(parent_vpath, "kid")
-        assert result is not None
-        assert result == child_vpath.resolve()
-
-    def test_resolve_child_no_alias_match(self, tmp_path, monkeypatch):
-        """_resolve_combine_child with non-matching alias returns None (L1500)."""
+    def test_resolve_child_no_combine_or_bad_file(self, tmp_path, monkeypatch):
+        """No combine block and bad vertex file both return None."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-
-        child_dir = tmp_path / "child"
-        child_dir.mkdir()
-        child_vpath = child_dir / "child.vertex"
-        child_vpath.write_text(
-            'name "child"\nstore "./child.db"\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-        parent_vpath = tmp_path / "parent.vertex"
-        parent_vpath.write_text(
-            'name "parent"\n'
-            'combine {\n'
-            f'  vertex "{str(child_vpath)}" as="kid"\n'
-            '}\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-
-        result = _resolve_combine_child(parent_vpath, "notexist")
-        assert result is None
-
-    def test_resolve_child_no_combine(self, tmp_path, monkeypatch):
-        """_resolve_combine_child with no combine block returns None (L1490-1491)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vpath = tmp_path / "simple.vertex"
-        vpath.write_text(
-            'name "simple"\nstore "./s.db"\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-        result = _resolve_combine_child(vpath, "any")
-        assert result is None
-
-    def test_resolve_child_bad_file(self, tmp_path, monkeypatch):
-        """_resolve_combine_child with bad vertex file returns None (L1487-1488)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        bad = tmp_path / "bad.vertex"
-        bad.write_text("{{invalid")
-        result = _resolve_combine_child(bad, "any")
-        assert result is None
+        vp = tmp_path / "s.vertex"
+        vp.write_text('name "s"\nstore "./s.db"\nloops { ping { fold { n "inc" } } }\n')
+        assert _resolve_combine_child(vp, "any") is None
+        bad = tmp_path / "bad.vertex"; bad.write_text("{{invalid")
+        assert _resolve_combine_child(bad, "any") is None
 
 
 class TestWhoamiIdentityStore:
@@ -2323,7 +2265,6 @@ class TestEmitMissLinesFix:
 
     def test_emit_dry_run_loopserror_sets_none_store(self, tmp_path, monkeypatch):
         """LoopsError in writable_vertex resolution with dry_run=True → L149."""
-        import argparse
         from loops.commands.emit import cmd_emit as _cmd_emit
 
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
@@ -2368,7 +2309,6 @@ class TestEmitMissLinesFix:
         A writable vertex is found (the file exists and resolves) but it has neither
         a store directive nor a combine block, so _resolve_vertex_store_path returns None.
         """
-        import argparse
         from loops.commands.emit import cmd_emit as _cmd_emit
 
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
@@ -2540,7 +2480,6 @@ class TestEmitBoundaryRun:
 
     def test_emit_triggers_boundary_run(self, tmp_path, monkeypatch, capsys):
         """boundary after=1 with run clause fires _execute_boundary_run → L330-331."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         vpath = tmp_path / "runtest.vertex"
@@ -2566,7 +2505,6 @@ class TestEmitExceptionAndResolveEdges:
 
     def test_emit_exception_in_receive(self, tmp_path, monkeypatch):
         """Exception in program.vertex.receive → L346-348."""
-        import argparse
         from unittest.mock import patch
         from engine.vertex import Vertex
         from loops.commands.emit import cmd_emit
@@ -2645,7 +2583,6 @@ class TestEmitPopErrors:
 
     def test_multi_template_no_qualifier_errors(self, tmp_path, monkeypatch, capsys):
         """pop.add on vertex with 2 templates and no qualifier → L209-217."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         home = tmp_path / "v"
@@ -2677,7 +2614,6 @@ class TestEmitPopErrors:
 
     def test_template_no_from_file_errors(self, tmp_path, monkeypatch, capsys):
         """pop.add on template with 'with' rows but no 'from file' → L223-230."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         home = tmp_path / "v"
@@ -2731,69 +2667,42 @@ class TestEmitPopFieldErrors:
         )
         return vpath
 
-    def test_pop_add_no_list_header(self, tmp_path, monkeypatch, capsys):
-        """Empty list file → 'no .list header' error in cmd_emit (L240-247)."""
-        import argparse
+    @staticmethod
+    def _do_emit(vpath, kind, *parts):
         from loops.commands.emit import cmd_emit
-
-        vpath = self._setup_list_vertex(tmp_path / "home", list_content="")
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
-        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
-
-        ns = argparse.Namespace(
-            vertex=None, kind="pop.add", parts=["key=val"], observer="", dry_run=False
+        return cmd_emit(
+            argparse.Namespace(vertex=None, kind=kind, parts=list(parts), observer="", dry_run=False),
+            vertex_path=vpath,
         )
-        rc = cmd_emit(ns, vertex_path=vpath)
-        assert rc == 1
+
+    def _setup_env(self, home, monkeypatch, list_content="key col1\nval1 data1\n"):
+        vpath = self._setup_list_vertex(home, list_content=list_content)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        return vpath
+
+    def test_pop_add_no_list_header(self, tmp_path, monkeypatch, capsys):
+        """Empty list file → 'no .list header' error (L240-247)."""
+        vpath = self._setup_env(tmp_path / "home", monkeypatch, list_content="")
+        assert self._do_emit(vpath, "pop.add", "key=val") == 1
         assert "no .list header" in capsys.readouterr().err
 
     def test_pop_add_no_key_in_payload(self, tmp_path, monkeypatch, capsys):
-        """pop.add without key= in payload → error (L251-255)."""
-        import argparse
-        from loops.commands.emit import cmd_emit
-
-        vpath = self._setup_list_vertex(tmp_path / "home")
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
-        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
-
-        ns = argparse.Namespace(
-            vertex=None, kind="pop.add", parts=["col1=data"], observer="", dry_run=False
-        )
-        rc = cmd_emit(ns, vertex_path=vpath)
-        assert rc == 1
+        """pop.add without key= → error (L251-255)."""
+        vpath = self._setup_env(tmp_path / "home", monkeypatch)
+        assert self._do_emit(vpath, "pop.add", "col1=data") == 1
         assert "requires key=" in capsys.readouterr().err
 
     def test_pop_add_missing_columns(self, tmp_path, monkeypatch, capsys):
-        """pop.add with key but missing other columns → error (L258-266)."""
-        import argparse
-        from loops.commands.emit import cmd_emit
-
-        vpath = self._setup_list_vertex(tmp_path / "home")
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
-        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
-
-        # Header is "key col1" — payload has key but not col1
-        ns = argparse.Namespace(
-            vertex=None, kind="pop.add", parts=["key=mykey"], observer="", dry_run=False
-        )
-        rc = cmd_emit(ns, vertex_path=vpath)
-        assert rc == 1
+        """pop.add with key but missing cols → error (L258-266)."""
+        vpath = self._setup_env(tmp_path / "home", monkeypatch)
+        assert self._do_emit(vpath, "pop.add", "key=mykey") == 1
         assert "requires all non-key columns" in capsys.readouterr().err
 
     def test_pop_rm_no_key_in_payload(self, tmp_path, monkeypatch, capsys):
-        """pop.rm without key= in payload → error (L268-272)."""
-        import argparse
-        from loops.commands.emit import cmd_emit
-
-        vpath = self._setup_list_vertex(tmp_path / "home")
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
-        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
-
-        ns = argparse.Namespace(
-            vertex=None, kind="pop.rm", parts=["col1=data"], observer="", dry_run=False
-        )
-        rc = cmd_emit(ns, vertex_path=vpath)
-        assert rc == 1
+        """pop.rm without key= → error (L268-272)."""
+        vpath = self._setup_env(tmp_path / "home", monkeypatch)
+        assert self._do_emit(vpath, "pop.rm", "col1=data") == 1
         assert "requires key=" in capsys.readouterr().err
 
 
@@ -2826,7 +2735,6 @@ class TestEmitPopSeedAndTemplate:
 
     def test_pop_add_seeds_and_emits(self, tmp_path, monkeypatch):
         """First pop.add seeds from list, then emits → L304-316 seeding path."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         vpath = self._setup_seeded_vertex(tmp_path / "home")
@@ -2844,7 +2752,6 @@ class TestEmitPopSeedAndTemplate:
 
     def test_pop_add_seeds_existing_rows(self, tmp_path, monkeypatch):
         """pop.add with pre-existing list rows triggers seed loop → L304-316."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         vpath = self._setup_seeded_vertex(tmp_path / "home")
@@ -2896,7 +2803,6 @@ class TestEmitMultiTemplate:
 
     def test_multi_template_payload_template_matches(self, tmp_path, monkeypatch):
         """Multi-template: payload template= matches qualifier → L285 + L305-306."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         vpath = self._setup_multi_template(tmp_path / "home")
@@ -2915,7 +2821,6 @@ class TestEmitMultiTemplate:
 
     def test_multi_template_payload_template_mismatch(self, tmp_path, monkeypatch, capsys):
         """Multi-template: payload template= mismatches qualifier → L275-284 error."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         vpath = self._setup_multi_template(tmp_path / "home")
@@ -2955,7 +2860,6 @@ class TestEmitAbsoluteListPath:
 
     def test_pop_add_with_absolute_list_path(self, tmp_path, monkeypatch):
         """Template with absolute 'from file' path → L236 (else: list_path=Path(...))."""
-        import argparse
         from loops.commands.emit import cmd_emit
 
         # Create list file at an absolute path
@@ -3016,7 +2920,6 @@ class TestPopMultiTemplateAddRm:
 
     def test_cmd_add_multi_template_sets_template_name(self, tmp_path, monkeypatch):
         """cmd_add on multi-template vertex with qualifier → L222 (template assigned)."""
-        import argparse
         from loops.commands.pop import cmd_add
 
         home = tmp_path / "home"
@@ -3030,7 +2933,6 @@ class TestPopMultiTemplateAddRm:
 
     def test_cmd_rm_multi_template_sets_template_name(self, tmp_path, monkeypatch):
         """cmd_rm on multi-template vertex with qualifier → L289 (template assigned)."""
-        import argparse
         from loops.commands.pop import cmd_add, cmd_rm
 
         home = tmp_path / "home"

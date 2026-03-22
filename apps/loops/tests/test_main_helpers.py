@@ -559,7 +559,7 @@ class TestMainAsModule:
         """Running loops as python -m loops covers __main__.py (L3, L5, L7)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.setattr("sys.argv", ["loops"])
-        import runpy, pytest
+        import runpy
         with pytest.raises(SystemExit):
             runpy.run_module("loops", run_name="__main__", alter_sys=True)
 
@@ -651,7 +651,7 @@ class TestMainAsDunder:
 
     def test_main_py_as_main(self, tmp_path, monkeypatch):
         """Running main.py as __main__ hits sys.exit(main()) → L1411."""
-        import runpy, pytest
+        import runpy
         from loops.main import main as loops_main
 
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

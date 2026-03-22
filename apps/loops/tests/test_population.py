@@ -52,37 +52,15 @@ class TestParserWiring:
         from loops.main import _run_ls
         assert callable(_run_ls)
 
-    def test_add_parser(self):
-        parser = argparse.ArgumentParser(prog="loops add")
-        parser.add_argument("target")
-        parser.add_argument("values", nargs="+")
-        args = parser.parse_args(
-            ["reading", "lobsters", "https://lobste.rs/rss"]
-        )
-        assert args.target == "reading"
-        assert args.values == ["lobsters", "https://lobste.rs/rss"]
-
-    def test_rm_parser(self):
-        parser = argparse.ArgumentParser(prog="loops rm")
-        parser.add_argument("target")
-        parser.add_argument("key")
-        args = parser.parse_args(["reading", "lobsters"])
-        assert args.target == "reading"
-        assert args.key == "lobsters"
-
-    def test_export_parser(self):
-        parser = argparse.ArgumentParser(prog="loops export")
-        parser.add_argument("target")
-        parser.add_argument("--output", "-o")
-        args = parser.parse_args(["reading"])
-        assert args.target == "reading"
-
-    def test_export_with_output(self):
-        parser = argparse.ArgumentParser(prog="loops export")
-        parser.add_argument("target")
-        parser.add_argument("--output", "-o")
-        args = parser.parse_args(["reading", "-o", "my.list"])
-        assert args.output == "my.list"
+    def test_add_rm_export_parsers(self):
+        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("values", nargs="+")
+        args = p.parse_args(["reading", "lobsters", "https://lobste.rs/rss"])
+        assert args.target == "reading" and args.values == ["lobsters", "https://lobste.rs/rss"]
+        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("key")
+        assert p.parse_args(["reading", "lobsters"]).key == "lobsters"
+        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("--output", "-o")
+        assert p.parse_args(["reading"]).target == "reading"
+        assert p.parse_args(["reading", "-o", "my.list"]).output == "my.list"
 
     def test_unknown_command(self):
         """Unknown names that don't resolve as vertices return error."""

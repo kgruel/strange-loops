@@ -2449,3 +2449,170 @@ class TestAstCoverage:
         # Different types → NotImplemented
         result = s.__eq__(ls)
         assert result is NotImplemented or result is False
+
+    def test_source_on_trigger(self):
+        """Loop file with on= trigger kind (L478)."""
+        from lang import parse_loop
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+on "status"
+""")
+        assert loop.on is not None
+        assert loop.on.kinds == ("status",)
+
+    def test_source_origin_field(self):
+        """Source with origin field (L484)."""
+        from lang import parse_loop
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+origin "custom-origin"
+""")
+        assert loop.origin == "custom-origin"
+
+    def test_source_on_no_kinds_raises(self):
+        """on: with no trigger kinds raises."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="on: requires at least one trigger"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+on
+""")
+
+    def test_source_unknown_field_raises(self):
+        """Unknown source field raises."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown source field"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+bazinga "hello"
+""")
+
+    def test_fold_op_missing_param_raises(self):
+        """Fold op missing required parameter."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="requires"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric { fold { items "by" } }
+}
+""")
+
+    def test_flatten_no_into_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="flatten requires into"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    flatten "items" {}
+}
+""")
+
+    def test_where_exists_no_operator(self):
+        """where with path but no op → defaults to exists (L189)."""
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="status"
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+        assert w[0].op == "exists"
+
+    def test_parse_loop_invalid_kdl(self):
+        """Invalid KDL syntax in parse_loop raises ParseError."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError):
+            parse_loop("{{invalid kdl")
+
+    def test_parse_vertex_invalid_kdl(self):
+        """Invalid KDL syntax in parse_vertex raises ParseError."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError):
+            parse_vertex("{{invalid kdl")
+
+    def test_combine_with_alias(self):
+        """Combine entry with as= alias (L555)."""
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "parent"
+combine {
+    vertex "./child/child.vertex" as="alias_name"
+}
+""")
+        assert v.combine is not None
+        assert len(v.combine) == 1
+        assert v.combine[0].alias == "alias_name"
+
+    def test_vertex_scope_observer(self):
+        """Vertex with scope 'observer' (L718)."""
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "test"
+scope "observer"
+loops {
+    metric { fold { n "inc" } }
+}
+""")
+        assert v.observer_scoped is True
+
+    def test_vertex_scope_unknown_raises(self):
+        """Unknown scope value raises (L720-721)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown scope value"):
+            parse_vertex("""\
+name "test"
+scope "global"
+loops {
+    metric { fold { n "inc" } }
+}
+""")
+
+    def test_vertex_unknown_key_raises(self):
+        """Unknown top-level key raises (L723)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown config key"):
+            parse_vertex("""\
+name "test"
+bazinga "hello"
+loops {
+    metric { fold { n "inc" } }
+}
+""")

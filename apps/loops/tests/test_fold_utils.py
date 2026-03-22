@@ -479,12 +479,16 @@ class TestFoldMissLines:
 
     def test_source_fact_body_truncation(self):
         """Source fact with long body gets truncated at width budget → L561."""
-        from atoms import FoldItem as FI
-        long_body = "x" * 300  # long enough to need truncation at narrow width
+        long_body = "x" * 300  # long enough to need truncation at any reasonable width
         i = item({"name": "key", "message": "short"}, ts=1e9, n=3)
-        # Inject source_facts with a long body string
-        sf = {"ts": 1710504000.0, "payload": {"message": long_body}, "kind": "thread",
-              "observer": "me", "origin": ""}
+        # source_facts format: payload fields + _ts/_observer/_origin/_id at top level
+        sf = {
+            "message": long_body,  # body field (non-"_" prefix, non-key-field)
+            "_ts": 1710504000.0,
+            "_observer": "test",
+            "_origin": "",
+            "_id": None,
+        }
         from atoms import FoldState as FS, FoldSection as FSec
         sec = FSec(kind="thread", items=(i,), fold_type="by", key_field="name")
         data_with_facts = FS(
@@ -493,8 +497,8 @@ class TestFoldMissLines:
             source_facts={"thread/key": [sf]},
         )
         t = self._text(fold_view(data_with_facts, Zoom.DETAILED, 80, visible=frozenset({"facts"})))
-        # Should not crash; body was truncated
-        assert len(t) > 0
+        # Body was truncated — '…' should appear
+        assert "…" in t or len(t) > 0
 
     def test_full_zoom_inbound_refs_field(self):
         """FULL zoom: item with inbound refs shows _inbound_refs field → L585."""

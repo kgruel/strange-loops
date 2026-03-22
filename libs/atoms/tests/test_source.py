@@ -629,6 +629,14 @@ class TestSequentialSource:
         seq = SequentialSource(sources=(), _observer="ci")
         assert seq.observer == "ci"
 
+    def test_empty_sources_kind_is_empty_string(self):
+        seq = SequentialSource(sources=(), _observer="ci")
+        assert seq.kind == ""
+
+    def test_empty_sources_command_is_empty_string(self):
+        seq = SequentialSource(sources=(), _observer="ci")
+        assert seq.command == ""
+
     async def test_declaration_order_preserved(self):
         """Facts arrive in declaration order: all of source1, then source2."""
         seq = SequentialSource(sources=(

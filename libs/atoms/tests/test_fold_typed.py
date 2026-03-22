@@ -189,6 +189,18 @@ class TestTypedFoldApply:
         result = s.apply(state, {"name": "NoId"})
         assert result == {"users": {}}
 
+    def test_upsert_accumulates_refs(self):
+        s = Shape(
+            name="registry",
+            folds=(Upsert(target="items", key="id"),),
+        )
+        state = {"items": {}}
+        state = s.apply(state, {"id": "x", "ref": "a,b"})
+        assert state["items"]["x"]["_refs"] == ["a", "b"]
+        state = s.apply(state, {"id": "x", "ref": "c"})
+        assert state["items"]["x"]["_refs"] == ["a", "b", "c"]
+        assert "ref" not in state["items"]["x"]  # consumed into _refs
+
 
 class TestTopN:
     """Tests for TopN convenience fold."""
@@ -484,3 +496,14 @@ class TestWindow:
 
         assert result["vals"] == [1, 2, 3]
         assert original["vals"] == [1, 2], "original list was mutated"
+
+
+class TestBuildFoldEdges:
+    def test_unknown_fold_type_raises(self):
+        from atoms.engine import build_fold_fn
+
+        class FakeFold:
+            pass
+
+        with pytest.raises(ValueError, match="Unknown fold type"):
+            build_fold_fn(FakeFold())

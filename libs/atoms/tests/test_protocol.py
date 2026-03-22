@@ -1,6 +1,9 @@
-"""Tests for atoms SourceProtocol — 0% coverage."""
+"""Tests for atoms module-level and SourceProtocol."""
 
 import asyncio
+
+import pytest
+
 from atoms.protocol import SourceProtocol
 
 
@@ -13,6 +16,13 @@ class _FakeAtomSource:
         from atoms import Fact
         yield Fact(kind="test", ts=1.0, payload={"x": 1}, observer=self.observer)
         yield Fact(kind="test", ts=2.0, payload={"x": 2}, observer=self.observer)
+
+
+class TestLazyImports:
+    def test_unknown_attribute_raises(self):
+        import atoms
+        with pytest.raises(AttributeError, match="no attribute 'NoSuchThing'"):
+            atoms.NoSuchThing
 
 
 class TestSourceProtocol:

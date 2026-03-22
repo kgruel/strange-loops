@@ -384,3 +384,27 @@ class TestOrigin:
         f = Fact.of("heartbeat", "alice")
         with pytest.raises(dataclasses.FrozenInstanceError):
             f.origin = "other"  # type: ignore[misc]
+
+
+# --- Protocol edges (immutability, eq, hash) ---
+
+
+class TestProtocolEdges:
+    def test_delattr_raises_frozen(self):
+        f = Fact.of("heartbeat", "alice")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            del f.kind
+
+    def test_eq_returns_not_implemented_for_non_fact(self):
+        f = Fact.of("heartbeat", "alice")
+        assert f.__eq__("not a fact") is NotImplemented
+
+    def test_hash_with_unhashable_payload(self):
+        f = Fact(kind="data", ts=1.0, payload={"a": [1, 2]}, observer="x")
+        # MappingProxyType with list values is unhashable — falls back to id()
+        h = hash(f)
+        assert isinstance(h, int)
+
+    def test_class_getitem(self):
+        assert Fact[str] is Fact
+        assert Fact[int] is Fact

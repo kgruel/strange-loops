@@ -296,6 +296,15 @@ class TestTypeUtilities:
         assert coerce_value({1, 2, 3}, "list") == [1, 2, 3] or set(coerce_value({1, 2, 3}, "list")) == {1, 2, 3}
         assert coerce_value([1, 2], "list") == [1, 2]
 
+    def test_coerce_value_fallthrough_returns_original(self):
+        """Uncoercible types pass through unchanged."""
+        obj = {"key": "val"}
+        assert coerce_value(obj, "int") is obj      # L76
+        assert coerce_value(obj, "float") is obj     # L87
+        assert coerce_value(obj, "set") is obj       # L104
+        assert coerce_value(obj, "list") is obj      # L110
+        assert coerce_value(obj, "dict") is obj      # L111-112 wildcard
+
     def test_type_matches_int(self):
         assert type_matches(42, "int") is True
         assert type_matches(True, "int") is False  # bool is not int

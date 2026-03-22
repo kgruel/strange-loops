@@ -38,8 +38,7 @@ def _load(target: str):
     from lang import parse_vertex_file
     from lang.ast import FromFile, TemplateSource
     from lang.population import list_file_header, resolve_template, resolve_vertex
-    from loops.main import loops_home
-    from loops.main import _resolve_vertex_store_path
+    from loops.commands.resolve import loops_home, _resolve_vertex_store_path
 
     vertex_ref, qualifier = parse_target(target)
     vertex_path = resolve_vertex(vertex_ref, loops_home())

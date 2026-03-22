@@ -6,8 +6,8 @@ import os
 
 
 def _loops_home() -> Path:
-    """Resolve the loops config directory (delegates to main.loops_home)."""
-    from loops.main import loops_home
+    """Resolve the loops config directory."""
+    from loops.commands.resolve import loops_home
 
     return loops_home()
 
@@ -206,7 +206,7 @@ def resolve_local_vertex(start: Path | None = None) -> Path:
 
     Raises FileNotFoundError if neither found.
     """
-    from loops.main import _find_local_vertex
+    from loops.commands.resolve import _find_local_vertex
 
     # 1. Local vertex in cwd
     local = _find_local_vertex()

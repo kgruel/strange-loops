@@ -457,14 +457,14 @@ class TestEdgeCases:
     """Edge cases that exercise error/boundary paths."""
 
     def test_emit_to_nonexistent_vertex(self, tmp_path):
-        """Emit to missing vertex — raises FileNotFoundError."""
+        """Emit to missing vertex — returns error code 1."""
         import argparse
         ns = argparse.Namespace(
             vertex=None, kind="test", parts=["x=1"],
             observer="", dry_run=False,
         )
-        with pytest.raises(FileNotFoundError):
-            cmd_emit(ns, vertex_path=tmp_path / "nonexistent.vertex")
+        rc = cmd_emit(ns, vertex_path=tmp_path / "nonexistent.vertex")
+        assert rc == 1
 
     def test_emit_creates_store_dir(self, tmp_path):
         """Emit to vertex whose store dir doesn't exist — creates it."""

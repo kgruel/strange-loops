@@ -161,6 +161,7 @@ class TestResolveObserverWalkup:
         """resolve_observer with single observer in .loops/.vertex (L75)."""
         from loops.commands.identity import resolve_observer
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.chdir(tmp_path)
         loops_dir = tmp_path / ".loops"
         loops_dir.mkdir()
@@ -174,6 +175,7 @@ class TestResolveObserverWalkup:
         """resolve_observer with multiple observers returns '' (L78)."""
         from loops.commands.identity import resolve_observer
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.chdir(tmp_path)
         loops_dir = tmp_path / ".loops"
         loops_dir.mkdir()

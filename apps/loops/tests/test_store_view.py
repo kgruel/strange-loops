@@ -407,3 +407,68 @@ class TestPayloadOneLiner:
     def test_none_payload(self):
         result = _payload_one_liner(None, 60)
         assert result == ""
+
+
+class TestStoreViewEdges:
+    """Cover remaining lenses/store.py paths."""
+
+    def test_render_summary_empty_store(self):
+        """_render_summary with no fact kinds (L76)."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        data = {"facts": {"kinds": {}}, "ticks": {"kinds": {}}}
+        block = store_view(data, Zoom.SUMMARY, 80)
+        from .helpers import block_text
+        assert "empty store" in block_text(block)
+
+    def test_format_count_large(self):
+        """_format_count with n >= 10000 (L258)."""
+        from loops.lenses.store import _format_count
+        assert _format_count(15000) == "15k"
+        assert _format_count(10000) == "10k"
+
+    def test_ensure_utc_naive(self):
+        """_ensure_utc with naive datetime (L267)."""
+        from loops.lenses.store import _ensure_utc
+        from datetime import datetime
+        naive = datetime(2024, 1, 1, 12, 0, 0)  # no tzinfo
+        result = _ensure_utc(naive)
+        assert result.tzinfo is not None
+
+    def test_relative_time_future(self):
+        """_relative_time with future date → 'just now' (L280)."""
+        from loops.lenses.store import _relative_time
+        from datetime import datetime, timezone, timedelta
+        future = datetime.now(timezone.utc) + timedelta(seconds=5)
+        assert _relative_time(future) == "just now"
+
+    def test_time_range_empty(self):
+        """_time_range with no timestamps → '' (L310)."""
+        from loops.lenses.store import _time_range
+        assert _time_range({}) == ""
+
+    def test_time_range_same_day(self):
+        """_time_range earliest == latest → single date string (L315)."""
+        from loops.lenses.store import _time_range
+        from datetime import datetime, timezone
+        ts = datetime(2024, 3, 15, tzinfo=timezone.utc)
+        result = _time_range({"metric": {"earliest": ts, "latest": ts}})
+        assert "Mar 15" in result and "–" not in result
+
+    def test_render_detailed_empty(self):
+        """_render_detailed with no kinds (L137)."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        from .helpers import block_text
+        data = {"facts": {"kinds": {}}, "ticks": {"kinds": {}}}
+        block = store_view(data, Zoom.DETAILED, 80)
+        assert "empty store" in block_text(block)
+
+    def test_render_ticks_empty(self):
+        """_render_ticks with no kinds (L181)."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        from .helpers import block_text
+        data = {"facts": {"kinds": {}, "total": 0}, "ticks": {"kinds": {}}}
+        block = store_view(data, Zoom.FULL, 80)
+        assert block is not None

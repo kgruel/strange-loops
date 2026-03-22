@@ -166,3 +166,46 @@ class TestFetchVerticesLocal:
         result = fetch_vertices_local()
         assert result is not None
         assert "vertices" in result
+
+
+class TestWalkRoot:
+    """Tests for _walk_root — discover/combine paths."""
+
+    def test_walk_root_discover(self, tmp_path):
+        """_walk_root with discover pattern finds child vertices (L83-94)."""
+        from loops.commands.vertices import _walk_root
+
+        # Root vertex with discover pattern
+        root = tmp_path / "root.vertex"
+        root.write_text('name "root"\ndiscover "*.vertex"\n')
+        # Child vertex
+        child = tmp_path / "proj.vertex"
+        child.write_text('name "proj"\nloops {\n    m { fold { n "inc" } }\n}\n')
+
+        result = _walk_root(root, tmp_path)
+        assert any(v["name"] == "proj" for v in result)
+
+    def test_walk_root_no_discover_no_combine(self, tmp_path):
+        """_walk_root with no discover/combine → lists all .vertex (L114-125)."""
+        from loops.commands.vertices import _walk_root
+
+        root = tmp_path / "root.vertex"
+        root.write_text('name "root"\nloops { m { fold { n "inc" } } }\n')
+        sibling = tmp_path / "sibling.vertex"
+        sibling.write_text('name "sibling"\nloops {\n    m { fold { n "inc" } }\n}\n')
+
+        result = _walk_root(root, tmp_path)
+        assert any(v["name"] == "sibling" for v in result)
+
+    def test_walk_root_broken_child(self, tmp_path):
+        """_walk_root skips broken .vertex files (L92-93, L123-124)."""
+        from loops.commands.vertices import _walk_root
+
+        root = tmp_path / "root.vertex"
+        root.write_text('name "root"\ndiscover "*.vertex"\n')
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+
+        result = _walk_root(root, tmp_path)
+        # Bad file is skipped, result is empty or has no "bad" entry
+        assert all(v.get("name") != "bad" for v in result)

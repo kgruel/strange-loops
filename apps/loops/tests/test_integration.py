@@ -828,102 +828,33 @@ class TestCloseWorkflow:
 
 
 class TestLensRendering:
-    """Test lens render functions directly — no terminal needed."""
+    """Smoke test: all lens render functions return non-None."""
 
-    @pytest.mark.parametrize(
-        "build_block",
-        [
-            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
-                __import__("atoms", fromlist=["FoldState", "FoldSection", "FoldItem"]).FoldState(
-                    sections=(
-                        __import__("atoms", fromlist=["FoldSection", "FoldItem"]).FoldSection(
-                            kind="metric",
-                            items=(
-                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"service": "api", "latency": "42"}, ts=1000000.0),
-                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"service": "web", "latency": "10"}, ts=1000001.0),
-                            ),
-                            sections=(),
-                            fold_type="by",
-                            key_field="service",
-                            scalars={},
-                        ),
-                    ),
-                    vertex="test",
-                ),
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
-                __import__("atoms", fromlist=["FoldState", "FoldSection", "FoldItem"]).FoldState(
-                    sections=(
-                        __import__("atoms", fromlist=["FoldSection", "FoldItem"]).FoldSection(
-                            kind="event",
-                            items=tuple(
-                                __import__("atoms", fromlist=["FoldItem"]).FoldItem(payload={"message": f"event-{i}"}, ts=1000000.0 + i)
-                                for i in range(5)
-                            ),
-                            sections=(),
-                            fold_type="collect",
-                            key_field=None,
-                            scalars={},
-                        ),
-                    ),
-                    vertex="test",
-                ),
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.fold", fromlist=["fold_view"]).fold_view(
-                __import__("atoms", fromlist=["FoldState"]).FoldState(sections=(), vertex="empty"),
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.stream", fromlist=["stream_view"]).stream_view(
-                [
-                    {"kind": "heartbeat", "ts": 1000000.0, "payload": {"service": "api"}, "observer": "me", "id": "abc123"},
-                    {"kind": "event", "ts": 1000001.0, "payload": {"message": "deploy"}, "observer": "me", "id": "def456"},
-                ],
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.store", fromlist=["store_view"]).store_view(
-                {
-                    "name": "test.db",
-                    "path": "/tmp/test.db",
-                    "facts": {"total": 42, "kinds": {"heartbeat": {"count": 30}, "event": {"count": 12}}},
-                    "ticks": {"total": 3, "names": {"heartbeat": {"count": 3, "sparkline": "▃▅█"}}},
-                },
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.compile", fromlist=["compile_view"]).compile_view(
-                {
-                    "type": "vertex",
-                    "name": "test",
-                    "source_path": "/tmp/test.vertex",
-                    "store": "test.db",
-                    "discover": None,
-                    "emit": None,
-                    "specs": {"heartbeat": {"state_fields": ["n"], "folds": ["Count: n"], "boundary": None}},
-                    "routes": {},
-                },
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.validate", fromlist=["validate_view"]).validate_view(
-                {"results": [{"path": "test.vertex", "valid": True, "error": None}], "checked": 1, "errors": 0},
-                Zoom(1),
-                width=80,
-            ),
-            lambda: __import__("loops.lenses.sync", fromlist=["sync_view"]).sync_view(
-                {"ran": ["disk.loop"], "skipped": [], "fact_counts": {"disk": 5}, "errors": [], "ticks": []},
-                Zoom(1),
-                width=80,
-            ),
-        ],
-    )
-    def test_views_render(self, build_block):
-        assert build_block() is not None
+    def test_all_views_render(self):
+        from loops.lenses.fold import fold_view
+        from loops.lenses.stream import stream_view
+        from loops.lenses.store import store_view
+        from loops.lenses.compile import compile_view
+        from loops.lenses.validate import validate_view
+        from loops.lenses.sync import sync_view
+        from atoms import FoldState, FoldSection, FoldItem
+
+        z, w = Zoom(1), 80
+        fi = lambda ts=1e6, **kw: FoldItem(payload=kw, ts=ts)
+        sec = lambda kind, items, ft="collect", kf=None: FoldSection(
+            kind=kind, items=items, sections=(), fold_type=ft, key_field=kf, scalars={})
+        fs = lambda *s: FoldState(sections=s, vertex="test")
+
+        assert fold_view(fs(sec("metric", (fi(service="api"), fi(ts=1e6+1, service="web")), "by", "service")), z, w) is not None
+        assert fold_view(fs(sec("event", tuple(fi(ts=1e6+i, message=f"e{i}") for i in range(5)))), z, w) is not None
+        assert fold_view(fs(), z, w) is not None
+        # dict format (normal) and list format (L38-39: else branch in stream_view)
+        assert stream_view({"facts": [{"kind": "heartbeat", "ts": 1e6, "payload": {"service": "api"}, "observer": "me", "id": "abc"}]}, z, w) is not None
+        assert stream_view([{"kind": "event", "ts": 1e6, "payload": {"message": "x"}, "observer": "me", "id": "y"}], z, w) is not None
+        assert store_view({"name": "t.db", "path": "/t.db", "facts": {"total": 42, "kinds": {"heartbeat": {"count": 30}}}, "ticks": {"total": 3, "names": {"heartbeat": {"count": 3, "sparkline": "▃▅█"}}}}, z, w) is not None
+        assert compile_view({"type": "vertex", "name": "t", "source_path": "/t.vertex", "store": "t.db", "discover": None, "emit": None, "specs": {"heartbeat": {"state_fields": ["n"], "folds": ["Count: n"], "boundary": None}}, "routes": {}}, z, w) is not None
+        assert validate_view({"results": [{"path": "t.vertex", "valid": True, "error": None}], "checked": 1, "errors": 0}, z, w) is not None
+        assert sync_view({"ran": ["disk.loop"], "skipped": [], "fact_counts": {"disk": 5}, "errors": [], "ticks": []}, z, w) is not None
 
 
 class TestVerticesLens:

@@ -260,40 +260,18 @@ class TestInitCommand:
         assert result == 0
         assert (deep / ".vertex").exists()
 
-    def test_template_flag_parsed(self):
+    def test_init_parser_args(self):
         import argparse
-        from loops.main import _run_init
-        # Verify the wrapper's parser handles template flag
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args(["--template", "session"])
-        assert args.template == "session"
-
-    def test_template_flag_short(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args(["-t", "tasks"])
-        assert args.template == "tasks"
-
-    def test_no_template_is_none(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args([])
-        assert args.template is None
-
-    def test_name_arg_parsed(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args(["project"])
-        assert args.name == "project"
-        assert args.template is None
+        def make_parser():
+            p = argparse.ArgumentParser(prog="loops init")
+            p.add_argument("name", nargs="?", default=None)
+            p.add_argument("--template", "-t")
+            return p
+        assert make_parser().parse_args(["--template", "session"]).template == "session"
+        assert make_parser().parse_args(["-t", "tasks"]).template == "tasks"
+        assert make_parser().parse_args([]).template is None
+        ns = make_parser().parse_args(["project"])
+        assert ns.name == "project" and ns.template is None
 
     def test_bare_name_creates_local_vertex(self, monkeypatch, tmp_path, capsys):
         """loops init project creates vertex in .loops/ from config-level source."""
@@ -333,14 +311,6 @@ class TestInitCommand:
         assert "loops {" in content
         assert (project_dir / ".loops" / "data").is_dir()
 
-    def test_template_project_choice(self):
-        import argparse
-        parser = argparse.ArgumentParser(prog="loops init")
-        parser.add_argument("name", nargs="?", default=None)
-        parser.add_argument("--template", "-t")
-        args = parser.parse_args(["-t", "project"])
-        assert args.template == "project"
-
     def test_template_creates_local_with_cwd(self, monkeypatch, tmp_path, capsys):
         """loops init --template session (no name) creates in .loops/."""
         monkeypatch.chdir(tmp_path)
@@ -364,107 +334,27 @@ class TestDefaultPaths:
 class TestReadVerb:
     """Tests for the read verb and implicit read dispatch."""
 
-    def test_read_routes_to_fold_by_default(self, monkeypatch, tmp_path, capsys):
-        """loops read <vertex> with no flags routes to fold."""
+    @pytest.fixture
+    def myvert(self, tmp_path, monkeypatch):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Seed a vertex with a store
         vdir = tmp_path / "myvert"
         vdir.mkdir()
         (vdir / "myvert.vertex").write_text(
             'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
+            'loops {\n  thing { fold { count "inc" } }\n}\n'
         )
-        result = main(["read", "myvert"])
-        assert result == 0
-        captured = capsys.readouterr()
-        # Should produce fold output (empty vertex = no sections, but no error)
-        assert result == 0
 
-    def test_read_facts_flag_routes_to_stream(self, monkeypatch, tmp_path, capsys):
-        """loops read <vertex> --facts routes to stream/facts mode."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["read", "myvert", "--facts"])
-        assert result == 0
-
-    def test_read_ticks_flag(self, monkeypatch, tmp_path, capsys):
-        """loops read <vertex> --ticks routes to stream with kind=tick filter."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["read", "myvert", "--ticks"])
-        assert result == 0
-
-    def test_implicit_read_via_vertex_name(self, monkeypatch, tmp_path, capsys):
-        """loops <vertex> (no verb) routes to implicit read."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["myvert"])
-        assert result == 0
-
-    def test_implicit_read_with_facts_flag(self, monkeypatch, tmp_path, capsys):
-        """loops <vertex> --facts routes to implicit read with facts mode."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["myvert", "--facts"])
-        assert result == 0
-
-    def test_vertex_first_read_op(self, monkeypatch, tmp_path, capsys):
-        """loops <vertex> read routes to read (vertex-first backward compat)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["myvert", "read"])
-        assert result == 0
-
-    def test_vertex_first_read_with_facts(self, monkeypatch, tmp_path, capsys):
-        """loops <vertex> read --facts works."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "myvert"
-        vdir.mkdir()
-        (vdir / "myvert.vertex").write_text(
-            'name "myvert"\nstore "./data/myvert.db"\n\n'
-            "loops {\n"
-            '  thing { fold { count "inc" } }\n'
-            "}\n"
-        )
-        result = main(["myvert", "read", "--facts"])
-        assert result == 0
+    @pytest.mark.parametrize("cmd", [
+        ["read", "myvert"],                  # explicit read verb → fold
+        ["read", "myvert", "--facts"],       # read + --facts → stream
+        ["read", "myvert", "--ticks"],       # read + --ticks → ticks
+        ["myvert"],                          # implicit read
+        ["myvert", "--facts"],               # implicit read + --facts
+        ["myvert", "read"],                  # vertex-first read
+        ["myvert", "read", "--facts"],       # vertex-first read + --facts
+    ])
+    def test_read_routes(self, myvert, cmd):
+        assert main(cmd) == 0
 
 
 class TestDispatchTiers:

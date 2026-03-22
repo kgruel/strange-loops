@@ -727,3 +727,37 @@ class TestPopulationEdgeCoverage:
         lines = ['  template "t" {', '  }']
         indent = _detect_indent(lines, 0, 1)
         assert indent == "    "  # template indent (2 spaces) + 2 more
+
+    def test_resolve_template_ambiguous_same_name(self):
+        """Multiple templates same name, can't disambiguate (L130)."""
+        from lang.ast import VertexFile, TemplateSource
+        from lang.population import resolve_template
+
+        t1 = TemplateSource(template=Path("test.loop"), params=(), from_=None, loop=None)
+        t2 = TemplateSource(template=Path("test.loop"), params=(), from_=None, loop=None)
+        v = VertexFile(
+            name="v", store=None, discover=None,
+            sources=(t1, t2), vertices=None, loops={},
+            routes=None, emit=None, combine=None, observers=None,
+            lens=None, observer_scoped=False, path=None,
+            sources_blocks=None,
+        )
+        with pytest.raises(ValueError, match="Multiple templates named"):
+            resolve_template(v, "test")
+
+    def test_read_population_empty_header(self, tmp_path):
+        """read_population with no file and no inline rows → empty header (L309)."""
+        from lang.ast import VertexFile, TemplateSource
+        from lang.population import read_population
+
+        t = TemplateSource(template=Path("test.loop"), params=(), from_=None, loop=None)
+        v = VertexFile(
+            name="v", store=None, discover=None,
+            sources=(t,), vertices=None, loops={},
+            routes=None, emit=None, combine=None, observers=None,
+            lens=None, observer_scoped=False, path=tmp_path / "v.vertex",
+            sources_blocks=None,
+        )
+        info = read_population(v, t, tmp_path)
+        assert info.header == []
+        assert info.rows == []

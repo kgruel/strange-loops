@@ -1815,6 +1815,20 @@ class TestWhoamiIdentityStore:
         result = _whoami_from_identity_store()
         assert result == ""
 
+    def test_whoami_exception_returns_empty(self, tmp_path, monkeypatch):
+        """_whoami_from_identity_store returns '' on exception (L2826-2827)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create an identity vertex with an invalid/corrupt store
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        identity_vpath = loops_dir / "identity.vertex"
+        identity_vpath.write_text('name "identity"\nstore "./identity.db"\nloops { self { fold { n "inc" } } }\n')
+        # Create a corrupt db file
+        (loops_dir / "identity.db").write_bytes(b"not-a-sqlite-db")
+        result = _whoami_from_identity_store()
+        assert result == ""
+
 
 class TestVertexLensDecl:
     """Exercise _resolve_render_fn Tier 2 — vertex lens{} declarations (L1924-1931)."""

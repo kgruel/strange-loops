@@ -154,6 +154,37 @@ class TestCollectObserversEdges:
         assert len(result) > 0 or True  # may not find if name property needed
 
 
+class TestResolveObserverWalkup:
+    """Test resolve_observer walkup paths (L75, L78)."""
+
+    def test_single_observer_auto_resolved(self, tmp_path, monkeypatch):
+        """resolve_observer with single observer in .loops/.vertex (L75)."""
+        from loops.commands.identity import resolve_observer
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        (loops_dir / ".vertex").write_text(
+            'name "root"\nobservers {\n    alice {}\n}\nloops { m { fold { n "inc" } } }\n'
+        )
+        result = resolve_observer(None)
+        assert result == "alice"
+
+    def test_multiple_observers_returns_empty(self, tmp_path, monkeypatch):
+        """resolve_observer with multiple observers returns '' (L78)."""
+        from loops.commands.identity import resolve_observer
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        (loops_dir / ".vertex").write_text(
+            'name "root"\nobservers {\n    alice {}\n    bob {}\n}\n'
+            'loops { m { fold { n "inc" } } }\n'
+        )
+        result = resolve_observer(None)
+        assert result == ""
+
+
 class TestResolveLocalVertex:
     def test_found_locally(self, tmp_path, monkeypatch):
         """resolve_local_vertex finds .loops/.vertex (L214)."""

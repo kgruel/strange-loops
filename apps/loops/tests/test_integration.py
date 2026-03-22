@@ -2087,6 +2087,17 @@ class TestRunTicksEdgePaths:
 class TestRenderFoldPlainEdges:
     """Exercise remaining _render_fold_plain paths."""
 
+    def test_detailed_payload_extra_fields(self, tmp_path, monkeypatch):
+        """Fold view at DETAILED with extra payload fields renders k:v (L522)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("threads").store("./threads.db").loop("thread", fold_by("name"))
+        vpath = tmp_path / "threads.vertex"
+        v.write(vpath)
+        _emit(vpath, "thread", name="task1", status="open", priority="high", extra="detail")
+        # -v = DETAILED — shows extra payload fields
+        rc = main(["read", str(vpath), "--plain", "-v"])
+        assert rc == 0
+
     def test_grouped_fold_salience_threshold(self, tmp_path, monkeypatch):
         """Fold view with namespaced items >5 hits salience threshold (L301)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

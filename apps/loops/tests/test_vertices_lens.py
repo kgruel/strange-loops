@@ -1,10 +1,8 @@
 """Tests for vertices lens — all zoom levels."""
 
-from painted import Block, Zoom
+from painted import Zoom
 
-
-def _text(block: Block) -> str:
-    return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+from .helpers import block_text as _text
 
 
 def test_vertices_minimal():

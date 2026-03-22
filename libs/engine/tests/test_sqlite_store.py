@@ -236,3 +236,41 @@ class TestTickPersistence:
             assert store.tick_total == 1
             store.append_tick(Tick(name="b", ts=NOW_DT, payload=2, origin="v"))
             assert store.tick_total == 2
+
+
+class TestFactDirectBuild:
+    """Tests exercising the Fact.from_dict fast-path in since()."""
+
+    def test_since_with_fact_deserializer(self, tmp_db: Path):
+        from atoms import Fact
+
+        store = SqliteStore(
+            path=tmp_db,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("heartbeat", "alice", v=1))
+        store.append(Fact.of("heartbeat", "alice", v=2))
+
+        facts = store.since(0)
+        assert len(facts) == 2
+        assert facts[0].kind == "heartbeat"
+        assert facts[1].payload["v"] == 2
+        store.close()
+
+    def test_mapping_proxy_serialization(self, tmp_db: Path):
+        """MappingProxyType payloads serialize via _mapping_proxy_default."""
+        from atoms import Fact
+
+        store = SqliteStore(
+            path=tmp_db,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # Fact wraps dict payloads in MappingProxyType
+        f = Fact(kind="test", ts=1.0, payload={"nested": {"a": 1}}, observer="obs")
+        store.append(f)
+        facts = store.since(0)
+        assert len(facts) == 1
+        assert facts[0].payload["nested"] == {"a": 1}
+        store.close()

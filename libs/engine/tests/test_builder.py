@@ -21,6 +21,7 @@ from engine.builder import (
 from lang.ast import (
     BoundaryAfter,
     BoundaryEvery,
+    BoundaryWhen,
     FoldAvg,
     FoldBy,
     FoldCollect,
@@ -225,3 +226,50 @@ class TestWriteAllFoldTypes:
         ast = parse_vertex_file(tmp_path / "t.vertex")
         assert isinstance(ast.loops["m"].boundary, BoundaryAfter)
         assert ast.loops["m"].boundary.count == 5
+
+
+class TestLoopBuilderMethods:
+    def test_fold_method(self):
+        lb = LoopBuilder("k", fold_count("n"))
+        lb.fold(fold_sum("total"))
+        _, loop_def = lb.build()
+        assert len(loop_def.folds) == 2
+
+    def test_boundary_after_method(self):
+        lb = LoopBuilder("k", fold_count("n"))
+        lb.boundary_after(3)
+        _, loop_def = lb.build()
+        assert isinstance(loop_def.boundary, BoundaryAfter)
+        assert loop_def.boundary.count == 3
+
+    def test_boundary_when_method(self):
+        lb = LoopBuilder("k", fold_count("n"))
+        lb.boundary_when("deploy", status="ok")
+        _, loop_def = lb.build()
+        assert isinstance(loop_def.boundary, BoundaryWhen)
+        assert loop_def.boundary.kind == "deploy"
+
+
+class TestWriteWithRoutes:
+    def test_write_routes_roundtrip(self, tmp_path):
+        from lang import parse_vertex_file
+        b = (vertex("rt")
+            .store("./rt.db")
+            .loop("a", fold_count("n"))
+            .route("x", "a"))
+        b.write(tmp_path / "rt.vertex")
+        ast = parse_vertex_file(tmp_path / "rt.vertex")
+        assert ast.routes == {"x": "a"}
+
+
+class TestBoundaryWhenRoundtrip:
+    def test_boundary_when_write_roundtrip(self, tmp_path):
+        from lang import parse_vertex_file
+        b = (vertex("bw")
+            .store("./bw.db")
+            .loop_builder("events", fold_count("n"))
+                .boundary_when("deploy", status="ok")
+                .done())
+        b.write(tmp_path / "bw.vertex")
+        ast = parse_vertex_file(tmp_path / "bw.vertex")
+        assert isinstance(ast.loops["events"].boundary, BoundaryWhen)

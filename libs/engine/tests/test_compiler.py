@@ -2141,3 +2141,23 @@ loops {
         result = map_parse_steps(steps)
         assert len(result) == 1
         assert isinstance(result[0], RuntimeFlatten)
+
+
+class TestCompiledVertexProtocol:
+    def test_repr(self):
+        from engine.compiler import CompiledVertex
+        cv = CompiledVertex(name="test", specs={}, children={})
+        r = repr(cv)
+        assert "CompiledVertex" in r
+        assert "test" in r
+
+    def test_eq_same(self):
+        from engine.compiler import CompiledVertex
+        cv1 = CompiledVertex(name="a", specs={}, children={})
+        cv2 = CompiledVertex(name="a", specs={}, children={})
+        assert cv1 == cv2
+
+    def test_eq_different_type(self):
+        from engine.compiler import CompiledVertex
+        cv = CompiledVertex(name="a", specs={}, children={})
+        assert cv.__eq__("not a vertex") is NotImplemented

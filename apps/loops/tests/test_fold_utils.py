@@ -420,7 +420,6 @@ class TestFoldView:
 
     def test_render_item_facts_visible(self):
         """facts visible with source_facts data (L538-569)."""
-        from atoms import FoldState, FoldSection
         i = item({"name": "x"}, ts=1e9, n=3)
         s = section(kind="thread", items=(i,), fold_type="by", key_field="name")
         # Build FoldState with source_facts

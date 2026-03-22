@@ -41,7 +41,6 @@ class TestParseVars:
 
     def test_var_parsed_by_pre_parser(self):
         """--var is handled by pre-parser in _run_sync."""
-        from loops.main import _parse_vars
         assert _parse_vars([]) == {}
 
 

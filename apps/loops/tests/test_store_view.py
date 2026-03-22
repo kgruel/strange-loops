@@ -414,8 +414,6 @@ class TestStoreViewEdges:
 
     def test_render_summary_empty_store(self):
         """_render_summary with no fact kinds (L76)."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         data = {"facts": {"kinds": {}}, "ticks": {"kinds": {}}}
         block = store_view(data, Zoom.SUMMARY, 80)
         from .helpers import block_text
@@ -430,15 +428,12 @@ class TestStoreViewEdges:
     def test_ensure_utc_naive(self):
         """_ensure_utc with naive datetime (L267)."""
         from loops.lenses.store import _ensure_utc
-        from datetime import datetime
         naive = datetime(2024, 1, 1, 12, 0, 0)  # no tzinfo
         result = _ensure_utc(naive)
         assert result.tzinfo is not None
 
     def test_relative_time_future(self):
         """_relative_time with future date → 'just now' (L280)."""
-        from loops.lenses.store import _relative_time
-        from datetime import datetime, timezone, timedelta
         future = datetime.now(timezone.utc) + timedelta(seconds=5)
         assert _relative_time(future) == "just now"
 
@@ -450,15 +445,12 @@ class TestStoreViewEdges:
     def test_time_range_same_day(self):
         """_time_range earliest == latest → single date string (L315)."""
         from loops.lenses.store import _time_range
-        from datetime import datetime, timezone
         ts = datetime(2024, 3, 15, tzinfo=timezone.utc)
         result = _time_range({"metric": {"earliest": ts, "latest": ts}})
         assert "Mar 15" in result and "–" not in result
 
     def test_render_detailed_empty(self):
         """_render_detailed with no kinds (L137)."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         from .helpers import block_text
         data = {"facts": {"kinds": {}}, "ticks": {"kinds": {}}}
         block = store_view(data, Zoom.DETAILED, 80)
@@ -466,8 +458,6 @@ class TestStoreViewEdges:
 
     def test_render_ticks_empty(self):
         """_render_ticks with no kinds (L181)."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         from .helpers import block_text
         data = {"facts": {"kinds": {}, "total": 0}, "ticks": {"kinds": {}}}
         block = store_view(data, Zoom.FULL, 80)
@@ -475,8 +465,6 @@ class TestStoreViewEdges:
 
     def test_render_summary_narrow_fill(self):
         """_render_summary with narrow width → fill = '  ' (L211)."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         from .helpers import block_text
         # Kind name + count + freshness that exceeds inner width
         data = {"facts": {"kinds": {
@@ -487,8 +475,6 @@ class TestStoreViewEdges:
 
     def test_render_summary_with_recent_payloads(self):
         """_render_summary with recent dicts (L222-225)."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         from .helpers import block_text
         data = {"facts": {"kinds": {
             "metric": {
@@ -507,8 +493,6 @@ class TestStoreViewEdges:
 class TestStoreSummaryNarrowFill:
     def test_narrow_kind_header_fill(self):
         """fill_len <= 2 → fill='  ' (two spaces, L211) when header leaves no room for dots."""
-        from loops.lenses.store import store_view
-        from painted import Zoom
         # fill_len code is in _render_full (zoom=FULL).
         # inner_w = width - 2. left="abc"(3), right="5 · never"(9)
         # fill_len = inner_w - 3 - 9 - 2 = inner_w - 14

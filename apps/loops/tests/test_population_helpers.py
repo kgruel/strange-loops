@@ -225,7 +225,6 @@ class TestPopStoreHelpers:
     def test_pop_store_has_facts_template_match(self, tmp_path):
         """pop_store_has_facts returns True when template field matches (L58)."""
         from loops.commands.pop import _append_fact
-        from loops.pop_store import POP_ADD_KIND
 
         store = tmp_path / "y.db"
         # Add a fact with a specific template field

@@ -602,7 +602,6 @@ class TestAutoresearchEdgeCases:
 
     def test_selected_empty_iterations(self):
         """AppState.selected returns None when no iterations (L261)."""
-        from loops.tui.autoresearch_app import AppState
         from painted.views import ListState as LS
         state = AppState(
             config={}, iterations=[], primary_metric="", direction="lower",
@@ -613,7 +612,6 @@ class TestAutoresearchEdgeCases:
 
     def test_selected_cursor_out_of_bounds(self):
         """AppState.selected returns None when cursor past iterations (L261)."""
-        from loops.tui.autoresearch_app import AppState
         from painted.views import ListState as LS
         it = make_iteration(1)
         state = AppState(
@@ -627,7 +625,6 @@ class TestAutoresearchEdgeCases:
 
     def test_render_header_no_primary_metric(self):
         """_render_header_panels with empty primary_metric covers 'no metric' branch (L296)."""
-        from loops.tui.autoresearch_app import AppState, _render_header_panels
         from painted.views import ListState as LS
         state = AppState(
             config={}, iterations=[], primary_metric="", direction="lower",
@@ -924,7 +921,6 @@ class TestOnStartAsync:
     def test_autoresearch_on_start_schedules_load(self, tmp_path, monkeypatch):
         """AutoresearchApp._on_start → asyncio.call_soon(_load_data) → L567."""
         import asyncio
-        from loops.tui.autoresearch_app import AutoresearchApp
 
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         app = AutoresearchApp(vertex_path=None)
@@ -934,7 +930,6 @@ class TestOnStartAsync:
     def test_store_explorer_on_start_schedules_load(self, tmp_path):
         """StoreExplorerApp._on_start → asyncio.call_soon(_load_store) → L109."""
         import asyncio
-        from loops.tui.store_app import StoreExplorerApp
 
         store_path = tmp_path / "test.db"
         store_path.touch()

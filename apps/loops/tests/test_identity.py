@@ -107,7 +107,6 @@ class TestReadObserversEdges:
 
     def test_single_observer_auto_resolved(self, tmp_path, monkeypatch):
         """resolve_observer with single observer in .vertex (L75)."""
-        from loops.commands.identity import resolve_observer
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
         loops_dir = tmp_path / ".loops"
@@ -120,7 +119,6 @@ class TestReadObserversEdges:
 
     def test_multiple_observers_returns_empty(self, tmp_path, monkeypatch):
         """resolve_observer with multiple observers → '' (L78)."""
-        from loops.commands.identity import resolve_observer
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
         loops_dir = tmp_path / ".loops"
@@ -159,7 +157,6 @@ class TestResolveObserverWalkup:
 
     def test_single_observer_auto_resolved(self, tmp_path, monkeypatch):
         """resolve_observer with single observer in .loops/.vertex (L75)."""
-        from loops.commands.identity import resolve_observer
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.chdir(tmp_path)
@@ -173,7 +170,6 @@ class TestResolveObserverWalkup:
 
     def test_multiple_observers_returns_empty(self, tmp_path, monkeypatch):
         """resolve_observer with multiple observers returns '' (L78)."""
-        from loops.commands.identity import resolve_observer
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         monkeypatch.chdir(tmp_path)
@@ -215,7 +211,6 @@ class TestResolveLocalVertex:
 class TestFindWorkspaceRootNone:
     def test_no_workspace_returns_none(self, tmp_path, monkeypatch):
         """find_workspace_root returns None when no .vertex exists (L34)."""
-        from loops.commands.identity import find_workspace_root
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = find_workspace_root(tmp_path)
         assert result is None
@@ -224,7 +219,6 @@ class TestFindWorkspaceRootNone:
 class TestValidateEmitProjectObservers:
     def test_validate_emit_project_level(self, tmp_path, monkeypatch):
         """validate_emit finds project-level .loops/.vertex observers (L155-156)."""
-        from loops.commands.identity import validate_emit
         from engine.builder import vertex, fold_by
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         proj_dir = tmp_path / "project"

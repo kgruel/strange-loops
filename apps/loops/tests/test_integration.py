@@ -1346,6 +1346,20 @@ class TestFoldFastPath:
         rc = main(["read", str(vpath), "--static", "--plain", "--lens", "reconcile"])
         assert rc == 0
 
+    def test_read_static_plain_broken_lens(self, fold_by_vertex, tmp_path, monkeypatch):
+        """--static --plain -v with broken lens hits exception path (L2357-2359)."""
+        monkeypatch.chdir(tmp_path)
+        _tmp, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        # Create a broken lens in the current dir's lenses/
+        lenses = tmp_path / "lenses"
+        lenses.mkdir()
+        (lenses / "broken_fold.py").write_text(
+            "def fold_view(data, zoom, width): raise RuntimeError('lens error')\n"
+        )
+        rc = main(["read", str(vpath), "--static", "--plain", "-v", "--lens", "broken_fold"])
+        assert rc == 2
+
     def test_read_static_plain_bad_vertex(self, tmp_path):
         """--static --plain on bad vertex file hits exception path (L2327-2329)."""
         bad = tmp_path / "bad.vertex"

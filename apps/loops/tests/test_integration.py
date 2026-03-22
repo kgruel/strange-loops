@@ -747,17 +747,38 @@ class TestStoreDetails:
         rc = main(["store", str(tmp_path / "test.db"), "--plain"])
         assert rc == 0
 
-    def test_store_verbose(self, vertex_dir):
-        """Store -v exercises detailed store view."""
-        tmp_path, vpath = vertex_dir
+    def test_store_verbose_and_zoom(self, vertex_dir, tmp_path, monkeypatch):
+        """Store -v and -vv exercises detailed store view and recent payloads (L222-225)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        _tmp, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
-        rc = main(["store", str(tmp_path / "test.db"), "--plain", "-v"])
-        assert rc == 0
+        assert main(["store", str(_tmp / "test.db"), "--plain", "-v"]) == 0
+        # -vv with boundary_every=2 + 2 emits = tick with recent payloads
+        v2 = vertex("t").store("./t.db").loop("ping", fold_count("n"), boundary_every=2)
+        vpath2 = tmp_path / "t.vertex"
+        v2.write(vpath2)
+        _emit(vpath2, "ping", x="1")
+        _emit(vpath2, "ping", x="2")
+        assert main(["store", str(tmp_path / "t.db"), "-vv", "--plain"]) == 0
 
     def test_store_nonexistent(self, tmp_path):
         """Store for nonexistent db — exercises error path."""
         rc = main(["store", str(tmp_path / "nope.db"), "--plain"])
         assert rc != 0 or rc == 0  # may handle gracefully
+
+    def test_store_narrow_width(self, tmp_path, monkeypatch):
+        """Store view at narrow width shows '  ' fill (L211)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("n").store("./n.db").loop("ping", fold_count("n"), boundary_every=2)
+        vpath = tmp_path / "n.vertex"
+        v.write(vpath)
+        _emit(vpath, "ping", x="1")
+        _emit(vpath, "ping", x="2")
+        from loops.lenses.store import store_view
+        from loops.commands.store import make_fetcher
+        from painted import Zoom
+        data = make_fetcher(tmp_path / "n.db", zoom=3)()
+        assert store_view(data, Zoom.SUMMARY, width=20) is not None
 
 
 class TestCloseWorkflow:
@@ -2177,30 +2198,4 @@ class TestTopologyKindKeys:
         assert len(result) == 2
 
 
-class TestStoreLensZoom:
-    """Exercise lenses/store.py paths at various zoom levels."""
 
-    @pytest.fixture
-    def store_with_ticks(self, tmp_path, monkeypatch):
-        """Vertex with ticks and fact data for store view."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        v = vertex("t").store("./t.db").loop("ping", fold_count("n"), boundary_every=2)
-        vpath = tmp_path / "t.vertex"
-        v.write(vpath)
-        _emit(vpath, "ping", x="1")
-        _emit(vpath, "ping", x="2")  # triggers boundary
-        return tmp_path / "t.db"
-
-    def test_store_view_verbose(self, store_with_ticks):
-        """Store view with -vv gets recent tick payloads (L222-225)."""
-        rc = main(["store", str(store_with_ticks), "-vv", "--plain"])
-        assert rc == 0
-
-    def test_store_view_narrow(self, store_with_ticks):
-        """Store view with very narrow fill shows '  ' (L211)."""
-        from loops.lenses.store import store_view
-        from loops.commands.store import make_fetcher
-        data = make_fetcher(store_with_ticks, zoom=3)()
-        from painted import Zoom
-        block = store_view(data, Zoom.SUMMARY, width=20)
-        assert block is not None

@@ -1,24 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
-# Run engine tests to ensure nothing is broken
-echo "Running engine tests..."
-uv run --package engine pytest libs/engine/tests -x -q --tb=short 2>&1 | tail -5
+# Run lang tests to ensure nothing is broken
+echo "Running lang tests..."
+uv run --package lang pytest libs/lang/tests -x -q --tb=short 2>&1 | tail -5
 
-# Also run atoms (engine dependency) and loops (engine consumer) to catch breakage
-echo "Running atoms tests (engine dependency)..."
+# Also run engine (lang consumer) and atoms (lang dependency) to catch breakage
+echo "Running engine tests (lang consumer)..."
+uv run --package engine pytest libs/engine/tests -x -q --tb=short 2>&1 | tail -5
+echo "Running atoms tests (lang dependency)..."
 uv run --package atoms pytest libs/atoms/tests -x -q --tb=short 2>&1 | tail -5
-echo "Running loops tests (engine consumer)..."
+echo "Running loops tests (app consumer)..."
 uv run --package loops pytest apps/loops/tests -x -q --tb=short \
     --ignore=apps/loops/tests/golden 2>&1 | tail -5
 
-# Verify no trivial tests in engine (warning only — many are legitimate does-not-raise)
+# Verify no trivial tests in lang (warning only)
 echo "Checking for trivial tests..."
 uv run python -c "
 import ast, sys, pathlib
 
 errors = []
-for path in pathlib.Path('libs/engine/tests').rglob('test_*.py'):
+for path in pathlib.Path('libs/lang/tests').rglob('test_*.py'):
     tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('test_'):
@@ -42,7 +44,7 @@ if errors:
     for e in errors:
         print(f'  {e}')
 else:
-    print('All engine tests have assertions.')
+    print('All lang tests have assertions.')
 "
 
 echo "All checks passed."

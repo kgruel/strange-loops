@@ -13,9 +13,9 @@ set -euo pipefail
 # See autoresearch.md for full methodology.
 
 # --- Target configuration ---
-PKG="engine"
-TEST_DIR="libs/engine/tests"
-SRC_DIR="libs/engine/src/engine"
+PKG="lang"
+TEST_DIR="libs/lang/tests"
+SRC_DIR="libs/lang/src/lang"
 NUM_RUNS=2
 
 # --- Pre-check: syntax errors in test files ---

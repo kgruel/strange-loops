@@ -2387,3 +2387,65 @@ loops {
     }
 }
 """)
+
+
+class TestAstCoverage:
+    """Cover ast.py frozen dataclass + Duration edges."""
+
+    def test_frozen_missing_arg(self):
+        from lang.ast import LoopFile
+        with pytest.raises(TypeError, match="missing required argument"):
+            LoopFile(kind="x")  # missing 'observer'
+
+    def test_frozen_repr(self):
+        from lang.ast import Strip
+        s = Strip(chars="/")
+        r = repr(s)
+        assert "Strip" in r
+
+    def test_frozen_setattr_raises(self):
+        from lang.ast import Strip
+        s = Strip(chars="/")
+        with pytest.raises(AttributeError, match="cannot assign"):
+            s.chars = "x"
+
+    def test_frozen_delattr_raises(self):
+        from lang.ast import Strip
+        s = Strip(chars="/")
+        with pytest.raises(AttributeError, match="cannot delete"):
+            del s.chars
+
+    def test_duration_invalid_char(self):
+        from lang.ast import Duration
+        with pytest.raises(ValueError, match="Invalid duration character"):
+            Duration.parse("5x")
+
+    def test_duration_trailing_number(self):
+        from lang.ast import Duration
+        with pytest.raises(ValueError, match="Trailing number without unit"):
+            Duration.parse("42")
+
+    def test_duration_str_seconds(self):
+        from lang.ast import Duration
+        d = Duration.parse("2s")
+        s = str(d)
+        assert "2s" in s
+
+    def test_duration_str_milliseconds(self):
+        from lang.ast import Duration
+        d = Duration.parse("500ms")
+        s = str(d)
+        assert "500ms" in s
+
+    def test_boundary_condition_invalid_op(self):
+        from lang.ast import BoundaryCondition
+        with pytest.raises(ValueError, match="Invalid condition operator"):
+            BoundaryCondition(target="n", op="~=", value=5)
+
+    def test_frozen_eq_attribute_error(self):
+        from lang.ast import Strip, LStrip
+        s = Strip(chars="/")
+        ls = LStrip(chars="/")
+        # Different types → NotImplemented
+        result = s.__eq__(ls)
+        assert result is NotImplemented or result is False

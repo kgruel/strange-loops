@@ -48,9 +48,9 @@ class TestEmit:
             def now(cls, tz=None):
                 return fixed
 
-        import loops.main as loops_main
+        import loops.commands.emit as emit_mod
 
-        monkeypatch.setattr(loops_main, "datetime", FakeDateTime)
+        monkeypatch.setattr(emit_mod, "datetime", FakeDateTime)
 
         result = main(
             [

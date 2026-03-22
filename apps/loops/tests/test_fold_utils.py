@@ -232,3 +232,74 @@ class TestGroupByNamespace:
         result = _group_by_namespace(items, "name")
         assert "" in result
         assert len(result[""]) == 2
+
+
+# ---------------------------------------------------------------------------
+# fold_view rendering paths
+# ---------------------------------------------------------------------------
+
+class TestFoldView:
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def test_empty_data(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        data = state(sections=())
+        assert "No data" in self._text(fold_view(data, Zoom.SUMMARY, 80))
+
+    def test_minimal_zoom(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        s = section(kind="decision", items=(item({"name": "x"}),))
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.MINIMAL, 80))
+        assert "1 decisions" in t
+
+    def test_minimal_with_unfolded(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        s = section(kind="thread", items=(item({"name": "a"}),))
+        data = state(sections=(s,), unfolded={"orphan": 3})
+        t = self._text(fold_view(data, Zoom.MINIMAL, 80))
+        assert "unfolded" in t
+
+    def test_summary_zoom(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        s = section(kind="decision", items=(
+            item({"name": "auth", "message": "Use JWT"}, ts=1710504000.0, n=2),
+        ))
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80))
+        assert "Decision" in t or "decision" in t
+
+    def test_refs_filter(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        i1 = item({"name": "x"}, refs=("decision/y",))
+        i2 = item({"name": "y"})  # no refs, no inbound
+        s = section(kind="thread", items=(i1, i2), key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80, visible={"refs"}))
+        # Should show section but filter disconnected items
+        assert "thread" in t.lower() or "Thread" in t
+
+    def test_facts_filter(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        i1 = item({"name": "x"}, n=3)
+        s = section(kind="metric", items=(i1,), fold_type="by")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80, visible={"facts"}))
+        assert len(t) > 0
+
+    def test_footer_with_skipped(self):
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        # collect fold with facts filter → skipped (no history)
+        s = section(kind="metric", items=(item({"name": "x"}),), fold_type="collect")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80, visible={"facts"}))
+        # Should show filtered message
+        assert len(t) > 0

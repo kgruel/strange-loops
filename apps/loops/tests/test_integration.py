@@ -2385,3 +2385,39 @@ class TestEmitMissLinesFix:
         # "notavertex" can't resolve → kind-shift → L423-427
         rc = _run_close(["notavertex", "thread", "task1", "--dry-run"])
         assert rc in (0, 1)
+
+
+class TestResolveEntityRefs:
+    """Cover _resolve_entity_refs miss lines in commands/resolve.py."""
+
+    def test_loopserror_on_bad_vertex_sets_empty_kind_keys(self, tmp_path):
+        """_resolve_entity_refs: LoopsError from _resolve_writable_vertex → L284-285."""
+        from loops.commands.resolve import _resolve_entity_refs
+
+        # Non-existent vertex: _parse_vertex raises VertexNotFound (LoopsError)
+        vpath = tmp_path / "nonexistent.vertex"
+        store_path = tmp_path / "store.db"
+
+        result = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
+        # LoopsError caught → writable=None, local_kind_keys={}, no refs resolved
+        assert result == {"x": "foo/bar"}
+
+    def test_topology_cache_hit_on_second_call(self, tmp_path, monkeypatch):
+        """_ensure_topology cache hit (L297): second ref triggers cache-hit path."""
+        from loops.commands.resolve import _resolve_entity_refs
+
+        # Create a minimal valid vertex (no loops → local_kind_keys={})
+        vpath = tmp_path / "minimal.vertex"
+        vpath.write_text('name "minimal"\nstore "./minimal.db"\n')
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        store_path = tmp_path / "minimal.db"
+
+        # Two unknown kinds → _ensure_topology called twice → L297 fires on 2nd call
+        result = _resolve_entity_refs(
+            vpath, store_path, {"a": "unknownkind1/val1", "b": "unknownkind2/val2"}
+        )
+        # Both kinds unknown, no refs resolved, payload unchanged
+        assert result.get("a") == "unknownkind1/val1"
+        assert result.get("b") == "unknownkind2/val2"

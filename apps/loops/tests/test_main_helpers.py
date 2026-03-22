@@ -562,3 +562,30 @@ class TestMainAsModule:
         import runpy, pytest
         with pytest.raises(SystemExit):
             runpy.run_module("loops", run_name="__main__", alter_sys=True)
+
+
+class TestResolveRenderFnEdges:
+    """Cover _resolve_render_fn miss lines (L157-159, L172-173)."""
+
+    def test_custom_stream_lens_from_vertex_decl(self, tmp_path, monkeypatch):
+        """L157-159: vertex lens{stream} declaration fires resolve_lens for stream_view."""
+        from loops.main import _resolve_render_fn
+        from loops.lenses.stream import stream_view
+
+        # Create vertex with lens { stream "stream" } and required loops block
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(
+            'name "t"\nstore "./t.db"\n'
+            'loops { ping { fold { n "inc" } } }\n'
+            'lens { stream "stream" }\n'
+        )
+        fn = _resolve_render_fn(None, vpath, "stream_view")
+        assert fn is stream_view  # L157-159: custom stream lens resolved
+
+    def test_unknown_view_name_fallback_to_fold_view(self):
+        """L172-173: view_name not in fold/stream/ticks → falls back to fold_view."""
+        from loops.main import _resolve_render_fn
+        from loops.lenses.fold import fold_view
+
+        fn = _resolve_render_fn(None, None, "completely_unknown_view")
+        assert fn is fold_view  # L172-173: default fallback

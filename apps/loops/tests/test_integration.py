@@ -1204,6 +1204,17 @@ def fold_by_vertex(tmp_path):
     return tmp_path, vpath
 
 
+@pytest.fixture
+def fold_collect_vertex(tmp_path):
+    """A vertex using fold_collect so items have non-keyed payloads."""
+    v = (vertex("collected")
+         .store("./collected.db")
+         .loop("event", fold_collect("items", max_items=10)))
+    vpath = tmp_path / "collected.vertex"
+    v.write(vpath)
+    return tmp_path, vpath
+
+
 class TestFoldFastPath:
     """Exercise _run_fold_fast and _render_fold_plain paths."""
 
@@ -1215,10 +1226,28 @@ class TestFoldFastPath:
         assert rc == 0
 
     def test_read_static_plain_summary(self, fold_by_vertex):
-        """--static --plain with data renders SUMMARY (L2234-2283)."""
+        """--static --plain with fold_by data renders SUMMARY (L2234-2283)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
         _emit(vpath, "heartbeat", service="web")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_read_static_plain_collect_items(self, fold_collect_vertex):
+        """--static --plain with fold_collect hits non-keyed item label path (L2253-2259)."""
+        tmp_path, vpath = fold_collect_vertex
+        _emit(vpath, "event", service="api", action="deploy")
+        _emit(vpath, "event", service="web", action="restart")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_read_static_plain_collect_with_body(self, fold_collect_vertex):
+        """fold_collect items with multiple fields renders 'label: body' (L2267-2278)."""
+        tmp_path, vpath = fold_collect_vertex
+        # service=api, action=deploy → label=api, body=deploy
+        _emit(vpath, "event", service="api", action="deploy")
         from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
@@ -1237,6 +1266,16 @@ class TestFoldFastPath:
         _emit(vpath, "heartbeat", service="api")
         from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain", "-v"])
+        assert rc == 0
+
+    def test_read_static_plain_via_full_dispatch(self, fold_by_vertex):
+        """--static --plain --kind=X bypasses _try_fast_read → enters _run_fold L2089."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        # --kind=heartbeat forces full dispatch (bypasses _try_fast_read) but
+        # _is_static_plain still returns True, so _run_fold hits L2089.
+        rc = main(["read", str(vpath), "--static", "--plain", "--kind=heartbeat"])
         assert rc == 0
 
 
@@ -1283,4 +1322,24 @@ class TestTicksPath:
         tmp_path, vpath = ticks_vertex
         from loops.main import _run_ticks
         rc = _run_ticks(["0"], vertex_path=vpath)
+        assert rc == 0
+
+
+class TestRunFoldPaths:
+    """Exercise _run_fold paths not covered by fast-path."""
+
+    def test_read_with_refs(self, fold_by_vertex):
+        """--refs flag adds 'refs' to visible set (L2146)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--refs", "--plain"])
+        assert rc == 0
+
+    def test_read_with_facts(self, vertex_dir):
+        """--facts flag adds 'facts' to visible set (L2148)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api", status="up")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--facts", "--plain"])
         assert rc == 0

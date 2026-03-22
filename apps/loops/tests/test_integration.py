@@ -2421,3 +2421,33 @@ class TestResolveEntityRefs:
         # Both kinds unknown, no refs resolved, payload unchanged
         assert result.get("a") == "unknownkind1/val1"
         assert result.get("b") == "unknownkind2/val2"
+
+
+class TestResolveEdgeCases:
+    """Cover resolve.py L71 (OSError) and L576-577 (LoopsError in _apply_vertex_scope)."""
+
+    def test_parse_vertex_oserror(self, tmp_path):
+        """_parse_vertex: OSError (e.g. permission denied) → VertexNotFound (L71)."""
+        import pytest, stat
+        from loops.commands.resolve import _parse_vertex
+        from loops.errors import VertexNotFound
+
+        vpath = tmp_path / "restricted.vertex"
+        vpath.write_text("name \"restricted\"\n")
+        vpath.chmod(0o000)  # remove all permissions
+        try:
+            with pytest.raises(VertexNotFound):
+                _parse_vertex(vpath)
+        finally:
+            vpath.chmod(stat.S_IRUSR | stat.S_IWUSR)  # restore for cleanup
+
+    def test_apply_vertex_scope_parse_error(self, tmp_path, monkeypatch):
+        """_apply_vertex_scope: LoopsError from _parse_vertex → return None (L576-577)."""
+        from loops.main import _apply_vertex_scope
+
+        # File contains scope keyword but is syntactically invalid → parse error
+        vpath = tmp_path / "bad_scope.vertex"
+        vpath.write_text('scope "observer"\n{{invalid syntax\n')
+
+        result = _apply_vertex_scope(None, vpath)
+        assert result is None  # L576-577 hit: LoopsError caught → None

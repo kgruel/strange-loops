@@ -2718,3 +2718,119 @@ loops {
     metric { fold { n "inc" } }
 }
 """)
+
+    def test_module_getattr_unknown(self):
+        """lang.__getattr__ for unknown attribute (L128)."""
+        import lang
+        with pytest.raises(AttributeError, match="no attribute"):
+            lang.nonexistent_thing
+
+    def test_frozen_positional_args(self):
+        """Frozen dataclass with positional args (L57)."""
+        from lang.ast import Strip
+        s = Strip("/")  # positional, not keyword
+        assert s.chars == "/"
+
+    def test_frozen_eq_incompatible(self):
+        """Frozen __eq__ with incompatible type triggers AttributeError catch (L92-93)."""
+        from lang.ast import Strip
+
+        class FakeStrip:
+            pass
+
+        s = Strip(chars="/")
+        fake = FakeStrip()
+        # Same type name trick won't work — just compare with object missing attrs
+        result = s.__eq__(fake)
+        assert result is NotImplemented or result is False
+
+    def test_location_eq_same_type(self):
+        """Location.__eq__ with same type (L24)."""
+        from lang.errors import Location
+        from pathlib import Path
+        a = Location(path=Path("x"), line=1, column=0)
+        b = Location(path=Path("x"), line=1, column=0)
+        assert a == b
+
+    def test_boundary_every_unknown_child_raises(self):
+        """Boundary every= with unknown child raises (L337)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="unknown boundary child"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary every=5 {
+            bazinga "hello"
+        }
+    }
+}
+""")
+
+    def test_boundary_condition_wrong_arity_raises(self):
+        """Boundary condition with wrong number of args (L351)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="condition requires 3 arguments"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary when="metric" {
+            condition "n"
+        }
+    }
+}
+""")
+
+    def test_boundary_condition_string_value(self):
+        """Boundary condition with non-numeric value (L361-362)."""
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary when="metric" {
+            condition "status" "==" "active"
+        }
+    }
+}
+""")
+        loop_def = v.loops["metric"]
+        assert loop_def.boundary is not None
+
+    def test_source_path_field_in_inline(self):
+        """path field in inline source via sources sequential block (L492)."""
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "test"
+sources sequential {
+    source "cat data" {
+        kind "metric"
+        path "/tmp/data.txt"
+    }
+}
+""")
+        assert v.sources_blocks is not None
+        assert len(v.sources_blocks) == 1
+
+    def test_sources_block_unknown_node_raises(self):
+        """Unknown node in sources sequential block raises (L536)."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown node in sources"):
+            parse_vertex("""\
+name "test"
+sources "sequential" {
+    bazinga "hello"
+}
+""")

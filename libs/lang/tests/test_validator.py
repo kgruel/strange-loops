@@ -614,3 +614,56 @@ parse {
 """)
         with pytest.raises(ValidationError, match="flatten.*requires dict input"):
             validate_loop(loop)
+
+    def test_shape_eq_same(self):
+        """Shape.__eq__ same type (L66)."""
+        from lang.validator import Shape, ShapeKind
+        a = Shape.dict_shape(("a", "b"))
+        b = Shape.dict_shape(("a", "b"))
+        assert a == b
+
+    def test_project_on_non_dict(self):
+        """project step on string input → validation error (L212)."""
+        from lang import parse_loop
+        from lang.validator import validate_loop, ValidationError
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "lines"
+parse {
+    project { field "x" path="y" }
+}
+""")
+        with pytest.raises(ValidationError, match="project.*requires dict input"):
+            validate_loop(loop)
+
+    def test_loop_missing_source_no_every(self):
+        """Loop without source or every → validation error (L251)."""
+        from lang.ast import LoopFile
+        from lang.validator import validate_loop, ValidationError
+
+        loop = LoopFile(
+            kind="metric", observer="test", source=None, every=None,
+            on=None, format="lines", timeout="60s", origin="",
+            env=None, parse=(), path=None,
+        )
+        with pytest.raises(ValidationError, match="source.*is required"):
+            validate_loop(loop)
+
+    def test_sources_block_empty(self):
+        """Empty sources block → validation error (L329)."""
+        from lang.ast import VertexFile, SourcesBlock, LoopDef, FoldDecl, FoldCount
+        from lang.validator import validate_vertex, ValidationError
+
+        v = VertexFile(
+            name="test", store=None, discover=None,
+            sources=(), vertices=None,
+            loops={"m": LoopDef(folds=(FoldDecl(target="n", op=FoldCount()),))},
+            routes=None, emit=None, combine=None, observers=None,
+            lens=None, observer_scoped=False, path=None,
+            sources_blocks=(SourcesBlock(mode="sequential", sources=()),),
+        )
+        with pytest.raises(ValidationError, match="has no sources"):
+            validate_vertex(v)

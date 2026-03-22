@@ -22,6 +22,14 @@ from lang.population import (
 )
 
 
+def make_row(key: str = "test", values: dict | None = None) -> PopulationRow:
+    """Build a PopulationRow without hitting the frozen setattr guard."""
+    row = PopulationRow.__new__(PopulationRow)
+    object.__setattr__(row, "key", key)
+    object.__setattr__(row, "values", values or {})
+    return row
+
+
 # ---------------------------------------------------------------------------
 # resolve_vertex
 # ---------------------------------------------------------------------------
@@ -591,35 +599,18 @@ class TestPopulationEdgeCoverage:
     """Cover population.py frozen types + list_file_header edges."""
 
     def test_population_row_repr(self):
-        from lang.population import PopulationRow
-        row = PopulationRow.__new__(PopulationRow)
-        object.__setattr__(row, "key", "test")
-        object.__setattr__(row, "values", {"a": "1"})
-        r = repr(row)
-        assert "PopulationRow" in r
+        assert "PopulationRow" in repr(make_row("test", {"a": "1"}))
 
     def test_population_row_eq_different_type(self):
-        from lang.population import PopulationRow
-        row = PopulationRow.__new__(PopulationRow)
-        object.__setattr__(row, "key", "test")
-        object.__setattr__(row, "values", {"a": "1"})
-        assert row.__eq__("not a row") is NotImplemented
+        assert make_row("test", {"a": "1"}).__eq__("not a row") is NotImplemented
 
     def test_population_row_setattr_raises(self):
-        from lang.population import PopulationRow
-        row = PopulationRow.__new__(PopulationRow)
-        object.__setattr__(row, "key", "test")
-        object.__setattr__(row, "values", {})
         with pytest.raises(AttributeError, match="cannot assign"):
-            row.key = "x"
+            make_row().key = "x"
 
     def test_population_row_delattr_raises(self):
-        from lang.population import PopulationRow
-        row = PopulationRow.__new__(PopulationRow)
-        object.__setattr__(row, "key", "test")
-        object.__setattr__(row, "values", {})
         with pytest.raises(AttributeError, match="cannot delete"):
-            del row.key
+            del make_row().key
 
     def test_population_info_repr(self):
         from lang.population import PopulationInfo
@@ -681,3 +672,58 @@ class TestPopulationEdgeCoverage:
         f.write_text("# comment 1\n# comment 2\n")
         result = list_file_header(f)
         assert result == []
+
+    def test_population_row_eq_same(self):
+        """PopulationRow.__eq__ same type, same values (L34)."""
+        assert make_row("k", {"a": "1"}) == make_row("k", {"a": "1"})
+
+    def test_population_info_eq_same(self):
+        """PopulationInfo.__eq__ same type (L66)."""
+        from lang.population import PopulationInfo
+        a = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        b = PopulationInfo(
+            template_name="t", header=["a"], rows=[],
+            storage="inline", file_path=None, vertex_path=Path("/v"),
+        )
+        assert a == b
+
+    def test_read_list_file_malformed_row(self, tmp_path):
+        """Malformed row (wrong column count) is skipped (L182)."""
+        f = tmp_path / "data.list"
+        f.write_text("name host port\nalice server1 8080\nbob\n")
+        header, rows = list_file_read(f)
+        # "bob" has 1 column but header has 3 → skipped
+        assert len(rows) == 1
+        assert rows[0].key == "alice"
+
+    def test_find_template_block_not_found(self):
+        """_find_template_block raises when not found (L357)."""
+        from lang.population import _find_template_block
+        lines = ['name "test"', 'loops {}']
+        with pytest.raises(ValueError, match="Template block not found"):
+            _find_template_block(lines, "nonexistent.loop")
+
+    def test_find_template_block_unclosed(self):
+        """_find_template_block raises when unclosed (L355-356)."""
+        from lang.population import _find_template_block
+        lines = ['template "test.loop" {', '  source "echo"']
+        with pytest.raises(ValueError, match="Unclosed template block"):
+            _find_template_block(lines, "test.loop")
+
+    def test_find_template_block_single_line(self):
+        """_find_template_block with single-line block (L349)."""
+        from lang.population import _find_template_block
+        lines = ['template "test.loop" {}']
+        start, end = _find_template_block(lines, "test.loop")
+        assert start == 0
+        assert end == 0
+
+    def test_detect_indent_fallback(self):
+        """_detect_indent fallback when no content lines (L367-368)."""
+        from lang.population import _detect_indent
+        lines = ['  template "t" {', '  }']
+        indent = _detect_indent(lines, 0, 1)
+        assert indent == "    "  # template indent (2 spaces) + 2 more

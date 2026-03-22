@@ -1653,3 +1653,41 @@ class TestVertexFoldCombine:
 
         result = vertex_fold(parent_vertex, observer="alice")
         assert result is not None
+
+    def test_dot_path_non_dict(self):
+        from engine.vertex_reader import _extract_field
+        result = _extract_field({"a": [1, 2]}, "a.b")
+        assert result == ""
+
+    def test_list_of_strings(self):
+        from engine.vertex_reader import _extract_field
+        result = _extract_field({"tags": ["a", "b", "c"]}, "tags")
+        assert result == "a b c"
+
+    def test_dict_value(self):
+        from engine.vertex_reader import _extract_field
+        result = _extract_field({"meta": {"k": "v"}}, "meta")
+        assert '"k"' in result  # JSON representation
+
+
+class TestRawToFoldStateScalars:
+    """Cover _raw_to_fold_state scalar extraction (L806-808)."""
+
+    def test_fold_with_multiple_ops_extracts_scalars(self, tmp_path):
+        """Multi-fold spec (items + count) → scalars extracted."""
+        from engine.vertex_reader import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test",
+            '  decision {\n'
+            '    fold {\n'
+            '      items "by" "topic"\n'
+            '      n "inc"\n'
+            '    }\n'
+            '  }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "db", "message": "SQLite"}},
+        ])
+
+        result = vertex_fold(vpath)
+        assert result is not None

@@ -249,3 +249,31 @@ class TestWalkRoot:
         (tmp_path / "notes.txt").write_text("notes")
         result = _walk_root(root, tmp_path)
         assert isinstance(result, list)
+
+    def test_walk_root_combine_nonexistent(self, tmp_path, monkeypatch):
+        """_walk_root combine entry where vpath doesn't exist (L104)."""
+        from loops.commands.vertices import _walk_root
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        root = tmp_path / "root.vertex"
+        root.write_text(
+            'name "root"\nloops { m { fold { n "inc" } } }\ncombine {\n    vertex "./nonexistent/x.vertex"\n}\n'
+        )
+        result = _walk_root(root, tmp_path)
+        # Should return empty (nonexistent path skipped)
+        assert result == []
+
+    def test_walk_root_combine_broken_vertex(self, tmp_path, monkeypatch):
+        """_walk_root combine entry with broken vertex file (L109-110)."""
+        from loops.commands.vertices import _walk_root
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        child_dir = tmp_path / "bad"
+        child_dir.mkdir()
+        bad_child = child_dir / "bad.vertex"
+        bad_child.write_text("{{invalid")
+        root = tmp_path / "root.vertex"
+        root.write_text(
+            'name "root"\nloops { m { fold { n "inc" } } }\ncombine {\n    vertex "./bad/bad.vertex"\n}\n'
+        )
+        result = _walk_root(root, tmp_path)
+        # Bad vertex is skipped
+        assert all(v.get("name") != "bad" for v in result)

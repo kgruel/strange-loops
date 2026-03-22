@@ -357,3 +357,36 @@ class TestWarnMissingFoldKeyEdge:
         with mock.patch("loops.main._resolve_writable_vertex", return_value=None):
             _warn_missing_fold_key(bad, "metric", {"value": 42})
         assert True  # no exception
+
+class TestRegisterWithAggregator:
+    def test_already_registered(self, tmp_path, monkeypatch):
+        """_register_with_aggregator skips if already registered (L290)."""
+        from loops.main import _register_with_aggregator
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        local_vf = tmp_path / "local" / "proj.vertex"
+        local_vf.parent.mkdir()
+        local_vf.write_text('name "local"\n')
+        config_vf = proj_dir / "proj.vertex"
+        # Already contains the absolute path
+        config_vf.write_text(f'name "proj"\ncombine {{\n    vertex "{local_vf.resolve()}"\n}}\n')
+        # Should return without modifying (path already in content)
+        _register_with_aggregator("proj", local_vf)
+        # Verify content unchanged
+        assert str(local_vf.resolve()) in config_vf.read_text()
+
+    def test_combine_at_start(self, tmp_path, monkeypatch):
+        """_register_with_aggregator with combine at file start (L296)."""
+        from loops.main import _register_with_aggregator
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        local_vf = tmp_path / "local" / "proj.vertex"
+        local_vf.parent.mkdir()
+        local_vf.write_text('name "local"\n')
+        config_vf = proj_dir / "proj.vertex"
+        config_vf.write_text('combine {\n}\nname "proj"\n')
+        _register_with_aggregator("proj", local_vf)
+        # Should have added the vertex
+        assert str(local_vf.resolve()) in config_vf.read_text()

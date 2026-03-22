@@ -2616,3 +2616,105 @@ loops {
     metric { fold { n "inc" } }
 }
 """)
+
+    def test_boundary_unknown_child_raises(self):
+        """Boundary block with unknown child (not 'run' or 'condition')."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary when="metric" {
+            bazinga "hello"
+        }
+    }
+}
+""")
+
+    def test_boundary_with_run_clause(self):
+        """Boundary block with run clause (L335)."""
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary when="metric" {
+            run "echo done"
+        }
+    }
+}
+""")
+        loop_def = v.loops["metric"]
+        assert loop_def.boundary is not None
+
+    def test_unknown_template_block_raises(self):
+        """Unknown block in template source raises."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown template block"):
+            parse_vertex("""\
+name "test"
+sources {
+    template "kind" {
+        bazinga "hello"
+    }
+}
+""")
+
+    def test_unknown_source_type_raises(self):
+        """Unknown source type raises."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown source type"):
+            parse_vertex("""\
+name "test"
+sources {
+    bazinga "hello"
+}
+""")
+
+    def test_observer_grant_unknown_field_raises(self):
+        """Observer grant with unknown field raises."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown grant field"):
+            parse_vertex("""\
+name "test"
+observers {
+    alice {
+        grant {
+            bazinga "hello"
+        }
+    }
+}
+loops {
+    metric { fold { n "inc" } }
+}
+""")
+
+    def test_observer_grant_no_potential_raises(self):
+        """Observer grant without potential kinds raises."""
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="grant requires potential kinds"):
+            parse_vertex("""\
+name "test"
+observers {
+    alice {
+        grant {}
+    }
+}
+loops {
+    metric { fold { n "inc" } }
+}
+""")

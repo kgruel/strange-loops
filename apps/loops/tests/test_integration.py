@@ -2624,3 +2624,249 @@ class TestEmitPopErrors:
         rc = cmd_emit(ns, vertex_path=vpath)
         assert rc == 1  # L223-230: no 'from file' → error
         assert "no 'from file'" in capsys.readouterr().err
+
+
+class TestEmitPopFieldErrors:
+    """Cover emit.py population field validation errors (L240-285)."""
+
+    @staticmethod
+    def _setup_list_vertex(home, list_content="key col1\nval1 data1\n"):
+        """Vertex with from-file template + .list file."""
+        vdir = home / "v"
+        vdir.mkdir(parents=True)
+        src_dir = vdir / "sources"
+        src_dir.mkdir()
+        (src_dir / "feed.loop").write_text(
+            'source "echo hi"\nkind "feed"\nobserver "test"\n'
+        )
+        (vdir / "feeds.list").write_text(list_content)
+        vpath = vdir / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            '  template "./sources/feed.loop" {\n'
+            '    from file "./feeds.list"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        return vpath
+
+    def test_pop_add_no_list_header(self, tmp_path, monkeypatch, capsys):
+        """Empty list file → 'no .list header' error in cmd_emit (L240-247)."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_list_vertex(tmp_path / "home", list_content="")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add", parts=["key=val"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1
+        assert "no .list header" in capsys.readouterr().err
+
+    def test_pop_add_no_key_in_payload(self, tmp_path, monkeypatch, capsys):
+        """pop.add without key= in payload → error (L251-255)."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_list_vertex(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add", parts=["col1=data"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1
+        assert "requires key=" in capsys.readouterr().err
+
+    def test_pop_add_missing_columns(self, tmp_path, monkeypatch, capsys):
+        """pop.add with key but missing other columns → error (L258-266)."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_list_vertex(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Header is "key col1" — payload has key but not col1
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add", parts=["key=mykey"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1
+        assert "requires all non-key columns" in capsys.readouterr().err
+
+    def test_pop_rm_no_key_in_payload(self, tmp_path, monkeypatch, capsys):
+        """pop.rm without key= in payload → error (L268-272)."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_list_vertex(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.rm", parts=["col1=data"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1
+        assert "requires key=" in capsys.readouterr().err
+
+
+class TestEmitPopSeedAndTemplate:
+    """Cover emit.py L285 (template assignment) and L304-316 (list seeding)."""
+
+    def _setup_seeded_vertex(self, home):
+        """Vertex with from-file template + pre-populated list file."""
+        vdir = home / "v"
+        vdir.mkdir(parents=True)
+        src = vdir / "sources"
+        src.mkdir()
+        (src / "feed.loop").write_text(
+            'source "echo hi"\nkind "feed"\nobserver "test"\n'
+        )
+        # List file with header + existing rows to trigger seeding
+        (vdir / "feeds.list").write_text("key url\n")
+        vpath = vdir / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            '  template "./sources/feed.loop" {\n'
+            '    from file "./feeds.list"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        return vpath
+
+    def test_pop_add_seeds_and_emits(self, tmp_path, monkeypatch):
+        """First pop.add seeds from list, then emits → L304-316 seeding path."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_seeded_vertex(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Valid pop.add: key + all required columns (url)
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add",
+            parts=["key=mysite", "url=https://example.com"],
+            observer="", dry_run=False,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 0  # L304-316: seed path ran (empty list → no rows to seed)
+
+    def test_pop_add_seeds_existing_rows(self, tmp_path, monkeypatch):
+        """pop.add with pre-existing list rows triggers seed loop → L304-316."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_seeded_vertex(tmp_path / "home")
+        # Add pre-existing rows to list file
+        list_file = vpath.parent / "feeds.list"
+        list_file.write_text("key url\nexisting1 https://existing.com\n")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add",
+            parts=["key=newsite", "url=https://new.com"],
+            observer="", dry_run=False,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 0  # L304-316: existing rows seeded into store
+
+
+class TestEmitMultiTemplate:
+    """Cover emit.py L275-285 (multi-template matching/mismatch) and L305-306."""
+
+    def _setup_multi_template(self, home):
+        """Vertex with 2 from-file templates (feed1.loop, feed2.loop)."""
+        vdir = home / "v"
+        vdir.mkdir(parents=True)
+        src = vdir / "sources"
+        src.mkdir()
+        for name in ("feed1", "feed2"):
+            (src / f"{name}.loop").write_text(
+                f'source "echo hi"\nkind "{name}"\nobserver "test"\n'
+            )
+            (vdir / f"{name}.list").write_text("key url\nexisting https://ex.com\n")
+        vpath = vdir / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            '  template "./sources/feed1.loop" {\n'
+            '    from file "./feed1.list"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '  template "./sources/feed2.loop" {\n'
+            '    from file "./feed2.list"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        return vpath
+
+    def test_multi_template_payload_template_matches(self, tmp_path, monkeypatch):
+        """Multi-template: payload template= matches qualifier → L285 + L305-306."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_multi_template(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # template=feed1 matches the feed1 template → L285 fires (template assigned)
+        # + L305-306 fires during seeding of existing rows
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add",
+            parts=["key=newsite", "url=https://new.com", "template=feed1"],
+            observer="", dry_run=False,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 0  # L285 + L305-306 covered
+
+    def test_multi_template_payload_template_mismatch(self, tmp_path, monkeypatch, capsys):
+        """Multi-template: payload template= mismatches qualifier → L275-284 error."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = self._setup_multi_template(tmp_path / "home")
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # qualifier=feed1 from payload, but we pass conflicting template=feed2
+        # Actually: qualifier comes from payload_template → feed1
+        # template_name = "feed1" (resolved template's stem)
+        # payload["template"] = "feed2" ≠ "feed1" → L275-284 error
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add",
+            parts=["key=site", "url=https://x.com", "template=feed2"],
+            observer="", dry_run=False,
+        )
+        # To trigger mismatch: qualifier resolves to feed1 but payload says feed2
+        # We need qualifier != payload["template"]
+        # Since qualifier = payload_template = "feed2" here, they'd match.
+        # Instead patch: call with namespace where kind has template qualifier
+        # and payload also specifies different template
+        # Simplest: use vertex_path=None so template_qualifier comes from split
+        import os
+        os.chdir(tmp_path)
+        ns2 = argparse.Namespace(
+            vertex="v/feed1",  # vertex_path=None path → qualifier="feed1"
+            kind="pop.add",
+            parts=["key=site", "url=https://x.com", "template=feed2"],  # mismatch!
+            observer="", dry_run=False,
+        )
+        rc = cmd_emit(ns2, vertex_path=None)
+        assert rc == 1  # L275-284: mismatch → error
+        assert "template" in capsys.readouterr().err.lower()

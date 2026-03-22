@@ -1804,3 +1804,19 @@ class TestTryFastRead:
         v.write(vdir / "myv.vertex")
         rc = main(["read", "myv", "--static", "--plain"])
         assert rc == 0
+
+
+class TestRunCompile:
+    """Exercise _run_compile error paths."""
+
+    def test_compile_nonexistent_file(self):
+        """compile with non-existent file errors (L1052-1053)."""
+        rc = main(["compile", "/nonexistent.vertex"])
+        assert rc == 1
+
+    def test_compile_unknown_suffix(self, tmp_path):
+        """compile with unknown file suffix errors (L1100)."""
+        bad = tmp_path / "bad.txt"
+        bad.write_text("content")
+        rc = main(["compile", str(bad)])
+        assert rc != 0

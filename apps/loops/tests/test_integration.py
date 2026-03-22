@@ -1129,6 +1129,20 @@ class TestSyncEdgePaths:
         out = capsys.readouterr()
         assert "boundary-fired" in out.out or True  # run executes in subprocess
 
+    def test_sync_error_source_logs_error(self, tmp_path, monkeypatch):
+        """_run_sync with error source triggers log_error (L971-972)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        vdir = tmp_path / "ep"
+        vdir.mkdir()
+        (vdir / "bad.loop").write_text('source "exit 1"\nkind "ping"\nobserver "t"\n')
+        dbpath = str((vdir / "data" / "ep.db").resolve())
+        (vdir / "ep.vertex").write_text(
+            f'name "ep"\nstore "{dbpath}"\n\n'
+            'sources {\n  path "./bad.loop"\n}\n\n'
+            'loops {\n  ping {\n    fold {\n      n "inc"\n    }\n  }\n}\n'
+        )
+        assert main(["sync", "--force", str(vdir / "ep.vertex")]) == 0
+
 
 class TestRunTest:
     """Exercise _run_test paths (test command)."""
@@ -1712,19 +1726,20 @@ class TestWhoamiIdentityStore:
 
 
 class TestVertexLensDecl:
-    """Exercise _resolve_render_fn Tier 2 — vertex lens{} declaration (L1924-1931)."""
+    """Exercise _resolve_render_fn Tier 2 — vertex lens{} declarations (L1924-1931)."""
 
-    def test_vertex_with_fold_lens_decl(self, fold_by_vertex, monkeypatch):
-        """A vertex with lens { fold 'reconcile' } uses the declared lens (L1924-1927)."""
-        tmp_path, vpath = fold_by_vertex
-        _emit(vpath, "heartbeat", service="api")
-        # Append a lens block to the vertex file
-        content = vpath.read_text()
-        content += '\nlens {\n  fold "reconcile"\n}\n'
-        vpath.write_text(content)
-        # Without --lens flag, vertex lens declaration is used (Tier 2)
-        rc = main(["read", str(vpath), "--plain"])
-        assert rc == 0
+    def test_vertex_with_fold_and_stream_lens(self, fold_by_vertex, vertex_dir):
+        """Vertex lens{} fold (L1924-1927) and stream (L1928-1931) declarations."""
+        # Test fold lens declaration
+        tmp_path1, vpath1 = fold_by_vertex
+        _emit(vpath1, "heartbeat", service="api")
+        vpath1.write_text(vpath1.read_text() + '\nlens {\n  fold "reconcile"\n}\n')
+        assert main(["read", str(vpath1), "--plain"]) == 0
+        # Test stream lens declaration
+        tmp_path2, vpath2 = vertex_dir
+        _emit(vpath2, "heartbeat", service="api")
+        vpath2.write_text(vpath2.read_text() + '\nlens {\n  stream "stream"\n}\n')
+        assert main(["read", str(vpath2), "--facts", "--plain"]) == 0
 
 
 class TestFetchFunctions:
@@ -2036,40 +2051,7 @@ class TestFetchTickRangeFold:
         assert "_tick_error" in result
 
 
-class TestSyncLogError:
-    """Exercise _run_sync log_error path when source fails (L971-972)."""
-
-    def test_sync_error_source_logs_error(self, tmp_path, monkeypatch, capsys):
-        """_run_sync with a source that exits non-zero triggers log_error callback (L971)."""
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        vdir = tmp_path / "proj"
-        vdir.mkdir()
-        (vdir / "bad.loop").write_text('source "exit 1"\nkind "ping"\nobserver "test"\n')
-        dbpath = str((vdir / "data" / "proj.db").resolve())
-        (vdir / "proj.vertex").write_text(
-            'name "proj"\n'
-            f'store "{dbpath}"\n\n'
-            "sources {\n  path \"./bad.loop\"\n}\n\n"
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-        vpath = vdir / "proj.vertex"
-        rc = main(["sync", "--force", str(vpath)])
-        assert rc == 0
-        out = capsys.readouterr()
-        assert "Errors" in out.err or True
 
 
-class TestStreamLensVertex:
-    """Exercise _resolve_render_fn Tier 2 stream_view via vertex lens{} (L1928-1931)."""
 
-    def test_vertex_with_stream_lens_decl(self, vertex_dir):
-        """A vertex with lens { stream 'stream' } uses the declared stream lens (L1928-1931)."""
-        tmp_path, vpath = vertex_dir
-        _emit(vpath, "heartbeat", service="api")
-        # Append a stream lens block
-        content = vpath.read_text()
-        content += '\nlens {\n  stream "stream"\n}\n'
-        vpath.write_text(content)
-        # --facts mode uses stream view
-        rc = main(["read", str(vpath), "--facts", "--plain"])
-        assert rc == 0
+

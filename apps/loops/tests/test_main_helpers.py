@@ -226,7 +226,7 @@ class TestExecuteBoundaryRun:
         import unittest.mock as mock
         with mock.patch("subprocess.Popen", side_effect=OSError("mocked error")):
             _execute_boundary_run("bad_cmd", "tick", tmp_path / "v.vertex")
-        assert "ERROR" in capsys.readouterr().err or True  # logged to stderr
+        assert "ERROR" in capsys.readouterr().err  # logged to stderr
 
 class TestWarnMissingFoldKey:
     def test_warns_on_missing_key(self, tmp_path, capsys):
@@ -237,7 +237,7 @@ class TestWarnMissingFoldKey:
         _warn_missing_fold_key(vf, "metric", {"value": 42})
         # Should emit a warning to stderr about missing fold key
         captured = capsys.readouterr()
-        assert len(captured.err) > 0 or True  # just verify no exception
+        assert "fold" in captured.err  # warns about missing fold key field
 
 class TestResolveCombineVertexPaths:
     def test_relative_combine_path(self, tmp_path, monkeypatch):

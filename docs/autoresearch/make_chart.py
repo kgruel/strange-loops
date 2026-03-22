@@ -106,7 +106,7 @@ add(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
 # ── Title ──────────────────────────────────────────────────────────────────
 add(f'<text x="{W//2}" y="36" text-anchor="middle" font-size="16" '
     f'font-weight="bold" fill="#1a1a2e" letter-spacing="0.3">'
-    f'autoresearch journey — 199 experiments across 4 libraries</text>')
+    f'autoresearch journey — {N} experiments across {len(phase_spans)} libraries</text>')
 
 # ── Phase background bands (drawn before grid so grid sits on top) ─────────
 for phase, s0, s1 in phase_spans:
@@ -240,10 +240,10 @@ fy = py_cov(r_final["metrics"]["coverage_pct"])
 add(f'<circle cx="{fx:.1f}" cy="{fy:.1f}" r="8" fill="none" stroke="#16a34a" stroke-width="2.5"/>')
 add(f'<circle cx="{fx:.1f}" cy="{fy:.1f}" r="4" fill="#16a34a"/>')
 add(f'<text x="{fx - 9:.1f}" y="{fy - 14:.1f}" text-anchor="end" '
-    f'font-size="11.5" fill="#16a34a" font-weight="bold">97.9%</text>')
+    f'font-size="11.5" fill="#16a34a" font-weight="bold">{r_final["metrics"]["coverage_pct"]}%</text>')
 
 # ── X axis ─────────────────────────────────────────────────────────────────
-for t in [1, 25, 50, 75, 100, 125, 150, 175, 199]:
+for t in [1] + list(range(25, N, 25)) + ([N] if N % 25 != 0 else []):
     tx = px(t)
     add(f'<line x1="{tx:.1f}" y1="{PAD_T+PH}" x2="{tx:.1f}" y2="{PAD_T+PH+5}" '
         f'stroke="#888" stroke-width="1"/>')
@@ -271,11 +271,18 @@ loops_start = next(s0 for (ph, s0, s1) in phase_spans if ph == "loops")
 sx0 = px(loops_start) + 20
 sy0 = py_cov(60) - 10   # at 60% coverage level, well below the loops coverage line
 
+first_cov = k_cov[0] if k_cov else 0
+last_cov = k_cov[-1] if k_cov else 0
+first_miss = records[0]["metrics"].get("miss", 0)
+last_miss = records[-1]["metrics"].get("miss", 0)
+first_eff = k_eff[0] if k_eff else 0
+last_eff = k_eff[-1] if k_eff else 0
+eff_delta = round(100 * (last_eff - first_eff) / first_eff) if first_eff else 0
 stats = [
-    ("start",         "56.8%  /  1,878 miss"),
-    ("finish",        "97.9%  /  17 miss"),
-    ("efficiency",    "4.53 → 3.57  (−21%)"),
-    ("experiments",   "199 total  /  178 kept"),
+    ("start",         f"{first_cov}%  /  {first_miss:,} miss"),
+    ("finish",        f"{last_cov}%  /  {last_miss:,} miss"),
+    ("efficiency",    f"{first_eff:.2f} → {last_eff:.2f}  ({eff_delta:+d}%)"),
+    ("experiments",   f"{N} total  /  {len(kept)} kept"),
 ]
 box_w, box_h = 238, len(stats) * 20 + 16
 add(f'<rect x="{sx0 - 10:.1f}" y="{sy0 - 16:.1f}" width="{box_w}" height="{box_h}" '

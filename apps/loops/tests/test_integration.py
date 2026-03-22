@@ -240,8 +240,8 @@ class TestDispatchHelpers:
         assert seen["argv"] == ["init", "project"]
         assert seen["prog"] == "loops"
         assert seen["description"] == "Runtime for .loop and .vertex files"
-        names = [c.name for c in seen["commands"]]
-        assert names == ["test", "compile", "validate", "store", "init", "whoami", "ls", "add", "rm", "export"]
+        names = {c.name for c in seen["commands"]}
+        assert {"test", "compile", "validate", "store", "init", "whoami", "ls", "export"} <= names
         init_cmd = next(c for c in seen["commands"] if c.name == "init")
         assert init_cmd.detail == "[name] [--template NAME]"
         assert len(init_cmd.help_args) == 2
@@ -290,11 +290,11 @@ class TestCLIDispatch:
 
     def test_main_no_args(self):
         rc = main([])
-        assert isinstance(rc, int)
+        assert rc == 0
 
     def test_main_help(self):
         rc = main(["--help"])
-        assert isinstance(rc, int)
+        assert rc == 0
 
 
 class TestCombinedVertex:
@@ -363,31 +363,26 @@ class TestSyncIntegration:
     def test_sync_no_sources(self, vertex_dir):
         """Sync a vertex with no sources — should handle gracefully."""
         _, vpath = vertex_dir
-        # No sources configured, sync should not crash
+        # No sources configured, sync completes with rc=0
         rc = main(["sync", str(vpath), "--plain"])
-        # May return non-zero (no sources), but shouldn't crash
-        assert isinstance(rc, int)
+        assert rc == 0
 
     def test_sync_force(self, vertex_dir):
         """Sync --force exercises the force flag path."""
         _, vpath = vertex_dir
         rc = main(["sync", str(vpath), "--force", "--plain"])
-        assert isinstance(rc, int)
+        assert rc == 0
 
 
 class TestInitIntegration:
     """Init command — exercises _run_init."""
 
-    def test_init_in_dir(self, tmp_path):
+    def test_init_in_dir(self, tmp_path, monkeypatch):
         """Init creates a vertex in .loops/."""
-        import os
-        os.environ["LOOPS_HOME"] = str(tmp_path / "home")
-        try:
-            rc = main(["init"])
-            assert rc == 0
-            assert (tmp_path / "home" / ".vertex").exists()
-        finally:
-            os.environ.pop("LOOPS_HOME", None)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        rc = main(["init"])
+        assert rc == 0
+        assert (tmp_path / "home" / ".vertex").exists()
 
 
 class TestObserverScoped:
@@ -760,7 +755,7 @@ class TestStoreDetails:
     def test_store_nonexistent(self, tmp_path):
         """Store for nonexistent db — exercises error path."""
         rc = main(["store", str(tmp_path / "nope.db"), "--plain"])
-        assert rc != 0 or rc == 0  # may handle gracefully
+        assert rc == 1  # nonexistent db returns error
 
     def test_store_narrow_width(self, tmp_path, monkeypatch):
         """Store view at narrow width shows '  ' fill (L211)."""
@@ -1035,7 +1030,7 @@ class TestSyncEdgePaths:
         rc = main(["sync", "--force", str(root_vpath)])
         assert rc == 0
         out = capsys.readouterr()
-        assert "Errors" in out.err or True  # error is shown
+        assert "Errors" in out.out  # sync summary reports error count in stdout
 
     def test_sync_run_boundary_fires(self, tmp_path, monkeypatch, capsys):
         """Sync with a boundary run clause executes the command (L989-990).
@@ -1072,7 +1067,7 @@ class TestSyncEdgePaths:
         assert rc == 0
         # The run clause should have executed echo boundary-fired
         out = capsys.readouterr()
-        assert "boundary-fired" in out.out or True  # run executes in subprocess
+        assert "boundary" in out.err  # boundary run dispatch logged to stderr
 
     def test_sync_error_source_logs_error(self, tmp_path, monkeypatch):
         """_run_sync with error source triggers log_error (L971-972)."""

@@ -1553,3 +1553,31 @@ class TestRunTestInputMode:
         from loops.main import main
         rc = main(["test", str(parse_loop), "--input", str(input_file), "--plain"])
         assert rc == 0
+
+
+class TestCloseCommand:
+    """Exercise _run_close paths."""
+
+    @pytest.fixture
+    def thread_vertex(self, tmp_path, monkeypatch):
+        """Vertex with fold_by('name') loop for thread tracking."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("threads").store("./threads.db").loop("thread", fold_by("name"))
+        vpath = tmp_path / "threads.vertex"
+        v.write(vpath)
+        _emit(vpath, "thread", name="my-task", status="open")
+        return tmp_path, vpath
+
+    def test_close_thread_dry_run(self, thread_vertex):
+        """close command with --dry-run finds item and shows resolution (L2607-2660)."""
+        tmp_path, vpath = thread_vertex
+        from loops.main import main
+        rc = main(["close", str(vpath), "thread", "my-task", "completed", "--dry-run"])
+        assert rc == 0
+
+    def test_close_not_found(self, thread_vertex):
+        """close with name that doesn't exist in fold returns 1 (L2625-2627)."""
+        tmp_path, vpath = thread_vertex
+        from loops.main import main
+        rc = main(["close", str(vpath), "thread", "no-such-task"])
+        assert rc == 1

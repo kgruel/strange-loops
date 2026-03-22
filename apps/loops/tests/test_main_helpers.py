@@ -240,3 +240,54 @@ class TestWarnMissingFoldKey:
         # Should emit a warning to stderr about missing fold key
         captured = capsys.readouterr()
         assert len(captured.err) > 0 or True  # just verify no exception
+
+class TestResolveCombineVertexPaths:
+    def test_relative_combine_path(self, tmp_path, monkeypatch):
+        """_resolve_combine_vertex_paths with relative combine entry (L764)."""
+        from loops.main import _resolve_combine_vertex_paths
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        # Create a vertex with a relative combine path (not absolute)
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vf = child_dir / "child.vertex"
+        child_vf.write_text('name "child"\nloops { m { fold { n "inc" } } }\n')
+        root_vf = tmp_path / "root.vertex"
+        root_vf.write_text(
+            'name "root"\nloops { m { fold { n "inc" } } }\ncombine {\n    vertex "./child/child.vertex"\n}\n'
+        )
+        result = _resolve_combine_vertex_paths(root_vf)
+        assert any("child" in str(p) for p in result)
+
+
+class TestResolveWritableVertex:
+    def test_combine_with_existing_child(self, tmp_path, monkeypatch):
+        """_resolve_writable_vertex follows combine chain (L1417)."""
+        from loops.main import _resolve_writable_vertex
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vf = child_dir / "child.vertex"
+        child_vf.write_text('name "child"\nstore "./child.db"\nloops { m { fold { n "inc" } } }\n')
+        root_vf = tmp_path / "root.vertex"
+        root_vf.write_text(
+            'name "root"\nloops { m { fold { n "inc" } } }\ncombine {\n    vertex "./child/child.vertex"\n}\n'
+        )
+        result = _resolve_writable_vertex(root_vf)
+        assert result is not None and "child.vertex" in str(result)
+
+
+class TestResolveVertexStorePath:
+    def test_combine_path_relative(self, tmp_path, monkeypatch):
+        """_resolve_vertex_store_path follows combine path (L1443-1447)."""
+        from loops.main import _resolve_vertex_store_path
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vf = child_dir / "child.vertex"
+        child_vf.write_text('name "child"\nstore "./child.db"\nloops { m { fold { n "inc" } } }\n')
+        root_vf = tmp_path / "root.vertex"
+        root_vf.write_text(
+            'name "root"\nloops { m { fold { n "inc" } } }\ncombine {\n    vertex "./child/child.vertex"\n}\n'
+        )
+        result = _resolve_vertex_store_path(root_vf)
+        assert result is not None and result.name == "child.db"

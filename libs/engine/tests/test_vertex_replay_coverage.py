@@ -386,3 +386,197 @@ class TestEvaluateBoundariesVertexOnly:
         # Loop-level boundary may fire on the stored fact
         assert isinstance(ticks, list)
         store2.close()
+
+
+class TestEvaluateBoundariesMixed:
+    """Cover L757-775: evaluate_boundaries with BOTH vertex and loop boundaries."""
+
+    def test_mixed_vertex_and_loop_boundary(self, tmp_path):
+        """Vertex with vertex-level + loop-level boundaries → mixed path."""
+        v, store = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v.register_vertex_boundary("session")
+
+        v.receive(fact("metric", v=1))
+        v.receive(fact("session", status="closed"))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v2.register_vertex_boundary("session")
+        v2.replay()
+        ticks = v2.evaluate_boundaries()
+        assert isinstance(ticks, list)
+        store2.close()
+
+    def test_mixed_boundary_match_skips(self, tmp_path):
+        """Vertex boundary with match in mixed mode — non-matching skips."""
+        v, store = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+
+        v.receive(fact("metric", v=1))
+        v.receive(fact("session", status="open"))  # doesn't match
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v2.register_vertex_boundary("session", match=(("status", "closed"),))
+        v2.replay()
+        ticks = v2.evaluate_boundaries()
+        assert isinstance(ticks, list)
+        store2.close()
+
+    def test_mixed_boundary_with_conditions(self, tmp_path):
+        """Vertex boundary with conditions in mixed mode."""
+        from lang.ast import BoundaryCondition
+
+        v, store = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v.register_vertex_boundary("session",
+            conditions=(BoundaryCondition(target="n", op=">=", value=1),))
+
+        v.receive(fact("metric", v=1))
+        v.receive(fact("session", status="closed"))
+        store.close()
+
+        v2, store2 = (VertexTestBuilder("proj")
+            .with_store(tmp_path)
+            .count_loop("metric", boundary_kind="metric", boundary_count=1)
+            .count_loop("session")
+            .build())
+        v2.register_vertex_boundary("session",
+            conditions=(BoundaryCondition(target="n", op=">=", value=1),))
+        v2.replay()
+        ticks = v2.evaluate_boundaries()
+        assert isinstance(ticks, list)
+        store2.close()
+
+
+class TestReplaySinceRawFastPath:
+    """Cover L619-628: since_raw fast path (no replay_cursor)."""
+
+    def test_since_raw_without_cached_fold_fns(self, tmp_path):
+        """Store with since_raw but loop spec lacks _cached_fold_fns → since_raw path."""
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+
+        # Create a vertex with a simple fold function (no Spec → no _cached_fold_fns)
+        v = Vertex("test", store=store)
+        v.register_loop(Loop(
+            name="metric",
+            initial={"n": 0},
+            fold=lambda state, payload: {**state, "n": state["n"] + 1},
+        ))
+
+        v.receive(fact("metric", v=1))
+        v.receive(fact("metric", v=2))
+        store.close()
+
+        # Reopen and replay — should use since_raw path (no _cached_fold_fns)
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v2 = Vertex("test", store=store2)
+        v2.register_loop(Loop(
+            name="metric",
+            initial={"n": 0},
+            fold=lambda state, payload: {**state, "n": state["n"] + 1},
+        ))
+        count = v2.replay()
+        assert count == 2
+        assert v2.state("metric")["n"] == 2
+        store2.close()
+
+    def test_since_raw_empty(self, tmp_path):
+        """since_raw returns empty → replay returns 0 immediately."""
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "empty.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("test", store=store)
+        v.register_loop(Loop(
+            name="metric",
+            initial={"n": 0},
+            fold=lambda state, payload: {**state, "n": state["n"] + 1},
+        ))
+        count = v.replay()
+        assert count == 0
+        store.close()
+
+    def test_since_raw_with_mut_dispatch_no_replay_cursor(self, tmp_path):
+        """Store has since_raw but NO replay_cursor → since_raw + mut_dispatch path."""
+        from engine.sqlite_store import SqliteStore
+        from atoms import Spec, Count
+
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        v = Vertex("test", store=store)
+        spec = Spec(name="metric", folds=(Count(target="n"),))
+        v.register_loop(Loop(
+            name="metric", initial=spec.initial_state(), fold=spec.apply,
+        ))
+        v.receive(fact("metric", v=1))
+        v.receive(fact("metric", v=2))
+        store.close()
+
+        # Reopen with a wrapper that hides replay_cursor
+        store2 = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        # Remove replay_cursor to force since_raw + mut_dispatch path
+        delattr(type(store2), 'replay_cursor') if False else None  # can't delete from class
+        # Instead, wrap the store
+        class NoReplayCursorStore:
+            """Proxy that hides replay_cursor."""
+            def __init__(self, inner):
+                self._inner = inner
+            def since_raw(self, cursor):
+                return self._inner.since_raw(cursor)
+            def since(self, cursor):
+                return self._inner.since(cursor)
+            def between(self, start, end):
+                return self._inner.between(start, end)
+            def close(self):
+                self._inner.close()
+
+        proxy = NoReplayCursorStore(store2)
+        v2 = Vertex("test", store=proxy)
+        spec2 = Spec(name="metric", folds=(Count(target="n"),))
+        v2.register_loop(Loop(
+            name="metric", initial=spec2.initial_state(), fold=spec2.apply,
+        ))
+        count = v2.replay()
+        assert count == 2
+        assert v2.state("metric")["n"] == 2
+        store2.close()

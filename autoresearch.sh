@@ -16,7 +16,7 @@ set -euo pipefail
 PKG="engine"
 TEST_DIR="libs/engine/tests"
 SRC_DIR="libs/engine/src/engine"
-NUM_RUNS=3
+NUM_RUNS=2
 
 # --- Pre-check: syntax errors in test files ---
 for f in $(find "$TEST_DIR" -name "test_*.py" -o -name "conftest.py"); do

@@ -274,3 +274,37 @@ class TestFactDirectBuild:
         assert len(facts) == 1
         assert facts[0].payload["nested"] == {"a": 1}
         store.close()
+
+
+class TestMappingProxyDefault:
+    def test_raises_on_unsupported_type(self):
+        from engine.sqlite_store import _mapping_proxy_default
+
+        with pytest.raises(TypeError, match="not JSON serializable"):
+            _mapping_proxy_default(object())
+
+
+class TestDetectFactBuild:
+    def test_detects_func_fallback_path(self, tmp_path):
+        """Deserializer with __func__ but no __self__.__name__ → __func__ path."""
+        from engine.sqlite_store import SqliteStore
+        from atoms import Fact
+
+        # Create a wrapper that has __func__ but not __self__.__name__
+        class DeserializerProxy:
+            def __init__(self, fn):
+                self.__func__ = fn.__func__
+                # No __self__ with __name__
+
+        proxy = DeserializerProxy(Fact.from_dict)
+        store = SqliteStore(
+            path=tmp_path / "test.db",
+            serialize=Fact.to_dict,
+            deserialize=proxy,
+        )
+        store._direct_fact_build = None
+        store._fact_class = None
+        store._deserialize = proxy
+        store._detect_fact_build()
+        assert store._direct_fact_build is True
+        assert store._fact_class is Fact

@@ -1523,3 +1523,33 @@ class TestTopologyStore:
         from loops.main import _try_topology_from_store
         result = _try_topology_from_store(dbpath)
         assert result is None
+
+
+class TestRunTestInputMode:
+    """Exercise _run_test --input mode (parse pipeline)."""
+
+    @pytest.fixture
+    def parse_loop(self, tmp_path):
+        """A .loop file with parse pipeline."""
+        loop = tmp_path / "parse.loop"
+        loop.write_text(
+            'source "echo one two"\n'
+            'kind "word"\n'
+            'observer "test"\n'
+            "parse {\n  split\n  pick 0 { names \"word\" }\n}\n"
+        )
+        return loop
+
+    def test_input_nonexistent_file(self, parse_loop):
+        """--input with non-existent file raises FileNotFoundError (L645)."""
+        from loops.main import main
+        rc = main(["test", str(parse_loop), "--input", "/nonexistent.txt", "--plain"])
+        assert rc == 1
+
+    def test_input_mode_happy_path(self, tmp_path, parse_loop):
+        """--input with real file parses lines through pipeline."""
+        input_file = tmp_path / "words.txt"
+        input_file.write_text("apple\nbanana\ncherry\n")
+        from loops.main import main
+        rc = main(["test", str(parse_loop), "--input", str(input_file), "--plain"])
+        assert rc == 0

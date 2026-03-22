@@ -1462,3 +1462,64 @@ class TestCmdEmitEdgePaths:
         from loops.main import main
         rc = main(["emit", "/nonexistent.vertex", "ping", "x=1"])
         assert rc == 1
+
+
+class TestTopologyStore:
+    """Exercise _try_topology_from_store (L1201-1244)."""
+
+    def test_try_topology_from_store_success(self, tmp_path, monkeypatch):
+        """_try_topology_from_store reads _topology facts from a store.
+
+        Setup: aggregation vertex with discover child. Emit to child (creates store),
+        then emit_topology to agg store. Then read topology back.
+        """
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Child vertex
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        # Emit to child (creates child.db)
+        _emit(child_vpath, "ping", x="1")
+
+        # Aggregation vertex
+        agg_vpath = tmp_path / "agg.vertex"
+        agg_vpath.write_text(
+            'name "agg"\nstore "./agg.db"\n'
+            'discover "child/*.vertex"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        # Emit topology (writes _topology facts to agg.db)
+        from engine.vertex_reader import emit_topology
+        emit_topology(agg_vpath)
+
+        # Now read topology back
+        dbpath = (tmp_path / "agg.db").resolve()
+        from loops.main import _try_topology_from_store
+        result = _try_topology_from_store(dbpath)
+        assert result is not None
+        kind_keys, store_paths = result
+        assert isinstance(kind_keys, dict)
+        assert len(store_paths) >= 1
+
+    def test_try_topology_no_store(self, tmp_path):
+        """_try_topology_from_store with non-existent store returns None."""
+        from loops.main import _try_topology_from_store
+        result = _try_topology_from_store(tmp_path / "nonexistent.db")
+        assert result is None
+
+    def test_try_topology_empty_store(self, tmp_path, monkeypatch):
+        """_try_topology_from_store with store but no _topology facts returns None."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("test").store("./test.db").loop("ping", fold_count("n"))
+        vpath = tmp_path / "test.vertex"
+        v.write(vpath)
+        _emit(vpath, "ping", x="1")
+        dbpath = (tmp_path / "test.db").resolve()
+        from loops.main import _try_topology_from_store
+        result = _try_topology_from_store(dbpath)
+        assert result is None

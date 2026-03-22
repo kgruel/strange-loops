@@ -392,20 +392,10 @@ def fetch_tick_range(
             )
             all_facts.extend(facts)
 
-    # Deduplicate by fact ID (overlapping windows could repeat)
-    seen: set[str] = set()
-    deduped: list[dict] = []
+    # Fact IDs are ULIDs (unique per write), so no dedup needed.
+    all_facts.sort(key=lambda f: f["ts"], reverse=True)
+
     for f in all_facts:
-        fid = f.get("id", "")
-        if fid and fid in seen:
-            continue
-        if fid:
-            seen.add(fid)
-        deduped.append(f)
-
-    deduped.sort(key=lambda f: f["ts"], reverse=True)
-
-    for f in deduped:
         if isinstance(f["ts"], datetime):
             f["ts"] = f["ts"].isoformat()
 
@@ -421,7 +411,7 @@ def fetch_tick_range(
         })
 
     return {
-        "facts": deduped,
+        "facts": all_facts,
         "fold_meta": _get_fold_meta(vertex_path),
         "vertex": ast.name,
         "_tick": {

@@ -5,36 +5,44 @@
 - Efficiency: 3.57 best (timing-variance adjusted; 5.39 at last run due to 2.82s vs 1.87s)
 - 200 experiments total, 178 kept
 
-## Confirmed dead code — do not pursue with tests
+## Remaining 14 miss lines — honest classification
 
-These 14 remaining miss lines are real error handlers and defensive guards confirmed
-by source inspection. They cannot be triggered without source changes. Logged here per
-the ceiling rule in autoresearch.md.
+### Actually dead (invariant, safe to remove from source)
 
-| File | Lines | Why unreachable |
-|------|-------|-----------------|
-| `emit.py` | L140, L144 | store-less writable vertex — `_resolve_writable_vertex` always returns a vertex that has a store configured; the `store_path is None` branch cannot fire |
-| `fetch.py` | L82 | kind-filter `continue` — `vertex_fold` pre-filters by kind before calling this; the inner guard is redundant |
-| `fetch.py` | L246 | tick payload `items` parsing — `fold_collect` always stores items as a list, never a non-list |
-| `fetch.py` | L324 | tick `since=None` fast path — callers always set `since`; `None` path structurally unreachable |
-| `fetch.py` | L401 | cross-tick fact dedup — fact IDs are unique within a vertex; the dedup set never fires |
-| `resolve.py` | L339 | topology key with `None` key_field — topology cache stores kind→key_field, which is always a string if the kind is present |
-| `resolve.py` | L343 | already-searched store dedup — local store and topology store are always distinct paths |
-| `resolve.py` | L526–528 | config-level combine fallback — both branches call the same `resolve_vertex`; only one path is ever taken |
-| `devtools.py` | L84 | `run_cli` error propagation — `run_cli` never returns a non-zero exit without raising |
-| `stream.py` | L192 | payload field extraction — the outer loop already handles all `_LABEL_FIELDS` keys; second loop is dead |
-| `main.py` | L1342 | fast-read vertex fallback — `_resolve_vertex_for_dispatch` and `_resolve_named_vertex` agree; the fallback path is never taken |
+| File | Lines | Why |
+|------|-------|-----|
+| `fetch.py` | L401 | Dedup `continue` requires two facts with the same ULID in one result set. Fact IDs are ULIDs — unique per write. Cannot happen. |
+| `resolve.py` | L339 | Fires when `topo_kind_keys.get(kind)` returns `None` after L334 already confirmed the kind exists in at least one map. Requires a cache entry mapping a kind to `None` — malformed state only. |
 
-## Source changes that would unlock further coverage
+These two are safe to delete from source outright.
 
-None of the above are worth testing around. If coverage needs to go higher:
+### Test gaps (reachable paths, not yet exercised)
 
-1. **emit.py L140/144** — remove the `store_path is None` branch entirely (writable always
-   has store). Saves ~5 source lines, eliminates 2 miss lines without any test.
-2. **fetch.py L82** — remove the kind guard (caller already filters). 1 line.
-3. **fetch.py L324** — remove the `since=None` branch or assert it's never None. 1 line.
-4. **fetch.py L401** — remove the cross-tick dedup set if fact IDs are globally unique. ~3 lines.
-5. **resolve.py L526–528** — collapse the two `config_parent` branches into one. ~3 lines.
+| File | Lines | What would trigger it |
+|------|-------|-----------------------|
+| `emit.py` | L140, L144 | Vertex file without a `store` directive passed to emit. Valid error path. |
+| `fetch.py` | L82 | `continue` in kind-filter loop — fires whenever a `FoldState` has sections of more than one kind. Our tests pass single-kind states to this function. |
+| `fetch.py` | L246 | Item-based fold (`fold { items "by" "name" }`) produces `{kind: {"items": [...]}}` in tick payload. Our tick tests only use count-based folds. |
+| `fetch.py` | L324 | `tick.since is None` — happens for the very first tick in a fresh vertex (no prior boundary). |
+| `resolve.py` | L343 | Local store appears in `topo_stores` — possible when a vertex's topology includes itself. |
+| `resolve.py` | L526–528 | Config-level combine vertex lookup. Fires when the parent lives in `loops_home`, not a local path. Our tests always use local directories. |
+| `devtools.py` | L84 | `run_cli` returns non-zero — a bad argument to the validate command would trigger this. |
+| `stream.py` | L192 | Last-resort label extractor for facts with `topic`/`name`/`summary`/`message` fields that didn't match the primary field logic. |
+| `main.py` | L1342 | Local vertex lookup fails but config-level lookup succeeds. Reachable for vertices in `loops_home`; our tests use local paths only. |
 
-Each is a small, safe deletion — not a refactor. Total: ~13 source lines removed,
-14→0 miss (98.0%→100%). Worth doing as a separate source cleanup pass, not as test work.
+These 12 are real code doing real work. The setup cost for each (multi-kind fold states,
+config-level vertices, first-tick scenarios, item-based folds) was non-trivial relative
+to the single line gained — that's why they weren't worth pursuing during the
+efficiency-optimised loop.
+
+## If coverage needs to go higher
+
+Delete the 2 dead lines from source (trivial, no tests needed). For the 12 test gaps:
+- **fetch.py L82, L246** — build a multi-kind `FoldState` or item-based fold tick
+- **fetch.py L324** — use a fresh vertex whose first tick has no `since`
+- **resolve.py L343, L526–528** — set up a config-level or self-referencing topology
+- **emit.py L140/144** — pass a vertex file with no `store` directive to `cmd_emit`
+- **devtools.py L84, stream.py L192, main.py L1342** — targeted edge-case inputs
+
+Each needs ~10–20 LOC of test setup. Worth doing if coverage % matters independently
+of efficiency — but at 98.0% with 940 tests and 1.87s, the suite is in good shape.

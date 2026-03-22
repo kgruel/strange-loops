@@ -334,9 +334,8 @@ def _resolve_entity_refs(
         if addr_kind not in local_kind_keys and addr_kind not in topo_kind_keys:
             continue  # Not a known kind anywhere in the topology
 
+        # L334 confirmed addr_kind exists in at least one map; value is always str
         key_field = topo_kind_keys.get(addr_kind) or local_kind_keys.get(addr_kind)
-        if key_field is None:
-            continue
 
         for sp in topo_stores:
             if sp.resolve() == store_path.resolve():

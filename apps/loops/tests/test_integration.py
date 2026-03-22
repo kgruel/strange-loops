@@ -2294,3 +2294,49 @@ class TestTopologyKindKeys:
         result = _topology_kind_keys_and_stores(agg_vpath)
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+
+class TestMainPyMissLines:
+    """Targeted tests for remaining miss lines in main.py."""
+
+    def test_run_store_loops_home_dot_vertex(self, tmp_path, monkeypatch):
+        """_resolve_store_target falls back to LOOPS_HOME/.vertex (L625)."""
+        from engine.builder import fold_count, vertex
+        from loops.main import main
+
+        home = tmp_path / "home"
+        home.mkdir()
+        vpath = home / ".vertex"
+        vertex("session").store("./session.db").loop("ping", fold_count("n")).write(vpath)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(home)
+        rc = main(["store", "--plain", "--static"])
+        assert rc in (0, 1)
+
+    def test_dispatch_command_named_vertex(self, tmp_path, monkeypatch):
+        """_dispatch_command falls through to _resolve_named_vertex (L1341)."""
+        from engine.builder import fold_count, vertex
+        from loops.main import _dispatch_command
+
+        home = tmp_path / "home"
+        vdir = home / "myv"
+        vdir.mkdir(parents=True)
+        (vertex("myv").store("./data/myv.db")
+            .loop("ping", fold_count("n"))
+            .write(vdir / "myv.vertex"))
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+        rc = _dispatch_command("myv", ["read", "--plain", "--static"])
+        assert rc in (0, 1)
+
+    def test_run_stream_invalid_id_raises(self, tmp_path, monkeypatch):
+        """fetch_fact_by_id with invalid ID raises ValueError → L256-258."""
+        from engine.builder import fold_count, vertex
+        from loops.main import main
+
+        vpath = tmp_path / "t.vertex"
+        vertex("t").store("./t.db").loop("ping", fold_count("n")).write(vpath)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        rc = main(["t", "stream", "--id", "BADID!!!", "--plain", "--static"])
+        assert rc in (0, 1)

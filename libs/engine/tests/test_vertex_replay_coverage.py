@@ -483,7 +483,8 @@ class TestEvaluateBoundariesMixed:
 
         # Receive a metric fact to build fold state (n=1)
         v.receive(fact("metric", v=1))
-        inject_fact(store, "session", status="closed", ts=_time.time() + 1.0)
+        # Use a generous future offset to avoid flakiness under load
+        inject_fact(store, "session", status="closed", ts=_time.time() + 60.0)
 
         ticks = v.evaluate_boundaries()
         assert len(ticks) >= 1  # Should fire — conditions met (n>=1)

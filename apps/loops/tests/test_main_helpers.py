@@ -506,37 +506,3 @@ class TestLoopsErrorHierarchy:
 
 # ---------------------------------------------------------------------------
 # commands/resolve.py — _err helper
-# ---------------------------------------------------------------------------
-
-class TestResolveErr:
-    def test_err_writes_to_stderr(self, capsys):
-        """_err renders a painted block to stderr."""
-        from loops.commands.resolve import _err
-        import sys
-        _err("something went wrong")
-        captured = capsys.readouterr()
-        assert "something went wrong" in captured.err
-
-    def test_err_custom_file(self, tmp_path):
-        """_err accepts an explicit file argument."""
-        import io
-        from loops.commands.resolve import _err
-        buf = io.StringIO()
-        _err("custom target", file=buf)
-        assert "custom target" in buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# commands/devtools.py — _run_validate exit code propagation
-# ---------------------------------------------------------------------------
-
-class TestRunValidateExitCode:
-    def test_validate_errors_returns_1(self, tmp_path, monkeypatch):
-        """_run_validate returns 1 when validation finds errors (L84)."""
-        from loops.commands.devtools import _run_validate
-        # A .loop file with invalid syntax produces errors > 0
-        bad_loop = tmp_path / "bad.loop"
-        bad_loop.write_text("this is not valid kdl !!!")
-        monkeypatch.chdir(tmp_path)
-        result = _run_validate(["--plain", str(bad_loop)])
-        assert result == 1

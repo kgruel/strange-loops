@@ -74,7 +74,9 @@ def project_vertex(loops_home):
 @pytest.fixture
 def autoresearch_vertex(loops_home):
     """An autoresearch-style vertex with experiment (fold_collect) and log/finding kinds."""
-    vpath = loops_home / "autoresearch" / "autoresearch.vertex"
+    vdir = loops_home / "autoresearch"
+    vdir.mkdir(parents=True, exist_ok=True)
+    vpath = vdir / "autoresearch.vertex"
     (vertex("autoresearch")
         .store("./data/autoresearch.db")
         .loop("experiment", fold_collect("items", max_items=1000))

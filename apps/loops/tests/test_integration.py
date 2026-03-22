@@ -1898,3 +1898,21 @@ class TestRenderFoldPlainEdges:
         # Width=15 is small enough to trigger truncation of body
         text = _render_fold_plain(data, zoom_level=1, width=15)
         assert text is not None
+
+
+class TestRunStoreDispatch:
+    """Exercise _run_store vertex-first dispatch path (L2384)."""
+
+    def test_store_via_vertex_first_dispatch(self, tmp_path, monkeypatch):
+        """Vertex-first dispatch ('myproject store') passes vertex_path to _run_store (L2384)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create vertex NOT in _COMMANDS (avoid "test", "compile", "validate", "store")
+        vdir = tmp_path / "myproject"
+        vdir.mkdir()
+        v = vertex("myproject").store("./myproject.db").loop("ping", fold_count("n"))
+        vpath = vdir / "myproject.vertex"
+        v.write(vpath)
+        _emit(vpath, "ping", x="1")
+        rc = main(["myproject", "store", "--plain"])
+        assert rc == 0

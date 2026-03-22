@@ -2059,3 +2059,21 @@ class TestFetchTickRangeFold:
 
 
 
+
+
+class TestCmdEmitSlashSplit:
+    """Exercise cmd_emit slash-split template qualifier path (L1626-1629)."""
+
+    def test_emit_slash_vertex_template(self, tmp_path, monkeypatch):
+        """emit 'parent/native' splits to parent + template_qualifier (L1626-1629)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create parent vertex in LOOPS_HOME
+        parent_dir = tmp_path / "parent"
+        parent_dir.mkdir()
+        vertex("parent").store("./parent.db").loop("ping", fold_count("n")).write(
+            parent_dir / "parent.vertex"
+        )
+        # 'parent/native' → full name not found → splits to vertex="parent" + qualifier="native"
+        rc = main(["emit", "parent/native", "ping", "x=1"])
+        assert rc == 0

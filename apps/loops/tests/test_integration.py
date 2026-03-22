@@ -1916,3 +1916,18 @@ class TestRunStoreDispatch:
         _emit(vpath, "ping", x="1")
         rc = main(["myproject", "store", "--plain"])
         assert rc == 0
+
+
+class TestCmdEmitReinterpreteKind:
+    """Exercise cmd_emit kind-reinterpretation path (L1635-1644)."""
+
+    def test_emit_kind_as_implicit_vertex(self, tmp_path, monkeypatch):
+        """'emit ping x=1' reinterprets 'ping' as kind, uses local vertex (L1636-1644)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        v = vertex("local").store("./local.db").loop("ping", fold_count("n"))
+        v.write(loops_dir / "local.vertex")
+        rc = main(["emit", "ping", "x=1"])
+        assert rc == 0

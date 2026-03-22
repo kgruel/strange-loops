@@ -271,6 +271,22 @@ class TestVertexProgramProtocol:
         assert "VertexProgram" in r
 
 
+def test_load_skip_sources(tmp_path: Path) -> None:
+    """skip_sources=True omits source compilation."""
+    vertex_file = tmp_path / "minimal.vertex"
+    vertex_file.write_text(
+        'name "minimal"\n'
+        'store "./m.db"\n'
+        'loops {\n'
+        '  heartbeat {\n'
+        '    fold { n "inc" }\n'
+        '  }\n'
+        '}\n'
+    )
+    prog = load_vertex_program(vertex_file, skip_sources=True)
+    assert prog.sources == []
+
+
 def test_substitute_no_sources():
     """_substitute_vertex_vars with empty sources returns ast unchanged."""
     from engine.program import _substitute_vertex_vars

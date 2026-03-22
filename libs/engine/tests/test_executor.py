@@ -420,3 +420,53 @@ class TestSyncFact:
         assert sync_a.payload["status"] == "ok"
         assert sync_b is not None
         assert sync_b.payload["status"] == "ok"
+
+
+class TestSourceErrorHandling:
+    def test_source_error_captures_stderr(self):
+        """SourceError with stderr and returncode is captured in sync fact."""
+        from atoms import SourceError
+
+        vertex = _make_vertex()
+
+        class SourceErrorSource:
+            kind = "lint"
+            observer = "ci"
+            command = "lint-cmd"
+
+            async def collect(self):
+                if False:
+                    yield
+                raise SourceError("lint-cmd", returncode=1, stderr="syntax error")
+
+        sources = [(SourceErrorSource(), Cadence.always())]
+        executor = Executor(vertex, sources)
+        asyncio.run(executor.sync_async(force=True))
+
+        sync_fact = vertex._store.latest_by_kind("_sync.lint")
+        assert sync_fact is not None
+        assert sync_fact.payload["status"] == "error"
+        assert sync_fact.payload["stderr"] == "syntax error"
+        assert sync_fact.payload["returncode"] == 1
+
+    def test_on_error_callback(self):
+        """on_error callback is called when a source fails."""
+        vertex = _make_vertex()
+        errors_seen = []
+
+        class FailSource:
+            kind = "broken"
+            observer = "test"
+            command = "fail-cmd"
+
+            async def collect(self):
+                if False:
+                    yield
+                raise RuntimeError("boom")
+
+        sources = [(FailSource(), Cadence.always())]
+        executor = Executor(vertex, sources, on_error=lambda f: errors_seen.append(f))
+        asyncio.run(executor.sync_async(force=True))
+
+        assert len(errors_seen) == 1
+        assert errors_seen[0].payload["status"] == "error"

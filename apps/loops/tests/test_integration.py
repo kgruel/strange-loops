@@ -2025,6 +2025,35 @@ class TestResolveVertexForDispatch:
         result = _resolve_combine_child(parent_vpath, "kid")
         assert result is not None
 
+    def test_config_level_combine_fallback(self, tmp_path, monkeypatch):
+        """Config-level combine fallback fires when local parent lacks the alias (L525-527).
+
+        Setup: local parent.vertex exists (found first) but has no combine block, so
+        the local combine check returns None.  A config-level parent.vertex ALSO exists
+        at LOOPS_HOME and DOES have the alias → resolution falls through to L525-527.
+        """
+        from .builders import VertexTopologyBuilder
+
+        topo = VertexTopologyBuilder(tmp_path)
+
+        # Config-level child and combine parent
+        child = topo.write_config(
+            "child",
+            'name "child"\nstore "./child.db"\nloops { ping { fold { n "inc" } } }\n',
+        )
+        topo.write_config_combine("parent", {"work": child})
+
+        # Local parent WITHOUT a combine block (so local alias check fails)
+        topo.write_local(
+            "parent",
+            'name "parent"\nstore "./parent.db"\nloops { ping { fold { n "inc" } } }\n',
+        )
+        topo.apply(monkeypatch)
+
+        result = _resolve_vertex_for_dispatch("parent/work")
+        assert result is not None
+        assert result == child.resolve()
+
 
 class TestTryFastRead:
     """Exercise _try_fast_read paths."""

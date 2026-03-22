@@ -347,6 +347,75 @@ def make_fidelity_facts(
 
 
 # ---------------------------------------------------------------------------
+# Vertex topology builder
+# ---------------------------------------------------------------------------
+
+class VertexTopologyBuilder:
+    """Build a two-tier vertex topology (local + config-level) for resolver tests.
+
+    Creates a ``local/`` directory (used as CWD) and a ``config/`` directory
+    (used as LOOPS_HOME). Each tier can hold regular vertex files and combine
+    vertices with named aliases.
+
+    This mirrors real-world setups where config-level aggregation vertices
+    (``project``, ``comms``) combine locally-registered project instances —
+    and where the local CWD has a plain vertex that lacks the combine alias
+    found in the config-level equivalent.
+
+    Usage::
+
+        topo = VertexTopologyBuilder(tmp_path)
+        child = topo.write_config("child",
+            'name "child"\\nstore "./c.db"\\nloops { task { fold { n "inc" } } }\\n')
+        topo.write_config_combine("parent", {"work": child})
+        topo.write_local("parent",
+            'name "parent"\\nstore "./p.db"\\nloops { task { fold { n "inc" } } }\\n')
+        topo.apply(monkeypatch)
+
+        result = _resolve_vertex_for_dispatch("parent/work")
+        assert result == child.resolve()
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.local_dir = root / "local"   # becomes CWD
+        self.config_dir = root / "config"  # becomes LOOPS_HOME
+        self.local_dir.mkdir(exist_ok=True)
+        self.config_dir.mkdir(exist_ok=True)
+
+    def write_local(self, name: str, content: str) -> Path:
+        """Write a .vertex file in the local CWD directory."""
+        path = self.local_dir / f"{name}.vertex"
+        path.write_text(content)
+        return path
+
+    def write_config(self, name: str, content: str) -> Path:
+        """Write a .vertex file at LOOPS_HOME/name/name.vertex."""
+        vertex_dir = self.config_dir / name
+        vertex_dir.mkdir(exist_ok=True)
+        path = vertex_dir / f"{name}.vertex"
+        path.write_text(content)
+        return path
+
+    def write_config_combine(self, name: str, aliases: "dict[str, Path]") -> Path:
+        """Write a config-level combine vertex with named child aliases.
+
+        aliases: mapping of alias_name -> child_vertex_path
+        """
+        entries = "\n".join(
+            f'    vertex "{child}" as="{alias}"'
+            for alias, child in aliases.items()
+        )
+        content = f'name "{name}"\ncombine {{\n{entries}\n}}\n'
+        return self.write_config(name, content)
+
+    def apply(self, monkeypatch: "Any") -> None:
+        """Set LOOPS_HOME env var and CWD for this topology."""
+        monkeypatch.setenv("LOOPS_HOME", str(self.config_dir))
+        monkeypatch.chdir(self.local_dir)
+
+
+# ---------------------------------------------------------------------------
 # Store populator
 # ---------------------------------------------------------------------------
 

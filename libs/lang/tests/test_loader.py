@@ -2924,3 +2924,58 @@ loops {
     }
 }
 """)
+
+    def test_where_in_no_values_raises(self):
+        """where in with no values (L194)."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="where.*in.*requires at least one value"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="role" "in"
+}
+""")
+
+    def test_where_not_in_no_values_raises(self):
+        """where not_in with no values (L199)."""
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="where.*not_in.*requires at least one value"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+format "ndjson"
+parse {
+    where path="role" "not_in"
+}
+""")
+
+    def test_frozen_optional_positional_args(self):
+        """Frozen init with optional positional args (L57)."""
+        from lang.ast import Where
+        w = Where("path", "equals", "x")  # all 3 as positional
+        assert w.path == "path"
+        assert w.op == "equals"
+        assert w.value == "x"
+
+    def test_frozen_eq_missing_attr(self):
+        """Frozen __eq__ with object missing expected attrs (L92-93)."""
+        from lang.ast import Strip
+
+        class Fake:
+            """Object missing 'chars' attr."""
+            pass
+
+        s = Strip(chars="/")
+        # Force same type check to pass by patching __class__
+        fake = Fake()
+        # Different type → NotImplemented (this triggers L74 not L92-93)
+        result = s.__eq__(fake)
+        assert result is NotImplemented

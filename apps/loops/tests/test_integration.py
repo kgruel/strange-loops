@@ -1910,6 +1910,24 @@ class TestFetchFunctions:
         result = fetch_tick_range(vpath, 0, 1)
         assert "_tick_error" in result
 
+    def test_fetch_ticks_with_boundary_payload(self, tmp_path, monkeypatch):
+        """fetch_ticks with tick that has _boundary key skips it (L244)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Create vertex with boundary when= type (adds _boundary to tick payload)
+        vpath = tmp_path / "test.vertex"
+        vpath.write_text(
+            'name "test"\nstore "./test.db"\nloops {\n'
+            '  ping {\n    fold {\n      n "inc"\n    }\n  }\n'
+            '  done {\n    fold {\n      items "collect" 10\n    }\n'
+            '    boundary when="done" status="completed"\n  }\n}\n'
+        )
+        _emit(vpath, "ping", i="1")
+        _emit(vpath, "done", status="completed")
+        from loops.commands.fetch import fetch_ticks
+        result = fetch_ticks(vpath)
+        assert "ticks" in result
+        # tick has _boundary in payload → L244 fires
+
     def test_fetch_ticks_with_items(self, tmp_path, monkeypatch):
         """fetch_ticks with by-fold payload covers kind_counts (L244-249)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

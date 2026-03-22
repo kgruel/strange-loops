@@ -916,3 +916,28 @@ class TestStoreExplorerEdgeCases:
         from loops.tui.store_app import _relative_time
         from datetime import datetime as dt2, timezone as tz2, timedelta
         assert "h ago" in _relative_time(dt2.now(tz2.utc) - timedelta(hours=5))
+
+
+class TestOnStartAsync:
+    """Cover _on_start async methods (L567 autoresearch, L109 store_app)."""
+
+    def test_autoresearch_on_start_schedules_load(self, tmp_path, monkeypatch):
+        """AutoresearchApp._on_start → asyncio.call_soon(_load_data) → L567."""
+        import asyncio
+        from loops.tui.autoresearch_app import AutoresearchApp
+
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        app = AutoresearchApp(vertex_path=None)
+        asyncio.run(app._on_start())
+        # L567 hit: asyncio.get_running_loop().call_soon(self._load_data)
+
+    def test_store_explorer_on_start_schedules_load(self, tmp_path):
+        """StoreExplorerApp._on_start → asyncio.call_soon(_load_store) → L109."""
+        import asyncio
+        from loops.tui.store_app import StoreExplorerApp
+
+        store_path = tmp_path / "test.db"
+        store_path.touch()
+        app = StoreExplorerApp(store_path)
+        asyncio.run(app._on_start())
+        # L109 hit: asyncio.get_running_loop().call_soon(self._load_store)

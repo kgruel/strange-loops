@@ -1193,29 +1193,94 @@ class TestScaffoldArtifacts:
         assert (tmp_path / "autoresearch.checks.sh").exists()
 
 
+@pytest.fixture
+def fold_by_vertex(tmp_path):
+    """A vertex using fold_by so sections have items for _render_fold_plain."""
+    v = (vertex("foldby")
+         .store("./fb.db")
+         .loop("heartbeat", fold_by("service")))
+    vpath = tmp_path / "foldby.vertex"
+    v.write(vpath)
+    return tmp_path, vpath
+
+
 class TestFoldFastPath:
     """Exercise _run_fold_fast and _render_fold_plain paths."""
 
-    def test_read_static_plain(self, vertex_dir):
-        """--static --plain triggers _run_fold_fast (L2089)."""
-        tmp_path, vpath = vertex_dir
-        _emit(vpath, "heartbeat", service="api", status="up")
-        from loops.main import main
-        rc = main(["read", str(vpath), "--static", "--plain"])
-        assert rc == 0
-
     def test_read_static_plain_no_data(self, vertex_dir):
-        """--static --plain with empty store still works."""
+        """--static --plain with empty store returns 'No data yet.' (L2225-2226)."""
         tmp_path, vpath = vertex_dir
         from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
-    def test_read_static_plain_verbose(self, vertex_dir):
-        """--static --plain -v triggers more detailed fold rendering."""
-        tmp_path, vpath = vertex_dir
-        for i in range(3):
-            _emit(vpath, "heartbeat", service=f"svc{i}", status="up")
+    def test_read_static_plain_summary(self, fold_by_vertex):
+        """--static --plain with data renders SUMMARY (L2234-2283)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        _emit(vpath, "heartbeat", service="web")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain"])
+        assert rc == 0
+
+    def test_read_static_plain_minimal(self, fold_by_vertex):
+        """--static --plain -q triggers MINIMAL zoom (L2229-2231)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--static", "--plain", "-q"])
+        assert rc == 0
+
+    def test_read_static_plain_verbose(self, fold_by_vertex):
+        """--static --plain -v triggers DETAILED/FULL (falls back to painted)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
         from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain", "-v"])
+        assert rc == 0
+
+
+@pytest.fixture
+def ticks_vertex(tmp_path):
+    """Vertex with boundary_every=2 to produce ticks quickly."""
+    v = (vertex("ticked")
+         .store("./ticked.db")
+         .loop("ping", fold_count("n"), boundary_every=2))
+    vpath = tmp_path / "ticked.vertex"
+    v.write(vpath)
+    # Emit 2 facts to fire boundary → produce 1 tick
+    _emit(vpath, "ping", i="1")
+    _emit(vpath, "ping", i="2")
+    return tmp_path, vpath
+
+
+class TestTicksPath:
+    """Exercise _run_ticks paths (--ticks flag)."""
+
+    def test_ticks_list(self, ticks_vertex):
+        """loops read --ticks shows tick list."""
+        tmp_path, vpath = ticks_vertex
+        from loops.main import main
+        rc = main(["read", str(vpath), "--ticks", "--plain"])
+        assert rc == 0
+
+    def test_ticks_drill_single(self, ticks_vertex):
+        """loops read --ticks 0 drills into most recent tick (L2929-2930)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.main import main
+        rc = main(["read", str(vpath), "--ticks", "0", "--plain"])
+        assert rc == 0
+
+    def test_ticks_drill_range(self, ticks_vertex):
+        """loops read --ticks 0:1 drills into range of ticks (L2922-2927)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.main import main
+        rc = main(["read", str(vpath), "--ticks", "0:1", "--plain"])
+        assert rc == 0
+
+    def test_ticks_with_vertex_path(self, ticks_vertex):
+        """_run_ticks with explicit vertex_path (L2907, L2949)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.main import _run_ticks
+        rc = _run_ticks(["0"], vertex_path=vpath)
         assert rc == 0

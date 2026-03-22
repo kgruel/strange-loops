@@ -1312,6 +1312,13 @@ class TestFoldFastPath:
         rc = main(["read", str(vpath), "--static", "--plain", "--lens", "reconcile"])
         assert rc == 0
 
+    def test_read_static_plain_bad_vertex(self, tmp_path):
+        """--static --plain on bad vertex file hits exception path (L2327-2329)."""
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        rc = main(["read", str(bad), "--static", "--plain"])
+        assert rc == 1
+
     def test_read_static_plain_via_full_dispatch(self, fold_by_vertex):
         """--static --plain --kind=X bypasses _try_fast_read → enters _run_fold L2089."""
         tmp_path, vpath = fold_by_vertex

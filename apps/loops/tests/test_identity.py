@@ -217,3 +217,22 @@ class TestFindWorkspaceRootNone:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         result = find_workspace_root(tmp_path)
         assert result is None
+
+
+class TestValidateEmitProjectObservers:
+    def test_validate_emit_project_level(self, tmp_path, monkeypatch):
+        """validate_emit finds project-level .loops/.vertex observers (L155-156)."""
+        from loops.commands.identity import validate_emit
+        from engine.builder import vertex, fold_by
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "project"
+        proj_dir.mkdir()
+        v = vertex("project").store("./project.db").loop("thread", fold_by("name"))
+        v.write(proj_dir / "project.vertex")
+        loops_dir = proj_dir / ".loops"
+        loops_dir.mkdir()
+        (loops_dir / ".vertex").write_text(
+            'name "proot"\nobservers {\n    alice {}\n}\nloops { m { fold { n "inc" } } }\n'
+        )
+        result = validate_emit(proj_dir / "project.vertex", "alice", "thread")
+        assert result is None

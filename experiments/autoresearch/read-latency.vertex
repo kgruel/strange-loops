@@ -1,0 +1,33 @@
+name "autoresearch/read-latency"
+store "./data/read-latency.db"
+
+loops {
+  // Each experiment result: commit, status, metric values, description
+  // Collected in order — the full history drives the dashboard
+  experiment {
+    fold { items "collect" 500; n "count" }
+    boundary after=15  // completion tick — fires when a batch finishes
+  }
+
+  // Key-value configuration: objective, primary_metric, direction, scope
+  config {
+    fold { items "by" "key" }
+  }
+
+  // Ideas to try — tracked by name, can be updated (tried/untried/rejected)
+  idea {
+    fold { items "by" "name" }
+  }
+
+  // Boundary fires on each experiment result, up to max iterations.
+  // Run clause calls the wrapper script — handles agent invocation,
+  // benchmark measurement, and deterministic emit.
+  boundary when="experiment" {
+    condition "n" "<" 15
+    run "./autoresearch.run.sh"
+  }
+}
+
+lens {
+  fold "autoresearch"
+}

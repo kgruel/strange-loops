@@ -9,20 +9,20 @@ Folded state — decisions, threads, tasks, changes.
 
 ```
 Decisions (2):
-  Use SQLite for persistence: Chose SQLite over filesystem for atomic writes …
-  KDL for config format: KDL is human-friendly and supports nested structure.
+  Use SQLite for persistence [Jan 15]: Chose SQLite over filesystem f… [+34c]
+  KDL for config format [Jan 14]: KDL is human-friendly and supports … [+16c]
 
 Threads (2):
-  vertex-routing: active
-  tick-nesting: exploring
+  vertex-routing [Jan 15]: active
+  tick-nesting [Jan 14]: exploring
 
 Tasks (2):
-  implement fold: in-progress
-  add observer field: done
+  implement fold [Jan 15]: in-progress
+  add observer field [Jan 14]: done
 
 Changes (2):
-  Added boundary detection to Spec: libs/atoms/src/atoms/spec.py
-  Refactored tick emission: libs/engine/src/engine/temporal.py
+  Added boundary detection to Spec [Jan 15]: libs/atoms/src/atoms/spe… [+3c]
+  Refactored tick emission [Jan 15]: libs/engine/src/engine/temporal.… [+1c]
 ```
 
 ## `stream`

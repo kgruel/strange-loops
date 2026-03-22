@@ -1343,3 +1343,21 @@ class TestRunFoldPaths:
         from loops.main import main
         rc = main(["read", str(vpath), "--facts", "--plain"])
         assert rc == 0
+
+    def test_read_lens_autoresearch(self, fold_by_vertex):
+        """--lens autoresearch sets up the interactive handler (L2165-2166, L2182)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        # --plain prevents interactive mode, so handler is defined but not called.
+        # This covers L2165 (if branch True), L2166 (def line), L2182 (handler assignment).
+        rc = main(["read", str(vpath), "--lens", "autoresearch", "--plain"])
+        assert rc == 0
+
+    def test_read_custom_lens(self, fold_by_vertex):
+        """--lens with a built-in lens hits _resolve_render_fn (L1916-1918)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--lens", "reconcile", "--plain"])
+        assert rc == 0

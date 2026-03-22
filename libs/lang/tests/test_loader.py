@@ -2175,3 +2175,215 @@ class TestErrorCoverage:
         from lang.errors import DSLError
         err = DSLError("bad input")
         assert "bad input" in str(err)
+
+    def test_node_map_helper(self):
+        """_node_map creates dict from nodes (L80-83)."""
+        from lang import parse_vertex
+
+        # Any vertex with named children exercises _node_map
+        v = parse_vertex("""\
+name "test"
+loops {
+    metric { fold { n "inc" } }
+}
+""")
+        assert "metric" in v.loops
+
+    def test_coerce_invalid_type(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="coerce: invalid type"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    transform "value" { coerce "banana" }
+}
+""")
+
+    def test_project_no_path_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="project field.*requires path"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    project { field "x" }
+}
+""")
+
+    def test_project_no_fields_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="project requires at least one field"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    project {}
+}
+""")
+
+    def test_where_no_path_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="where requires path"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    where {}
+}
+""")
+
+    def test_where_in_values(self):
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    where path="status" in="active" "pending"
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+
+    def test_where_exists_default(self):
+        from lang import parse_loop
+        from lang.ast import Where
+
+        loop = parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    where path="status"
+}
+""")
+        w = [s for s in loop.parse if isinstance(s, Where)]
+        assert len(w) == 1
+
+    def test_flatten_no_arg_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="flatten requires a field name"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    flatten {}
+}
+""")
+
+    def test_flatten_extract_no_fields_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="flatten requires extract"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    flatten "items" into="flat" { extract {} }
+}
+""")
+
+    def test_unknown_parse_step_raises(self):
+        from lang import parse_loop
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown parse step"):
+            parse_loop("""\
+kind "metric"
+observer "test"
+source "echo test"
+parse {
+    wizardry "x"
+}
+""")
+
+    def test_fold_missing_op_raises(self):
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="missing operation"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric { fold { n } }
+}
+""")
+
+    def test_fold_unknown_op_raises(self):
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown fold operation"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric { fold { n "wizardry" } }
+}
+""")
+
+    def test_boundary_missing_trigger_raises(self):
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="boundary requires when="):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary {}
+    }
+}
+""")
+
+    def test_boundary_condition_fields(self):
+        from lang import parse_vertex
+
+        v = parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        boundary when="metric" {
+            condition "n" ">=" 5
+        }
+    }
+}
+""")
+        loop_def = v.loops["metric"]
+        assert loop_def.boundary is not None
+
+    def test_unknown_loop_field_raises(self):
+        from lang import parse_vertex
+        from lang.errors import ParseError
+
+        with pytest.raises(ParseError, match="Unknown loop field"):
+            parse_vertex("""\
+name "test"
+loops {
+    metric {
+        fold { n "inc" }
+        bazinga "hello"
+    }
+}
+""")

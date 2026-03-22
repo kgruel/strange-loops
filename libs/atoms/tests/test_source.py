@@ -629,6 +629,99 @@ class TestSequentialSource:
         seq = SequentialSource(sources=(), _observer="ci")
         assert seq.observer == "ci"
 
+class TestSourceParseHelpers:
+    """Direct tests for _parse_data / _parse_data_many without subprocess."""
+
+    def test_parse_data_non_str_non_dict(self):
+        # L91: defensive normalization for non-str, non-dict input
+        source = Source(command="unused", kind="test", observer="t")
+        result = source._parse_data(42)
+        assert result == {"_json": 42}
+
+    def test_parse_data_many_non_str_non_dict(self):
+        # L103-104: wraps non-str/dict into {"_json": ...}
+        source = Source(command="unused", kind="test", observer="t")
+        result = source._parse_data_many([1, 2, 3])
+        assert result == [{"_json": [1, 2, 3]}]
+
+    def test_parse_data_many_no_pipeline(self):
+        # L106-108: no parse pipeline, dict input → [data]
+        source = Source(command="unused", kind="test", observer="t")
+        result = source._parse_data_many({"a": 1})
+        assert result == [{"a": 1}]
+
+    def test_parse_data_many_no_pipeline_str(self):
+        # L109: no parse pipeline, str input → []
+        source = Source(command="unused", kind="test", observer="t")
+        result = source._parse_data_many("hello")
+        assert result == []
+
+    def test_parse_data_many_with_pipeline(self):
+        # L111-113: with parse pipeline, delegates to run_parse_many
+        from atoms import Explode
+        source = Source(
+            command="unused", kind="test", observer="t",
+            parse=(Explode(path="items"),),
+        )
+        result = source._parse_data_many({"items": [{"n": "a"}, {"n": "b"}]})
+        assert len(result) == 2
+
+
+class TestSourceSubprocessEdges:
+    """Tests for subprocess edge cases."""
+
+    async def test_json_format_with_explode(self):
+        """JSON format with explode pipeline fans out records."""
+        from atoms import Explode
+        source = Source(
+            command='echo \'{"items": [{"name": "a"}, {"name": "b"}]}\'',
+            kind="test", observer="t", format="json",
+            parse=(Explode(path="items"),),
+        )
+        facts = [f async for f in source.collect()]
+        names = [f.payload["name"] for f in facts]
+        assert "a" in names
+        assert "b" in names
+
+    async def test_ndjson_format_skips_empty_lines(self):
+        """NDJSON skips blank lines and parses each JSON line."""
+        source = Source(
+            command='printf \'{"x":1}\\n\\n{"x":2}\\n\'',
+            kind="test", observer="t", format="ndjson",
+        )
+        facts = [f async for f in source.collect()]
+        assert len(facts) == 2
+
+    async def test_env_vars_passed(self):
+        """Environment variables are forwarded to subprocess."""
+        source = Source(
+            command='echo $MY_TEST_VAR',
+            kind="test", observer="t",
+            env={"MY_TEST_VAR": "hello_from_env"},
+        )
+        facts = [f async for f in source.collect()]
+        assert any("hello_from_env" in f.payload.get("line", "") for f in facts)
+
+    async def test_ndjson_json_error_continues(self):
+        """NDJSON skips malformed lines and continues."""
+        source = Source(
+            command='printf \'{"x":1}\\nnot json\\n{"x":2}\\n\'',
+            kind="test", observer="t", format="ndjson",
+        )
+        facts = [f async for f in source.collect()]
+        assert len(facts) == 2  # malformed line skipped
+
+    async def test_generic_exception_wrapped(self):
+        """Non-SourceError exceptions are wrapped in SourceError."""
+        source = Source(
+            command="this_command_really_does_not_exist_xyz_99",
+            kind="test", observer="t",
+        )
+        with pytest.raises(SourceError):
+            async for _ in source.collect():
+                pass
+
+
     def test_empty_sources_kind_is_empty_string(self):
         seq = SequentialSource(sources=(), _observer="ci")
         assert seq.kind == ""

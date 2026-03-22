@@ -141,3 +141,23 @@ class TestGetVertexLensDecl:
         bad.write_text("{{invalid")
         result = _get_vertex_lens_decl(bad)
         assert result is None
+
+class TestResolveNamedStore:
+    def test_missing_vertex_raises(self, tmp_path, monkeypatch):
+        """_resolve_named_store raises when vertex not found (L1457-1458)."""
+        from loops.main import _resolve_named_store
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        with pytest.raises(FileNotFoundError, match="Vertex not found"):
+            _resolve_named_store("nonexistent")
+
+    def test_vertex_no_store_raises(self, tmp_path, monkeypatch):
+        """_resolve_named_store raises when vertex has no store (L1460-1461)."""
+        from loops.main import _resolve_named_store
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # resolve_vertex("proj", home) → home/proj/proj.vertex
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        vf = proj_dir / "proj.vertex"
+        vf.write_text('name "proj"\nloops { m { fold { n "inc" } } }\n')
+        with pytest.raises(FileNotFoundError, match="has no store"):
+            _resolve_named_store("proj")

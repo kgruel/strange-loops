@@ -2113,6 +2113,22 @@ class TestTryFastRead:
         rc = main(["read", "myv", "--static", "--plain"])
         assert rc == 0
 
+    def test_fast_read_unresolvable_vertex_falls_through(self, tmp_path, monkeypatch):
+        """_try_fast_read returns None when vertex name can't be resolved (L1344).
+
+        When _resolve_vertex_for_dispatch returns None (vertex not found),
+        _try_fast_read returns None to let full dispatch handle it.
+        Test directly so we don't depend on full dispatch error-handling.
+        """
+        from loops.main import _try_fast_read
+
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Must include "read" verb so len check passes (needs ≥4 args)
+        # Unresolvable name → _resolve_vertex_for_dispatch returns None → L1344
+        result = _try_fast_read(["read", "no-such-vertex", "--static", "--plain"])
+        assert result is None
+
 
 class TestRunCompile:
     """Exercise _run_compile error paths."""
@@ -2517,11 +2533,13 @@ class TestResolveEntityRefs:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
 
-        # Emit to child with a ref payload — local miss triggers topology widening
-        # At that point child_store IS in topo_stores, so L342 skips it
-        result = _resolve_entity_refs(child_vpath, child_store, {"project": "task/mytask"})
-        # Whether resolved or not, L342 was exercised (no double-search crash)
+        # Use a value that is NOT in the child store → local _try_resolve returns None
+        # → falls through to topology widening → topo_stores includes child_store
+        # → L342 fires to skip child_store (already searched locally)
+        result = _resolve_entity_refs(child_vpath, child_store, {"project": "task/doesnotexist"})
+        # Ref not resolved (not in any store), but L342 was exercised
         assert "project" in result
+        assert "project_ref" not in result
 
 
 class TestResolveEdgeCases:

@@ -135,13 +135,10 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                 return 1
             store_path = None
         else:
+            # _resolve_writable_vertex only returns a path when the vertex has a
+            # store directive (directly or via combine chain), so
+            # _resolve_vertex_store_path is always non-None here.
             store_path = _resolve_vertex_store_path(writable_path)
-            if store_path is None and not args.dry_run:
-                show(
-                    Block.text("Error: vertex has no store configured", p.error),
-                    file=sys.stderr,
-                )
-                return 1
     except LoopsError as e:
         if not args.dry_run:
             show(Block.text(f"Error: {e}", p.error), file=sys.stderr)

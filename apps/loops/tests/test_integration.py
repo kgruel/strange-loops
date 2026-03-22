@@ -1704,3 +1704,20 @@ class TestWhoamiIdentityStore:
         from loops.main import _whoami_from_identity_store
         result = _whoami_from_identity_store()
         assert result == ""
+
+
+class TestVertexLensDecl:
+    """Exercise _resolve_render_fn Tier 2 — vertex lens{} declaration (L1924-1931)."""
+
+    def test_vertex_with_fold_lens_decl(self, fold_by_vertex, monkeypatch):
+        """A vertex with lens { fold 'reconcile' } uses the declared lens (L1924-1927)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        # Append a lens block to the vertex file
+        content = vpath.read_text()
+        content += '\nlens {\n  fold "reconcile"\n}\n'
+        vpath.write_text(content)
+        from loops.main import main
+        # Without --lens flag, vertex lens declaration is used (Tier 2)
+        rc = main(["read", str(vpath), "--plain"])
+        assert rc == 0

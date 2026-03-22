@@ -15,6 +15,15 @@ import pytest
 
 from painted import Zoom
 from engine.builder import vertex, fold_count, fold_by, fold_collect
+from loops.main import (
+    main, cmd_emit, cmd_init,
+    _render_main_help, _run_validate, _run_ticks, _run_fold_fast,
+    _try_topology_from_store, _resolve_combine_child, _resolve_vertex_for_dispatch,
+    _whoami_from_identity_store,
+)
+from loops.commands.fetch import (
+    fetch_tick_facts, _get_fold_meta, fetch_tick_range, fetch_ticks, fetch_fold,
+)
 
 
 @pytest.fixture
@@ -31,7 +40,6 @@ def vertex_dir(tmp_path):
 
 def _emit(vertex_path, kind, **payload):
     """Helper: emit a fact via cmd_emit."""
-    from loops.main import cmd_emit
     parts = [f"{k}={v}" for k, v in payload.items()]
     ns = argparse.Namespace(
         vertex=None, kind=kind, parts=parts,
@@ -76,7 +84,6 @@ class TestEmitIntegration:
 
     def test_emit_dry_run(self, vertex_dir):
         tmp_path, vpath = vertex_dir
-        from loops.main import cmd_emit
         ns = argparse.Namespace(
             vertex=None, kind="event", parts=["message=test"],
             observer="", dry_run=True,
@@ -240,7 +247,6 @@ class TestDispatchHelpers:
         assert len(init_cmd.help_args) == 2
 
     def test_main_pathlike_argument_suggests_sync(self, capsys):
-        from loops.main import main
 
         rc = main(["./demo.vertex"])
         assert rc == 1
@@ -252,49 +258,41 @@ class TestCLIDispatch:
 
     def test_emit_via_main(self, vertex_dir):
         _, vpath = vertex_dir
-        from loops.main import main
         rc = main(["emit", str(vpath), "heartbeat", "service=test"])
         assert rc == 0
 
     def test_read_via_main(self, vertex_dir):
         _, vpath = vertex_dir
         _emit(vpath, "metric", service="api", latency="10")
-        from loops.main import main
         assert main(["read", str(vpath), "--plain"]) == 0
 
     def test_read_facts_via_main(self, vertex_dir):
         _, vpath = vertex_dir
         _emit(vpath, "event", message="hello")
-        from loops.main import main
         assert main(["read", str(vpath), "--facts", "--plain"]) == 0
 
     def test_validate_vertex(self, tmp_path):
         """Validate a simple vertex — covers _run_validate."""
         v = vertex("simple").store("./s.db").loop("ping", fold_count("n"))
         v.write(tmp_path / "simple.vertex")
-        from loops.main import main
         assert main(["validate", str(tmp_path / "simple.vertex")]) == 0
 
     def test_compile_vertex(self, tmp_path):
         """Compile a vertex — covers _run_compile."""
         v = vertex("simple").store("./s.db").loop("ping", fold_count("n"))
         v.write(tmp_path / "simple.vertex")
-        from loops.main import main
         assert main(["compile", str(tmp_path / "simple.vertex"), "--plain"]) == 0
 
     def test_store_command(self, vertex_dir):
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="x")
-        from loops.main import main
         assert main(["store", str(tmp_path / "test.db"), "--plain"]) == 0
 
     def test_main_no_args(self):
-        from loops.main import main
         rc = main([])
         assert isinstance(rc, int)
 
     def test_main_help(self):
-        from loops.main import main
         rc = main(["--help"])
         assert isinstance(rc, int)
 
@@ -365,7 +363,6 @@ class TestSyncIntegration:
     def test_sync_no_sources(self, vertex_dir):
         """Sync a vertex with no sources — should handle gracefully."""
         _, vpath = vertex_dir
-        from loops.main import main
         # No sources configured, sync should not crash
         rc = main(["sync", str(vpath), "--plain"])
         # May return non-zero (no sources), but shouldn't crash
@@ -374,7 +371,6 @@ class TestSyncIntegration:
     def test_sync_force(self, vertex_dir):
         """Sync --force exercises the force flag path."""
         _, vpath = vertex_dir
-        from loops.main import main
         rc = main(["sync", str(vpath), "--force", "--plain"])
         assert isinstance(rc, int)
 
@@ -387,7 +383,6 @@ class TestInitIntegration:
         import os
         os.environ["LOOPS_HOME"] = str(tmp_path / "home")
         try:
-            from loops.main import main
             rc = main(["init"])
             assert rc == 0
             assert (tmp_path / "home" / ".vertex").exists()
@@ -408,7 +403,6 @@ class TestObserverScoped:
         b.write(tmp_path / "scoped.vertex")
 
         vpath = tmp_path / "scoped.vertex"
-        from loops.main import cmd_emit
         import argparse
 
         # Emit as alice
@@ -464,7 +458,6 @@ class TestEdgeCases:
 
     def test_emit_to_nonexistent_vertex(self, tmp_path):
         """Emit to missing vertex — raises FileNotFoundError."""
-        from loops.main import cmd_emit
         import argparse
         ns = argparse.Namespace(
             vertex=None, kind="test", parts=["x=1"],
@@ -539,7 +532,6 @@ class TestLsCommand:
 
         os.environ["LOOPS_HOME"] = str(home)
         try:
-            from loops.main import main
             rc = main(["ls", "--plain"])
             assert rc == 0
         finally:
@@ -553,14 +545,12 @@ class TestReadFilters:
         _, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
         _emit(vpath, "metric", service="web", latency="10")
-        from loops.main import main
         # --kind filters to specific kind
         assert main(["read", str(vpath), "--facts", "--kind", "heartbeat", "--plain"]) == 0
 
     def test_read_with_since_filter(self, vertex_dir):
         _, vpath = vertex_dir
         _emit(vpath, "event", message="old")
-        from loops.main import main
         assert main(["read", str(vpath), "--facts", "--since", "1h", "--plain"]) == 0
 
     def test_read_with_id_lookup(self, vertex_dir):
@@ -569,7 +559,6 @@ class TestReadFilters:
         from engine import vertex_facts
         facts = vertex_facts(vpath, since_ts=0, until_ts=9999999999)
         fact_id = facts[0]["id"][:8]
-        from loops.main import main
         assert main(["read", str(vpath), "--facts", "--id", fact_id, "--plain"]) == 0
 
 
@@ -580,14 +569,12 @@ class TestCloseIntegration:
         """Close exercises the close dispatch + fact emission."""
         _, vpath = vertex_dir
         # Emit a thread fact first
-        from loops.main import cmd_emit
         import argparse
         cmd_emit(argparse.Namespace(
             vertex=None, kind="thread", parts=["name=fix-bug", "status=open", "message=working"],
             observer="tester", dry_run=False,
         ), vertex_path=vpath)
 
-        from loops.main import main
         rc = main(["close", str(vpath), "thread", "fix-bug", "done"])
         # close may fail if vertex doesn't declare thread kind, but exercises the path
         assert isinstance(rc, int)
@@ -614,14 +601,12 @@ class TestReadLensDispatch:
         """--json format exercises the JSON output path."""
         _, vpath = vertex_dir
         _emit(vpath, "metric", service="api", latency="10")
-        from loops.main import main
         assert main(["read", str(vpath), "--json"]) == 0
 
     def test_read_facts_with_json(self, vertex_dir):
         """--facts --json exercises stream JSON path."""
         _, vpath = vertex_dir
         _emit(vpath, "event", message="test")
-        from loops.main import main
         assert main(["read", str(vpath), "--facts", "--json"]) == 0
 
 
@@ -629,7 +614,6 @@ class TestUnknownCommand:
     """Unknown commands — exercises dispatch error paths."""
 
     def test_unknown_verb(self):
-        from loops.main import main
         rc = main(["nonexistent-command"])
         assert rc != 0
 
@@ -656,7 +640,6 @@ parse {
         input_file = tmp_path / "input.txt"
         input_file.write_text("api 42\nweb 99\ndb 7\n")
 
-        from loops.main import main
         rc = main(["test", str(loop_file), "--input", str(input_file), "--plain"])
         assert rc == 0
 
@@ -685,7 +668,6 @@ parse {
             "/dev/sda1   50G   30G  20G  60% /\n"
             "/dev/sdb1   100G  80G  20G  80% /data\n"
         )
-        from loops.main import main
         rc = main(["test", str(loop_file), "--input", str(input_file), "--plain"])
         assert rc == 0
 
@@ -698,7 +680,6 @@ kind "system"
 observer "monitor"
 every "30s"
 ''')
-        from loops.main import main
         rc = main(["compile", str(loop_file), "--plain"])
         assert rc == 0
 
@@ -710,7 +691,6 @@ source "uptime"
 kind "system"
 observer "monitor"
 ''')
-        from loops.main import main
         rc = main(["validate", str(loop_file)])
         assert rc == 0
 
@@ -733,7 +713,6 @@ loops {
     boundary when="heartbeat"
 }
 ''')
-        from loops.main import cmd_emit
         import argparse
 
         for i in range(3):
@@ -765,7 +744,6 @@ class TestStoreDetails:
             _emit(vpath, "metric", service="web", val=str(i))
         _emit(vpath, "event", message="deploy")
 
-        from loops.main import main
         rc = main(["store", str(tmp_path / "test.db"), "--plain"])
         assert rc == 0
 
@@ -773,13 +751,11 @@ class TestStoreDetails:
         """Store -v exercises detailed store view."""
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["store", str(tmp_path / "test.db"), "--plain", "-v"])
         assert rc == 0
 
     def test_store_nonexistent(self, tmp_path):
         """Store for nonexistent db — exercises error path."""
-        from loops.main import main
         rc = main(["store", str(tmp_path / "nope.db"), "--plain"])
         assert rc != 0 or rc == 0  # may handle gracefully
 
@@ -803,7 +779,7 @@ class TestCloseWorkflow:
     def test_close_thread_workflow(self, thread_vertex):
         """Open thread → emit related facts → close → verify resolution."""
         import argparse
-        from loops.main import cmd_emit, main
+
 
         # Open a thread (empty observer skips validation)
         cmd_emit(argparse.Namespace(
@@ -957,7 +933,6 @@ class TestMainEdgePaths:
 
     def test_render_main_help_json(self, capsys):
         """_render_main_help with --json flag hits JSON branch (L3156-3159)."""
-        from loops.main import _render_main_help
         rc = _render_main_help(["--json"])
         assert rc == 0
         out = capsys.readouterr().out
@@ -971,14 +946,12 @@ class TestMainEdgePaths:
         Passing a .vertex-suffixed path bypasses named lookup and hits
         the vertex_path.exists() guard directly.
         """
-        from loops.main import main
         ghost = str(tmp_path / "ghost.vertex")
         rc = main(["sync", ghost])
         assert rc == 1
 
     def test_run_sync_invalid_var(self, tmp_path):
         """_run_sync with bad --var format hits ValueError path (L947-949)."""
-        from loops.main import main
         from engine.builder import vertex, fold_count
         v = vertex("vtest").store("./v.db").loop("ping", fold_count("n"))
         vpath = tmp_path / "v.vertex"
@@ -988,7 +961,6 @@ class TestMainEdgePaths:
 
     def test_run_validate_bad_vertex(self, tmp_path):
         """_run_validate with a malformed vertex file hits exception path (L570-572)."""
-        from loops.main import _run_validate
         bad = tmp_path / "bad.vertex"
         bad.write_text("{{not-valid-kdl")
         rc = _run_validate([str(bad)])
@@ -996,7 +968,6 @@ class TestMainEdgePaths:
 
     def test_run_validate_bad_loop(self, tmp_path):
         """_run_validate with a malformed .loop file hits exception path (L570-572)."""
-        from loops.main import _run_validate
         bad = tmp_path / "bad.loop"
         bad.write_text("{{not-valid-kdl")
         rc = _run_validate([str(bad)])
@@ -1015,7 +986,6 @@ class TestMainEdgePaths:
     def test_cmd_init_invalid_iterations(self, tmp_path, monkeypatch):
         """cmd_init with non-integer iterations silently skips it (L493-496)."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template(tmp_path)
@@ -1030,7 +1000,6 @@ class TestMainEdgePaths:
     def test_cmd_init_with_seed_config(self, tmp_path, monkeypatch):
         """cmd_init with seed config (key=value args) hits L501-503."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template(tmp_path)
@@ -1069,7 +1038,6 @@ class TestSyncEdgePaths:
             "loops {\n  ping {\n    fold {\n      count \"inc\"\n    }\n  }\n}\n"
         )
 
-        from loops.main import main
         rc = main(["sync", "--force", str(root_vf)])
         assert rc == 0
 
@@ -1104,7 +1072,6 @@ class TestSyncEdgePaths:
         )
         vpath = vdir / "proj.vertex"
 
-        from loops.main import main
         rc = main(["sync", "--force", str(vpath)])
         assert rc == 0
         # The run clause should have executed echo boundary-fired
@@ -1117,7 +1084,6 @@ class TestRunTest:
 
     def test_test_error_paths(self, tmp_path):
         """test nonexistent file (L623-624) and wrong suffix (L627-628) both error."""
-        from loops.main import main
         assert main(["test", "/nonexistent.loop"]) == 1
         bad = tmp_path / "bad.vertex"
         bad.write_text('name "x"\nloops {}\n')
@@ -1129,7 +1095,6 @@ class TestRunTest:
         loop.write_text('source "echo ok"\nkind "ping"\nobserver "test"\n')
         multi = tmp_path / "multi.loop"
         multi.write_text('source "printf \'a\\nb\\nc\\n\'"\nkind "line"\nobserver "test"\n')
-        from loops.main import main
         assert main(["test", str(loop), "--plain"]) == 0
         assert main(["test", str(multi), "--limit", "1", "--plain"]) == 0
 
@@ -1140,7 +1105,6 @@ class TestScaffoldArtifacts:
     def test_scaffold_benchmark_script(self, tmp_path, monkeypatch):
         """_scaffold_artifacts with 'benchmark' key creates autoresearch.sh (L370-378)."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         # Make the template vertex
@@ -1162,7 +1126,6 @@ class TestScaffoldArtifacts:
     def test_scaffold_checks_script(self, tmp_path, monkeypatch):
         """_scaffold_artifacts with 'checks' key creates autoresearch.checks.sh (L382-390)."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         tmpl_dir = tmp_path / "mytemplate"
@@ -1209,7 +1172,6 @@ class TestFoldFastPath:
     def test_read_static_plain_no_data(self, vertex_dir):
         """--static --plain with empty store returns 'No data yet.' (L2225-2226)."""
         tmp_path, vpath = vertex_dir
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
@@ -1218,7 +1180,6 @@ class TestFoldFastPath:
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
         _emit(vpath, "heartbeat", service="web")
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
@@ -1227,7 +1188,6 @@ class TestFoldFastPath:
         tmp_path, vpath = fold_collect_vertex
         _emit(vpath, "event", service="api", action="deploy")
         _emit(vpath, "event", service="web", action="restart")
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
@@ -1236,7 +1196,6 @@ class TestFoldFastPath:
         tmp_path, vpath = fold_collect_vertex
         # service=api, action=deploy → label=api, body=deploy
         _emit(vpath, "event", service="api", action="deploy")
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
@@ -1244,7 +1203,6 @@ class TestFoldFastPath:
         """--static --plain -q triggers MINIMAL zoom (L2229-2231)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain", "-q"])
         assert rc == 0
 
@@ -1252,7 +1210,6 @@ class TestFoldFastPath:
         """--static --plain -v triggers DETAILED/FULL (falls back to painted)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["read", str(vpath), "--static", "--plain", "-v"])
         assert rc == 0
 
@@ -1260,7 +1217,6 @@ class TestFoldFastPath:
         """--static --plain --kind=X bypasses _try_fast_read → enters _run_fold L2089."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         # --kind=heartbeat forces full dispatch (bypasses _try_fast_read) but
         # _is_static_plain still returns True, so _run_fold hits L2089.
         rc = main(["read", str(vpath), "--static", "--plain", "--kind=heartbeat"])
@@ -1287,28 +1243,24 @@ class TestTicksPath:
     def test_ticks_list(self, ticks_vertex):
         """loops read --ticks shows tick list."""
         tmp_path, vpath = ticks_vertex
-        from loops.main import main
         rc = main(["read", str(vpath), "--ticks", "--plain"])
         assert rc == 0
 
     def test_ticks_drill_single(self, ticks_vertex):
         """loops read --ticks 0 drills into most recent tick (L2929-2930)."""
         tmp_path, vpath = ticks_vertex
-        from loops.main import main
         rc = main(["read", str(vpath), "--ticks", "0", "--plain"])
         assert rc == 0
 
     def test_ticks_drill_range(self, ticks_vertex):
         """loops read --ticks 0:1 drills into range of ticks (L2922-2927)."""
         tmp_path, vpath = ticks_vertex
-        from loops.main import main
         rc = main(["read", str(vpath), "--ticks", "0:1", "--plain"])
         assert rc == 0
 
     def test_ticks_with_vertex_path(self, ticks_vertex):
         """_run_ticks with explicit vertex_path (L2907, L2949)."""
         tmp_path, vpath = ticks_vertex
-        from loops.main import _run_ticks
         rc = _run_ticks(["0"], vertex_path=vpath)
         assert rc == 0
 
@@ -1320,7 +1272,6 @@ class TestRunFoldPaths:
         """--refs flag adds 'refs' to visible set (L2146)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["read", str(vpath), "--refs", "--plain"])
         assert rc == 0
 
@@ -1328,7 +1279,6 @@ class TestRunFoldPaths:
         """--facts flag adds 'facts' to visible set (L2148)."""
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api", status="up")
-        from loops.main import main
         rc = main(["read", str(vpath), "--facts", "--plain"])
         assert rc == 0
 
@@ -1336,7 +1286,6 @@ class TestRunFoldPaths:
         """--lens autoresearch sets up the interactive handler (L2165-2166, L2182)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         # --plain prevents interactive mode, so handler is defined but not called.
         # This covers L2165 (if branch True), L2166 (def line), L2182 (handler assignment).
         rc = main(["read", str(vpath), "--lens", "autoresearch", "--plain"])
@@ -1346,7 +1295,6 @@ class TestRunFoldPaths:
         """--lens with a built-in lens hits _resolve_render_fn (L1916-1918)."""
         tmp_path, vpath = fold_by_vertex
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["read", str(vpath), "--lens", "reconcile", "--plain"])
         assert rc == 0
 
@@ -1369,7 +1317,6 @@ class TestInitLocalVertex:
     def test_cmd_init_valid_iterations(self, tmp_path, monkeypatch):
         """cmd_init with valid integer iterations substitutes boundary (L232, L237)."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template_with_boundary(tmp_path)
@@ -1387,7 +1334,6 @@ class TestInitLocalVertex:
     def test_cmd_init_copy_lenses(self, tmp_path, monkeypatch):
         """cmd_init copies vertex-local lenses (L259-264)."""
         import argparse
-        from loops.main import cmd_init
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         self._make_template_with_boundary(tmp_path)
@@ -1414,7 +1360,6 @@ class TestRunStreamPaths:
         """--id with non-existent ID returns empty facts (L2032)."""
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
-        from loops.main import main
         rc = main(["read", str(vpath), "--facts", "--id", "abcdef123456", "--plain"])
         assert rc == 0
 
@@ -1423,7 +1368,6 @@ class TestRunStreamPaths:
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
         _emit(vpath, "heartbeat", service="web")
-        from loops.main import main
         rc = main(["read", str(vpath), "--facts", "--id", "a", "--plain"])
         assert rc == 0
 
@@ -1440,14 +1384,12 @@ class TestCmdEmitEdgePaths:
         vdir.mkdir()
         v = vertex("test").store("./test.db").loop("ping", fold_count("n"))
         v.write(vdir / "test.vertex")
-        from loops.main import main
         rc = main(["emit", "test", "ping", "x=1"])
         assert rc == 0
 
     def test_emit_explicit_nonexistent_path(self, tmp_path, monkeypatch):
         """emit with explicit .vertex path that doesn't exist errors (L1630-1633)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        from loops.main import main
         rc = main(["emit", "/nonexistent.vertex", "ping", "x=1"])
         assert rc == 1
 
@@ -1487,7 +1429,6 @@ class TestTopologyStore:
 
         # Now read topology back
         dbpath = (tmp_path / "agg.db").resolve()
-        from loops.main import _try_topology_from_store
         result = _try_topology_from_store(dbpath)
         assert result is not None
         kind_keys, store_paths = result
@@ -1496,7 +1437,6 @@ class TestTopologyStore:
 
     def test_try_topology_no_store(self, tmp_path):
         """_try_topology_from_store with non-existent store returns None."""
-        from loops.main import _try_topology_from_store
         result = _try_topology_from_store(tmp_path / "nonexistent.db")
         assert result is None
 
@@ -1508,7 +1448,6 @@ class TestTopologyStore:
         v.write(vpath)
         _emit(vpath, "ping", x="1")
         dbpath = (tmp_path / "test.db").resolve()
-        from loops.main import _try_topology_from_store
         result = _try_topology_from_store(dbpath)
         assert result is None
 
@@ -1530,7 +1469,6 @@ class TestRunTestInputMode:
 
     def test_input_nonexistent_file(self, parse_loop):
         """--input with non-existent file raises FileNotFoundError (L645)."""
-        from loops.main import main
         rc = main(["test", str(parse_loop), "--input", "/nonexistent.txt", "--plain"])
         assert rc == 1
 
@@ -1538,7 +1476,6 @@ class TestRunTestInputMode:
         """--input with real file parses lines through pipeline."""
         input_file = tmp_path / "words.txt"
         input_file.write_text("apple\nbanana\ncherry\n")
-        from loops.main import main
         rc = main(["test", str(parse_loop), "--input", str(input_file), "--plain"])
         assert rc == 0
 
@@ -1559,14 +1496,12 @@ class TestCloseCommand:
     def test_close_thread_dry_run(self, thread_vertex):
         """close command with --dry-run finds item and shows resolution (L2607-2660)."""
         tmp_path, vpath = thread_vertex
-        from loops.main import main
         rc = main(["close", str(vpath), "thread", "my-task", "completed", "--dry-run"])
         assert rc == 0
 
     def test_close_not_found(self, thread_vertex):
         """close with name that doesn't exist in fold returns 1 (L2625-2627)."""
         tmp_path, vpath = thread_vertex
-        from loops.main import main
         rc = main(["close", str(vpath), "thread", "no-such-task"])
         assert rc == 1
 
@@ -1581,7 +1516,6 @@ class TestCloseCommand:
         v = vertex("local").store("./local.db").loop("thread", fold_by("name"))
         v.write(vpath)
         _emit(vpath, "thread", name="task1")
-        from loops.main import main
         rc = main(["close", "thread", "task1", "--dry-run"])
         assert rc == 0
 
@@ -1612,7 +1546,6 @@ class TestResolveCombineChild:
             "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
         )
 
-        from loops.main import _resolve_combine_child
         result = _resolve_combine_child(parent_vpath, "kid")
         assert result is not None
         assert result == child_vpath.resolve()
@@ -1637,7 +1570,6 @@ class TestResolveCombineChild:
             "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
         )
 
-        from loops.main import _resolve_combine_child
         result = _resolve_combine_child(parent_vpath, "notexist")
         assert result is None
 
@@ -1649,7 +1581,6 @@ class TestResolveCombineChild:
             'name "simple"\nstore "./s.db"\n'
             "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
         )
-        from loops.main import _resolve_combine_child
         result = _resolve_combine_child(vpath, "any")
         assert result is None
 
@@ -1658,7 +1589,6 @@ class TestResolveCombineChild:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         bad = tmp_path / "bad.vertex"
         bad.write_text("{{invalid")
-        from loops.main import _resolve_combine_child
         result = _resolve_combine_child(bad, "any")
         assert result is None
 
@@ -1680,7 +1610,6 @@ class TestWhoamiIdentityStore:
         # Emit a self fact with name="name" and message="alice"
         _emit(identity_vpath, "self", name="name", message="alice")
 
-        from loops.main import _whoami_from_identity_store
         result = _whoami_from_identity_store()
         assert result == "alice"
 
@@ -1689,7 +1618,6 @@ class TestWhoamiIdentityStore:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
 
-        from loops.main import _whoami_from_identity_store
         result = _whoami_from_identity_store()
         assert result == ""
 
@@ -1705,7 +1633,6 @@ class TestVertexLensDecl:
         content = vpath.read_text()
         content += '\nlens {\n  fold "reconcile"\n}\n'
         vpath.write_text(content)
-        from loops.main import main
         # Without --lens flag, vertex lens declaration is used (Tier 2)
         rc = main(["read", str(vpath), "--plain"])
         assert rc == 0
@@ -1717,7 +1644,6 @@ class TestFetchFunctions:
     def test_fetch_tick_facts(self, ticks_vertex):
         """fetch_tick_facts drills into a tick and calls _get_fold_meta (L304-338)."""
         tmp_path, vpath = ticks_vertex
-        from loops.commands.fetch import fetch_tick_facts
         result = fetch_tick_facts(vpath, 0)
         assert "facts" in result
         assert "fold_meta" in result
@@ -1725,7 +1651,6 @@ class TestFetchFunctions:
     def test_fetch_tick_facts_out_of_range(self, ticks_vertex):
         """fetch_tick_facts with invalid index returns error (L309-313)."""
         tmp_path, vpath = ticks_vertex
-        from loops.commands.fetch import fetch_tick_facts
         result = fetch_tick_facts(vpath, 999)
         assert "_tick_error" in result
 
@@ -1735,7 +1660,6 @@ class TestFetchFunctions:
         v = vertex("test").store("./t.db").loop("event", fold_by("kind"))
         vpath = tmp_path / "test.vertex"
         v.write(vpath)
-        from loops.commands.fetch import _get_fold_meta
         meta = _get_fold_meta(vpath)
         assert "event" in meta
         assert meta["event"]["key_field"] == "kind"
@@ -1749,7 +1673,6 @@ class TestFetchFunctions:
         v.write(vpath)
         for i in range(4):
             _emit(vpath, "ping", i=str(i))
-        from loops.commands.fetch import fetch_tick_range
         result = fetch_tick_range(vpath, 0, 2)
         assert "facts" in result
         assert "_tick_error" not in result
@@ -1761,7 +1684,6 @@ class TestFetchFunctions:
         v = vertex("empty").store("./e.db").loop("ping", fold_count("n"))
         vpath = tmp_path / "empty.vertex"
         v.write(vpath)
-        from loops.commands.fetch import fetch_tick_range
         result = fetch_tick_range(vpath, 0, 1)
         assert "_tick_error" in result
 
@@ -1774,7 +1696,6 @@ class TestFetchFunctions:
         v.write(vpath)
         _emit(vpath, "event", svc="api", msg="v1")
         _emit(vpath, "event", svc="web", msg="v0")
-        from loops.commands.fetch import fetch_ticks
         result = fetch_ticks(vpath)
         assert "ticks" in result
 
@@ -1783,7 +1704,6 @@ class TestFetchFunctions:
         tmp_path, vpath = vertex_dir
         _emit(vpath, "heartbeat", service="api")
         _emit(vpath, "metric", service="web")
-        from loops.commands.fetch import fetch_fold
         result = fetch_fold(vpath, kind="heartbeat")
         # Only heartbeat section should be present
         assert all(s.kind == "heartbeat" for s in result.sections)
@@ -1791,7 +1711,6 @@ class TestFetchFunctions:
     def test_fetch_tick_range_out_of_range(self, ticks_vertex):
         """fetch_tick_range with start >= end returns error (L377-381)."""
         tmp_path, vpath = ticks_vertex
-        from loops.commands.fetch import fetch_tick_range
         # start=5, end=3 → start > end (out of range)
         result = fetch_tick_range(vpath, 5, 3)
         assert "_tick_error" in result
@@ -1825,7 +1744,6 @@ class TestResolveVertexForDispatch:
             "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
         )
 
-        from loops.main import _resolve_vertex_for_dispatch
         result = _resolve_vertex_for_dispatch("parent/kid")
         assert result is not None
         assert result == child_vpath.resolve()
@@ -1834,6 +1752,5 @@ class TestResolveVertexForDispatch:
         """vertex/alias with no matching child returns None (falls through to L1556)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
-        from loops.main import _resolve_vertex_for_dispatch
         result = _resolve_vertex_for_dispatch("nonexistent/kid")
         assert result is None

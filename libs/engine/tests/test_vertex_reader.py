@@ -1238,3 +1238,117 @@ class TestCombinedVertexSearch:
         ])
 
         assert vertex_search(combine_vpath, "nonexistent") == []
+
+
+class TestVertexSummary:
+    """vertex_summary: store summary from a vertex file."""
+
+    def test_summary_with_store(self, tmp_path):
+        from engine import vertex_summary
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "payload": {"v": 1}},
+            {"kind": "metric", "ts": 2000.0, "payload": {"v": 2}},
+        ])
+
+        result = vertex_summary(vpath)
+        assert result["facts"]["total"] == 2
+        assert "metric" in result["facts"]["kinds"]
+
+    def test_summary_no_store_declared(self, tmp_path):
+        from engine import vertex_summary
+
+        content = 'name "ns"\nloops {\n  metric { fold { n "inc" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+
+        result = vertex_summary(vpath)
+        assert result["facts"]["total"] == 0
+
+    def test_summary_store_missing(self, tmp_path):
+        from engine import vertex_summary
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        # Don't create store.db
+
+        result = vertex_summary(vpath)
+        assert result["facts"]["total"] == 0
+
+
+class TestVertexTicks:
+    """vertex_ticks: read ticks from a vertex's store."""
+
+    def test_ticks_from_store(self, tmp_path):
+        from engine import vertex_ticks
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        db = tmp_path / "store.db"
+        _seed_facts(db, [])
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            ("T001", "metric", 1000.0, None, "test", '{"n": 1}'),
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            ("T002", "metric", 2000.0, 1000.0, "test", '{"n": 3}'),
+        )
+        conn.commit()
+        conn.close()
+
+        ticks = vertex_ticks(vpath, since_ts=0, until_ts=9999)
+        assert len(ticks) == 2
+
+    def test_ticks_no_store(self, tmp_path):
+        from engine import vertex_ticks
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        ticks = vertex_ticks(vpath, since_ts=0, until_ts=9999)
+        assert ticks == []
+
+    def test_ticks_store_missing(self, tmp_path):
+        from engine import vertex_ticks
+
+        content = 'name "ns"\nloops {\n  metric { fold { n "inc" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+        ticks = vertex_ticks(vpath, since_ts=0, until_ts=9999)
+        assert ticks == []
+
+
+class TestVertexFactById:
+    """vertex_fact_by_id: look up a fact by ID or prefix."""
+
+    def test_exact_match(self, tmp_path):
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"id": "01ABC123", "kind": "metric", "ts": 1000.0, "payload": {"v": 42}},
+        ])
+
+        result = vertex_fact_by_id(vpath, "01ABC123")
+        assert result is not None
+        assert result["payload"]["v"] == 42
+
+    def test_not_found(self, tmp_path):
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath = _create_vertex_file(tmp_path, "test", '  metric { fold { n "inc" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"id": "01ABC123", "kind": "metric", "ts": 1000.0, "payload": {"v": 1}},
+        ])
+
+        result = vertex_fact_by_id(vpath, "ZZZZZ")
+        assert result is None
+
+    def test_no_store(self, tmp_path):
+        from engine.vertex_reader import vertex_fact_by_id
+
+        content = 'name "ns"\nloops {\n  metric { fold { n "inc" } }\n}\n'
+        vpath = tmp_path / "ns.vertex"
+        vpath.write_text(content)
+
+        result = vertex_fact_by_id(vpath, "01ABC")
+        assert result is None

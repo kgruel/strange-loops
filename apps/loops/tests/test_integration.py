@@ -1795,3 +1795,45 @@ class TestFetchFunctions:
         # start=5, end=3 → start > end (out of range)
         result = fetch_tick_range(vpath, 5, 3)
         assert "_tick_error" in result
+
+
+class TestResolveVertexForDispatch:
+    """Exercise _resolve_vertex_for_dispatch slash-qualified paths (L1540-1554)."""
+
+    def test_slash_resolve_combine_child(self, tmp_path, monkeypatch):
+        """vertex/alias resolves combine child (L1539-1547)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # Create child vertex
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        # Create parent with combine + alias in .loops/ (local vertex)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        parent_vpath = loops_dir / "parent.vertex"
+        parent_vpath.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{str(child_vpath)}" as="kid"\n'
+            '}\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+
+        from loops.main import _resolve_vertex_for_dispatch
+        result = _resolve_vertex_for_dispatch("parent/kid")
+        assert result is not None
+        assert result == child_vpath.resolve()
+
+    def test_slash_no_match(self, tmp_path, monkeypatch):
+        """vertex/alias with no matching child returns None (falls through to L1556)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        from loops.main import _resolve_vertex_for_dispatch
+        result = _resolve_vertex_for_dispatch("nonexistent/kid")
+        assert result is None

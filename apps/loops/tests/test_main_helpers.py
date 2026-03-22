@@ -552,3 +552,13 @@ class TestMainHelperEdges:
         )
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         assert _resolve_named_vertex("myv").name == "myv.vertex"
+
+
+class TestMainAsModule:
+    def test_main_module_entry_point(self, tmp_path, monkeypatch):
+        """Running loops as python -m loops covers __main__.py (L3, L5, L7)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.setattr("sys.argv", ["loops"])
+        import runpy, pytest
+        with pytest.raises(SystemExit):
+            runpy.run_module("loops", run_name="__main__", alter_sys=True)

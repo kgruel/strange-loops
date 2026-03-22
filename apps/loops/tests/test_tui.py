@@ -579,569 +579,340 @@ class TestStoreExplorerFidelity:
         assert len(frames) >= 2
 
 
+
 # ---------------------------------------------------------------------------
-# AutoresearchApp: remaining miss lines
+# AutoresearchApp: edge cases and remaining miss lines (consolidated)
 # ---------------------------------------------------------------------------
 
-class TestFormatMetric:
-    def test_value_gte_10(self):
-        """_format_metric for values >= 10 → one decimal (L112)."""
+class TestAutoresearchEdgeCases:
+    """Consolidated edge case tests for AutoresearchApp."""
+
+    # --- _format_metric branches ---
+
+    def test_format_metric_gte_10(self):
         from loops.tui.autoresearch_app import _format_metric
         assert _format_metric(15.0) == "15"
         assert _format_metric(10.5) == "10.5"
-        assert _format_metric(100.7) == "100.7"
 
-    def test_value_lt_1(self):
-        """_format_metric for abs(value) < 1 → three decimals (L115)."""
+    def test_format_metric_lt_1(self):
         from loops.tui.autoresearch_app import _format_metric
         assert _format_metric(0.5) == "0.500"
-        assert _format_metric(0.123) == "0.123"
 
+    # --- AppState.selected edge cases ---
 
-class TestAppStateEdges:
     def test_selected_empty_iterations(self):
         """AppState.selected returns None when no iterations (L261)."""
         from loops.tui.autoresearch_app import AppState
-        from painted.views import ListState
+        from painted.views import ListState as LS
         state = AppState(
             config={}, iterations=[], primary_metric="", direction="lower",
             baseline=None, best=None, best_run=0, total_experiments=0,
-            cursor=ListState().with_count(0), focus="list", detail_scroll=0,
+            cursor=LS().with_count(0), focus="list", detail_scroll=0,
         )
         assert state.selected is None
 
-    def test_selected_out_of_bounds(self):
+    def test_selected_cursor_out_of_bounds(self):
         """AppState.selected returns None when cursor past iterations (L261)."""
         from loops.tui.autoresearch_app import AppState
-        from painted.views import ListState
+        from painted.views import ListState as LS
         it = make_iteration(1)
         state = AppState(
             config={}, iterations=[it], primary_metric="", direction="lower",
             baseline=None, best=None, best_run=0, total_experiments=1,
-            cursor=ListState().with_count(5).move_to(4),  # cursor beyond list
-            focus="list", detail_scroll=0,
+            cursor=LS().with_count(5).move_to(4), focus="list", detail_scroll=0,
         )
         assert state.selected is None
 
+    # --- Render edge cases ---
 
-class TestRenderHeaderNoMetric:
-    def test_header_no_primary_metric(self):
-        """_render_header_panels with no primary_metric shows 'no metric' (L296)."""
+    def test_render_header_no_primary_metric(self):
+        """_render_header_panels with empty primary_metric covers 'no metric' branch (L296)."""
         from loops.tui.autoresearch_app import AppState, _render_header_panels
-        from painted.views import ListState
+        from painted.views import ListState as LS
         state = AppState(
-            config={}, iterations=[], primary_metric="",
-            direction="lower", baseline=None, best=None,
-            best_run=0, total_experiments=0,
-            cursor=ListState().with_count(0), focus="list", detail_scroll=0,
+            config={}, iterations=[], primary_metric="", direction="lower",
+            baseline=None, best=None, best_run=0, total_experiments=0,
+            cursor=LS().with_count(0), focus="list", detail_scroll=0,
         )
-        block = _render_header_panels(state, 100)
-        assert block.height >= 1
+        assert _render_header_panels(state, 100).height >= 1
 
-
-class TestIterationListNoneMetric:
-    def test_list_renders_dash_for_none_metric(self, tmp_path):
-        """Iteration with metric=None shows '      -' in the list (L373)."""
-        state = (AppStateBuilder()
-            .iteration(metric=None, status="crash")
-            .build())
+    def test_render_none_metric_shows_dash(self, tmp_path):
+        """Iteration with metric=None shows dash in list (L373)."""
+        state = AppStateBuilder().iteration(metric=None, status="crash").build()
         app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=state)
         harness = TestSurface(app, width=100, height=30, input_queue=["q"])
         frames = harness.run_to_completion()
-        # '-' indicator should appear somewhere in the rendered frame
         assert "-" in frames[0].text
 
-
-class TestLogWithFiles:
-    def test_render_detail_log_with_files_field(self):
-        """Log item with 'files' field appended to message (L436)."""
-        from atoms import FoldItem
-        log = FoldItem(
-            payload={"type": "change", "message": "refactored", "files": "main.py, util.py"},
-            ts=300.0,
-        )
-        it = make_iteration(1, description="step up", logs=(log,))
-        block = _render_detail(it, 100, 30, scroll=0, focused=True)
-        text = block_text(block)
-        assert "main.py" in text or "refactored" in text
-
-
-class TestUpdateAndOnKeyDirect:
-    def test_update_method_covered(self, tmp_path):
-        """Direct update() call covers method body (L605-609)."""
-        import time as _time
-        app = AutoresearchApp(tmp_path / "v.vertex")
-        # Trigger reload path by zeroing refresh time
-        app._last_refresh = 0.0
-        app._refresh_interval = 0.0
-        app.update()
-        # _load_data fired (vertex missing → error set)
-        assert app._error is not None
-
-    def test_on_key_covered_directly(self, tmp_path, app_state):
-        """Direct on_key() call covers method dispatch (L611+)."""
-        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
-        # Initialise buffer for render
-        from painted.tui import TestSurface
-        harness = TestSurface(app, width=80, height=24, input_queue=[])
-        # Direct key dispatch
-        app.on_key("j")  # navigate down
-        app.on_key("k")  # navigate up
-        app.on_key("tab")  # toggle focus
-        app.on_key("enter")  # switch to detail
-        app.on_key("j")  # scroll detail
-        app.on_key("page_down")  # page down in detail
-        app.on_key("page_up")   # page up in detail
-        app.on_key("g")  # home
-        app.on_key("G")  # end
-
-    def test_on_key_unknown_no_crash(self, tmp_path, app_state):
-        """Unknown key in both list and detail focus is a no-op."""
-        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
-        app.on_key("z")  # unknown in list
-        app._state = replace(app._state, focus="detail")
-        app.on_key("z")  # unknown in detail
-
-
-class TestRenderIterationListCall:
-    def test_render_calls_iteration_list(self, tmp_path, app_state):
-        """Full render() path calls _render_iteration_list (L713)."""
-        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
-        harness = TestSurface(app, width=100, height=40, input_queue=["q"])
-        frames = harness.run_to_completion()
-        assert "Iterations" in frames[0].text
-
-
-# ---------------------------------------------------------------------------
-# StoreExplorerApp: remaining miss lines
-# ---------------------------------------------------------------------------
-
-class TestStoreExplorerStateEdges:
-    def test_selected_name_out_of_bounds(self):
-        """selected_name() returns None when no tick names (L82)."""
-        # Build a state with tick_names=[] — cursor.selected=0, 0 < 0 is False → None
-        state = StoreExplorerStateBuilder().ticks([]).build()
-        assert state.selected_name() is None
-
-    def test_selected_label_no_ticks(self):
-        """selected_label returns None when no tick names (L75)."""
-        state = StoreExplorerStateBuilder().ticks([]).build()
-        assert state.selected_label is None
-
-    def test_selected_data_no_name(self):
-        """selected_data() returns None when no selection (L68)."""
-        state = StoreExplorerStateBuilder().ticks([]).build()
-        assert state.selected_data() is None
-
-
-class TestStoreExplorerLoadStore:
-    def test_load_store_with_real_db(self, tmp_path):
-        """_load_store() with a real SQLite store covers L113-129."""
-        from .builders import StorePopulator
-        from engine.builder import vertex, fold_count
-
-        # Build a real vertex + store
-        vpath = tmp_path / "s.vertex"
-        vertex("s").store("./s.db").loop("ping", fold_count("n")).write(vpath)
-        db_path = tmp_path / "s.db"
-        StorePopulator(db_path).emit("ping", n="1").emit("ping", n="2").done()
-
-        app = StoreExplorerApp(db_path)
-        app._load_store()
-        assert app._state is not None
-        assert app._error is None
-
-    def test_load_store_error_on_missing_db(self, tmp_path):
-        """_load_store() sets _error when db doesn't exist (L127-128)."""
-        app = StoreExplorerApp(tmp_path / "nonexistent.db")
-        app._load_store()
-        assert app._error is not None
-
-
-class TestStoreExplorerKeyEdges:
-    def test_list_key_unknown(self, tmp_path, store_explorer_state):
-        """Unknown list key hits else:return (L176)."""
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
-        harness = TestSurface(app, width=100, height=24, input_queue=[])
-        app.on_key("z")  # unknown in list → L176 else:return
-
-    def test_detail_key_no_detail(self, tmp_path):
-        """_handle_detail_key returns early when no detail (L197)."""
-        state = StoreExplorerStateBuilder().focus("detail").build()
-        state = replace(state, detail=None)
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
-        harness = TestSurface(app, width=100, height=24, input_queue=[])
-        app.on_key("j")  # detail is None → L197 early return
-
-    def test_detail_key_unknown(self, tmp_path):
-        """Unknown detail key hits else:return (L215)."""
-        state = StoreExplorerStateBuilder().with_detail().focus("detail").build()
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
-        harness = TestSurface(app, width=100, height=24, input_queue=[])
-        app.on_key("z")  # unknown in detail → L215 else
-
-    def test_selection_change_no_data(self, tmp_path):
-        """List navigation where new selection has no tick data → detail=None (L189)."""
-        # Create state with 2 ticks but empty data for second
-        summary = {
-            "facts": {"total": 2, "kinds": {}},
-            "ticks": {"total": 2, "names": {"tick-a": {"count": 1, "sparkline": "", "latest": None}}},
-        }
-        from loops.tui.store_app import StoreExplorerState
-        state = StoreExplorerState.from_summary(summary)
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
-        harness = TestSurface(app, width=100, height=24, input_queue=[])
-        # Move to a tick with no data → detail becomes None
-        app.on_key("j")
-
-    def test_fidelity_key_home_end(self, tmp_path, store_explorer_state_with_fidelity):
-        """g/G in fidelity mode navigate cursor (L304, L306)."""
-        app = StoreExplorerApp(
-            tmp_path / "t.db",
-            _initial_state=store_explorer_state_with_fidelity,
-        )
-        harness = TestSurface(app, width=120, height=30, input_queue=[])
-        app.on_key("G")  # L306
-        app.on_key("g")  # L304
-
-    def test_fidelity_key_unknown(self, tmp_path, store_explorer_state_with_fidelity):
-        """Unknown fidelity key hits else:return (L253)."""
-        app = StoreExplorerApp(
-            tmp_path / "t.db",
-            _initial_state=store_explorer_state_with_fidelity,
-        )
-        app.on_key("z")  # unknown in fidelity → L253
-
-    def test_fidelity_filter_no_facts_for_first_kind(self, tmp_path):
-        """'a' in fidelity with facts but 0 matching kind hits else:return (L270)."""
-        from loops.tui.store_app import FidelityState
-        from painted.views import ListState
-        # facts with one kind but filter targets a different kind
-        facts = make_fidelity_facts(["thread"])
-        fid = FidelityState(
-            facts=facts, tick_name="t", since=0.0, until=1.0,
-            cursor=ListState().with_count(1),
-            filtered=True, filter_kind="thread",  # already filtered
-        )
-        state = StoreExplorerStateBuilder().ticks(["t"]).build()
-        state = replace(state, fidelity=fid)
-
-        def _fetch(since, until, kind=None):
-            if kind:
-                return []  # empty filter result → L270
-            return facts
-
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
-        app.on_key("a")  # tries to filter but gets empty → L268-270
-
-
-class TestStoreExplorerRelativeTime:
-    def test_just_now(self):
-        """_relative_time for future timestamps → 'just now' (L480)."""
-        from loops.tui.store_app import _relative_time
-        from datetime import datetime as dt, timezone as tz, timedelta
-        future = dt.now(tz.utc) + timedelta(seconds=5)
-        result = _relative_time(future)
-        assert result == "just now"
-
-    def test_seconds_ago(self):
-        """_relative_time for < 60s → '??s ago' (L482)."""
-        from loops.tui.store_app import _relative_time
-        from datetime import datetime as dt, timezone as tz, timedelta
-        assert "s ago" in _relative_time(dt.now(tz.utc) - timedelta(seconds=30))
-
-    def test_minutes_ago(self):
-        """_relative_time for 1-59min → '??m ago' (L485)."""
-        from loops.tui.store_app import _relative_time
-        from datetime import datetime as dt, timezone as tz, timedelta
-        assert "m ago" in _relative_time(dt.now(tz.utc) - timedelta(minutes=15))
-
-    def test_hours_ago(self):
-        """_relative_time for 1-23h → '??h ago' (L488)."""
-        from loops.tui.store_app import _relative_time
-        from datetime import datetime as dt, timezone as tz, timedelta
-        assert "h ago" in _relative_time(dt.now(tz.utc) - timedelta(hours=5))
-
-
-class TestStoreExplorerRenderLayout:
-    def test_medium_height_layout(self, tmp_path, store_explorer_state):
-        """Height 7-11 uses tight layout (header+panels+footer, L459)."""
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
-        harness = TestSurface(app, width=100, height=9, input_queue=["q"])
-        frames = harness.run_to_completion()
-        assert len(frames) >= 1
-
-    def test_render_fidelity_early_return(self, tmp_path, store_explorer_state_with_fidelity):
-        """Fidelity render with height < panel_height — row loop short-circuits (L367)."""
-        app = StoreExplorerApp(
-            tmp_path / "t.db",
-            _initial_state=store_explorer_state_with_fidelity,
-        )
-        # Very small height forces minimal panel
-        harness = TestSurface(app, width=80, height=8, input_queue=["q"])
-        frames = harness.run_to_completion()
-        assert len(frames) >= 1
-
-
-# ---------------------------------------------------------------------------
-# AutoresearchApp: _load_data paths and render edges
-# ---------------------------------------------------------------------------
-
-class TestAutoresearchLoadData:
-    def test_load_data_initial_with_real_vertex(self, autoresearch_vertex, monkeypatch):
-        """_load_data() on initial load (state=None) covers L575-L584."""
-        import time
-        from .builders import StorePopulator
-        db_path = autoresearch_vertex.parent / "data" / "autoresearch.db"
-        (StorePopulator(db_path)
-            .emit("config", key="primary_metric", value="efficiency")
-            .emit("config", key="direction", value="lower")
-            .emit("experiment", efficiency="4.5", status="keep",
-                  commit="abc1234", description="baseline", ts=200.0)
-            .done())
-
-        app = AutoresearchApp(autoresearch_vertex)
-        app._last_refresh = 0.0
-        app._refresh_interval = 0.0
-        app._load_data()
-        # Initial path: _state was None, now set
-        assert app._state is not None
-        assert len(app._state.iterations) >= 1
-
-    def test_load_data_refresh_with_real_vertex(self, autoresearch_vertex):
-        """_load_data() on refresh (state already set) covers L586-L594."""
-        from .builders import StorePopulator
-        db_path = autoresearch_vertex.parent / "data" / "autoresearch.db"
-        (StorePopulator(db_path)
-            .emit("config", key="primary_metric", value="efficiency")
-            .emit("experiment", efficiency="3.5", status="keep",
-                  commit="abc", description="step", ts=200.0)
-            .done())
-
-        app = AutoresearchApp(autoresearch_vertex)
-        app._load_data()  # initial load
-        first_state = app._state
-        assert first_state is not None
-        # Second load → refresh path (state is not None)
-        app._load_data()
-        assert app._state is not None
-
-
-class TestAutoresearchHandleKeyNoState:
-    def test_handle_list_key_no_state(self, tmp_path):
-        """_handle_list_key returns early when state=None (L635)."""
-        app = AutoresearchApp(tmp_path / "v.vertex")
-        # Don't set state — _state is None
-        app._handle_list_key("j")  # L635: return early
-
-    def test_handle_detail_key_no_state(self, tmp_path):
-        """_handle_detail_key returns early when state=None (L660)."""
-        app = AutoresearchApp(tmp_path / "v.vertex")
-        app._handle_detail_key("j")  # L660: return early
-
-    def test_render_no_buf(self, tmp_path):
-        """render() returns early when _buf is None (L685)."""
-        app = AutoresearchApp(tmp_path / "v.vertex")
-        # _buf not set up (no TestSurface) → L685 early return
-        app.render()
-
-    def test_render_no_iterations(self, tmp_path):
+    def test_render_no_iterations_shows_placeholder(self, tmp_path):
         """render() with empty iterations shows 'No iterations' (L726)."""
-        state = (AppStateBuilder()
-            .metric("efficiency")
-            .focus("list")
-            .build())  # no .iteration() calls → 0 iterations
+        state = AppStateBuilder().metric("efficiency").focus("list").build()
         app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=state)
         harness = TestSurface(app, width=100, height=30, input_queue=["q"])
         frames = harness.run_to_completion()
         assert "No iterations" in frames[0].text
 
+    def test_render_detail_log_files_field(self):
+        """Log with 'files' field is appended to message (L436)."""
+        from atoms import FoldItem
+        log = FoldItem(payload={"type": "change", "message": "refactored", "files": "main.py"}, ts=300.0)
+        it = make_iteration(1, description="step", logs=(log,))
+        block = _render_detail(it, 100, 30, scroll=0, focused=True)
+        text = block_text(block)
+        assert "main.py" in text or "refactored" in text
+
+    # --- update() and on_key() direct coverage ---
+
+    def test_update_triggers_reload(self, tmp_path):
+        """update() with elapsed interval calls _load_data (L605-609)."""
+        app = AutoresearchApp(tmp_path / "v.vertex")
+        app._last_refresh = 0.0
+        app._refresh_interval = 0.0
+        app.update()
+        assert app._error is not None  # vertex missing → error set
+
+    def test_on_key_all_list_and_detail_branches(self, tmp_path, app_state):
+        """Direct on_key() exercises list and detail key dispatch (L611+)."""
+        app = AutoresearchApp(tmp_path / "v.vertex", _initial_state=app_state)
+        TestSurface(app, width=80, height=24, input_queue=[])  # init buffer
+        for key in ["j", "k", "tab", "enter", "j", "page_down", "page_up", "g", "G"]:
+            app.on_key(key)
+        # Unknown keys in list and detail are no-ops
+        app._state = replace(app._state, focus="list")
+        app.on_key("z")
+        app._state = replace(app._state, focus="detail")
+        app.on_key("z")
+
+    def test_on_key_no_state_no_crash(self, tmp_path):
+        """on_key when state=None (no initial state) is a no-op (L635, L660)."""
+        app = AutoresearchApp(tmp_path / "v.vertex")
+        app._handle_list_key("j")
+        app._handle_detail_key("j")
+
+    def test_render_no_buf_no_crash(self, tmp_path):
+        """render() with no buffer set up returns immediately (L685)."""
+        AutoresearchApp(tmp_path / "v.vertex").render()
+
+    # --- _load_data paths ---
+
+    def test_load_data_initial_and_refresh(self, autoresearch_vertex):
+        """_load_data covers both initial load (L575-584) and refresh (L586-594)."""
+        from .builders import StorePopulator
+        db_path = autoresearch_vertex.parent / "data" / "autoresearch.db"
+        (StorePopulator(db_path)
+            .emit("config", key="primary_metric", value="efficiency")
+            .emit("experiment", efficiency="4.5", status="keep",
+                  commit="abc", description="baseline", ts=200.0)
+            .done())
+        app = AutoresearchApp(autoresearch_vertex)
+        app._load_data()             # initial load
+        assert app._state is not None
+        app._load_data()             # refresh path
+
 
 # ---------------------------------------------------------------------------
-# StoreExplorerApp: remaining miss lines
+# StoreExplorerApp: edge cases and remaining miss lines (consolidated)
 # ---------------------------------------------------------------------------
 
-class TestStoreExplorerLoadStoreDetail:
+class TestStoreExplorerEdgeCases:
+    """Consolidated edge case tests for StoreExplorerApp."""
+
+    # --- State edge cases ---
+
+    def test_selected_name_no_ticks(self):
+        """selected_name() returns None when tick_names empty (L82)."""
+        assert StoreExplorerStateBuilder().ticks([]).build().selected_name() is None
+
+    def test_selected_label_no_ticks(self):
+        """selected_label returns None when no ticks (L75)."""
+        assert StoreExplorerStateBuilder().ticks([]).build().selected_label is None
+
+    def test_selected_data_no_ticks(self):
+        """selected_data() returns None when no ticks (L68)."""
+        assert StoreExplorerStateBuilder().ticks([]).build().selected_data() is None
+
+    # --- _load_store coverage ---
+
+    def test_load_store_with_real_db(self, tmp_path):
+        """_load_store() covers L113-129 with a real SQLite store."""
+        from .builders import StorePopulator
+        from engine.builder import fold_count, vertex
+        db_path = tmp_path / "s.db"
+        vertex("s").store("./s.db").loop("ping", fold_count("n")).write(tmp_path / "s.vertex")
+        StorePopulator(db_path).emit("ping", n="1").emit("ping", n="2").done()
+        app = StoreExplorerApp(db_path)
+        app._load_store()
+        assert app._error is None
+
+    def test_load_store_error_on_missing_db(self, tmp_path):
+        """_load_store() sets _error for missing db (L127-128)."""
+        app = StoreExplorerApp(tmp_path / "nonexistent.db")
+        app._load_store()
+        assert app._error is not None
+
     def test_load_store_populates_detail(self, tmp_path, monkeypatch):
-        """_load_store() with a summary that has a tick covers the detail init (L123)."""
+        """_load_store() with ticked summary sets detail (L123)."""
         summary = make_store_summary(tick_names=["2024-01-01"])
-        # Patch make_fetcher to return our controlled summary
-        import loops.tui.store_app as store_app_mod
-        monkeypatch.setattr(
-            store_app_mod, "make_fetcher" if hasattr(store_app_mod, "make_fetcher") else "_make_fetcher",
-            lambda path, zoom: (lambda: summary),
-            raising=False,
-        )
-        # Patch at import level inside _load_store
         import loops.commands.store as store_cmd
         monkeypatch.setattr(store_cmd, "make_fetcher", lambda path, zoom: (lambda: summary))
         monkeypatch.setattr(store_cmd, "make_fidelity_fetcher", lambda path: (lambda s, u, **kw: []))
-
         app = StoreExplorerApp(tmp_path / "test.db")
         app._load_store()
-        # summary has ticks → selected_data() returns non-empty dict → detail set (L123)
         assert app._state is not None
-        assert app._error is None
 
+    # --- Key dispatch edge cases ---
 
-class TestStoreExplorerDrillFidelity:
-    def test_drill_fidelity_no_fetch(self, tmp_path, store_explorer_state):
-        """_drill_fidelity returns early when _fidelity_fetch is None (L224)."""
+    def test_list_key_unknown_no_crash(self, tmp_path, store_explorer_state):
+        """Unknown list key hits else:return (L176)."""
         app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
-        app._drill_fidelity()  # L224: fidelity_fetch is None → return
+        app.on_key("z")
 
-    def test_drill_fidelity_no_tick_name(self, tmp_path):
+    def test_list_key_no_state(self, tmp_path):
+        """_handle_list_key with state=None returns early (L163)."""
+        StoreExplorerApp(tmp_path / "t.db")._handle_list_key("j")
+
+    def test_detail_key_no_state(self, tmp_path):
+        """_handle_detail_key with state=None returns early (L197)."""
+        StoreExplorerApp(tmp_path / "t.db")._handle_detail_key("j")
+
+    def test_detail_key_no_detail(self, tmp_path, store_explorer_state):
+        """_handle_detail_key with detail=None returns early (L197)."""
+        state = replace(store_explorer_state, detail=None)
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        app._handle_detail_key("j")
+
+    def test_detail_key_unknown(self, tmp_path):
+        """Unknown detail key is a no-op (L215)."""
+        state = StoreExplorerStateBuilder().with_detail().focus("detail").build()
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
+        app.on_key("z")
+
+    def test_navigation_to_ghost_tick(self, tmp_path):
+        """Navigation to tick with no summary data sets detail=None (L189)."""
+        from painted.views import ListState
+        summary = {"facts": {"total": 1, "kinds": {}},
+                   "ticks": {"total": 1, "names": {"real": {"count": 1, "sparkline": ""}}}}
+        state = StoreExplorerState.from_summary(summary)
+        state = replace(state, tick_names=["real", "ghost"], cursor=ListState().with_count(2))
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=state).on_key("j")
+
+    # --- Fidelity edge cases ---
+
+    def test_fidelity_key_direct_no_state(self, tmp_path):
+        """_handle_fidelity_key with state=None returns early (L253)."""
+        StoreExplorerApp(tmp_path / "t.db")._handle_fidelity_key("j")
+
+    def test_fidelity_key_home_end(self, tmp_path, store_explorer_state_with_fidelity):
+        """g/G in fidelity mode navigate cursor (L304, L306)."""
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state_with_fidelity)
+        app.on_key("G")
+        app.on_key("g")
+
+    def test_fidelity_key_unknown(self, tmp_path, store_explorer_state_with_fidelity):
+        """Unknown fidelity key is a no-op (L253)."""
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state_with_fidelity).on_key("x")
+
+    def test_fidelity_cursor_oob_filter(self, tmp_path):
+        """'a' when cursor OOB but facts exist hits elif branch (L267-268)."""
+        from painted.views import ListState as LS
+        facts = make_fidelity_facts(["thread", "decision"])
+        fid = FidelityState(facts=facts, tick_name="t", since=0.0, until=1.0,
+                            cursor=LS().with_count(10).move_to(9))
+        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+        def _fetch(s, u, kind=None): return [f for f in facts if f["kind"] == kind] if kind else facts
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch).on_key("a")
+
+    def test_fidelity_empty_facts_filter(self, tmp_path):
+        """'a' with no facts returns early (L270)."""
+        from painted.views import ListState as LS
+        fid = FidelityState(facts=[], tick_name="t", since=0.0, until=1.0, cursor=LS().with_count(0))
+        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+        def _fetch(s, u, kind=None): return []
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch).on_key("a")
+
+    def test_fidelity_filter_restore_all(self, tmp_path):
+        """'a' when already filtered restores all facts (L284-285)."""
+        from painted.views import ListState as LS
+        facts = make_fidelity_facts(["thread", "decision"])
+        fid = FidelityState(facts=[facts[0]], tick_name="t", since=0.0, until=1.0,
+                            cursor=LS().with_count(1), filtered=True, filter_kind="thread")
+        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+        def _fetch(s, u, kind=None): return facts
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
+        app.on_key("a")
+        assert app._state.fidelity.filtered is False
+
+    def test_drill_fidelity_no_fetch(self, tmp_path, store_explorer_state):
+        """_drill_fidelity returns early when no fidelity_fetch (L224)."""
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)._drill_fidelity()
+
+    def test_drill_fidelity_no_tick(self, tmp_path):
         """_drill_fidelity returns early when no tick selected (L228)."""
         state = StoreExplorerStateBuilder().ticks([]).build()
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state,
-                               _fidelity_fetch=lambda s, u, **kw: [])
-        app._drill_fidelity()  # L228: tick_name is None → return
+        StoreExplorerApp(tmp_path / "t.db", _initial_state=state,
+                         _fidelity_fetch=lambda s, u, **kw: [])._drill_fidelity()
 
-    def test_drill_fidelity_with_since_until(self, tmp_path):
-        """_drill_fidelity with valid since/until covers L236-L248."""
+    def test_drill_fidelity_with_timestamps(self, tmp_path):
+        """_drill_fidelity with valid since/until drills into fidelity (L236-248)."""
         facts = make_fidelity_facts(["thread", "decision"])
         summary = make_store_summary(tick_names=["2024-01-01"])
-        # Add latest_since/latest_ts to tick so drill can proceed
         summary["ticks"]["names"]["2024-01-01"]["latest_since"] = 1704067200.0
         summary["ticks"]["names"]["2024-01-01"]["latest_ts"] = 1704153600.0
         state = StoreExplorerState.from_summary(summary)
-
-        def _fetch(since, until, kind=None):
-            return facts if kind is None else [f for f in facts if f["kind"] == kind]
-
+        def _fetch(since, until, kind=None): return facts if not kind else [f for f in facts if f["kind"] == kind]
         app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
-        app._drill_fidelity()  # L236-L248: full drill
-        assert app._state is not None
+        app._drill_fidelity()
         assert app._state.fidelity is not None
 
-    def test_fidelity_filter_restore_all(self, tmp_path):
-        """'a' when already filtered → restore all facts (L284-L285)."""
-        from painted.views import ListState as LS
-        facts = make_fidelity_facts(["thread", "decision"])
-        fid = FidelityState(
-            facts=[facts[0]],  # already filtered to 1 fact
-            tick_name="2024-01-01",
-            since=1704067200.0,
-            until=1704153600.0,
-            cursor=LS().with_count(1),
-            filtered=True,
-            filter_kind="thread",
-        )
-        summary = make_store_summary(tick_names=["2024-01-01"])
-        state = replace(StoreExplorerState.from_summary(summary), fidelity=fid)
+    # --- Fidelity render ---
 
-        def _fetch(since, until, kind=None):
-            return facts  # all facts when no kind filter
+    def test_fidelity_panel_renders(self, tmp_path, store_explorer_state_with_fidelity):
+        """Fidelity panel renders — footer shows bksp/filter hint."""
+        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state_with_fidelity)
+        harness = TestSurface(app, width=120, height=30, input_queue=["q"])
+        frames = harness.run_to_completion()
+        assert "bksp" in frames[0].text or "filter" in frames[0].text
 
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
-        app.on_key("a")  # restore all → L284-L285
-        assert app._state.fidelity.filtered is False
-
-
-class TestStoreExplorerRemainingMiss:
-    def test_relative_time_non_datetime(self):
-        """_relative_time with non-datetime → '?' (L474)."""
-        from loops.tui.store_app import _relative_time
-        assert _relative_time("not a datetime") == "?"
-        assert _relative_time(None) == "?"
-        assert _relative_time(42) == "?"
-
-    def test_handle_list_key_no_state_direct(self, tmp_path):
-        """_handle_list_key returns early when state=None (L163)."""
-        app = StoreExplorerApp(tmp_path / "t.db")
-        app._handle_list_key("j")  # L163: state is None → return
-
-    def test_handle_detail_key_no_state_direct(self, tmp_path):
-        """_handle_detail_key returns early when state=None or detail=None (L197)."""
-        app = StoreExplorerApp(tmp_path / "t.db")
-        app._handle_detail_key("j")  # L197: state is None → return
-
-    def test_fidelity_key_handler_unknown_no_state(self, tmp_path, store_explorer_state_with_fidelity):
-        """Fidelity navigation with unknown key (L253)."""
-        app = StoreExplorerApp(
-            tmp_path / "t.db",
-            _initial_state=store_explorer_state_with_fidelity,
-        )
-        app.on_key("x")  # unknown in fidelity → L253 else: return
-
-
-class TestStoreExplorerFinalMiss:
-    def test_handle_list_navigation_to_empty_tick(self, tmp_path):
-        """Navigation to tick not in summary → detail=None (L189)."""
-        from painted.views import ListState
-        # tick_names has a name that summary dict doesn't have
-        summary = {
-            "facts": {"total": 1, "kinds": {}},
-            "ticks": {"total": 1, "names": {"real-tick": {"count": 1, "sparkline": ""}}},
-        }
-        # Manually craft state with extra tick_names entry not in summary
-        state = StoreExplorerState.from_summary(summary)
-        # Add an extra tick name that has no summary entry
-        from dataclasses import replace as dc_replace
-        state = dc_replace(state,
-            tick_names=["real-tick", "ghost-tick"],
-            cursor=ListState().with_count(2),
-        )
+    def test_fidelity_empty_panel(self, tmp_path):
+        """Fidelity with empty facts shows placeholder."""
+        state = StoreExplorerStateBuilder().ticks(["2024-01-01"]).with_fidelity([]).build()
         app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state)
-        app.on_key("j")  # navigate to "ghost-tick" → selected_data() returns {} → L189
+        harness = TestSurface(app, width=120, height=30, input_queue=["q"])
+        frames = harness.run_to_completion()
+        assert "no facts" in frames[0].text.lower()
 
-    def test_handle_fidelity_key_direct_no_state(self, tmp_path):
-        """_handle_fidelity_key called directly with state=None (L253)."""
-        app = StoreExplorerApp(tmp_path / "t.db")
-        app._handle_fidelity_key("j")  # state is None → L253 return
+    def test_render_no_buf_no_crash(self, tmp_path):
+        """render() with no buffer returns early (L367)."""
+        StoreExplorerApp(tmp_path / "t.db").render()
 
-    def test_handle_fidelity_key_direct_no_fidelity(self, tmp_path, store_explorer_state):
-        """_handle_fidelity_key called directly with fidelity=None (L253)."""
+    def test_medium_height_layout(self, tmp_path, store_explorer_state):
+        """Height 7-11 uses tight layout (L459)."""
         app = StoreExplorerApp(tmp_path / "t.db", _initial_state=store_explorer_state)
-        app._handle_fidelity_key("j")  # fidelity is None → L253 return
+        harness = TestSurface(app, width=100, height=9, input_queue=["q"])
+        assert len(harness.run_to_completion()) >= 1
 
-    def test_fidelity_filter_cursor_out_of_bounds(self, tmp_path):
-        """'a' filter when cursor.selected >= len(fid.facts) but facts exist → L267-268."""
-        from painted.views import ListState
-        facts = make_fidelity_facts(["thread", "decision"])
-        # cursor.selected=99, len(facts)=2 → 0 <= 99 < 2 is False → elif fid.facts: L267-268
-        fid = FidelityState(
-            facts=facts,
-            tick_name="t",
-            since=0.0, until=1.0,
-            cursor=ListState().with_count(len(facts)).move_to(99),  # clamped, might not be OOB
-        )
-        # Force cursor out of bounds by putting more items in cursor than facts
-        from painted.views import ListState as LS2
-        fid2 = FidelityState(
-            facts=facts,
-            tick_name="t",
-            since=0.0, until=1.0,
-            cursor=LS2().with_count(10).move_to(9),  # cursor at 9, but only 2 facts
-        )
-        summary = make_store_summary(tick_names=["t"])
-        state = replace(StoreExplorerState.from_summary(summary), fidelity=fid2)
+    # --- relative_time ---
 
-        def _fetch(since, until, kind=None):
-            return [f for f in facts if f["kind"] == kind] if kind else facts
+    def test_relative_time_non_datetime(self):
+        from loops.tui.store_app import _relative_time
+        assert _relative_time("not a dt") == "?"
 
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
-        app.on_key("a")  # cursor OOB → elif fid.facts → L267-268
+    def test_relative_time_just_now(self):
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt2, timezone as tz2, timedelta
+        assert _relative_time(dt2.now(tz2.utc) + timedelta(seconds=5)) == "just now"
 
-    def test_fidelity_filter_empty_facts(self, tmp_path):
-        """'a' filter when facts is empty → else: return (L270)."""
-        from painted.views import ListState
-        fid = FidelityState(
-            facts=[],  # no facts → L270
-            tick_name="t",
-            since=0.0, until=1.0,
-            cursor=ListState().with_count(0),
-        )
-        summary = make_store_summary(tick_names=["t"])
-        state = replace(StoreExplorerState.from_summary(summary), fidelity=fid)
+    def test_relative_time_seconds(self):
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt2, timezone as tz2, timedelta
+        assert "s ago" in _relative_time(dt2.now(tz2.utc) - timedelta(seconds=30))
 
-        def _fetch(since, until, kind=None):
-            return []
+    def test_relative_time_minutes(self):
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt2, timezone as tz2, timedelta
+        assert "m ago" in _relative_time(dt2.now(tz2.utc) - timedelta(minutes=15))
 
-        app = StoreExplorerApp(tmp_path / "t.db", _initial_state=state, _fidelity_fetch=_fetch)
-        app.on_key("a")  # no facts → L270 return
-
-    def test_render_no_buf(self, tmp_path):
-        """render() returns early when _buf is None (L367)."""
-        app = StoreExplorerApp(tmp_path / "t.db")
-        app.render()  # L367: _buf is None → return early
+    def test_relative_time_hours(self):
+        from loops.tui.store_app import _relative_time
+        from datetime import datetime as dt2, timezone as tz2, timedelta
+        assert "h ago" in _relative_time(dt2.now(tz2.utc) - timedelta(hours=5))

@@ -1361,3 +1361,80 @@ class TestRunFoldPaths:
         from loops.main import main
         rc = main(["read", str(vpath), "--lens", "reconcile", "--plain"])
         assert rc == 0
+
+
+class TestInitLocalVertex:
+    """Exercise _init_local_vertex edge paths."""
+
+    def _make_template_with_boundary(self, tmp_path, name="mytemplate"):
+        """Create template with iterations-substitutable boundary."""
+        tmpl_dir = tmp_path / name
+        tmpl_dir.mkdir(exist_ok=True)
+        (tmpl_dir / f"{name}.vertex").write_text(
+            f'name "{name}"\n'
+            'store "./data/t.db"\n\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n"
+            "    boundary after=30 {\n      run \"echo done\"\n    }\n"
+            "  }\n}\n"
+        )
+
+    def test_cmd_init_valid_iterations(self, tmp_path, monkeypatch):
+        """cmd_init with valid integer iterations substitutes boundary (L232, L237)."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        self._make_template_with_boundary(tmp_path)
+        ns = argparse.Namespace(
+            name="myv",
+            template="mytemplate",
+            seed=["iterations=50"],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+        # Verify iterations substitution happened
+        created = tmp_path / ".loops" / "myv.vertex"
+        assert "after=50" in created.read_text()
+
+    def test_cmd_init_copy_lenses(self, tmp_path, monkeypatch):
+        """cmd_init copies vertex-local lenses (L259-264)."""
+        import argparse
+        from loops.main import cmd_init
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        self._make_template_with_boundary(tmp_path)
+        # Create a lenses/ dir in the template
+        lens_dir = tmp_path / "mytemplate" / "lenses"
+        lens_dir.mkdir()
+        (lens_dir / "custom.py").write_text("def fold_view(data, zoom, width): pass\n")
+        ns = argparse.Namespace(
+            name="myv2",
+            template="mytemplate",
+            seed=[],
+        )
+        rc = cmd_init(ns)
+        assert rc == 0
+        # Verify lenses were copied
+        copied_lenses = tmp_path / ".loops" / "lenses"
+        assert copied_lenses.exists()
+
+
+class TestRunStreamPaths:
+    """Exercise _run_stream paths."""
+
+    def test_stream_id_not_found(self, vertex_dir):
+        """--id with non-existent ID returns empty facts (L2032)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--facts", "--id", "abcdef123456", "--plain"])
+        assert rc == 0
+
+    def test_stream_id_ambiguous(self, vertex_dir):
+        """--id with short prefix (ambiguous) hits ValueError path (L2028-2030)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        _emit(vpath, "heartbeat", service="web")
+        from loops.main import main
+        rc = main(["read", str(vpath), "--facts", "--id", "a", "--plain"])
+        assert rc == 0

@@ -3,33 +3,29 @@
 ## Completed packages
 - **atoms**: 98.1% | **engine**: 92.5% | **store**: 99.6% | **lang**: 98.4%
 
-## Current: loops app (67.4%, 1456 miss)
+## Current: loops app (68.4%, 1410 miss)
 
-### Remaining miss by file (excluding TUI apps)
-- `main.py`: ~568 miss (67.4%) — CLI dispatch, most paths need real vertex/store
-- `commands/fetch.py`: ~105 miss — subprocess/network mocking needed
-- `commands/vertices.py`: ~32 miss — vertex discovery needs real files
-- `commands/pop.py`: ~18 miss — some testable helper paths
-- `commands/identity.py`: ~17 miss — some testable helper paths
+### Remaining testable main.py helpers
+- `_resolve_combine_vertex_paths` L764: relative path resolution in combine
+- `_resolve_vertex_store_path` L1443-1447: combine path resolution
+- `_apply_vertex_scope` L3207+: reading scoped vertex text
+- `_parse_emit_parts` — pure string parsing, zero dependencies
+
+### After main.py helpers
+- `commands/identity.py`: 13 miss — find_workspace_root fallback paths
+- `commands/pop.py`: 18 miss — needs real store with pop history  
 - `lenses/fold.py`: 9 miss — very deep rendering paths
-- `lenses/store.py`: ~5 miss remaining (the L211-225 path needs real data)
-- `tui/autoresearch_app.py`: 442 miss — TUI, not testable
-- `tui/store_app.py`: 253 miss — TUI, not testable
+- main.py large functions (cmd_emit 62 miss, etc.) — need full CLI setup
 
-### L211-225 in lenses/store.py
-- L211: `fill = "  "` (inside a column calculation when spacing needed)
-- L222-225: Recent payload gist for DETAILED zoom (needs actual fact records with payloads)
-- These need the `_render_summary` path with actual kind data
-
-### Next targets
-1. `lenses/store.py` L211-225: DETAILED zoom with populated fact kinds and recent payloads
-2. `commands/vertices.py` helper functions (classify/describe/extract)
-3. Main.py: `_parse_emit_parts`, `_warn_missing_fold_key` edges
+### Blocked (695 miss TUI apps)
+- `tui/autoresearch_app.py` + `tui/store_app.py` — needs TUI event loop
 
 ## Flaky test note
 - `test_mixed_boundary_with_conditions_met` in engine — timing-dependent, pre-existing
-- Test timing has ±0.5s variance — min-of-2 is sufficient, 3 runs adds overhead
+- Test timing ~1.7-2.1s now; efficiency ~3.1 (31% below baseline 4.53)
 
-## Step-down opportunities
-- Test timing noise makes step-down unreliable right now
-- The inline import pattern was tried and discarded (timing offset the LOC gains)
+## Architecture insight
+The main.py pure helpers are very testable since they don't need real vertex/store:
+- Exception paths (L1189-1190, L1954-1955, L1457-1458, etc.)
+- Path resolution with mocked LOOPS_HOME
+- Error/dispatch paths that just return an int

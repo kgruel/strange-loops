@@ -176,3 +176,37 @@ class TestApplyVertexScope:
         # non-existent path → OSError
         result = _apply_vertex_scope(None, tmp_path / "nonexistent.vertex")
         assert result is None
+
+    def test_success_returns_store(self, tmp_path, monkeypatch):
+        """_resolve_named_store returns store path when all found (L1462)."""
+        from loops.main import _resolve_named_store
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        vf = proj_dir / "proj.vertex"
+        vf.write_text('name "proj"\nstore "./proj.db"\nloops { m { fold { n "inc" } } }\n')
+        # Store doesn't need to exist for the path resolution
+        result = _resolve_named_store("proj")
+        assert result.name == "proj.db"
+
+class TestAddProduced:
+    def test_named_key(self):
+        """_add_produced with name key (L2738-2740)."""
+        from loops.main import _add_produced
+        produced = []
+        _add_produced(produced, {"kind": "decision", "payload": {"name": "auth"}})
+        assert produced == [{"kind": "decision", "key": "auth"}]
+
+    def test_fallback_first_string(self):
+        """_add_produced falls back to first non-empty string (L2742-2745)."""
+        from loops.main import _add_produced
+        produced = []
+        _add_produced(produced, {"kind": "metric", "payload": {"value": 42, "tag": "prod"}})
+        assert produced == [{"kind": "metric", "key": "prod"}]
+
+    def test_no_key_fields(self):
+        """_add_produced with no useful fields → nothing added."""
+        from loops.main import _add_produced
+        produced = []
+        _add_produced(produced, {"kind": "metric", "payload": {"_meta": "x"}})
+        assert produced == []

@@ -208,3 +208,12 @@ class TestResolveLocalVertex:
         session_vf.write_text('name "session"\nloops { m { fold { n "inc" } } }\n')
         result = resolve_local_vertex()
         assert result == session_vf
+
+
+class TestFindWorkspaceRootNone:
+    def test_no_workspace_returns_none(self, tmp_path, monkeypatch):
+        """find_workspace_root returns None when no .vertex exists (L34)."""
+        from loops.commands.identity import find_workspace_root
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        result = find_workspace_root(tmp_path)
+        assert result is None

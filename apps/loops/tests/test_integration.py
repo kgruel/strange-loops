@@ -1618,6 +1618,17 @@ class TestCloseCommand:
         rc = main(["close", str(vpath), "thread", "no-such-task"])
         assert rc == 1
 
+    def test_close_fallback_key_field(self, tmp_path, monkeypatch):
+        """close with fold_collect (no key_field) uses fallback name check (L2620)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("events").store("./events.db").loop("event", fold_collect("items", max_items=50))
+        vpath = tmp_path / "events.vertex"
+        v.write(vpath)
+        _emit(vpath, "event", name="task1", status="open")
+        # fold_collect has no key_field → fallback check fires
+        rc = main(["close", str(vpath), "event", "task1", "--dry-run"])
+        assert rc == 0
+
     def test_close_with_artifacts(self, tmp_path, monkeypatch):
         """close non-dry-run collects artifacts and commits (L2657)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

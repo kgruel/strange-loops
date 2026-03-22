@@ -1,31 +1,34 @@
 # Autoresearch Ideas
 
 ## Completed packages
-- **atoms**: 98.1% (done — remaining 8 lines are coverage quirks)
-- **engine**: 92.5% (132 miss — mostly combine/discover in vertex_reader)
-- **store**: 99.6% (1 miss — effectively done)
-- **lang**: 98.4% (done — remaining 6 lines are dead/unreachable code)
+- **atoms**: 98.1% | **engine**: 92.5% | **store**: 99.6% | **lang**: 98.4%
 
-## Current: loops app (63.6%, 1598 miss)
+## Current: loops app (64.9%, 1549 miss)
 
-### Remaining testable targets by bang-for-buck
-- `lenses/fold.py`: 87 miss — rendering paths (MINIMAL zoom, refs filter, facts filter, grouped rendering, skipped sections footer). High LOC cost per line but pure logic.
-- `main.py`: 573 miss — CLI dispatch. Many paths need real vertex files + stores. Could test individual helper functions.
-- `commands/fetch.py`: 105 miss — fetch pipeline. Needs network/subprocess mocking.
-- `commands/vertices.py`: 32 miss — vertex listing command. Needs real .vertex files.
-- `commands/pop.py`: 18 miss, `commands/identity.py`: 17 miss — smaller command modules.
-- `lenses/sync.py`: 12 miss, `lenses/store.py`: 13 miss — small gaps.
-- `palette.py`: 9 miss — color palette theming.
+### Remaining miss by file (excluding TUI apps)
+- `main.py`: 573 miss (67.1%) — CLI dispatch, many subcommands need vertex/store setup
+- `commands/fetch.py`: 105 miss — fetch pipeline with subprocess/network
+- `lenses/fold.py`: ~73 miss — deep item rendering (_render_item_line)
+- `commands/vertices.py`: 32 miss — needs vertex discovery
+- `commands/pop.py`: 18 miss, `commands/identity.py`: 17 miss
+- `lenses/sync.py`: 12 miss, `lenses/store.py`: 13 miss
 
-### Not cost-effective
-- `tui/autoresearch_app.py`: 442 miss (0%) — TUI app, requires terminal/async event loop
-- `tui/store_app.py`: 253 miss (21.4%) — TUI app, same issue
-- These 695 miss are ~43% of all remaining miss but essentially untestable without TUI harness
+### Excluded (not cost-effective)
+- `tui/autoresearch_app.py`: 442 miss (0%) — TUI, needs async event loop
+- `tui/store_app.py`: 253 miss (21.4%) — TUI, same
 
-### Step-down opportunities
-- `_text()` helper duplicated in 4 test files — could be shared via conftest
-- Test time climbing (3.39s) — check for slow test patterns
+### Fully covered now
+- palette.py: 100%
+- pop_store.py: 98.5%
+- lenses/test.py, lenses/_helpers.py: ~97%+
+- lenses/run.py, lenses/ticks.py: ~98%+
+- lenses/validate.py, lenses/compile.py, lenses/gist.py: ~95%+
 
-## Structural notes
-- Flaky engine test: `test_mixed_boundary_with_conditions_met` — timing-dependent
-- `_node_map` in lang/loader.py is dead code (defined L78-83, never called) — could be deleted
+### Path forward
+- main.py helper functions could be targeted individually without full CLI setup
+- commands/ modules often follow same pattern: parse args → load vertex → run operation
+  Could test individual steps
+- Step-down phase may help — test_fold_utils.py is large (47 tests, ~230 LOC)
+
+## Flaky test note
+- `test_mixed_boundary_with_conditions_met` in engine — timing-dependent, pre-existing

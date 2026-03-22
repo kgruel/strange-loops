@@ -123,3 +123,21 @@ class TestVertexNameEdges:
         result = _vertex_name(p)
         # Should use parent name
         assert isinstance(result, str)
+
+class TestExtractKindKeys:
+    def test_bad_vertex_returns_empty(self, tmp_path):
+        """_extract_kind_keys with unparseable vertex (L1189-1190)."""
+        from loops.main import _extract_kind_keys
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        result = _extract_kind_keys(bad)
+        assert result == {}
+
+class TestGetVertexLensDecl:
+    def test_bad_vertex_returns_none(self, tmp_path):
+        """_get_vertex_lens_decl with unparseable vertex (L1954-1955)."""
+        from loops.main import _get_vertex_lens_decl
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        result = _get_vertex_lens_decl(bad)
+        assert result is None

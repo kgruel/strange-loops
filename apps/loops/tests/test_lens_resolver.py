@@ -169,3 +169,14 @@ def fold_view(data, zoom, width):
         bad_lens.write_text("def fold_view(: :\n    pass\n")  # syntax error
         result = resolve_lens(str(bad_lens), "fold_view", vertex_dir=None)
         assert result is None
+
+
+class TestLoadFromFileSpecNone:
+    def test_load_from_file_non_python(self, tmp_path):
+        """_load_from_file with non-.py file hits spec=None path (L135)."""
+        from loops.lens_resolver import _load_from_file
+        # A .txt file can't be spec'd by importlib
+        non_py = tmp_path / "test.txt"
+        non_py.write_text("def fold_view(d, z, w): pass\n")
+        result = _load_from_file(non_py, ("fold_view",))
+        assert result is None

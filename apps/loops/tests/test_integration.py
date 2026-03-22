@@ -1304,6 +1304,19 @@ class TestFoldFastPath:
         rc = main(["read", str(vpath), "--static", "--plain", "-vv"])
         assert rc == 0
 
+    def test_read_static_plain_local_vertex(self, tmp_path, monkeypatch):
+        """--static --plain without vertex uses local vertex (L2319)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        v = vertex("local").store("./local.db").loop("heartbeat", fold_by("service"))
+        vpath = loops_dir / "local.vertex"
+        v.write(vpath)
+        _emit(vpath, "heartbeat", service="api")
+        rc = main(["read", "--static", "--plain"])
+        assert rc == 0
+
     def test_read_static_plain_with_lens(self, fold_by_vertex):
         """--static --plain --lens uses custom lens in fast path (L2341)."""
         tmp_path, vpath = fold_by_vertex

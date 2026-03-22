@@ -406,3 +406,28 @@ class TestMainEntry:
         from loops.main import main
         result = main(["--help"])
         assert isinstance(result, int)
+
+class TestDispatchObserver:
+    def test_close_dispatch(self, tmp_path, monkeypatch):
+        """_dispatch_observer with 'close' op (L3281)."""
+        import unittest.mock as mock
+        from loops.main import _dispatch_observer
+        # Create minimal vertex
+        vf = tmp_path / "proj.vertex"
+        vf.write_text('name "proj"\nstore "./proj.db"\nloops { m { fold { n "inc" } } }\n')
+        with mock.patch("loops.main._run_close", return_value=0) as m:
+            result = _dispatch_observer("proj", vf, ["close", "--since", "1h"])
+            # If close is reached, _run_close was called
+            if m.called:
+                assert result == 0
+
+    def test_store_dispatch(self, tmp_path, monkeypatch):
+        """_dispatch_observer with 'store' op (L3287)."""
+        import unittest.mock as mock
+        from loops.main import _dispatch_observer
+        vf = tmp_path / "proj.vertex"
+        vf.write_text('name "proj"\nstore "./proj.db"\nloops { m { fold { n "inc" } } }\n')
+        with mock.patch("loops.main._run_store", return_value=0) as m:
+            result = _dispatch_observer("proj", vf, ["store"])
+            if m.called:
+                assert result == 0

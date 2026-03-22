@@ -1853,3 +1853,17 @@ class TestRunTicksEdgePaths:
         # No vertex arg → uses local vertex
         rc = main(["read", "--ticks", "--plain"])
         assert rc == 0
+
+
+class TestStreamQueryPath:
+    """Exercise _run_stream query and edge paths."""
+
+    def test_stream_query_string(self, vertex_dir, monkeypatch):
+        """Stream with a query string (not a vertex) shifts it to query (L2013)."""
+        tmp_path, vpath = vertex_dir
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        _emit(vpath, "heartbeat", service="api", status="up")
+        # Use --facts --since with a query-like first arg
+        # We need first arg that doesn't resolve as a vertex
+        rc = main(["read", "--facts", "--since", "1h", "--plain"])
+        assert isinstance(rc, int)

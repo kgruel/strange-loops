@@ -1115,35 +1115,23 @@ class TestSyncEdgePaths:
 class TestRunTest:
     """Exercise _run_test paths (test command)."""
 
-    def test_test_nonexistent_file(self):
-        """test with non-existent file errors (L623-624)."""
+    def test_test_error_paths(self, tmp_path):
+        """test nonexistent file (L623-624) and wrong suffix (L627-628) both error."""
         from loops.main import main
-        rc = main(["test", "/nonexistent.loop"])
-        assert rc == 1
-
-    def test_test_wrong_suffix(self, tmp_path):
-        """test with non-.loop file errors (L627-628)."""
-        from loops.main import main
+        assert main(["test", "/nonexistent.loop"]) == 1
         bad = tmp_path / "bad.vertex"
         bad.write_text('name "x"\nloops {}\n')
-        rc = main(["test", str(bad)])
-        assert rc == 1
+        assert main(["test", str(bad)]) == 1
 
-    def test_test_echo_loop(self, tmp_path):
-        """test command runs .loop file with echo source (L679-729)."""
+    def test_test_echo_loop_with_limit(self, tmp_path):
+        """test runs .loop (L679-729) and --limit (L702-703) truncates output."""
         loop = tmp_path / "ping.loop"
         loop.write_text('source "echo ok"\nkind "ping"\nobserver "test"\n')
+        multi = tmp_path / "multi.loop"
+        multi.write_text('source "printf \'a\\nb\\nc\\n\'"\nkind "line"\nobserver "test"\n')
         from loops.main import main
-        rc = main(["test", str(loop), "--plain"])
-        assert rc == 0
-
-    def test_test_loop_with_limit(self, tmp_path):
-        """test command with --limit flag (L702-703)."""
-        loop = tmp_path / "multi.loop"
-        loop.write_text('source "printf \'a\\nb\\nc\\n\'"\nkind "line"\nobserver "test"\n')
-        from loops.main import main
-        rc = main(["test", str(loop), "--limit", "1", "--plain"])
-        assert rc == 0
+        assert main(["test", str(loop), "--plain"]) == 0
+        assert main(["test", str(multi), "--limit", "1", "--plain"]) == 0
 
 
 class TestScaffoldArtifacts:

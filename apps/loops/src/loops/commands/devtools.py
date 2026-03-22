@@ -68,7 +68,7 @@ def _run_validate(argv: list[str]) -> int:
         w = ctx.width if ctx.is_tty else None
         return validate_view(data, ctx.zoom, w)
 
-    rc = run_cli(
+    run_cli(
         rest,
         fetch=fetch,
         render=render,
@@ -80,8 +80,7 @@ def _run_validate(argv: list[str]) -> int:
             ),
         ],
     )
-    if rc != 0:
-        return rc
+    # run_cli always returns 0 here — fetch catches all exceptions internally.
     # Preserve exit code: 1 if validation errors or no files found
     if fetch_result:
         data = fetch_result[0]

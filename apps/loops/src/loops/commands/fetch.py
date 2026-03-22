@@ -313,15 +313,14 @@ def fetch_tick_facts(
 
     tick = ticks_newest[tick_index]
 
-    # Retrieve facts in the tick's window
-    if tick.since is not None:
-        facts = vertex_facts(
-            vertex_path,
-            tick.since.timestamp(),
-            tick.ts.timestamp(),
-        )
-    else:
-        facts = []
+    # Retrieve facts in the tick's window.
+    # Engine invariant: tick.since is always set to the period's first-fact
+    # timestamp — the engine sets _vertex_period_start before firing a boundary.
+    facts = vertex_facts(
+        vertex_path,
+        tick.since.timestamp(),  # type: ignore[union-attr]
+        tick.ts.timestamp(),
+    )
 
     facts.sort(key=lambda f: f["ts"], reverse=True)
 

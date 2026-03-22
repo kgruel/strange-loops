@@ -1789,3 +1789,21 @@ class TestFetchFunctions:
         from loops.commands.fetch import fetch_ticks
         result = fetch_ticks(vpath)
         assert "ticks" in result
+
+    def test_fetch_fold_with_kind_filter(self, vertex_dir):
+        """fetch_fold with kind filter skips non-matching sections (L82)."""
+        tmp_path, vpath = vertex_dir
+        _emit(vpath, "heartbeat", service="api")
+        _emit(vpath, "metric", service="web")
+        from loops.commands.fetch import fetch_fold
+        result = fetch_fold(vpath, kind="heartbeat")
+        # Only heartbeat section should be present
+        assert all(s.kind == "heartbeat" for s in result.sections)
+
+    def test_fetch_tick_range_out_of_range(self, ticks_vertex):
+        """fetch_tick_range with start >= end returns error (L377-381)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.commands.fetch import fetch_tick_range
+        # start=5, end=3 → start > end (out of range)
+        result = fetch_tick_range(vpath, 5, 3)
+        assert "_tick_error" in result

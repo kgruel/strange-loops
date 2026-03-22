@@ -1438,3 +1438,27 @@ class TestRunStreamPaths:
         from loops.main import main
         rc = main(["read", str(vpath), "--facts", "--id", "a", "--plain"])
         assert rc == 0
+
+
+class TestCmdEmitEdgePaths:
+    """Exercise cmd_emit legacy vertex resolution paths."""
+
+    def test_emit_by_vertex_name(self, tmp_path, monkeypatch):
+        """emit via vertex name (not path) hits config-level resolution (L1621)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create vertex in LOOPS_HOME subdir
+        vdir = tmp_path / "test"
+        vdir.mkdir()
+        v = vertex("test").store("./test.db").loop("ping", fold_count("n"))
+        v.write(vdir / "test.vertex")
+        from loops.main import main
+        rc = main(["emit", "test", "ping", "x=1"])
+        assert rc == 0
+
+    def test_emit_explicit_nonexistent_path(self, tmp_path, monkeypatch):
+        """emit with explicit .vertex path that doesn't exist errors (L1630-1633)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        from loops.main import main
+        rc = main(["emit", "/nonexistent.vertex", "ping", "x=1"])
+        assert rc == 1

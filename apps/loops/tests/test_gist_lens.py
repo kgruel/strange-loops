@@ -85,3 +85,16 @@ class TestTruncate:
     def test_zero_width(self):
         from loops.lenses.gist import _truncate
         assert _truncate("text", 0) == ""
+
+class TestGistEdges:
+    def test_message_no_sender_no_chat(self):
+        """_extract_message with only text, no sender or chat (L68)."""
+        from loops.lenses.gist import content_gist
+        result = content_gist("message", {"text": "just text"})
+        assert result == "just text"
+
+    def test_decision_only_message_no_topic(self):
+        """_extract_decision returns msg when no topic (L76)."""
+        from loops.lenses.gist import content_gist
+        result = content_gist("decision", {"message": "the decision"})
+        assert result == "the decision"

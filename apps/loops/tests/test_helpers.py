@@ -105,3 +105,15 @@ class TestConstants:
     def test_label_fields(self):
         assert "name" in LABEL_FIELDS
         assert "topic" in LABEL_FIELDS
+
+class TestRenderSessionEdge:
+    def test_item_with_no_body(self):
+        """render_session item with label but no body (L91)."""
+        from loops.lenses._helpers import render_session
+        from atoms import FoldSection, FoldItem
+        items = (FoldItem(payload={"name": "s1"}, ts=1.0),)
+        section = FoldSection(kind="session", items=items, sections=(),
+                             fold_type="by", key_field="name", scalars={})
+        lines = render_session(section)
+        assert any("s1" in line for line in lines)
+        assert not any(": " in line for line in lines if "SESSION" not in line)

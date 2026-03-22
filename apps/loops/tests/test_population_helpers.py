@@ -221,3 +221,13 @@ class TestPopStoreHelpers:
         assert [r.key for r in rows] == ["a", "b"]
         content = list_path.read_text()
         assert "a A" in content and "b B" in content
+
+    def test_pop_store_has_facts_template_match(self, tmp_path):
+        """pop_store_has_facts returns True when template field matches (L58)."""
+        from loops.commands.pop import _append_fact
+        from loops.pop_store import POP_ADD_KIND
+
+        store = tmp_path / "y.db"
+        # Add a fact with a specific template field
+        _append_fact(store, POP_ADD_KIND, {"key": "a", "template": "fred"}, observer="")
+        assert pop_store_has_facts(store, template="fred", include_unscoped=False) is True

@@ -46,3 +46,24 @@ def test_vertices_full():
     assert "store:" in t
     assert "combine:" in t
     assert "discover:" in t
+
+def test_vertices_long_line_truncated():
+    """Long summary line gets truncated at width (L59)."""
+    from loops.lenses.vertices import vertices_view
+    data = {"vertices": [{"name": "v", "kind": "leaf",
+                           "loops": [{"name": "m" * 40, "folds": ["x"]}]}]}
+    block = vertices_view(data, Zoom.SUMMARY, 40)
+    t = _text(block)
+    # Line should not exceed width
+    for line in t.splitlines():
+        assert len(line) <= 40
+
+def test_vertices_long_detail_truncated():
+    """Long detail line gets truncated (L67)."""
+    from loops.lenses.vertices import vertices_view
+    data = {"vertices": [{"name": "v", "kind": "leaf",
+                           "loops": [{"name": "m", "folds": ["x" * 50]}]}]}
+    block = vertices_view(data, Zoom.DETAILED, 40)
+    t = _text(block)
+    for line in t.splitlines():
+        assert len(line) <= 40

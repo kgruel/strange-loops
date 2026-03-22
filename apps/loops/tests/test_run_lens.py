@@ -72,3 +72,18 @@ def test_format_ts_float():
 def test_format_ts_empty():
     from loops.lenses.run import _format_ts
     assert _format_ts("") == "?"
+
+def test_run_no_width():
+    """_block with width=None path (L14)."""
+    from loops.lenses.run import run_facts_view
+    # width=None triggers the unbounded block path
+    block = run_facts_view([{"kind": "m", "payload": {}}], Zoom.MINIMAL, None)
+    assert block is not None
+
+def test_format_ts_datetime():
+    """_format_ts with datetime object (L133)."""
+    from loops.lenses.run import _format_ts
+    from datetime import datetime, timezone
+    dt = datetime(2024, 3, 15, 10, 0, 0, tzinfo=timezone.utc)
+    result = _format_ts(dt)
+    assert "2024" in result

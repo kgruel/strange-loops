@@ -148,14 +148,6 @@ def fetch_ls(target: str) -> dict:
     include_unscoped = not is_multi
 
     if not header:
-        # Legacy case: header not yet present, just read file if it exists.
-        if list_path.exists():
-            header, rows = list_file_read(list_path)
-            if header:
-                return {
-                    "header": header,
-                    "rows": [row.values for row in rows],
-                }
         return {"header": [], "rows": []}
 
     facts = pop_read_facts(store_path)

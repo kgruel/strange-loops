@@ -243,8 +243,7 @@ def fetch_ticks(
             if k.startswith("_"):
                 continue
             if isinstance(v, dict) and "items" in v:
-                items = v["items"]
-                kind_counts[k] = len(items) if isinstance(items, (dict, list)) else 0
+                kind_counts[k] = len(v["items"])
             elif isinstance(v, list):
                 kind_counts[k] = len(v)
         boundary = payload.get("_boundary", {})

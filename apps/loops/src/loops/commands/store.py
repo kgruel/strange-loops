@@ -85,10 +85,9 @@ def make_fetcher(path: Path, zoom: int):
                     info["sparkline"] = _sparkline_str(buckets)
                     # Extract payload key names from latest tick
                     recent = reader.recent_ticks(name, 1)
-                    if recent and isinstance(recent[0].payload, dict):
-                        info["payload_keys"] = list(recent[0].payload.keys())
-                    else:
-                        info["payload_keys"] = []
+                    info["payload_keys"] = (
+                        list(recent[0].payload.keys()) if recent else []
+                    )
                 # Keep sample payload per fact kind for SUMMARY gist
                 for kind, info in data["facts"]["kinds"].items():
                     recent = reader.recent_facts(kind, 1)

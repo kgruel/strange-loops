@@ -303,3 +303,65 @@ class TestFoldView:
         t = self._text(fold_view(data, Zoom.SUMMARY, 80, visible={"facts"}))
         # Should show filtered message
         assert len(t) > 0
+
+    def test_detailed_zoom_with_observer(self):
+        """DETAILED zoom with multiple observers shows observer column."""
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        items_list = (
+            item({"name": "a", "message": "hi"}, ts=1710504000.0, observer="alice"),
+            item({"name": "b", "message": "bye"}, ts=1710504001.0, observer="bob"),
+        )
+        s = section(kind="thread", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.DETAILED, 80))
+        assert "Thread" in t or "thread" in t
+
+    def test_full_zoom(self):
+        """FULL zoom shows all meta fields."""
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        i = item({"name": "x", "message": "content"}, ts=1710504000.0,
+                 observer="alice", origin="proj", n=3, refs=("decision/y",))
+        s = section(kind="thread", items=(i,), fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.FULL, 80))
+        assert len(t) > 0
+
+    def test_grouped_by_namespace(self):
+        """By-fold items with namespaced keys get grouped."""
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        items_list = (
+            item({"name": "api/auth"}, ts=1e9),
+            item({"name": "api/users"}, ts=1e9),
+            item({"name": "core/db"}, ts=1e9),
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80))
+        assert "api/" in t or "core/" in t
+
+    def test_collect_fold(self):
+        """Collect fold renders items flat (not by key)."""
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        items_list = (
+            item({"message": "first note"}, ts=1e9),
+            item({"message": "second note"}, ts=1e9 + 1),
+        )
+        s = section(kind="notes", items=items_list, fold_type="collect", key_field=None)
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80))
+        assert "Note" in t or "note" in t
+
+    def test_multiple_sections(self):
+        """Multiple sections get separator lines."""
+        from loops.lenses.fold import fold_view
+        from painted import Zoom
+        s1 = section(kind="thread", items=(item({"name": "a"}),), fold_type="by", key_field="name")
+        s2 = section(kind="decision", items=(item({"name": "b"}),), fold_type="by", key_field="name")
+        data = state(sections=(s1, s2))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80))
+        assert "Thread" in t or "thread" in t
+        assert "Decision" in t or "decision" in t

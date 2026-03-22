@@ -1673,3 +1673,34 @@ class TestResolveCombineChild:
         from loops.main import _resolve_combine_child
         result = _resolve_combine_child(bad, "any")
         assert result is None
+
+
+class TestWhoamiIdentityStore:
+    """Exercise _whoami_from_identity_store (L2806-2827)."""
+
+    def test_whoami_with_identity_vertex(self, tmp_path, monkeypatch):
+        """_whoami_from_identity_store reads self fact from identity vertex (L2817-2824)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # Create .loops/identity.vertex (local identity vertex)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        identity_vpath = loops_dir / "identity.vertex"
+        v = vertex("identity").store("./identity.db").loop("self", fold_by("name"))
+        v.write(identity_vpath)
+        # Emit a self fact with name="name" and message="alice"
+        _emit(identity_vpath, "self", name="name", message="alice")
+
+        from loops.main import _whoami_from_identity_store
+        result = _whoami_from_identity_store()
+        assert result == "alice"
+
+    def test_whoami_no_identity_vertex(self, tmp_path, monkeypatch):
+        """_whoami_from_identity_store returns '' when no identity vertex."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        from loops.main import _whoami_from_identity_store
+        result = _whoami_from_identity_store()
+        assert result == ""

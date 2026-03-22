@@ -1927,68 +1927,48 @@ class TestRenderFoldPlainEdges:
         assert text is not None
 
 
-class TestRunStoreDispatch:
-    """Exercise _run_store vertex-first dispatch path (L2384)."""
+class TestMiscEdgePaths:
+    """Miscellaneous main.py edge paths — store dispatch, emit variants."""
 
-    def test_store_via_vertex_first_dispatch(self, tmp_path, monkeypatch):
-        """Vertex-first dispatch ('myproject store') passes vertex_path to _run_store (L2384)."""
+    def test_store_via_vertex_first(self, tmp_path, monkeypatch):
+        """'myproject store' vertex-first dispatch hits _run_store with vertex_path (L2384)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
-        # Create vertex NOT in _COMMANDS (avoid "test", "compile", "validate", "store")
         vdir = tmp_path / "myproject"
         vdir.mkdir()
         v = vertex("myproject").store("./myproject.db").loop("ping", fold_count("n"))
         vpath = vdir / "myproject.vertex"
         v.write(vpath)
         _emit(vpath, "ping", x="1")
-        rc = main(["myproject", "store", "--plain"])
-        assert rc == 0
+        assert main(["myproject", "store", "--plain"]) == 0
 
-
-class TestCmdEmitReinterpreteKind:
-    """Exercise cmd_emit kind-reinterpretation path (L1635-1644)."""
-
-    def test_emit_kind_as_implicit_vertex(self, tmp_path, monkeypatch):
-        """'emit ping x=1' reinterprets 'ping' as kind, uses local vertex (L1636-1644)."""
+    def test_emit_kind_shift_uses_local_vertex(self, tmp_path, monkeypatch):
+        """'emit ping x=1' shifts 'ping' to kind, uses local .loops vertex (L1636-1644)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         loops_dir = tmp_path / ".loops"
         loops_dir.mkdir()
-        v = vertex("local").store("./local.db").loop("ping", fold_count("n"))
-        v.write(loops_dir / "local.vertex")
-        rc = main(["emit", "ping", "x=1"])
-        assert rc == 0
+        vertex("local").store("./local.db").loop("ping", fold_count("n")).write(loops_dir / "local.vertex")
+        assert main(["emit", "ping", "x=1"]) == 0
 
-
-class TestCmdEmitMorePaths:
-    """Exercise more cmd_emit edge paths."""
-
-    def test_emit_no_vertex_errors(self, tmp_path, monkeypatch):
-        """emit with no vertex found shows error (L1646-1652)."""
+    def test_emit_no_vertex_error(self, tmp_path, monkeypatch):
+        """emit with no vertex at all shows error (L1646-1652)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)
-        # No .loops directory → no local vertex
-        rc = main(["emit", "ping", "x=1"])
-        assert rc == 1
+        assert main(["emit", "ping", "x=1"]) == 1
 
-    def test_emit_with_thread_env(self, vertex_dir, monkeypatch):
-        """emit with LOOPS_THREAD set auto-tags payload (L1661)."""
+    def test_emit_thread_env(self, vertex_dir, monkeypatch):
+        """LOOPS_THREAD auto-tags payload (L1661)."""
         tmp_path, vpath = vertex_dir
-        monkeypatch.setenv("LOOPS_THREAD", "my-feature-thread")
-        rc = main(["emit", str(vpath), "heartbeat", "service=api"])
-        assert rc == 0
+        monkeypatch.setenv("LOOPS_THREAD", "thread-1")
+        assert main(["emit", str(vpath), "heartbeat", "service=api"]) == 0
 
     def test_emit_no_store_dry_run(self, tmp_path, monkeypatch):
-        """emit --dry-run on vertex without store sets store_path=None (L1683)."""
+        """--dry-run on no-store vertex succeeds (L1683)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        # Create vertex without a store
         vpath = tmp_path / "nostorev.vertex"
-        vpath.write_text(
-            'name "nostorev"\n'
-            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
-        )
-        rc = main(["emit", str(vpath), "ping", "x=1", "--dry-run"])
-        assert rc == 0
+        vpath.write_text('name "nostorev"\nloops {\n  ping {\n    fold {\n      n "inc"\n    }\n  }\n}\n')
+        assert main(["emit", str(vpath), "ping", "x=1", "--dry-run"]) == 0
 
 
 class TestFetchTickRangeFold:

@@ -1989,3 +1989,25 @@ class TestCmdEmitMorePaths:
         )
         rc = main(["emit", str(vpath), "ping", "x=1", "--dry-run"])
         assert rc == 0
+
+
+class TestFetchTickRangeFold:
+    """Exercise fetch_tick_range_fold error paths."""
+
+    def test_no_ticks_error(self, tmp_path, monkeypatch):
+        """fetch_tick_range_fold with no ticks returns error (L525-528)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        from engine.builder import vertex, fold_count
+        v = vertex("empty").store("./e.db").loop("ping", fold_count("n"))
+        vpath = tmp_path / "empty.vertex"
+        v.write(vpath)
+        from loops.commands.fetch import fetch_tick_range_fold
+        result = fetch_tick_range_fold(vpath, 0, 1)
+        assert "_tick_error" in result
+
+    def test_out_of_range_error(self, ticks_vertex):
+        """fetch_tick_range_fold with out-of-range start returns error (L531-535)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.commands.fetch import fetch_tick_range_fold
+        result = fetch_tick_range_fold(vpath, 10, 5)
+        assert "_tick_error" in result

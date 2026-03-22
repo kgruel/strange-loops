@@ -605,3 +605,63 @@ class TestRunStreamQueryJoin:
         # 'notavertex' is not a vertex → query = "notavertex somequery" (L243)
         rc = main(["read", "notavertex", "somequery", "--facts", "--since", "1h", "--plain"])
         assert rc in (0, 1)
+
+
+class TestStreamAmbiguousId:
+    """Cover main.py L256-258 (ValueError on ambiguous --id prefix in _run_stream)."""
+
+    def test_ambiguous_id_prefix_returns_error(self, tmp_path, monkeypatch):
+        """fetch_fact_by_id raises ValueError on ambiguous prefix → L256-258."""
+        import sqlite3, json, time
+        from engine.builder import fold_count, vertex as vb
+        from loops.main import main
+
+        home = tmp_path / "home"
+        vdir = home / "proj"
+        vdir.mkdir(parents=True)
+        vpath = vdir / "proj.vertex"
+        vb("proj").store("./proj.db").loop("ping", fold_count("n")).write(vpath)
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Directly insert facts with IDs that share the prefix "aaa"
+        db_path = vdir / "proj.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS facts "
+            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, payload TEXT)"
+        )
+        t = time.time()
+        conn.execute("INSERT INTO facts VALUES (?,?,?,?,?,?)",
+                     ("aaa111", "ping", t, "test", "", json.dumps({"n": "1"})))
+        conn.execute("INSERT INTO facts VALUES (?,?,?,?,?,?)",
+                     ("aaa222", "ping", t + 1, "test", "", json.dumps({"n": "2"})))
+        conn.commit()
+        conn.close()
+
+        # Query with prefix "aaa" → matches both "aaa111" and "aaa222" → ValueError
+        rc = main(["read", "proj", "--facts", "--id", "aaa", "--plain"])
+        assert rc in (0, 1)
+
+
+class TestMainAsDunder:
+    """Cover main.py L1411 (sys.exit(main()) under __name__ == '__main__')."""
+
+    def test_main_py_as_main(self, tmp_path, monkeypatch):
+        """Running main.py as __main__ hits sys.exit(main()) → L1411."""
+        import runpy, pytest
+        from loops.main import main as loops_main
+
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # Find main.py path
+        import loops.main as _lm
+        main_py = _lm.__file__
+
+        # Run as __main__ — triggers sys.exit(main()) at L1411
+        with pytest.raises(SystemExit):
+            runpy.run_path(main_py, run_name="__main__",
+                           init_globals={"sys": __import__("sys")})

@@ -1611,6 +1611,18 @@ class TestCloseCommand:
         rc = main(["close", str(vpath), "thread", "no-such-task"])
         assert rc == 1
 
+    def test_close_with_artifacts(self, tmp_path, monkeypatch):
+        """close non-dry-run collects artifacts and commits (L2657)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        v = vertex("threads").store("./threads.db").loop("thread", fold_by("name"))
+        vpath = tmp_path / "threads.vertex"
+        v.write(vpath)
+        _emit(vpath, "thread", name="task1", status="open")
+        # Emit a 'decision' artifact during the thread's lifetime (L2657)
+        _emit(vpath, "decision", topic="design-choice", message="foo")
+        rc = main(["close", str(vpath), "thread", "task1", "completed"])
+        assert rc == 0
+
     def test_close_without_vertex(self, tmp_path, monkeypatch):
         """close without explicit vertex resolves local vertex (L2601)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))

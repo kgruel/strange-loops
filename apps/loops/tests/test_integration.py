@@ -2455,3 +2455,101 @@ class TestDevtoolsTestLiveMode:
 
         rc = main(["test", str(loop_file), "--live", "--plain", "--limit", "1"])
         assert rc in (0, 1)  # L215 covered
+
+
+class TestEmitBoundaryRun:
+    """Cover emit.py L330-331 (_execute_boundary_run called when tick.run is set)."""
+
+    def test_emit_triggers_boundary_run(self, tmp_path, monkeypatch, capsys):
+        """boundary after=1 with run clause fires _execute_boundary_run → L330-331."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        vpath = tmp_path / "runtest.vertex"
+        vpath.write_text(
+            'name "runtest"\nstore "./run.db"\n'
+            'loops {\n  ping {\n    fold { n "inc" }\n'
+            '    boundary after=1 {\n      run "echo boundary-fired"\n    }\n'
+            '  }\n}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="ping", parts=["n=1"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 0  # boundary fired, run clause executed → L330-331
+
+
+class TestEmitExceptionAndResolveEdges:
+    """Cover emit.py L346-348, resolve.py L191+L253-254."""
+
+    def test_emit_exception_in_receive(self, tmp_path, monkeypatch):
+        """Exception in program.vertex.receive → L346-348."""
+        import argparse
+        from unittest.mock import patch
+        from engine.vertex import Vertex
+        from loops.commands.emit import cmd_emit
+
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(
+            'name "t"\nstore "./t.db"\n'
+            'loops {\n  ping {\n    fold { n "inc" }\n  }\n}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        def bad_receive(self, fact):
+            raise RuntimeError("inject error for L346-348")
+
+        with patch.object(Vertex, "receive", bad_receive):
+            ns = argparse.Namespace(
+                vertex=None, kind="ping", parts=["n=1"], observer="", dry_run=False
+            )
+            rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1  # L346-348: exception caught → error shown → return 1
+
+    def test_stale_topology_cache_returns_none(self, tmp_path):
+        """_try_topology_from_store returns None when cached store path gone → L191."""
+        import json, sqlite3, time
+        from loops.commands.resolve import _try_topology_from_store
+
+        # Create store with _topology fact referencing non-existent store
+        db = tmp_path / "topo.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE facts "
+            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, payload TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO facts VALUES (?,?,?,?,?,?)",
+            ("id1", "_topology", time.time(), "sys", "",
+             json.dumps({"name": "gone", "store": str(tmp_path / "nonexistent.db"),
+                         "kind_keys": {}})),
+        )
+        conn.commit()
+        conn.close()
+
+        result = _try_topology_from_store(db)
+        assert result is None  # L191: stale path → return None
+
+    def test_topology_emit_exception_is_silenced(self, tmp_path, monkeypatch):
+        """emit_topology exception is caught silently → L253-254."""
+        from unittest.mock import patch
+        from loops.commands.resolve import _topology_kind_keys_and_stores
+        from engine.builder import fold_count, vertex as vb
+
+        # Minimal vertex with a store
+        vpath = tmp_path / "t.vertex"
+        vb("t").store("./t.db").loop("ping", fold_count("n")).write(vpath)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        # Patch emit_topology to raise → L253-254 silences it
+        import engine.vertex_reader as vr
+        with patch.object(vr, "emit_topology", side_effect=RuntimeError("topo fail")):
+            result = _topology_kind_keys_and_stores(vpath)
+        # Returns normally despite exception — cache refresh is best-effort
+        assert isinstance(result, tuple)

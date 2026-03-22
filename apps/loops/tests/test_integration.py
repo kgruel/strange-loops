@@ -1721,3 +1721,46 @@ class TestVertexLensDecl:
         # Without --lens flag, vertex lens declaration is used (Tier 2)
         rc = main(["read", str(vpath), "--plain"])
         assert rc == 0
+
+
+class TestFetchFunctions:
+    """Exercise fetch.py functions not covered by CLI tests."""
+
+    def test_fetch_tick_facts(self, ticks_vertex):
+        """fetch_tick_facts drills into a tick and calls _get_fold_meta (L304-338)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.commands.fetch import fetch_tick_facts
+        result = fetch_tick_facts(vpath, 0)
+        assert "facts" in result
+        assert "fold_meta" in result
+
+    def test_fetch_tick_facts_out_of_range(self, ticks_vertex):
+        """fetch_tick_facts with invalid index returns error (L309-313)."""
+        tmp_path, vpath = ticks_vertex
+        from loops.commands.fetch import fetch_tick_facts
+        result = fetch_tick_facts(vpath, 999)
+        assert "_tick_error" in result
+
+    def test_get_fold_meta_by_fold(self, tmp_path):
+        """_get_fold_meta extracts key_field from fold_by loops (L266-278)."""
+        from engine.builder import vertex, fold_by
+        v = vertex("test").store("./t.db").loop("event", fold_by("kind"))
+        vpath = tmp_path / "test.vertex"
+        v.write(vpath)
+        from loops.commands.fetch import _get_fold_meta
+        meta = _get_fold_meta(vpath)
+        assert "event" in meta
+        assert meta["event"]["key_field"] == "kind"
+
+    def test_fetch_ticks_with_items(self, tmp_path, monkeypatch):
+        """fetch_ticks with by-fold payload covers kind_counts (L244-249)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        from engine.builder import vertex, fold_by
+        v = vertex("t").store("./t.db").loop("event", fold_by("svc"), boundary_every=2)
+        vpath = tmp_path / "t.vertex"
+        v.write(vpath)
+        _emit(vpath, "event", svc="api", msg="v1")
+        _emit(vpath, "event", svc="web", msg="v0")
+        from loops.commands.fetch import fetch_ticks
+        result = fetch_ticks(vpath)
+        assert "ticks" in result

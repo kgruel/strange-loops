@@ -2553,3 +2553,74 @@ class TestEmitExceptionAndResolveEdges:
             result = _topology_kind_keys_and_stores(vpath)
         # Returns normally despite exception — cache refresh is best-effort
         assert isinstance(result, tuple)
+
+
+class TestEmitPopErrors:
+    """Cover emit.py population error paths (L209-217, L223-230)."""
+
+    def _setup_home(self, home):
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "sources").mkdir(exist_ok=True)
+        (home / "sources" / "feed.loop").write_text(
+            'source "echo hi"\nkind "feed"\nobserver "test"\n'
+        )
+
+    def test_multi_template_no_qualifier_errors(self, tmp_path, monkeypatch, capsys):
+        """pop.add on vertex with 2 templates and no qualifier → L209-217."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        home = tmp_path / "v"
+        self._setup_home(home)
+        vpath = home / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            '  template "./sources/feed.loop" {\n'
+            '    with key="a"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '  template "./sources/feed.loop" {\n'
+            '    with key="b"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add", parts=["key=val"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1  # L209-217: multi-template, no qualifier → error
+        assert "multiple templates" in capsys.readouterr().err
+
+    def test_template_no_from_file_errors(self, tmp_path, monkeypatch, capsys):
+        """pop.add on template with 'with' rows but no 'from file' → L223-230."""
+        import argparse
+        from loops.commands.emit import cmd_emit
+
+        home = tmp_path / "v"
+        self._setup_home(home)
+        vpath = home / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'sources {\n'
+            '  template "./sources/feed.loop" {\n'
+            '    with key="static-val"\n'
+            '    loop { fold { count "inc" } }\n'
+            '  }\n'
+            '}\n'
+            'loops { ping { fold { n "inc" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        ns = argparse.Namespace(
+            vertex=None, kind="pop.add", parts=["key=newval"], observer="", dry_run=False
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        assert rc == 1  # L223-230: no 'from file' → error
+        assert "no 'from file'" in capsys.readouterr().err

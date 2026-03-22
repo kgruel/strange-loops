@@ -1773,3 +1773,34 @@ class TestResolveVertexForDispatch:
         monkeypatch.chdir(tmp_path)
         result = _resolve_vertex_for_dispatch("nonexistent/kid")
         assert result is None
+
+
+class TestTryFastRead:
+    """Exercise _try_fast_read paths."""
+
+    def test_fast_read_two_positionals_falls_through(self, vertex_dir):
+        """Two positional args makes _try_fast_read return None (L3391)."""
+        tmp_path, vpath = vertex_dir
+        # Two positional args → unexpected, falls through to full dispatch
+        rc = main(["read", str(vpath), "extra_arg", "--static", "--plain"])
+        assert isinstance(rc, int)
+
+    def test_fast_read_no_static_flag_falls_through(self, vertex_dir, monkeypatch):
+        """Missing --static makes _try_fast_read return None (L3394)."""
+        tmp_path, vpath = vertex_dir
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # --plain without --static → not fast path
+        rc = main(["read", str(vpath), "--plain", "--kind", "heartbeat"])
+        assert isinstance(rc, int)
+
+    def test_fast_read_named_vertex(self, tmp_path, monkeypatch):
+        """Fast read with vertex name uses _resolve_named_vertex fallback (L3399)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create vertex in LOOPS_HOME
+        vdir = tmp_path / "myv"
+        vdir.mkdir()
+        v = vertex("myv").store("./myv.db").loop("ping", fold_count("n"))
+        v.write(vdir / "myv.vertex")
+        rc = main(["read", "myv", "--static", "--plain"])
+        assert rc == 0

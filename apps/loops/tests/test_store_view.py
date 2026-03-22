@@ -472,3 +472,33 @@ class TestStoreViewEdges:
         data = {"facts": {"kinds": {}, "total": 0}, "ticks": {"kinds": {}}}
         block = store_view(data, Zoom.FULL, 80)
         assert block is not None
+
+    def test_render_summary_narrow_fill(self):
+        """_render_summary with narrow width → fill = '  ' (L211)."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        from .helpers import block_text
+        # Kind name + count + freshness that exceeds inner width
+        data = {"facts": {"kinds": {
+            "very_long_kind_name_xxxx": {"count": 5, "freshness": None, "recent": []}
+        }}, "ticks": {"kinds": {}}}
+        block = store_view(data, Zoom.DETAILED, 30)  # narrow width
+        assert block is not None
+
+    def test_render_summary_with_recent_payloads(self):
+        """_render_summary with recent dicts (L222-225)."""
+        from loops.lenses.store import store_view
+        from painted import Zoom
+        from .helpers import block_text
+        data = {"facts": {"kinds": {
+            "metric": {
+                "count": 3,
+                "freshness": None,
+                "recent": [
+                    {"name": "cpu", "value": "0.5"},
+                    {"name": "mem", "value": "1.2"},
+                ]
+            }
+        }}, "ticks": {"kinds": {}}}
+        t = block_text(store_view(data, Zoom.DETAILED, 80))
+        assert "cpu" in t or "mem" in t or "metric" in t

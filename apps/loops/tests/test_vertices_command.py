@@ -142,3 +142,27 @@ class TestFetchVertices:
         result = fetch_vertices(tmp_path)
         assert len(result["vertices"]) == 1
         assert result["vertices"][0]["name"] == "child"
+
+
+class TestFetchVerticesLocal:
+    """Tests for fetch_vertices_local — .loops/.vertex path."""
+
+    def test_no_local_vertex_returns_none(self, tmp_path, monkeypatch):
+        """fetch_vertices_local returns None when .loops/.vertex doesn't exist (L137)."""
+        from loops.commands.vertices import fetch_vertices_local
+        monkeypatch.chdir(tmp_path)
+        assert fetch_vertices_local() is None
+
+    def test_with_local_vertex_file(self, tmp_path, monkeypatch):
+        """fetch_vertices_local walks .loops directory (L135+)."""
+        from loops.commands.vertices import fetch_vertices_local
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        root_vertex = loops_dir / ".vertex"
+        root_vertex.write_text('name "root"\n')
+        child = loops_dir / "proj.vertex"
+        child.write_text('name "proj"\nloops {\n    m { fold { n "inc" } }\n}\n')
+        result = fetch_vertices_local()
+        assert result is not None
+        assert "vertices" in result

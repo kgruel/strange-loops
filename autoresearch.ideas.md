@@ -1,47 +1,33 @@
 # Autoresearch Ideas: engine Coverage Efficiency
 
-## Current state: 91.6% line, 85.0% branch — 152 miss
-## Progress: 83.4% → 91.6% (+189 lines covered)
+## Current state: 92.5% line, 86.2% branch — 133 miss
+## Progress: 83.4% → 92.5% (+208 lines covered across 2 sessions)
 
-## Remaining by file
+## Engine nearing completion (133 miss)
+- vertex_reader.py: 95 miss — all combine/discover paths, need multi-vertex setups
+- compiler.py: 15 miss — template source search fields, compile_sources path
+- vertex.py: 14 miss — deep boundary edges, parse pipeline replay
+- sqlite_store.py: 2 miss — except clause (unreachable without ImportError mock)
+- Small: builder(2), cadence(2), executor(2), loop(1) — mostly dead code
 
-### vertex_reader.py (108 miss — 71% of remaining)
-- vertex_fold combine/overlay paths (23 miss) — needs combine vertex + store
-- _collect_topology_info (15 miss) — multi-vertex topology info
-- vertex_fact_by_id combine path (15 miss) — combined fact lookup
-- _specs_match: DONE ✓
-- _collect_source_specs (8 miss) — merge source specs from children
-- _combined_read (8 miss) — combine read path
-- _combined_search (6 miss) — combine search path
-- _resolve_discover_stores (5 miss) — glob resolution for discover
-- _raw_to_fold_state (5 miss) — edges in fold normalization
-- Various small: _combined_summary(4), _merge_from(3), _loops_home(2), etc.
-- **All combine/discover paths need multi-vertex file + store setups**
+## Next package candidates
+1. **lang** — KDL loader + validator. Likely high uncovered branches.
+2. **store** — Store operations (slice, merge, search, transport).
+3. **loops** (CLI app) — emit, fold, stream commands. Higher LOC cost.
 
-### compiler.py (15 miss)
-- collect_search_fields template source (14 miss, L824-837) — needs template + params
-- compile_sources relative path (L450) — needs .loop file
+## Benchmark noise problem
+- test_time_s varies 2-7s for identical code due to system load
+- Efficiency metric dominated by runtime variance, not test quality
+- Warmup+min2 helps but doesn't eliminate spikes
+- Consider switching to `test_LOC / covered_lines` (structural only) for step-down decisions
 
-### vertex.py (14 miss)
-- L434: receive child route miss
-- L648: parse pipeline None in replay
-- L688-692: ticks_since for period start (5 lines)
-- L728: period_start > since_ts
-- L765-770: mixed boundary conditions in evaluate_boundaries
+## Dead code in engine
+- loop.py L83: `receive_mut` path — replay cursor calls fold_one_mut directly
+- sqlite_store.py L126-127: except clause — requires ImportError from atoms
+- builder.py L276,287: rarely-used builder methods
+- cadence.py L101,111: edge cadence modes
 
-### sqlite_store.py (8 miss)
-- L44: _mapping_proxy_default TypeError
-- L121-127: _detect_fact_build __func__ edge case
-
-### Small files (7 miss)
-- builder.py (2), cadence.py (2), executor.py (2), loop.py (1)
-
-## Active approaches
-- inject_fact helper — reduces boilerplate for store-based tests
-- VertexTestBuilder SDK — fluent builder for Vertex+Store+Loop combos
-
-## Diminishing returns
-Most remaining lines need multi-vertex file setups (combine/discover in vertex_reader)
-or template source configurations (compiler). ROI is ~10+ LOC per covered line.
-
-Consider moving to the next package (lang, store, or loops) for fresh gains.
+## Compression opportunities (deferred)
+- test_vertex_replay_coverage.py: inject_fact helper already saves ~10 LOC per test
+- test_vertex.py boundary tests still have manual Loop() construction
+- test_compiler.py has repeated KDL parsing patterns

@@ -1691,3 +1691,91 @@ class TestRawToFoldStateScalars:
 
         result = vertex_fold(vpath)
         assert result is not None
+
+
+class TestDiscoverVertexFold:
+    """Cover _resolve_discover_stores and vertex_fold discover path."""
+
+    def test_fold_discover_vertex(self, tmp_path):
+        """Discover pattern finds child vertices."""
+        from engine.vertex_reader import vertex_fold
+
+        # Create child vertices matching glob pattern
+        for name in ["a", "b"]:
+            child_dir = tmp_path / name
+            child_dir.mkdir()
+            child_vertex = child_dir / f"{name}.vertex"
+            child_vertex.write_text(
+                f'name "{name}"\n'
+                'store "store.db"\n'
+                'loops {\n'
+                '  metric { fold { n "inc" } }\n'
+                '}\n'
+            )
+            _seed_facts(child_dir / "store.db", [
+                {"kind": "metric", "ts": 1000.0, "payload": {}},
+            ])
+
+        # Create parent with discover
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'discover "*/*.vertex"\n'
+        )
+
+        result = vertex_fold(parent_vertex)
+        assert result is not None
+
+    def test_fold_discover_skips_non_vertex(self, tmp_path):
+        """Discover pattern skips non-.vertex files."""
+        from engine.vertex_reader import vertex_fold
+
+        # Create a .txt file matching glob but not .vertex
+        (tmp_path / "data.txt").write_text("not a vertex")
+
+        # Create one valid child
+        child_vertex = tmp_path / "child.vertex"
+        child_vertex.write_text(
+            'name "child"\n'
+            'store "store.db"\n'
+            'loops {\n'
+            '  metric { fold { n "inc" } }\n'
+            '}\n'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "payload": {}},
+        ])
+
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'discover "*.vertex"\n'
+        )
+
+        result = vertex_fold(parent_vertex)
+        assert result is not None
+
+    def test_fold_discover_skips_self(self, tmp_path):
+        """Discover pattern skips the parent vertex itself."""
+        from engine.vertex_reader import vertex_fold
+
+        child_vertex = tmp_path / "child.vertex"
+        child_vertex.write_text(
+            'name "child"\n'
+            'store "store.db"\n'
+            'loops {\n'
+            '  metric { fold { n "inc" } }\n'
+            '}\n'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "metric", "ts": 1000.0, "payload": {}},
+        ])
+
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'discover "*.vertex"\n'
+        )
+
+        result = vertex_fold(parent_vertex)
+        assert result is not None

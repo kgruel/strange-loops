@@ -2093,3 +2093,41 @@ class TestRunStoreNameResolution:
         _emit(vpath, "ping", x="1")
         rc = main(["store", "myproject", "--plain"])
         assert rc == 0
+
+
+class TestTopologyKindKeys:
+    """Exercise _topology_kind_keys_and_stores paths."""
+
+    def test_topology_bad_vertex(self, tmp_path):
+        """_topology_kind_keys_and_stores with bad vertex returns empty (L1260-1261)."""
+        from loops.main import _topology_kind_keys_and_stores
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        result = _topology_kind_keys_and_stores(bad)
+        assert result == ({}, [])
+
+    def test_topology_fast_path(self, tmp_path, monkeypatch):
+        """_topology_kind_keys_and_stores fast path with existing store+topology (L1265-1271)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        # Setup: aggregate vertex with discover child
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        _emit(child_vpath, "ping", x="1")
+        agg_vpath = tmp_path / "agg.vertex"
+        agg_vpath.write_text(
+            'name "agg"\nstore "./agg.db"\ndiscover "child/*.vertex"\n'
+            "loops {\n  ping {\n    fold {\n      n \"inc\"\n    }\n  }\n}\n"
+        )
+        # Write topology to the aggregate store
+        from engine.vertex_reader import emit_topology
+        emit_topology(agg_vpath)
+        # Now _topology_kind_keys_and_stores should use the fast path
+        from loops.main import _topology_kind_keys_and_stores
+        result = _topology_kind_keys_and_stores(agg_vpath)
+        assert isinstance(result, tuple)
+        assert len(result) == 2

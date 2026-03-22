@@ -1143,6 +1143,25 @@ class TestScaffoldArtifacts:
         assert rc == 0
         assert (tmp_path / "autoresearch.checks.sh").exists()
 
+    def test_scaffold_with_iterate_template(self, tmp_path, monkeypatch):
+        """_scaffold_artifacts copies iterate.sh from template if present (L407-413)."""
+        import argparse
+        from loops.main import _scaffold_artifacts
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        # Create iterate.sh template in LOOPS_HOME/myv/
+        tmpl_dir = tmp_path / "myv"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "iterate.sh").write_text(
+            "#!/usr/bin/env bash\nVERTEX=__VERTEX__\nBENCHMARK=__BENCHMARK__\n"
+        )
+        _scaffold_artifacts({"benchmark": "./run.sh"}, vertex_name="myv")
+        # iterate.sh should be created with substitutions
+        created = tmp_path / "iterate.sh"
+        assert created.exists()
+        content = created.read_text()
+        assert ".loops/myv.vertex" in content
+
 
 @pytest.fixture
 def fold_by_vertex(tmp_path):

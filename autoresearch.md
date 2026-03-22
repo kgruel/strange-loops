@@ -82,3 +82,50 @@ Test files: everything under `libs/*/tests/` and `apps/*/tests/`.
 
 To narrow scope to one package, edit `INCLUDE_PACKAGES` and `TEST_DIRS` in
 `autoresearch.sh`. The methodology stays the same.
+
+---
+
+## Recognizing the Ceiling
+
+Some miss lines cannot be covered without changing the source itself. Recognizing this
+early prevents grinding 50+ experiments against a wall with negligible return.
+
+### Dead code
+
+If remaining miss lines are defensive checks, impossible branches, or structurally
+unreachable paths (the type system or data model makes them impossible to trigger):
+
+1. **Confirm once** — read the source, understand why the path can't fire.
+2. **Log it** — add to `autoresearch.ideas.md` under a `## Confirmed dead code` heading
+   with the file, line numbers, and a one-line reason.
+3. **Stop pursuing it** — do not write tests that mock internals just to make a line
+   execute. That produces brittle tests with no real signal.
+
+If the dead code is genuinely unreachable (not just hard to reach), the right fix is a
+source cleanup — deleting the branch — not a test. Log it as a source task and move on.
+
+### Source-level blockers
+
+If the next meaningful gain requires a structural source change — adding a testability
+hook, splitting a function, refactoring across multiple modules — log it in
+`autoresearch.ideas.md` with:
+
+- what change is needed
+- which files are affected
+- roughly how many lines it would unlock
+
+Then move on to the next target. Source changes are legitimate and sometimes the right
+call, but they require a deliberate decision, not another iteration of the same loop.
+
+### When to stop the loop entirely
+
+Stop and write a final summary when **all three** conditions hold:
+
+1. The primary metric has not improved in the last ~15 experiments.
+2. All remaining gaps are either confirmed dead code or source-level blockers already
+   logged in `autoresearch.ideas.md`.
+3. No new experiment idea would move the metric without first making a source change.
+
+At that point, continuing is waste. Write a clear stopping summary — what was achieved,
+what's left and why, what source changes would unlock the next tier — and halt. The
+`autoresearch.ideas.md` file becomes the handoff to whoever addresses the blockers.

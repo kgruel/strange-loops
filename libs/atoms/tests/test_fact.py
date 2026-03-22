@@ -408,3 +408,15 @@ class TestProtocolEdges:
     def test_class_getitem(self):
         assert Fact[str] is Fact
         assert Fact[int] is Fact
+
+    def test_repr(self):
+        f = Fact(kind="heartbeat", ts=1.0, payload="x", observer="a")
+        r = repr(f)
+        assert "kind='heartbeat'" in r
+        assert "observer='a'" in r
+
+    def test_dunder_replace(self):
+        f = Fact(kind="heartbeat", ts=1.0, payload="x", observer="a")
+        f2 = f.__replace__(kind="deploy")
+        assert f2.kind == "deploy"
+        assert f2.observer == "a"

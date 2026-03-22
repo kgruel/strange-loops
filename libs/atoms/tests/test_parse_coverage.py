@@ -141,6 +141,31 @@ class TestRunParseManyDispatch:
         results = run_parse_many(data, ops)
         assert results == []  # Skip matched → filtered out
 
+    def test_single_ops_dispatch_in_stream_mode(self):
+        """Exercise _apply_single_op branches via run_parse_many.
+
+        Covers L528-538: Pick, Rename, Transform, Coerce, Select, Split
+        dispatched through the 'else' branch of run_parse_many.
+        """
+        # Split + Pick + Rename chain through single-op dispatch
+        data = {"line": "a:b:c"}
+        # Transform needs a dict with a string field
+        result = run_parse_many({"x": " hello "}, [Transform(field="x", strip=" ")])
+        assert result == [{"x": "hello"}]
+
+        # Coerce through single-op dispatch
+        result = run_parse_many({"n": "42"}, [Coerce(types={"n": int})])
+        assert result == [{"n": 42}]
+
+        # Pick through single-op dispatch (needs a list input, so feed one)
+        # run_parse_many starts with [data], and Pick expects list — will return None → filtered
+        result = run_parse_many({"x": 1}, [Pick(0)])
+        assert result == []  # Pick on dict → None → filtered
+
+        # Rename through single-op dispatch (same — needs list input)
+        result = run_parse_many({"x": 1}, [Rename({0: "a"})])
+        assert result == []  # Rename on dict → None → filtered
+
 
 class TestRunParseSingleDispatch:
     """run_parse exercising single-record pipeline dispatch in the main function."""

@@ -528,40 +528,27 @@ class TestVertexNameBareFile:
         assert result == "" or result is not None  # implementation-defined
 
 
-class TestFindLocalVertexDotVertex:
+class TestMainHelperEdges:
     def test_dotvertex_in_home_returns_root(self, tmp_path, monkeypatch):
         """_find_local_vertex returns LOOPS_HOME/.vertex when it exists (L625)."""
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        dot_vertex = tmp_path / ".vertex"
-        dot_vertex.write_text('name "session"\n')
+        (tmp_path / ".vertex").write_text('name "session"\n')
         monkeypatch.chdir(tmp_path)
         from loops.main import _find_local_vertex
-        result = _find_local_vertex()
-        assert result == dot_vertex
+        assert _find_local_vertex() == tmp_path / ".vertex"
 
-
-class TestTickDrillHeaderEmpty:
     def test_empty_tick_meta_returns_empty_block(self):
         """_tick_drill_header with no tick_meta returns empty block (L843)."""
         from loops.main import _tick_drill_header
-        block = _tick_drill_header({}, width=80)
-        assert block.height == 1
+        assert _tick_drill_header({}, width=80).height == 1
 
-
-class TestDispatchCommandNamedVertex:
-    def test_dispatch_command_resolves_named_vertex(self, tmp_path, monkeypatch):
-        """_dispatch_command resolves via _resolve_named_vertex when local fails (L1341)."""
-        from loops.main import _dispatch_command
-        home = tmp_path / "home"
-        # Set up a config-level vertex
-        vdir = home / "myv"
+    def test_resolve_named_vertex_by_name(self, tmp_path, monkeypatch):
+        """_resolve_named_vertex resolves config-level vertex by name (L1341 path)."""
+        from loops.main import _resolve_named_vertex
+        vdir = tmp_path / "myv"
         vdir.mkdir(parents=True)
         (vdir / "myv.vertex").write_text(
             'name "myv"\nstore "./data/myv.db"\nloops { ping { fold { n "inc" } } }\n'
         )
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        monkeypatch.chdir(tmp_path)
-        # "myv" is not a local vertex → _resolve_vertex_for_dispatch returns None
-        # → falls through to _resolve_named_vertex (L1341)
-        result = _dispatch_command("myv", ["read", "--plain", "--static"])
-        assert result in (0, 1)  # may succeed or fail, but L1341 is hit
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        assert _resolve_named_vertex("myv").name == "myv.vertex"

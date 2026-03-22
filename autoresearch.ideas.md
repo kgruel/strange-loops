@@ -64,3 +64,16 @@
 - L253-254: emit_topology exception catch (best-effort cache refresh)
 - L284-285: _resolve_entity_refs LoopsError on writable vertex
 - L297: topology cache hit (fast path in _topology_kind_keys_and_stores)
+
+## Additional dead code candidates (confirmed unreachable)
+- `commands/fetch.py L82`: `continue` in fetch_fold — `vertex_fold` already pre-filters by kind, so the defensive filter loop never skips sections
+- `commands/fetch.py L246-247`: `v = {"items": [...]}` dict path in fetch_ticks — fold_collect stores payload as `{"items": [list]}` at top level, so `v` is always a list (L248-249), never a dict with nested "items"
+- `commands/fetch.py L325`: `facts = []` in fetch_tick_facts — tick.since is always set by vertex_ticks for any real boundary
+- `commands/fetch.py L402`: duplicate fact ID dedup — facts have unique IDs within a vertex; cross-tick deduplication never fires in practice
+- `lenses/fold.py L266, L352`: "no connected items" after refs filter — section-level pre-filter in fold_view ensures at least 1 connected item before calling _render_grouped/_render_flat, making the inner filter check always find items
+
+## Practical coverage ceiling
+Accounting for all confirmed dead code:
+- ~17 dead lines: stream.py L192, store.py L91, vertices.py L118, fold.py L182/266/352, fetch.py L82/246/247/325/402, tui L567/L109 (_on_start async)
+- Plus ~112 async/TUI dispatch lines in main.py (L383-409, L642-657) and devtools.py async stream (L200-215)
+- Realistic ceiling: ~4750-4760 covered lines out of 4769 (≈99.7% minus confirmed dead code)

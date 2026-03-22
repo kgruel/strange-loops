@@ -262,6 +262,24 @@ class TestWalkRoot:
         # Should return empty (nonexistent path skipped)
         assert result == []
 
+    def test_walk_root_combine_duplicate(self, tmp_path, monkeypatch):
+        """_walk_root combine with duplicate entry is skipped (L106)."""
+        from loops.commands.vertices import _walk_root
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "home"))
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vpath = child_dir / "child.vertex"
+        child_vpath.write_text(
+            'name "child"\nstore "./child.db"\nloops { ping { fold { n "inc" } } }\n'
+        )
+        root = tmp_path / "root.vertex"
+        root.write_text(
+            'name "root"\nloops { ping { fold { n "inc" } } }\n'
+            f'combine {{\n  vertex "{str(child_vpath)}"\n  vertex "{str(child_vpath)}"\n}}\n'
+        )
+        result = _walk_root(root, tmp_path)
+        assert len(result) == 1  # duplicate skipped
+
     def test_walk_root_combine_broken_vertex(self, tmp_path, monkeypatch):
         """_walk_root combine entry with broken vertex file (L109-110)."""
         from loops.commands.vertices import _walk_root

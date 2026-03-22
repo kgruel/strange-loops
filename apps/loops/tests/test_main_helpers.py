@@ -318,13 +318,14 @@ class TestFindSourceVertex:
         assert "lens" in result
 
     def test_with_store_directive(self, tmp_path, monkeypatch):
-        """_find_source_vertex returns content for direct instance (L168)."""
+        """_find_source_vertex returns content for direct instance with store but NO loops (L168)."""
         from loops.main import _find_source_vertex
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         proj_dir = tmp_path / "proj"
         proj_dir.mkdir()
         vf = proj_dir / "proj.vertex"
-        vf.write_text('name "proj"\nstore "./data/proj.db"\nloops { m { fold { n "inc" } } }\n')
+        # Has store directive but no loops block → hits L167-168
+        vf.write_text('name "proj"\nstore "./data/proj.db"\n')
         result = _find_source_vertex("proj")
         assert result is not None
         assert "store" in result

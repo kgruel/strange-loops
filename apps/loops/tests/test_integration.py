@@ -2965,3 +2965,47 @@ class TestPopMultiTemplateAddRm:
         ns = argparse.Namespace(target="v/feed1", key="mysite")
         rc = cmd_rm(ns)
         assert rc == 0  # L289: payload["template"] = "feed1"
+
+
+class TestCloseValidateEmitError:
+    """Cover emit.py L548-549 (validate_emit error in _run_close)."""
+
+    def test_run_close_validate_emit_error(self, tmp_path, monkeypatch, capsys):
+        """_run_close with observer whose grant excludes the kind → L548-549."""
+        import sqlite3, time, json as _json
+        from loops.commands.emit import _run_close
+
+        home = tmp_path / "home"
+        vdir = home / "t"
+        vdir.mkdir(parents=True)
+        vpath = vdir / "t.vertex"
+        # Vertex with observer restrictions: myobs can only emit "task", not "thread"
+        vpath.write_text(
+            'name "t"\nstore "./t.db"\n'
+            'observers {\n  myobs {\n    grant { potential "task" }\n  }\n}\n'
+            'loops {\n'
+            '  thread { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            '}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
+
+        # Pre-seed the store with a "thread" fact so _run_close finds it
+        db = vdir / "t.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS facts "
+            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, payload TEXT)"
+        )
+        conn.execute("INSERT INTO facts VALUES (?,?,?,?,?,?)",
+            ("fakeid1", "thread", time.time(), "admin", "",
+             _json.dumps({"name": "task1"})))
+        conn.commit()
+        conn.close()
+
+        # close thread task1 with observer who can't emit "thread" → L548-549
+        rc = _run_close(["thread", "task1"], vertex_path=vpath, observer="myobs")
+        assert rc == 1  # L548-549: validate_emit returned error
+        captured = capsys.readouterr()
+        assert "cannot emit" in captured.err or "Error" in captured.err

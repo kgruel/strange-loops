@@ -328,3 +328,32 @@ class TestFindSourceVertex:
         result = _find_source_vertex("proj")
         assert result is not None
         assert "store" in result
+
+class TestRunWhoami:
+    def test_with_env_observer(self, monkeypatch):
+        """_run_whoami with LOOPS_OBSERVER set (L2795-2803)."""
+        from loops.main import _run_whoami
+        monkeypatch.setenv("LOOPS_OBSERVER", "alice")
+        result = _run_whoami([])
+        assert result == 0
+
+    def test_no_observer_returns_1(self, tmp_path, monkeypatch):
+        """_run_whoami returns 1 when no observer found (L2799-2801)."""
+        from loops.main import _run_whoami
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        result = _run_whoami([])
+        assert result == 1
+
+class TestWarnMissingFoldKeyEdge:
+    def test_invalid_vertex_silently_returns(self, tmp_path):
+        """_warn_missing_fold_key with invalid vertex (L1161-1162)."""
+        import unittest.mock as mock
+        from loops.main import _warn_missing_fold_key
+        bad = tmp_path / "bad.vertex"
+        bad.write_text("{{invalid")
+        # Patch _resolve_writable_vertex to return None (skip combine chain)
+        with mock.patch("loops.main._resolve_writable_vertex", return_value=None):
+            _warn_missing_fold_key(bad, "metric", {"value": 42})
+        assert True  # no exception

@@ -1470,6 +1470,13 @@ class TestRunStreamPaths:
         rc = main(["read", str(vpath), "--facts", "--id", "a", "--plain"])
         assert rc == 0
 
+    def test_stream_no_vertex(self, vertex_dir, monkeypatch):
+        """--facts --since without vertex uses local vertex (L2017)."""
+        tmp_path, vpath = vertex_dir
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        _emit(vpath, "heartbeat", service="api")
+        assert isinstance(main(["read", "--facts", "--since", "1h", "--plain"]), int)
+
 
 class TestCmdEmitEdgePaths:
     """Exercise cmd_emit legacy vertex resolution paths."""
@@ -1948,18 +1955,7 @@ class TestRunTicksEdgePaths:
         assert rc == 0
 
 
-class TestStreamQueryPath:
-    """Exercise _run_stream query and edge paths."""
 
-    def test_stream_query_string(self, vertex_dir, monkeypatch):
-        """Stream with a query string (not a vertex) shifts it to query (L2013)."""
-        tmp_path, vpath = vertex_dir
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        _emit(vpath, "heartbeat", service="api", status="up")
-        # Use --facts --since with a query-like first arg
-        # We need first arg that doesn't resolve as a vertex
-        rc = main(["read", "--facts", "--since", "1h", "--plain"])
-        assert isinstance(rc, int)
 
 
 class TestRenderFoldPlainEdges:

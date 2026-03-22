@@ -1497,6 +1497,18 @@ class TestRunStreamPaths:
         _emit(vpath, "heartbeat", service="api")
         assert isinstance(main(["read", "--facts", "--since", "1h", "--plain"]), int)
 
+    def test_stream_query_as_first_arg(self, tmp_path, monkeypatch):
+        """'read search-term --facts --since' treats non-vertex as query (L2013)."""
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vpath = loops_dir / "local.vertex"
+        vertex("local").store("./local.db").loop("ping", fold_count("n")).write(vpath)
+        _emit(vpath, "ping", x="1")
+        # "search-term" → not a vertex → query shift
+        assert main(["read", "search-term", "--facts", "--since", "1h", "--plain"]) == 0
+
 
 class TestCmdEmitEdgePaths:
     """Exercise cmd_emit legacy vertex resolution paths."""

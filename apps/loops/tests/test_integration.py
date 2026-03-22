@@ -1283,6 +1283,13 @@ class TestFoldFastPath:
         rc = main(["read", str(vpath), "--static", "--plain", "-v"])
         assert rc == 0
 
+    def test_read_static_plain_very_verbose(self, fold_by_vertex):
+        """--static --plain -vv triggers zoom_level=3 (L2307)."""
+        tmp_path, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        rc = main(["read", str(vpath), "--static", "--plain", "-vv"])
+        assert rc == 0
+
     def test_read_static_plain_via_full_dispatch(self, fold_by_vertex):
         """--static --plain --kind=X bypasses _try_fast_read → enters _run_fold L2089."""
         tmp_path, vpath = fold_by_vertex

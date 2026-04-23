@@ -587,6 +587,10 @@ def _tick_payload_stats(payload: dict) -> dict:
                     n = item.get("_n", 1)
                     per_key_n[str(key)] = n if isinstance(n, int) else 1
                 else:
+                    # Defensive — by-fold values are always dicts in practice
+                    # (payload + _n). This branch catches malformed payloads
+                    # from legacy data or round-trip encoding drift without
+                    # crashing the whole derivation.
                     per_key_n[str(key)] = 1
         elif isinstance(items_raw, list):
             # collect-fold — no keying, no per-item identity

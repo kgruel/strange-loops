@@ -44,6 +44,7 @@ __all__ = [
     "FoldItem",
     "FoldSection",
     "FoldState",
+    "TickWindow",
     # Parse vocabulary
     "Coerce",
     "Explode",
@@ -93,6 +94,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "FoldItem": ("atoms.fold_state", "FoldItem"),
     "FoldSection": ("atoms.fold_state", "FoldSection"),
     "FoldState": ("atoms.fold_state", "FoldState"),
+    "TickWindow": ("atoms.ticks", "TickWindow"),
     # Parse vocabulary
     "Coerce": ("atoms.parse", "Coerce"),
     "Explode": ("atoms.parse", "Explode"),

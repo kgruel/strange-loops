@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from atoms import FoldItem, FoldState
+    from atoms import FoldItem, FoldState, TickWindow
 
 
 def _parse_duration(s: str) -> float:
@@ -531,3 +531,237 @@ def fetch_tick_range_fold(
         "fold_state": fold_state,
         "_tick": _tick_range_metadata(selected, start=start, end=end, total=len(ticks_newest)),
     }
+
+
+# ---------------------------------------------------------------------------
+# TickWindow plumbing — derive density-and-depth summaries from tick payloads.
+#
+# Stats pass produces an intermediate per-kind map of {key → _n}. This is the
+# authoritative structure: delta computation compares current vs. previous to
+# distinguish *added* (new keys) from *updated* (existing keys whose _n grew).
+# Collect-folds have no per-item identity — they contribute to count-level
+# deltas only; their key maps stay empty.
+# ---------------------------------------------------------------------------
+
+
+def _tick_payload_stats(payload: dict) -> dict:
+    """Extract density and per-key item maps from a tick's fold-state payload.
+
+    A tick payload produced by a vertex-level boundary has the shape
+    ``{kind: {"items": ...}, ..., "_boundary": {...}}`` where ``items`` is
+    either a dict (by-folds, keyed by the fold key) or a list (collect-folds).
+
+    Returns a dict with:
+        ``total_items``: sum of item counts across kinds
+        ``total_facts``: sum of ``_n`` values across items
+        ``kind_counts``: ``dict[kind, int]`` item count per kind
+        ``kind_compression``: ``dict[kind, float]`` avg ``_n`` per kind
+        ``ref_count``: number of items with a non-empty ``_refs`` field
+        ``kind_items``: ``dict[kind, dict[key, n]]`` — per-kind, per-key ``_n``.
+            Empty dict for collect-folds. Used by delta computation.
+    """
+    total_items = 0
+    total_facts = 0
+    ref_count = 0
+    kind_counts: dict[str, int] = {}
+    kind_compression: dict[str, float] = {}
+    kind_items: dict[str, dict[str, int]] = {}
+
+    for kind, kind_data in payload.items():
+        if kind.startswith("_"):
+            continue
+        if not isinstance(kind_data, dict):
+            continue
+
+        items_raw = kind_data.get("items")
+        if items_raw is None:
+            continue
+
+        per_key_n: dict[str, int] = {}
+        items_list: list
+        if isinstance(items_raw, dict):
+            # by-fold — keyed by fold key, value is the item dict
+            items_list = list(items_raw.values())
+            for key, item in items_raw.items():
+                if isinstance(item, dict):
+                    n = item.get("_n", 1)
+                    per_key_n[str(key)] = n if isinstance(n, int) else 1
+                else:
+                    per_key_n[str(key)] = 1
+        elif isinstance(items_raw, list):
+            # collect-fold — no keying, no per-item identity
+            items_list = items_raw
+        else:
+            continue
+
+        count = len(items_list)
+        kind_counts[kind] = count
+        total_items += count
+        kind_items[kind] = per_key_n
+
+        n_sum = 0
+        for item in items_list:
+            if isinstance(item, dict):
+                n = item.get("_n", 1)
+                n_sum += n if isinstance(n, int) else 1
+                if item.get("_refs"):
+                    ref_count += 1
+            else:
+                n_sum += 1
+
+        total_facts += n_sum
+        if count > 0:
+            kind_compression[kind] = round(n_sum / count, 1)
+
+    return {
+        "total_items": total_items,
+        "total_facts": total_facts,
+        "kind_counts": kind_counts,
+        "kind_compression": kind_compression,
+        "ref_count": ref_count,
+        "kind_items": kind_items,
+    }
+
+
+def _tick_delta(
+    current: dict,
+    previous: dict,
+) -> tuple[int, int, dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
+    """Compute added / updated deltas between two ``_tick_payload_stats`` results.
+
+    Returns ``(delta_added, delta_updated, added_keys, updated_keys)``:
+        - ``delta_added``: total new items across all kinds. For by-folds this
+          counts newly-keyed entries; for collect-folds it counts item-count
+          growth (since there is no key identity).
+        - ``delta_updated``: total keys whose ``_n`` grew. By-folds only
+          (collect-folds contribute 0).
+        - ``added_keys``: per-kind tuples of newly-added keys (sorted). Empty
+          for collect-folds and for kinds with no new keys.
+        - ``updated_keys``: per-kind tuples of keys whose ``_n`` grew (sorted).
+          Empty for collect-folds and for kinds with no growth.
+    """
+    curr_items = current["kind_items"]
+    prev_items = previous["kind_items"]
+    curr_counts = current["kind_counts"]
+    prev_counts = previous["kind_counts"]
+
+    added_keys: dict[str, tuple[str, ...]] = {}
+    updated_keys: dict[str, tuple[str, ...]] = {}
+
+    by_added_total = 0
+    by_updated_total = 0
+    collect_added = 0
+
+    all_kinds = set(curr_counts) | set(prev_counts) | set(curr_items) | set(prev_items)
+    for kind in all_kinds:
+        curr = curr_items.get(kind, {})
+        prev = prev_items.get(kind, {})
+
+        # by-fold signature: non-empty per-key map on either side
+        if curr or prev:
+            new = tuple(sorted(k for k in curr if k not in prev))
+            grew = tuple(
+                sorted(k for k in curr if k in prev and curr[k] > prev[k])
+            )
+            if new:
+                added_keys[kind] = new
+                by_added_total += len(new)
+            if grew:
+                updated_keys[kind] = grew
+                by_updated_total += len(grew)
+            continue
+
+        # collect-fold signature: kind present but kind_items empty on both
+        # sides. Added count comes from item-count growth.
+        growth = curr_counts.get(kind, 0) - prev_counts.get(kind, 0)
+        if growth > 0:
+            collect_added += growth
+
+    return (
+        by_added_total + collect_added,
+        by_updated_total,
+        added_keys,
+        updated_keys,
+    )
+
+
+def fetch_tick_windows(
+    vertex_path: Path,
+    *,
+    name: str | None = None,
+    since: str = "30d",
+) -> "tuple[TickWindow, ...]":
+    """Build ``TickWindow`` objects for a vertex's recent ticks.
+
+    When *name* is None or empty, resolves to the vertex name — the tick
+    series produced by the vertex-level boundary. Otherwise filters to
+    the named loop's tick series.
+
+    Returns newest-first. ``delta_*`` on index *i* compares against index
+    *i + 1* (the next-older tick). The oldest tick in the returned slice
+    has zero deltas by construction.
+    """
+    from atoms import TickWindow
+    from engine import vertex_ticks
+    from lang import parse_vertex_file
+
+    if not name:
+        ast = parse_vertex_file(vertex_path)
+        name = ast.name
+
+    since_secs = _parse_duration(since)
+    now = datetime.now(timezone.utc)
+    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+
+    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp(), name=name)
+    ticks_newest = list(reversed(ticks))  # newest first
+
+    # One stats pass per tick, reused for density fields and delta comparison.
+    payload_stats = [
+        _tick_payload_stats(
+            tick.payload if isinstance(tick.payload, dict) else {}
+        )
+        for tick in ticks_newest
+    ]
+
+    windows: list[TickWindow] = []
+    for i, tick in enumerate(ticks_newest):
+        stats = payload_stats[i]
+
+        ts_epoch = tick.ts.timestamp()
+        since_epoch = tick.since.timestamp() if tick.since else None
+        duration = (ts_epoch - since_epoch) if since_epoch is not None else None
+
+        payload = tick.payload if isinstance(tick.payload, dict) else {}
+        boundary = payload.get("_boundary", {}) or {}
+        observer = str(boundary.get("name", ""))
+        status = str(boundary.get("status", ""))
+        trigger = f"{observer} {status}".strip() if observer else ""
+
+        if i + 1 < len(payload_stats):
+            delta_added, delta_updated, added, updated = _tick_delta(
+                stats, payload_stats[i + 1],
+            )
+        else:
+            delta_added, delta_updated, added, updated = 0, 0, {}, {}
+
+        windows.append(TickWindow(
+            index=i,
+            name=tick.name,
+            ts=ts_epoch,
+            since=since_epoch,
+            duration_secs=duration,
+            observer=observer,
+            boundary_trigger=trigger,
+            total_items=stats["total_items"],
+            total_facts=stats["total_facts"],
+            kind_summary=dict(stats["kind_counts"]),
+            kind_compression=dict(stats["kind_compression"]),
+            ref_count=stats["ref_count"],
+            delta_added=delta_added,
+            delta_updated=delta_updated,
+            added_keys=added,
+            updated_keys=updated,
+        ))
+
+    return tuple(windows)

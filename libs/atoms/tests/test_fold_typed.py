@@ -201,6 +201,28 @@ class TestTypedFoldApply:
         assert state["items"]["x"]["_refs"] == ["a", "b", "c"]
         assert "ref" not in state["items"]["x"]  # consumed into _refs
 
+    def test_collect_extracts_refs_per_item(self):
+        """Collect-fold items get per-entry _refs from the ref payload field.
+
+        Mirrors upsert's ref handling so collect-fold items (pings, messages,
+        etc.) contribute to inbound ref counts. Refs are per-item — no
+        cross-item accumulation like the upsert set-union.
+        """
+        s = Shape(
+            name="pings",
+            folds=(Collect(target="items"),),
+        )
+        state = {"items": []}
+        state = s.apply(state, {"ref": "design/a,thread/b"})
+        state = s.apply(state, {"ref": "rendering/c"})
+        state = s.apply(state, {"other": "no refs here"})
+        assert len(state["items"]) == 3
+        assert state["items"][0]["_refs"] == ["design/a", "thread/b"]
+        assert "ref" not in state["items"][0]
+        assert state["items"][1]["_refs"] == ["rendering/c"]
+        assert "_refs" not in state["items"][2]  # no ref → no _refs key
+        assert state["items"][2] == {"other": "no refs here"}
+
 
 class TestTopN:
     """Tests for TopN convenience fold."""

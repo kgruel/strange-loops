@@ -122,6 +122,69 @@ from loops.commands.emit import (  # noqa: E402 — re-export for back-compat
 )
 
 
+def _run_cite(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+) -> int:
+    """Emit a cite fact — a reference-only attention signal, no key, no body.
+
+    ``loops cite [vertex] REF1 REF2 ... [--context NAME] [--dry-run]``
+
+    Capture what informed the current reasoning: every ref named here
+    accumulates an inbound count on the target item, boosting its salience
+    in lenses. Cite is vocabulary-aligned with how the signal is generated
+    — during design sessions, when prior work is referenced, it's
+    *cited* (the target is informing the current work), not merely pinged.
+
+    Dissolves into ``emit`` with kind=cite — the positional refs translate
+    to a single ``ref=R1,R2,...`` payload and the collect-fold handles the
+    rest. See ``design/cite-as-attention-signal`` and
+    ``design/derived-keys-as-focus-filter`` for rationale.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="loops cite", add_help=False)
+    if vertex_path is None:
+        parser.add_argument("vertex", nargs="?", default=None)
+    parser.add_argument(
+        "refs",
+        nargs="+",
+        help="kind/key refs or bare ULIDs — the attention targets",
+    )
+    parser.add_argument(
+        "--context",
+        default=None,
+        help="Optional thread or task name to tag the citation",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the fact JSON without storing",
+    )
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 2)
+
+    # Translate to emit-shaped argv: [vertex?] cite ref=R1 ref=R2 ... [--flags]
+    emit_argv: list[str] = []
+    if vertex_path is None:
+        vname = getattr(args, "vertex", None)
+        if vname:
+            emit_argv.append(vname)
+    emit_argv.append("cite")
+    for r in args.refs:
+        emit_argv.append(f"ref={r}")
+    if args.context:
+        emit_argv.append(f"context={args.context}")
+    if args.dry_run:
+        emit_argv.append("--dry-run")
+
+    return _run_emit(emit_argv, vertex_path=vertex_path, observer=observer)
+
+
 def _resolve_render_fn(
     lens_flag: str | None,
     vertex_path: Path | None,
@@ -171,6 +234,50 @@ def _resolve_render_fn(
 
     from .lenses.fold import fold_view
     return fold_view
+
+
+def _effective_lens_name(
+    lens_flag: str | None,
+    vertex_path: Path | None,
+    view_name: str,
+) -> str | None:
+    """Return the effective lens name for a command — flag or vertex decl.
+
+    Used by fetch resolution so a lens-declared ``fetch`` overrides the
+    default command fetch, regardless of whether the lens was requested
+    via --lens or via the vertex's lens{} block.
+    """
+    if lens_flag is not None:
+        return lens_flag
+    if vertex_path is None:
+        return None
+    vertex_lens = _get_vertex_lens_decl(vertex_path)
+    if vertex_lens is None:
+        return None
+    if view_name == "fold_view" and vertex_lens.fold:
+        return vertex_lens.fold
+    if view_name == "stream_view" and vertex_lens.stream:
+        return vertex_lens.stream
+    return None
+
+
+def _resolve_lens_fetch(
+    lens_flag: str | None,
+    vertex_path: Path | None,
+    view_name: str,
+):
+    """Return a lens-declared fetch callable, or None to fall through to default.
+
+    A lens module may export ``fetch(vertex_path, **kwargs)`` alongside its
+    view function. When present, the lens owns its input contract — useful
+    for composition lenses (fold + ticks, etc.).
+    """
+    name = _effective_lens_name(lens_flag, vertex_path, view_name)
+    if name is None:
+        return None
+    from .lens_resolver import resolve_lens_fetch
+    vertex_dir = vertex_path.parent if vertex_path is not None else None
+    return resolve_lens_fetch(name, vertex_dir=vertex_dir)
 
 
 def _get_vertex_lens_decl(vertex_path: Path):
@@ -336,6 +443,16 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         # Apply vertex scope — deferred until vertex_path is known
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
+        # Lens may declare its own fetch (composition lenses — fold + ticks,
+        # fold + refs-graph, etc.). When present, the lens owns the input
+        # contract; we pass through the standard kwargs and let the lens
+        # consume what it needs.
+        lens_fetch = _resolve_lens_fetch(known.lens, vertex_path, "fold_view")
+        if lens_fetch is not None:
+            return lens_fetch(
+                vertex_path, kind=known.kind, observer=obs_for_engine,
+                retain_facts=want_facts,
+            )
         from .commands.fetch import fetch_fold
         return fetch_fold(
             vertex_path, kind=known.kind, observer=obs_for_engine,
@@ -549,16 +666,26 @@ def _run_fold_fast(
     observer = _apply_vertex_scope(observer, vertex_path)
     obs_for_engine = observer if observer else None
 
-    from .commands.fetch import fetch_fold
+    # Lens-declared fetch takes precedence. Composition lenses (fold + ticks,
+    # etc.) return a non-FoldState shape — the pure-text fast path can't
+    # render that, so we route those through painted below.
+    lens_fetch = _resolve_lens_fetch(known.lens, vertex_path, "fold_view")
     try:
-        data = fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
+        if lens_fetch is not None:
+            data = lens_fetch(
+                vertex_path, kind=known.kind, observer=obs_for_engine,
+            )
+        else:
+            from .commands.fetch import fetch_fold
+            data = fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # Text-only rendering for MINIMAL/SUMMARY with default lens —
-    # skips the entire painted import chain (~15ms).
-    if known.lens is None and zoom_level <= 1:
+    # Text-only rendering for MINIMAL/SUMMARY with default lens and default
+    # fetch shape — skips the entire painted import chain (~15ms). Lens-
+    # declared fetch shapes go through painted regardless of zoom.
+    if known.lens is None and lens_fetch is None and zoom_level <= 1:
         width = shutil.get_terminal_size().columns
         text = _render_fold_plain(data, zoom_level, width)
         print(text)
@@ -815,8 +942,8 @@ def _whoami_from_identity_store() -> str:
 
 
 # Verb-first dispatch: `loops <verb> [vertex] [args]`.
-# These are the primary CLI verbs — read (implicit default), emit, sync, close.
-_VERBS = frozenset({"read", "emit", "close", "sync"})
+# These are the primary CLI verbs — read (implicit default), emit, sync, close, cite.
+_VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 
 # Dev and setup commands dispatched directly.
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
@@ -827,7 +954,7 @@ _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 
 # Vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
-    "read", "emit", "close", "sync", "store",
+    "read", "emit", "close", "sync", "store", "cite",
     "ls", "add", "rm", "export",
 })
 
@@ -1091,6 +1218,7 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "sync", "Run sources (cadence-gated)", detail="[vertex] [--force] [--var KEY=VALUE]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
+            HelpFlag(None, "cite", "Attention signal — inform current work with prior refs", detail="[vertex] <ref1> <ref2> ... [--context NAME]"),
         ),
     )
 
@@ -1183,6 +1311,8 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
         return _run_close(rest, vertex_path=None, observer=observer)
     if verb == "sync":
         return _run_sync(rest, vertex_path=None)
+    if verb == "cite":
+        return _run_cite(rest, vertex_path=None, observer=observer)
 
     _err(f"Unknown verb: {verb}")
     return 1
@@ -1224,6 +1354,8 @@ def _dispatch_observer(
         return _run_close(args, vertex_path=vertex_path, observer=observer)
     if op == "sync":
         return _run_sync(args, vertex_path=vertex_path)
+    if op == "cite":
+        return _run_cite(args, vertex_path=vertex_path, observer=observer)
 
     # Dev tools
     if op == "store":

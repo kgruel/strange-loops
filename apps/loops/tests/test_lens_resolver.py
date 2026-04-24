@@ -172,11 +172,76 @@ def fold_view(data, zoom, width):
 
 
 class TestLoadFromFileSpecNone:
-    def test_load_from_file_non_python(self, tmp_path):
-        """_load_from_file with non-.py file hits spec=None path (L135)."""
-        from loops.lens_resolver import _load_from_file
+    def test_load_lens_module_non_python(self, tmp_path):
+        """_load_lens_module with non-.py file hits spec=None path."""
+        from loops.lens_resolver import _load_lens_module
         # A .txt file can't be spec'd by importlib
         non_py = tmp_path / "test.txt"
         non_py.write_text("def fold_view(d, z, w): pass\n")
-        result = _load_from_file(non_py, ("fold_view",))
+        result = _load_lens_module(non_py)
+        assert result is None
+
+
+class TestResolveLensFetch:
+    """resolve_lens_fetch — composition lenses declare their own fetch."""
+
+    def test_returns_none_when_lens_omits_fetch(self, tmp_path):
+        """Simple lenses (view-only) yield None — caller uses default fetch."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        lens_dir = tmp_path / "lenses"
+        lens_dir.mkdir()
+        (lens_dir / "simple.py").write_text(
+            "def fold_view(data, zoom, width): return None\n"
+        )
+        # Point the user-global search at tmp_path — fall back path search
+        result = resolve_lens_fetch(
+            str((lens_dir / "simple.py").resolve()),
+            vertex_dir=None,
+        )
+        assert result is None
+
+    def test_resolves_fetch_from_file(self, tmp_path):
+        """Lens file exporting fetch returns the callable."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        lens_file = tmp_path / "composed.py"
+        lens_file.write_text(
+            "def fetch(vertex_path, **kwargs):\n"
+            "    return {'v': str(vertex_path)}\n"
+            "def fold_view(data, zoom, width): return None\n"
+        )
+        result = resolve_lens_fetch(str(lens_file), vertex_dir=None)
+        assert result is not None
+        assert result(Path("/tmp/x")) == {"v": "/tmp/x"}
+
+    def test_resolves_fetch_by_name_in_vertex_dir(self, tmp_path):
+        """Name-style resolution finds <vertex_dir>/lenses/<name>.py fetch."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        lens_dir = tmp_path / "lenses"
+        lens_dir.mkdir()
+        (lens_dir / "custom.py").write_text(
+            "def fetch(vertex_path, **kwargs):\n"
+            "    return 'declared'\n"
+            "def fold_view(data, zoom, width): return None\n"
+        )
+        result = resolve_lens_fetch("custom", vertex_dir=tmp_path)
+        assert result is not None
+        assert result(Path("/tmp/x")) == "declared"
+
+    def test_returns_none_when_lens_not_found(self, tmp_path):
+        """Unresolvable name returns None (no exception)."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        result = resolve_lens_fetch("nonexistent_lens_xyz", vertex_dir=tmp_path)
+        assert result is None
+
+    def test_path_style_missing_returns_none(self, tmp_path):
+        """Path-style lens that doesn't exist returns None (no built-in fallback)."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        result = resolve_lens_fetch(
+            str(tmp_path / "nope.py"), vertex_dir=None,
+        )
         assert result is None

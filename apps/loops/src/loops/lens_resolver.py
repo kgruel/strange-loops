@@ -17,6 +17,12 @@ Names starting with '.' or '/' are treated as paths relative to the vertex file.
 Lens contract: module must export fold_view(data, zoom, width) -> Block
 and/or stream_view(data, zoom, width) -> Block.
 
+Lenses MAY also export a module-level ``fetch(vertex_path, **kwargs)`` callable.
+When present, the CLI uses it instead of the default command fetch — the lens
+declares its complete input contract, not just rendering. Simple lenses omit
+``fetch`` and consume the default shape (FoldState for fold_view). See
+``resolve_lens_fetch``.
+
 Optional context kwargs (vertex_name, etc.) are passed when available.
 Lenses that want them add *, vertex_name=None to their signature.
 Lenses that don't care ignore them — call_lens handles the fallback.
@@ -56,27 +62,73 @@ def resolve_lens(
     """
     candidates = _view_candidates(name, view)
 
-    # Path-style name: resolve relative to vertex
+    # Path-style name: explicit path, no fallback to built-in
     if name.startswith((".", "/")):
-        if vertex_dir is not None:
-            target = (vertex_dir / name).resolve()
-        else:
-            target = Path(name).resolve()
-        if target.is_file():
-            return _load_from_file(target, candidates)
-        return None
+        path = _find_lens_module_path(name, vertex_dir=vertex_dir)
+        if path is None:
+            return None
+        mod = _load_lens_module(path)
+        return _extract_view(mod, candidates) if mod is not None else None
 
-    # Name-style: search the path hierarchy
-    search_dirs = _build_search_path(vertex_dir)
-    for search_dir in search_dirs:
-        candidate = search_dir / f"{name}.py"
-        if candidate.is_file():
-            fn = _load_from_file(candidate, candidates)
+    # Name-style: search the path hierarchy, then fall back to built-in
+    path = _find_lens_module_path(name, vertex_dir=vertex_dir)
+    if path is not None:
+        mod = _load_lens_module(path)
+        if mod is not None:
+            fn = _extract_view(mod, candidates)
             if fn is not None:
                 return fn
 
     # Fall back to built-in lenses in this package
     return _load_builtin(name, candidates)
+
+
+def resolve_lens_fetch(
+    name: str,
+    *,
+    vertex_dir: Path | None = None,
+) -> Callable | None:
+    """Resolve a lens name to its optional ``fetch`` callable.
+
+    Companion to ``resolve_lens``. When a lens module exports a module-level
+    ``fetch(vertex_path, **kwargs)`` function, the CLI uses it instead of the
+    default command fetch. This lets a lens declare its complete input
+    contract, enabling composition lenses (fold + ticks, fold + refs-graph)
+    without new top-level commands.
+
+    Returns None when the lens doesn't declare a fetch — the caller should
+    fall back to its default fetch.
+
+    Args:
+        name: Lens name or path (same semantics as ``resolve_lens``)
+        vertex_dir: Directory containing the vertex file (for relative resolution)
+
+    Returns:
+        The ``fetch`` callable, or None if not declared.
+    """
+    # Path-style: explicit path, no fallback to built-in
+    if name.startswith((".", "/")):
+        path = _find_lens_module_path(name, vertex_dir=vertex_dir)
+        if path is None:
+            return None
+        mod = _load_lens_module(path)
+        return getattr(mod, "fetch", None) if mod is not None else None
+
+    # Name-style: search path hierarchy, then fall back to built-in
+    path = _find_lens_module_path(name, vertex_dir=vertex_dir)
+    if path is not None:
+        mod = _load_lens_module(path)
+        if mod is not None:
+            fn = getattr(mod, "fetch", None)
+            if fn is not None:
+                return fn
+
+    # Built-in fallback
+    try:
+        mod = importlib.import_module(f"loops.lenses.{name}")
+    except (ImportError, ModuleNotFoundError):
+        return None
+    return getattr(mod, "fetch", None)
 
 
 def _build_search_path(vertex_dir: Path | None) -> list[Path]:
@@ -126,8 +178,28 @@ def _extract_view(mod, candidates: tuple[str, ...]) -> LensRenderFn | None:
     return None
 
 
-def _load_from_file(path: Path, candidates: tuple[str, ...]) -> LensRenderFn | None:
-    """Dynamically import a Python file and extract the view function."""
+def _find_lens_module_path(name: str, *, vertex_dir: Path | None) -> Path | None:
+    """Find the file path for a lens name. None if not resolvable to a file.
+
+    Path-style names (starting with '.' or '/') resolve relative to
+    ``vertex_dir``. Name-style searches the standard lens hierarchy.
+    """
+    if name.startswith((".", "/")):
+        if vertex_dir is not None:
+            target = (vertex_dir / name).resolve()
+        else:
+            target = Path(name).resolve()
+        return target if target.is_file() else None
+
+    for search_dir in _build_search_path(vertex_dir):
+        candidate = search_dir / f"{name}.py"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_lens_module(path: Path):
+    """Dynamically import a Python file. Returns the module, or None on failure."""
     module_name = f"_loops_lens_{path.stem}_{id(path)}"
 
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -142,7 +214,7 @@ def _load_from_file(path: Path, candidates: tuple[str, ...]) -> LensRenderFn | N
         del sys.modules[module_name]
         return None
 
-    return _extract_view(mod, candidates)
+    return mod
 
 
 def _load_builtin(name: str, candidates: tuple[str, ...]) -> LensRenderFn | None:

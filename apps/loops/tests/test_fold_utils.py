@@ -161,6 +161,22 @@ class TestInboundCount:
         inbound = Counter({"decision/auth": 3, "thread/auth": 1})
         assert _inbound_count(item({"name": "auth"}), "name", inbound) == 4
 
+    def test_namespaced_key_matches_both_forms(self):
+        """Keys with a namespace slash must match bare and kind-qualified refs.
+
+        Fixes the endswith("/{key}") miss: for key="design/foo" the bare
+        ref "design/foo" doesn't end with "/design/foo" and was skipped.
+        Both forms appear in practice — ref=design/foo and
+        ref=decision/design/foo should contribute equivalently.
+        """
+        inbound = Counter({
+            "design/foo": 5,                    # bare kind/key form
+            "decision/design/foo": 3,           # fully-qualified form
+            "design/other": 7,                  # should NOT match (different key)
+        })
+        result = _inbound_count(item({"topic": "design/foo"}), "topic", inbound)
+        assert result == 8  # 5 + 3, not 3 alone
+
 
 class TestComputeInboundRefs:
     def test_with_refs(self):

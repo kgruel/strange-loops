@@ -631,15 +631,26 @@ def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
 
 
 def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Look up inbound ref count for this item."""
+    """Look up inbound ref count for this item.
+
+    Matches refs in two forms:
+    * Kind-qualified — ``<fact-kind>/<key>`` (e.g. ``decision/design/foo``)
+    * Bare — the key_field value itself (e.g. ``design/foo``)
+
+    The bare form matters when the key contains a namespace slash:
+    ``endswith("/foo")`` alone misses it. Both forms commonly appear in
+    practice — refs emitted as ``ref=design/foo`` vs ``ref=decision/design/foo``
+    should contribute equivalently to salience.
+    """
     if not key_field:
         return 0
     key = item.payload.get(key_field, "")
     if not key:
         return 0
     count = 0
+    suffix = f"/{key}"
     for ref_key, ref_count in inbound.items():
-        if ref_key.endswith(f"/{key}"):
+        if ref_key == key or ref_key.endswith(suffix):
             count += ref_count
     return count
 

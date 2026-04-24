@@ -8,6 +8,7 @@ loops {
   task     { fold { items "by" "name" } }
   session  { fold { items "by" "name" } }
   log      { fold { items "collect" 20 } }
+  cite     { fold { items "collect" 0 } }
 
   boundary when="session" status="closed"
 }

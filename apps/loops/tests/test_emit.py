@@ -9,7 +9,48 @@ from pathlib import Path
 from atoms import Fact
 from engine import SqliteStore
 
+from loops.commands.emit import _parse_emit_parts
 from loops.main import main
+
+
+class TestParseEmitParts:
+    """_parse_emit_parts — payload parsing with ref accumulation."""
+
+    def test_basic_kv(self):
+        payload = _parse_emit_parts(["topic=auth", "status=open"])
+        assert payload == {"topic": "auth", "status": "open"}
+
+    def test_trailing_message(self):
+        payload = _parse_emit_parts(["name=x", "some", "message", "text"])
+        assert payload == {"name": "x", "message": "some message text"}
+
+    def test_ref_comma_separated(self):
+        payload = _parse_emit_parts(["topic=t", "ref=a,b,c"])
+        assert payload == {"topic": "t", "ref": "a,b,c"}
+
+    def test_multiple_ref_accumulates(self):
+        """ref=X ref=Y ref=Z accumulates instead of silently dropping earlier ones."""
+        payload = _parse_emit_parts(["topic=t", "ref=a", "ref=b", "ref=c"])
+        assert payload == {"topic": "t", "ref": "a,b,c"}
+
+    def test_mixed_ref_forms(self):
+        """Both ref=A,B and ref=C accumulate into one comma-separated value."""
+        payload = _parse_emit_parts(["topic=t", "ref=a,b", "ref=c"])
+        assert payload == {"topic": "t", "ref": "a,b,c"}
+
+    def test_ref_dedup_preserves_order(self):
+        """Duplicate refs are collapsed; first-seen order preserved."""
+        payload = _parse_emit_parts(["topic=t", "ref=a,b", "ref=b,c", "ref=a"])
+        assert payload == {"topic": "t", "ref": "a,b,c"}
+
+    def test_ref_blank_segments_ignored(self):
+        payload = _parse_emit_parts(["topic=t", "ref=a,,b", "ref="])
+        assert payload == {"topic": "t", "ref": "a,b"}
+
+    def test_ref_absent_no_key(self):
+        """No ref= at all → no ref key in payload (not an empty string)."""
+        payload = _parse_emit_parts(["topic=t"])
+        assert "ref" not in payload
 
 
 def _write_vertex(home: Path, name: str, *, store: str | None) -> Path:
@@ -438,6 +479,90 @@ class TestEntityRefResolution:
         # Decision doesn't exist in project store, but was found in meta store
         assert payload["decided_by"] == "decision/design/scaffold-minimalism"
         assert "decided_by_ref" in payload
+
+
+class TestCite:
+    """loops cite — attention signal, emits kind=cite with refs only."""
+
+    def _write_cite_vertex(self, home: Path, name: str = "project") -> Path:
+        vdir = home / name
+        vdir.mkdir(parents=True)
+        vertex_path = vdir / f"{name}.vertex"
+        vertex_path.write_text(
+            f'name "{name}"\n'
+            'store "./data/project.db"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  cite { fold { items "collect" 0 } }\n'
+            "}\n"
+        )
+        return vertex_path
+
+    def test_cite_emits_kind_cite_with_comma_joined_refs(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Positional refs become a single comma-separated ref payload."""
+        home = tmp_path / "home"
+        self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "cite", "project",
+            "design/foo", "thread/bar", "atoms/baz",
+            "--dry-run",
+        ])
+        assert result == 0
+        captured = capsys.readouterr()
+        d = json.loads(captured.out)
+        assert d["kind"] == "cite"
+        assert d["payload"]["ref"] == "design/foo,thread/bar,atoms/baz"
+        assert "message" not in d["payload"]
+
+    def test_cite_context_becomes_payload_field(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """--context lands as a plain payload field, not a ref."""
+        home = tmp_path / "home"
+        self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "cite", "project", "design/foo",
+            "--context", "my-thread",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["ref"] == "design/foo"
+        assert d["payload"]["context"] == "my-thread"
+
+    def test_cite_persists_as_collect_fold_with_refs(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Cite facts land as collect-fold items with _refs populated."""
+        home = tmp_path / "home"
+        vertex_path = self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setenv("LOOPS_OBSERVER", "tester")
+        monkeypatch.chdir(tmp_path)
+
+        rc = main(["cite", "project", "design/a", "thread/b"])
+        out = capsys.readouterr()
+        assert rc == 0, f"cite 1 failed: stdout={out.out!r} stderr={out.err!r}"
+        rc = main(["cite", "project", "design/a"])
+        out = capsys.readouterr()
+        assert rc == 0, f"cite 2 failed: stdout={out.out!r} stderr={out.err!r}"
+
+        from engine import vertex_fold
+        data = vertex_fold(vertex_path, observer=None)
+        cite_section = next((s for s in data.sections if s.kind == "cite"), None)
+        assert cite_section is not None
+        assert cite_section.fold_type == "collect"
+        assert len(cite_section.items) == 2
+        assert cite_section.items[0].refs == ("design/a", "thread/b")
+        assert cite_section.items[1].refs == ("design/a",)
 
 
 class TestObserverResolution:

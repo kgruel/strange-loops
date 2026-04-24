@@ -55,11 +55,24 @@ def _make_sum(target: str, value_field: str) -> Callable[[dict, dict], None]:
 
 
 def _make_collect(target: str, max_size: int) -> Callable[[dict, dict], None]:
-    """Append payload to state[target] list, bounded by max_size."""
+    """Append payload to state[target] list, bounded by max_size.
+
+    Extracts the reserved ``ref`` payload field (comma-separated) into ``_refs``
+    on the appended entry — mirrors the ref-accumulation behavior in
+    ``_make_upsert`` so collect-fold items also contribute to inbound ref
+    counts. Ref semantics are per-item (each collect entry carries its own
+    refs); there is no cross-item accumulation like the upsert set-union.
+    """
     def fold(state: dict, payload: dict) -> None:
         items = state[target]
         # Convert to dict in case payload is MappingProxyType
-        items.append(dict(payload))
+        entry = dict(payload)
+        ref_val = entry.pop("ref", "")
+        if ref_val:
+            refs = {r.strip() for r in str(ref_val).split(",") if r.strip()}
+            if refs:
+                entry["_refs"] = sorted(refs)
+        items.append(entry)
         if max_size and len(items) > max_size:
             state[target] = items[-max_size:]
     return fold

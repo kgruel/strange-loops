@@ -15,18 +15,34 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
 
     Any KEY=VALUE tokens become payload entries. Any trailing non-key=value
     tokens are joined with spaces into payload["message"].
+
+    The ``ref`` key is special: repeated ``ref=X`` occurrences accumulate into
+    a single comma-separated value (matching the downstream fold convention
+    in ``_make_upsert`` / ``_make_collect``). Both ``ref=A,B`` and
+    ``ref=A ref=B`` produce the same payload. This dissolves a long-lived
+    footgun where argparse-style dict-overwrite silently dropped all but
+    the last ``ref=`` occurrence.
     """
     payload: dict[str, str] = {}
+    refs_accum: list[str] = []  # preserve order; dedup-on-insert
     message_parts: list[str] = []
 
     for item in parts:
         if "=" in item:
             key, _, value = item.partition("=")
             if key.isidentifier():
+                if key == "ref":
+                    for r in value.split(","):
+                        r = r.strip()
+                        if r and r not in refs_accum:
+                            refs_accum.append(r)
+                    continue
                 payload[key] = value
                 continue
         message_parts.append(item)
 
+    if refs_accum:
+        payload["ref"] = ",".join(refs_accum)
     if message_parts:
         payload["message"] = " ".join(message_parts)
 

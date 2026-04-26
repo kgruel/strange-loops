@@ -1,17 +1,20 @@
 """Session landing lens — window-framed view of the accumulated vertex.
 
-The view you get when you land in a session. Composes two shapes:
+The view you get when you land in a session. Composes three shapes:
 
-1. **Window header** — what moved in the most recent tick window
-   (density, compression, per-kind deltas). The window IS the attention
-   frame: it's what happened since the last boundary fired.
+1. **LANDING header** — the slice you're landing into: most-recent-closed
+   tick window's density, compression, and per-kind deltas. Named for
+   purpose, not temporal position — at session_start the open window is
+   empty by definition, so "the window you arrive into" IS the slice
+   that just closed. The open-window bridge (``_compute_marks``) handles
+   any post-close emissions so they still surface as updated.
 
-2. **History strip** — compact row per prior window for orientation.
+2. **HISTORY strip** — compact row per prior window for orientation.
    Replaces the bash-era ``--ticks --since 3d | head -15`` stanza with
    a native render; each row is one TickWindow's identity + delta.
 
 3. **Accumulated, focus-filtered** — the standing threads / tasks /
-   decisions in the vertex, with items whose keys appear in the current
+   decisions in the vertex, with items whose keys appear in the landing
    window's ``added_keys`` / ``updated_keys`` marked and pulled to the
    top of their section. Untouched items de-emphasize at SUMMARY zoom.
 
@@ -46,7 +49,7 @@ if TYPE_CHECKING:
 # Config
 # ---------------------------------------------------------------------------
 
-# Hook-mechanical kinds — exclude from WINDOW/HISTORY chip strips. These are
+# Hook-mechanical kinds — exclude from LANDING/HISTORY chip strips. These are
 # emitted by session lifecycle / observation plumbing rather than by domain
 # work. They inflate kind chips and crowd out signal. Note: ``cite`` is *not*
 # in here — it's a deliberate attention signal, worth surfacing as activity.
@@ -242,7 +245,7 @@ def fetch(vertex_path: Path, **kwargs) -> LandingData:
 # ---------------------------------------------------------------------------
 
 def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Block:
-    """Render the landing view: window header + history + focus-filtered body."""
+    """Render the landing view: landing header + history + focus-filtered body."""
     fp = _default_fold_palette()
     windows = data.windows
     fold = data.fold
@@ -250,7 +253,7 @@ def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Blo
 
     blocks: list[Block] = []
 
-    # --- 1. Window header (landing window) ---
+    # --- 1. LANDING header (most-recent-closed window) ---
     if windows:
         current: "TickWindow" = windows[0]
         blocks.append(_render_window_header(current, observer, fp, width))
@@ -275,14 +278,14 @@ def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Blo
 
 
 # ---------------------------------------------------------------------------
-# Block 1 — window header
+# Block 1 — LANDING header
 # ---------------------------------------------------------------------------
 
 def _render_window_header(
     window: "TickWindow", observer: str, fp: FoldPalette, width: int | None,
 ) -> Block:
-    """Single window as dashboard: trigger, bar, counts, per-kind chips."""
-    rows: list[Block] = [_section_header("WINDOW", fp, width)]
+    """Landing window as dashboard: trigger, bar, counts, per-kind chips."""
+    rows: list[Block] = [_section_header("LANDING", fp, width)]
 
     # Line 1: trigger · recency · duration
     trigger = _compact_trigger(window.boundary_trigger or window.name, observer)

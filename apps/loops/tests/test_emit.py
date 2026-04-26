@@ -538,6 +538,64 @@ class TestCite:
         assert d["payload"]["ref"] == "design/foo"
         assert d["payload"]["context"] == "my-thread"
 
+    def test_cite_message_becomes_payload_field(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """--message lands as a payload field, not a ref. Closes the partial-information gap."""
+        home = tmp_path / "home"
+        self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "cite", "project", "design/foo",
+            "--message", "informs the salience composition",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["ref"] == "design/foo"
+        assert d["payload"]["message"] == "informs the salience composition"
+
+    def test_cite_message_short_flag(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """-m is the short form of --message."""
+        home = tmp_path / "home"
+        self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "cite", "project", "design/foo",
+            "-m", "short form",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["message"] == "short form"
+
+    def test_cite_message_and_context_coexist(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """--message and --context land as distinct payload fields."""
+        home = tmp_path / "home"
+        self._write_cite_vertex(home)
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "cite", "project", "design/foo",
+            "--context", "my-thread",
+            "--message", "rope-winding moment",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["ref"] == "design/foo"
+        assert d["payload"]["context"] == "my-thread"
+        assert d["payload"]["message"] == "rope-winding moment"
+
     def test_cite_persists_as_collect_fold_with_refs(
         self, tmp_path, monkeypatch, capsys,
     ):

@@ -71,11 +71,39 @@ _TASK_CAP = 10
 _PLAN_CAP = 3              # plans are heavy — few should be in flight
 _BODY_LIMIT = 200
 
+def _cap(base: int, zoom: "Zoom") -> int:
+    """Scale a section cap by zoom level — depth governs both detail and count.
+
+    -q (MINIMAL): halve the budget — minimal orient.
+    default (SUMMARY): base — comfort zone.
+    -v (DETAILED): double — expanded view.
+    -vv (FULL): effectively unbounded — show all.
+
+    Resolves verbosity-fidelity-review symptom 4 ('-v / -vv expand fact
+    detail but don't expand structural truncation'): one knob, two effects,
+    both meaning give-me-more. Per rendering/salience-driven-display.
+    """
+    z = int(zoom)
+    if z <= 0:
+        return max(1, base // 2)
+    if z == 1:
+        return base
+    if z == 2:
+        return base * 2
+    return 10000  # FULL/-vv — effectively unbounded
+
+
 # Focus-filter marks
 _MARK_ADDED = "added"
 _MARK_UPDATED = "updated"
+_MARK_CITED = "cited"
 _MARK_STALE = "stale"
-_MARK_GLYPH = {_MARK_ADDED: "✦", _MARK_UPDATED: "◦", _MARK_STALE: "⊘"}
+_MARK_GLYPH = {
+    _MARK_ADDED: "✦",
+    _MARK_UPDATED: "◦",
+    _MARK_CITED: "⊙",
+    _MARK_STALE: "⊘",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -102,11 +130,21 @@ class LandingData:
     derived from fold + clock; drives ⊘ marks on the accumulated body.
     Clock-derived: same store, different time → different stale_keys.
     Acknowledged in design/stale-as-focus-filter.
+
+    ``cite_keys`` is the set of ref strings carried by cite items emitted
+    within the landing window's time range. Fourth instance of
+    derived-keys-as-focus-filter: items targeted by cites in the current
+    window get the ⊙ "cited" mark. Stored as raw ref strings (kind/key or
+    bare) — dual-form matched against item full keys at mark-resolution
+    time, mirroring _inbound_count's approach. See
+    design/cite-as-partial-information-primitive and
+    rendering/salience-driven-display.
     """
     windows: tuple
     fold: "FoldState"
     observer: str = ""
     stale_keys: frozenset[tuple[str, str]] = frozenset()
+    cite_keys: frozenset[str] = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +204,36 @@ def fetch(vertex_path: Path, **kwargs) -> LandingData:
                 continue
             stale.add((section.kind, key))
 
+    # Compute cite_keys: refs carried by cite items in the landing window.
+    # Stored as raw ref strings (the form they were emitted in). Dual-form
+    # matching happens at mark-resolution time (see _compute_marks).
+    # Window range: [window.since, window.ts]. Falls back to all-time when
+    # no window exists (fresh vertex), which is a no-op since cite_keys is
+    # only consulted to mark items.
+    cite_keys: set[str] = set()
+    landing_window = windows[0] if windows else None
+    win_since = landing_window.since if landing_window else None
+    win_ts = landing_window.ts if landing_window else None
+    for section in fold.sections:
+        if section.kind != "cite":
+            continue
+        for item in section.items:
+            if item.ts is None:
+                continue
+            if win_since is not None and item.ts < win_since:
+                continue
+            if win_ts is not None and item.ts > win_ts:
+                continue
+            for ref in item.refs:
+                if ref:
+                    cite_keys.add(ref)
+
     return LandingData(
         windows=windows,
         fold=fold,
         observer=self_id or "",
         stale_keys=frozenset(stale),
+        cite_keys=frozenset(cite_keys),
     )
 
 
@@ -195,11 +258,11 @@ def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Blo
     # --- 2. History strip (prior windows) ---
     if len(windows) > 1:
         blocks.append(Block.text("", Style(), width=width))
-        blocks.append(_render_history_strip(windows[1:], observer, fp, width))
+        blocks.append(_render_history_strip(windows[1:], observer, zoom, fp, width))
 
     # --- 3. Accumulated body, focus-filtered by window deltas + stale ---
     current_window = windows[0] if windows else None
-    marks = _compute_marks(current_window, data.stale_keys)
+    marks = _compute_marks(current_window, data.stale_keys, data.cite_keys, fold)
     body = _render_accumulated(fold, marks, zoom, fp, width)
     if body is not None:
         if blocks:
@@ -291,12 +354,13 @@ def _compression_bar(window: "TickWindow", bar_width: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _render_history_strip(
-    windows: tuple, observer: str, fp: FoldPalette, width: int | None,
+    windows: tuple, observer: str, zoom: "Zoom",
+    fp: FoldPalette, width: int | None,
 ) -> Block:
     """Row-per-window for prior ticks. Orientation signal, not decoration."""
     rows: list[Block] = [_section_header("HISTORY", fp, width)]
 
-    shown = windows[:_HISTORY_CAP]
+    shown = windows[:_cap(_HISTORY_CAP, zoom)]
     for w in shown:
         recency = _recency_tag(w.ts) or "—"
         trigger = _compact_trigger(w.boundary_trigger or w.name, observer)
@@ -351,13 +415,13 @@ def _render_accumulated(
     # because an open plan is the strongest "what we're executing now"
     # signal — answers landing's primary question before tasks/threads.
     if "plan" in section_map:
-        b = _render_plans(section_map["plan"], marks, fp, width)
+        b = _render_plans(section_map["plan"], marks, zoom, fp, width)
         if b:
             blocks.append(b)
 
     # --- Tier 1: Working context (tasks) ---
     if "task" in section_map:
-        b = _render_tasks(section_map["task"], marks, fp, width)
+        b = _render_tasks(section_map["task"], marks, zoom, fp, width)
         if b:
             if blocks:
                 blocks.append(Block.text("", Style(), width=width))
@@ -365,7 +429,7 @@ def _render_accumulated(
 
     # --- Tier 2: Orientation (threads) ---
     if "thread" in section_map:
-        b = _render_threads(section_map["thread"], marks, fp, width)
+        b = _render_threads(section_map["thread"], marks, zoom, fp, width)
         if b:
             if blocks:
                 blocks.append(Block.text("", Style(), width=width))
@@ -390,7 +454,8 @@ def _render_accumulated(
 # ---------------------------------------------------------------------------
 
 def _render_tasks(
-    section: "FoldSection", marks: dict, fp: FoldPalette, width: int | None,
+    section: "FoldSection", marks: dict, zoom: "Zoom",
+    fp: FoldPalette, width: int | None,
 ) -> Block | None:
     """Active tasks. Marked items sort first; others follow by recency."""
     inactive = RESOLVED_STATUSES | {"parked"}
@@ -405,7 +470,7 @@ def _render_tasks(
             -(i.ts or 0),
         ),
     )
-    shown = sorted_items[:_TASK_CAP]
+    shown = sorted_items[:_cap(_TASK_CAP, zoom)]
     remaining = len(sorted_items) - len(shown)
 
     rows: list[Block] = [_section_header("TASK", fp, width)]
@@ -420,7 +485,8 @@ def _render_tasks(
 
 
 def _render_plans(
-    section: "FoldSection", marks: dict, fp: FoldPalette, width: int | None,
+    section: "FoldSection", marks: dict, zoom: "Zoom",
+    fp: FoldPalette, width: int | None,
 ) -> Block | None:
     """Active plans — multi-step orchestration. Heavier than tasks, fewer expected.
 
@@ -444,7 +510,7 @@ def _render_plans(
             -(i.ts or 0),
         ),
     )
-    shown = sorted_items[:_PLAN_CAP]
+    shown = sorted_items[:_cap(_PLAN_CAP, zoom)]
     remaining = len(sorted_items) - len(shown)
 
     rows: list[Block] = [_section_header("PLAN", fp, width)]
@@ -479,7 +545,8 @@ def _render_plans(
 
 
 def _render_threads(
-    section: "FoldSection", marks: dict, fp: FoldPalette, width: int | None,
+    section: "FoldSection", marks: dict, zoom: "Zoom",
+    fp: FoldPalette, width: int | None,
 ) -> Block | None:
     """Open threads with body; parked as compact name list; focus marks applied."""
     active = [i for i in section.items if i.payload.get("status") not in RESOLVED_STATUSES]
@@ -521,8 +588,9 @@ def _render_threads(
 
     if parked_items:
         names = [_label(i, section.key_field) for i in parked_items]
-        if len(names) > _PARKED_CAP:
-            text = ", ".join(names[:_PARKED_CAP]) + f", ({len(names) - _PARKED_CAP} more)"
+        parked_cap = _cap(_PARKED_CAP, zoom)
+        if len(names) > parked_cap:
+            text = ", ".join(names[:parked_cap]) + f", ({len(names) - parked_cap} more)"
         else:
             text = ", ".join(names)
         rows.append(join_horizontal(
@@ -576,9 +644,11 @@ def _render_decisions(
     rows: list[Block] = [_section_header(kind.upper(), fp, width)]
     groups_shown = 0
     show_all_bodies = int(zoom) >= 2  # DETAILED/FULL: no de-emphasis
+    group_cap = _cap(_DECISION_GROUP_CAP, zoom)
+    body_cap = _cap(_DECISION_BODY_CAP, zoom)
 
     for ns, group_items in sorted_groups:
-        if groups_shown >= _DECISION_GROUP_CAP:
+        if groups_shown >= group_cap:
             remaining_groups = len(sorted_groups) - groups_shown
             remaining_items = sum(len(g) for _, g in sorted_groups[groups_shown:])
             rows.append(Block.text(
@@ -614,7 +684,7 @@ def _render_decisions(
             show_body = (
                 mark is not None
                 or show_all_bodies
-                or (sal >= _SALIENCE_BODY_THRESHOLD and body_shown < _DECISION_BODY_CAP)
+                or (sal >= _SALIENCE_BODY_THRESHOLD and body_shown < body_cap)
             )
 
             if show_body:
@@ -664,6 +734,7 @@ def _render_decisions_flat(
     body_shown = 0
     name_only: list[str] = []
     show_all_bodies = int(zoom) >= 2
+    flat_body_cap = _cap(_DECISION_BODY_CAP * 2, zoom)
 
     for item in sorted_items:
         lbl = _label(item, key_field)
@@ -673,7 +744,7 @@ def _render_decisions_flat(
         show_body = (
             mark is not None
             or show_all_bodies
-            or (sal >= _SALIENCE_BODY_THRESHOLD and body_shown < _DECISION_BODY_CAP * 2)
+            or (sal >= _SALIENCE_BODY_THRESHOLD and body_shown < flat_body_cap)
         )
 
         if show_body:
@@ -711,18 +782,30 @@ def _render_decisions_flat(
 def _compute_marks(
     window: "TickWindow | None",
     stale_keys: frozenset[tuple[str, str]],
+    cite_keys: frozenset[str] = frozenset(),
+    fold: "FoldState | None" = None,
 ) -> dict[tuple[str, str], str]:
-    """(kind, key) → 'added' | 'updated' | 'stale'. Drives salience marks.
+    """(kind, key) → 'added' | 'updated' | 'cited' | 'stale'. Drives salience marks.
 
-    Three derived key sets composed by precedence (added > updated > stale):
-    - TickWindow.added_keys: items new in the current window.
-    - TickWindow.updated_keys: items touched in the current window.
+    Five derived key sets composed by precedence (added > updated > cited > stale):
+    - TickWindow.added_keys: items new in the closed landing window.
+    - TickWindow.updated_keys: items touched in the closed landing window.
+    - cite_keys: items targeted by cites in the closed landing window
+      (dual-form matched against fold items, kind-qualified or bare).
+    - fresh-since-close: items with ts > window.ts — post-boundary emits
+      that haven't yet been captured in any closed window's deltas.
+      Marked _MARK_UPDATED so mid-session emissions don't fall into the
+      truncation tail. Instance #5 of derived-keys-as-focus-filter;
+      bridges the open-window gap (current-open-window-semantics).
     - stale_keys: items open but untouched in >7d (clock-derived).
 
-    Each is an instance of derived-keys-as-focus-filter — bounded
-    (kind, key) sets that mark the accumulated view by membership.
-    Composition order is intentional: recent activity outranks stale flags
-    so a stale item that just got touched displays as ✦/◦, not ⊘.
+    Each is an instance of derived-keys-as-focus-filter — bounded sets that
+    mark the accumulated view by membership. Composition order is
+    intentional: direct touches (added/updated) outrank inbound attention
+    (cited) which outranks staleness — a stale item that just got cited
+    displays as ⊙, dissolving the ⊘ in real time. Closed-window deltas
+    outrank fresh-since-close so a re-emit's prior closed-window mark wins
+    (avoids marking the same item twice across boundaries).
     """
     marks: dict[tuple[str, str], str] = {}
     if window is not None:
@@ -732,8 +815,39 @@ def _compute_marks(
         for kind, keys in window.updated_keys.items():
             for k in keys:
                 marks.setdefault((kind, k), _MARK_UPDATED)
+    if cite_keys and fold is not None:
+        # Dual-form match: cite refs may be emitted as 'kind/key' or bare 'key'.
+        # Walk fold items and check both forms against cite_keys.
+        for section in fold.sections:
+            kf = section.key_field
+            if not kf:
+                continue
+            for item in section.items:
+                key = str(item.payload.get(kf, ""))
+                if not key:
+                    continue
+                full = f"{section.kind}/{key}"
+                if full in cite_keys or key in cite_keys:
+                    marks.setdefault((section.kind, key), _MARK_CITED)
+    if window is not None and window.ts and fold is not None:
+        # Fresh-since-close: items emitted after the landing window's
+        # boundary are mid-session and have no mark from window deltas yet.
+        # Mark as UPDATED (not ADDED) — we can't distinguish brand-new from
+        # re-emit without prior fold state. The next boundary will refine.
+        boundary_ts = window.ts
+        for section in fold.sections:
+            kf = section.key_field
+            if not kf:
+                continue
+            for item in section.items:
+                if item.ts is None or item.ts <= boundary_ts:
+                    continue
+                key = str(item.payload.get(kf, ""))
+                if not key:
+                    continue
+                marks.setdefault((section.kind, key), _MARK_UPDATED)
     for key_tuple in stale_keys:
-        marks.setdefault(key_tuple, _MARK_STALE)  # added/updated win
+        marks.setdefault(key_tuple, _MARK_STALE)  # higher-priority marks win
     return marks
 
 
@@ -752,16 +866,19 @@ def _item_mark(
 def _mark_priority(
     kind: str, item: "FoldItem", key_field: str | None, marks: dict,
 ) -> int:
-    """Sort weight from focus mark: added=3, updated=2, stale=1, unmarked=0.
+    """Sort weight: added=4, updated=3, cited=2, stale=1, unmarked=0.
 
-    Recent activity outranks stale flags — new/touched items pull to the top
-    of their section, stale-open items pull above untouched but stay below
-    anything moving. Stale is a salience signal, not an escalation.
+    Direct touches (added/updated) outrank inbound attention (cited) which
+    outranks staleness. New/touched items pull to the top of their section;
+    cited items pull above stale (just got attention); stale-open pulls
+    above untouched. All four are salience signals, not escalations.
     """
     m = _item_mark(kind, item, key_field, marks)
     if m == _MARK_ADDED:
-        return 3
+        return 4
     if m == _MARK_UPDATED:
+        return 3
+    if m == _MARK_CITED:
         return 2
     if m == _MARK_STALE:
         return 1
@@ -769,9 +886,16 @@ def _mark_priority(
 
 
 def _mark_style(mark: str, fp: FoldPalette) -> Style:
-    """Palette role for each mark kind."""
+    """Palette role for each mark kind.
+
+    cited shares ref_outbound's role since cite-count is structurally
+    inbound-ref count of kind=cite — same family of signal as outbound
+    ref edges in the fold lens, just routed through the cite primitive.
+    """
     if mark == _MARK_ADDED:
         return fp.ref_indicator
+    if mark == _MARK_CITED:
+        return fp.ref_outbound
     if mark == _MARK_STALE:
         return fp.stale_indicator
     return fp.n_indicator

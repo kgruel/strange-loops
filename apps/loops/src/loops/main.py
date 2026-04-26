@@ -130,7 +130,7 @@ def _run_cite(
 ) -> int:
     """Emit a cite fact — a reference-only attention signal, no key, no body.
 
-    ``loops cite [vertex] REF1 REF2 ... [--context NAME] [--dry-run]``
+    ``loops cite [vertex] REF1 REF2 ... [--context NAME] [-m MESSAGE] [--dry-run]``
 
     Capture what informed the current reasoning: every ref named here
     accumulates an inbound count on the target item, boosting its salience
@@ -138,10 +138,17 @@ def _run_cite(
     — during design sessions, when prior work is referenced, it's
     *cited* (the target is informing the current work), not merely pinged.
 
+    The optional ``--message`` / ``-m`` carries in-the-moment context
+    alongside the ref pointer — closing the partial-information gap per
+    ``design/cite-as-partial-information-primitive``. Without a message
+    the cite is a bare attention signal; with one it carries the thought
+    that prompted the cite, surfaced when the target is read.
+
     Dissolves into ``emit`` with kind=cite — the positional refs translate
-    to a single ``ref=R1,R2,...`` payload and the collect-fold handles the
-    rest. See ``design/cite-as-attention-signal`` and
-    ``design/derived-keys-as-focus-filter`` for rationale.
+    to a single ``ref=R1,R2,...`` payload, ``--message`` becomes a
+    ``message=`` payload field, and the collect-fold handles the rest.
+    See ``design/cite-as-attention-signal``, ``design/cite-as-partial-information-primitive``,
+    and ``design/derived-keys-as-focus-filter`` for rationale.
     """
     import argparse
 
@@ -157,6 +164,12 @@ def _run_cite(
         "--context",
         default=None,
         help="Optional thread or task name to tag the citation",
+    )
+    parser.add_argument(
+        "-m",
+        "--message",
+        default=None,
+        help="Optional in-the-moment context for the citation",
     )
     parser.add_argument(
         "--dry-run",
@@ -179,6 +192,8 @@ def _run_cite(
         emit_argv.append(f"ref={r}")
     if args.context:
         emit_argv.append(f"context={args.context}")
+    if args.message:
+        emit_argv.append(f"message={args.message}")
     if args.dry_run:
         emit_argv.append("--dry-run")
 
@@ -1218,7 +1233,7 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "sync", "Run sources (cadence-gated)", detail="[vertex] [--force] [--var KEY=VALUE]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
-            HelpFlag(None, "cite", "Attention signal — inform current work with prior refs", detail="[vertex] <ref1> <ref2> ... [--context NAME]"),
+            HelpFlag(None, "cite", "Attention signal — inform current work with prior refs", detail="[vertex] <ref1> <ref2> ... [--context NAME] [-m MSG]"),
         ),
     )
 

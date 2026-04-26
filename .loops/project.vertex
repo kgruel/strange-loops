@@ -6,6 +6,7 @@ loops {
   thread   { fold { items "by" "name" } }
   change   { fold { items "collect" 20 } }
   task     { fold { items "by" "name" } }
+  plan     { fold { items "by" "name" } }
   session  { fold { items "by" "name" } }
   log      { fold { items "collect" 20 } }
   cite     { fold { items "collect" 0 } }

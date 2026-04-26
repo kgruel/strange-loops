@@ -63,6 +63,7 @@ class FoldPalette:
     ref_edge_out: Style     # "→ decision/auth" — outbound edge expansion
     meta: Style             # metadata fields at FULL zoom
     unfolded: Style         # "Unfolded: 26 observation"
+    stale_indicator: Style  # "⊘" — open-but-untouched (>7d) work items
 
 
 def _default_fold_palette() -> FoldPalette:
@@ -84,6 +85,7 @@ def _default_fold_palette() -> FoldPalette:
         ref_edge_out=Style(fg=245),       # gray — outbound edges (→ target), dimmer
         meta=p.muted,
         unfolded=p.muted,
+        stale_indicator=Style(fg=208),    # orange — stale-open work (peer to ✦/◦, not escalation)
     )
 
 

@@ -98,11 +98,19 @@ def fold_view(
     data: FoldState, zoom: Zoom, width: int | None,
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
+    lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render fold data at the given zoom level.
 
     visible gates which concern layers are rendered:
       - "refs": show per-item edge expansion (← inbound, → outbound)
+
+    Density budgets (0 = unlimited):
+      lines: max items shown per section/group. Items beyond the budget
+             collapse into "(N more)" footers. Salience ordering applies first.
+      chars: max display width for body text. Caps the body budget that
+             width-based truncation already enforces — useful for context-
+             window economics where total tokens matter more than terminal fit.
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
@@ -167,6 +175,7 @@ def fold_view(
             inbound=inbound, inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
+            lines=lines, chars=chars,
         )
         blocks.append(section_block)
 
@@ -211,6 +220,7 @@ def _render_section(
     fp: FoldPalette,
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
+    lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render a section's items — grouped by namespace or flat."""
     is_by = section.fold_type == "by"
@@ -222,6 +232,7 @@ def _render_section(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
+            lines=lines, chars=chars,
         )
     else:
         return _render_flat(
@@ -231,6 +242,7 @@ def _render_section(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
+            lines=lines, chars=chars,
         )
 
 
@@ -255,6 +267,7 @@ def _render_grouped(
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
     section_kind: str = "",
+    lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render by-fold items grouped by namespace prefix."""
     # When --refs is active, filter to only connected items
@@ -300,6 +313,10 @@ def _render_grouped(
             if not show_items:
                 show_items = sorted_items[:1]
 
+        # Apply lines budget (highest-salience kept; rest collapse to "more")
+        if lines > 0 and len(show_items) > lines:
+            show_items = list(show_items)[:lines]
+
         for item in show_items:
             blocks.append(_render_item_line(
                 item, key_field, zoom, fmt, width,
@@ -307,6 +324,7 @@ def _render_grouped(
                 facts_by_key=facts_by_key,
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
+                chars=chars,
             ))
 
         remaining = len(sorted_items) - len(show_items)
@@ -338,6 +356,7 @@ def _render_flat(
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
     section_kind: str = "",
+    lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render items as a flat list — sorted by salience for by-folds."""
     is_by = fold_type == "by"
@@ -359,6 +378,12 @@ def _render_flat(
     else:
         sorted_items = items
 
+    # Apply lines budget (highest-salience first for by-folds; chronological
+    # head for collect folds — both surface the most-relevant first)
+    total = len(sorted_items)
+    if lines > 0 and total > lines:
+        sorted_items = list(sorted_items)[:lines]
+
     blocks: list[Block] = []
     for item in sorted_items:
         blocks.append(_render_item_line(
@@ -367,6 +392,13 @@ def _render_flat(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
+            chars=chars,
+        ))
+
+    remaining = total - len(sorted_items)
+    if remaining > 0:
+        blocks.append(Block.text(
+            f"  ({remaining} more)", fp.collapse, width=width,
         ))
 
     return join_vertical(*blocks) if blocks else Block.empty(0, 0)
@@ -394,6 +426,7 @@ def _render_item_line(
     strip_namespace: bool = False,
     is_by: bool = True,
     section_kind: str = "",
+    chars: int = 0,
 ) -> Block:
     """Render a single fold item as a composed Block with multi-style.
 
@@ -446,17 +479,26 @@ def _render_item_line(
     truncation_hint = ""
 
     if body:
+        # Per-body chars budget: caps width-based budget, or stands alone when piped.
+        # Width-based truncation already accounts for badge/label fixed length;
+        # chars further constrains body text directly.
         if width is not None:
             # Reserve space for potential truncation hint " [+NNNc]"
             hint_reserve = 10
             body_budget = max(10, width - fixed_len - hint_reserve)
+            if chars > 0:
+                body_budget = min(body_budget, chars)
             if body_len > body_budget:
                 body_text = _truncate(body, body_budget)
                 truncation_hint = f" [+{body_len - body_budget}c]"
             else:
                 body_text = body
         else:
-            body_text = body
+            if chars > 0 and body_len > chars:
+                body_text = _truncate(body, chars)
+                truncation_hint = f" [+{body_len - chars}c]"
+            else:
+                body_text = body
     elif item.ts and not n_text and not ref_in_text:
         body_text = ""
     else:

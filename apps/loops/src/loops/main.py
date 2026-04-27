@@ -490,6 +490,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             vertex_name=_vertex_name(vertex_path),
             vertex_path=str(vertex_path) if vertex_path else None,
             visible=ctx.fidelity.visible,
+            lines=ctx.fidelity.lines,
+            chars=ctx.fidelity.chars,
         )
 
     def _add_fold_args(parser):
@@ -571,7 +573,10 @@ def _is_static_plain(rest: list[str]) -> bool:
     return has_static and has_plain and not has_help and not has_json and not has_live and not has_interactive
 
 
-def _render_fold_plain(data: Any, zoom_level: int, width: int) -> str:
+def _render_fold_plain(
+    data: Any, zoom_level: int, width: int,
+    *, lines: int = 0, chars: int = 0,
+) -> str:
     """Render fold state as plain text without importing painted (~15ms saved).
 
     Produces identical output to fold_view + print_block(use_ansi=False)
@@ -580,6 +585,10 @@ def _render_fold_plain(data: Any, zoom_level: int, width: int) -> str:
 
     This avoids the painted.core.block → _text_width → wcwidth import chain
     (~13ms) and the writer/icon_set imports (~2ms).
+
+    Density budgets (0 = unlimited):
+      lines: max items shown per section. Items beyond budget collapse to "(N more)".
+      chars: max display width for body text. Caps width-based budget.
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
@@ -591,20 +600,24 @@ def _render_fold_plain(data: Any, zoom_level: int, width: int) -> str:
         return ", ".join(parts)
 
     # SUMMARY: section headers + item lines
-    lines: list[str] = []
+    out: list[str] = []
     for s in populated:
-        if lines:
-            lines.append("")
+        if out:
+            out.append("")
 
         # Header
         label = s.kind.title()
         if not s.kind.endswith("s"):
             label += "s"
-        lines.append(f"{label} ({s.count}):")
+        out.append(f"{label} ({s.count}):")
 
-        # Items
+        # Items — apply lines budget
         is_by = s.fold_type == "by"
-        for item in s.items:
+        all_items = list(s.items)
+        total = len(all_items)
+        shown_items = all_items[:lines] if lines > 0 and total > lines else all_items
+
+        for item in shown_items:
             payload = item.payload
             if is_by and s.key_field:
                 item_label = str(payload.get(s.key_field, ""))
@@ -633,14 +646,20 @@ def _render_fold_plain(data: Any, zoom_level: int, width: int) -> str:
                 max_body = width - reserved
                 if max_body < 10:
                     max_body = 10
+                if chars > 0:
+                    max_body = min(max_body, chars)
                 if len(body) > max_body:
                     body = body[: max_body - 1] + "\u2026"
                 line = f"  {item_label}: {body}"
             else:
                 line = f"  {item_label}"
-            lines.append(line)
+            out.append(line)
 
-    return "\n".join(lines)
+        remaining = total - len(shown_items)
+        if remaining > 0:
+            out.append(f"  ({remaining} more)")
+
+    return "\n".join(out)
 
 
 def _run_fold_fast(
@@ -660,13 +679,40 @@ def _run_fold_fast(
 
     # Resolve zoom from rest args (lightweight, no painted import)
     zoom_level = 1  # SUMMARY default
-    for arg in rest:
+    max_lines = 0
+    max_chars = 0
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
         if arg == "-q" or arg == "--quiet":
             zoom_level = 0
         elif arg == "-vv":
             zoom_level = 3
         elif arg == "-v" or arg == "--verbose":
             zoom_level = 2
+        elif arg == "--max-lines" and i + 1 < len(rest):
+            try:
+                max_lines = int(rest[i + 1])
+            except ValueError:
+                pass
+            i += 1
+        elif arg.startswith("--max-lines="):
+            try:
+                max_lines = int(arg.split("=", 1)[1])
+            except ValueError:
+                pass
+        elif arg == "--max-chars" and i + 1 < len(rest):
+            try:
+                max_chars = int(rest[i + 1])
+            except ValueError:
+                pass
+            i += 1
+        elif arg.startswith("--max-chars="):
+            try:
+                max_chars = int(arg.split("=", 1)[1])
+            except ValueError:
+                pass
+        i += 1
 
     # Fetch data
     if vertex_path is None:
@@ -702,7 +748,10 @@ def _run_fold_fast(
     # declared fetch shapes go through painted regardless of zoom.
     if known.lens is None and lens_fetch is None and zoom_level <= 1:
         width = shutil.get_terminal_size().columns
-        text = _render_fold_plain(data, zoom_level, width)
+        text = _render_fold_plain(
+            data, zoom_level, width,
+            lines=max_lines, chars=max_chars,
+        )
         print(text)
         return 0
 

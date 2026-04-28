@@ -61,6 +61,8 @@ def make_fetcher(args=None) -> Callable[[], dict[str, dict]]:
                 vertex=program.vertex,
                 sources=[(s, c) for s, c in program.sources if s.kind == stack],
                 expected_ticks=[stack],
+                path=program.path,
+                run_dispatcher=program.run_dispatcher,
             )
         result = program.sync(force=True)
         results = {t.name: t.payload for t in result.ticks}

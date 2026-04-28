@@ -162,8 +162,8 @@ class TestVertexWrite:
         vpath = tmp_path / "full.vertex"
         program = load_vertex_program(vpath, validate_ast=False)
         fact = Fact(kind="event", ts=1.0, payload={"msg": "hello"}, observer="test")
-        program.vertex.receive(fact)
-        if program.vertex._store:
+        program.receive(fact)
+        if program.has_store:
             program.vertex._store.close()
 
         from engine import vertex_facts

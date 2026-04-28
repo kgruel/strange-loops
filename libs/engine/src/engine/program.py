@@ -14,29 +14,81 @@ from lang import parse_vertex_file
 from lang.ast import SourceParams, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
-    from atoms import Source
+    from pathlib import Path
+    from typing import Any, Callable
+    from atoms import Fact, Source
     from .cadence import Cadence
     from .executor import SyncResult
     from .tick import Tick
     from .vertex import Vertex
 
 
+# Dispatcher contract: (command, tick_name, vertex_path) -> None.
+# Engine calls this when a tick with .run is born; implementation
+# (e.g. subprocess execution) lives in the consumer.
+RunDispatcher = "Callable[[str, str, Path], None]"
+
+
 class VertexProgram:
-    """A fully-materialized vertex plus its compiled sources with cadences."""
+    """A fully-materialized vertex plus its compiled sources with cadences.
 
-    __slots__ = ("vertex", "sources", "expected_ticks")
+    Carries an optional run_dispatcher callback. When set, ticks with
+    .run produced by receive() or sync() are dispatched at the place
+    they're born — no longer the caller's responsibility to remember.
+    """
 
-    def __init__(self, vertex: Vertex, sources: list[tuple[Source, Cadence]],
-                 expected_ticks: list[str]):
+    __slots__ = ("vertex", "sources", "expected_ticks", "path", "run_dispatcher")
+
+    def __init__(
+        self,
+        vertex: Vertex,
+        sources: list[tuple[Source, Cadence]],
+        expected_ticks: list[str],
+        *,
+        path: Path | None = None,
+        run_dispatcher: Callable[[str, str, Path], None] | None = None,
+    ):
         object.__setattr__(self, "vertex", vertex)
         object.__setattr__(self, "sources", sources)
         object.__setattr__(self, "expected_ticks", expected_ticks)
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "run_dispatcher", run_dispatcher)
 
     def __setattr__(self, name, value):
         raise AttributeError(f"cannot assign to field '{name}'")
 
     def __repr__(self):
         return f"VertexProgram(vertex={self.vertex!r}, sources={self.sources!r})"
+
+    @property
+    def name(self) -> str:
+        """Vertex name — exposed at program level so callers don't reach into .vertex."""
+        return self.vertex.name
+
+    @property
+    def has_store(self) -> bool:
+        """Whether the underlying vertex is backed by a durable store."""
+        return getattr(self.vertex, "_store", None) is not None
+
+    def _dispatch_tick(self, tick: Tick) -> None:
+        """Fire run_dispatcher for a tick with .run, if dispatcher and path are set."""
+        if self.run_dispatcher is None or self.path is None:
+            return
+        if not getattr(tick, "run", None):
+            return
+        self.run_dispatcher(tick.run, tick.name, self.path)
+
+    def receive(self, fact: Fact, grant: Any = None) -> Tick | None:
+        """Route a fact through the vertex; dispatch run-clause if the resulting tick has one.
+
+        Single-fact entry that consolidates ``vertex.receive(fact)`` with
+        run-clause dispatch. Use this in place of ``program.vertex.receive(fact)``
+        from CLI/app code so any registered dispatcher fires automatically.
+        """
+        tick = self.vertex.receive(fact, grant) if grant is not None else self.vertex.receive(fact)
+        if tick is not None:
+            self._dispatch_tick(tick)
+        return tick
 
     async def sync_async(
         self,
@@ -45,11 +97,14 @@ class VertexProgram:
         on_error: Callable | None = None,
         force: bool = False,
     ) -> SyncResult:
-        """One-shot sync: evaluate cadence, run qualifying sources."""
+        """One-shot sync: evaluate cadence, run qualifying sources, dispatch run-clauses."""
         from .executor import Executor
 
         executor = Executor(self.vertex, self.sources, on_error=on_error)
-        return await executor.sync_async(grant=grant, force=force)
+        result = await executor.sync_async(grant=grant, force=force)
+        for tick in result.ticks:
+            self._dispatch_tick(tick)
+        return result
 
     def sync(
         self,
@@ -116,6 +171,7 @@ def load_vertex_program(
     default_fold_override: FoldOverride | None = None,
     validate_ast: bool = True,
     skip_sources: bool = False,
+    run_dispatcher: Callable[[str, str, Path], None] | None = None,
 ) -> VertexProgram:
     """Load a .vertex file into a runnable (vertex, sources) program.
 
@@ -170,4 +226,10 @@ def load_vertex_program(
     expected_ticks = sorted(
         name for name, spec in compiled.specs.items() if spec.boundary is not None
     )
-    return VertexProgram(vertex=vertex, sources=sources, expected_ticks=expected_ticks)
+    return VertexProgram(
+        vertex=vertex,
+        sources=sources,
+        expected_ticks=expected_ticks,
+        path=vertex_path,
+        run_dispatcher=run_dispatcher,
+    )

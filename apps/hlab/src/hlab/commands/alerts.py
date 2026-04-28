@@ -30,6 +30,8 @@ def _load_program(show_targets: bool = False) -> VertexProgram:
             vertex=program.vertex,
             sources=[s for s in program.sources if s.kind != "targets"],
             expected_ticks=program.expected_ticks,
+            path=program.path,
+            run_dispatcher=program.run_dispatcher,
         )
     return program
 

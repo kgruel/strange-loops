@@ -94,15 +94,13 @@ def _run_sync_aggregate(
         children: list[dict] = []
 
         for child_path in child_paths:
-            child_program = load_vertex_program(child_path, vars=vars)
+            child_program = load_vertex_program(
+                child_path, vars=vars, run_dispatcher=_execute_boundary_run,
+            )
             if not child_program.sources:
                 continue
+            # Boundary run clauses dispatched inside program.sync().
             result = child_program.sync(on_error=log_error, force=force)
-
-            # Execute boundary run clauses — fire and forget
-            for tick in result.ticks:
-                if tick.run:
-                    _execute_boundary_run(tick.run, tick.name, child_path)
 
             all_ran.extend(result.ran)
             all_skipped.extend(
@@ -130,7 +128,7 @@ def _run_sync_aggregate(
                 for tick in result.ticks
             )
             children.append({
-                "name": child_program.vertex.name,
+                "name": child_program.name,
                 "ran": result.ran,
                 "skipped": [
                     {"kind": s.kind, "last_run_ts": s.last_run_ts, "cadence_interval": s.cadence_interval}
@@ -217,7 +215,9 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         _err(str(e))
         return 1
 
-    program = load_vertex_program(vertex_path, vars=vars or None)
+    program = load_vertex_program(
+        vertex_path, vars=vars or None, run_dispatcher=_execute_boundary_run,
+    )
 
     # Aggregation vertex: no own sources but has combine children — sync each child
     if not program.sources:
@@ -225,12 +225,12 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         if child_paths:
             return _run_sync_aggregate(
                 child_paths, vars=vars or None, force=known.force,
-                parent_name=program.vertex.name, rest=rest,
+                parent_name=program.name, rest=rest,
             )
         # Sourceless vertex with a store: still sync to evaluate boundaries.
         # Vertices like orchestration have no sources but boundaries with
         # run clauses that fire on externally-emitted facts.
-        if program.vertex._store is None:
+        if not program.has_store:
             _err("No sources configured")
             return 1
 
@@ -243,20 +243,15 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     label = "force" if force else "cadence-gated"
     show(
         Block.text(
-            f"Syncing {program.vertex.name}: {len(program.sources)} sources ({label})",
+            f"Syncing {program.name}: {len(program.sources)} sources ({label})",
             current_palette().muted,
         ),
         file=sys.stderr,
     )
 
     def fetch():
+        # Boundary run clauses dispatched inside program.sync().
         result = program.sync(on_error=log_error, force=force)
-
-        # Execute boundary run clauses — fire and forget.
-        # Engine produces ticks with run metadata; app layer executes.
-        for tick in result.ticks:
-            if tick.run:
-                _execute_boundary_run(tick.run, tick.name, vertex_path)
 
         return {
             "ran": result.ran,
@@ -295,7 +290,7 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         fetch=fetch,
         render=render,
         prog="loops sync",
-        description=f"Sync vertex {program.vertex.name}",
+        description=f"Sync vertex {program.name}",
         help_args=[
             HelpArg("vertex", "Vertex name", positional=True),
             HelpArg("--force", "Run all sources unconditionally"),

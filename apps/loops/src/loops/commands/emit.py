@@ -297,9 +297,14 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                     return 1
                 payload["template"] = template_name
 
-        # Load the vertex runtime — facts route through loops, boundaries fire
+        # Load the vertex runtime — facts route through loops, boundaries fire.
+        # Inject the run-clause dispatcher so program.receive/sync fire
+        # boundary run clauses automatically when ticks have .run set.
         store_path.parent.mkdir(parents=True, exist_ok=True)
-        program = load_vertex_program(writable_path, validate_ast=False)
+        from loops.commands.sync import _execute_boundary_run
+        program = load_vertex_program(
+            writable_path, validate_ast=False, run_dispatcher=_execute_boundary_run,
+        )
 
         try:
             if is_pop and list_path is not None and header is not None:
@@ -326,10 +331,12 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                                     observer=args.observer or "",
                                     origin="",
                                 )
-                                program.vertex.receive(seed_fact)
+                                # Use program.receive so seed-fact boundaries dispatch.
+                                program.receive(seed_fact)
 
-            # Route fact through the vertex runtime — fold, boundary check, store
-            tick = program.vertex.receive(fact)
+            # Route fact through the vertex runtime — fold, boundary check, store.
+            # program.receive dispatches the run clause if the resulting tick has one.
+            tick = program.receive(fact)
             if tick is not None:
                 # Boundary fired — a tick was produced
                 show(
@@ -338,13 +345,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                         p.muted,
                     ),
                 )
-                # Execute boundary run clause if present — fire and forget
-                if tick.run:
-                    from loops.commands.sync import _execute_boundary_run
-                    _execute_boundary_run(tick.run, tick.name, writable_path)
         finally:
             # Clean up the store connection
-            if hasattr(program.vertex, '_store') and program.vertex._store is not None:
+            if program.has_store:
                 program.vertex._store.close()
 
         if is_pop and list_path is not None and header is not None:
@@ -562,10 +565,11 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
         return 1
 
     from engine import load_vertex_program
+    from loops.commands.sync import _execute_boundary_run
 
     vp = _resolve_writable_vertex(vertex_path)
-    program = load_vertex_program(vp)
-    program.vertex.receive(fact)
+    program = load_vertex_program(vp, run_dispatcher=_execute_boundary_run)
+    program.receive(fact)
 
     show(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))
     return 0

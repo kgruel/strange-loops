@@ -117,9 +117,9 @@ def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path)
     assert program.expected_ticks == ["foo"]
 
     # Ensure override is actually applied by folding and firing the boundary.
-    tick = program.vertex.receive(Fact.of("foo", "test", v=2))
+    tick = program.receive(Fact.of("foo", "test", v=2))
     assert tick is None
-    tick = program.vertex.receive(Fact.of("foo.complete", "test"))
+    tick = program.receive(Fact.of("foo.complete", "test"))
     assert tick is not None
     assert tick.name == "foo"
     assert tick.payload["acc"] == 2
@@ -158,8 +158,8 @@ def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
     program = load_vertex_program(vertex, fold_overrides={"a": ({"seen": 0}, fold_a)})
     assert program.expected_ticks == ["a", "b"]
 
-    program.vertex.receive(Fact.of("a", "test"))
-    tick_a = program.vertex.receive(Fact.of("a.complete", "test"))
+    program.receive(Fact.of("a", "test"))
+    tick_a = program.receive(Fact.of("a.complete", "test"))
     assert tick_a is not None
     assert tick_a.name == "a"
     assert tick_a.payload["seen"] == 10
@@ -310,3 +310,118 @@ def test_substitute_non_template_passthrough():
     ast = VertexFile(name="test", loops={}, sources=(plain,))
     result = _substitute_vertex_vars(ast, {"k": "v"})
     assert result.sources[0] is plain
+
+
+# ---------------------------------------------------------------------------
+# program.receive dispatches run-clauses (the consolidation that closed
+# the three-CLI-site dispatch fragility — see decision
+# design/dispatch-consolidation-via-program).
+# ---------------------------------------------------------------------------
+
+
+def test_program_receive_dispatches_run_clause(tmp_path: Path) -> None:
+    """When vertex.receive produces a tick with .run, program.receive fires the dispatcher."""
+    from engine import SqliteStore
+    from engine.loop import Loop
+
+    store = SqliteStore(
+        path=tmp_path / "test.db",
+        serialize=Fact.to_dict,
+        deserialize=Fact.from_dict,
+    )
+    v = Vertex("orch", store=store)
+    loop = Loop(
+        name="task",
+        initial=[],
+        fold=lambda s, p: [*s, p],
+        boundary_count=1,
+        boundary_mode="every",
+        boundary_run="scripts/dispatch.sh",
+    )
+    v.register_loop(loop)
+    v.replay()
+
+    calls: list[tuple[str, str, Path]] = []
+
+    def dispatcher(command: str, tick_name: str, vertex_path: Path) -> None:
+        calls.append((command, tick_name, vertex_path))
+
+    fake_path = tmp_path / "orch.vertex"
+    program = VertexProgram(
+        vertex=v, sources=[], expected_ticks=["task"],
+        path=fake_path, run_dispatcher=dispatcher,
+    )
+
+    tick = program.receive(Fact.of("task", "kyle", name="job1"))
+    assert tick is not None
+    assert tick.run == "scripts/dispatch.sh"
+    assert calls == [("scripts/dispatch.sh", "task", fake_path)]
+    store.close()
+
+
+def test_program_receive_no_dispatcher_is_noop(tmp_path: Path) -> None:
+    """No dispatcher wired → program.receive still returns the tick, no error on .run."""
+    from engine import SqliteStore
+    from engine.loop import Loop
+
+    store = SqliteStore(
+        path=tmp_path / "test.db",
+        serialize=Fact.to_dict,
+        deserialize=Fact.from_dict,
+    )
+    v = Vertex("orch", store=store)
+    loop = Loop(
+        name="task",
+        initial=[],
+        fold=lambda s, p: [*s, p],
+        boundary_count=1,
+        boundary_mode="every",
+        boundary_run="scripts/dispatch.sh",
+    )
+    v.register_loop(loop)
+    v.replay()
+
+    program = VertexProgram(vertex=v, sources=[], expected_ticks=["task"])  # no dispatcher
+
+    tick = program.receive(Fact.of("task", "kyle", name="job1"))
+    assert tick is not None
+    assert tick.run == "scripts/dispatch.sh"  # tick still carries it
+    store.close()
+
+
+def test_program_sync_dispatches_evaluate_boundary_ticks(tmp_path: Path) -> None:
+    """program.sync dispatches run-clauses on ticks produced by evaluate_boundaries (catchup path)."""
+    from engine import SqliteStore
+
+    # Pre-seed a store with a fact that will trigger a vertex-level boundary
+    # on next sync via evaluate_boundaries (catchup path).
+    store = SqliteStore(
+        path=tmp_path / "test.db",
+        serialize=Fact.to_dict,
+        deserialize=Fact.from_dict,
+    )
+    store.append(Fact.of("task", "kyle", name="job1", status="open"))
+
+    v = Vertex("orch", store=store)
+    v.register("task", {}, lambda s, p: {**s, p["name"]: p})
+    v.register_vertex_boundary(
+        "task", match=(("status", "open"),),
+        run="scripts/dispatch.sh",
+    )
+    v.replay()
+
+    calls: list[tuple[str, str, Path]] = []
+
+    def dispatcher(command: str, tick_name: str, vertex_path: Path) -> None:
+        calls.append((command, tick_name, vertex_path))
+
+    fake_path = tmp_path / "orch.vertex"
+    program = VertexProgram(
+        vertex=v, sources=[], expected_ticks=[],
+        path=fake_path, run_dispatcher=dispatcher,
+    )
+
+    result = program.sync()
+    assert any(t.run == "scripts/dispatch.sh" for t in result.ticks)
+    assert calls == [("scripts/dispatch.sh", "orch", fake_path)]
+    store.close()

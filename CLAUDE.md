@@ -96,6 +96,41 @@ The fold keys by `name` (threads, tasks, sessions) or `topic` (decisions). If th
 has no key field, the fold can't upsert it — the emit succeeds silently but the data
 is orphaned. Always use `name=` or `topic=` explicitly.
 
+**Names and topics carry verdict-substance, not slug-identity.**
+
+Thread `name=` and decision `topic=` render as headlines in first-disclosure surfaces
+(TOUCHED, fold, reconcile). The fold doesn't care what shape the name takes as long
+as it's stable. The render does — discriminating names earn the drill-down decision;
+slug-like names trigger it. Prefer:
+
+```bash
+# GOOD — name carries the verdict:
+uv run loops emit project thread name=read-path-depth-gap status=open ...
+uv run loops emit project decision topic=painted/first-disclosure-via-existing-headlines ...
+
+# WEAKER — name is empty calories at the headline layer:
+uv run loops emit project thread name=fix-rendering-stuff ...
+uv run loops emit project decision topic=design/my-decision ...
+```
+
+**Message bodies should front-load the verdict.** The first ~140 chars is the TOUCHED
+preview budget. Long-form context lives in the rest of the body, discoverable at
+`-v` / DETAILED+ zoom. HYPOTHESIS-shaped bodies (verdict + evidence + conclusion)
+earn the drill-down decision instead of triggering it. Example:
+
+```bash
+# Earns: verdict in the first clause, evidence next, conclusion last.
+uv run loops emit project decision topic=foo/bar message="Decision: X over Y. \
+Evidence: 3 instances across N lenses (cite a, b, c). Implication: Z dissolves."
+
+# Triggers: lots of context, verdict somewhere in the middle.
+uv run loops emit project decision topic=foo/bar message="In yesterday's session \
+we discussed X, and then thought about Y, and eventually concluded that X over Y."
+```
+
+The painted decision at `painted/first-disclosure-via-existing-headlines` codifies
+the render-side half of this; emit-side discipline is the author-side half.
+
 **Review before wrap-up:**
 ```bash
 uv run loops read project --lens reconcile --plain    # groups by attention-need, recency tags

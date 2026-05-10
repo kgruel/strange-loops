@@ -18,19 +18,41 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 
 # --- Collect context ---
 # Identity is already in the system prompt header (via agent config).
-# additionalContext carries: landing view (window + history + focus-filtered
-# accumulated state, one lens) + comms. The session_landing lens declares
-# its own fetch (design/lens-declares-fetch) — composes TickWindow series
-# with FoldState, no bash-script stitching.
+# additionalContext carries (in priority order — most actionable first):
+#
+#   1. MENTIONS — direct addresses since last sync (discord). The thing
+#      that should make me act before anything else. Surfaced separately
+#      because comms summary-counts ("discord: 62") triggers drill-later;
+#      addressee + freshness + body triggers act-now. Per the
+#      painted/first-disclosure-via-existing-headlines decision: surface
+#      enough substance to earn the drill-down, not just enough to know
+#      it exists.
+#   2. PROJECT LANDING — session_landing lens output: NOW (window
+#      dashboard), TOUCHED (focus-marked items), UNPACK (drill-down
+#      commands). Answers "what was happening, what's already in flight."
+#   3. EXPERIMENTS — active experimental vertices (hypothesis status,
+#      recent run receipts). Currently hardcoded to coupling-kernels.
+#   4. COMMS SUMMARY — count-level signal (discord: N native: M). Tail
+#      of context: a glance signal, not an action signal.
+#
 # Read comms BEFORE emitting check — so "new" means "since last session."
+mentions=$($HOME/.config/loops/bin/mentions-block "$observer" 2>/dev/null || true)
 project=$($LOOPS read project --lens session_landing --plain 2>/dev/null || true)
 comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
+
+# Active experimental vertices — surface what's in flight (hypothesis status,
+# recent receipts). Currently hardcoded to coupling-kernels; generalize when
+# more experimental vertices have receipt machinery. The fold view here
+# answers "what experiments am I in the middle of and what's their state."
+exp_coupling=$($LOOPS read coupling-kernels --plain 2>/dev/null || true)
 
 # Advance cursor after reading — marks what we've seen
 $LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
 
 context=""
+[[ -n "$mentions" ]] && context+="$mentions"$'\n'
 [[ -n "$project" ]]  && context+="$project"$'\n\n'
+[[ -n "$exp_coupling" ]] && context+="## EXPERIMENTS — coupling-kernels"$'\n\n'"$exp_coupling"$'\n\n'
 [[ -n "$comms" && "$comms" != "(quiet)" ]] && context+="$comms"
 
 # --- Emit as JSON additionalContext for reliable injection ---

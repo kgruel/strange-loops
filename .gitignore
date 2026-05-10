@@ -25,3 +25,7 @@ session.vertex
 !experiments/**/session.vertex
 !experiments/**/check.vertex
 .ruff_cache/
+
+# coupling-kernels structure-reveal scratch (embeddings + run outputs)
+experiments/coupling-kernels/cache/
+experiments/coupling-kernels/runs/outputs/

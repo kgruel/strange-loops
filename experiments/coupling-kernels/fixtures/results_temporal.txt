@@ -1,0 +1,100 @@
+Uninstalled 1 package in 4ms
+Installed 1 package in 5ms
+# corpus: 527 items, first=2026-02-28, last=2026-05-09
+# windows (cumulative, +14d each):
+    T1 (Mar 14, +14d)                        cutoff=2026-03-14  n_active=296
+    T2 (Mar 28, +28d)                        cutoff=2026-03-28  n_active=426
+    T3 (Apr 11, +42d)                        cutoff=2026-04-11  n_active=426
+    T4 (Apr 25, +56d, apparatus-mature)      cutoff=2026-04-25  n_active=448 ◀── apparatus-mature
+    T5 (May 9, +70d, today)                  cutoff=2026-05-10  n_active=527
+
+## T1 (Mar 14, +14d)  σ=0.0252  n_items=296  non_trivial≥3=17
+   kinds: decision:194 thread:66 task:27 observation:5 handoff:4
+   apparatus present: (only base kinds)
+   bridges (≥2 kinds × ≥2 members): 4  mean_purity: 0.79
+
+   top clusters
+   ★ C1 n=37  architecture, design     [decision:32 thread:3 task:2     ]  new
+   ★ C2 n=27  design, architecture     [decision:20 thread:5 task:2     ]  new
+   ★ C3 n=15  design, custom-lens-infrastructure [decision:7 thread:5 task:2 observation:1]  new
+     C4 n=8   design, architecture     [decision:8                      ]  new
+   ★ C5 n=5   fact-drill-down, tick-to-fact-flow [thread:3 task:2                 ]  new
+     C6 n=5   meta, atoms              [decision:5                      ]  new
+     C7 n=4   design, session-as-tick  [decision:3 thread:1             ]  new
+     C8 n=4   discord-source-poll-kind, sync-completion-tick [thread:3 task:1                 ]  new
+
+## T2 (Mar 28, +28d)  σ=0.0220  n_items=426  non_trivial≥3=19
+   kinds: decision:266 thread:100 task:33 observation:23 handoff:4
+   apparatus present: (only base kinds)
+   bridges (≥2 kinds × ≥2 members): 4  mean_purity: 0.81
+   lineage vs prev: persistent(7)  morphing(3)  emerging/new(9)
+
+   top clusters
+   ★ C1 n=13  design, custom-lens-infrastructure [decision:6 thread:5 task:2      ]  ⟸C3(15) j=0.56
+   ★ C2 n=11  design, autoresearch-as-vertex [decision:8 thread:3             ]  new (best j=0.00)
+     C3 n=10  observer, cli-unscoped-fold [decision:8 thread:1 task:1      ]  morph⟸C1 j=0.27
+     C4 n=8   architecture, design     [decision:7 thread:1             ]  new (best j=0.00)
+   ★ C5 n=8   design, orchestration-agent [decision:5 thread:3             ]  morph⟸C2 j=0.30
+   ★ C6 n=6   rendering, attention-density [decision:4 thread:2             ]  new (best j=0.00)
+     C7 n=6   architecture, design     [decision:6                      ]  new (best j=0.16)
+     C8 n=5   design, format-dissolves-into-lens [decision:3 thread:1 observation:1]  morph⟸C3 j=0.25
+
+## T3 (Apr 11, +42d)  σ=0.0220  n_items=426  non_trivial≥3=19
+   kinds: decision:266 thread:100 task:33 observation:23 handoff:4
+   apparatus present: (only base kinds)
+   bridges (≥2 kinds × ≥2 members): 4  mean_purity: 0.81
+   lineage vs prev: persistent(19)  morphing(0)  emerging/new(0)
+
+   top clusters
+   ★ C1 n=13  design, custom-lens-infrastructure [decision:6 thread:5 task:2      ]  ⟸C1(13) j=1.00
+   ★ C2 n=11  design, autoresearch-as-vertex [decision:8 thread:3             ]  ⟸C2(11) j=1.00
+     C3 n=10  observer, cli-unscoped-fold [decision:8 thread:1 task:1      ]  ⟸C3(10) j=1.00
+     C4 n=8   architecture, design     [decision:7 thread:1             ]  ⟸C4(8) j=1.00
+   ★ C5 n=8   design, orchestration-agent [decision:5 thread:3             ]  ⟸C5(8) j=1.00
+   ★ C6 n=6   rendering, attention-density [decision:4 thread:2             ]  ⟸C6(6) j=1.00
+     C7 n=6   architecture, design     [decision:6                      ]  ⟸C7(6) j=1.00
+     C8 n=5   design, format-dissolves-into-lens [decision:3 thread:1 observation:1]  ⟸C8(5) j=1.00
+
+## T4 (Apr 25, +56d, apparatus-mature)  σ=0.0225  n_items=448  non_trivial≥3=22
+   kinds: decision:278 thread:107 task:36 observation:23 handoff:4
+   apparatus present: (only base kinds)
+   bridges (≥2 kinds × ≥2 members): 5  mean_purity: 0.78
+   lineage vs prev: persistent(18)  morphing(0)  emerging/new(4)
+
+   top clusters
+   ★ C1 n=20  design, custom-lens-infrastructure [decision:11 thread:6 task:2 observation:1]  ⟸C1(13) j=0.65
+   ★ C2 n=12  design, autoresearch-as-vertex [decision:8 thread:4             ]  ⟸C2(11) j=0.92
+     C3 n=10  observer, cli-unscoped-fold [decision:8 thread:1 task:1      ]  ⟸C3(10) j=1.00
+   ★ C4 n=9   architecture, design     [decision:7 thread:2             ]  ⟸C4(8) j=0.89
+   ★ C5 n=8   design, orchestration-agent [decision:5 thread:3             ]  ⟸C5(8) j=1.00
+     C6 n=7   architecture, design     [decision:7                      ]  ⟸C7(6) j=0.86
+   ★ C7 n=6   rendering, attention-density [decision:4 thread:2             ]  ⟸C6(6) j=1.00
+     C8 n=5   atoms, design            [decision:5                      ]  new (best j=0.00)
+
+## T5 (May 9, +70d, today)  σ=0.0234  n_items=527  non_trivial≥3=23
+   kinds: decision:312 thread:125 task:38 observation:23 cite:15 hypothesis:7 handoff:4 plan:3
+   apparatus present: plan, cite, hypothesis
+   bridges (≥2 kinds × ≥2 members): 6  mean_purity: 0.76
+   lineage vs prev: persistent(14)  morphing(3)  emerging/new(6)
+
+   top clusters
+   ★ C1 n=41  design, architecture     [decision:29 thread:10 task:2    ]  morph⟸C2 j=0.29
+   ★ C2 n=30  design, custom-lens-infrastructure [decision:18 thread:7 task:3 observation:2]  ⟸C1(20) j=0.67
+     C3 n=11  design, paradigm         [decision:8 thread:1 task:1 cite:1]  morph⟸C18 j=0.27
+     C4 n=11  observer, cli-unscoped-fold [decision:9 thread:1 task:1      ]  ⟸C3(10) j=0.91
+   ★ C5 n=10  salience-driven-display-impl, current-open-window-semantics [thread:3 plan:2 decision:2 cite:2 task:1]  morph⟸C13 j=0.30
+     C6 n=8   architecture, design     [decision:8                      ]  ⟸C6(7) j=0.88
+   ★ C7 n=6   rendering, attention-density [decision:4 thread:2             ]  ⟸C7(6) j=1.00
+   ★ C8 n=5   architecture, cross-machine-vertex-visibility [thread:3 decision:2             ]  new (best j=0.00)
+
+========================================================================
+# Overall trajectory
+  window                                    n  comp  br   pur
+  T1 (Mar 14, +14d)                       296    17   4  0.79
+  T2 (Mar 28, +28d)                       426    19   4  0.81
+  T3 (Apr 11, +42d)                       426    19   4  0.81
+  T4 (Apr 25, +56d, apparatus-mature)     448    22   5  0.78
+  T5 (May 9, +70d, today)                 527    23   6  0.76
+
+  bridge-count trajectory: 4 → 4 → 4 → 5 → 6
+  item-count trajectory:    296 → 426 → 426 → 448 → 527

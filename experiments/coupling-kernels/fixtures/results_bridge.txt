@@ -1,0 +1,378 @@
+Uninstalled 1 package in 3ms
+Installed 1 package in 4ms
+# loaded 527 substantive items across kinds:
+    decision       312
+    thread         125
+    task           38
+    observation    23
+    cite           15
+    hypothesis     7
+    handoff        4
+    plan           3
+  manifest saved: project_all_kinds_manifest.json
+
+# embedding under both instructions
+  loading multilingual-e5-large-instruct...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 5716.38it/s]
+  encoding 527 items under 'mechanism'...
+Batches:   0%|          | 0/66 [00:00<?, ?it/s]Batches:   2%|▏         | 1/66 [00:02<03:08,  2.90s/it]Batches:   3%|▎         | 2/66 [00:04<02:13,  2.09s/it]Batches:   5%|▍         | 3/66 [00:05<01:56,  1.84s/it]Batches:   6%|▌         | 4/66 [00:06<01:31,  1.48s/it]Batches:   8%|▊         | 5/66 [00:07<01:15,  1.24s/it]Batches:   9%|▉         | 6/66 [00:08<01:06,  1.12s/it]Batches:  11%|█         | 7/66 [00:09<01:00,  1.03s/it]Batches:  12%|█▏        | 8/66 [00:10<00:52,  1.10it/s]Batches:  14%|█▎        | 9/66 [00:10<00:46,  1.23it/s]Batches:  15%|█▌        | 10/66 [00:11<00:42,  1.31it/s]Batches:  17%|█▋        | 11/66 [00:11<00:37,  1.47it/s]Batches:  18%|█▊        | 12/66 [00:12<00:33,  1.62it/s]Batches:  20%|█▉        | 13/66 [00:12<00:30,  1.74it/s]Batches:  21%|██        | 14/66 [00:13<00:28,  1.85it/s]Batches:  23%|██▎       | 15/66 [00:13<00:26,  1.96it/s]Batches:  24%|██▍       | 16/66 [00:14<00:23,  2.08it/s]Batches:  26%|██▌       | 17/66 [00:14<00:22,  2.15it/s]Batches:  27%|██▋       | 18/66 [00:14<00:21,  2.24it/s]Batches:  29%|██▉       | 19/66 [00:15<00:19,  2.37it/s]Batches:  30%|███       | 20/66 [00:15<00:19,  2.41it/s]Batches:  32%|███▏      | 21/66 [00:16<00:18,  2.44it/s]Batches:  33%|███▎      | 22/66 [00:16<00:17,  2.54it/s]Batches:  35%|███▍      | 23/66 [00:16<00:16,  2.62it/s]Batches:  36%|███▋      | 24/66 [00:17<00:16,  2.58it/s]Batches:  38%|███▊      | 25/66 [00:17<00:15,  2.67it/s]Batches:  39%|███▉      | 26/66 [00:17<00:14,  2.69it/s]Batches:  41%|████      | 27/66 [00:18<00:13,  2.81it/s]Batches:  42%|████▏     | 28/66 [00:18<00:13,  2.74it/s]Batches:  44%|████▍     | 29/66 [00:19<00:13,  2.65it/s]Batches:  45%|████▌     | 30/66 [00:19<00:13,  2.72it/s]Batches:  47%|████▋     | 31/66 [00:19<00:12,  2.80it/s]Batches:  48%|████▊     | 32/66 [00:20<00:11,  2.88it/s]Batches:  50%|█████     | 33/66 [00:20<00:11,  2.99it/s]Batches:  52%|█████▏    | 34/66 [00:20<00:10,  3.09it/s]Batches:  53%|█████▎    | 35/66 [00:20<00:09,  3.26it/s]Batches:  55%|█████▍    | 36/66 [00:21<00:09,  3.17it/s]Batches:  56%|█████▌    | 37/66 [00:21<00:09,  3.09it/s]Batches:  58%|█████▊    | 38/66 [00:21<00:08,  3.21it/s]Batches:  59%|█████▉    | 39/66 [00:22<00:08,  3.25it/s]Batches:  61%|██████    | 40/66 [00:22<00:07,  3.30it/s]Batches:  62%|██████▏   | 41/66 [00:22<00:07,  3.43it/s]Batches:  64%|██████▎   | 42/66 [00:22<00:06,  3.61it/s]Batches:  65%|██████▌   | 43/66 [00:23<00:06,  3.77it/s]Batches:  67%|██████▋   | 44/66 [00:23<00:05,  3.71it/s]Batches:  68%|██████▊   | 45/66 [00:23<00:05,  3.74it/s]Batches:  70%|██████▉   | 46/66 [00:23<00:05,  3.74it/s]Batches:  71%|███████   | 47/66 [00:24<00:05,  3.76it/s]Batches:  73%|███████▎  | 48/66 [00:24<00:04,  3.91it/s]Batches:  74%|███████▍  | 49/66 [00:24<00:04,  4.13it/s]Batches:  76%|███████▌  | 50/66 [00:25<00:04,  3.75it/s]Batches:  77%|███████▋  | 51/66 [00:25<00:03,  4.11it/s]Batches:  79%|███████▉  | 52/66 [00:25<00:03,  4.23it/s]Batches:  80%|████████  | 53/66 [00:25<00:03,  4.24it/s]Batches:  82%|████████▏ | 54/66 [00:25<00:02,  4.37it/s]Batches:  83%|████████▎ | 55/66 [00:26<00:02,  4.28it/s]Batches:  85%|████████▍ | 56/66 [00:26<00:02,  4.40it/s]Batches:  86%|████████▋ | 57/66 [00:26<00:01,  4.64it/s]Batches:  88%|████████▊ | 58/66 [00:26<00:01,  4.85it/s]Batches:  89%|████████▉ | 59/66 [00:26<00:01,  4.78it/s]Batches:  91%|█████████ | 60/66 [00:27<00:01,  5.03it/s]Batches:  92%|█████████▏| 61/66 [00:27<00:00,  5.23it/s]Batches:  94%|█████████▍| 62/66 [00:27<00:00,  5.58it/s]Batches:  95%|█████████▌| 63/66 [00:27<00:00,  5.85it/s]Batches:  97%|█████████▋| 64/66 [00:27<00:00,  5.94it/s]Batches:  98%|█████████▊| 65/66 [00:27<00:00,  5.43it/s]Batches: 100%|██████████| 66/66 [00:28<00:00,  4.70it/s]Batches: 100%|██████████| 66/66 [00:28<00:00,  2.34it/s]
+  saved: proj_e5_allkinds_mechanism.npz
+  loading multilingual-e5-large-instruct...
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 7010.44it/s]
+  encoding 527 items under 'concern'...
+Batches:   0%|          | 0/66 [00:00<?, ?it/s]Batches:   2%|▏         | 1/66 [00:01<01:44,  1.61s/it]Batches:   3%|▎         | 2/66 [00:03<01:43,  1.62s/it]Batches:   5%|▍         | 3/66 [00:04<01:34,  1.50s/it]Batches:   6%|▌         | 4/66 [00:05<01:22,  1.33s/it]Batches:   8%|▊         | 5/66 [00:06<01:10,  1.15s/it]Batches:   9%|▉         | 6/66 [00:07<01:02,  1.04s/it]Batches:  11%|█         | 7/66 [00:08<00:57,  1.02it/s]Batches:  12%|█▏        | 8/66 [00:08<00:51,  1.13it/s]Batches:  14%|█▎        | 9/66 [00:09<00:46,  1.23it/s]Batches:  15%|█▌        | 10/66 [00:10<00:41,  1.35it/s]Batches:  17%|█▋        | 11/66 [00:10<00:36,  1.50it/s]Batches:  18%|█▊        | 12/66 [00:11<00:32,  1.67it/s]Batches:  20%|█▉        | 13/66 [00:11<00:30,  1.76it/s]Batches:  21%|██        | 14/66 [00:12<00:28,  1.86it/s]Batches:  23%|██▎       | 15/66 [00:12<00:25,  1.97it/s]Batches:  24%|██▍       | 16/66 [00:12<00:24,  2.07it/s]Batches:  26%|██▌       | 17/66 [00:13<00:23,  2.09it/s]Batches:  27%|██▋       | 18/66 [00:13<00:21,  2.23it/s]Batches:  29%|██▉       | 19/66 [00:14<00:19,  2.36it/s]Batches:  30%|███       | 20/66 [00:14<00:19,  2.39it/s]Batches:  32%|███▏      | 21/66 [00:14<00:18,  2.44it/s]Batches:  33%|███▎      | 22/66 [00:15<00:17,  2.51it/s]Batches:  35%|███▍      | 23/66 [00:15<00:16,  2.57it/s]Batches:  36%|███▋      | 24/66 [00:15<00:16,  2.61it/s]Batches:  38%|███▊      | 25/66 [00:16<00:15,  2.68it/s]Batches:  39%|███▉      | 26/66 [00:16<00:14,  2.67it/s]Batches:  41%|████      | 27/66 [00:17<00:14,  2.78it/s]Batches:  42%|████▏     | 28/66 [00:17<00:13,  2.75it/s]Batches:  44%|████▍     | 29/66 [00:17<00:14,  2.62it/s]Batches:  45%|████▌     | 30/66 [00:18<00:13,  2.71it/s]Batches:  47%|████▋     | 31/66 [00:18<00:12,  2.81it/s]Batches:  48%|████▊     | 32/66 [00:18<00:11,  2.97it/s]Batches:  50%|█████     | 33/66 [00:19<00:10,  3.00it/s]Batches:  52%|█████▏    | 34/66 [00:19<00:10,  3.01it/s]Batches:  53%|█████▎    | 35/66 [00:19<00:09,  3.15it/s]Batches:  55%|█████▍    | 36/66 [00:20<00:09,  3.08it/s]Batches:  56%|█████▌    | 37/66 [00:20<00:09,  3.15it/s]Batches:  58%|█████▊    | 38/66 [00:20<00:08,  3.30it/s]Batches:  59%|█████▉    | 39/66 [00:20<00:07,  3.40it/s]Batches:  61%|██████    | 40/66 [00:21<00:07,  3.37it/s]Batches:  62%|██████▏   | 41/66 [00:21<00:07,  3.39it/s]Batches:  64%|██████▎   | 42/66 [00:21<00:06,  3.58it/s]Batches:  65%|██████▌   | 43/66 [00:21<00:06,  3.77it/s]Batches:  67%|██████▋   | 44/66 [00:22<00:06,  3.66it/s]Batches:  68%|██████▊   | 45/66 [00:22<00:05,  3.72it/s]Batches:  70%|██████▉   | 46/66 [00:22<00:05,  3.88it/s]Batches:  71%|███████   | 47/66 [00:23<00:04,  3.92it/s]Batches:  73%|███████▎  | 48/66 [00:23<00:04,  4.00it/s]Batches:  74%|███████▍  | 49/66 [00:23<00:04,  4.18it/s]Batches:  76%|███████▌  | 50/66 [00:23<00:03,  4.16it/s]Batches:  77%|███████▋  | 51/66 [00:23<00:03,  4.42it/s]Batches:  79%|███████▉  | 52/66 [00:24<00:03,  4.39it/s]Batches:  80%|████████  | 53/66 [00:24<00:03,  4.31it/s]Batches:  82%|████████▏ | 54/66 [00:24<00:03,  3.92it/s]Batches:  83%|████████▎ | 55/66 [00:24<00:02,  4.24it/s]Batches:  85%|████████▍ | 56/66 [00:25<00:02,  4.57it/s]Batches:  86%|████████▋ | 57/66 [00:25<00:01,  4.81it/s]Batches:  88%|████████▊ | 58/66 [00:25<00:01,  4.89it/s]Batches:  89%|████████▉ | 59/66 [00:25<00:01,  4.80it/s]Batches:  91%|█████████ | 60/66 [00:25<00:01,  4.97it/s]Batches:  92%|█████████▏| 61/66 [00:26<00:00,  5.14it/s]Batches:  94%|█████████▍| 62/66 [00:26<00:00,  5.22it/s]Batches:  95%|█████████▌| 63/66 [00:26<00:00,  5.39it/s]Batches:  97%|█████████▋| 64/66 [00:26<00:00,  5.46it/s]Batches:  98%|█████████▊| 65/66 [00:26<00:00,  5.80it/s]Batches: 100%|██████████| 66/66 [00:26<00:00,  6.29it/s]Batches: 100%|██████████| 66/66 [00:26<00:00,  2.46it/s]
+  saved: proj_e5_allkinds_concern.npz
+
+## MECHANISM instruction  (auto-scale σ=0.0288)
+  N=527  components=305  non_trivial≥3=30
+  kind-purity: pure≥0.9: 9  dominant 0.7-0.9: 4  mixed<0.7: 17
+  mean purity: 0.74  median: 0.67
+  cross-kind clusters (≥2 kinds ×≥2 members): 6
+
+  ## top non-trivial components
+
+  C1  size=44   purity=0.70  kinds=[decision:31 thread:11 observation:1 task:1] ★
+    [decision   ] architecture/loop-as-runtime
+    [decision   ] design/bounded-agent-turns
+    [decision   ] design/root-vertex-as-readable-surface
+    [decision   ] design/vertex-as-loop-controller
+    [decision   ] design/autoresearch-system-user-prompt-split
+    [decision   ] design/autoresearch-one-shot-agents
+
+  C2  size=33   purity=0.64  kinds=[decision:21 thread:7 task:3 observation:2] ★
+    [decision   ] design/app-dissolution
+    [decision   ] design/lens-declares-fetch
+    [decision   ] design/three-surviving-concerns
+    [decision   ] architecture/painted-native-display-layer
+    [decision   ] design/fold-aware-auto-rendering
+    [decision   ] architecture/rendering-three-layers
+
+  C3  size=24   purity=0.54  kinds=[decision:13 thread:6 task:5] ★
+    [thread     ] daemon-as-new-lib (parked)
+    [decision   ] design/dispatch-consolidation-via-program
+    [decision   ] design/notify-as-vertex-capability
+    [decision   ] design/vertex-as-interface
+    [task       ] fix-dispatch-fragility (completed)
+    [decision   ] design/vertex-tree-as-routing
+
+  C4  size=12   purity=0.33  kinds=[thread:4 cite:3 plan:2 decision:2 task:1] ★
+    [decision   ] design/session-start-as-tickwindow
+    [thread     ] current-open-window-semantics (resolved)
+    [plan       ] salience-driven-display-impl (done)
+    [decision   ] rendering/plan-section-tier-0
+    [thread     ] session-start-as-tickwindow (resolved)
+    [cite       ] salience-driven-display-impl,rendering/salience-driven-display,verbosity-fidelity-review,current-open-window-semantics
+
+  C5  size=8    purity=1.00  kinds=[decision:8]
+    [decision   ] architecture/store-search-layer
+    [decision   ] design/lazy-fts-indexing
+    [decision   ] architecture/search-fts5-first
+    [decision   ] architecture/vertex-search-declaration
+    [decision   ] design/combinatorial-vertex-search
+    [decision   ] architecture/pickup-lens-scope
+
+  C6  size=8    purity=1.00  kinds=[decision:8]
+    [decision   ] meta/session-summary
+    [decision   ] meta/current-activity
+    [decision   ] design/progressive-vertex-chain
+    [decision   ] workflow/project-vertex-pattern
+    [decision   ] atoms/progressive-claude-md
+    [decision   ] architecture/root-claude-md
+
+  C7  size=6    purity=0.50  kinds=[thread:3 decision:3] ★
+    [decision   ] architecture/sqlmerge-as-substrate-dep
+    [thread     ] sqlmerge-extraction-pressure-test (resolved)
+    [thread     ] cross-machine-vertex-visibility (open)
+    [thread     ] sqlmerge-portability (open)
+    [decision   ] architecture/transport-plugin-surface
+    [decision   ] architecture/libs-store
+
+  C8  size=6    purity=1.00  kinds=[decision:6]
+    [decision   ] architecture/vertex-as-read-interface
+    [decision   ] atoms/refs-on-any-fold
+    [decision   ] design/fold-state-typed-contract
+    [decision   ] design/fold-state-contract
+    [decision   ] atoms/refs-on-fold-item
+    [decision   ] rendering/unfolded-kind-detection
+
+  C9  size=5    purity=0.60  kinds=[decision:3 thread:2] ★
+    [decision   ] architecture/operation-ir-adoption
+    [decision   ] architecture/siftd-dissolution-path
+    [decision   ] architecture/siftd-decomposition
+    [thread     ] siftd-investigation (resolved)
+    [thread     ] siftd-exchange-topology (resolved)
+
+  C10  size=5    purity=0.60  kinds=[thread:3 task:1 decision:1]
+    [decision   ] design/internal-fact-namespace
+    [thread     ] kind-prefix-leak (resolved)
+    [thread     ] discord-source-poll-kind (resolved)
+    [task       ] discord-source-poll-kind (completed)
+    [thread     ] sync-completion-tick (resolved)
+
+  C11  size=4    purity=0.50  kinds=[decision:2 thread:1 cite:1]
+    [decision   ] paradigm/boundary-as-watcher-triple
+    [thread     ] emit-skips-boundary-catchup (open)
+    [cite       ] paradigm/boundary-as-watcher-triple,paradigm/boundaries-as-driven-conditions
+    [decision   ] design/boundary-decoupling
+
+  C12  size=4    purity=0.75  kinds=[decision:3 thread:1]
+    [decision   ] design/cite-as-partial-information-primitive
+    [thread     ] structured-cite-for-comms (open)
+    [decision   ] design/cite-as-attention-signal
+    [decision   ] design/ping-as-attention-signal
+
+  ## strongest bridges (lowest kind-purity, ≥2 kinds × ≥2 members)
+
+  B1  size=12   purity=0.33  kinds=[thread:4 cite:3 plan:2 decision:2 task:1]
+    [cite       ] salience-driven-display-impl,rendering/salience-driven-display,verbosity-fidelity-review,current-open-window-semantics
+    [cite       ] current-open-window-semantics,rendering/salience-driven-display,derived-keys-as-focus-filter
+    [cite       ] salience-driven-display-impl,rendering/salience-driven-display
+    [decision   ] design/session-start-as-tickwindow
+    [decision   ] rendering/plan-section-tier-0
+    [plan       ] salience-driven-display-impl
+    [plan       ] lightweight-emission-ergonomics
+    [task       ] session-prompt-ticks
+    [thread     ] current-open-window-semantics
+    [thread     ] session-start-as-tickwindow
+    ... and 2 more
+
+  B2  size=6    purity=0.50  kinds=[thread:3 decision:3]
+    [decision   ] architecture/sqlmerge-as-substrate-dep
+    [decision   ] architecture/transport-plugin-surface
+    [decision   ] architecture/libs-store
+    [thread     ] sqlmerge-extraction-pressure-test
+    [thread     ] cross-machine-vertex-visibility
+    [thread     ] sqlmerge-portability
+
+  B3  size=24   purity=0.54  kinds=[decision:13 thread:6 task:5]
+    [decision   ] design/dispatch-consolidation-via-program
+    [decision   ] design/notify-as-vertex-capability
+    [decision   ] design/vertex-as-interface
+    [decision   ] design/vertex-tree-as-routing
+    [decision   ] design/boundary-run-clause
+    [decision   ] design/cli-dissolution
+    [decision   ] design/no-persistent-runtime
+    [decision   ] design/orchestration-as-boundary-actions
+    [decision   ] design/daemon-as-vertex-lifecycle
+    [decision   ] design/orchestration-as-design-thread
+    ... and 14 more
+
+  B4  size=5    purity=0.60  kinds=[decision:3 thread:2]
+    [decision   ] architecture/operation-ir-adoption
+    [decision   ] architecture/siftd-dissolution-path
+    [decision   ] architecture/siftd-decomposition
+    [thread     ] siftd-investigation
+    [thread     ] siftd-exchange-topology
+
+  B5  size=33   purity=0.64  kinds=[decision:21 thread:7 task:3 observation:2]
+    [decision   ] design/app-dissolution
+    [decision   ] design/lens-declares-fetch
+    [decision   ] design/three-surviving-concerns
+    [decision   ] architecture/painted-native-display-layer
+    [decision   ] design/fold-aware-auto-rendering
+    [decision   ] architecture/rendering-three-layers
+    [decision   ] design/custom-lens-system
+    [decision   ] design/lens-is-the-interface
+    [decision   ] design/payload-lens
+    [decision   ] architecture/painted-record-patterns
+    ... and 23 more
+
+  B6  size=44   purity=0.70  kinds=[decision:31 thread:11 observation:1 task:1]
+    [decision   ] architecture/loop-as-runtime
+    [decision   ] design/bounded-agent-turns
+    [decision   ] design/root-vertex-as-readable-surface
+    [decision   ] design/vertex-as-loop-controller
+    [decision   ] design/autoresearch-system-user-prompt-split
+    [decision   ] design/autoresearch-one-shot-agents
+    [decision   ] design/iterate-dissolves-into-vertex
+    [decision   ] combine-auto-inherit
+    [decision   ] design/autoresearch-one-shot-load-bearing
+    [decision   ] design/vertex-io-contract-plan
+    ... and 34 more
+
+## CONCERN instruction  (auto-scale σ=0.0234)
+  N=527  components=343  non_trivial≥3=23
+  kind-purity: pure≥0.9: 8  dominant 0.7-0.9: 3  mixed<0.7: 12
+  mean purity: 0.76  median: 0.67
+  cross-kind clusters (≥2 kinds ×≥2 members): 6
+
+  ## top non-trivial components
+
+  C1  size=41   purity=0.71  kinds=[decision:29 thread:10 task:2] ★
+    [decision   ] design/vertex-as-interface
+    [decision   ] architecture/loop-as-runtime
+    [decision   ] design/bounded-agent-turns
+    [decision   ] design/root-vertex-store
+    [decision   ] design/vertex-tree-as-routing
+    [decision   ] design/boundary-run-clause
+
+  C2  size=30   purity=0.60  kinds=[decision:18 thread:7 task:3 observation:2] ★
+    [decision   ] design/app-dissolution
+    [decision   ] design/fold-lens-fidelity-wired
+    [decision   ] design/fold-lens-fidelity-gap
+    [task       ] wire-fold-lens-to-fidelity (completed)
+    [decision   ] design/lens-declares-fetch
+    [decision   ] design/format-dissolves
+
+  C3  size=11   purity=0.73  kinds=[decision:8 thread:1 task:1 cite:1]
+    [decision   ] paradigm/boundary-as-watcher-triple
+    [thread     ] emit-skips-boundary-catchup (open)
+    [decision   ] design/dispatch-consolidation-via-program
+    [decision   ] design/notify-as-vertex-capability
+    [cite       ] paradigm/boundary-as-watcher-triple,paradigm/boundaries-as-driven-conditions
+    [decision   ] architecture/sources-sequential
+
+  C4  size=11   purity=0.82  kinds=[decision:9 thread:1 task:1]
+    [decision   ] engine/observer-scope-as-vertex-concern
+    [decision   ] observer-in-vertex-declaration
+    [decision   ] architecture/observer-file-split
+    [decision   ] design/resolve-observer-canonical
+    [decision   ] infrastructure/observer-elevation
+    [decision   ] vertex-mutation-generalizes
+
+  C5  size=10   purity=0.30  kinds=[thread:3 plan:2 decision:2 cite:2 task:1] ★
+    [decision   ] rendering/salience-driven-display
+    [decision   ] design/session-start-as-tickwindow
+    [thread     ] current-open-window-semantics (resolved)
+    [plan       ] salience-driven-display-impl (done)
+    [thread     ] session-start-as-tickwindow (resolved)
+    [cite       ] salience-driven-display-impl,rendering/salience-driven-display,verbosity-fidelity-review,current-open-window-semantics
+
+  C6  size=8    purity=1.00  kinds=[decision:8]
+    [decision   ] architecture/store-search-layer
+    [decision   ] architecture/distributed-store-default
+    [decision   ] design/lazy-fts-indexing
+    [decision   ] architecture/search-fts5-first
+    [decision   ] architecture/vertex-search-declaration
+    [decision   ] design/combinatorial-vertex-search
+
+  C7  size=6    purity=0.67  kinds=[decision:4 thread:2] ★
+    [decision   ] rendering/visibility-as-gate
+    [decision   ] rendering/chain-display-pattern
+    [decision   ] rendering/visibility-shapes-emphasis
+    [decision   ] rendering/fetch-expanding-visibility
+    [thread     ] ref-graph-view (resolved)
+    [thread     ] attention-density (resolved)
+
+  C8  size=5    purity=0.60  kinds=[thread:3 decision:2] ★
+    [decision   ] architecture/sqlmerge-as-substrate-dep
+    [thread     ] sqlmerge-extraction-pressure-test (resolved)
+    [thread     ] cross-machine-vertex-visibility (open)
+    [thread     ] sqlmerge-portability (open)
+    [decision   ] architecture/transport-plugin-surface
+
+  C9  size=5    purity=1.00  kinds=[decision:5]
+    [decision   ] atoms/refs-on-any-fold
+    [decision   ] design/fold-state-typed-contract
+    [decision   ] design/fold-state-contract
+    [decision   ] atoms/refs-on-fold-item
+    [decision   ] atoms/n-on-fold-item
+
+  C10  size=5    purity=1.00  kinds=[decision:5]
+    [decision   ] design/siftd-as-index
+    [decision   ] design/kind-scoped-horizon
+    [decision   ] architecture/operation-ir-adoption
+    [decision   ] architecture/siftd-dissolution-path
+    [decision   ] architecture/siftd-decomposition
+
+  C11  size=5    purity=0.60  kinds=[decision:3 observation:1 thread:1]
+    [observation] aggregation-key-collision
+    [decision   ] design/init-purely-mechanical
+    [decision   ] combine-auto-inherit
+    [decision   ] init/aggregation-loops-root
+    [thread     ] combine-auto-inherit (resolved)
+
+  C12  size=5    purity=1.00  kinds=[decision:5]
+    [decision   ] design/composition-primitives
+    [decision   ] architecture/painted-native-display-layer
+    [decision   ] architecture/rendering-three-layers
+    [decision   ] architecture/painted-record-patterns
+    [decision   ] design/lens-generalization-flow
+
+  ## strongest bridges (lowest kind-purity, ≥2 kinds × ≥2 members)
+
+  B1  size=10   purity=0.30  kinds=[thread:3 plan:2 decision:2 cite:2 task:1]
+    [cite       ] salience-driven-display-impl,rendering/salience-driven-display,verbosity-fidelity-review,current-open-window-semantics
+    [cite       ] current-open-window-semantics,rendering/salience-driven-display,derived-keys-as-focus-filter
+    [decision   ] rendering/salience-driven-display
+    [decision   ] design/session-start-as-tickwindow
+    [plan       ] salience-driven-display-impl
+    [plan       ] lightweight-emission-ergonomics
+    [task       ] session-prompt-ticks
+    [thread     ] current-open-window-semantics
+    [thread     ] session-start-as-tickwindow
+    [thread     ] verbosity-fidelity-review
+
+  B2  size=4    purity=0.50  kinds=[task:2 thread:2]
+    [task       ] tick-to-fact-flow
+    [task       ] tick-surfacing
+    [thread     ] bulk-emit-ux
+    [thread     ] cli-json-input
+
+  B3  size=5    purity=0.60  kinds=[thread:3 decision:2]
+    [decision   ] architecture/sqlmerge-as-substrate-dep
+    [decision   ] architecture/transport-plugin-surface
+    [thread     ] sqlmerge-extraction-pressure-test
+    [thread     ] cross-machine-vertex-visibility
+    [thread     ] sqlmerge-portability
+
+  B4  size=30   purity=0.60  kinds=[decision:18 thread:7 task:3 observation:2]
+    [decision   ] design/app-dissolution
+    [decision   ] design/fold-lens-fidelity-wired
+    [decision   ] design/fold-lens-fidelity-gap
+    [decision   ] design/lens-declares-fetch
+    [decision   ] design/format-dissolves
+    [decision   ] architecture/app-registration
+    [decision   ] design/three-surviving-concerns
+    [decision   ] rendering/ticks-interface-deferred
+    [decision   ] design/custom-lens-system
+    [decision   ] design/lens-is-the-interface
+    ... and 20 more
+
+  B5  size=6    purity=0.67  kinds=[decision:4 thread:2]
+    [decision   ] rendering/visibility-as-gate
+    [decision   ] rendering/chain-display-pattern
+    [decision   ] rendering/visibility-shapes-emphasis
+    [decision   ] rendering/fetch-expanding-visibility
+    [thread     ] ref-graph-view
+    [thread     ] attention-density
+
+  B6  size=41   purity=0.71  kinds=[decision:29 thread:10 task:2]
+    [decision   ] design/vertex-as-interface
+    [decision   ] architecture/loop-as-runtime
+    [decision   ] design/bounded-agent-turns
+    [decision   ] design/root-vertex-store
+    [decision   ] design/vertex-tree-as-routing
+    [decision   ] design/boundary-run-clause
+    [decision   ] design/root-vertex-as-readable-surface
+    [decision   ] design/cli-dissolution
+    [decision   ] design/no-persistent-runtime
+    [decision   ] design/vertex-as-loop-controller
+    ... and 31 more
+
+## reshuffle: mechanism → concern
+  A-cluster                best-B                   jaccard  composition
+  A-C1(n=44,decision:31/thread:11/observation:1) B-C1(n=41)                 0.37
+  A-C2(n=33,decision:21/thread:7/task:3) B-C2(n=30)                 0.54
+  A-C3(n=24,decision:13/thread:6/task:5) B-C1(n=41)                 0.30
+  A-C4(n=12,thread:4/cite:3/plan:2) B-C5(n=10)                 0.69
+  A-C5(n=8,decision:8)     B-C6(n=8)                  0.60
+  A-C6(n=8,decision:8)     B-C13(n=5)                 0.62
+  A-C7(n=6,thread:3/decision:3) B-C8(n=5)                  0.83
+  A-C8(n=6,decision:6)     B-C9(n=5)                  0.57
+  A-C9(n=5,decision:3/thread:2) B-C10(n=5)                 0.43
+  A-C10(n=5,thread:3/task:1/decision:1) B-C19(n=3)                 0.60
+
+## reshuffle: concern → mechanism
+  A-cluster                best-B                   jaccard  composition
+  A-C1(n=41,decision:29/thread:10/task:2) B-C1(n=44)                 0.37
+  A-C2(n=30,decision:18/thread:7/task:3) B-C2(n=33)                 0.54
+  A-C3(n=11,decision:8/thread:1/task:1) B-C11(n=4)                 0.36
+  A-C4(n=11,decision:9/thread:1/task:1) B-C1(n=44)                 0.20
+  A-C5(n=10,thread:3/plan:2/decision:2) B-C4(n=12)                 0.69
+  A-C6(n=8,decision:8)     B-C5(n=8)                  0.60
+  A-C7(n=6,decision:4/thread:2) B-C14(n=4)                 0.67
+  A-C8(n=5,thread:3/decision:2) B-C7(n=6)                  0.83
+  A-C9(n=5,decision:5)     B-C8(n=6)                  0.57
+  A-C10(n=5,decision:5)    B-C9(n=5)                  0.43

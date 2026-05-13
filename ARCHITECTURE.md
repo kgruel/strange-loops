@@ -4,6 +4,36 @@ The implementation of [STRANGE-LOOPS](STRANGE-LOOPS.md) in Python. The paradigm
 is three shapes, four properties, one pattern. This document is how and why
 those are instantiated as software.
 
+## Loops as protocol
+
+Loops is a **protocol** — a shape (`Fact`, `Tick`, `Cascade`, `Observer`,
+`Grant`) with operational properties (participatory observation, append-only
+storage, fold-derived state, boundary-driven ticks) — that any implementation
+can honor. This Python codebase is one instantiation; it is not the
+definition. The definition lives in the shape and the properties.
+
+Two consequences fall out:
+
+- **Same-language consumers** import the libraries directly. They share the
+  Python implementation, the conventions, the test infrastructure. The
+  protocol holds because the code holds.
+- **Cross-language consumers** implement the protocol over the wire — Facts
+  serialized as JSON, traversal verbs as a documented API, storage and
+  transport as their own concern. They share the shape without sharing
+  implementation. The protocol holds because the shape is portable.
+
+Both are valid; neither is privileged. Multiple implementations are expected
+in any sufficiently durable ecosystem — peer homelabs in different stacks,
+embedded subsystems with different constraints, alternate runtimes for
+research and replay. The shape survives across them because the shape is
+small, the substrate is thin, and the trust attaches to the fact-stream
+rather than to any specific implementation's enforcement.
+
+This framing is what makes the system trivially portable in a deeper sense
+than "the language is portable." The paradigm is portable; the paradigm is
+what matters. (See [the trust-as-substrate essay](essays/2026-05-13-on-trust-as-substrate.md)
+for the operational consequences.)
+
 ## Why Python
 
 Not because Python is fast, or because the ecosystem demands it. Because the
@@ -206,7 +236,12 @@ plane that works for everyone in the loop.
 
 ## Identity: Peer/Grant
 
-Implemented in engine. Not yet used by any application.
+Implemented in engine. The current shape (Peer-as-convenience-bundle with
+horizon/potential; Observer-as-string on Fact; Grant separated as policy at
+Vertex) is the result of the Jan 27–30 dissolution in the prism workspace
+that broke up the original bundled Peer atom. See [IDENTITY.md](docs/IDENTITY.md)
+for the full evolution and current model; [SCOPE-LATTICE.md](docs/SCOPE-LATTICE.md)
+for the operational algebra of delegation under chains.
 
 **Observer** is a string on every Fact. Naming hierarchy encodes participation
 level by convention: `kyle` (direct), `kyle/claude-session-123` (delegated),
@@ -221,8 +256,20 @@ level by convention: `kyle` (direct), `kyle/claude-session-123` (delegated),
 constrained voice. `delegate(peer, "child", potential={"health"})` creates
 a child peer that can only emit health observations.
 
-This mechanism exists and is tested. Whether it survives real use or dissolves
-further is an open question tracked in the project store.
+**The substrate stance is participatory, not authenticative.** Observer
+carries who-asserts; trust attaches to the accumulated fact-stream, not to
+per-fact signatures. Verification, when needed, happens at boundaries via
+`VertexPolicy` hooks. The substrate ships nothing for cryptographic
+verification of facts; consumers that need it (vouch's ledger entries) carry
+signatures in their consumer payload.
+
+**First cross-repo consumer:** [vouch](../vouch/) (homelab agent IdP) is the
+first external consumer that exercises this machinery seriously. Vouch is
+the *forcing function* for any further Peer/Grant recast — substrate
+refinements (`Peer.iss` for federation, lifting `Grant` to `kind=grant`
+Facts, the `VertexPolicy` interface) emerge from vouch's implementation
+friction rather than being pre-committed in advance. Refinements land here
+when vouch's exercise produces them.
 
 ## Conventions
 
@@ -252,5 +299,7 @@ uv run --package <name> pytest apps/<name>/tests       # test one app
 | [VERTEX.md](docs/VERTEX.md) | Routing, folding, branching in the engine |
 | [TEMPORAL.md](docs/TEMPORAL.md) | Boundaries, nesting, semantic time |
 | [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, replay, store protocol |
-| [IDENTITY.md](docs/IDENTITY.md) | Observer attribution, gating policy |
+| [IDENTITY.md](docs/IDENTITY.md) | Observer attribution, gating policy, cross-collab |
+| [SCOPE-LATTICE.md](docs/SCOPE-LATTICE.md) | Capability algebra at the substrate |
+| [trust-as-substrate essay](essays/2026-05-13-on-trust-as-substrate.md) | What the substrate doesn't decide |
 | Lib CLAUDE.md files | Progressive API guides for each library |

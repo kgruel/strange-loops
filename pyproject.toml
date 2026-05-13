@@ -10,6 +10,9 @@ dependencies = [
     "painted>=0.1.1",
     "ckdl>=1.0",
     "sqlite-ulid",
+    "pyjwt[crypto]>=2.9",
+    "cryptography>=43",
+    "python-ulid>=3.0",
 ]
 
 [project.scripts]
@@ -26,6 +29,7 @@ only-include = [
     "libs/atoms/src/atoms",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
     "README.md",
@@ -37,6 +41,7 @@ packages = [
     "libs/atoms/src/atoms",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
 ]
@@ -47,6 +52,7 @@ members = [
     "libs/engine",
     "libs/painted",
     "libs/lang",
+    "libs/sign",
     "libs/store",
     "apps/hlab",
     "apps/loops",

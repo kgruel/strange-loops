@@ -35,6 +35,15 @@ class Peer:
 
     None means unrestricted — the peer can see/do anything.
     An explicit frozenset constrains to those entries only.
+
+    Chain ancestry is intentionally NOT reachable from a leaf Peer.
+    Peer is a per-agent projection of current state, not a per-assertion
+    relation. To reconstruct "who vouched for this Peer / who is its
+    voucher's voucher," walk the Fact ledger (via Fact.observer for the
+    immediate asserter and via payload conventions like chain_metadata
+    for ancestry). This is by design — assertions live on Facts, not on
+    identity objects. See loops decision
+    `substrate-friction/peer-assertion-relation` (2026-05-13).
     """
 
     name: str

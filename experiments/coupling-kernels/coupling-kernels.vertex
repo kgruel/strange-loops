@@ -1,0 +1,54 @@
+// Coupling-kernels experimental vertex
+//
+// Provenance store for the structure-reveal harness in core/.
+// Three kinds:
+//   - query-run: receipt of one Query execution (one fact per call to run())
+//   - query-comparison: receipt of one compare(qa, qb, op) invocation
+//   - hypothesis: testable prediction about embedder/clustering behavior
+//
+// Design references (in the project store):
+//   loops read project --kind decision | grep coupling-kernels
+//
+// Key shape decisions:
+//   - query-run / query-comparison: 'by' upserts on content-derived ID fields
+//     (run_id, comparison_id). Semantically collect — one fact per execution
+//     (key is unique by construction) — but refable through existing ref
+//     machinery without exposing fact ULIDs.
+//   - Recipe-hash vs binding split: spec_hash identifies the recipe (Query
+//     as a value); binding (corpus snapshot, embedder version) is separate
+//     because same-recipe-different-snapshot runs aren't comparable.
+//   - Artifacts (E embedding matrix) referenced via embeddings_ref pointing
+//     at CachedEmbedder's existing cache path — the cache IS the sidecar.
+//   - hypothesis carries optional recipe_id + params for future
+//     "loops run-pending" light-trigger path. Daemon trigger deferred.
+
+name "coupling-kernels"
+store "./data/coupling-kernels.db"
+
+loops {
+  // --- Receipt of one Query execution ---
+  // run_id = "run_<short_spec_hash>_<ts_ms>" — unique by construction.
+  // Payload fields: spec_hash, binding (json), embeddings_ref (optional;
+  //   absent = ephemeral run with no persisted artifacts), sigma,
+  //   n_components, n_items, components (json list of int lists),
+  //   readout_summary (json), ref=hypothesis:<name> (optional).
+  query-run {
+    fold { items "by" "run_id" }
+  }
+
+  // --- Receipt of one compare(qa, qb, op) invocation ---
+  // comparison_id = "cmp_<run_a_id>_<run_b_id>_<op>" — unique per (pair, op).
+  // refs both runs via existing ref machinery: ref=query-run:<run_a_id>,query-run:<run_b_id>
+  // Cluster lineage queryable via the ref graph.
+  query-comparison {
+    fold { items "by" "comparison_id" }
+  }
+
+  // --- Testable predictions about embedder behavior ---
+  // status: proposed → confirmed | rejected | refined as evidence accumulates.
+  // Optional payload: recipe_id, params (light-trigger door; daemon deferred).
+  // query-run facts ref=hypothesis:<name> when their run was driven by it.
+  hypothesis {
+    fold { items "by" "name" }
+  }
+}

@@ -45,7 +45,16 @@ def positive_components(K):
     return comps
 
 
-def find_richness_scale(D):
+def find_richness_scale(D, ratio: float = 2.0):
+    """Search percentile-derived sigmas for the one maximizing non-trivial
+    component count under dog_kernel(D, s, ratio).
+
+    The ratio parameter (default 2.0 to preserve existing callers) is
+    passed through to dog_kernel — without it, the search is silently
+    ratio=2.0 regardless of the calling Kernel's ratio. See hypothesis
+    'find-richness-scale-drops-ratio' (coupling-kernels vertex) for the
+    bug history.
+    """
     if D.shape[0] < 5:
         return 0.0, []
     off = D[np.triu_indices(D.shape[0], k=1)]
@@ -55,7 +64,7 @@ def find_richness_scale(D):
         s = float(np.percentile(off, p))
         if s == 0:
             continue
-        K = dog_kernel(D, s)
+        K = dog_kernel(D, s, ratio=ratio)
         comps = positive_components(K)
         non_trivial = [c for c in comps if len(c) >= 3]
         if len(non_trivial) > best_richness:
@@ -81,4 +90,4 @@ class Kernel:
             return s, positive_components(K)
         if callable(self.scale_finder):
             return self.scale_finder(D)
-        return find_richness_scale(D)
+        return find_richness_scale(D, ratio=self.ratio)

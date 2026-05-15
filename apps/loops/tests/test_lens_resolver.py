@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from loops.lens_resolver import resolve_lens, call_lens, _view_candidates, _build_search_path
+from loops.lens_resolver import resolve_lens, call_lens, call_lens_fetch, _view_candidates, _build_search_path
 
 
 class TestViewCandidates:
@@ -136,6 +136,97 @@ class TestCallLens:
 
         result = call_lens(lens, "d", "z", 80)
         assert result == "ok"
+
+
+class TestCallLensFetch:
+    """call_lens_fetch — symmetric to call_lens on the fetch side.
+
+    Inspects the fetch function's signature to decide what to pass:
+    var-keyword lenses get everything; named-param lenses get matching kwargs;
+    parameterless lenses get just vertex_path.
+    """
+
+    def test_var_keyword_lens_gets_all(self):
+        """Lens declaring **kwargs receives every kwarg passed."""
+        received = {}
+
+        def lens_fetch(vertex_path, **kwargs):
+            received.update(kwargs)
+            return "data"
+
+        result = call_lens_fetch(
+            lens_fetch, "/path",
+            kind="decision", key="design/", observer="me", retain_facts=True,
+            custom_thing="extra",
+        )
+        assert result == "data"
+        assert received == {
+            "kind": "decision", "key": "design/",
+            "observer": "me", "retain_facts": True, "custom_thing": "extra",
+        }
+
+    def test_named_params_filter_kwargs(self):
+        """Lens with named params only receives matching kwargs; others dropped silently."""
+        received = {}
+
+        def lens_fetch(vertex_path, *, kind=None, observer=None):
+            received["kind"] = kind
+            received["observer"] = observer
+            return "data"
+
+        result = call_lens_fetch(
+            lens_fetch, "/path",
+            kind="decision", key="design/",  # key is not declared — dropped
+            observer="me", retain_facts=True,  # retain_facts not declared — dropped
+        )
+        assert result == "data"
+        assert received == {"kind": "decision", "observer": "me"}
+
+    def test_lens_with_custom_param_receives_it(self):
+        """Lens declaring its own param (e.g. --context) receives it via kwargs passthrough."""
+        received = {}
+
+        def lens_fetch(vertex_path, *, kind=None, context=None):
+            received["kind"] = kind
+            received["context"] = context
+            return "data"
+
+        result = call_lens_fetch(
+            lens_fetch, "/path",
+            kind="guide", context="authorization",
+        )
+        assert result == "data"
+        assert received == {"kind": "guide", "context": "authorization"}
+
+    def test_lens_with_no_kwargs_gets_just_vertex_path(self):
+        """Parameterless lens fetch receives only vertex_path."""
+        received = {"called": False}
+
+        def lens_fetch(vertex_path):
+            received["called"] = True
+            received["vertex_path"] = vertex_path
+            return "data"
+
+        result = call_lens_fetch(
+            lens_fetch, "/path",
+            kind="decision", key="design/",
+        )
+        assert result == "data"
+        assert received["called"] is True
+        assert received["vertex_path"] == "/path"
+
+    def test_typeerror_inside_lens_body_propagates(self):
+        """TypeError raised inside the lens body is NOT swallowed — surfaces to caller.
+
+        This distinguishes inspect-based dispatch from try/except: a real error
+        in the lens (bad indexing, missing attr) shouldn't be misread as a kwarg
+        mismatch and silently retried.
+        """
+        def lens_fetch(vertex_path, **kwargs):
+            return None.nonexistent  # type: ignore
+
+        with pytest.raises(AttributeError):
+            call_lens_fetch(lens_fetch, "/path", kind="x")
 
 
 class TestLensResolverEdges:

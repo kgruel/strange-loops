@@ -1,8 +1,17 @@
 """Data retrieval — fold (collapsed state) and stream (event history).
 
-Supports key drill-down via ``kind/key`` syntax on the ``--kind`` flag:
-``--kind thread/fold-state-types`` filters to the single folded item
-(fold) or facts matching the key field value (stream).
+Supports key drill-down via two equivalent surfaces:
+
+- ``--key <prefix>`` flag: ``loops read project --kind decision --key design/``
+  filters to items whose key field starts with the prefix. Cross-kind operation
+  supported when ``--kind`` is omitted (filters all sections by prefix).
+- ``kind/key`` embedded syntax (back-compat): ``--kind thread/fold-state-types``
+  is equivalent to ``--kind thread --key fold-state-types``.
+
+Matching is prefix-based and case-insensitive — ``--key design/`` matches
+``design/lens-is-the-interface``, ``design/derived-keys-as-focus-filter``, etc.
+For exact match, type the full key (a unique full key matches only itself via
+``.startswith()``).
 """
 
 from __future__ import annotations
@@ -54,35 +63,49 @@ def _get_key_field(vertex_path: Path, kind: str) -> str | None:
 def fetch_fold(
     vertex_path: Path,
     kind: str | None = None,
+    key: str | None = None,
     observer: str | None = None,
     retain_facts: bool = False,
 ) -> "FoldState":
-    """Fetch fold state, with optional key drill-down.
+    """Fetch fold state, with optional key prefix drill-down.
 
-    Supports ``kind/key`` syntax: ``thread/fold-state-types`` filters
-    to the single item whose key field matches. The fold section is
-    preserved (one item instead of many) so lenses render normally.
+    Two equivalent calling conventions for keys:
+
+    - Explicit: ``fetch_fold(vp, kind="decision", key="design/")``
+    - Embedded (back-compat): ``fetch_fold(vp, kind="decision/design/")``
+
+    Both produce the same result. Key matching is prefix-based (``.startswith()``,
+    case-insensitive) — ``key="design/"`` matches every item whose fold-key field
+    starts with ``design/``. For exact match, pass the full key (a unique full
+    key is a prefix of only itself).
+
+    When ``kind`` is omitted but ``key`` is provided, filtering runs across all
+    sections — each section uses its own declared key_field. Sections with no
+    matches are dropped.
     """
     from atoms import FoldSection, FoldState
     from engine import vertex_fold
 
-    kind_filter, key_filter = _split_kind_key(kind)
+    # Back-compat: split embedded kind/key syntax when no explicit key given.
+    if kind and key is None and "/" in kind:
+        kind, key = _split_kind_key(kind)
+
     state = vertex_fold(
-        vertex_path, observer=observer, kind=kind_filter,
+        vertex_path, observer=observer, kind=kind,
         retain_facts=retain_facts,
     )
 
-    if key_filter is None:
+    if key is None:
         return state
 
-    # Filter sections to items matching the key value
-    # (vertex_fold(kind=kind_filter) always returns a single-kind state,
-    # so all sections already have kind == kind_filter)
+    # Filter each section's items by the section's own key_field (prefix match).
+    # When kind was set, state has one section; when kind was None, state has
+    # all sections and we filter each by its own declared key_field.
     filtered: list[FoldSection] = []
     for section in state.sections:
         matches = tuple(
             item for item in section.items
-            if _item_matches_key(item, section.key_field, key_filter)
+            if _item_matches_key(item, section.key_field, key)
         )
         if matches:
             filtered.append(FoldSection(
@@ -97,17 +120,20 @@ def fetch_fold(
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:
-    """Check if a fold item matches a key value.
+    """Check if a fold item's key matches a prefix (case-insensitive).
 
-    Tries key_field first, then common label fields. Case-insensitive.
+    Tries the section's declared key_field first, then common label fields
+    (topic, name, title, summary). Uses ``.startswith()`` — type the full key
+    to match a single item; type a prefix to match a subtree.
     """
     candidates = [key_field] if key_field else []
     candidates.extend(["topic", "name", "title", "summary"])
 
+    key_lower = key.lower()
     for field in candidates:
         if field and field in item.payload:
-            val = str(item.payload[field])
-            if val.lower() == key.lower():
+            val = str(item.payload[field]).lower()
+            if val.startswith(key_lower):
                 return True
     return False
 
@@ -126,8 +152,9 @@ def fetch_stream(
     uses FTS5 search; otherwise returns raw facts in reverse-chrono order.
 
     Supports ``kind/key`` drill-down: ``--kind thread/fold-state-types``
-    returns only facts whose key field payload matches. When drilling down,
-    time window defaults to all history (not 7d).
+    returns only facts whose key field payload starts with the prefix
+    (case-insensitive). When drilling down, time window defaults to all
+    history (not 7d).
 
     Returns ``{"facts": list[dict], "fold_meta": dict, "vertex": str}``.
     """
@@ -184,15 +211,16 @@ def fetch_stream(
 
 
 def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:
-    """Check if a raw fact's payload matches a key value."""
+    """Check if a raw fact's payload matches a key prefix (case-insensitive)."""
     payload = fact.get("payload", {})
     candidates = [key_field] if key_field else []
     candidates.extend(["topic", "name", "title", "summary"])
 
+    key_lower = key.lower()
     for field in candidates:
         if field and field in payload:
-            val = str(payload[field])
-            if val.lower() == key.lower():
+            val = str(payload[field]).lower()
+            if val.startswith(key_lower):
                 return True
     return False
 

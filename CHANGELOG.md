@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-05-15
+
+### Read-path access primitives
+
+- **`--key <prefix>`** on `loops read` — kind-aware fold-key filter, prefix
+  matching (case-insensitive). Works with or without `--kind` (cross-kind
+  filters every section by its own declared `key_field`). Full key matches
+  exactly its own item (degenerate prefix case).
+- **`--kind kind/key` embedded syntax** now does prefix matching too
+  (back-compat: equality is the degenerate prefix case — existing exact-match
+  usages unchanged).
+- **`call_lens_fetch`** in `lens_resolver` — inspects lens fetch signature;
+  passes only kwargs the lens declares. Symmetric to `call_lens` on render
+  side. Real `TypeError` from lens body propagates instead of being swallowed.
+
 ## 2026-03-22
 
 ### Autoresearch: Test Coverage Campaign (#001)

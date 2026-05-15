@@ -200,6 +200,109 @@ def _run_cite(
     return _run_emit(emit_argv, vertex_path=vertex_path, observer=observer)
 
 
+def _exit_lens_not_found(
+    name: str,
+    view_name: str,
+    vertex_dir: Path | None,
+    *,
+    source: str,
+) -> None:
+    """Print a helpful error and ``sys.exit(2)`` for an unresolvable lens request.
+
+    Lists the file-search tiers tried so the user can drop the lens in the
+    right place or fix the typo. The view_name appears in the message because
+    a lens module CAN exist but lack the requested view (e.g. fold_view
+    present, stream_view missing) — same surface error, distinct cause, and
+    the user inspects the named module to tell them apart.
+    """
+    from .lens_resolver import _build_search_path
+
+    lines = [
+        f"Lens '{name}' (requested via {source}) not found, "
+        f"or found but missing {view_name}().",
+        "Searched:",
+    ]
+    for d in _build_search_path(vertex_dir):
+        lines.append(f"  {d}/{name}.py")
+    lines.append(f"  built-in: loops.lenses.{name}")
+    print("\n".join(lines), file=sys.stderr)
+    sys.exit(2)
+
+
+def _declared_kinds(vertex_path: Path) -> set[str]:
+    """Return the set of kinds declared by a vertex (instance or aggregation).
+
+    For an instance vertex, returns the kinds in its ``loops {}`` block.
+    For an aggregation vertex that defines its own loops, those kinds.
+    For an aggregation vertex with no loops block (pure combine), returns
+    the union of source-vertex kinds — same union ``vertex_fold`` uses.
+
+    Returns an empty set on parse/compile failure (validation is best-effort
+    — callers should treat empty as "couldn't determine" rather than "vertex
+    declares nothing").
+    """
+    try:
+        from lang import parse_vertex_file
+        from engine.compiler import compile_vertex
+        from engine.vertex_reader import _collect_source_specs
+
+        ast = parse_vertex_file(vertex_path)
+        specs = compile_vertex(ast)
+        if (ast.combine is not None or ast.discover is not None) and not specs:
+            source_specs = _collect_source_specs(
+                ast, vertex_path, override_kinds=frozenset(specs),
+            )
+            return set(source_specs.keys()) | set(specs.keys())
+        return set(specs.keys())
+    except Exception:
+        return set()
+
+
+def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
+    """If ``--kind X`` is set and X is not declared by the vertex, exit 2.
+
+    Silent empty results hide the indistinguishability between:
+    - typo in kind name (``--kind decsion``)
+    - real kind that this vertex doesn't declare (``--kind decision`` on
+      coupling-kernels, which only declares hypothesis/query-run/query-comparison)
+    - valid kind with zero facts yet
+
+    Strict validation surfaces the first two as actionable errors; the third
+    keeps current "No data yet" behavior because the kind IS declared.
+
+    Same fix shape as ``_exit_lens_not_found`` — third instance of the
+    measurement-fidelity discipline. Honest naming: this is consumer-side
+    validation of declared kinds, not the broader sensor-registry that
+    alcove pointed at (that waits for concrete sensor use cases).
+
+    Skips validation when ``kind`` is None (no filter requested) or the
+    vertex's declared-kinds set is empty (couldn't determine — don't block).
+    Path-style ``kind/key`` is split: only the kind half is validated.
+    """
+    if kind is None or vertex_path is None:
+        return
+    # kind/key drill-down: validate only the kind half.
+    kind_only = kind.split("/", 1)[0]
+    declared = _declared_kinds(vertex_path)
+    if not declared:
+        return  # Couldn't determine — don't second-guess the caller.
+    if kind_only in declared:
+        return
+
+    import difflib
+    suggestions = difflib.get_close_matches(
+        kind_only, sorted(declared), n=3, cutoff=0.5,
+    )
+    lines = [
+        f"Vertex '{vertex_path.stem}' does not declare kind '{kind_only}'.",
+    ]
+    if suggestions:
+        lines.append(f"Did you mean: {', '.join(suggestions)}?")
+    lines.append(f"Declared kinds: {', '.join(sorted(declared)) or '(none)'}")
+    print("\n".join(lines), file=sys.stderr)
+    sys.exit(2)
+
+
 def _resolve_render_fn(
     lens_flag: str | None,
     vertex_path: Path | None,
@@ -211,19 +314,31 @@ def _resolve_render_fn(
     1. --lens CLI flag (resolved via lens_resolver)
     2. Vertex lens{} declaration (resolved via lens_resolver)
     3. Built-in default
+
+    Explicit lens requests fail loudly. When ``--lens NAME`` or a vertex
+    ``lens { fold "NAME" }`` declaration cannot be resolved in any tier
+    (vertex-local, cwd, user-global, built-in), this prints a helpful error
+    listing the search path and calls ``sys.exit(2)``. Silent fallback to a
+    different view would hide measurement misalignment — same failure shape
+    as alcove's recency-counter-vs-emitted-kind bug. The user explicitly
+    asked for a lens by name; they get either that lens or a clear failure.
+
+    Implicit fallbacks (no ``lens_flag``, no vertex decl) still return the
+    built-in default — that path is the normal "no lens requested" case.
     """
     from .lens_resolver import resolve_lens
 
     # Determine vertex directory for lens search path
     vertex_dir = vertex_path.parent if vertex_path is not None else None
 
-    # Tier 1: --lens flag
+    # Tier 1: --lens flag — explicit request, fail loudly if unresolvable
     if lens_flag is not None:
         fn = resolve_lens(lens_flag, view_name, vertex_dir=vertex_dir)
         if fn is not None:
             return fn
+        _exit_lens_not_found(lens_flag, view_name, vertex_dir, source="--lens flag")
 
-    # Tier 2: vertex lens{} declaration
+    # Tier 2: vertex lens{} declaration — explicit decl, fail loudly if unresolvable
     if vertex_path is not None:
         vertex_lens = _get_vertex_lens_decl(vertex_path)
         if vertex_lens is not None:
@@ -231,10 +346,18 @@ def _resolve_render_fn(
                 fn = resolve_lens(vertex_lens.fold, view_name, vertex_dir=vertex_dir)
                 if fn is not None:
                     return fn
+                _exit_lens_not_found(
+                    vertex_lens.fold, view_name, vertex_dir,
+                    source=f"vertex lens decl in {vertex_path.name}",
+                )
             elif view_name == "stream_view" and vertex_lens.stream:
                 fn = resolve_lens(vertex_lens.stream, view_name, vertex_dir=vertex_dir)
                 if fn is not None:
                     return fn
+                _exit_lens_not_found(
+                    vertex_lens.stream, view_name, vertex_dir,
+                    source=f"vertex lens decl in {vertex_path.name}",
+                )
 
     # Tier 3: built-in defaults
     if view_name == "fold_view":
@@ -370,6 +493,11 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
 
+        # Kind validation: --kind X against vertex.declared_kinds.
+        # Same fix shape as _exit_lens_not_found — surfaces consumer-side
+        # measurement misalignment loudly instead of silent empty results.
+        _validate_kind_or_exit(known.kind, vertex_path)
+
         # --id: single fact lookup by ID or prefix
         if known.fact_id is not None:
             from .commands.fetch import fetch_fact_by_id
@@ -427,6 +555,7 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
     if vertex_path is None:
         pre.add_argument("vertex", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
+    pre.add_argument("--key", default=None)
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
@@ -458,19 +587,23 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         # Apply vertex scope — deferred until vertex_path is known
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
+        # Kind validation against vertex.declared_kinds (see _validate_kind_or_exit).
+        _validate_kind_or_exit(known.kind, vertex_path)
         # Lens may declare its own fetch (composition lenses — fold + ticks,
         # fold + refs-graph, etc.). When present, the lens owns the input
         # contract; we pass through the standard kwargs and let the lens
         # consume what it needs.
         lens_fetch = _resolve_lens_fetch(known.lens, vertex_path, "fold_view")
         if lens_fetch is not None:
-            return lens_fetch(
-                vertex_path, kind=known.kind, observer=obs_for_engine,
+            from .lens_resolver import call_lens_fetch
+            return call_lens_fetch(
+                lens_fetch, vertex_path,
+                kind=known.kind, key=known.key, observer=obs_for_engine,
                 retain_facts=want_facts,
             )
         from .commands.fetch import fetch_fold
         return fetch_fold(
-            vertex_path, kind=known.kind, observer=obs_for_engine,
+            vertex_path, kind=known.kind, key=known.key, observer=obs_for_engine,
             retain_facts=want_facts,
         )
 
@@ -677,10 +810,11 @@ def _run_fold_fast(
     """
     import shutil
 
-    # Resolve zoom from rest args (lightweight, no painted import)
+    # Resolve zoom + key drilldown from rest args (lightweight, no painted import)
     zoom_level = 1  # SUMMARY default
     max_lines = 0
     max_chars = 0
+    key_filter: str | None = None
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -712,6 +846,11 @@ def _run_fold_fast(
                 max_chars = int(arg.split("=", 1)[1])
             except ValueError:
                 pass
+        elif arg == "--key" and i + 1 < len(rest):
+            key_filter = rest[i + 1]
+            i += 1
+        elif arg.startswith("--key="):
+            key_filter = arg.split("=", 1)[1]
         i += 1
 
     # Fetch data
@@ -727,18 +866,29 @@ def _run_fold_fast(
     observer = _apply_vertex_scope(observer, vertex_path)
     obs_for_engine = observer if observer else None
 
+    # Kind validation against vertex.declared_kinds (see _validate_kind_or_exit).
+    _validate_kind_or_exit(known.kind, vertex_path)
+
     # Lens-declared fetch takes precedence. Composition lenses (fold + ticks,
     # etc.) return a non-FoldState shape — the pure-text fast path can't
     # render that, so we route those through painted below.
+    # --key may arrive via known.key (when caller pre-parsed it) or via rest
+    # (when called standalone). Prefer known.key.
+    effective_key = getattr(known, "key", None) or key_filter
+
     lens_fetch = _resolve_lens_fetch(known.lens, vertex_path, "fold_view")
     try:
         if lens_fetch is not None:
-            data = lens_fetch(
-                vertex_path, kind=known.kind, observer=obs_for_engine,
+            from .lens_resolver import call_lens_fetch
+            data = call_lens_fetch(
+                lens_fetch, vertex_path,
+                kind=known.kind, key=effective_key, observer=obs_for_engine,
             )
         else:
             from .commands.fetch import fetch_fold
-            data = fetch_fold(vertex_path, kind=known.kind, observer=obs_for_engine)
+            data = fetch_fold(
+                vertex_path, kind=known.kind, key=effective_key, observer=obs_for_engine,
+            )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

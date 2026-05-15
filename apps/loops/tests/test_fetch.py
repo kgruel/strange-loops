@@ -69,6 +69,34 @@ class TestKeyMatchingHelpers:
         fact = {"payload": {"topic": "design/api"}}
         assert _fact_matches_key(fact, None, "design/api") is True
 
+    # Prefix semantics — type the prefix to drill into a subtree;
+    # type the full key for exact match (it's a prefix of only itself).
+
+    def test_item_matches_prefix(self):
+        from atoms import FoldItem
+        item = FoldItem(payload={"topic": "design/lens-is-the-interface"}, ts=1.0)
+        assert _item_matches_key(item, "topic", "design/") is True
+        assert _item_matches_key(item, "topic", "design/lens-") is True
+
+    def test_item_matches_full_key_as_self_prefix(self):
+        from atoms import FoldItem
+        item = FoldItem(payload={"topic": "design/foo"}, ts=1.0)
+        assert _item_matches_key(item, "topic", "design/foo") is True
+
+    def test_item_prefix_no_match(self):
+        from atoms import FoldItem
+        item = FoldItem(payload={"topic": "design/foo"}, ts=1.0)
+        assert _item_matches_key(item, "topic", "architecture/") is False
+
+    def test_fact_matches_prefix(self):
+        fact = {"payload": {"topic": "design/lens-is-the-interface"}}
+        assert _fact_matches_key(fact, "topic", "design/") is True
+        assert _fact_matches_key(fact, "topic", "design/lens-") is True
+
+    def test_fact_prefix_no_match(self):
+        fact = {"payload": {"topic": "design/foo"}}
+        assert _fact_matches_key(fact, "topic", "architecture/") is False
+
 
 class TestGetKeyField:
     def test_fold_by_kind(self, tmp_path):
@@ -122,6 +150,108 @@ class TestFetchIntegration:
         assert len(state.sections) == 1
         assert state.sections[0].kind == "metric"
         assert all(item.payload["service"] == "api" for item in state.sections[0].items)
+
+    def test_fetch_fold_explicit_key_param(self, tmp_path):
+        """Explicit key= param is equivalent to embedded kind/key syntax."""
+        from engine.builder import fold_by, vertex
+        from loops.commands.fetch import fetch_fold
+        from loops.main import cmd_emit
+        import argparse
+
+        vpath = tmp_path / "t.vertex"
+        vertex("t").store("./t.db").loop("metric", fold_by("service")).write(vpath)
+        for svc in ["api", "web"]:
+            cmd_emit(argparse.Namespace(
+                vertex=None, kind="metric", parts=[f"service={svc}", "val=1"],
+                observer="", dry_run=False,
+            ), vertex_path=vpath)
+
+        state = fetch_fold(vpath, kind="metric", key="api")
+        assert len(state.sections) == 1
+        assert state.sections[0].kind == "metric"
+        assert all(item.payload["service"] == "api" for item in state.sections[0].items)
+
+    def test_fetch_fold_key_prefix_match(self, tmp_path):
+        """--key foo matches all items whose key starts with foo."""
+        from engine.builder import fold_by, vertex
+        from loops.commands.fetch import fetch_fold
+        from loops.main import cmd_emit
+        import argparse
+
+        vpath = tmp_path / "t.vertex"
+        vertex("t").store("./t.db").loop("decision", fold_by("topic")).write(vpath)
+        for topic in ["design/lens", "design/atoms", "architecture/store"]:
+            cmd_emit(argparse.Namespace(
+                vertex=None, kind="decision",
+                parts=[f"topic={topic}", "message=x"],
+                observer="", dry_run=False,
+            ), vertex_path=vpath)
+
+        state = fetch_fold(vpath, kind="decision", key="design/")
+        assert len(state.sections) == 1
+        topics = {item.payload["topic"] for item in state.sections[0].items}
+        assert topics == {"design/lens", "design/atoms"}
+
+    def test_fetch_fold_cross_kind_key_filter(self, tmp_path):
+        """--key without --kind filters across all sections by their own key_field."""
+        from engine.builder import fold_by, vertex
+        from loops.commands.fetch import fetch_fold
+        from loops.main import cmd_emit
+        import argparse
+
+        vpath = tmp_path / "t.vertex"
+        (vertex("t").store("./t.db")
+            .loop("decision", fold_by("topic"))
+            .loop("thread", fold_by("name"))
+            .write(vpath))
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/lens", "message=x"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=architecture/store", "message=x"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="thread",
+            parts=["name=design/foo", "status=open"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="thread",
+            parts=["name=fix-bug", "status=open"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+
+        # Cross-kind key prefix — each section uses its own key_field
+        state = fetch_fold(vpath, key="design/")
+        sections_by_kind = {s.kind: s for s in state.sections}
+        assert "decision" in sections_by_kind
+        assert "thread" in sections_by_kind
+        decision_topics = {i.payload["topic"] for i in sections_by_kind["decision"].items}
+        thread_names = {i.payload["name"] for i in sections_by_kind["thread"].items}
+        assert decision_topics == {"design/lens"}
+        assert thread_names == {"design/foo"}
+
+    def test_fetch_fold_key_no_matches_returns_empty(self, tmp_path):
+        """When --key matches nothing, return state with no sections."""
+        from engine.builder import fold_by, vertex
+        from loops.commands.fetch import fetch_fold
+        from loops.main import cmd_emit
+        import argparse
+
+        vpath = tmp_path / "t.vertex"
+        vertex("t").store("./t.db").loop("decision", fold_by("topic")).write(vpath)
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/x", "message=y"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+
+        state = fetch_fold(vpath, kind="decision", key="nonexistent/")
+        assert len(state.sections) == 0
 
     def test_fetch_stream_basic(self, tmp_path):
         from engine.builder import fold_count, vertex

@@ -236,3 +236,33 @@ def call_lens(fn: LensRenderFn, data, zoom, width, **kwargs) -> "Block":
         return fn(data, zoom, width, **kwargs)
     except TypeError:
         return fn(data, zoom, width)
+
+
+def call_lens_fetch(fetch_fn, vertex_path, **all_kwargs):
+    """Call a lens-declared fetch, passing only kwargs the function accepts.
+
+    Symmetric to ``call_lens`` on the render side. Inspects the fetch function's
+    signature to decide what to pass:
+
+    - Lens has ``**kwargs`` in signature → passes everything (lens opts into all)
+    - Lens has named params → passes only those that match
+    - Lens has neither → passes just ``vertex_path``
+
+    Uses ``inspect.signature`` rather than try/except so a TypeError raised inside
+    the lens body (bad indexing, missing import) surfaces normally instead of
+    being misread as a kwarg mismatch.
+    """
+    import inspect
+
+    sig = inspect.signature(fetch_fn)
+    params = sig.parameters
+
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in params.values()
+    )
+    if has_var_keyword:
+        return fetch_fn(vertex_path, **all_kwargs)
+
+    accepted = {k: v for k, v in all_kwargs.items() if k in params}
+    return fetch_fn(vertex_path, **accepted)

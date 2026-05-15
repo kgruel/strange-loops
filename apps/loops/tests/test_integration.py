@@ -1376,6 +1376,90 @@ class TestRunFoldPaths:
         rc = main(["read", str(vpath), "--lens", "reconcile", "--plain"])
         assert rc == 0
 
+    def test_read_lens_not_found_exits_loudly(self, fold_by_vertex, capsys):
+        """--lens NAME with NAME not found in any tier exits 2 with helpful msg.
+
+        Silent fallback to default fold view would hide measurement misalignment
+        — same shape as alcove's recency-counter-vs-emitted-kind bug. The user
+        explicitly asked for a lens by name; they get either that lens or a
+        clear failure listing the search path. Uses ``pytest.raises(SystemExit)``
+        because ``_exit_lens_not_found`` calls ``sys.exit(2)`` which propagates
+        past main() (consistent with how Python CLIs surface exit codes — the
+        outer ``sys.exit(main())`` wrapper at module bottom catches it for the
+        actual shell exit code).
+        """
+        import pytest as _pytest
+        _, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        with _pytest.raises(SystemExit) as exc_info:
+            main(["read", str(vpath), "--lens", "totally_nonexistent_lens", "--plain"])
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        # Message names the lens, the source, and lists the search path.
+        assert "totally_nonexistent_lens" in captured.err
+        assert "--lens flag" in captured.err
+        assert "Searched:" in captured.err
+        assert "built-in: loops.lenses.totally_nonexistent_lens" in captured.err
+
+    def test_read_kind_typo_exits_loudly_with_suggestion(self, fold_by_vertex, capsys):
+        """--kind X with X not in vertex.declared_kinds exits 2 with fuzzy hint.
+
+        Silent empty output collapses three distinct epistemic situations
+        into one: typo, valid kind not declared by THIS vertex, valid kind
+        with zero facts. Validation surfaces the first two as actionable
+        errors; the third keeps existing 'No data yet' behavior.
+        """
+        import pytest as _pytest
+        _, vpath = fold_by_vertex
+        _emit(vpath, "heartbeat", service="api")
+        # heartbeat is the declared kind; 'heartbet' is the typo
+        with _pytest.raises(SystemExit) as exc_info:
+            main(["read", str(vpath), "--kind", "heartbet", "--plain"])
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "does not declare kind 'heartbet'" in captured.err
+        assert "Did you mean:" in captured.err
+        assert "heartbeat" in captured.err  # fuzzy match suggested
+        assert "Declared kinds:" in captured.err
+
+    def test_read_kind_valid_but_empty_renders_normally(self, fold_by_vertex):
+        """--kind X with X declared but zero facts must keep existing render path.
+
+        Critical: validation must NOT block valid kinds with no data yet.
+        This is the third case the silent-empty path used to collapse with
+        the typo / undeclared cases. Now the three are distinguished:
+        invalid → exit 2; declared-but-empty → normal render.
+        """
+        _, vpath = fold_by_vertex
+        # No emits — vertex declares heartbeat in fixture but no facts.
+        rc = main(["read", str(vpath), "--kind", "heartbeat", "--plain"])
+        assert rc == 0  # declared kind, empty render path still works.
+
+    def test_read_vertex_decl_lens_not_found_exits_loudly(self, tmp_path, capsys):
+        """vertex lens{} pointing at unresolvable name also exits 2.
+
+        Symmetric to --lens flag failure: the vertex declared a lens by name,
+        the user may not even know about the decl, but silent fallback would
+        still hide the misconfiguration. Same fix shape, same error shape.
+        """
+        import pytest as _pytest
+        vpath = tmp_path / "tlens.vertex"
+        vpath.write_text(
+            'name "tlens"\n'
+            f'store "{tmp_path}/tlens.db"\n'
+            'loops { thing { fold { items "by" "name" } } }\n'
+            'lens { fold "totally_missing_decl_lens" }\n'
+        )
+        # Emit something so the vertex has data
+        _emit(vpath, "thing", name="x")
+        with _pytest.raises(SystemExit) as exc_info:
+            main(["read", str(vpath), "--plain"])
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "totally_missing_decl_lens" in captured.err
+        assert "vertex lens decl" in captured.err
+        assert "tlens.vertex" in captured.err
+
 
 class TestInitLocalVertex:
     """Exercise _init_local_vertex edge paths."""

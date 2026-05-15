@@ -29,3 +29,5 @@ session.vertex
 # coupling-kernels structure-reveal scratch (embeddings + run outputs)
 experiments/coupling-kernels/cache/
 experiments/coupling-kernels/runs/outputs/
+# Per-machine MCP server config (contains auth tokens)
+.mcp.json

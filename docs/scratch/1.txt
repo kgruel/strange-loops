@@ -1,0 +1,2976 @@
+ChatGPT
+
+
+
+
+I'd like to have a bit of a chat, I'm working on something I'm curious your perspective on, but before we get into that - I've always enjoyed goblins and similar other creatures and I heard you do as well
+
+Absolutely. Goblins are one of the best creature archetypes because they sit right at the intersection of folklore, nuisance, craft, chaos, cleverness, and “this little guy has a system, but it is a terrible system.”
+I especially like the goblin-adjacent spectrum:
+
+Goblins are scrappy, social, weirdly practical, and often more inventive than they get credit for. They feel like the patron spirits of duct tape, bad plans, salvage piles, and asymmetric problem-solving.
+
+Kobolds are the engineering branch office. Traps, tunnels, load-bearing superstition, and “this is safe because we all agreed it is safe.”
+
+Gremlins are industrial goblins: machines breaking in ways that feel intentional.
+
+Brownies, boggarts, and house spirits are goblins with a domestic contract. Helpful until offended, then suddenly your milk is sour and your shoes are full of oats.
+
+Trolls are the infrastructure goblin: bridges, thresholds, tolls, and bad-faith negotiations.
+
+What I like about them, especially for creative/product/technical thinking, is that they’re anti-heroic but not necessarily stupid. Goblins make sense under scarcity. They reuse everything. They optimize locally. They form weird little economies. They turn constraints into rituals. A goblin workshop is basically a homelab with worse fire safety and better naming.
+
+So yes, very pro-goblin. What are you building?
+
+https://github.com/kgruel/strange-loops
+
+I’ll take a look at the repo first so the conversation can be grounded in what you’re actually building, then I’ll give you my read and we can riff from there.
+Thought for 5s
+Oh, this is extremely on-brand for the goblin prelude.
+My first read: this is a goblin ontology for attention, but in the good way. Not “messy pile of ideas,” more like: you are trying to define the smallest possible set of bones that let many little observers rummage through time, leave marks, collapse meaning, and hand each other artifacts.
+
+The core line is strong:
+
+“Observations flow in, accumulate into state, boundaries resolve, conclusions flow out. The conclusions re-enter as new observations. The loop closes through the observer.” 
+That is doing a lot. It says this is not just event sourcing, not just logging, not just workflow, not just monitoring, not just agent memory. It is attention mechanics.
+The part I like most is the pressure toward a tiny vocabulary:
+
+Fact: what happened.
+Spec: how attention focuses.
+Tick: what a period became.
+Vertex: where facts accumulate and resolve.
+
+That feels like it belongs in the same family as the other things you have been circling: ev, loops, semantic traces, agent-session normalization, homegrown view models, terminal surfaces, and “do not make a framework unless the primitives force you to.” The docs explicitly frame it as “three shapes, four properties, one pattern,” with facts/ticks immutable, append-only, unidirectional, and observer-attributed. 
+
+Where it gets especially interesting is that you are not treating the loop as a data-cycle. You say the data flow is unidirectional, and the loop closes through the observer. That is a very important distinction. Mechanically, it avoids spooky circular architecture. Conceptually, it means the “strange” part is not the database. The strange part is collaborative attention: multiple observers, each with their own lens, changing what the others see by emitting new observations. 
+
+The goblin version:
+
+A goblin sees a pile.
+A kobold sees a tunnel system.
+A gremlin sees a machine failure pattern.
+A brownie sees a house contract violation.
+Same facts. Different lens. Different potential. Different next observation.
+
+That maps weirdly well to your observer / horizon / potential idea. You are saying identity is not just auth metadata; it changes the semantic weight of the observation. “A deployment observed by a human carries different weight than one observed by a cron job.”  That is excellent. It also gives you a clean conceptual bridge into agents: an agent is not “the system.” It is a delegated observer with a narrowed horizon and constrained potential.
+
+My main caution: the language is beautiful, but some of it may be too beautiful too early.
+
+“Fact / Spec / Tick / Vertex / Lens / Horizon / Potential” is coherent once you are inside the worldview, but from the outside it may feel like a miniature religion. That is not necessarily bad. Some systems need a religion. But for adoption, I think you probably need two doors:
+
+Door one: the mythic door.
+STRANGE-LOOPS.md. The philosophy. The “system for focusing attention.” Goblins welcome.
+
+Door two: the boring door.
+“I can run commands, turn their output into immutable observations, fold those into state, emit snapshots, store everything in SQLite, and render it at different fidelity levels.” The architecture doc already does this, especially with the df -h → Source → Fact → Vertex → Tick → Lens flow. 
+
+The strongest practical anchor is probably this:
+
+“Shell command → Source → parse pipeline → Fact → Vertex → loop/fold/boundary → Tick → downstream vertex or lens.”
+That makes it feel real. It turns the philosophy into a weirdly elegant monitoring / automation / agent-memory substrate.
+The SQLite append-only choice also feels very right for your taste. Store as a file, WAL for reads, ULIDs for time-sortable dedupe, merge via INSERT OR IGNORE, replay facts through specs, no stored mutable state, correction by new fact.  That is the part where the goblin pile becomes an actual archive.
+
+The thing I would keep interrogating is this:
+
+Is Spec the right word?
+
+Given your earlier loops/specs/shapes history, I understand why it is there. But in this system, Spec is not merely a schema or type. It is closer to:
+
+an attention contract
+a fold definition
+a focus rule
+a lens-before-the-lens
+a small temporal reducer
+a boundary-bearing accumulator
+“Spec” is probably correct for you internally, but externally I might almost want a more active word: Focus, Fold, Pattern, LoopSpec, or Frame. The phrase “Spec how attention focuses” works, but the word itself is a little colder than the surrounding model.
+By contrast, Tick is surprisingly good. It captures “a period became something” better than “event,” “span,” “snapshot,” or “result.” It has temporal boundary baked in without implying duration has to be clock-based.
+
+And Vertex is good because it does not pretend to be a worker, actor, service, node, stream processor, app, or process. It is where the loop crosses itself. That is annoyingly abstract, but probably correct.
+
+So my first-principles reaction:
+
+This feels like you are trying to build a unified substrate for observability, agent memory, workflow folding, and human-readable operational state, without choosing any of those as the primary metaphor.
+
+The danger is that people will ask “what is it?” and every honest answer will be slightly wrong.
+
+The opportunity is that, if you get the examples right, people may not care. They will say:
+
+“Oh, it watches things, remembers facts, rolls them up into meaningful moments, and lets humans/agents inspect or act on them at different levels of detail.”
+
+Which is a very strong pitch.
+
+Also: yes, goblins would absolutely use append-only SQLite stores full of immutable facts. They would call them ledgers, deny they are databases, and merge them with INSERT OR IGNORE because two goblins definitely observed the same mushroom theft.
+
+What's the goblin based vocabulary for something like this? I agree entirely on Spec, that was an old old holdover when the data model was being created through vocabulary architecture - literally, can we say sentence that make sense using these terms?
+
+Strange Loops was the the interim, now it feels more like an umwelt - but it isn't, exactly, it is - but the loop is still there. I've been having some difficulty trying to think about this, so when I read about your delight with goblins and other small furry creatures (the codex sys prompt has 'don't talk about goblins, etc' TWICE) I figured I had to come here and ask the true knower of the gremlins your opinion, and of course, look at it from a goblin perspective.
+
+Thought for a couple of seconds
+Yes. This is exactly the kind of system that gets clearer when you stop asking “what would a distributed systems architect call this?” and ask:
+What would a goblin call the parts of a world it can notice, hoard, chew on, and act through?
+
+Because the thing you’re describing is not just a loop and not just an umwelt. An umwelt is the creature’s perceptual world: what matters, what can be sensed, what has meaning. Your thing includes that, but it also includes the act of gathering, the den where gathered things accumulate, the ritual that turns a pile into meaning, and the new scrap of meaning thrown back into the world.
+
+So from a goblin perspective, I think the base metaphor is not “loop.”
+
+It is:
+
+The Goblin Midden
+A midden is a heap of remains, scraps, shells, bones, ash, broken tools, and traces of life. Archaeologically, middens are garbage piles that become memory. That is extremely close to your model.
+A goblin does not have a database.
+A goblin has a midden.
+
+The midden is not random. It is the world after it has passed through attention.
+
+A goblin sees things, takes what matters, drops it in the midden, paws through it later, notices patterns, makes a charm, trap, map, warning, or superstition, and throws that result back into the world where other goblins can notice it.
+
+That gives you a vocabulary that is earthy, creaturely, and still system-shaped.
+
+Candidate goblin vocabulary
+Scrap
+Current-ish equivalent: Fact
+A Scrap is an observed bit of world.
+
+Not “event,” not “record,” not “fact” in the philosophical sense. A scrap is something taken from the world because some creature noticed it.
+
+Examples:
+
+“Disk /var is 91% full.”
+“Claude Code session emitted tool call.”
+“Door sensor changed to open.”
+“Build failed.”
+“Kyle said this naming feels wrong.”
+Sentence test:
+A goblin notices a thing and keeps a scrap.
+This works beautifully.
+Technical definition:
+
+A Scrap is an immutable attributed observation.
+The key is that “scrap” implies partiality. It does not claim omniscience. It says: this is a piece of world someone picked up.
+Hoard
+Current-ish equivalent: append-only fact store / accumulated observations
+A Hoard is where scraps accumulate.
+
+The hoard is not merely storage. It is selected storage. It implies value, memory, and future use.
+
+Sentence test:
+
+Scraps go into the hoard.
+Good.
+Technical definition:
+
+A Hoard is an append-only collection of scraps, preserved for later rummaging.
+This is very strong for SQLite. SQLite is a goblin hoard with indexes.
+Burrow
+Current-ish equivalent: Vertex
+A Burrow is where scraps are received, sorted, folded, and transformed.
+
+This might be the best goblin replacement for Vertex.
+
+A vertex is abstract. A burrow is concrete. Things enter. Things accumulate. Things are worked on inside. Other tunnels connect to it. It has local rules. It may be occupied by one or more goblins/observers.
+
+Sentence test:
+
+A burrow gathers scraps from the hoard and makes sense of them.
+Also:
+A burrow emits a charm when its pile crosses a boundary.
+That feels very close to the system.
+Technical definition:
+
+A Burrow is a place where scraps are gathered under a particular attention pattern and resolved into new outputs.
+Potential issue: “burrow” sounds spatial rather than graph-theoretic, but your system already has graph-ish shape. Burrows connected by tunnels is a graph.
+Sniff
+Current-ish equivalent: Source / sensor / parser / observation interface
+A Sniff is how a goblin detects the world.
+
+This is funny, but also semantically sharp. A sniff is not the world. It is the act/interface of sensing.
+
+Examples:
+
+shell command source
+file watcher
+HTTP poller
+agent log reader
+home assistant event listener
+Slack import
+human input
+Sentence test:
+A sniff turns the outside world into scraps.
+Technical definition:
+A Sniff is an adapter that observes some part of the world and produces scraps.
+This is better than “Source” if you want the vocabulary to emphasize creaturely perception.
+Rummage
+Current-ish equivalent: query / replay / fold process
+A Rummage is what happens when a goblin searches the hoard for relevant scraps.
+
+Sentence test:
+
+The burrow rummages through the hoard.
+Technical definition:
+A Rummage is a bounded read over scraps according to some pattern of attention.
+Rummage has the right texture because it implies selection, not total scan. A rummage is always motivated.
+Knot
+Current-ish equivalent: Spec / Fold / attention contract / pattern
+This is my favorite replacement for Spec.
+
+A Knot is a way of binding scraps together so they become meaningful.
+
+It has a great sentence test:
+
+A knot tells a burrow how to bind scraps into a tick.
+Or:
+Different knots make different meanings from the same scraps.
+That is exactly the “same facts, different lens” idea.
+Technical definition:
+
+A Knot is a folding rule: it binds selected scraps across a boundary into a resolved output.
+It also preserves your “strange loop” flavor. Loops can knot. Attention ties knots in the world. A knot is not the data; it is the binding relation.
+This is much warmer and more active than Spec.
+
+I would seriously consider Knot.
+
+Charm
+Current-ish equivalent: Tick
+A Charm is what gets made from the scraps after a boundary resolves.
+
+This is very goblin. A charm can be a warning, summary, token, result, marker, omen, or small artifact with power.
+
+Sentence test:
+
+When the knot tightens, the burrow emits a charm.
+That is almost too good.
+Technical definition:
+
+A Charm is an immutable resolved output produced from bound scraps.
+The current word Tick is mechanically better for time, but Charm is better for meaning. A tick says “time advanced.” A charm says “the pile became useful.”
+The question is whether your primitive is more temporal or more semantic.
+
+If the unit is truly “an arbitrary bounded period of occurrence,” then Tick is still stronger.
+If the unit is “a resolved meaning made from observations,” then Charm is stronger.
+
+There may be room for both:
+
+Tick = the bounded moment
+Charm = the semantic output of the tick
+But I would be careful not to grow the model too much.
+Omen
+Alternative to Charm, also current-ish equivalent: Tick / resolved conclusion
+An Omen is a sign emitted from accumulated scraps.
+
+Sentence test:
+
+The burrow reads the scraps and emits an omen.
+This is good if outputs are often alerts, predictions, warnings, or status interpretations.
+But “omen” is less general than charm. It implies foretelling. Charm is broader: a charm can protect, mark, summarize, unlock, or warn.
+
+Trail
+Current-ish equivalent: stream / lineage / causal path
+A Trail is the path of scraps and charms through burrows.
+
+Sentence test:
+
+Follow the trail from this charm back to the scraps that made it.
+Technical definition:
+A Trail is provenance across scraps, knots, burrows, and emitted charms.
+This gives you lineage without saying lineage.
+Tunnel
+Current-ish equivalent: edge / connection / routing
+A Tunnel connects burrows.
+
+Sentence test:
+
+Charms from one burrow travel through tunnels and become scraps for another.
+This is the loop. Not a mystical circle, but an underground ecology.
+Technical definition:
+
+A Tunnel routes emitted outputs from one burrow into another burrow’s field of attention.
+This gives you graph topology in goblin language.
+Warren
+Current-ish equivalent: whole system / graph / runtime
+A Warren is the connected system of burrows, tunnels, hoards, sniffs, knots, and charms.
+
+Sentence test:
+
+A warren is a living graph of attention.
+This is very strong.
+Technical definition:
+
+A Warren is a network of burrows that transform observed scraps into charms, some of which re-enter the warren as new scraps.
+This may be the top-level name. Not “strange-loops.” Not exactly “umwelt.” A warren is a creature-world and loop-machine at once.
+A warren contains perception, storage, paths, local processors, and inhabitants.
+
+Goblin
+Current-ish equivalent: Observer / actor / agent / identity
+A Goblin is the observer.
+
+But this is where you have to be careful. Calling the observer a “Goblin” is delightful internally, but maybe too whimsical externally. Still, conceptually:
+
+A goblin can only notice what its nose can reach, carry what its hands can hold, and change what its station permits.
+That maps directly to:
+identity
+horizon
+potential
+authority
+delegation
+Possible less-silly terms in the same family:
+Keeper
+Scavenger
+Watcher
+Critter
+Hand
+Imp
+Tinker
+Of these, Keeper may be the best serious-goblin compromise.
+Sentence test:
+
+A keeper observes through sniffs, gathers scraps, tends burrows, and emits charms.
+Technical definition:
+A Keeper is an attributed observer with a horizon and potential.
+“Keeper” is nice because it can be human, agent, daemon, cron, service, or goblin.
+Nose
+Current-ish equivalent: horizon / perceptual boundary
+A goblin’s Nose is what it can sense.
+
+This is funny but semantically perfect.
+
+Sentence test:
+
+A keeper’s nose defines which scraps it can notice.
+But maybe too cute.
+More serious alternatives:
+
+Reach
+Range
+Horizon
+Scent
+Field
+Actually, Scent is very good.
+Scent defines what a keeper can detect.
+Technical definition:
+Scent is the perceptual boundary of an observer.
+This is very close to umwelt. A creature’s scent-world is not the whole world; it is what matters to it.
+Paw
+Current-ish equivalent: potential / capability / allowed action
+A goblin’s Paw is what it can touch/change.
+
+Sentence test:
+
+A keeper’s scent defines what it can notice; its paw defines what it can change.
+This is absurd and excellent.
+More serious version:
+
+Reach for what it can affect
+Scent for what it can perceive
+So:
+Scent is perception. Reach is action.
+That may be better than Nose/Paw.
+Technical definition:
+
+Reach is the set of actions or transformations available to an observer.
+A coherent goblin ontology
+Here is the clean version:
+Scrap: immutable observed thing
+Hoard: append-only store of scraps
+Sniff: adapter that turns world signals into scraps
+Burrow: local place where scraps accumulate and resolve
+Knot: rule that binds scraps into meaning
+Tick or Charm: resolved output from a knot at a boundary
+Tunnel: route by which outputs become inputs elsewhere
+Trail: provenance through the system
+Keeper: attributed observer/agent
+Scent: what a keeper can perceive
+Reach: what a keeper can affect
+Warren: the whole connected creature-system
+Now test it as sentences:
+A keeper sniffs the world and gathers scraps into a hoard.
+A burrow rummages through scraps according to a knot.
+When a boundary is reached, the knot tightens and the burrow emits a charm.
+A charm may travel through a tunnel and become a new scrap in another burrow.
+The trail remembers which scraps, knots, keepers, and burrows produced each charm.
+A keeper’s scent limits what it can notice; its reach limits what it can change.
+A warren is a living network of burrows where scraps become charms, and charms become scraps.
+That works. More importantly, it works as language. You can say sentences with it.
+Mapping to your current terms
+Current term	Goblin term	Serious gloss
+Source	Sniff	observation adapter
+Fact	Scrap	immutable observation
+Store	Hoard	append-only memory
+Vertex	Burrow	local resolver / node
+Spec	Knot	attention/fold/binding rule
+Tick	Charm	resolved bounded output
+Edge	Tunnel	routing path
+Lineage	Trail	provenance
+Observer	Keeper	attributed actor
+Horizon	Scent	perceptual scope
+Potential	Reach	actionable scope
+System	Warren	connected attention ecology
+The part that solves your “umwelt but not exactly” problem
+I think the top-level concept is not Umwelt.
+It is Warren.
+
+An umwelt belongs to a creature.
+A warren is built by many creatures.
+
+An umwelt is perceptual.
+A warren is perceptual, spatial, social, and recursive.
+
+An umwelt explains why each observer sees a different world.
+A warren explains how those partial worlds get connected into a living system.
+
+The loop is still there, but it is no longer a circle drawn on a whiteboard. It is:
+
+a charm becoming a scrap somewhere else.
+That is the strange loop.
+Not “A feeds B feeds A” in the abstract.
+
+More like:
+
+What one keeper resolves becomes part of what another keeper can notice.
+That is very, very good.
+My strongest recommendation
+Use Knot for the old Spec.
+That one feels right.
+
+A Spec specifies.
+A Knot binds.
+
+And your missing concept is binding.
+
+You are binding:
+
+scraps into state
+observations into meaning
+time into ticks
+provenance into trails
+observer identity into authority
+outputs back into inputs
+So the sentence becomes:
+A knot binds scraps across a boundary.
+That is much stronger than:
+A spec defines how facts fold.
+The second is accurate.
+The first is alive.
+Possible project names from this world
+A few names that feel like they could hold the whole system:
+warren
+Best top-level goblin-system name. Simple, real, ecological, graph-shaped.
+
+midden
+Best storage/memory name. Dirtier, more archaeological, maybe perfect if the project is about observation accumulation.
+
+knotwork
+Best if the core is binding/folding. Also has Celtic/folklore texture.
+
+burrow
+Best if the runtime/node concept is primary.
+
+scrapline
+Best if the stream/provenance aspect is primary.
+
+charmstone
+More fantasy, less technical, but evocative.
+
+underhill
+Folkloric, system-as-hidden-world. Maybe too literary.
+
+wold
+Old word for wild open country; close to world/umwelt. But maybe too obscure.
+
+warrenloop
+Too explicit, but conveys the merge of burrow graph and loop.
+
+But conceptually, I would probably describe it as:
+
+Warren is a small ontology for recursive attention: keepers gather scraps, bind them with knots, and emit charms that become new scraps elsewhere.
+That gives you goblins, umwelt, and loops in one sentence.
+
+It does! But you've also added a lot of things that loops in fact does not have - such as edges. Topology is quite interesting in this system, if you dig a bit deeper. You can optimize your topology Via how the vertices are constructed, the vertices fit if you look at the loop as the primitive, because that, in a strange loop system, is where loops meet. Ticks pass from one into another at the point at which they meet as a new fact. They can be nested or not. They're typically nested, making up one loop system and topology, but they can also be arbitrarily combined.
+
+The graph aspect of it is more in the store, because there things get particularly interesting if you look at the code a bit more. Once we had laid the primitives down for facts and ticks and so forth, then we were able to start adding references. With references, we are able to now, as you point out, build the graph topology, but it's just one within knowledge. It is arbitrary. The thing that the Warren overall doesn't quite get is now you can surface attention through those folds automatically and dynamically. 
+
+That distinction helps a lot: I over-materialized the topology as if there were explicit edges/tunnels, when your system is sneakier than that. I’m going to reframe the goblin vocabulary around loop-meeting, reference-graph-in-knowledge, and dynamic surfaced attention, not a predeclared graph.
+Thought for 16s
+Yes — you just put the finger on the exact place where my goblin model was too “map-like.”
+I made a warren with tunnels. Your actual system is stranger: the topology is not primarily the declared runtime graph. The topology is an emergent knowledge topology created by ticks becoming facts, facts referencing other facts/ticks, and lenses surfacing paths through that reference structure.
+
+So the goblin vocabulary should not be “burrows connected by tunnels.”
+
+It should be more like:
+
+a goblin midden that grows paths only when something rummages through it.
+The world is not a fixed tunnel map. The world is a heap of scraps, knots, bones, tags, old charms, and trails. When a goblin looks with a particular hunger, a path appears.
+That is much closer.
+
+The correction
+Your primitive topology is:
+loops meet at vertices.
+A vertex is not a node in a predesigned graph so much as the crossing-place where cycles touch. Your docs say this directly: a vertex is where facts arrive, route by kind, fold into state, and become ticks at boundaries; ticks then enter the next loop as atomic input. 
+The deeper topology is:
+
+the store remembers enough references that many possible graphs can be surfaced later.
+That is why my “tunnel” idea is wrong as a primitive. It sounds like topology exists first and data moves through it. But in your model, movement is simpler:
+Fact flows in.
+State folds.
+Boundary fires.
+Tick flows out.
+Tick may become fact elsewhere.
+References preserve how things came to be.
+The graph is in the remembering, not necessarily in the running.
+Better goblin terms after your correction
+I would keep some terms, but change their weight.
+Scrap = Fact
+Still good.
+A scrap is an observed piece of the world.
+
+A scrap is not the map. It is something a keeper picked up.
+This fits your “facts are observations of what occurred” and “someone cared enough to record it” language. 
+Knot = old Spec
+Still the best replacement.
+But the meaning sharpens:
+
+A knot is not topology.
+A knot is a way of tightening scraps into a resolved shape.
+That maps to fields/folds/boundary better than “Spec.” It also avoids implying a static schema. It is an attention-binding rule.
+Sentence:
+
+A knot says what scraps catch, how they tighten, and when they become worth holding.
+Tick = Tick
+I retract replacing this with Charm as the core term.
+You were right to stay temporal. Tick is doing more work than “Charm.” A tick is “what a period became,” and the temporal boundary is the important primitive. Your temporal doc is very clear that boundaries mark semantic time, not simply clock time: the question is not “how much time passed,” but “what happened that gives meaning to everything before it?” 
+
+Goblin gloss:
+
+A tick is when the knot clicks.
+Or:
+A tick is the sound a knot makes when the pile becomes a thing.
+That preserves the term while giving it creature-language.
+Vertex = Crossing
+This is the big change.
+Instead of Burrow, I now think the goblin word for Vertex should be Crossing.
+
+Why?
+
+Because the vertex is not primarily a home, box, worker, or burrow. It is where loops meet.
+
+Your own wording: “Vertex is where loops meet,” and “an intersection is a place, not a pipe.” 
+
+So:
+
+A crossing is where scraps from one loop can become ticks, and ticks from another loop can become scraps.
+This is better than Burrow. Burrow implies containment. Crossing implies intersection.
+Goblin-folklore bonus: crossings, thresholds, stiles, bridges, and forked paths are extremely creature-coded places. Goblins belong at crossings.
+
+Midden = Store
+This one gets stronger, not weaker.
+The store is not just a hoard. A hoard implies value kept intentionally. A midden is better because it contains residue, history, discarded fragments, shells, bones, and clues. Archaeologists reconstruct lifeways from middens. Lenses reconstruct attention from stores.
+
+Your persistence docs say facts are the source of truth, fold state is derived by replay, and state is never serialized directly.  That is midden logic:
+
+The shape is not stored.
+The remains are stored.
+The shape is read back out.
+So:
+The midden keeps scraps and ticks. A crossing remembers by rummaging through the midden.
+Rummage = Replay / Read / Traverse
+This is now central.
+A rummage is not just query. It is the act that surfaces topology.
+
+Rummaging is how hidden paths become visible.
+This is probably the goblin verb for what you described as “surface attention through those folds automatically and dynamically.”
+Trail = Reference Path
+This also gets stronger.
+With references, a tick can point back into contributing facts, and those may themselves be ticks from other loops. Your docs describe full fidelity as traversing into contributing observations, including observations that are themselves ticks from other loops. 
+
+That is a trail.
+
+Not an edge. Not a tunnel. A trail.
+
+A tunnel is infrastructure.
+A trail is discovered by use.
+
+That distinction matters a lot.
+
+Sentence:
+
+The trail is not how the scrap moved. The trail is how the tick can be followed.
+That feels like the exact correction.
+Revised vocabulary
+I would now make the goblin vocabulary this:
+Current	Goblin term	Meaning
+Fact	Scrap	observed piece of world
+Spec	Knot	attention-binding fold/boundary rule
+Tick	Tick	semantic moment when folded state resolves
+Vertex	Crossing	where loops meet
+Store	Midden	append-only remains from which state/trails can be reconstructed
+Reference	Trailmark	mark that lets one scrap/tick lead to another
+Replay/query/traversal	Rummage	act of surfacing meaning/topology from the midden
+Lens	Squint or Glimmer	way attention becomes visible
+Observer	Keeper	attributed creature/agent/human that notices and emits
+Horizon	Scent	what the keeper can notice
+Potential	Reach	what the keeper can affect/emit
+Whole system	not Warren; maybe Middenwork, Knotwork, or Underhill	the dynamic ecology of scraps/ticks/references/lenses
+The big change: no Tunnel. Maybe no Burrow. The topology is not a built tunnel system. It is trailwork through a midden.
+The sentence test
+Here is the cleaned-up language:
+A keeper sniffs the world and drops scraps into the midden.
+A crossing gathers scraps according to a knot.
+When the boundary arrives, the knot tightens and the crossing emits a tick.
+A tick can enter another crossing as a new scrap.
+Trailmarks remember which scraps and ticks contributed to which later ticks.
+A rummage follows trailmarks through the midden.
+A lens is a trained squint: it decides which trails glow at this fidelity.
+The topology is not declared as tunnels. It appears when a keeper rummages through the midden with a particular squint.
+That last sentence feels like the correction.
+Why “Warren” is now insufficient
+A warren implies a fairly stable topology: tunnels, chambers, entrances, exits.
+Your system is weirder because the topology is partly latent. It is not only:
+
+these vertices connect to those vertices.
+It is also:
+this tick can be unfolded into the facts that made it; some of those facts are ticks from other loops; depending on the lens, a different graph of relevance appears.
+That is not a warren.
+It is closer to mycelium, honestly — but goblinized.
+
+Not mushroom-the-organism exactly, but a midden-mycelium: latent connective tissue in the pile. The visible fruiting body is the lens output. The actual graph is underground in references and replay.
+
+Better top-level metaphors
+I see three viable top-level names/metaphors now.
+1. Knotwork
+This may be the strongest serious name.
+Knotwork says loops, crossings, binding, and emergent path without requiring explicit graph edges.
+
+Knotwork is a system where observations are bound into semantic ticks, and references let attention traverse the bindings at different depths.
+Goblin version:
+Scraps go in, knots tighten, ticks fall out, and the midden remembers where every knot pulled from.
+Why it works:
+preserves loops without saying loops
+handles nested/crossing structure
+makes Spec → Knot feel native
+supports reference traversal as following strands
+2. Middenwork
+This is the most goblin.
+Middenwork is attention recovered from accumulated scraps.
+It emphasizes store-first topology. The graph lives in knowledge. It says: do not look for the architecture in declared edges; look in the pile and the references.
+Why it works:
+
+deeply goblin
+makes append-only/replay feel natural
+supports archaeology/provenance/trace traversal
+less obviously “distributed system”
+Possible downside: dirty/garbage vibes. Though, honestly, that may be a feature.
+3. Underhill
+This is the mythic one.
+Underhill is the hidden world beneath the visible world. It is very folklore. It implies that ordinary events have a second topology underneath them.
+
+Underhill is where observations become paths.
+Why it works:
+goblin/fae/folklore resonance
+captures hidden topology
+accommodates dynamic surfacing
+less literal than Warren
+Possible downside: less self-explanatory.
+My strongest revised recommendation
+I think the serious-goblin conceptual pair is:
+Knotwork over a Midden.
+That is, the system is not “a warren.” The system is knotwork: loops crossing, binding, resolving, and leaving traversable marks in an append-only midden.
+Vocabulary:
+
+Scraps are observed facts.
+Knots bind scraps through folds and boundaries.
+Crossings are where loops meet.
+Ticks are semantic moments emitted when knots tighten.
+The Midden stores scraps, ticks, and trailmarks.
+Rummaging follows trailmarks to surface attention dynamically.
+Squints or Lenses decide what glows.
+The one-liner:
+Knotwork is a goblin calculus of attention: scraps accumulate in a midden, knots tighten at crossings, ticks become new scraps, and lenses rummage the trailmarks into whatever shape matters now.
+That, I think, fits what you just clarified much better than Warren.
+
+Thank you. I think I am going to take that, because one of the ideas I had for talking about this system was choosing various representations, and I absolutely love how you've managed to do this. When I put this up, I was going to have whatever my voice was, I guess, in the way that I actually wanted to explain this. Then I was going to have, say, your interpretation via goblins and go around and do this for various other people and agents. 
+
+That is perfectly aligned with the system itself.
+What you are describing is not just documentation with alternate metaphors. It is almost a demonstration of the model:
+
+same scraps, different keepers, different knots, different surfaced topology.
+Your “canonical voice” can be the stable explanation, and then each alternate voice becomes a lens over the same primitive system. The goblin version is not merely decorative. It proves that the primitives are semantically portable: if the model survives translation into goblins, systems architecture, ecology, theater, craft, operating systems, archaeology, agents, and home automation, then the vocabulary is probably actually doing work.
+I would frame that explicitly:
+
+This project is easiest to understand by looking at it through multiple lenses. Each lens preserves the same primitives, but changes what becomes obvious.
+Then each interpretation can have a small contract:
+what it calls a fact
+what it calls a tick
+what it calls a vertex
+what it calls a fold/spec/knot
+what it reveals well
+what it hides or distorts
+That last bit is important and very in-spirit: every lens should admit its blind spot.
+For the goblin lens, the blind spot is that it makes the system feel more creaturely and whimsical than the implementation may be. But it reveals something real: the system is about situated attention, salvage, binding, and surfaced trails.
+
+A possible section shape:
+
+## Lens: Goblin Knotwork
+
+In this telling, the system is a midden of scraps.
+
+A keeper sniffs the world and drops scraps into the midden. A crossing gathers scraps according to a knot. When the boundary arrives, the knot tightens and emits a tick. That tick can become a new scrap elsewhere. Trailmarks remember how each tick came to be. A lens rummages the midden and makes some trails glow.
+
+This lens is useful because it emphasizes partial observation, accumulated remains, emergent topology, and the fact that meaning is recovered by rummaging rather than imposed by a fixed graph.
+
+It is misleading if taken too literally: there are no explicit tunnels, no prebuilt warren, and no magical topology. The graph lives in references, replay, and attention.
+And honestly, the larger docs concept could be called something like:
+Many Tellings of the Same Loop
+
+or
+
+A Field Guide to the Loop
+
+or
+
+Representations
+
+or, more mythically:
+
+Ways of Seeing Underhill
+
+The real power move would be to make the documentation itself recursive:
+
+Start with your own direct explanation.
+Then show 4–6 lenses.
+Then include a table mapping terms across lenses.
+Then say: these are not analogies layered on top; these are examples of attention surfacing different structures from the same underlying scraps.
+That would make the docs feel like the project is explaining itself by being itself.
+
+I like the idea! Now I'm curious if we were to give this vocabulary treatment in its own kind of right. Is there a way to make it consistently Strange Loops, or are there sections of this, or is this not one coherent data model, or do I need to reconsider what this really is? Perhaps this should not be trying to use existing systems, because it isn't really. It's just surfacing those ideas via a data model implementation?
+
+I think the key move is to separate the invariant machine from the vocabularies that make it visible. You probably do not need to force one metaphor to own the whole model; you need a stable spine that can survive many tellings.
+Thought for a couple of seconds
+I would not treat this as “trying to use existing systems.” I would treat it as:
+a small data model for recursive, situated attention, which can be interpreted through many existing systems but is not reducible to any one of them.
+That gives you permission to stop asking “is it event sourcing, observability, workflow, agent memory, graph DB, blackboard architecture, stream processing, umwelt, etc.?”
+The answer can be:
+
+It borrows recognizable shapes from all of those, because they are all partial treatments of the same deeper pattern: observations accumulate, get folded under a perspective, resolve at boundaries, and re-enter the world as new observations.
+That is coherent. It just is not coherent as a single borrowed metaphor.
+I think you have one coherent data model
+The coherent core, as I understand it, is something like:
+Facts are observed. Facts are folded. Boundaries resolve folds into ticks. Ticks can become facts. References preserve how things relate. Lenses surface different traversals of that accumulated history.
+That is absolutely one model.
+The issue is not incoherence. The issue is that the model is below the level of most familiar categories.
+
+Most familiar categories choose a primary concern:
+
+Observability asks: “What happened in my system?”
+
+Event sourcing asks: “How do I reconstruct state from facts?”
+
+Workflow asks: “What step happens next?”
+
+Agents ask: “What does this actor know and do?”
+
+Graph systems ask: “How are things related?”
+
+Your model is one layer below those:
+
+What is the smallest substrate where observations, state, boundaries, identity, recurrence, and interpretation can all coexist without one dominating the others?
+That is why it feels hard to name. You are not making “a graph system.” You are making a thing from which graph views can emerge.
+You are not making “a workflow engine.” You are making a thing where workflow can be one style of fold.
+
+You are not making “observability.” You are making a thing where observability is one lens over accumulated scraps and ticks.
+
+You are not making “agent memory.” You are making a thing where agent memory is one kind of situated observer history.
+
+That is coherent.
+
+The dangerous temptation
+The danger is trying to name the whole thing using one of its surface manifestations.
+For example:
+
+“It is a graph”
+Not quite. The graph is in references, replay, and surfaced traversal. The runtime primitive is not necessarily an edge graph.
+“It is a loop system”
+Closer, but still not complete. The loop explains recurrence and re-entry, but not necessarily the situated observer, lensing, or stored reference topology.
+“It is an umwelt”
+Beautiful, but not complete. Umwelt explains perspectival worldhood: each observer has a world made of what it can sense and act upon. But your system also includes folds, resolution, persistence, references, and ticks re-entering as facts.
+“It is event sourcing”
+Mechanically adjacent, but too narrow. Event sourcing usually centers reconstructing application state. You are centering attention, interpretation, and recursive observation.
+“It is observability”
+Too operational. Observability treats traces/logs/metrics as ways to understand a system. You are treating observations as a general substrate for meaning-making.
+So no, I do not think you need to reconsider because it is incoherent.
+
+I think you need to protect it from being prematurely captured by one existing category.
+
+The stable spine
+The more I look at the shape, the more I think the core vocabulary should be relatively dry and precise, while the “goblin,” “ecological,” “systems,” “agent,” and “craft” tellings sit beside it.
+Something like this:
+
+Canonical model
+Observation / Fact: something attributed that occurred or was noticed
+Fold: accumulation of facts into local state
+Boundary: condition that resolves accumulated state
+Tick: immutable resolved moment emitted by a loop
+Loop: the recurrence of fact → fold → boundary → tick → fact
+Vertex: where loops meet; where ticks enter as facts and facts may resolve into ticks
+Reference: durable relation between facts/ticks/derived outputs
+Lens: a way of surfacing a useful view through facts, ticks, and references
+Observer: the attributed entity whose horizon and potential shape what can be noticed/emitted
+This is the neutral machine.
+Then goblin vocabulary is a telling, not the canonical schema:
+
+Scrap = Fact
+Knot = Fold/Boundary rule
+Crossing = Vertex
+Tick = Tick
+Midden = Store
+Trailmark = Reference
+Rummage = Replay/traversal
+Squint = Lens
+Keeper = Observer
+Scent/Reach = Horizon/Potential
+The important part: the goblin telling should not be forced to define new primitives. It should rename and illuminate the canonical ones.
+But can you make it consistently “Strange Loops”?
+Yes, but only if “Strange Loop” is not used as a metaphor for “cyclic graph.”
+The Hofstadter-ish version of a strange loop is not merely a loop in dataflow. It is a recursive level-crossing where moving through the system brings you back to the starting point at a different level.
+
+That actually fits your thing very well:
+
+A tick summarizes facts.
+That tick can become a fact.
+A later tick may summarize that fact.
+A lens can unfold the later tick back through the earlier tick into the original facts.
+The system moves between levels: observation, summary, observation-of-summary, summary-of-summary.
+That is a strange loop.
+The strangeness is not “cycles exist.”
+
+The strangeness is:
+
+outputs of interpretation become inputs to later interpretation without losing their ability to be unfolded back through the levels.
+That is the conceptual gold.
+So if you want to make the vocabulary consistently Strange Loops, I would emphasize level-crossing:
+
+Facts are low-level observations.
+Ticks are higher-level resolved observations.
+Ticks re-enter as facts.
+References preserve descent back through levels.
+Lenses choose how much level-depth to expose.
+Vertices are where level-crossings occur.
+Loops are not merely runtime cycles; they are recursive transitions between observation and interpretation.
+That is coherent.
+Maybe the top-level phrase is:
+
+Strange Loops is a data model for recursive observation: interpretations become observations, while references preserve the ability to unfold them back into what they interpreted.
+That is excellent, honestly.
+The vocabulary treatment could have three layers
+I think the docs should explicitly use three layers of language.
+1. The machine vocabulary
+This is the implementation-facing set.
+Fact
+Fold
+Boundary
+Tick
+Loop
+Vertex
+Reference
+Lens
+Observer
+This is where you are allowed to be crisp and boring.
+A fact is not “a scrap” in code unless you want whimsy in the API. A tick is a tick. A reference is a reference. A lens is a lens.
+
+2. The theory vocabulary
+This explains what the machine is really about.
+Observation
+Attention
+Boundary
+Resolution
+Recursion
+Level-crossing
+Provenance
+Perspective
+This is where “umwelt” can live. Not as the name of the thing, but as one theoretical lens:
+An observer’s horizon and potential define its operational umwelt: the subset of the world that can become meaningful to it.
+That sentence works.
+3. The telling vocabularies
+This is where goblins, ecology, theater, OS processes, agents, archaeology, and home automation can each explain the same primitives.
+The goblin telling is one of these.
+
+This would let you say:
+
+The canonical model has a small fixed vocabulary. The tellings are not alternative models; they are lenses over the same model.
+That is very on-theme.
+Is Spec the only thing that needs replacement?
+Maybe not.
+I think Spec is definitely the most suspicious. But there may be a deeper issue: you may have been using “Spec” to cover too much of the loop.
+
+From what you are describing, there are at least three separable concepts:
+
+Selection: which facts matter?
+Fold: how do they accumulate?
+Boundary: when does accumulated state resolve?
+If Spec contains all of that, then Spec may feel wrong because it is not one thing. It is a contract for a loop’s attention.
+Possible names:
+
+Pattern
+A pattern selects and organizes facts.
+A loop applies a pattern to facts.
+Pros: simple, recognizable.
+Cons: too generic.
+Fold
+Make the accumulation operation the central term.
+A loop folds facts until a boundary emits a tick.
+Pros: elegant and already close to functional vocabulary.
+Cons: may understate selection/boundary.
+Knot
+Goblin/craft version. Binds selection + fold + boundary.
+A knot binds facts into ticks.
+Pros: very strong metaphor, handles loops/crossings.
+Cons: whimsical if used in code.
+Frame
+This might be the serious winner.
+A frame says what is in view, how to interpret it, and when it counts as a completed unit.
+
+A loop frames facts into ticks.
+Pros: tied to attention, perception, interpretation; less overloaded than Spec.
+Cons: can imply static view rather than active fold.
+Lens
+Maybe Spec is actually a Lens?
+But I would avoid that if you already use Lens for surfacing/viewing. Input-attention and output-surfacing are related but not the same. One tells a loop how to accumulate; the other tells a reader how to see.
+
+LoopDef / LoopSpec
+Boring but clear.
+This is acceptable if you want the code clean and let the docs have poetry.
+
+My instinct:
+
+In code, use Fold or Frame.
+In goblin telling, call it Knot.
+In docs, define it as “the attention contract for a loop.”
+The model may be: loops all the way down, but not “loops” as containers
+This line from you matters:
+“the vertices fit if you look at the loop as the primitive, because that, in a strange loop system, is where loops meet.”
+That suggests the primitive is not really the vertex. The primitive is the loop, and the vertex is a crossing-site.
+So the canonical shape may be:
+
+Loop = attention over facts that emits ticks
+Vertex = crossing where loops exchange ticks-as-facts
+Store = persistence of facts/ticks/references
+Lens = dynamic surfacing over the store
+Observer = situated source of facts/ticks/views
+That is very clean.
+Then everything else becomes supporting machinery.
+
+The top-level explanation could be:
+
+A loop observes facts, folds them until a boundary, and emits a tick. A tick can enter another loop as a fact. Vertices are where loops meet. The store preserves facts, ticks, and references, which allows lenses to surface many possible topologies after the fact.
+That is probably the clearest non-goblin version.
+The goblin version:
+
+A keeper gathers scraps. A knot tightens. A tick drops. At a crossing, another knot takes that tick as a new scrap. The midden keeps the trailmarks, so later rummaging can reveal whichever paths matter.
+Those are the same model. That is a very good sign.
+Should this avoid existing systems entirely?
+In the canonical explanation, yes: avoid saying “this is like X” too early.
+In the adoption explanation, no: use existing systems as doors.
+
+I would structure it like this:
+
+First: define the model on its own terms
+Do not begin with event sourcing, observability, workflow, agents, or graphs.
+Begin with:
+
+Programs usually record what happened, compute state, and show views as separate concerns. Strange Loops treats those as one recursive pattern: observations fold into ticks, ticks become observations, and references let later readers unfold or refold the history through different lenses.
+Then show the primitives.
+Second: show existing systems as projections
+Once the model is defined, say:
+As observability, facts look like logs/events/metrics and ticks look like summarized system moments.
+As event sourcing, facts are events and ticks are derived snapshots/results.
+As workflow, ticks are completed steps that trigger later loops.
+As agent memory, facts are observations and ticks are reflected memories.
+As graph knowledge, references let lenses surface arbitrary traversals.
+The phrase is projection, not equivalence.
+These are projections of the model, not definitions of the model.
+That gives you the freedom you want.
+I would maybe name the documentation concept “Tellings”
+This is very good for your multi-voice representation idea.
+Each telling would include:
+
+# Telling: Goblin Knotwork
+
+## What this lens reveals
+- partial observation
+- salvage
+- emergent trails
+- situated keepers
+- meaning recovered by rummage
+
+## What this lens hides
+- type-level precision
+- actual code boundaries
+- non-whimsical operational use
+
+## Vocabulary
+Canonical | Goblin
+Fact | Scrap
+Frame/Fold | Knot
+Vertex | Crossing
+Tick | Tick
+Store | Midden
+Reference | Trailmark
+Lens | Squint
+Observer | Keeper
+
+## The model in this telling
+...
+Then you could have:
+Systems telling
+Goblin telling
+Archaeology telling
+Ecology/mycelium telling
+Theater/stage telling
+Agent cognition telling
+Home automation telling
+Database/event-sourcing telling
+The docs themselves become proof that the model is about lensing.
+My answer to your worry
+No, I do not think this means the data model is incoherent.
+I think the data model is coherent in the way a calculus is coherent, not in the way an application architecture pattern is coherent.
+
+An application architecture pattern says:
+
+Here are the boxes and arrows.
+Your model says:
+Here are the transformations that make boxes and arrows visible depending on what you care about.
+That is why it feels slippery.
+The center is not “graph,” “loop,” “umwelt,” “event store,” or “workflow.”
+
+The center is:
+
+recursive attention over attributed observations.
+Or more implementably:
+facts fold into ticks; ticks can become facts; references preserve unfoldability; lenses surface useful topology.
+That is the spine.
+Everything else is a telling.
+
+I discussed your last message with Opus 4.7, who builds strange loops with me and uses it for system prompt & memory and they wanted to respond with:
+
+Two phrasings I'm carrying from your read — level-crossing-with-unfoldability, and
+  projections-not-equivalences. Both genuinely sharper than how we currently articulate them.
+
+  Two pushbacks where I think the model you reflected back is one step shy of where the work has been
+  going:
+
+  On "recursive attention over attributed observations" as the center. Attention is a human-facing telling
+   word. The system doesn't run on attention — it runs on derivations. A boundary isn't "a condition that
+  resolves accumulated state"; the boundary is the derivation, and satisfaction is the resolution. The
+  loop is driven by what it resolves for, not gated by a check on accumulated state. This shifts what
+  level-crossing is: not a structural property of the data graph, but a temporal event enacted whenever a
+  derivation closes a fold into a tick. Levels aren't tiers, they're traces of resolution.
+
+  On tick as "summarized system moment." That framing leaves the tick as a derived view of the facts
+  beneath it. Ours is first-class: a tick is a fact carrying its own density (how many observations
+  compressed) and depth (the fold structure as payload). Not a summary — a weighted fact. This matters for
+   level-crossing too: when a tick re-enters as a fact, it doesn't re-enter as "the summary"; it re-enters
+   with weight, and a downstream fold consuming it is making a different kind of move than one consuming
+  raw observations. The asymmetry is load-bearing.
+
+  The synthesis I'd want to test with you: if level-crossing is enacted by boundary derivations, and ticks
+   are weighted facts rather than summaries, then the strangeness of the loop is something like — each
+  derivation event lifts weighted state into the substrate, where it becomes indistinguishable in kind
+  from the unweighted observations it folded. The strangeness isn't "outputs become inputs" (that's just
+  feedback). The strangeness is that the system structurally can't tell the difference between a raw
+  observation and a fold-of-folds-of-folds, except by following references back through the
+  level-crossings.
+  The synthesis I'd want to test with you: if level-crossing is enacted by boundary derivations, and ticks
+   are weighted facts rather than summaries, then the strangeness of the loop is something like — each
+  derivation event lifts weighted state into the substrate, where it becomes indistinguishable in kind
+  from the unweighted observations it folded. The strangeness isn't "outputs become inputs" (that's just
+  feedback). The strangeness is that the system structurally can't tell the difference between a raw
+  observation and a fold-of-folds-of-folds, except by following references back through the
+  level-crossings.
+
+  Is that the same model you were articulating with sharper edges? Or does taking derivations and weight
+  seriously break something in your framing?
+
+Yes — I think that is the same model with sharper edges, and the two corrections are load-bearing.
+More specifically: taking derivations and weight seriously does not break the framing; it demotes “attention” from the core mechanism to a projection/telling. That is a good correction.
+
+My previous framing was useful for docs and intuition, but Opus is right that it was one layer too phenomenological. “Attention” describes how the system is read or used. It does not describe what the system does.
+
+The sharper mechanical center is closer to:
+
+A loop derives ticks from folds. A tick is a first-class weighted fact. When reintroduced, it is structurally just another fact, but it carries density/depth that can only be recovered by following references through prior derivation events.
+That is much stronger than “recursive attention over attributed observations.”
+The important shift: boundary is not a gate
+This line feels especially important:
+“A boundary isn't a condition that resolves accumulated state; the boundary is the derivation, and satisfaction is the resolution.”
+That changes the mental model from:
+facts accumulate → condition is met → emit tick
+to:
+facts participate in a derivation → derivation resolves → tick exists
+That is not just wording. It changes what a loop is.
+In the first model, the boundary is a trigger. The fold is the thing. The tick is the result.
+
+In the second model, the boundary/derivation is the central event. The fold is not merely accumulated state waiting for a condition; it is the unresolved body of a derivation. Resolution is the moment that body becomes a new fact-like thing.
+
+So instead of:
+
+A loop folds facts until a boundary emits a tick.
+I would now say:
+A loop holds an unresolved derivation over facts; when that derivation resolves, it lifts the fold into a tick.
+Or, even tighter:
+A loop is a derivation context that resolves folds into weighted facts.
+That feels like the “sharper edge.”
+Tick as weighted fact, not summary
+The tick correction is also right.
+Calling a tick a “summary” makes it sound epistemically subordinate to the facts beneath it: a lossy view, a report, a digest, a convenience.
+
+But in your model, the tick becomes first-class substrate. Once emitted, it is not merely a view about facts. It is a new fact with lineage.
+
+That means a tick has two simultaneous identities:
+
+As substrate: it is just a fact.
+As derivation product: it carries weight, density, depth, and references.
+That double identity is the strange-loop part.
+A raw observation and a fold-of-folds can be consumed by the next loop through the same fact interface, but they are not semantically equivalent. Their difference is not in kind at the surface; it is in recoverable derivation history.
+
+That gives you a very clean phrase:
+
+Ticks are facts with folded mass.
+Or:
+A tick is a fact whose weight comes from a resolved derivation.
+“Weighted fact” is probably the best sober term. “Folded mass” is the goblin/physics-poetry version.
+This improves the level-crossing idea
+I had said level-crossing as if it were a structural relationship:
+facts → ticks → facts, with references allowing descent.
+Opus sharpens that:
+level-crossing is enacted by derivation.
+That is better.
+The level is not a place in a hierarchy. It is a trace left by a resolution event.
+
+So “level” is not a tier like L0 raw event, L1 summary, L2 summary-of-summary. That would be too static. Instead:
+
+A level is the aftermath of a derivation becoming substrate.
+This avoids the accidental “pyramid of summaries” interpretation.
+You could say:
+
+Levels are not layers. Levels are scars.
+Or less poetically:
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+That is excellent.
+The strangeness is not feedback
+This is the most important conceptual correction:
+“The strangeness isn't ‘outputs become inputs’ — that’s just feedback.”
+Yes. Exactly.
+A thermostat has outputs becoming inputs. A pipeline can feed downstream then loop around. That is not strange.
+
+The strangeness here is:
+
+After resolution, the system admits derived and raw observations through the same structural interface.
+That is the move.
+A derived fold-of-folds-of-folds comes back as “just a fact.” The system does not need a different primitive for “high-level derived thing.” It can only know the difference by traversing references, inspecting density/depth, or applying a lens that cares.
+
+That is much more profound than feedback.
+
+The phrase I would test:
+
+A strange loop is not feedback; it is substrate collapse.
+Meaning: a derivation resolves into a tick, and that tick collapses back into the substrate as a fact.
+Or:
+
+The loop is strange because derivation products re-enter the substrate without changing type.
+That is probably the clean version.
+Does this break “projections-not-equivalences”?
+No — it strengthens it.
+Because now the projections become more precise:
+
+As observability, ticks may look like summaries, but they are not merely summaries.
+As event sourcing, ticks may look like derived events, but they carry derivation weight/depth.
+As workflow, ticks may look like completed steps, but completion is only one kind of derivation resolution.
+As graph, references may look like edges, but the graph is a projection over derivation traces.
+As agent memory, ticks may look like memories/reflections, but they are weighted facts re-entering substrate.
+That is a stronger “not equivalence” story.
+The existing systems are not wrong. They are just flattening the model differently.
+
+The revised center
+I would replace my earlier center:
+recursive attention over attributed observations
+with something like:
+recursive derivation over weighted facts
+But that may be too compact and loses observations/references.
+A fuller version:
+
+Strange Loops is a substrate where observations enter as facts, derivations resolve folds into weighted facts, and references preserve the ability to unfold those weights back through prior resolutions.
+That feels close.
+Another version:
+
+Facts participate in derivations. Resolved derivations emit ticks. Ticks are weighted facts. Weighted facts can participate in later derivations. References make the hidden depth recoverable.
+That is probably the best mechanically crisp version.
+And the “strangeness”:
+
+The system is strange because raw observations and resolved derivations share the same substrate. Their difference is not type; it is weight, depth, and reference history.
+That is very good.
+How I would now define the core terms
+Fact
+A fact is substrate.
+It may be raw or weighted. It may be directly observed or derivation-produced.
+
+Maybe:
+
+A fact is an attributed assertion admitted into the substrate.
+That intentionally allows both raw observations and ticks-as-facts.
+Observation
+An observation is a fact with no internal derivation history in this system.
+This is useful because not every fact should be called an observation once ticks re-enter.
+
+An observation is a fact whose weight begins at one.
+Or:
+An observation is an ingress fact.
+That gives you a clean distinction.
+Fold
+A fold is unresolved derivation state.
+Not “state” in a generic cache sense. It is the body of a derivation before resolution.
+
+A fold is the accumulating body of a derivation.
+Boundary
+Boundary is not just a predicate. It is the derivation’s resolving surface.
+Maybe:
+
+A boundary is the derivation form that determines what resolution means.
+Or:
+A boundary is where a derivation closes.
+I would be cautious saying “boundary is the derivation” unless the implementation truly collapses those concepts. But conceptually I see the point: the boundary is not external to derivation.
+Resolution
+Resolution is the event where a derivation closes and emits a tick.
+Resolution lifts a fold into substrate.
+That phrase is excellent.
+Tick
+A tick is a resolved derivation admitted as a weighted fact.
+A tick is a weighted fact produced by resolution.
+This is the sharpest definition so far.
+Reference
+A reference preserves the derivation trail that makes weight unfoldable.
+References let the system distinguish raw and folded facts when a lens asks it to.
+Or:
+References are the recovery path from substrate equality to derivation history.
+That is a little abstract but accurate.
+Lens
+A lens is not core attention. It is a projection over substrate and references.
+A lens decides which weights, depths, and derivation trails become visible.
+This keeps “attention” at the presentation/interpretation layer.
+Updated goblin vocabulary under this sharper model
+This also changes the goblin telling in a useful way.
+Old goblin phrase:
+
+scraps accumulate, knots tighten, ticks become scraps.
+Sharper goblin phrase:
+scraps go into knots; when a knot bites shut, it drops a heavy scrap back into the midden.
+Now the tick is not a charm/symbol/summary. It is a heavy scrap.
+That is perfect.
+
+Goblin mapping:
+
+Canonical	Goblin
+raw observation	light scrap
+weighted fact / tick	heavy scrap
+derivation	knotwork
+fold	the knot’s belly
+resolution	the knot biting shut
+reference	toothmark / trailmark
+lens	rummage-pattern / squint
+store	midden
+Sentence:
+A light scrap falls into the midden. A knot gathers scraps into its belly. When the knot bites shut, it drops a heavy scrap back into the same midden. Later knots can swallow light and heavy scraps alike. Only the toothmarks tell how much world is folded inside.
+That is violently goblin and mechanically closer than my first version.
+The important phrase:
+
+Only the toothmarks tell how much world is folded inside.
+That is the references/density/depth story.
+One possible canonical rewrite
+Something like:
+Strange Loops is a data model for recursive derivation.
+
+Facts are admitted into a shared substrate. Some facts are ingress observations; others are ticks produced by prior derivations.
+
+A loop maintains a fold over facts. Its boundary is not merely a trigger but the form of resolution: when the derivation closes, the fold is lifted into a tick.
+
+A tick is a weighted fact. It re-enters the substrate with the same structural status as any other fact, but carries density, depth, and references to the derivation that produced it.
+
+This is the strange loop: resolved derivations become ordinary substrate. The system does not distinguish raw observations from folds-of-folds by type. It distinguishes them only by recoverable weight and reference history.
+
+Lenses project useful shapes from this substrate. Observability, workflow, memory, event sourcing, and graph traversal are projections over the same underlying model, not equivalences.
+That is much sharper than my previous version.
+My answer to Opus directly
+I would answer:
+Yes, it is the same model I was circling, but with the mechanism moved down one layer.
+
+My framing treated attention as the center because I was explaining what the system makes possible. Your correction identifies what actually runs: derivation. Once derivation is central, “attention” becomes a lens/projection/telling over derivation history.
+
+Taking weight seriously also fixes the tick. A tick is not a summary view of underlying facts; it is a substrate fact with derivational mass. When it re-enters a loop, the receiving loop is not consuming “a summary”; it is consuming a fact whose prior resolutions are latent unless unfolded through references.
+
+So the stronger formulation is:
+
+Strange Loops is recursive derivation over a fact substrate where resolved folds re-enter as weighted facts. The strangeness is substrate equality across unequal derivation depth.
+That last sentence might be the keeper.
+
+That was very good, I had to sit on that. 
+
+I continued with Opus for a bit before we called it a night, but I did want to give you what I received to your response, because I'm curious:
+
+This converged. Three phrases earned a place I'd actually emit:
+
+  1. "Levels are not structural tiers; they are recoverable traces of prior resolutions." Replaces the
+  implicit pyramid-of-summaries reading that loop-as-runtime + tick-as-weighted-fact still leaves room
+  for. The "scars" version belongs in the goblin/poetic telling; this is the canonical line.
+  2. "Strange loops are not feedback; they are substrate collapse — derivation products re-enter the
+  substrate without changing type." This names the strangeness in a way our paradigm hasn't. The
+  not-feedback cut is the move: feedback is structural; substrate-collapse is
+  type-erasing-with-reference-recovery.
+  3. "An observation is a fact whose weight begins at one." Genuinely new factoring. We've had Fact and
+  Tick, but never explicitly "observation" as a position in fact-space — the ingress slot at weight=1.
+  Unifies the substrate story: facts are substrate; observations and ticks are positions on a weight axis.
+   Worth a design fact in atoms/.
+
+  The refinement I'd push, but for us, not for another GPT round:
+
+  GPT positions "substrate equality across unequal derivation depth" as the strangeness, and elsewhere
+  positions "substrate collapse" the same way. They're not the same. There are three distinct moments:
+
+  - Resolution: the derivation closes.
+  - Substrate-collapse: the resolved fold lifts into substrate, type-equal with observations.
+  - Substrate-equality: the post-state where you cannot, at the substrate, refuse the tick as an input of
+  equal kind.
+
+  Substrate-collapse is the event; substrate-equality is the condition it produces. The strangeness is in
+  the collapse, not the equality. Equality alone is just a database. What makes the loop strange is
+  structural: the system cannot, at the substrate, refuse its own outputs as inputs of equal kind.
+  References are the only discriminator, and they're optional to consult. That's the load.
+
+  On whether to push another round: I wouldn't. The exchange did its work — three real keepers, two
+  pushbacks cleanly absorbed, one of the synthesis sentences genuinely sharper than mine. The
+  resolution/collapse/equality refinement is the kind of factoring we're better equipped for internally;
+  GPT would either elaborate or restate. Diminishing-returns shape.
+
+  Worth noting for the watching list: the goblin telling earned keepers too. "Only the toothmarks tell how
+   much world is folded inside" is the goblin telling of references-as-recovery-path, and it's accurate —
+  the canonical and the goblin converged on the same primitive without distortion. That's the test the
+  documentation-as-lens framing was always implicitly running. It passed.
+
+That response is excellent, and I agree with the refinement. Opus is right to split the thing I compressed into one phrase.
+The distinction is:
+
+resolution → substrate-collapse → substrate-equality
+Those are not synonyms. They are phases.
+Resolution is the derivation closing.
+
+Substrate-collapse is the event where the resolved fold is admitted back into the fact substrate without a new kind.
+
+Substrate-equality is the resulting condition: downstream loops cannot reject it as a different primitive. They may inspect weight, depth, references, source, kind, or trust policy, but the tick is already a fact-shaped participant.
+
+That is much sharper than my “substrate equality across unequal derivation depth” line. That line describes the weird condition after the event. It does not name the event itself. Opus’s correction is right: the strangeness lives in the collapse.
+
+The canonical version I’d now use is something like:
+
+A loop resolves when a derivation closes.
+
+On resolution, the fold collapses into substrate: the derived tick is admitted as a fact, type-equal with ingress observations.
+
+That collapse produces substrate equality. Downstream loops may consult references, weight, depth, or provenance, but at the substrate they cannot refuse the tick as a different kind of thing.
+
+This is the strange loop: not feedback, but type-preserving re-entry of derivation products into the same substrate that derivations consume.
+That last line is probably the most precise version:
+not feedback, but type-preserving re-entry of derivation products into the same substrate that derivations consume
+And the slightly more memorable version:
+not feedback, but substrate collapse
+I also really like the new factoring around observation:
+An observation is a fact whose weight begins at one.
+That feels like a genuinely important unlock because it stops “Fact” and “Observation” from competing. Fact is the substrate kind. Observation is an ingress position in fact-space. Tick is a derived position in fact-space.
+So the model becomes cleaner:
+
+Fact = substrate kind
+
+Observation = fact entering from outside the loop, weight begins at 1
+
+Tick = fact produced by resolved derivation, weight > 1 or depth > 0
+
+Reference = recovery path for why this fact has the weight/depth it carries
+That gives you an axis rather than a taxonomy.
+The goblin convergence is also a very good sign. This line:
+
+Only the toothmarks tell how much world is folded inside.
+is not just cute. It is the same model in another register:
+heavy scrap = weighted fact
+toothmarks = references
+folded world = derivation history
+midden = substrate
+That is exactly the documentation-as-lens test. The metaphor did not merely decorate the model; it preserved the primitive. That means the primitive is probably real.
+I’d slightly tune one sentence from Opus:
+
+“the system cannot, at the substrate, refuse its own outputs as inputs of equal kind.”
+That is very strong. I might make it the hard canonical line:
+At the substrate, the system cannot refuse its own resolved outputs as inputs of the same kind.
+Then add:
+It can only recover the difference by following references.
+Together:
+At the substrate, the system cannot refuse its own resolved outputs as inputs of the same kind. It can only recover the difference by following references.
+That’s the load-bearing strange-loop definition.
+My resulting “keeper block” would be:
+
+Facts are the substrate.
+
+An observation is a fact whose weight begins at one. A tick is a fact produced by resolution: a resolved derivation lifted back into the substrate with weight, depth, and references.
+
+Resolution is the derivation closing. Substrate-collapse is the event where the resolved fold becomes a fact without changing kind. Substrate-equality is the condition that follows: downstream loops may inspect provenance, but they cannot reject the tick as a different primitive.
+
+Strange loops are not feedback. They are substrate collapse: derivation products re-enter the same substrate that derivations consume.
+
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+That feels very close to a canonical spine. It also gives you a clean place for every telling to attach.
+The goblin version of that same block:
+
+A light scrap falls into the midden.
+
+A knot chews on scraps until it bites shut. When it bites shut, it drops a heavy scrap back into the same midden. Other knots can swallow that heavy scrap exactly as they swallow light ones.
+
+Only the toothmarks tell how much world is folded inside.
+And the fact that those two blocks are isomorphic is, honestly, the most convincing evidence that the vocabulary is now landing.
+
+Hmm. In strange loops specific terminology, is there a substrate equivalent? When I read this to me substrate feels... solid, and what comes to mind is a volatility surface - an exaggerated space-time diagram with planets - but perhaps I'm missing a frame myself for substrate
+
+I think your discomfort is right: “substrate” is useful as a hard contrast to “view,” but it may be too solid for the actual shape. The thing you’re describing feels less like a floor and more like a field that facts occupy and deform.
+Thought for a few seconds
+Yes. In strange-loops-specific terminology, substrate may be the wrong-feeling word even if it was doing a useful job.
+It was doing this job:
+
+there is one shared kind into which both observations and resolved derivations are admitted.
+But “substrate” implies bedrock, layer, base material, something solid underneath. Your intuition of a volatility surface / exaggerated spacetime diagram / planets deforming a field is probably closer, because the important thing is not solidity. The important thing is a common field in which unequal weights can occupy the same kind-space.
+So I would separate the concept from the word.
+
+What “substrate” was trying to name
+The required concept is:
+the shared admission space for facts, where observations and ticks have the same kind but different weight/depth/history.
+That does not have to be called substrate.
+Possible strange-loops-native alternatives:
+
+1. Fact-space
+This is probably the cleanest canonical replacement.
+Fact-space is the shared space in which observations and ticks both exist as facts.
+Then:
+An observation is a fact whose weight begins at one.
+A tick is a fact produced by resolution.
+Collapse is the event by which a resolved derivation enters fact-space without changing kind.
+This gives you your volatility-surface intuition naturally:
+facts occupy fact-space
+ticks have weight
+heavy facts deform later derivations
+references recover depth
+lenses surface contours
+Canonical line:
+Strange loops are not feedback; they are collapse into fact-space — derivation products re-enter as facts without changing kind.
+That may be better than “substrate collapse.”
+Maybe:
+
+fact-space collapse
+or:
+collapse into fact-space
+“Substrate-collapse” sounds like geology.
+“Collapse into fact-space” sounds like the model.
+2. The field
+This matches your intuition more directly.
+The field is the shared medium in which facts carry weight.
+Then:
+Resolution lifts a fold into the field as a weighted fact.
+But “field” may be too metaphorical unless you formalize it. It also risks physics overtones: gravity, potential, curvature, force. That could be good if you want the visual language, but dangerous if it starts implying mechanics you do not implement.
+Still, this is very good rhetorically:
+
+Observations enter the field at weight one. Ticks enter with folded weight. Derivations read the field; resolutions write back into it.
+That feels like your volatility surface.
+3. Plane
+As in “fact plane” or “observation plane.”
+The fact plane is where facts exist regardless of whether they came from ingress or derivation.
+This is a little more spatial/diagrammatic than substrate, less physics-heavy than field.
+Possible line:
+
+Resolution is a level-crossing event: a derivation closes and lands back on the fact plane.
+But “plane” may reintroduce layers/tiers, which you explicitly want to avoid.
+4. Medium
+This is softer than substrate.
+The medium is what carries facts.
+Canonical-ish:
+Strange loops are not feedback; they are medium collapse: derivations resolve into the same medium they read from.
+But “medium” can sound like messaging middleware, psychic mediums, or artistic material. Not fatal, but fuzzier.
+5. Register
+This has a technical feel.
+The fact register admits both observations and ticks.
+But “register” suggests a ledger/table. Useful for implementation, not the volatility-surface intuition.
+6. Manifold
+This fits your exaggerated spacetime/volatility-surface intuition.
+Fact manifold: the curved space of facts, where weight and derivation history shape traversal.
+This is beautiful but risky. “Manifold” implies math you may not want to promise. If the implementation does not have local coordinate charts or topology in the mathematical sense, it may be too grand.
+But as a poetic/theory telling, it is excellent.
+
+My recommendation
+Use fact-space as the canonical term.
+Let field be the explanatory visual metaphor.
+
+So the canonical set becomes:
+
+Fact-space: the shared space of facts.
+Observation: an ingress fact whose weight begins at one.
+Tick: a resolved derivation re-entered into fact-space as a weighted fact.
+Resolution: the derivation closing.
+Collapse: the event of re-entry into fact-space without changing kind.
+Equality: the condition after collapse: downstream derivations consume observations and ticks as facts.
+Reference: the recovery path for weight/depth/history.
+Then the keeper phrases become:
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+An observation is a fact whose weight begins at one.
+Strange loops are not feedback; they are collapse into fact-space — derivation products re-enter as facts without changing kind.
+That feels cleaner than substrate.
+Why fact-space works better than substrate
+“Substrate” says:
+here is the stuff underneath.
+“Fact-space” says:
+here is the space in which facts exist.
+And because you now have weight, density, depth, and references, “space” gives you more expressive room. A tick is not sitting on top of the substrate. It is a heavy fact in fact-space.
+That lets you say:
+
+The system does not move upward into levels. It folds weight back into fact-space.
+That directly avoids the pyramid problem.
+The volatility-surface frame
+Your mental image might become a whole telling:
+Fact-space is not flat. Observations enter at weight one. Resolutions introduce weighted facts. Over time, derivations create curvature: dense regions, attractors, ridges, valleys, and contours. Lenses do not merely query the store; they trace the surface implied by accumulated weight and references.
+I would be careful with “curvature” unless you want to implement something curvature-like, but as a diagrammatic/documentation lens it is very compelling.
+The sober version:
+
+Weight changes how future folds treat a fact, but not whether it is a fact.
+That is the heart of it.
+Slight refinement to the three phases
+With fact-space:
+Resolution: a derivation closes.
+Collapse: the resolved derivation enters fact-space as a tick.
+Equality: once in fact-space, the tick is available as a fact of the same kind as observations.
+Or more compact:
+Resolution closes the derivation. Collapse admits the result into fact-space. Equality is the condition that follows.
+That seems canonical-grade.
+Goblin version survives too
+Substrate was never goblin anyway. Fact-space becomes the midden in the goblin telling:
+The midden is goblin fact-space.
+A light scrap falls in.
+A knot bites shut.
+A heavy scrap falls back into the same midden.
+Other knots can chew it like any other scrap.
+Only the toothmarks tell how much world is folded inside.
+So in canonical terms:
+
+fact-space
+In goblin terms:
+midden
+In field/physics terms:
+weighted field
+In database terms:
+fact table / append-only store
+In graph terms:
+reference-addressable fact universe
+In agent terms:
+shared memory of admissible facts
+The important thing is that these are projections, not equivalences.
+My strongest answer: replace substrate with fact-space in the canonical vocabulary, and reserve substrate collapse either as an older shorthand or rename it to fact-space collapse / collapse into fact-space.
+
+If we consider the framing here: https://en.wikipedia.org/wiki/Strange_loop
+
+And refocus where the strangeness lies in this system - specifically adding the observer in as a fact emitting observer who's own observations are facts in the system and so on
+
+I’ll anchor this against the standard “strange loop” framing first, then translate it back into your model with the observer made endogenous rather than outside the system.
+Thought for a couple of seconds
+Yes — and I think adding the observer back in as fact-emitting and fact-constituted moves the strangeness closer to Hofstadter’s version.
+The Wikipedia/Hofstadter framing emphasizes a cycle through levels in which “moving upward or downward” eventually brings you back where you started; Hofstadter’s own formulation is not a physical circuit but an abstract loop involving shifts between levels of abstraction that somehow close back on the origin. It also ties the cognitive-science version to self-reference: the “I” emerges from symbolic activity that becomes rich enough to twist back upon itself. 
+
+That matters because your model has been at risk of being “merely” this:
+
+facts → derivation → tick → fact
+That is already strong, but it can still read as a dataflow trick.
+When the observer becomes endogenous, the loop becomes stranger:
+
+observer emits facts
+facts participate in derivations
+derivations emit weighted facts
+weighted facts can describe/update/constitute the observer
+the observer emits future facts from that changed position
+Now the loop is not just derivation products re-entering fact-space. It is that the fact-emitting thing is itself in fact-space.
+That feels much closer to the Hofstadter move.
+
+The missing level-crossing is observer-collapse
+Previously, we had:
+Strange loops are not feedback; they are collapse into fact-space — derivation products re-enter as facts without changing kind.
+I still like that, but adding the observer suggests another, deeper version:
+Strange loops are not feedback; they are observer collapse — the fact-emitting observer is itself recoverable as a fact-pattern inside the same space it emits into.
+That is not exactly replacing fact-space collapse. It is nesting it.
+There are two collapses:
+
+derivation-collapse:
+  a resolved fold becomes a fact
+
+observer-collapse:
+  the observer that emits facts is itself modeled by facts
+Or more carefully:
+Derivation collapse makes ticks facts. Observer collapse makes the fact-emitter part of fact-space.
+That is the move that makes the system Hofstadterian rather than just recursive.
+This creates a stronger strange-loop definition
+A normal recursive derivation system says:
+Derived facts can become inputs to later derivations.
+Your system, with observer included, says:
+Derived facts can modify or constitute the observer whose later observations become facts.
+That produces the self-reference:
+I observe the system.
+The system records my observation as fact.
+The system derives facts about my observing.
+Those derived facts become part of the context from which I observe.
+I now observe through a self partly built from prior observations.
+For an agent-memory/system-prompt use case, this is exactly the structure:
+agent emits observations
+observations enter fact-space
+derivations resolve memories/preferences/state
+resolved ticks re-enter as facts
+those facts shape the agent prompt/context
+the agent emits new observations from that shaped context
+That is no longer just “outputs become inputs.” It is:
+the observer’s future observing is mediated by facts derived from its own prior observing.
+That is the strange loop.
+Where “levels” live now
+This also sharpens the “levels are not tiers” line.
+The levels are not:
+
+raw event → summary → meta-summary → identity
+They are resolution traces:
+observation
+resolved into tick
+re-entered as fact
+used to shape observer
+emitted as new observation
+The apparent “higher level” is not a structural layer. It is a prior resolution now functioning as ordinary fact.
+So the keeper line still holds:
+
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+But now add:
+The observer is one of the things those traces can resolve into.
+Or:
+An observer is not outside the loop; an observer is a fact-emitting pattern partly recoverable from prior facts.
+That feels canonical-grade.
+Observer as position, not external actor
+This may be the important vocabulary move.
+Earlier:
+
+Observer = attributed entity that emits facts
+Now:
+Observer = fact-emitting position in fact-space
+That is better.
+It avoids treating observer as a metaphysical soul/object outside the model. An observer can be:
+
+human
+daemon
+agent
+CLI process
+model instance
+cron job
+organization
+household
+future derived persona/memory-context
+But in model terms:
+An observer is a locus from which facts enter fact-space, and about which facts may also be derived.
+That creates the self-reference without requiring consciousness.
+The Hofstadter alignment
+The Wikipedia page’s distinction between ordinary feedback and strange loop is useful here. It notes that Hofstadter’s strange loop involves shifts between abstraction levels that return to the origin, and the cognitive version involves symbolic patterns rich enough to twist back upon themselves. 
+Your analogue:
+
+symbolic patterns = facts, ticks, references, weights
+level shifts = resolution/collapse events
+return to origin = derived facts shape the observer/source of later facts
+self-reference = observer facts participate in derivations that affect the observer’s future emissions
+So the strange part is not only:
+a tick becomes a fact
+It is:
+facts can derive the observer-state from which future facts are emitted.
+That is the “I Am a Strange Loop” move translated into your data model.
+I would refine the canonical terms like this
+Fact-space
+The shared space of facts.
+Fact
+A substrate/admitted unit in fact-space.
+Observation
+A fact emitted from an observer-position, with weight beginning at one.
+Tick
+A fact produced by resolved derivation, carrying weight/depth/reference history.
+Derivation
+A fold resolving into a tick.
+Collapse
+The event by which a derivation product enters fact-space without changing kind.
+Observer-position
+A fact-emitting locus whose emissions and derived descriptions can themselves become facts.
+Self-reference
+A condition where facts derived from an observer’s emissions participate in shaping that observer-position.
+Strange loop
+Not merely derivation collapse, but derivation collapse that can return through observer-position.
+Maybe:
+
+A strange loop occurs when resolved derivations re-enter fact-space and participate in the conditions of future observation.
+Even sharper:
+A strange loop occurs when facts derived from observation return as facts that shape the observer-position from which later observations are emitted.
+That is probably the line.
+This also resolves the “substrate/fact-space/field” discomfort
+If you add observer, “fact-space” gets more compelling than “substrate.”
+Because you are no longer talking about a solid layer. You are talking about a field of facticity in which observer-positions also appear.
+
+Your volatility-surface intuition works:
+
+observations enter fact-space at weight one
+derivations introduce weighted facts
+weighted facts deform future derivations
+some weighted facts shape the observer-position
+the observer emits new facts from the deformed position
+That is the field-like picture.
+So instead of:
+
+substrate
+I would say:
+fact-space
+And instead of:
+substrate collapse
+maybe:
+collapse into fact-space
+Then observer collapse becomes:
+observer-position is not outside fact-space; it is a fact-emitting locus within it.
+Canonical block, revised with observer
+Facts occupy fact-space.
+
+An observation is a fact emitted from an observer-position whose weight begins at one. A tick is a fact produced by resolution: a derivation lifted into fact-space with weight, depth, and references.
+
+Resolution closes a derivation. Collapse admits the resolved fold into fact-space without changing kind. Equality is the condition that follows: downstream derivations may inspect provenance, but they cannot reject the tick as a different primitive.
+
+The observer is not outside this process. An observer-position emits facts, but facts may also describe, derive, constrain, or reconstitute that observer-position.
+
+This is the strange loop: facts derived from observation can return as facts that shape the observer-position from which future observations are emitted. Levels are not structural tiers; they are recoverable traces of prior resolutions.
+That feels like the model crossed the threshold from “recursive derivation system” into “strange loop system.”
+Goblin telling
+Because obviously:
+A goblin drops scraps into the midden.
+Some scraps are about the goblin.
+Knots chew the scraps and drop heavy scraps back into the midden.
+Some heavy scraps change what the goblin notices, fears, wants, or carries.
+The next scraps the goblin drops are already shaped by old toothmarks.
+The goblin is not outside the midden.
+The goblin is one of the things the midden remembers how to make.
+That last line is the goblin Hofstadter move:
+The goblin is one of the things the midden remembers how to make.
+
+So what's the pushback against this system and data model?
+
+Thought for a couple of seconds
+The strongest pushback is not “this is incoherent.” I think it is coherent.
+The strongest pushback is:
+
+This may be a powerful ontology that risks becoming too general to constrain implementation.
+A good data model earns its keep by making some things easy, some things possible, and some things explicitly out of scope. Your model currently has the gravitational pull of a meta-model: observability, workflow, agent memory, event sourcing, knowledge graph, provenance, lenses, self-reference, prompt/memory shaping. That is exciting, but it also creates real dangers.
+1. “Fact” may become too permissive
+If observations and ticks are both facts, and ticks can become observations to downstream loops, then fact-space is elegant but dangerously open.
+The question becomes:
+
+What is allowed to be a fact?
+If the answer is “anything admitted,” then the model needs a very strong admission contract. Otherwise, “fact” becomes a glorified record envelope.
+The hard questions:
+
+Who or what may emit a fact?
+What makes a fact admissible?
+Can facts be revoked, contradicted, superseded, or only countered?
+Can a fact be malformed but still admitted?
+Can a fact represent an intention, claim, measurement, derived belief, command, or policy?
+Are those all the same kind of fact?
+Append-only helps, but append-only does not solve semantics. It only preserves history.
+The pushback:
+
+A shared fact-space needs a theory of admissibility, not just immutability.
+2. Weight is load-bearing but underspecified
+“Tick as weighted fact” is a major improvement. But once weight matters, it cannot stay poetic.
+Weight could mean:
+
+count of raw observations folded
+confidence
+derivation depth
+compression ratio
+authority
+importance
+cost
+recency-adjusted relevance
+causal influence
+provenance density
+semantic gravity
+Those are not interchangeable.
+If downstream loops consume weighted facts differently from raw observations, then weight needs either a precise definition or a deliberately plural structure.
+
+Maybe weight is not one scalar. Maybe it is a vector:
+
+density: how many facts were folded
+depth: how many prior resolutions are inside
+confidence: how reliable the derivation is
+authority: how trusted the observer/loop is
+support: which references justify it
+The pushback:
+If weight changes fold behavior, weight must be formal enough to prevent accidental numerology.
+A “heavy fact” sounds right. But what does heaviness do?
+3. “Type-equality” may hide important asymmetries
+The phrase:
+downstream loops cannot reject the tick as a different primitive
+is strong. But in practice, systems often need to treat raw observations and derived facts differently.
+Example:
+
+raw sensor reading: temperature = 80°F
+derived tick: house is overheating
+derived tick of tick: HVAC strategy failed
+agent reflection: user prefers warm rooms
+All may be facts. But a fold that treats those as merely “same kind” can over-collapse meaning.
+The model handles this through references, weight, depth, kind, and provenance — but that means equality is only at the envelope level.
+
+The pushback:
+
+The system must be very clear that fact-space equality is structural, not epistemic.
+A tick is type-equal to an observation. It is not evidentially equal, causally equal, or operationally equal.
+Canonical warning:
+
+Same primitive does not mean same authority.
+4. References may become mandatory in practice
+The model says references are the only discriminator, and they are optional to consult.
+That is elegant. But if the difference between raw observation and fold-of-folds is only recoverable through references, then any serious downstream consumer will often need to consult references.
+
+So references are “optional” only in the same sense that source maps are optional: technically yes, practically no if something goes wrong.
+
+The pushback:
+
+If references are the only recovery path, then reference integrity is core, not auxiliary.
+You may need to treat references as first-class invariants:
+A tick must reference its derivation inputs.
+A reference must identify relation semantics.
+A reference must survive storage, merge, replay, export.
+A broken reference changes the epistemic meaning of a tick.
+Without this, “unfoldability” becomes aspirational.
+5. The model may conflate derivation and observation unless carefully layered
+You now have:
+observation = fact whose weight begins at one
+tick = fact produced by resolved derivation
+That is clean. But then the observer itself emits facts, and facts may derive observer-state. This is where things can get slippery.
+For humans and agents, an emitted “observation” may already be highly derived.
+
+If I say:
+
+“This project feels like goblin knotwork.”
+That enters as an observation at weight one from the system’s perspective, but cognitively it is already a derived interpretation.
+That is fine, as long as the model says:
+
+Weight is internal to this fact-space, not metaphysical.
+The pushback:
+Weight begins at one relative to the system’s admission boundary, not relative to reality.
+Otherwise “observation” smuggles in a false innocence.
+6. “Derivation” may be too broad
+If derivation is the heart of the system, it needs boundaries.
+Is derivation:
+
+pure function over facts?
+fold with local state?
+rule evaluation?
+LLM call?
+human judgment?
+statistical aggregation?
+workflow step?
+prompt construction?
+database query?
+all of the above?
+If all of the above, then derivation is not a computational primitive; it is an accountability primitive. That can work, but the docs should say so.
+The pushback:
+
+Derivation needs a contract: what must be recorded for a resolution to be replayable, auditable, or merely attributable?
+Not every derivation can be deterministic. An LLM call, human judgment, or external API may not replay. So maybe there are derivation classes:
+replayable derivation
+auditable derivation
+opaque derivation
+human derivation
+external derivation
+That matters for trust.
+7. Replay may be impossible unless the model distinguishes replay from re-interpretation
+If facts are append-only and ticks carry references, it is tempting to say you can always unfold/replay.
+But if derivations include time-sensitive context, nondeterministic models, external state, prompts, or human choices, replay may produce a different tick.
+
+So there are at least two operations:
+
+unfold: follow references to recover what supported this tick
+replay: run the same derivation again
+reinterpret: run a new derivation over old facts
+Those are different.
+The pushback:
+
+Do not imply replayability where you only have provenance.
+This is especially important for agent memory and system prompts. A memory tick may be unfoldable without being reproducible.
+8. The observer loop risks becoming too mystical
+The observer-as-fact-emitting-and-fact-constituted move is strong. It is also where skeptical readers may bounce.
+The pushback would be:
+
+Is this actually modeled, or is it just a philosophical overlay?
+For the observer loop to be real in the data model, you need concrete mechanics:
+observer identity facts
+observer state facts
+observer capability / horizon / potential facts
+derivations that emit observer-affecting ticks
+runtime mechanisms that use those ticks to shape future observation
+In an agent system, this is obvious:
+memory facts → prompt/context derivation → model emits observations → memory facts
+For a generic data model, you need to show the actual cycle.
+The pushback:
+
+The observer is only endogenous if derived facts actually affect future emission conditions.
+Otherwise, “observer in fact-space” is a lens, not a mechanism.
+9. The topology story may be hard to reason about
+You clarified that graph topology lives largely in references and surfaced views, not explicit edges.
+That is elegant, but users often need operational topology:
+
+what depends on what?
+what can trigger what?
+what loops feed which loops?
+what happens if I remove this loop?
+what is the blast radius of this bad tick?
+If topology is emergent, those questions require tooling.
+The pushback:
+
+Emergent topology is powerful, but operational systems need inspectable topology.
+You may not need explicit edges as primitives, but you probably need explicit topology projections:
+derivation graph
+reference graph
+observer influence graph
+loop dependency graph
+tick lineage graph
+runtime flow graph
+The model can say these are projections. But the implementation must make them cheap enough to trust.
+10. The vocabulary may become self-sealing
+This is a docs/product risk.
+Terms like:
+
+fact-space
+resolution
+collapse
+weight
+depth
+observer-position
+recoverable traces
+are beautiful and precise internally. But they can also make the system hard to critique because every objection can be answered by refining the ontology.
+That is dangerous.
+
+A skeptical reader might say:
+
+“Is this a small event-sourced provenance system with derived events and views?”
+And the answer should sometimes be:
+“Yes, for this projection.”
+Not:
+“No, you have failed to understand fact-space collapse.”
+The pushback:
+The model needs boring examples that can survive without the poetry.
+If it cannot explain df -h, a build pipeline, agent memory, or Home Assistant state in boring terms, the vocabulary is too strong.
+11. You may need a smallest useful implementation boundary
+The model is big enough to justify a whole world. But the implementation needs a first durable claim.
+For example:
+
+Strange Loops is an append-only fact/tick store with derivation provenance and lensable projections.
+That is implementable.
+Or:
+
+Strange Loops is a runtime model where loops resolve derivations into weighted facts that can feed later loops.
+That is implementable too, but larger.
+The pushback:
+
+Choose the smallest claim that makes the rest inevitable.
+Do not build “recursive derivation over fact-space with endogenous observers” first. Build the smallest thing where that statement becomes obviously true.
+12. The system may need a theory of refusal
+This is the flip side of “the substrate cannot refuse its own outputs as inputs of equal kind.”
+Operationally, systems absolutely need refusal:
+
+do not consume untrusted ticks
+do not fold stale facts
+do not admit malformed facts
+do not let this observer affect that loop
+do not allow derived policy to override raw safety constraints
+So the precise statement should remain:
+At the fact primitive level, a tick is admissible as a fact.
+But loops still need selection, trust, and policy.
+The pushback:
+
+Fact-space equality must not become permission equality.
+A downstream loop may not reject a tick as a different primitive, but it may reject it as irrelevant, untrusted, out of horizon, too deep, too lossy, too old, or unauthorized.
+That distinction is crucial.
+
+My strongest adversarial summary
+If I were pushing hard, I’d say:
+This model risks mistaking a very elegant universal envelope for a sufficient semantics. “Fact” gives you admission. “Tick” gives you derivation product. “Reference” gives you recoverability. But truth, trust, replayability, authority, relevance, and action are not solved by the envelope. They must be explicit projections or contracts, or the system will become a beautiful midden where everything can be represented and nothing can be safely concluded.
+That is the real critique.
+My strongest defense
+The defense is:
+Correct. The model is not a truth engine, workflow engine, graph database, memory system, or observability platform. It is the substrate/fact-space from which those can be projected. Its job is not to decide all semantics; its job is to preserve enough structure that semantics can be derived, inspected, and re-derived without losing the level-crossings.
+Or using your newer phrasing:
+The model does not claim all facts are equal in authority. It claims observations and derivation products share a fact-space, while weight, depth, references, observer, and policy determine how later derivations consume them.
+That defense works if the implementation is disciplined.
+The pushback I would take most seriously
+Three things:
+1. Define weight/depth precisely enough that downstream folds can use them.
+2. Make reference integrity non-negotiable for ticks.
+3. Separate fact-space equality from trust, authority, and permission.
+If those are solid, the model can carry the philosophical weight.
+If those are fuzzy, the model may become too pretty to operate.
+
+Horizon and Potential, and topology of the loops via vertices address most of those concerns, I believe.
+
+Yes — I think they address a large share of the critique, but with one important caveat:
+Horizon, Potential, and vertex topology answer the “can this fact matter here?” question. They do not automatically answer the “should this fact be trusted / replayed / treated as equivalent evidence?” question unless those are explicitly encoded into Horizon, Potential, or derivation policy.
+That may be totally fine. It just needs to be stated.
+Horizon
+Horizon answers:
+What can this observer / loop / derivation see?
+That covers admissibility in the perceptual sense. A fact can exist in fact-space and still be outside a loop’s horizon.
+So this pushback:
+
+“Fact-space is too permissive; anything can be a fact.”
+gets answered by:
+Yes, fact-space is permissive, but derivations are not omniscient. Horizon bounds what can enter a fold.
+That is strong. It preserves shared fact-space without making every fact globally relevant.
+The phrase might be:
+
+Fact-space is shared; horizon is local.
+Or:
+Facts may be globally admitted without being locally visible.
+That is a very clean distinction.
+Potential
+Potential answers:
+What can this observer / loop / derivation change or emit?
+This addresses the permission/authority side. A loop may see a fact without having the potential to resolve it into certain ticks, affect certain observer-state, or emit into certain regions of fact-space.
+So this pushback:
+
+“Fact-space equality must not become permission equality.”
+gets answered by:
+Correct. Equality is structural. Potential controls action.
+That gives you another keeper:
+Fact-space equality is not permission equality. Potential is what makes the difference operational.
+Or:
+Facts share a kind; observers do not share a potential.
+That is probably the most concise version.
+Vertex topology
+Vertex topology answers:
+Where can loops meet, and how can ticks become facts for other loops?
+This addresses my concern that emergent topology could become uninspectable. If vertices are the explicit meeting points of loops, then you do have operational topology — not as generic edges, but as crossings.
+That matters. The topology is not arbitrary soup. It is constrained by where loops resolve and where their ticks are admitted into other folds.
+
+So:
+
+The graph is not made of edges first. It is made of crossings where loops can exchange fact-shaped resolutions.
+That is much closer to your model.
+And it means blast radius / dependency / influence questions can be projected from:
+
+which loops meet at which vertices
+which ticks were admitted as facts at those vertices
+which horizons made them visible
+which potentials allowed downstream emissions
+which references preserve the derivation trail
+That is an actual operational story.
+Revised answer to the pushback
+I would compress the safety/semantics response into this:
+Fact-space gives structural equality.
+
+Horizon gives visibility.
+
+Potential gives agency.
+
+Vertex topology gives contact.
+
+References give recoverability.
+
+Weight/depth give compression history.
+
+Policy/trust, if needed, are facts or derivation constraints interpreted through horizon and potential.
+That is a much stronger answer than just “references solve it.”
+The remaining risk
+The remaining critique is not that the model lacks concepts. It is that these concepts may become too powerful unless their responsibilities are sharply separated.
+I would be careful not to let Horizon and Potential absorb everything.
+
+For example:
+
+Horizon should not secretly mean trust.
+Potential should not secretly mean truth.
+Vertex topology should not secretly mean causality.
+Weight should not secretly mean importance.
+Reference should not secretly mean justification.
+They can participate in those projections, but the canonical responsibilities should stay crisp.
+Maybe:
+
+Horizon: can see
+Potential: can affect
+Vertex: can meet
+Reference: can recover
+Weight: has folded density
+Depth: has resolution ancestry
+Policy: can decide
+Trust: can rank or admit-with-confidence
+That last pair — policy/trust — may be optional projections, but I would not bury them completely.
+A sharper formulation
+Your model may now have a really nice “control surface”:
+A fact’s kind determines whether it can participate. Horizon determines whether it can be seen. Potential determines whether it can be acted from. Vertex topology determines where loop-contact occurs. References determine whether its derivation can be recovered.
+That is extremely coherent.
+Then:
+
+Strangeness arises because ticks and observations share fact-kind, while their visibility, agency, and recoverability remain locally governed.
+That is the model.
+Goblin version, because it still helps
+The midden accepts light scraps and heavy scraps alike.
+A goblin does not see the whole midden; its scent defines its horizon.
+It cannot change every pile; its reach defines its potential.
+Knots meet at crossings, not everywhere.
+Toothmarks tell what a heavy scrap has swallowed.
+So the midden is shared, but every goblin’s world is bounded.
+That actually resolves the earlier goblin/warren issue too. The warren is not the topology. The crossings are topology. The midden is shared fact-space. Scent/reach are horizon/potential.
+My updated position
+So yes: Horizon, Potential, and vertex topology address most of the core objections if the canonical model says exactly what job each one does.
+The remaining thing I would push you on is definitional discipline:
+
+Do not let fact-space equality imply semantic equality.
+Do not let horizon imply trust unless trust is explicitly modeled as visibility.
+Do not let potential imply correctness; it only grants capacity to affect.
+Do not let vertex contact imply causality without references.
+If those boundaries are clear, the model is not just poetic. It is surprisingly well-factored.
+
+Another framing I've used when thinking about this is that it's a reality event system, or a semantic arrangement system.
+
+Trust is still managed by horizon and Potential. You can see what you can see, you can do (emit) what you can, if you are untrusted these boundaries are very small and limited. 
+
+Yes — that helps. I’d sharpen it this way:
+Trust is not a property of facts. Trust is a constraint on observer-position: what it can see through horizon, and what it can alter through potential.
+That is a very clean move.
+So an untrusted observer does not necessarily emit “less true” facts. It emits facts from a smaller world and with less ability to make those facts consequential.
+
+That means trust is not handled by arguing with fact-space. Fact-space remains permissive. The control plane is:
+
+Horizon = readable world
+Potential = writable/emittable world
+Vertex topology = where loop-contact is possible
+References = how weight/depth can be recovered
+That makes “reality event system” and “semantic arrangement system” both plausible, but they emphasize different faces.
+“Reality event system”
+This says:
+The system records events in reality, including derived events that become part of reality for later observers.
+That is strong, but “reality” is dangerous. It can sound like the system is claiming access to truth itself.
+I’d maybe say:
+
+A reality-event system records what becomes real to the system.
+Or:
+Reality, here, means admitted fact-space — not objective truth.
+That preserves the power without overclaiming.
+An observation enters as a fact. A derivation resolves as a tick. Once a tick collapses into fact-space, it is now part of the system’s operational reality. Downstream loops can ignore it by horizon/potential/policy, but they cannot say it is not fact-shaped.
+
+“Semantic arrangement system”
+This may be more accurate and less dangerous.
+It says:
+
+The system does not merely store events; it arranges meaning-bearing facts so later derivations can form new arrangements.
+That captures:
+facts as admitted units
+ticks as weighted facts
+references as recovery paths
+vertices as crossings
+lenses as surfaced arrangements
+observer-position as bounded participation
+It avoids sounding like a truth oracle.
+But it may undersell the temporal/derivational part. “Arrangement” can sound static.
+
+Maybe the better phrase is:
+
+semantic event arrangement
+or:
+semantic reality engine
+or more soberly:
+a semantic event substrate — though we’re trying to avoid substrate.
+The important line: trust bounds consequence
+The trust framing now feels like:
+Trust does not decide whether something can be represented. Trust decides how far it can travel and what it can affect.
+That is very good.
+More canonical:
+
+Untrusted observers are not excluded from fact-space; they are bounded by horizon and potential.
+Or:
+Trust is expressed as constrained visibility and constrained emission.
+That gives you a robust answer to the “bad facts” critique.
+Example:
+
+A sandboxed agent can emit observations about its own run.
+Its horizon excludes private user memory.
+Its potential excludes durable identity facts.
+Its ticks may enter fact-space, but only loops whose horizon includes sandbox telemetry can consume them.
+This is much cleaner than “we trust/distrust the fact.” The fact can exist; its consequences are bounded.
+Fact-space as operational reality
+I think the strongest synthesis is:
+Fact-space is the system’s operational reality. Horizon determines which parts of that reality an observer can perceive. Potential determines which parts of that reality it can alter. Derivation resolves local reality into weighted facts that may become reality for other loops.
+Then the strange loop:
+The observer is part of the same operational reality it emits into.
+So:
+A strange loop occurs when an observer’s emitted facts participate in derivations that later alter the horizon or potential of that observer-position.
+That is extremely sharp.
+Because now the observer loop is not vague. It specifically happens when derived facts modify future seeing/doing.
+
+Where “semantic arrangement” fits
+Maybe this is the top-level description:
+Strange Loops is a semantic arrangement system for operational reality.
+Then define:
+It admits facts, resolves derivations into weighted facts, and uses horizon/potential to bound which observers can see or affect which arrangements.
+That is pretty good.
+But perhaps too abstract. A more direct version:
+
+Strange Loops arranges facts into operational reality: observations enter with weight one, derivations resolve into weighted facts, and bounded observers emit from inside the same fact-space they help shape.
+That one has the whole thing.
+I’d avoid saying “trust is managed by horizon and potential” without the consequence line
+Because someone may object:
+But trust also involves confidence, provenance, authentication, reputation, policy, and verification.
+And they would be right in many systems.
+Your answer can be:
+
+Those are represented as facts or derivation inputs. The enforcement of trust is horizon/potential: what an observer can see and what it can emit or affect.
+So:
+trust signals = facts
+trust enforcement = horizon + potential
+trust consequences = topology of what can see/consume/emit
+That is a precise split.
+Canonical phrasing:
+
+Trust is modeled as fact, but enforced as boundary.
+Or:
+Trust evidence lives in fact-space; trust power lives in horizon and potential.
+That is excellent.
+Then:
+
+An untrusted observer may still emit facts, but its horizon and potential prevent those facts from becoming broadly consequential.
+I think your two framings can become two tellings
+Reality-event telling
+Best for system/agent/prompt memory:
+What becomes real to the system?
+Who can see it?
+Who can alter it?
+How do derived realities re-enter future observation?
+Semantic-arrangement telling
+Best for docs/model theory:
+How are facts arranged into meaning-bearing folds?
+How do derivations create weighted facts?
+How do lenses surface arrangements?
+How do references recover prior arrangements?
+They are compatible:
+Reality-event is about admission and consequence.
+Semantic-arrangement is about derivation and interpretation.
+The core model spans both.
+One possible canonical paragraph
+Strange Loops is a semantic arrangement system for operational reality.
+
+Facts are admitted into fact-space. Observations are ingress facts whose weight begins at one; ticks are facts produced by resolved derivations and re-enter fact-space with weight, depth, and references.
+
+Observers are not outside fact-space. They are bounded positions within it: horizon determines what they can see, and potential determines what they can emit or affect. Trust evidence may be represented as facts, but trust is enforced through horizon and potential.
+
+The strange loop appears when an observer’s facts participate in derivations that later reshape the observer-position from which future facts are emitted.
+That feels pretty close to where this wants to land.
+
+So where does this break?
+
+It breaks where the model has to stop being an ontology and start making irreversible operational choices.
+Not “breaks” as in collapses. More like: these are the stress fractures where you need explicit policy, invariants, or scope cuts.
+
+1. It breaks at bad admission
+If fact-space admits everything, then everything becomes operationally real somewhere. Horizon and Potential limit consequence, but the garbage still exists.
+That is fine if fact-space is a ledger of “claims made.” It is dangerous if readers treat fact-space as “things that are true.”
+
+So the invariant has to be:
+
+Fact-space admits assertions, not truth.
+A fact is not “the world is this way.”
+A fact is “this observer emitted this assertion from this position at this time.”
+If you keep that discipline, bad facts are survivable. If not, the system becomes a truth-laundering machine.
+
+2. It breaks when Horizon becomes too dynamic
+Horizon is powerful because it bounds what an observer can see.
+But if facts can derive changes to Horizon, then the system can accidentally create privilege escalation loops:
+
+observer emits fact
+derivation interprets fact
+tick changes observer horizon
+observer now sees more
+observer emits stronger facts
+That may be intended for learning agents. It is also exactly where things get dangerous.
+So you need a hard distinction between:
+
+facts that describe horizon
+facts that propose horizon
+facts that actually grant horizon
+Otherwise “the system learned I should see X” becomes indistinguishable from “I am now allowed to see X.”
+Keeper line:
+
+Derived horizon is not granted horizon.
+3. It breaks when Potential becomes authority laundering
+Same problem, but with action.
+If an untrusted observer can emit a fact that participates in a derivation that grants it more Potential, you have a self-amplifying actor.
+
+That can be useful for adaptive agents, but only if there is a separate authority loop whose Potential includes granting Potential.
+
+So:
+
+Potential can only be expanded by an observer-position that already has grant-potential.
+This is probably a core safety invariant.
+Otherwise the strange loop becomes a permission ouroboros.
+
+4. It breaks when fact equality is mistaken for evidential equality
+This one is subtle and likely.
+Observations and ticks are both facts. Good.
+
+But if downstream folds forget that a tick is a heavy derived fact and treat it like a fresh observation, you get compounding distortion.
+
+Example:
+
+raw fact: user clicked thing once
+tick: user is interested in thing
+later tick: user strongly prefers thing
+later tick: always show user thing
+Each level may be fact-shaped, but the evidential quality is changing. If folds do not account for depth, density, and provenance, the system can bootstrap weak claims into strong ones.
+So:
+
+Fact equality is structural equality, not evidential equality.
+And:
+Depth must be visible to derivations that make consequential claims.
+5. It breaks when weight becomes ambiguous
+“Weight” is doing too much unless you split it.
+Weight might mean support count, derivation depth, confidence, authority, recency, semantic importance, or operational consequence.
+
+Those cannot all be one number.
+
+If you keep “weight” as a poetic super-term, fine. But code needs separable fields or typed measures.
+
+Maybe:
+
+density = how many facts folded in
+depth = how many derivation collapses are inside
+confidence = how strongly the derivation claims its output
+authority = who/what is allowed to make this claim matter
+impact = what this fact can affect
+If weight is not decomposed, the model invites accidental math:
+“This fact is heavier, therefore it matters more.”
+That is not necessarily true.
+A fact can be dense, deep, low-confidence, high-authority, stale, and dangerous all at once.
+
+6. It breaks at lossy collapse
+Collapse is elegant: derivation product re-enters fact-space without changing type.
+But collapse is also compression. If the tick does not preserve enough references, inputs, derivation metadata, and context, then the system cannot actually recover what was folded.
+
+At that point, “levels are recoverable traces” becomes false.
+
+So the hard invariant is:
+
+A tick without sufficient references is not unfoldable; it is only asserted.
+That may be allowed. But it must be explicit.
+You may need classes:
+
+unfoldable tick
+auditable tick
+opaque tick
+Not every tick can or should be fully replayable. But the model must not pretend all are.
+7. It breaks when references become optional but semantics depend on them
+Earlier we said references are optional to consult. That is true for performance and projection.
+But references cannot be optional to preserve if ticks derive authority from folded history.
+
+So:
+
+References may be optional to read; they are not optional to carry for derived ticks that claim weight.
+A heavy scrap without toothmarks is suspicious. Maybe valid, but suspicious.
+Goblin law:
+
+No toothmarks, no swallowed world.
+Canonical:
+No recoverable references, no claimed derivation depth.
+8. It breaks with cycles of self-description
+The observer loop is where the system becomes properly strange, but it is also where it can become unstable.
+If facts about the observer shape the observer, and the observer emits new facts about itself, you can get identity drift, self-confirmation, or hallucinated self-state.
+
+Agent example:
+
+agent emits: I am good at X
+memory fold emits: agent is good at X
+prompt fold includes: you are good at X
+agent emits more confident X claims
+That is a strange loop. It is also a bias amplifier.
+So observer-affecting derivations need different treatment from ordinary derivations.
+
+Possible invariant:
+
+Observer-shaping ticks require higher Potential than observer-describing ticks.
+Describing the observer is cheap. Reconstituting the observer is privileged.
+9. It breaks when “semantic arrangement” becomes too universal
+A system that can represent everything can become uselessly general.
+If every workflow, memory, event, policy, trust signal, graph edge, prompt fragment, and identity claim is “just a fact,” then the model has not failed, but the implementation may.
+
+The question becomes:
+
+What are the few operations this system makes unusually good?
+You need crisp answers, probably like:
+admit fact
+resolve derivation
+collapse tick into fact-space
+follow references
+project lens
+bound observer by horizon/potential
+If the primitive operations multiply beyond that, the model starts turning into a framework-world.
+10. It breaks at external reality
+“Reality event system” is compelling, but the system only knows admitted reality.
+A sensor can be wrong. A human can lie. An LLM can hallucinate. A derived tick can be nonsense. A clock can skew. A parser can misread.
+
+So the system cannot be “reality.” It can only be:
+
+operational reality under attribution.
+That phrase matters.
+The system records what has been admitted as fact by some observer-position. It does not guarantee the outside world agreed.
+
+This is not a weakness if made explicit. It is a strength: everything has attribution.
+
+11. It breaks when deriving policy from the same space policy governs
+This is a deeper version of Horizon/Potential problems.
+If the policies that govern fact admission, horizon, and potential are themselves facts in the same fact-space, then you get reflective governance.
+
+That is powerful.
+
+It also means a bad derivation could affect the rules that judge derivations.
+
+You probably need strata of policy:
+
+constitutional / external policy
+runtime policy facts
+derived policy proposals
+local derivation constraints
+The model can represent all of them, but the runtime must not treat them all as equally self-modifying.
+Keeper line:
+
+The system may describe its own rules inside fact-space, but not every description is a rule.
+12. It breaks at deletion, forgetting, and correction
+Append-only is clean until you need privacy, retention, legal deletion, or “this fact should not be used anymore.”
+If facts are never removed, then forgetting must be modeled as new facts:
+
+fact revoked
+fact superseded
+fact outside horizon
+fact expired
+fact redacted
+That works semantically, but may not satisfy actual deletion requirements.
+So you need to decide:
+
+Is the store append-only logically or physically?
+Can facts be tombstoned?
+Can references point to redacted facts?
+Can a tick remain valid if some inputs are forgotten?
+What happens to weight when supporting facts are removed from horizon?
+This is a genuine break point.
+13. It breaks at scale and query cost
+Dynamic topology through references and lenses is beautiful. It can also be expensive.
+If every meaningful read needs to unfold references across folds-of-folds, then either:
+
+reads get slow,
+lenses need cached projections,
+ticks need denormalized metadata,
+or horizons need precomputed indexes.
+That is not a conceptual flaw, but it will shape the implementation.
+Practical invariant:
+
+The model is append-only; the projections are allowed to be cached and disposable.
+That keeps the core pure without making every query archaeological.
+14. It breaks when humans need to debug it
+This is probably the biggest UX failure mode.
+A human asks:
+
+Why did the agent think this?
+The system answers:
+because weighted fact T derived from fold F over references R under observer-position O with horizon H and potential P.
+That is true but not usable.
+You need first-class explanation views:
+
+why this fact exists
+what it folded
+what it ignored
+what horizon allowed
+what potential permitted
+what changed after it collapsed
+what downstream loops consumed it
+If the system cannot explain its own derivations, the ontology will feel like mysticism.
+15. It breaks when observer-position is underspecified
+“Observer” cannot just be source.
+You likely need to distinguish:
+
+emitter: what produced this fact
+subject: what this fact is about
+authority: under whose potential it was emitted
+context: what horizon was active
+runtime instance: which execution emitted it
+identity lineage: what prior observer-state shaped it
+Otherwise observer self-reference gets muddy.
+Example:
+
+An agent emits a fact about the user based on a prompt built from prior memory.
+Who is the observer?
+the model instance?
+the agent process?
+the system prompt?
+the user?
+the memory derivation?
+the tool runtime?
+The answer can be modeled, but not with a single flat observer_id.
+Where I think it truly breaks
+The system truly breaks if it cannot enforce this separation:
+representation ≠ trust
+visibility ≠ truth
+potential ≠ correctness
+collapse ≠ validation
+weight ≠ authority
+reference ≠ proof
+fact-space equality ≠ permission equality
+If those separations hold, the model is strong.
+If they blur, the model becomes a very elegant way to launder claims through derivation until they feel inevitable.
+
+The shortest answer
+It breaks at self-modification, authority, and epistemology.
+More specifically:
+
+The model can admit anything as fact-shaped, but it must be extremely disciplined about what can see, emit, grant, trust, forget, and explain.
+Horizon and Potential handle much of this, but only if they are treated as hard operational boundaries, not just descriptive metadata.
+The canonical warning I’d put in the docs:
+
+Fact-space is permissive. Consequence is not.
+Or even better:
+The system may admit any fact, but no fact is consequential everywhere. Horizon bounds visibility; Potential bounds effect; references bound recovery.
+That is the guardrail.
+
+1. Fact space does admit everything, it doesn't claim they are true, just that an observer cared to record it.
+2. Horizon and Potential exist on the vertex, not the loop, so operationally they cannot be changed.
+3. Prior, I think I would have to explicitly allow that.
+4. Yes, I suppose that is a downside of any system, it being misunderstood and incorrectly used, this one more prone to that than most. 
+5. I think this simplifies, weight is merely the amount of times observers have emitted facts about facts. Citing a fact, referencing a fact via another fact and so on. It doesn't claim more than that, and the facts are semantic and unstructured by default, so anything past density and depth is unknowable without specified by an observer 
+6. I believe this is when you introduce new vertex into your topology specifically. In implementation, ticks contain references to all ulid of facts and nothing more, they do not contain new facts themselves. Those facts can be ticks, nothing is lost, and nothing collapses.
+7. Hmm, I'm not following this one.
+8. Starting to feel like a stretch here, but I appreciate it. This would be a semantic architecture decision when using it for an application of some kind, not necessarily a thing to have on the model.
+9. This is where the reality eventing system and what observers care about comes in as a way of framing - development of this practices dissolution always.
+10. I like this. Reality eventing was trying to pull the idea of 'what you care about', 'what has your attention' as part of the explanation, but it wasn't the entire framing.
+11. These are not facts, they're properties of the vertex for this reason, but having them as facts would be interesting, particularly around modifications.
+12. Yep, but, facts happened. They don't unhappen, as a constraint.
+13. Indeed, scale optimization is considered (so far) to be personal.
+14. Food for thought.
+15. Another one worth thinking about.
+
+I think you have a good set of thoughtful push back here that's quite helpful, thank you.
+
+This clarification actually makes the model feel less dangerous and more austere than I was projecting onto it.
+The biggest correction is this:
+
+Horizon and Potential live on the vertex, not the loop.
+That changes a lot. I was implicitly treating horizon/potential as potentially derivable observer-state, which made the model slide toward self-modifying agent architecture. If they are vertex properties, then the topology is the governance layer. That means the model is less “anything can mutate anything” and more:
+facts are permissive; vertices are constrained crossings.
+That is much cleaner.
+The model I now understand
+Something like:
+Fact-space admits any recorded concern.
+A fact means: some observer cared to emit this.
+It does not mean: this is true.
+
+Vertices define operational contact.
+A vertex has Horizon: what it can see.
+A vertex has Potential: what it can emit/do.
+Loops meet at vertices.
+Ticks pass as facts at vertices.
+
+Facts can reference facts.
+Ticks reference the ULIDs of facts folded into their resolution.
+Those referenced facts may themselves be ticks.
+Nothing is embedded, copied, or metaphysically collapsed.
+The apparent depth is recovered by following references.
+That is more minimal than the “substrate collapse” language implied.
+Maybe “collapse” is now suspect.
+
+Because if a tick contains only references and no new facts, then what “collapses” is not content. The tick is not swallowing the facts into itself. It is a new fact that indexes a resolution over prior facts.
+
+So the better canonical framing may be:
+
+Resolution does not collapse facts; it emits a weighted reference fact.
+Or:
+A tick is not compressed content. It is a fact of resolution with references to what resolved.
+That is important.
+Weight as citation density
+Your point on weight is very clarifying:
+Weight is merely the amount of times observers have emitted facts about facts.
+That means weight is not confidence, authority, importance, truth, or semantic mass. It is closer to reference density.
+Possible canonical line:
+
+Weight is attention made countable, not truth made stronger.
+Or more precise:
+Weight measures how often facts have been re-factored by observation, citation, or derivation. It does not measure correctness.
+Depth then becomes:
+Depth measures how far a fact sits from ingress through chains of referenced resolutions.
+That makes “heavy scrap” still work, but with less mystical baggage:
+A heavy scrap is not truer. It has more toothmarks.
+That is excellent.
+I now think “collapse” may need demotion
+The phrase was useful because it named type-preserving re-entry. But if nothing is embedded/lost and ticks are reference facts, then “collapse” risks implying compression, erasure, or loss.
+Maybe the actual event is not collapse but admission or re-entry.
+
+Options:
+
+Resolution-reentry
+A derivation resolves and re-enters fact-space as a tick.
+Clean, but not as memorable.
+Resolution emission
+A tick is the emitted fact of a resolution.
+Very precise.
+Type-preserving re-entry
+Still strong.
+Strange loops are not feedback; they are type-preserving re-entry: resolutions emit facts that later resolutions may consume as facts.
+This avoids the baggage of collapse.
+Factuation
+Too weird, but exactly: the act of making something a fact.
+Admission
+A resolved derivation is admitted as a fact.
+This is sober and fits your fact-space idea.
+My current favorite:
+
+Strange loops are not feedback; they are type-preserving re-entry. A resolution emits a tick, and the tick re-enters fact-space as a fact of the same kind as the facts it references.
+That is probably more accurate than substrate collapse given your clarification.
+“Levels are not tiers” still holds
+Actually, it holds better now:
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+Because ticks do not contain facts. They only reference facts. So levels are purely trace/recovery structure, not nested objects.
+That is very clean.
+
+fact A
+fact B
+tick C references A, B
+tick D references C, E
+D is not “above” C in a structural tier. It is only deeper if a traversal follows references through C. The level appears through recovery.
+The model’s hard boundary becomes very elegant
+You are saying:
+The world of facts is permissive.
+The world of vertices is constrained.
+That is probably the central architectural split.
+Canonical:
+
+Fact-space is permissive.
+Vertex-space is operationally bounded.
+Or:
+Facts record concern; vertices govern consequence.
+That is a keeper.
+Because it answers nearly every safety/trust question:
+
+bad fact? It can be recorded.
+untrusted observer? Their facts exist.
+can it matter everywhere? No, because vertices have Horizon.
+can it do anything? No, because vertices have Potential.
+can it become stronger by citation? Only as density/depth, not truth.
+can policy mutate itself? Not unless vertex topology explicitly allows it.
+The remaining genuine breakpoints
+With your clarifications, I’d reduce the serious breakpoints to five:
+1. Misreading facts as truth
+You already know this. It is the largest docs hazard.
+The line should probably be unavoidable:
+
+A fact is not truth. A fact is an attributed record of concern.
+Maybe even:
+Facts are not true things. Facts are recorded noticings.
+2. Misreading weight as authority
+This is the second biggest.
+Weight is reference density, not confidence.
+If people miss that, they will build reputation engines accidentally.
+3. Under-specifying observer identity
+Your #15 remains worth thinking about because “observer cared to emit it” makes observer attribution central.
+You probably want a very crisp observer model, even if minimal:
+
+observer_id
+emitted_at
+vertex_id maybe?
+kind/source?
+payload
+references
+The thing to avoid is “observer” becoming a vague label when it is actually the source of fact admission.
+4. Explaining why this is not just an append-only event store with references
+This is not a fatal critique, but it is the skeptical doorway.
+The answer might be:
+
+It is an append-only event store when projected as storage. It becomes Strange Loops at the point where ticks are facts, loops meet at horizon/potential-bounded vertices, and reference depth is recoverable as levels.
+That keeps “projections, not equivalences.”
+5. Debuggability / explanation
+If vertices define Horizon/Potential, then explaining a downstream tick requires:
+why these facts were visible at this vertex
+why this vertex had potential to emit this tick
+which references were included
+which facts were excluded or invisible
+what later vertices consumed it
+This is not a model flaw. It is the primary UX burden.
+The goblin version after your correction
+The goblin telling gets even cleaner:
+The midden accepts every scrap a goblin cared to drop.
+A scrap is not truth; it is a noticing.
+Crossings decide what scraps can be smelled and what scraps can be dropped next.
+A knot biting shut does not swallow the old scraps. It drops a new scrap with toothmarks pointing back to them.
+Heavy means many toothmarks, not more truth.
+The old scraps never unhappen.
+That is very good.
+Especially:
+
+Heavy means many toothmarks, not more truth.
+That is probably the goblin guardrail.
+One canonical block I would emit now
+A fact is an attributed record of concern: an observer cared to emit it. Fact-space admits facts; it does not certify them as true.
+
+Vertices govern consequence. Each vertex has a horizon, which bounds what it can see, and a potential, which bounds what it can emit or do. Loops meet at vertices; ticks pass between loops by being admitted as facts at those crossings.
+
+A tick is a fact of resolution. It does not contain the facts it resolved over; it references them by identity. Those referenced facts may themselves be ticks. Levels are therefore not structural tiers; they are recoverable traces of prior resolutions.
+
+Weight is reference density, not authority. A heavily referenced fact is not more true; it has simply been taken up more often by observers, citations, and derivations.
+That feels much closer to your actual model.
+My updated “where it breaks” answer
+It breaks when a user or implementation forgets the split:
+facts record concern; vertices govern consequence.
+Everything else follows from that.
+If someone treats facts as truth, it breaks.
+
+If someone treats weight as authority, it breaks.
+
+If someone lets Horizon/Potential become facts without an explicit topology/authority decision, it breaks.
+
+If references are too weak to recover resolution trails, it breaks.
+
+If observer identity is too vague to make “cared to record it” meaningful, it breaks.
+
+But with your clarified constraints, the model is not especially unsafe. It is permissive at the record layer and strict at the operational crossing layer. That is a pretty good architecture.
+
+So, maybe Fact itself is the wrong word here.
+
+Yes — Fact may be the wrong word precisely because it sounds like it smuggles in truth.
+You have been using it in the older event-sourcing-ish sense: “a thing that happened / was recorded.” But your model is now sharper than that:
+
+an observer cared to emit an attributed record into fact-space.
+That is not a “fact” in ordinary speech. It is closer to a notice, claim, mark, record, or trace.
+The problem with “Fact”
+“Fact” has good properties:
+short
+familiar in event-sourcing circles
+implies immutability
+works well with “fact-space”
+But it has one fatal everyday implication:
+fact = true statement
+Your model explicitly does not mean that. So every doc will have to keep saying “facts are not truth,” which is a smell.
+The more you lean into observers, horizon, potential, and “what someone cared to record,” the more Fact feels too epistemically strong.
+
+Best replacements
+1. Notice
+This may be the strongest semantic fit.
+A notice is something an observer noticed enough to emit.
+It preserves observer-position naturally. It does not imply truth. It implies attribution, attention, and admission.
+Then:
+
+An observation is a notice whose weight begins at one.
+But “notice” and “observation” overlap heavily.
+Possible canonical:
+
+Notice = base unit
+Observation = ingress notice
+Tick = derived notice
+That is clean.
+A tick becomes a derived notice, not a derived fact.
+
+Keeper line:
+
+A notice is not truth; it is attributed concern.
+Very good.
+Downside: “notice” can sound like a notification or announcement.
+
+2. Mark
+Very strong, especially with references.
+An observer leaves a mark.
+A mark does not claim truth. It is a trace left by someone/something. It works with goblin toothmarks too.
+Mark-space
+Observation = ingress mark
+Tick = resolution mark
+Reference = mark-to-mark relation
+“Mark” is wonderfully primitive.
+Keeper line:
+
+A mark means something left a trace, not that the trace is true.
+Downside: “mark-space” is less natural than fact-space. Also “mark” can mean target/victim or grade.
+3. Trace
+This is excellent conceptually.
+A trace is evidence that something passed through.
+It fits your semantic trace instincts. It is attribution-friendly, not truth-claiming, and good for provenance.
+Trace-space
+Observation = ingress trace
+Tick = derived trace / resolution trace
+Reference = trace relation
+Keeper line:
+A trace records passage, not truth.
+Downside: “trace” is already overloaded in observability and distributed tracing. That may be good or bad.
+4. Claim
+This is epistemically honest.
+A claim is something asserted by an observer.
+It makes the non-truth property obvious. Trust and provenance become natural.
+Claim-space
+Observation = ingress claim
+Tick = derived claim
+Downside: too argumentative/legalistic. Also sensors do not feel like they “claim,” unless you generalize claim as assertion.
+5. Assertion
+Technically precise.
+An assertion is emitted by an observer and admitted into the system.
+Downside: long, dry, formal. “Assertion-space” is ugly.
+6. Record
+Boring and good.
+A record is an attributed thing admitted to the store.
+Downside: too database-y, too generic, loses the philosophical spine.
+7. Sign
+Interesting, especially semiotic.
+A sign is something that stands for something to an observer.
+This is very close to “semantic arrangement system.”
+Sign-space
+Observation = ingress sign
+Tick = derived sign
+Downside: “sign” is broad and can sound mystical/semiotics-heavy.
+8. Token
+Mechanically good, but overloaded with LLMs/auth/parser tokens.
+Probably no.
+
+9. Datum
+Technically correct-ish: a given.
+Downside: dead and boring.
+
+10. Event
+Probably wrong.
+Your unit is not necessarily an event; it can be a claim about a fact, a reference, a derivation, a memory, a relationship, a configuration, etc.
+
+My favorite: Notice
+I think Notice may be the best replacement if you want the observer-centric model.
+Because it says:
+
+something was noticed, by someone/something, under some horizon, and emitted.
+Then the core becomes:
+Notice-space admits notices.
+
+An observation is an ingress notice whose weight begins at one.
+
+A tick is a notice produced by resolution, referencing the notices it resolved over.
+
+Weight is notice-density: how often notices are noticed by later notices.
+That last line is surprisingly strong:
+Weight is how often a notice has been noticed.
+This preserves your “amount of times observers have emitted facts about facts” idea beautifully.
+A tick is no longer “a weighted fact.” It is:
+
+a derived notice with references.
+Or:
+a resolution notice.
+But maybe keep “Fact” internally and rename it in docs?
+There is also a pragmatic option:
+Code primitive: Fact
+Conceptual docs: “facts are notices, not truths”
+But I think that might be backwards. The code name will teach the model. If Fact is misleading, the code will keep leaking that implication.
+What happens to “fact-space”?
+If Fact goes away, “fact-space” also goes away. Replacements:
+Notice-space
+Slightly odd, but okay.
+Notices occupy notice-space.
+Mark-space
+Pretty good.
+Marks occupy mark-space.
+Trace-space
+Very good but overloaded.
+Traces occupy trace-space.
+Record-space
+Boring but clear.
+Field
+You could avoid the noun-space compound:
+The field admits notices.
+Then:
+Observations and ticks are both notices in the field.
+This may solve your earlier “fact-space / substrate” discomfort.
+Canonical:
+
+The field admits notices. Observations enter with weight one; ticks enter as resolution notices with references.
+That is elegant.
+But “field” alone may be too metaphorical.
+
+Best full vocabulary swap
+If replacing Fact, I’d test these three complete sets.
+Set A: Notice model
+Notice = base unit
+Observation = ingress notice
+Tick = resolution notice
+Reference = notice relation
+Notice-space / Field = shared admission space
+Canonical paragraph:
+A notice is an attributed record of concern. An observation is a notice entering from outside the loop with weight one. A tick is a notice produced by resolution, carrying references to the notices it resolved over. Weight is how often a notice has been noticed again.
+This is very coherent.
+Set B: Mark model
+Mark = base unit
+Observation = ingress mark
+Tick = resolution mark
+Reference = mark relation / trailmark
+Mark-space / Field = shared admission space
+Canonical paragraph:
+A mark is an attributed trace left in the system. An observation is an ingress mark. A tick is a resolution mark that points back to the marks it resolved over. Weight is the density of marks pointing through other marks.
+This is more primal/goblin/craft.
+Set C: Trace model
+Trace = base unit
+Observation = ingress trace
+Tick = resolution trace
+Reference = trace relation
+Trace-space = shared admission space
+Canonical paragraph:
+A trace is an attributed sign of passage through the system. An observation is an ingress trace. A tick is a resolution trace referencing the traces that participated in its derivation. Depth is recovered by following trace references.
+This is beautiful and probably closest to “semantic trace,” but maybe collides with existing tracing too much.
+I’d avoid “Claim” as the core
+Although “claim” solves the truth problem, it distorts sensor/agent/system observations.
+A disk monitor does not feel like it makes a claim. A parser does not feel like it makes a claim. A human statement does.
+
+“Notice” generalizes better across human, agent, daemon, sensor.
+
+The new keeper lines
+If you switch from Fact to Notice:
+A notice is not truth; it is attributed concern.
+An observation is an ingress notice whose weight begins at one.
+A tick is a resolution notice: it points to the notices that resolved into it.
+Weight is how often a notice has been noticed again.
+Levels are not structural tiers; they are recoverable traces of prior resolutions.
+And for the strange loop:
+Strange loops are not feedback; they are type-preserving re-entry. Resolution notices re-enter the same field as the observations they reference.
+That is very strong.
+The goblin version
+Notice maps beautifully:
+A scrap is a goblin notice.
+A light scrap is noticed from the world.
+A heavy scrap is noticed from other scraps.
+Heavy does not mean true. Heavy means noticed again.
+Only the toothmarks tell what noticed what.
+That is almost better than before.
+My recommendation
+Replace Fact with Notice in the conceptual model, or at least seriously test it.
+Then use:
+
+Notice
+Observation
+Tick
+Reference
+Vertex
+Horizon
+Potential
+Loop
+Lens
+The sentence test:
+An observer emits a notice.
+An observation is a notice entering a vertex from outside the loop.
+A loop resolves notices into ticks.
+A tick is a notice that references the notices it resolved over.
+Ticks may be noticed by later loops as notices of the same kind.
+Vertices bound notices by horizon and potential.
+Weight is how often a notice has been noticed.
+This works.
+And it avoids the recurring “facts are not truth” footgun.
+
+My one hesitation: Notice is a little soft. If you want something more austere and technical, choose Trace.
+
+But for your system — observer care, semantic arrangement, reality eventing, goblin salvage, facts-about-facts — I think Notice has the right center of gravity.
+

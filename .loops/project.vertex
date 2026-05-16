@@ -10,8 +10,9 @@ loops {
   session    { fold { items "by" "name" } }
   log        { fold { items "collect" 20 } }
   cite       { fold { items "collect" 0 } }
-  hypothesis { fold { items "by" "name" } }
-  friction   { fold { items "by" "name" } }
+  hypothesis  { fold { items "by" "name" } }
+  friction    { fold { items "by" "name" } }
+  observation { fold { items "by" "topic" } }
 
   boundary when="session" status="closed"
 }

@@ -102,6 +102,7 @@ def fetch_fold(
     # When kind was set, state has one section; when kind was None, state has
     # all sections and we filter each by its own declared key_field.
     filtered: list[FoldSection] = []
+    surviving_source_keys: set[str] = set()
     for section in state.sections:
         matches = tuple(
             item for item in section.items
@@ -115,8 +116,25 @@ def fetch_fold(
                 fold_type=section.fold_type,
                 key_field=section.key_field,
             ))
+            if section.key_field:
+                for item in matches:
+                    key_value = str(item.payload.get(section.key_field, ""))
+                    surviving_source_keys.add(f"{section.kind}/{key_value}")
 
-    return FoldState(sections=tuple(filtered), vertex=state.vertex)
+    # Preserve source_facts for surviving items only (drop entries whose
+    # fold item was filtered out). Without this, retain_facts=True + key
+    # filtering would silently drop the lifecycle data that callers like
+    # fetch_trace depend on.
+    filtered_source_facts = {
+        k: v for k, v in state.source_facts.items()
+        if k in surviving_source_keys
+    }
+
+    return FoldState(
+        sections=tuple(filtered),
+        vertex=state.vertex,
+        source_facts=filtered_source_facts,
+    )
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:
@@ -237,6 +255,195 @@ def fetch_fact_by_id(
     from engine import vertex_fact_by_id
 
     return vertex_fact_by_id(vertex_path, fact_id)
+
+
+def _source_payload_to_fact_dict(payload: dict, kind: str) -> dict:
+    """Adapt source_facts payload shape to fact-dict shape.
+
+    ``source_facts`` entries are flat payloads with metadata under-prefixed
+    (``_ts``, ``_observer``, ``_origin``, ``_id``) — see ``vertex_reader.py``
+    around line 911. The ``stream_view`` lens (and most lens consumers)
+    expect the nested fact-dict shape ``{kind, ts, observer, origin, id,
+    payload}``. This adapter is the consumer-side boundary: it keeps the
+    lens API decoupled from the engine-internal ``source_facts`` shape.
+
+    Anchored by decision:implementation/trace-source-facts-shape-adapter.
+    """
+    nested_payload = {k: v for k, v in payload.items() if not k.startswith("_")}
+    ts = payload.get("_ts")
+    if isinstance(ts, datetime):
+        ts = ts.isoformat()
+    return {
+        "kind": kind,
+        "ts": ts,
+        "observer": payload.get("_observer", ""),
+        "origin": payload.get("_origin", ""),
+        "id": payload.get("_id"),
+        "payload": nested_payload,
+    }
+
+
+def fetch_trace(
+    vertex_path: Path,
+    kind: str,
+    key: str,
+    *,
+    observer: str | None = None,
+    refs_depth: int = 0,
+) -> dict:
+    """Fetch the source-fact lifecycle for one or more ``kind/key`` entities.
+
+    Returns the same shape as ``fetch_stream``: ``{"facts": [...],
+    "fold_meta": {...}, "vertex": str}``, plus a ``_trace`` metadata entry
+    naming the queried kind/key. Facts are returned in **ASC** order
+    (oldest first, changelog-style) — the inverse of ``fetch_stream``,
+    because trace renders a single entity's lifecycle as a forward
+    narrative rather than a recency-ranked log.
+
+    Uses ``vertex_fold(retain_facts=True)`` under the hood via ``fetch_fold``
+    — the same key-prefix semantics apply (``key="design/"`` matches every
+    item under that namespace, exact key matches just one). When the key
+    matches multiple items, all their source facts are interleaved by
+    timestamp, producing a merged lifecycle view across the namespace.
+
+    When ``refs_depth > 0``, walks the outbound ref graph: for each fact's
+    ``ref`` field, follows ``kind/key`` addresses to fetch those entities'
+    lifecycles too, recursing up to ``refs_depth`` hops. Each fact carries
+    an ``_entity`` field marking which ``kind/key`` it belongs to, so the
+    lens can group or label. Cycles are protected by a visited set keyed
+    on ``kind/key`` addresses.
+    """
+    from lang import parse_vertex_file
+    from lang.ast import FoldBy
+
+    # Loud-check: combine/discover vertices don't populate source_facts in
+    # the engine path (vertex_reader.py:867-891 doesn't walk retain_facts
+    # through _combined_read). Fail clearly rather than silently returning
+    # empty results. See friction:trace-combine-vertex-silent-empty.
+    ast_check = parse_vertex_file(vertex_path)
+    if ast_check.combine is not None or ast_check.discover is not None:
+        raise RuntimeError(
+            f"vertex '{ast_check.name}' is an aggregator (combine/discover) — "
+            f"trace operates on a single store. Try a child vertex directly: "
+            f"sl trace <vertex> {kind}/{key}"
+        )
+
+    # Fold metadata for the lens (key_field per kind) — used during ref walk
+    # too, to derive the per-entity address for each source fact.
+    ast = parse_vertex_file(vertex_path)
+    fold_meta: dict[str, dict] = {}
+    for k, loop_def in ast.loops.items():
+        kf = None
+        if loop_def.folds:
+            fold_decl = loop_def.folds[0]
+            if isinstance(fold_decl.op, FoldBy):
+                kf = fold_decl.op.key_field
+        fold_meta[k] = {"key_field": kf}
+
+    facts: list[dict] = []
+    visited: set[str] = set()
+    # Frontier holds (kind, key) pairs to walk in the next hop. Initial
+    # frontier is the primary entity, regardless of whether key is a
+    # full match or a prefix — we expand it via fetch_fold's filter.
+    frontier: list[tuple[str, str]] = [(kind, key)]
+
+    # Walk up to refs_depth + 1 layers (primary + N hops of refs).
+    layers = refs_depth + 1
+    for hop in range(layers):
+        next_frontier: list[tuple[str, str]] = []
+        for ent_kind, ent_key in frontier:
+            for fact, fact_refs in _fetch_entity_facts(
+                vertex_path, ent_kind, ent_key, observer=observer,
+                visited=visited,
+            ):
+                facts.append(fact)
+                # On non-final hops, refs become next frontier (deduped via visited)
+                if hop < layers - 1:
+                    for ref_kind, ref_key in fact_refs:
+                        addr = f"{ref_kind}/{ref_key}"
+                        if addr in visited:
+                            continue
+                        next_frontier.append((ref_kind, ref_key))
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    # ASC ordering — oldest first (changelog-style). Tie-break by id to keep
+    # deterministic order across calls.
+    facts.sort(key=lambda f: (f["ts"] or "", f.get("id") or ""))
+
+    return {
+        "facts": facts,
+        "fold_meta": fold_meta,
+        "vertex": ast.name,
+        "_trace": {"kind": kind, "key": key, "refs_depth": refs_depth},
+    }
+
+
+def _fetch_entity_facts(
+    vertex_path: Path,
+    kind: str,
+    key: str,
+    *,
+    observer: str | None,
+    visited: set[str],
+) -> "list[tuple[dict, list[tuple[str, str]]]]":
+    """Fetch source facts for one entity address; collect outbound refs.
+
+    Returns a list of (fact_dict, ref_addresses) tuples. Each fact dict
+    carries an ``_entity`` field with the matched ``kind/key``. Marks each
+    matched entity address as visited (prevents cycles and re-fetches).
+    """
+    state = fetch_fold(
+        vertex_path, kind=kind, key=key,
+        observer=observer, retain_facts=True,
+    )
+
+    results: list[tuple[dict, list[tuple[str, str]]]] = []
+    for section in state.sections:
+        kf = section.key_field
+        if not kf:
+            continue
+        for item in section.items:
+            key_value = str(item.payload.get(kf, ""))
+            addr = f"{section.kind}/{key_value}"
+            if addr in visited:
+                continue
+            visited.add(addr)
+            source_key = addr
+            for p in state.source_facts.get(source_key, []):
+                fact = _source_payload_to_fact_dict(p, section.kind)
+                fact["_entity"] = addr
+                refs = _parse_fact_refs(fact["payload"].get("ref"))
+                results.append((fact, refs))
+    return results
+
+
+def _parse_fact_refs(value: object) -> "list[tuple[str, str]]":
+    """Parse a fact's ``ref`` field into a list of (kind, key) tuples.
+
+    Refs are written as ``kind:key`` (e.g. ``decision:design/foo``) — colon
+    separates kind from key, key itself may contain slashes (namespace
+    prefixes like ``design/``). This is the runbook convention and the
+    same shape that ``_resolve_entity_refs`` resolves at emit time.
+
+    Accepts the comma-separated string form (``kind:key,kind:key``) and
+    the list form (already split). Items lacking a ``:`` separator are
+    skipped — they aren't well-formed entity addresses.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(v).strip() for v in value]
+    else:
+        parts = [r.strip() for r in str(value).split(",")]
+    out: list[tuple[str, str]] = []
+    for p in parts:
+        if not p or ":" not in p:
+            continue
+        k, v = p.split(":", 1)
+        out.append((k, v))
+    return out
 
 
 def fetch_ticks(

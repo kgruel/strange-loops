@@ -676,6 +676,7 @@ class VertexFile:
     lens: LensDecl | None = None
     boundary: Boundary | None = None  # vertex-level boundary (fires all loops)
     observer_scoped: bool = False  # fold defaults to current observer when True
+    strict: bool = False  # when True, emit refuses on validation failures (no override)
 
     # Source location for error reporting
     path: Path | None = None

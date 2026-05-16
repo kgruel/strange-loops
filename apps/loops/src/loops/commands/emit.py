@@ -4,10 +4,137 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from loops.errors import LoopsError
+
+
+def _new_fact_id() -> str:
+    """Pre-generate a fact ID before storing. Mirrors sqlite_store._gen_id.
+
+    Generating the ID here lets cmd_emit thread it through receive(id_override=)
+    and report the same ID in the receipt. Stores that don't track IDs ignore it.
+    """
+    return str(uuid.uuid4())
+
+
+def _build_receipt_lines(
+    kind: str,
+    fact_id: str,
+    status: "object",  # EmitStatus, kept loose to avoid circular import
+    unresolved: list,
+    refs_resolved_count: int,
+    refuse: bool,
+    refuse_reasons: list[str],
+    vertex_strict_source: bool,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Build receipt content as (warns, success_or_error) tuples of (line, role).
+
+    ``role`` is one of: "error", "warn", "muted" — caller maps to palette.
+    Returns (warn_lines, primary_lines):
+      * warn_lines — WARN: ... lines (shown unless --quiet AND not strict)
+      * primary_lines — either the ERROR + hint (refuse) or the stored: receipt
+    """
+    warn_lines: list[tuple[str, str]] = []
+    primary_lines: list[tuple[str, str]] = []
+
+    kind_declared = getattr(status, "kind_declared", False)
+    fold_key_field = getattr(status, "fold_key_field", None)
+    fold_key_present = getattr(status, "fold_key_present", True)
+    fold_key_value = getattr(status, "fold_key_value", None)
+
+    # WARN composition (also fuels ERROR composition when refuse=True)
+    if not kind_declared:
+        warn_lines.append((
+            f"WARN: kind '{kind}' not declared on this vertex — "
+            "fact stored, will not fold",
+            "warn",
+        ))
+    elif fold_key_field is not None and not fold_key_present:
+        warn_lines.append((
+            f"WARN: kind '{kind}' folds by '{fold_key_field}' but payload has no "
+            f"'{fold_key_field}=' field — fact stored, will not fold",
+            "warn",
+        ))
+
+    for u in unresolved:
+        warn_lines.append((
+            f"WARN: ref '{getattr(u, 'addr', u)}' did not resolve — dropped",
+            "warn",
+        ))
+
+    if refuse:
+        # Strict refusal — ERROR + hint, no stored line
+        for reason in refuse_reasons:
+            primary_lines.append((f"ERROR: {reason}", "error"))
+        if vertex_strict_source:
+            primary_lines.append((
+                "hint: vertex declares strict — fix the emit or update the vertex spec",
+                "muted",
+            ))
+        else:
+            primary_lines.append((
+                "hint: declare the kind in the vertex file, or omit --strict / LOOPS_EMIT_STRICT",
+                "muted",
+            ))
+        return warn_lines, primary_lines
+
+    # Success path — build the stored: line
+    if kind_declared and fold_key_present and fold_key_value:
+        key_display = fold_key_value
+    else:
+        key_display = "<no-fold>"
+
+    suffix = ""
+    if refs_resolved_count > 0:
+        suffix = f"  (refs: {refs_resolved_count} resolved)"
+    primary_lines.append((
+        f"stored: {kind}/{key_display} @ {fact_id}{suffix}",
+        "muted",
+    ))
+
+    return warn_lines, primary_lines
+
+
+def _emit_lines(lines: list[tuple[str, str]]) -> None:
+    """Render receipt lines to stderr via painted, mapping role→palette."""
+    if not lines:
+        return
+    from painted import show, Block
+    from painted.palette import current_palette
+    p = current_palette()
+    role_map = {"error": p.error, "warn": p.error, "muted": p.muted}
+    for text, role in lines:
+        show(Block.text(text, role_map.get(role, p.muted)), file=sys.stderr)
+
+
+def _resolve_strict(args: argparse.Namespace, vertex_path: Path | None) -> tuple[bool, bool]:
+    """Resolve effective strict mode.
+
+    Returns ``(effective_strict, vertex_declared)``:
+      * effective_strict — True if any source declares strict
+      * vertex_declared — True iff the vertex spec itself declared strict
+        (used to shape the receipt's hint message)
+
+    Precedence (any True → strict):
+      1. vertex.spec.strict      (no override possible from CLI/env)
+      2. LOOPS_EMIT_STRICT=1     (session opt-in)
+      3. --strict flag           (per-call opt-in)
+    """
+    vertex_declared = False
+    if vertex_path is not None:
+        try:
+            from lang import parse_vertex_file
+            ast = parse_vertex_file(vertex_path)
+            vertex_declared = bool(getattr(ast, "strict", False))
+        except Exception:
+            vertex_declared = False
+
+    env_strict = os.environ.get("LOOPS_EMIT_STRICT", "") == "1"
+    flag_strict = bool(getattr(args, "strict", False))
+    return (vertex_declared or env_strict or flag_strict, vertex_declared)
 
 
 def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
@@ -56,7 +183,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
     from loops.commands.resolve import (
         loops_home, _find_local_vertex, _resolve_vertex_for_dispatch,
         _resolve_writable_vertex, _resolve_vertex_store_path,
-        _resolve_entity_refs, _warn_missing_fold_key,
+        _resolve_entity_refs, classify_emit_status,
     )
     from loops.pop_store import POP_ADD_KIND, POP_RM_KIND
     from painted import show, Block
@@ -136,9 +263,6 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             show(Block.text(f"Error: {err}", p.error), file=sys.stderr)
             return 1
 
-        # Warn if payload is missing the fold key field (data quality)
-        _warn_missing_fold_key(vertex_path, kind, payload)
-
     # Resolve store path early — needed for entity reference resolution
     try:
         writable_path = _resolve_writable_vertex(vertex_path)
@@ -164,8 +288,53 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
     # Resolve entity references in payload values (kind/fold_key_value → ULID)
     # store_path may not exist yet (first emit to this vertex) — cross-vertex
     # resolution can still succeed via topology widening.
+    unresolved_refs: list = []
+    refs_resolved_count = 0
     if vertex_path is not None and store_path is not None:
-        payload = _resolve_entity_refs(vertex_path, store_path, payload)
+        payload_before_refs = payload
+        payload, unresolved_refs = _resolve_entity_refs(vertex_path, store_path, payload)
+        refs_resolved_count = sum(
+            1 for k in payload if k.endswith("_ref") and k not in payload_before_refs
+        )
+
+    # Classify emit status for receipt (pure — no side effects)
+    if vertex_path is not None:
+        emit_status = classify_emit_status(vertex_path, kind, payload)
+    else:
+        emit_status = None  # no vertex → no classification possible
+
+    # Resolve effective strict mode (vertex.spec.strict > env > flag)
+    strict_mode, vertex_declared_strict = _resolve_strict(args, vertex_path)
+    quiet = bool(getattr(args, "quiet", False))
+
+    # If strict and any validation failure: refuse, do not store.
+    if strict_mode and emit_status is not None:
+        refuse_reasons: list[str] = []
+        if not emit_status.kind_declared:
+            refuse_reasons.append(
+                f"kind '{kind}' not declared on this vertex"
+            )
+        elif emit_status.fold_key_field is not None and not emit_status.fold_key_present:
+            refuse_reasons.append(
+                f"kind '{kind}' folds by '{emit_status.fold_key_field}' "
+                f"but payload has no '{emit_status.fold_key_field}=' field"
+            )
+        for u in unresolved_refs:
+            refuse_reasons.append(f"ref '{u.addr}' did not resolve")
+
+        if refuse_reasons:
+            warn_lines, primary_lines = _build_receipt_lines(
+                kind=kind,
+                fact_id="",
+                status=emit_status,
+                unresolved=unresolved_refs,
+                refs_resolved_count=0,
+                refuse=True,
+                refuse_reasons=refuse_reasons,
+                vertex_strict_source=vertex_declared_strict,
+            )
+            _emit_lines(primary_lines)
+            return 2
 
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(
@@ -185,6 +354,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
             file=sys.stdout,
         )
         return 0
+
+    # Pre-generate the fact ID so the receipt reports the same ULID the store assigns.
+    fact_id = _new_fact_id()
 
     try:
         from engine import load_vertex_program
@@ -336,7 +508,9 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
 
             # Route fact through the vertex runtime — fold, boundary check, store.
             # program.receive dispatches the run clause if the resulting tick has one.
-            tick = program.receive(fact)
+            # id_override threads the pre-generated fact_id so the receipt
+            # reports the same ULID the store assigns.
+            tick = program.receive(fact, id_override=fact_id)
             if tick is not None:
                 # Boundary fired — a tick was produced
                 show(
@@ -345,6 +519,24 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
                         p.muted,
                     ),
                 )
+
+            # Emit receipt: WARN lines (kind/fold-key/refs degradation) plus
+            # success line. Stderr for both. -q suppresses the success line
+            # but keeps WARN lines visible (load-bearing for in-moment feedback).
+            if emit_status is not None:
+                warn_lines, primary_lines = _build_receipt_lines(
+                    kind=kind,
+                    fact_id=fact_id,
+                    status=emit_status,
+                    unresolved=unresolved_refs,
+                    refs_resolved_count=refs_resolved_count,
+                    refuse=False,
+                    refuse_reasons=[],
+                    vertex_strict_source=vertex_declared_strict,
+                )
+                _emit_lines(warn_lines)
+                if not quiet:
+                    _emit_lines(primary_lines)
         finally:
             # Clean up the store connection
             if program.has_store:
@@ -385,6 +577,20 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print the fact JSON without storing"
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Refuse on validation failures (unknown kind, missing fold-key, "
+            "unresolved ref). Overridden by vertex 'strict true' declaration "
+            "(which always refuses)."
+        ),
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress the 'stored:' success receipt line (WARN/ERROR still print).",
     )
     args = parser.parse_args(argv)
     if vertex_path is not None:

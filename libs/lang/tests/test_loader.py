@@ -1922,6 +1922,45 @@ class TestLensBlock:
             parse_vertex(text)
 
 
+class TestStrictKeyword:
+    """Tests for the vertex-level 'strict' declaration.
+
+    When `strict true` is declared, all emits to that vertex refuse on
+    validation failures (kind-not-declared, fold-key-missing, unresolved
+    refs). No CLI/env override possible — the vertex IS the contract.
+    """
+
+    def test_strict_true(self):
+        text = (
+            'name "t"\nstore "./t.db"\nstrict true\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.strict is True
+
+    def test_strict_false(self):
+        text = (
+            'name "t"\nstore "./t.db"\nstrict false\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.strict is False
+
+    def test_strict_omitted_defaults_false(self):
+        # Existing vertices without strict keyword must continue to parse
+        text = 'name "t"\nstore "./t.db"\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.strict is False
+
+    def test_strict_bad_value_errors(self):
+        text = (
+            'name "t"\nstore "./t.db"\nstrict "maybe"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="strict requires a boolean"):
+            parse_vertex(text)
+
+
 class TestParseAtVertex:
     """Tests for per-kind parse declarations in .vertex loop definitions."""
 

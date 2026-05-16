@@ -50,16 +50,20 @@ class FileStore(Generic[T]):
                 if line:
                     self._events.append(self._deserialize(json.loads(line)))
 
-    def append(self, event: T) -> None:
-        """Append one event to the file and in-memory buffer."""
+    def append(self, event: T, *, id_override: str | None = None) -> None:
+        """Append one event to the file and in-memory buffer.
+
+        ``id_override`` is accepted for protocol compatibility with SqliteStore
+        but ignored — FileStore doesn't track per-event IDs.
+        """
         self._events.append(event)
         if self._file is not None:
             self._file.write(json.dumps(self._serialize(event)) + "\n")
             self._file.flush()
 
-    async def consume(self, event: T) -> None:
+    async def consume(self, event: T, *, id_override: str | None = None) -> None:
         """Consumer protocol: append event."""
-        self.append(event)
+        self.append(event, id_override=id_override)
 
     def since(self, cursor: int) -> list[T]:
         """Return events from logical index `cursor` onward."""

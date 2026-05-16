@@ -133,19 +133,26 @@ class SqliteStore(Generic[T]):
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._sync_set = True
 
-    def append(self, event: T) -> None:
-        """Append one event to the store."""
+    def append(self, event: T, *, id_override: str | None = None) -> str:
+        """Append one event to the store. Returns the ID assigned.
+
+        If id_override is provided, that ID is used; otherwise a new ID
+        is generated via _gen_id(). The ID is returned in either case so
+        callers (e.g. emit's receipt path) can reference the stored row.
+        """
         self._ensure_sync()
         d = self._serialize(event)
+        fact_id = id_override if id_override is not None else _gen_id()
         self._conn.execute(
             "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+            (fact_id, d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
         )
         self._conn.commit()
+        return fact_id
 
-    async def consume(self, event: T) -> None:
+    async def consume(self, event: T, *, id_override: str | None = None) -> None:
         """Consumer protocol: append event to store."""
-        self.append(event)
+        self.append(event, id_override=id_override)
 
     def since(self, cursor: int) -> list[T]:
         """Return events with rowid > cursor.

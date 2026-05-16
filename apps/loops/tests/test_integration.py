@@ -2417,9 +2417,11 @@ class TestResolveEntityRefs:
         vpath = tmp_path / "nonexistent.vertex"
         store_path = tmp_path / "store.db"
 
-        result = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
+        result, unresolved = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
         # LoopsError caught → writable=None, local_kind_keys={}, no refs resolved
         assert result == {"x": "foo/bar"}
+        # addr_kind 'foo' is not declared anywhere → not surfaced as unresolved
+        assert unresolved == []
 
     def test_topology_cache_hit_on_second_call(self, tmp_path, monkeypatch):
         """_ensure_topology cache hit (L297): second ref triggers cache-hit path."""
@@ -2434,12 +2436,14 @@ class TestResolveEntityRefs:
         store_path = tmp_path / "minimal.db"
 
         # Two unknown kinds → _ensure_topology called twice → L297 fires on 2nd call
-        result = _resolve_entity_refs(
+        result, unresolved = _resolve_entity_refs(
             vpath, store_path, {"a": "unknownkind1/val1", "b": "unknownkind2/val2"}
         )
         # Both kinds unknown, no refs resolved, payload unchanged
         assert result.get("a") == "unknownkind1/val1"
         assert result.get("b") == "unknownkind2/val2"
+        # Unknown addr_kinds aren't surfaced as unresolved (not intended refs)
+        assert unresolved == []
 
     def test_local_store_in_topo_stores_skipped(self, tmp_path, monkeypatch):
         """Topology dedup skips child's own store when widening (L342).
@@ -2486,10 +2490,15 @@ class TestResolveEntityRefs:
         # Use a value that is NOT in the child store → local _try_resolve returns None
         # → falls through to topology widening → topo_stores includes child_store
         # → L342 fires to skip child_store (already searched locally)
-        result = _resolve_entity_refs(child_vpath, child_store, {"project": "task/doesnotexist"})
+        result, unresolved = _resolve_entity_refs(
+            child_vpath, child_store, {"project": "task/doesnotexist"}
+        )
         # Ref not resolved (not in any store), but L342 was exercised
         assert "project" in result
         assert "project_ref" not in result
+        # addr_kind 'task' IS declared locally; addr 'task/doesnotexist'
+        # didn't resolve → surfaced as an unresolved ref
+        assert any(u.addr == "task/doesnotexist" for u in unresolved)
 
 
 class TestResolveEdgeCases:

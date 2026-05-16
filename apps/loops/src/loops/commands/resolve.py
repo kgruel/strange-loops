@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,27 @@ from loops.errors import (
 
 if TYPE_CHECKING:
     from io import TextIO
+
+
+@dataclass(frozen=True)
+class EmitStatus:
+    """Pure structural classification of an emit attempt — no side effects.
+
+    Used by the emit receipt path to decide whether to print success / WARN /
+    refuse. Mirrors the diagnostic surface of ``_warn_missing_fold_key`` but
+    without printing, so the caller controls output.
+    """
+    kind_declared: bool          # is the kind registered in the vertex's loops?
+    fold_key_field: str | None   # expected fold-key field name (e.g. "topic"), None if collect-style
+    fold_key_present: bool       # did the payload supply the fold-key field?
+    fold_key_value: str | None   # the value, when present
+
+
+@dataclass(frozen=True)
+class UnresolvedRef:
+    """A payload value that looked like an entity ref but did not resolve."""
+    field: str   # payload key (e.g. "ref" or any field carrying an address)
+    addr: str    # the raw address string the user wrote (e.g. "decision/design/foo")
 
 
 def loops_home() -> Path:
@@ -82,6 +104,72 @@ def _err(msg: str, file: TextIO | None = None) -> None:
 
 
 # --- Warning / best-effort functions (catch LoopsError, never raise) ---
+
+
+def classify_emit_status(
+    vertex_path: Path,
+    kind: str,
+    payload: dict,
+) -> EmitStatus:
+    """Classify an emit attempt without side effects.
+
+    Returns an ``EmitStatus`` describing whether the kind is declared,
+    whether the kind folds by a key field, and whether the payload supplies
+    that field. This is the pure-data substrate underneath the emit receipt
+    path — the caller decides whether to print WARN, ERROR, or success.
+
+    Vertex resolution failures (parse errors, combine misses) degrade to
+    "kind not declared" — the receipt's WARN line will mention the missing
+    declaration, matching observed behavior from today's live incident.
+    """
+    from lang.ast import FoldBy
+
+    # Follow combine chain to the vertex with actual loop declarations
+    try:
+        writable = _resolve_writable_vertex(vertex_path)
+    except LoopsError:
+        writable = None
+    if writable is not None:
+        vertex_path = writable
+
+    try:
+        ast = _parse_vertex(vertex_path)
+    except LoopsError:
+        return EmitStatus(
+            kind_declared=False,
+            fold_key_field=None,
+            fold_key_present=False,
+            fold_key_value=None,
+        )
+
+    loop_def = ast.loops.get(kind)
+    if loop_def is None:
+        return EmitStatus(
+            kind_declared=False,
+            fold_key_field=None,
+            fold_key_present=False,
+            fold_key_value=None,
+        )
+
+    # Kind is declared — does it fold by a key field?
+    for fold_decl in loop_def.folds:
+        if isinstance(fold_decl.op, FoldBy):
+            key = fold_decl.op.key_field
+            present = key in payload
+            return EmitStatus(
+                kind_declared=True,
+                fold_key_field=key,
+                fold_key_present=present,
+                fold_key_value=payload.get(key) if present else None,
+            )
+
+    # Kind is declared but folds by collect/count/etc. — no key required
+    return EmitStatus(
+        kind_declared=True,
+        fold_key_field=None,
+        fold_key_present=True,  # vacuously satisfied
+        fold_key_value=None,
+    )
 
 
 def _warn_missing_fold_key(
@@ -263,7 +351,7 @@ def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
     payload: dict[str, str],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], list[UnresolvedRef]]:
     """Resolve entity addresses in payload values to ULIDs.
 
     Scans payload values for entity addresses (kind/fold_key_value format).
@@ -274,7 +362,16 @@ def _resolve_entity_refs(
     The original field is preserved (navigable address). A sibling field
     {name}_ref is added with the pinned ULID (provenance anchor).
 
-    Returns the payload with any resolved references added.
+    Returns ``(augmented_payload, unresolved_refs)``:
+      * ``augmented_payload`` — payload plus any ``{field}_ref`` sibling fields
+        whose addresses resolved to a ULID
+      * ``unresolved_refs`` — refs where the value LOOKED like an address
+        (addr_kind is a declared kind in this vertex or its topology) but no
+        matching entity was found. Values whose addr_kind isn't declared
+        anywhere are not surfaced — those weren't intended as refs.
+
+    The receipt path uses ``unresolved_refs`` to emit WARN lines so users
+    notice typos / stale refs at write-time.
     """
     from engine import StoreReader
 
@@ -315,6 +412,7 @@ def _resolve_entity_refs(
 
     # Scan payload values for entity address pattern: kind/fold_key_value
     refs: dict[str, str] = {}
+    unresolved: list[UnresolvedRef] = []
     for field_name, value in payload.items():
         if not isinstance(value, str) or "/" not in value:
             continue
@@ -322,33 +420,38 @@ def _resolve_entity_refs(
         addr_kind, addr_value = value.split("/", 1)
 
         # Try local store first
+        resolved_id: str | None = None
         if addr_kind in local_kind_keys:
             key_field = local_kind_keys[addr_kind]
-            ulid = _try_resolve(store_path, addr_kind, key_field, addr_value)
-            if ulid is not None:
-                refs[f"{field_name}_ref"] = ulid
+            resolved_id = _try_resolve(store_path, addr_kind, key_field, addr_value)
+            if resolved_id is not None:
+                refs[f"{field_name}_ref"] = resolved_id
                 continue
 
         # Local miss or kind not declared locally — widen to topology
         topo_kind_keys, topo_stores = _ensure_topology()
         if addr_kind not in local_kind_keys and addr_kind not in topo_kind_keys:
-            continue  # Not a known kind anywhere in the topology
+            continue  # Not a known kind anywhere — not an intended ref
 
-        # L334 confirmed addr_kind exists in at least one map; value is always str
+        # addr_kind exists in at least one map; value is always str
         key_field = topo_kind_keys.get(addr_kind) or local_kind_keys.get(addr_kind)
 
         for sp in topo_stores:
             if sp.resolve() == store_path.resolve():
                 continue  # Already searched
-            ulid = _try_resolve(sp, addr_kind, key_field, addr_value)
-            if ulid is not None:
-                refs[f"{field_name}_ref"] = ulid
+            resolved_id = _try_resolve(sp, addr_kind, key_field, addr_value)
+            if resolved_id is not None:
+                refs[f"{field_name}_ref"] = resolved_id
                 break
+
+        # Surface unresolved refs (addr_kind is a declared kind but no ULID found)
+        if resolved_id is None:
+            unresolved.append(UnresolvedRef(field=field_name, addr=value))
 
     if refs:
         payload = {**payload, **refs}
 
-    return payload
+    return payload, unresolved
 
 
 # --- Vertex resolution (raise on failure) ---

@@ -341,6 +341,7 @@ class Vertex:
         grant: Grant | None = None,
         *,
         _from_child: str | None = None,
+        id_override: str | None = None,
     ) -> Tick | None:
         """Route a fact to the appropriate fold engine, gated by optional grant.
 
@@ -382,9 +383,12 @@ class Vertex:
             if owner_name and owner_name != observer:
                 return None
 
-        # Store the full fact (not just kind/payload) for replay
+        # Store the full fact (not just kind/payload) for replay.
+        # id_override (when provided by callers like cmd_emit) lets the
+        # caller pre-generate the fact ID so the same ID can be reported
+        # in the emit receipt — only honored by stores that track IDs.
         if self._store is not None:
-            self._store.append(fact)
+            self._store.append(fact, id_override=id_override)
 
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)

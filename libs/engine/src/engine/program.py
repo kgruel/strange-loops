@@ -78,14 +78,27 @@ class VertexProgram:
             return
         self.run_dispatcher(tick.run, tick.name, self.path)
 
-    def receive(self, fact: Fact, grant: Any = None) -> Tick | None:
+    def receive(
+        self,
+        fact: Fact,
+        grant: Any = None,
+        *,
+        id_override: str | None = None,
+    ) -> Tick | None:
         """Route a fact through the vertex; dispatch run-clause if the resulting tick has one.
 
         Single-fact entry that consolidates ``vertex.receive(fact)`` with
         run-clause dispatch. Use this in place of ``program.vertex.receive(fact)``
         from CLI/app code so any registered dispatcher fires automatically.
+
+        ``id_override`` (optional) is threaded through to the underlying store
+        so callers can pre-generate the fact ID for receipt printing. Only
+        honored by stores that track IDs (SqliteStore).
         """
-        tick = self.vertex.receive(fact, grant) if grant is not None else self.vertex.receive(fact)
+        if grant is not None:
+            tick = self.vertex.receive(fact, grant, id_override=id_override)
+        else:
+            tick = self.vertex.receive(fact, id_override=id_override)
         if tick is not None:
             self._dispatch_tick(tick)
         return tick

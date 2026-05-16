@@ -18,5 +18,6 @@ loops {
   decision    { fold { items "by" "topic" } }
   thread      { fold { items "by" "name" } }
   dissolution { fold { items "by" "concept" } }
+  observation { fold { items "by" "topic" } }
   session     { fold { items "by" "name" } }
 }

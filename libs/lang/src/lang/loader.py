@@ -674,6 +674,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     lens: LensDecl | None = None
     vertex_boundary: Boundary | None = None
     observer_scoped: bool = False
+    strict: bool = False
 
     for node in doc.nodes:
         key = node.name
@@ -681,6 +682,22 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             name = _require_arg(node, 0, "name string", path)
         elif key == "store":
             store = Path(_require_arg(node, 0, "path", path))
+        elif key == "strict":
+            # `strict true` / `strict false` — when true, all emits to this vertex
+            # refuse on validation failures. No CLI override.
+            # ckdl returns Python bool for unquoted true/false; _require_arg
+            # may stringify it. Accept either bool or the literal string.
+            if not node.args:
+                raise _error("strict: missing required boolean", path)
+            raw = node.args[0]
+            if raw is True or (isinstance(raw, str) and raw.lower() == "true"):
+                strict = True
+            elif raw is False or (isinstance(raw, str) and raw.lower() == "false"):
+                strict = False
+            else:
+                raise _error(
+                    f"strict requires a boolean (true/false), got {raw!r}", path
+                )
         elif key == "discover":
             discover = _require_arg(node, 0, "glob pattern", path)
         elif key == "emit":
@@ -763,6 +780,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         lens=lens,
         boundary=vertex_boundary,
         observer_scoped=observer_scoped,
+        strict=strict,
         path=path,
     )
 

@@ -64,6 +64,7 @@ project's `meta.vertex`. Works from anywhere in the monorepo.
 | `decision` | by topic | Cross-cutting resolved positions |
 | `thread` | by name | Open investigations |
 | `dissolution` | by concept | Things that collapsed into existing primitives |
+| `observation` | by topic | Note something true, no prescription |
 | `handoff` | collect 1 | Session continuity — the cold-start narrative |
 
 ### Topic Namespacing

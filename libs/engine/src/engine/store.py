@@ -25,8 +25,13 @@ class Store(Protocol[T_contra]):
     Optional: between() for time-range queries (fidelity traversal).
     """
 
-    def append(self, event: T_contra) -> None:
-        """Append one event to the log."""
+    def append(self, event: T_contra, *, id_override: str | None = None) -> Any:
+        """Append one event to the log.
+
+        ``id_override`` is honored by stores that track explicit IDs
+        (SqliteStore); other implementations may ignore it. When provided,
+        the returned ID (if any) equals ``id_override``.
+        """
         ...
 
     def since(self, cursor: int) -> list:
@@ -108,16 +113,21 @@ class EventStore(Generic[T]):
                 if line:
                     self._events.append(self._deserialize(json.loads(line)))
 
-    async def consume(self, event: T) -> None:
+    async def consume(self, event: T, *, id_override: str | None = None) -> None:
         """Consumer protocol: append event to store."""
-        self.append(event)
+        self.append(event, id_override=id_override)
 
     @property
     def version(self) -> int:
         """Bumped on each append. Use to detect new events."""
         return self._version
 
-    def append(self, event: T) -> None:
+    def append(self, event: T, *, id_override: str | None = None) -> None:
+        """Append one event.
+
+        ``id_override`` is accepted for protocol compatibility with SqliteStore
+        but ignored — EventStore doesn't track per-event IDs.
+        """
         self._events.append(event)
         if self._file is not None:
             self._file.write(json.dumps(self._serialize(event)) + "\n")

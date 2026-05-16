@@ -79,7 +79,24 @@ def _make_collect(target: str, max_size: int) -> Callable[[dict, dict], None]:
 
 
 def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
-    """Insert/update in dict keyed by key_field, tracking observation count and refs."""
+    """Insert/update in dict keyed by key_field, tracking observation count and refs.
+
+    Merge semantics: a new emit's fields overlay the existing entry; fields
+    the new payload does NOT supply are preserved from the prior state.
+
+    Verdict 2026-05-16 (see decision:design/fold-merge-default): prior
+    replace-style ``state[target][key_value] = entry`` was a silent-loss bug
+    — every "refined" or "resolved" re-emit silently dropped any field not
+    re-supplied. Today's runbook practice (re-emit to update status) WANTS
+    merge. Patch-emit (subset payload) is now plain emit on this fold; no
+    separate command needed.
+
+    Refs and ``_n`` are computed against ``existing`` before merge, so they
+    remain authoritative on the merged entry.
+
+    Trade-off: cannot unset a field by omitting it — when that operation
+    surfaces, callers pass an explicit clear sentinel (e.g. ``field=``).
+    """
     def fold(state: dict, payload: dict) -> None:
         key_value = payload.get(key_field)
         if key_value is not None:
@@ -98,7 +115,10 @@ def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
             entry["_n"] = n
             if prev_refs:
                 entry["_refs"] = sorted(prev_refs)
-            state[target][key_value] = entry
+            # Merge: prior fields persist unless explicitly overwritten by entry.
+            # (Replaces the prior replace-style assignment that silently dropped
+            # any field not re-supplied — see decision:design/fold-merge-default.)
+            state[target][key_value] = {**(existing or {}), **entry}
     return fold
 
 

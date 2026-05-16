@@ -180,6 +180,52 @@ class TestTypedFoldApply:
         assert state["users"]["a"]["name"] == "Alicia"
         assert state["users"]["b"]["name"] == "Bob"
 
+    def test_upsert_partial_payload_preserves_prior_fields(self):
+        """Merge semantics: fields not re-supplied in a later emit persist.
+
+        Verifies decision:design/fold-merge-default (2026-05-16). The runbook
+        practice of 're-emit with status update' relies on this: callers
+        supply only the changed fields, prior fields stay in the fold.
+        Prior to this fix, the fold was replace-style and silently dropped
+        any field omitted from the new payload.
+        """
+        s = Shape(
+            name="registry",
+            folds=(Upsert(target="tasks", key="name"),),
+        )
+        state = {"tasks": {}}
+        # Initial: full payload with multiple fields
+        state = s.apply(state, {
+            "name": "demo", "status": "open",
+            "priority": "high", "message": "initial body",
+        })
+        # Patch: only the changed field
+        state = s.apply(state, {"name": "demo", "status": "in_progress"})
+
+        entry = state["tasks"]["demo"]
+        # Changed field reflects new value
+        assert entry["status"] == "in_progress"
+        # Unchanged fields persist (this is what replace-style silently dropped)
+        assert entry["priority"] == "high"
+        assert entry["message"] == "initial body"
+        # Revision counter advanced
+        assert entry["_n"] == 2
+
+    def test_upsert_merge_overwrites_supplied_fields(self):
+        """Merge precedence: new fields win when both old and new supply the key."""
+        s = Shape(
+            name="registry",
+            folds=(Upsert(target="tasks", key="name"),),
+        )
+        state = {"tasks": {}}
+        state = s.apply(state, {"name": "demo", "status": "open", "priority": "low"})
+        # Supply both status and priority — both should reflect new values
+        state = s.apply(state, {"name": "demo", "status": "done", "priority": "high"})
+
+        entry = state["tasks"]["demo"]
+        assert entry["status"] == "done"
+        assert entry["priority"] == "high"
+
     def test_upsert_ignores_missing_key(self):
         s = Shape(
             name="registry",

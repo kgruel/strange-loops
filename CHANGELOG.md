@@ -2,6 +2,48 @@
 
 ## 2026-05-16
 
+### Trace: kind/key lifecycle as a top-level verb
+
+- **`sl trace <kind>/<key>`** — walks a single fold-key entity's source
+  facts in ASC order (changelog-style, oldest first). Built on
+  `vertex_fold(retain_facts=True)` and `FoldState.source_facts`, which
+  already grouped raw facts by fold position — trace is mostly wiring,
+  not new fetch infrastructure. Works both verb-first (`sl trace
+  decision/design/foo`) and vertex-op (`sl project trace ...`).
+- **`--refs`** — walks the outbound ref graph one hop. Each fact's `ref`
+  field (`kind:key,kind:key`) names entities to pull into the trace.
+  Cycle-protected via visited set keyed on `kind/key` addresses.
+- **`--depth N`** — recurses N hops along the ref graph (`--refs` is
+  shorthand for `--depth 1`). At depth=2 a single thread surfaces its
+  full causal subgraph — design decisions, frictions, hypotheses, all
+  the entities it references transitively.
+- **`--diff`** — renders cumulative field-deltas instead of full
+  snapshots. First fact shows `field: . → value`; subsequent facts show
+  only `field: old → new` for changed scalars and `+added / -removed`
+  for ref-set deltas. Under `--refs`, the diff accumulator partitions
+  per entity — each entity's facts diff against its own prior, not the
+  merged stream. Works because fold-merge means each emit's payload IS
+  the patch it applied.
+- **Empty handling** — trace has no time-window; "no lifecycle found
+  for kind/key" rather than the misleading "no facts in the given time
+  range" that `stream_view` would emit.
+- **Combine aggregator transparency** — `_combined_read` extended with
+  `return_payloads` so `retain_facts=True` flows through the combine
+  branch of `vertex_fold`. From cwd, `sl trace thread/foo` walks the
+  `.loops/.vertex` aggregator end-to-end without needing the explicit
+  child-vertex form. The previously-planned `--all` flag dissolves —
+  the aggregator IS the cross-vertex mechanism.
+- **Engine bug fix in passing** — `fetch_fold` previously stripped
+  `source_facts` when filtering by `--key`, making `retain_facts=True +
+  key=…` a silent no-op. Regression test pinned.
+- **`observation` kind declared on project vertex** — runbook lists it
+  as a valid intent; vertex didn't declare it; recovered 30+ orphaned
+  observations into the fold via single-line vertex change.
+
+Resolves `friction:lineage-view-missing` (all in-scope strands) and
+`friction:trace-combine-vertex-silent-empty`. 749 engine tests + 1056
+loops tests pass (7 new this campaign).
+
 ### Emit Receipt + Fold Merge
 
 - **`emit-receipt-on-write`** — every `sl emit` prints a receipt to stderr:

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-05-16
+
+### Emit Receipt + Fold Merge
+
+- **`emit-receipt-on-write`** — every `sl emit` prints a receipt to stderr:
+  success line `stored: kind/key @ <ulid>` plus WARN lines for
+  kind-not-declared, fold-key-missing, and unresolved refs. Closes the
+  verify-as-you-emit gap — silent-loss bugs that previously took a session
+  boundary to surface are now visible in-moment. `-q/--quiet` suppresses
+  the success line only; WARN/ERROR always print.
+- **Vertex-declared strict** — `strict true` in a `.vertex` spec makes all
+  emits refuse on validation failure (exit 2, fact not stored). No CLI
+  override. `LOOPS_EMIT_STRICT=1` and `--strict` provide per-call /
+  per-session opt-in for vertices that don't declare it.
+- **Fold-merge default** — `_make_upsert` flipped from replace to merge
+  semantics. Re-emit with subset payload preserves prior fields. Dissolves
+  the patch-emit friction entirely: `sl emit project friction name=foo
+  status=resolved` works as a partial patch with no new subcommand.
+  Touches every fold-by kind across the codebase — load-bearing semantic
+  change. Trade-off: cannot unset a field by omission (use explicit
+  clear sentinel).
+- **`observation` kind** added to meta vertex. Runbook updated with the
+  `friction-emits-in-moment` principle.
+
 ## 2026-05-15
 
 ### Read-path access primitives

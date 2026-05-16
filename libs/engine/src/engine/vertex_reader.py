@@ -329,18 +329,26 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
 
 
 def _combined_read(
-    ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None
-) -> dict[str, dict[str, Any]]:
+    ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None,
+    return_payloads: bool = False,
+) -> "dict[str, dict[str, Any]] | tuple[dict[str, dict[str, Any]], dict[str, list[dict]]]":
     """Fold state across multiple stores (combinatorial vertex_read).
 
     Fetches all facts in a single SQL query across attached stores,
     then groups by kind and replays through specs. Single query avoids
     the SQLite cold-start penalty (~10ms) that would hit the first of
     N per-kind queries.
+
+    When ``return_payloads=True``, returns ``(raw_state, kind_payloads)``
+    so callers can use the per-kind payload lists for retain_facts /
+    source_facts population without re-querying the stores.
     """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
-        return {kind: spec.initial_state() for kind, spec in specs.items()}
+        empty_raw = {kind: spec.initial_state() for kind, spec in specs.items()}
+        if return_payloads:
+            return empty_raw, {k: [] for k in specs}
+        return empty_raw
 
     conn, aliases = _open_combined(store_paths)
     try:
@@ -389,12 +397,40 @@ def _combined_read(
             p["_origin"] = r[4] or ""
             kind_payloads[target].append(p)
 
-        return {
+        raw = {
             kind: spec.replay(kind_payloads[kind])
             for kind, spec in specs.items()
         }
+        if return_payloads:
+            return raw, kind_payloads
+        return raw
     finally:
         conn.close()
+
+
+def _populate_source_facts(
+    specs: dict, payloads_by_kind: dict[str, list[dict]],
+    source_facts: dict[str, list[dict]],
+) -> None:
+    """Bucket per-kind payloads into ``source_facts[kind/key_value]``.
+
+    Mutates ``source_facts`` in place. Handles upsert-fold kinds (which
+    declare a key field); skips other fold types — they don't have a
+    per-key bucket to attach to. Used by both the simple-store and
+    combine branches of ``vertex_fold`` to keep retain_facts working
+    consistently across vertex topologies.
+    """
+    from atoms.fold import Upsert
+
+    for kind, spec in specs.items():
+        if not spec.folds:
+            continue
+        fold_op = spec.folds[0]
+        if not isinstance(fold_op, Upsert):
+            continue
+        for p in payloads_by_kind.get(kind, []):
+            fk = f"{kind}/{p.get(fold_op.key, '')}"
+            source_facts.setdefault(fk, []).append(p)
 
 
 def _combined_facts(
@@ -865,7 +901,16 @@ def vertex_fold(
     unfolded: dict[str, int] = {}
     source_facts: dict[str, list[dict]] = {}
     if ast.combine is not None or ast.discover is not None:
-        raw = _combined_read(ast, vertex_path, full_specs, observer=observer)
+        if retain_facts:
+            raw, child_payloads = _combined_read(
+                ast, vertex_path, full_specs,
+                observer=observer, return_payloads=True,
+            )
+            _populate_source_facts(full_specs, child_payloads, source_facts)
+        else:
+            raw = _combined_read(
+                ast, vertex_path, full_specs, observer=observer,
+            )
 
         # Aggregation with own store: overlay self-knowledge
         if ast.store is not None:
@@ -876,6 +921,7 @@ def vertex_fold(
                 from .store_reader import StoreReader  # deferred: not needed for combine-only
 
                 with StoreReader(own_store) as reader:
+                    own_payloads_by_kind: dict[str, list[dict]] = {}
                     for k, spec in specs.items():
                         facts = reader.facts_by_kind(k)
                         if observer:
@@ -888,7 +934,10 @@ def vertex_fold(
                             p["_origin"] = fact.get("origin", "")
                             p["_id"] = fact.get("id")
                             payloads.append(p)
+                        own_payloads_by_kind[k] = payloads
                         raw[k] = spec.replay(payloads)
+                    if retain_facts:
+                        _populate_source_facts(specs, own_payloads_by_kind, source_facts)
     elif ast.store is None:
         raw = {k: spec.initial_state() for k, spec in full_specs.items()}
     else:

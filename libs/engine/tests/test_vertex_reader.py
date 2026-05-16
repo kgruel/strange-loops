@@ -1654,6 +1654,58 @@ class TestVertexFoldCombine:
         result = vertex_fold(parent_vertex, observer="alice")
         assert result is not None
 
+    def test_fold_combine_retain_facts_populates_source_facts(self, tmp_path):
+        """retain_facts=True populates source_facts through the combine path.
+
+        Regression guard for friction:trace-combine-vertex-silent-empty:
+        _combined_read previously discarded its per-kind payloads after
+        replay, so retain_facts was effectively a no-op for combine
+        vertices — trace from a combine aggregator returned empty.
+        """
+        from engine.vertex_reader import vertex_fold
+
+        child_dir = tmp_path / "child"
+        child_dir.mkdir()
+        child_vertex = child_dir / "child.vertex"
+        child_vertex.write_text(
+            'name "child"\n'
+            'store "store.db"\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '}\n'
+        )
+        _seed_facts(child_dir / "store.db", [
+            {"kind": "decision", "ts": 1000.0,
+             "payload": {"topic": "design/x", "message": "v1"}},
+            {"kind": "decision", "ts": 2000.0,
+             "payload": {"topic": "design/x", "message": "v2"}},
+            {"kind": "decision", "ts": 3000.0,
+             "payload": {"topic": "design/y", "message": "other"}},
+        ])
+
+        parent_vertex = tmp_path / "parent.vertex"
+        parent_vertex.write_text(
+            'name "parent"\n'
+            'combine {\n'
+            f'  vertex "{child_vertex}"\n'
+            '}\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '}\n'
+        )
+
+        result = vertex_fold(parent_vertex, retain_facts=True)
+        assert result.source_facts, "source_facts empty under combine + retain_facts"
+        # Both keys present
+        assert "decision/design/x" in result.source_facts
+        assert "decision/design/y" in result.source_facts
+        # design/x has both emits (lifecycle visible)
+        x_facts = result.source_facts["decision/design/x"]
+        assert len(x_facts) == 2
+        # ASC by ts (the SQL ORDER BY ts sort produces this)
+        assert x_facts[0]["message"] == "v1"
+        assert x_facts[1]["message"] == "v2"
+
     def test_dot_path_non_dict(self):
         from engine.vertex_reader import _extract_field
         result = _extract_field({"a": [1, 2]}, "a.b")

@@ -627,20 +627,6 @@ def _run_trace(
         obs_for_engine = observer if observer else None
         _validate_kind_or_exit(trace_kind, vertex_path)
 
-        # Combine/discover guard: source_facts isn't populated through the
-        # combine branch of vertex_reader, so trace would silently return
-        # empty. Surface the limitation upfront — see
-        # friction:trace-combine-vertex-silent-empty.
-        from lang import parse_vertex_file as _parse_vertex_file
-        ast_check = _parse_vertex_file(vertex_path)
-        if ast_check.combine is not None or ast_check.discover is not None:
-            _err(
-                f"vertex '{ast_check.name}' is an aggregator (combine/discover) "
-                f"— trace operates on a single store. Try a child vertex: "
-                f"sl trace <vertex> {trace_kind}/{trace_key}"
-            )
-            raise SystemExit(2)
-
         from .commands.fetch import fetch_trace
         data = fetch_trace(
             vertex_path,

@@ -316,17 +316,9 @@ def fetch_trace(
     from lang import parse_vertex_file
     from lang.ast import FoldBy
 
-    # Loud-check: combine/discover vertices don't populate source_facts in
-    # the engine path (vertex_reader.py:867-891 doesn't walk retain_facts
-    # through _combined_read). Fail clearly rather than silently returning
-    # empty results. See friction:trace-combine-vertex-silent-empty.
-    ast_check = parse_vertex_file(vertex_path)
-    if ast_check.combine is not None or ast_check.discover is not None:
-        raise RuntimeError(
-            f"vertex '{ast_check.name}' is an aggregator (combine/discover) — "
-            f"trace operates on a single store. Try a child vertex directly: "
-            f"sl trace <vertex> {kind}/{key}"
-        )
+    # Combine/discover vertices: now supported via engine retain_facts
+    # walking _combined_read's per-kind payloads (vertex_reader.py
+    # _populate_source_facts). No special-case needed at the consumer.
 
     # Fold metadata for the lens (key_field per kind) — used during ref walk
     # too, to derive the per-entity address for each source fact.

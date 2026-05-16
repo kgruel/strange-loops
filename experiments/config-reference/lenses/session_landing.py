@@ -61,11 +61,18 @@ _HEADER_SKIP_KINDS = frozenset({"session", "log", "change", "message"})
 # Header
 _BAR_WIDTH = 20            # compression bar characters
 
-# History strip
+# History strip (only at -v / DETAILED+)
 _HISTORY_CAP = 4           # prior windows to show
 _TRIGGER_WIDTH = 18        # column width for boundary trigger (post-strip)
 
-# Body (same semantics as session_start, plus focus-filter boost)
+# TOUCHED — items with focus marks (added/updated/cited) at default zoom.
+# Caps tight to fit ~1.7KB total budget (2KB harness inline preview minus
+# experiments/comms). 6 items × ~190 chars (header + body) ≈ 1140 chars.
+_TOUCHED_CAP = 6
+_TOUCHED_BODY_LIMIT = 140
+
+# Body (same semantics as session_start, plus focus-filter boost) — used only
+# at -v / DETAILED+ for full drill-down view.
 _DECISION_BODY_CAP = 3
 _DECISION_GROUP_CAP = 8
 _SALIENCE_BODY_THRESHOLD = 2
@@ -245,7 +252,22 @@ def fetch(vertex_path: Path, **kwargs) -> LandingData:
 # ---------------------------------------------------------------------------
 
 def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Block:
-    """Render the landing view: landing header + history + focus-filtered body."""
+    """Render the landing view, budget-tuned for the 2KB hook inline preview.
+
+    **Default zoom (SUMMARY)**: NOW header + TOUCHED items (focus-marked only)
+    + UNPACK drill-down commands. Targets ~1.7KB total so the hook composition
+    (session_landing + experiments + comms) fits under the harness's 2KB
+    inline cutoff. Only items the user "just touched" surface; everything
+    else lives in the file or via drill-down.
+
+    **DETAILED+ zoom (-v / -vv)**: appends HISTORY strip + full accumulated
+    body (plans, tasks, threads, decisions). The full landing surface — for
+    deliberate review, not session-start orient.
+
+    The 2KB-tuning is a deliberate constraint: forces "what was happening"
+    over "how many things exist." Drill-down handles (UNPACK) keep the full
+    fold one command away.
+    """
     fp = _default_fold_palette()
     windows = data.windows
     fold = data.fold
@@ -253,24 +275,34 @@ def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Blo
 
     blocks: list[Block] = []
 
-    # --- 1. LANDING header (most-recent-closed window) ---
+    # --- 1. NOW header (most-recent-closed window) ---
     if windows:
         current: "TickWindow" = windows[0]
         blocks.append(_render_window_header(current, observer, fp, width))
 
-    # --- 2. History strip (prior windows) ---
-    if len(windows) > 1:
-        blocks.append(Block.text("", Style(), width=width))
-        blocks.append(_render_history_strip(windows[1:], observer, zoom, fp, width))
-
-    # --- 3. Accumulated body, focus-filtered by window deltas + stale ---
+    # --- 2. TOUCHED — focus-marked items (added/updated/cited) ---
     current_window = windows[0] if windows else None
     marks = _compute_marks(current_window, data.stale_keys, data.cite_keys, fold)
-    body = _render_accumulated(fold, marks, zoom, fp, width)
-    if body is not None:
+    touched = _render_touched(fold, marks, zoom, fp, width)
+    if touched is not None:
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
-        blocks.append(body)
+        blocks.append(touched)
+
+    # --- 3. DETAILED+ only: HISTORY + full accumulated body ---
+    if int(zoom) >= 2:
+        if len(windows) > 1:
+            blocks.append(Block.text("", Style(), width=width))
+            blocks.append(_render_history_strip(windows[1:], observer, zoom, fp, width))
+        body = _render_accumulated(fold, marks, zoom, fp, width)
+        if body is not None:
+            blocks.append(Block.text("", Style(), width=width))
+            blocks.append(body)
+
+    # --- 4. UNPACK — drill-down commands (always; gives me handles to dig in) ---
+    if blocks:
+        blocks.append(Block.text("", Style(), width=width))
+    blocks.append(_render_unpack(fp, width))
 
     if not blocks:
         return Block.text("(empty)", Style(dim=True), width=width)
@@ -284,8 +316,13 @@ def fold_view(data: LandingData, zoom: Zoom, width: int | None, **kwargs) -> Blo
 def _render_window_header(
     window: "TickWindow", observer: str, fp: FoldPalette, width: int | None,
 ) -> Block:
-    """Landing window as dashboard: trigger, bar, counts, per-kind chips."""
-    rows: list[Block] = [_section_header("LANDING", fp, width)]
+    """Landing window as dashboard: trigger, bar, counts, per-kind chips.
+
+    Section labeled "NOW" — what just happened, where we landed. The lens
+    keeps the file-level name "landing" (resolution chain identity) but the
+    surface label is user-facing.
+    """
+    rows: list[Block] = [_section_header("NOW", fp, width)]
 
     # Line 1: trigger · recency · duration
     trigger = _compact_trigger(window.boundary_trigger or window.name, observer)
@@ -350,6 +387,128 @@ def _compression_bar(window: "TickWindow", bar_width: int) -> str:
     # Invert: more compression → more filled.
     filled = int(round((1.0 - ratio) * bar_width))
     return "▓" * filled + "░" * (bar_width - filled)
+
+
+# ---------------------------------------------------------------------------
+# Block 1.5 — TOUCHED (default zoom): focus-marked items only
+# ---------------------------------------------------------------------------
+
+# Mark priority for the TOUCHED filter: which marks count as "what just
+# happened." STALE is excluded — staleness is "needs attention," surfaced
+# via the reconcile lens (UNPACK drill-down).
+_TOUCHED_MARKS = frozenset({_MARK_ADDED, _MARK_UPDATED, _MARK_CITED})
+
+
+def _render_touched(
+    fold: "FoldState", marks: dict[tuple[str, str], str],
+    zoom: Zoom, fp: FoldPalette, width: int | None,
+) -> Block | None:
+    """Items with focus marks — what just happened in the current window.
+
+    Filter: ADDED ✦ + UPDATED ◦ + CITED ⊙. Sort by mark priority then
+    recency. Cap at ``_TOUCHED_CAP`` (default 6). Each item: header line
+    (glyph + kind + key + recency) + body snippet (≤ ``_TOUCHED_BODY_LIMIT``).
+
+    The default-zoom answer to "what was I doing right before this session
+    closed?" Replaces the old full accumulated body (which renders as
+    drill-down at -v / DETAILED+).
+    """
+    touched: list[tuple[str, "FoldItem", str, str]] = []
+    for section in fold.sections:
+        # Filter hook-mechanical kinds — sessions, logs, etc. are emitted by
+        # plumbing, not domain work. Same exclusion as the kind chip strip:
+        # they crowd out signal in the "what was I doing" view.
+        if section.kind in _HEADER_SKIP_KINDS:
+            continue
+        kf = section.key_field
+        if not kf:
+            continue
+        for item in section.items:
+            key = str(item.payload.get(kf, ""))
+            if not key:
+                continue
+            mark = marks.get((section.kind, key))
+            if mark in _TOUCHED_MARKS:
+                touched.append((section.kind, item, kf, mark))
+
+    if not touched:
+        return None
+
+    # Mark priority: added=4, updated=3, cited=2 (matches _mark_priority).
+    def _sort_key(t):
+        _, item, _, mark = t
+        priority = {_MARK_ADDED: 4, _MARK_UPDATED: 3, _MARK_CITED: 2}.get(mark, 0)
+        return (-priority, -(item.ts or 0))
+    touched.sort(key=_sort_key)
+
+    cap = _cap(_TOUCHED_CAP, zoom)
+    shown = touched[:cap]
+    remaining = len(touched) - len(shown)
+
+    rows: list[Block] = [_section_header("TOUCHED", fp, width)]
+    for kind, item, kf, mark in shown:
+        lbl = _label(item, kf)
+        recency = _recency_tag(item.ts)
+        bdy = _item_body(item, kf)
+
+        header_parts: list[Block] = [
+            Block.text("  ", fp.collapse),
+            Block.text(f"{_MARK_GLYPH[mark]} ", _mark_style(mark, fp)),
+            Block.text(kind, fp.group_header),
+            Block.text(" ", fp.collapse),
+            Block.text(lbl, fp.key),
+        ]
+        if recency:
+            header_parts.append(Block.text(f" ({recency})", fp.collapse))
+        rows.append(join_horizontal(*header_parts))
+
+        if bdy:
+            if len(bdy) > _TOUCHED_BODY_LIMIT:
+                bdy = bdy[:_TOUCHED_BODY_LIMIT] + "…"
+            rows.append(Block.text(f"    {bdy}", fp.body, width=width))
+
+    if remaining > 0:
+        rows.append(Block.text(
+            f"  ({remaining} more touched — see -v)", fp.collapse, width=width,
+        ))
+    return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
+# Block 4 — UNPACK (always shown): drill-down commands
+# ---------------------------------------------------------------------------
+
+# Drill-down commands listed in the lens output itself, so they sit inside
+# the harness's ~2KB inline preview. If they were appended by the hook script
+# *after* experiments + comms, the budget cutoff would push them below the
+# fold and the drill handles would be invisible exactly when they're needed.
+# Generic over vertex — names like "<vertex>" are placeholders, not coupling.
+_UNPACK_LINES: tuple[tuple[str, str], ...] = (
+    ("loops read project --lens session_landing -v",
+     "full landing — history + accumulated body"),
+    ("loops read project --lens fold",
+     "all work-state surfaces"),
+    ("loops read project --lens reconcile",
+     "staleness review"),
+    ("loops read <vertex>",
+     "any vertex (e.g. coupling-kernels, comms)"),
+    ("loops read project --kind <kind>",
+     "filter: decision, thread, task, plan, hypothesis"),
+    ("loops read project --kind <kind> --facts",
+     "event history per emission"),
+)
+
+
+def _render_unpack(fp: FoldPalette, width: int | None) -> Block:
+    """Drill-down commands. Always rendered, kept short to fit the budget."""
+    rows: list[Block] = [_section_header("UNPACK", fp, width)]
+    for cmd, descr in _UNPACK_LINES:
+        rows.append(join_horizontal(
+            Block.text("  ", fp.collapse),
+            Block.text(cmd, fp.key),
+            Block.text(f"  # {descr}", fp.collapse),
+        ))
+    return join_vertical(*rows)
 
 
 # ---------------------------------------------------------------------------

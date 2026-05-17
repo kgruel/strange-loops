@@ -567,6 +567,13 @@ def _run_trace(
     from painted import run_cli
     from painted.cli import HelpArg
 
+    # No args at all → show help instead of bare usage line.
+    # When invoked as `sl trace` (no vertex, no entity, no flags), there's
+    # nothing meaningful to do; surface the full help with all flags rather
+    # than a one-line usage that hides what's available.
+    if not argv and vertex_path is None:
+        argv = ["--help"]
+
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         pre.add_argument("vertex_or_entity", nargs="?", default=None)
@@ -580,6 +587,10 @@ def _run_trace(
     pre.add_argument("--depth", type=int, default=None,
                      help="Walk outbound refs N hops (implies --refs)")
     known, rest = pre.parse_known_args(argv)
+
+    # If --help/-h is in argv, defer to run_cli (painted) — it intercepts
+    # help before fetch/render run, so we don't need a valid entity.
+    help_requested = "-h" in argv or "--help" in argv
 
     # Resolve refs_depth: --depth N takes precedence; --refs alone = 1; default 0.
     if known.depth is not None:
@@ -601,7 +612,11 @@ def _run_trace(
             # First positional is a vertex name
             resolved = _resolve_vertex_for_dispatch(first)
             if resolved is None:
-                resolved = _resolve_named_vertex(first)
+                from .errors import VertexNotFound
+                try:
+                    resolved = _resolve_named_vertex(first)
+                except VertexNotFound:
+                    resolved = None
             if resolved is not None:
                 vertex_path = resolved
                 entity = known.entity
@@ -612,11 +627,33 @@ def _run_trace(
     else:
         entity = known.entity
 
-    if entity is None or "/" not in entity:
-        _err("usage: sl trace [vertex] <kind>/<key>")
-        return 2
+    # Three modes:
+    #   help_mode  : --help / -h → painted renders help, fetch never runs
+    #   index_mode : vertex resolved, entity missing-or-invalid → kind index
+    #   trace_mode : entity has kind/key → render lifecycle
+    #
+    # Bare `sl trace` (no args at all) was redirected to --help above.
+    # `sl trace <flag>` with no vertex/entity still has nothing to fetch
+    # against — fall through to the usage error.
+    index_mode = False
+    if not help_requested:
+        entity_has_slash = entity is not None and "/" in entity
+        if vertex_path is not None and not entity_has_slash:
+            # Vertex known, no valid entity → kind index. This also covers
+            # `sl trace <vertex> foo` (incomplete entity) — show the menu
+            # of valid kinds rather than a terse error.
+            index_mode = True
+        elif not entity_has_slash:
+            _err("usage: sl trace [vertex] <kind>/<key>")
+            return 2
 
-    trace_kind, trace_key = entity.split("/", 1)
+    # Safe split — when help_requested or index_mode, the trace fetch path
+    # never runs (painted short-circuits on help; index_mode uses its own
+    # fetch), so empty sentinels are harmless.
+    if entity is not None and "/" in entity:
+        trace_kind, trace_key = entity.split("/", 1)
+    else:
+        trace_kind, trace_key = "", ""
 
     def fetch():
         nonlocal vertex_path, observer
@@ -625,6 +662,12 @@ def _run_trace(
             vertex_path = _resolve_local_vertex()
         observer = _apply_vertex_scope(observer, vertex_path)
         obs_for_engine = observer if observer else None
+
+        if index_mode:
+            # Kind-index: no kind/key filter — fetch full fold, render as menu.
+            from .commands.fetch import fetch_fold
+            return fetch_fold(vertex_path, observer=obs_for_engine)
+
         _validate_kind_or_exit(trace_kind, vertex_path)
 
         from .commands.fetch import fetch_trace
@@ -644,14 +687,17 @@ def _run_trace(
     def render(ctx, data):
         nonlocal resolved_render_fn
         if resolved_render_fn is None:
-            # Default lens is trace_view; --lens overrides.
-            if known.lens is None:
-                from .lenses.trace import trace_view
-                resolved_render_fn = trace_view
-            else:
+            # Default lens depends on mode; --lens overrides either.
+            if known.lens is not None:
                 resolved_render_fn = _resolve_render_fn(
                     known.lens, vertex_path, "trace_view",
                 )
+            elif index_mode:
+                from .lenses.trace_index import trace_index_view
+                resolved_render_fn = trace_index_view
+            else:
+                from .lenses.trace import trace_view
+                resolved_render_fn = trace_view
         w = ctx.width if ctx.is_tty else None
         from .lens_resolver import call_lens
         return call_lens(
@@ -666,7 +712,7 @@ def _run_trace(
         prog="loops trace",
         description="Lifecycle of one kind/key entity",
         help_args=[
-            HelpArg("entity", "kind/key — e.g. decision/design/foo", positional=True),
+            HelpArg("entity", "kind/key (e.g. decision/design/foo); omit for kind index; kind/ for kind-wide listing", positional=True),
             HelpArg("--diff", "Show cumulative field-deltas instead of snapshots"),
             HelpArg("--refs", "Walk outbound refs one hop (depth=1)"),
             HelpArg("--depth", "Walk outbound refs N hops (implies --refs)"),
@@ -1560,6 +1606,7 @@ def _render_main_help(argv: list[str]) -> int:
             HelpFlag(None, "sync", "Run sources (cadence-gated)", detail="[vertex] [--force] [--var KEY=VALUE]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
             HelpFlag(None, "cite", "Attention signal — inform current work with prior refs", detail="[vertex] <ref1> <ref2> ... [--context NAME] [-m MSG]"),
+            HelpFlag(None, "trace", "Lifecycle of one kind/key entity", detail="[vertex] <kind>/<key> [--diff] [--refs] [--depth N] [--lens NAME]"),
         ),
     )
 

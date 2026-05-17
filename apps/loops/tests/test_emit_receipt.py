@@ -103,6 +103,46 @@ class TestReceiptContent:
         # ULID/UUID present (some form of identifier after the @)
         assert " @ " in err
 
+    def test_receipt_id_is_ulid_format(self, basic_vertex, capsys):
+        """The id in the receipt is a 26-char Crockford base32 ULID.
+
+        Regression bar for the 2026-05-17 discovery: the CLI emit path had
+        its own uuid4 generator (`_new_fact_id`) that bypassed the engine's
+        `gen_id` ULID source. The existing receipt test asserted the line
+        format but not the id format, so the divergence was silent for
+        months. This test locks the id-format invariant at the emit-path
+        level — a future swap that drops the property fails fast here as
+        well as at the store layer (TestIdGenerationContract).
+        """
+        import string
+
+        rc, _ = _emit(basic_vertex, "decision", topic="design/foo", message="x")
+        assert rc == 0
+        err = capsys.readouterr().err
+
+        # Parse the id after " @ "
+        assert " @ " in err, f"no id in receipt: {err!r}"
+        # Receipt is one line; split off the id.
+        receipt_line = next(
+            line for line in err.splitlines() if "stored: decision/design/foo @ " in line
+        )
+        fact_id = receipt_line.split(" @ ", 1)[1].strip()
+
+        crockford = set(string.digits + "ABCDEFGHJKMNPQRSTVWXYZ")
+        assert len(fact_id) == 26, (
+            f"expected 26-char ULID, got {len(fact_id)}: {fact_id!r}. "
+            "If this is hyphenated (8-4-4-4-12), the emit path is generating "
+            "uuid4 instead of using engine.gen_id."
+        )
+        assert "-" not in fact_id, (
+            f"hyphen in id {fact_id!r} — looks like uuid4, not ULID. "
+            "Emit path must use engine.gen_id, not uuid.uuid4()."
+        )
+        assert all(c in crockford for c in fact_id), (
+            f"non-Crockford-base32 char in {fact_id!r}: "
+            f"{set(fact_id) - crockford}"
+        )
+
     def test_kind_not_declared_emits_warn_and_stores_fact(self, basic_vertex, capsys):
         rc, _ = _emit(basic_vertex, "observation", topic="oops", message="orphan")
         assert rc == 0  # warn-mode default: store anyway

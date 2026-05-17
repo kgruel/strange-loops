@@ -33,6 +33,7 @@ __all__ = [
     "FileStore",
     "FileWriter",
     "Tailer",
+    "gen_id",
     "replay",
     # Utilities
     "Forward",
@@ -102,6 +103,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "FileWriter": ("engine.file_writer", "FileWriter"),
     "replay": ("engine.replay", "replay"),
     "SqliteStore": ("engine.sqlite_store", "SqliteStore"),
+    "gen_id": ("engine.sqlite_store", "gen_id"),
     "EventStore": ("engine.store", "EventStore"),
     "Store": ("engine.store", "Store"),
     "StoreReader": ("engine.store_reader", "StoreReader"),

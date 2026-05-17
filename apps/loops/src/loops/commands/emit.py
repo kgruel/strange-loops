@@ -4,20 +4,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from engine import gen_id
 from loops.errors import LoopsError
-
-
-def _new_fact_id() -> str:
-    """Pre-generate a fact ID before storing. Mirrors sqlite_store._gen_id.
-
-    Generating the ID here lets cmd_emit thread it through receive(id_override=)
-    and report the same ID in the receipt. Stores that don't track IDs ignore it.
-    """
-    return str(uuid.uuid4())
 
 
 def _build_receipt_lines(
@@ -356,7 +347,7 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         return 0
 
     # Pre-generate the fact ID so the receipt reports the same ULID the store assigns.
-    fact_id = _new_fact_id()
+    fact_id = gen_id()
 
     try:
         from engine import load_vertex_program

@@ -18,7 +18,7 @@ from tests.vertex_test_sdk import VertexTestBuilder, fact, reopen_store
 
 def inject_fact(store, kind: str, observer: str = "test", ts: float | None = None, **payload):
     """Insert a fact directly into a SqliteStore, bypassing vertex.receive()."""
-    from engine.sqlite_store import _gen_id
+    from engine.sqlite_store import gen_id
 
     if ts is None:
         ts = _time.time()
@@ -27,7 +27,7 @@ def inject_fact(store, kind: str, observer: str = "test", ts: float | None = Non
     store._ensure_sync()
     store._conn.execute(
         "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-        (_gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        (gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
     )
     store._conn.commit()
 

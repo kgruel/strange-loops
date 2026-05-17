@@ -31,7 +31,7 @@ from ulid import ULID
 _raw_decode = json.JSONDecoder().raw_decode
 
 
-def _gen_id() -> str:
+def gen_id() -> str:
     """Generate a unique ID for store records.
 
     Uses python-ulid: 26-char Crockford base32 ULID, time-sortable
@@ -46,7 +46,7 @@ _UTC = _tz.utc
 from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar
 
-# IDs generated Python-side via python-ulid (see _gen_id above).
+# IDs generated Python-side via python-ulid (see gen_id above).
 # The sqlite-ulid C extension is not a dependency — id generation lives
 # entirely in Python. All INSERTs supply id explicitly, so no SQL-callable
 # ulid() function is needed.
@@ -153,12 +153,12 @@ class SqliteStore(Generic[T]):
         """Append one event to the store. Returns the ID assigned.
 
         If id_override is provided, that ID is used; otherwise a new ID
-        is generated via _gen_id(). The ID is returned in either case so
+        is generated via gen_id(). The ID is returned in either case so
         callers (e.g. emit's receipt path) can reference the stored row.
         """
         self._ensure_sync()
         d = self._serialize(event)
-        fact_id = id_override if id_override is not None else _gen_id()
+        fact_id = id_override if id_override is not None else gen_id()
         self._conn.execute(
             "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
             (fact_id, d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
@@ -266,7 +266,7 @@ class SqliteStore(Generic[T]):
         d = tick.to_dict()
         self._conn.execute(
             "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (_gen_id(), d["name"], d["ts"], d["since"], d["origin"],
+            (gen_id(), d["name"], d["ts"], d["since"], d["origin"],
              json.dumps(d["payload"], default=_mapping_proxy_default)),
         )
         self._conn.commit()

@@ -325,30 +325,49 @@ _BATCH_COCHAIN_THRESHOLD = 3
 def _categorize(chain: ChainSignals, batch_ts: frozenset[int]) -> str:
     """Bucket a chain: 'SUSPICIOUS' | 'HEALTHY' | 'IN_FLIGHT' | 'BATCH' | 'OTHER'.
 
+    SUSPICIOUS criterion: closed with emit_count<=1 and not-batch. Calibrated
+    2026-05-16 after the initial session_span criterion produced false
+    positives — chains like truncation-as-coupling-function (3 empirical
+    emits in one session with numerical evidence) and title-only-clustering
+    (designed falsifier proposed-then-rejected in 5 min) inspect as
+    legitimate fast empirical work, not deliberation gaps. The Alcove
+    signal isn't "happened fast" — it's "never staked as a prediction."
+    A chain that emitted ``proposed`` then ``confirmed`` minutes later
+    at least went through the discipline; one whose only emit is
+    ``confirmed`` never made a prediction at all. emit_count==1 catches
+    that specifically.
+
     OTHER captures chains terminating in non-closed-non-open status — most
     notably ``refined`` as a final hypothesis state. Design choice: ``refined``
     is treated as "still evolving" rather than closure, so refined-as-final
     chains are exempt from the SUSPICIOUS check. They may still warrant
     review (a fast refinement that stalled), but the suspicious-cleanness
-    semantic is specifically about closure-without-deliberation. Re-examine
+    semantic is specifically about closure-without-prediction. Re-examine
     this choice if a "fast-refined-then-stalled" pattern becomes load-bearing.
 
-    BATCH detection: a chain whose first_ts is shared with N other chains
-    routes to BATCH rather than SUSPICIOUS — the cleanness is a load
-    artifact, not a deliberation gap.
+    BATCH: a chain whose first_ts is shared with N other chains routes to
+    BATCH rather than SUSPICIOUS — bulk-load mechanism, not deliberation.
+    A chain that emerged in batch but later evolved across sessions
+    (session_span>=2) gets rescued back to HEALTHY.
+
+    HEALTHY now means: closed and (multi-emit OR cross-session). The
+    multi-emit case is "you staked the prediction before claiming it";
+    the cross-session case is "you came back to it under different
+    attention." Both qualify as discipline.
     """
     if chain.final_status in _OPEN_STATUSES or not chain.final_status:
         return "IN_FLIGHT"
     if chain.final_status in _CLOSED_STATUSES:
-        # BATCH only when the chain ALSO didn't cross sessions. A chain that
-        # emerged in a batch but later evolved across sessions is closer in
-        # shape to HEALTHY — the post-batch deliberation rescued it.
         batch_first = (
             chain.first_ts is not None and int(chain.first_ts) in batch_ts
         )
         if batch_first and chain.session_span <= 1:
             return "BATCH"
-        return "SUSPICIOUS" if chain.session_span <= 1 else "HEALTHY"
+        # The Alcove criterion: closed-without-prediction.
+        # emit_count==1 → only fact is the closing status, no prior stake.
+        if chain.emit_count <= 1:
+            return "SUSPICIOUS"
+        return "HEALTHY"
     return "OTHER"
 
 
@@ -440,8 +459,8 @@ def fold_view(
     rows.append(Block.text("", style))
     if sus:
         rows.append(Block.text(
-            "SUSPICIOUS — closed within one session window "
-            "(candidates for lower-density re-examination)",
+            "SUSPICIOUS — closed without prior staking "
+            "(emit_count<=1 — never went through proposed phase)",
             style,
         ))
         for c in sus:
@@ -453,7 +472,7 @@ def fold_view(
         if healthy:
             rows.append(Block.text("", style))
             rows.append(Block.text(
-                "HEALTHY — closed across multiple session windows",
+                "HEALTHY — closed with prior staking (multi-emit or cross-session)",
                 style,
             ))
             for c in healthy:

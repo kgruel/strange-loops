@@ -1,0 +1,22 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.13",
+
+  "include": [
+    "apps",
+    "libs",
+    "experiments"
+  ],
+
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "**/build",
+    "**/dist",
+    "**/.pytest_cache"
+  ],
+
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none"
+}

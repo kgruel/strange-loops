@@ -722,6 +722,52 @@ def _run_trace(
     )
 
 
+def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
+    """Extract ``--refs [N]`` from rest; return ``(refs_depth, cleaned_rest)``.
+
+    Manual scan rather than argparse ``nargs='?'`` because the latter is
+    brittle when the optional integer is followed by another flag or a
+    positional that argparse might try to consume as the int value.
+
+    Semantics:
+      - ``--refs``                 → depth 1 (bare flag = walk one hop)
+      - ``--refs 2`` / ``--refs=N`` → depth N
+      - absent                    → depth 0 (no walk, no edge decoration)
+      - ``--refs <non-int>``       → depth 1, ``<non-int>`` is left in rest
+
+    Removes the consumed tokens from rest so downstream parsers (painted)
+    don't double-consume them.
+    """
+    depth = 0
+    out: list[str] = []
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--refs":
+            # Greedy peek: if the next token parses as int, consume both;
+            # otherwise treat as bare flag and leave next token for others.
+            if i + 1 < len(rest):
+                try:
+                    depth = int(rest[i + 1])
+                    i += 2
+                    continue
+                except ValueError:
+                    pass
+            depth = 1
+            i += 1
+            continue
+        if arg.startswith("--refs="):
+            try:
+                depth = int(arg.split("=", 1)[1])
+            except ValueError:
+                depth = 1
+            i += 1
+            continue
+        out.append(arg)
+        i += 1
+    return depth, out
+
+
 def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Run fold command — show collapsed vertex state."""
     pre = argparse.ArgumentParser(add_help=False)
@@ -735,9 +781,21 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
     # Pre-check --facts for fetch (it stays in rest for painted's parser too)
     want_facts = "--facts" in rest
 
+    # Pre-extract --refs [N]. Unlike --facts (a presence flag), --refs carries
+    # an optional int depth that fetch needs at fetch-time (the walk happens
+    # before the lens renders). Manual scan removes the flag from rest so
+    # painted's parser doesn't see it — refs_depth is plumbed through the
+    # closure to both fetch() (as refs_depth=N) and _build_fold_fidelity()
+    # (which adds "refs" to visible when depth > 0 so the lens decorates).
+    refs_depth, rest = _extract_refs_depth(rest)
+
     # Fast path: --static --plain bypasses the CLI framework import (~7ms).
-    # Detect these flags before importing painted.cli.
-    if _is_static_plain(rest):
+    # Detect these flags before importing painted.cli. The --refs bail-out
+    # is here (not in _is_static_plain) because rest has already had --refs
+    # stripped by _extract_refs_depth — only refs_depth is meaningful at
+    # this point. Fast path's plain renderer doesn't know how to decorate
+    # edges, so any walk/decoration request must take the slow path.
+    if refs_depth == 0 and _is_static_plain(rest):
         return _run_fold_fast(known, rest, vertex_path=vertex_path, observer=observer)
 
     from painted import run_cli
@@ -773,11 +831,13 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
                 lens_fetch, vertex_path,
                 kind=known.kind, key=known.key, observer=obs_for_engine,
                 retain_facts=want_facts,
+                refs_depth=refs_depth,
             )
         from .commands.fetch import fetch_fold
         return fetch_fold(
             vertex_path, kind=known.kind, key=known.key, observer=obs_for_engine,
             retain_facts=want_facts,
+            refs_depth=refs_depth,
         )
 
     def render(ctx, data):
@@ -801,16 +861,27 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         )
 
     def _add_fold_args(parser):
-        """Add fold-specific flags: visibility layers."""
-        parser.add_argument("--refs", action="store_true", default=False,
-                            help="Show reference connections")
+        """Add fold-specific flags: visibility layers.
+
+        --refs is consumed by the outer pre-parser (_extract_refs_depth) so it
+        does not appear here — the int depth needs to be available at
+        fetch-time, before painted parses. The visible-set update happens in
+        _build_fold_fidelity via the refs_depth closure variable.
+        """
         parser.add_argument("--facts", action="store_true", default=False,
                             help="Show source facts per item")
 
     def _build_fold_fidelity(parsed, base):
-        """Inject visibility tags from fold-specific flags."""
+        """Inject visibility tags from fold-specific flags.
+
+        refs_depth comes from the closure (pre-parsed before painted ran).
+        When refs_depth > 0, "refs" is added to visible so the fold lens
+        decorates each item with its inbound/outbound edges. The walk itself
+        (refs_depth > 1) is handled in fetch_fold; this only controls
+        rendering.
+        """
         visible = set()
-        if getattr(parsed, "refs", False):
+        if refs_depth > 0:
             visible.add("refs")
         if getattr(parsed, "facts", False):
             visible.add("facts")
@@ -862,14 +933,24 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
         description="Show folded state",
         help_args=[
             HelpArg("--kind", "Filter by fact kind"),
+            HelpArg("--key", "Filter by fold-key prefix (kind-aware)"),
             HelpArg("--observer", "Filter by observer (default: you)"),
             HelpArg("--lens", "Render lens (prompt)"),
+            HelpArg("--refs", "Walk + decorate ref graph; bare = depth 1, --refs N = depth N"),
+            HelpArg("--facts", "Show source facts per item"),
         ],
     )
 
 
 def _is_static_plain(rest: list[str]) -> bool:
-    """Check if rest args contain --static --plain without help flags."""
+    """Check if rest args contain --static --plain without help flags.
+
+    Note: the --refs bail-out for the fast path is enforced at the call site
+    in _run_fold (using refs_depth from _extract_refs_depth). Putting it here
+    wouldn't work — the caller strips --refs from rest before this check, so
+    has_refs would always be False at this point. The bug class
+    exercising-catches-coherence-gaps caught this on first run.
+    """
     has_static = "--static" in rest
     has_plain = "--plain" in rest
     has_help = "-h" in rest or "--help" in rest

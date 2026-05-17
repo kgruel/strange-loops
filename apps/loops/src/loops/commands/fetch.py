@@ -66,6 +66,7 @@ def fetch_fold(
     key: str | None = None,
     observer: str | None = None,
     retain_facts: bool = False,
+    refs_depth: int = 0,
 ) -> "FoldState":
     """Fetch fold state, with optional key prefix drill-down.
 
@@ -82,6 +83,12 @@ def fetch_fold(
     When ``kind`` is omitted but ``key`` is provided, filtering runs across all
     sections — each section uses its own declared key_field. Sections with no
     matches are dropped.
+
+    ``refs_depth`` controls outbound ref-graph walk (currently plumbing only —
+    accepted to thread through call sites, but the walk itself is implemented
+    in A2 of the trace-dissolution arc, see decision/design/trace-dissolves-
+    into-read-with-unified-refs). When > 0, will pull connected entities into
+    the result; depth-0 (default) returns only matched items.
     """
     from atoms import FoldSection, FoldState
     from engine import vertex_fold

@@ -91,7 +91,158 @@ class TestIsStaticPlain:
         from loops.main import _is_static_plain
         assert _is_static_plain(["read", "proj"]) is False
 
-class TestResolveVertexPath:
+
+class TestExtractRefsDepth:
+    """A1 of trace-dissolution: --refs [N] extraction from rest.
+
+    Manual scan rather than argparse nargs='?' because the latter is brittle
+    when the optional integer is followed by another flag or positional. The
+    extraction is the load-bearing primitive for both code paths (slow + fast
+    bail-out) so it gets its own asymmetric-pair regression test.
+    """
+
+    def test_absent(self):
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--kind", "decision"])
+        assert depth == 0
+        assert rest == ["--kind", "decision"]
+
+    def test_bare(self):
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs"])
+        assert depth == 1
+        assert rest == []
+
+    def test_with_int_arg(self):
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs", "2"])
+        assert depth == 2
+        assert rest == []
+
+    def test_equals_form(self):
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs=3"])
+        assert depth == 3
+        assert rest == []
+
+    def test_bare_before_flag(self):
+        """--refs followed by another flag → bare, don't consume the flag."""
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs", "--plain"])
+        assert depth == 1
+        assert rest == ["--plain"]
+
+    def test_bare_before_non_int_positional(self):
+        """--refs followed by a non-int token → bare, leave token alone."""
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs", "decision/design/foo"])
+        assert depth == 1
+        assert rest == ["decision/design/foo"]
+
+    def test_preserves_other_args_around(self):
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(
+            ["--kind", "decision", "--refs", "2", "--plain", "-v"]
+        )
+        assert depth == 2
+        assert rest == ["--kind", "decision", "--plain", "-v"]
+
+    def test_equals_with_non_int_falls_back(self):
+        """--refs=garbage → fallback depth=1, consumed."""
+        from loops.main import _extract_refs_depth
+        depth, rest = _extract_refs_depth(["--refs=garbage"])
+        assert depth == 1
+        assert rest == []
+
+
+class TestRunFoldRefsBothPaths:
+    """Asymmetric-pair regression: --refs must apply consistently across
+    slow path (_run_fold via run_cli) AND fast-path bail (_is_static_plain
+    returns False at the call site when refs_depth > 0).
+
+    Tracks the bug class exercising-catches-coherence-gaps — yesterday's
+    pattern that catches "feature works in path A, silently breaks in path B."
+    The bug was actually shipped on first A1 implementation attempt: the
+    has_refs check inside _is_static_plain saw an already-stripped rest.
+    """
+
+    @staticmethod
+    def _inject_argparse():
+        """main.py defers argparse import for cold-start perf, injecting it
+        into module globals via main() at line 1990. Tests that call _run_*
+        directly without going through main() must replicate that setup.
+        """
+        import argparse
+        import loops.main as _main
+        _main.__dict__["argparse"] = argparse
+
+    @staticmethod
+    def _mock_dispatch(monkeypatch):
+        """Set up shared mocks for both dispatch tests.
+
+        Returns (run_cli_stub, fast_path_patch) — caller is responsible for
+        entering the fast_path_patch context. main.py does `from painted import
+        run_cli` inside _run_fold, so we patch painted.run_cli (not
+        painted.cli.runner.run_cli — that's where it ORIGINATES, but
+        from-import binds a local reference that bypasses the source module).
+        """
+        from unittest.mock import MagicMock, patch
+        import painted
+        run_cli_stub = MagicMock(return_value=0)
+        monkeypatch.setattr(painted, "run_cli", run_cli_stub)
+        return run_cli_stub, patch("loops.main._run_fold_fast", return_value=0)
+
+    def test_refs_blocks_fast_path_at_call_site(self, tmp_path, monkeypatch):
+        """Verify _run_fold does NOT dispatch to _run_fold_fast when --refs is set.
+
+        Implementation invariant: refs_depth > 0 must bypass the fast path,
+        because the fast-path plain renderer has no edge-decoration support.
+        We exercise _run_fold with --refs + --static + --plain and confirm
+        _run_fold_fast is never called.
+        """
+        vf = tmp_path / "test.vertex"
+        vf.write_text("")
+        monkeypatch.chdir(tmp_path)
+        self._inject_argparse()
+
+        run_cli_stub, fast_path_patch = self._mock_dispatch(monkeypatch)
+        from loops.main import _run_fold
+
+        with fast_path_patch as fast_path:
+            _run_fold(["--refs", "--static", "--plain"], vertex_path=vf)
+            assert fast_path.call_count == 0, (
+                "_run_fold_fast was called with --refs — fast path's plain "
+                "renderer can't decorate edges. Regression: the --refs "
+                "bail-out at the _is_static_plain call site is broken."
+            )
+            assert run_cli_stub.call_count == 1, (
+                "Slow path (run_cli) was not entered; check whether the "
+                "dispatch fell through entirely."
+            )
+
+    def test_no_refs_uses_fast_path_when_static_plain(self, tmp_path, monkeypatch):
+        """Mirror: without --refs, --static --plain SHOULD take the fast path.
+
+        Establishes the asymmetric pair: same flags except --refs. Different
+        dispatch. Together with the previous test, this locks the contract
+        — if either side flips, the pair breaks and someone has to look at it.
+        """
+        vf = tmp_path / "test.vertex"
+        vf.write_text("")
+        monkeypatch.chdir(tmp_path)
+        self._inject_argparse()
+
+        run_cli_stub, fast_path_patch = self._mock_dispatch(monkeypatch)
+        from loops.main import _run_fold
+
+        with fast_path_patch as fast_path:
+            _run_fold(["--static", "--plain"], vertex_path=vf)
+            assert fast_path.call_count == 1, (
+                "Fast path was not taken for --static --plain (no --refs). "
+                "Either the fast-path criteria changed or refs_depth "
+                "extraction is leaking a non-zero value when --refs is absent."
+            )
+            assert run_cli_stub.call_count == 0
     def test_explicit_path(self, tmp_path):
         """_resolve_vertex_path with explicit file arg (L511)."""
         from loops.main import _resolve_vertex_path

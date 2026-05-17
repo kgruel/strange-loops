@@ -131,27 +131,12 @@ def fold_view(
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
-    refs_filter = "refs" in visible
     facts_filter = "facts" in visible
     blocks: list[Block] = []
     skipped_sections: list[tuple[str, int]] = []
 
     for s in populated:
         display_count = s.count
-
-        # When --refs is active, count connected items and track disconnected
-        if refs_filter:
-            connected_count = sum(
-                1 for i in s.items
-                if i.refs or _item_full_key(i, s.key_field, s.kind) in inbound_edges
-            )
-            disconnected = s.count - connected_count
-            if connected_count == 0:
-                skipped_sections.append((s.kind, s.count))
-                continue
-            elif disconnected > 0:
-                skipped_sections.append((s.kind, disconnected))
-            display_count = connected_count
 
         # When --facts is active, minimize sections without compression history
         # Collect folds and by-folds where no item has n>1 have nothing to drill into
@@ -183,14 +168,10 @@ def fold_view(
     footer_parts: list[str] = []
     if skipped_sections:
         parts = [f"{count} {kind}" for kind, count in skipped_sections]
-        # skipped_sections only populates via refs_filter or facts_filter paths
-        if refs_filter and facts_filter:
-            label = "Filtered"
-        elif refs_filter:
-            label = "No refs"
-        else:
-            label = "No history"
-        footer_parts.append(f"{label}: {', '.join(parts)}")
+        # skipped_sections now only populates via the facts_filter path
+        # (refs filtering retired in A1 of the trace-dissolution arc — see
+        # decision/design/trace-dissolves-into-read-with-unified-refs).
+        footer_parts.append(f"No history: {', '.join(parts)}")
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
         footer_parts.append(f"Unfolded: {loose}")
@@ -269,15 +250,13 @@ def _render_grouped(
     section_kind: str = "",
     lines: int = 0, chars: int = 0,
 ) -> Block:
-    """Render by-fold items grouped by namespace prefix."""
-    # When --refs is active, filter to only connected items
-    # (fold_view already skips fully-disconnected sections, so items is non-empty)
-    if "refs" in visible:
-        items = tuple(
-            i for i in items
-            if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
-        )
+    """Render by-fold items grouped by namespace prefix.
 
+    As of A1 of the trace-dissolution arc, --refs no longer filters items to
+    the ref-connected subset — orphans render normally with edge decoration
+    where edges exist. See decision/design/trace-dissolves-into-read-with-
+    unified-refs.
+    """
     groups = _group_by_namespace(items, key_field)
 
     sorted_groups = sorted(
@@ -299,11 +278,10 @@ def _render_grouped(
             reverse=True,
         )
 
-        # When --refs is active, show all connected items (refs filter already reduced the set).
-        # Otherwise, apply salience windowing.
-        if "refs" in visible:
-            show_items = sorted_items
-        elif len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
+        # Salience windowing: when group is large, show only high-salience items.
+        # The pre-A1 "if refs in visible: show all" branch was retired alongside
+        # the refs filter — normal windowing applies regardless of --refs.
+        if len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
             show_items = sorted_items
         else:
             show_items = [
@@ -358,16 +336,13 @@ def _render_flat(
     section_kind: str = "",
     lines: int = 0, chars: int = 0,
 ) -> Block:
-    """Render items as a flat list — sorted by salience for by-folds."""
-    is_by = fold_type == "by"
+    """Render items as a flat list — sorted by salience for by-folds.
 
-    # When --refs is active, filter to only connected items
-    # (fold_view already skips fully-disconnected sections, so items is non-empty)
-    if "refs" in visible and is_by:
-        items = tuple(
-            i for i in items
-            if i.refs or _item_full_key(i, key_field, section_kind) in inbound_edges
-        )
+    As of A1 of the trace-dissolution arc, --refs no longer filters items to
+    the ref-connected subset — see decision/design/trace-dissolves-into-read-
+    with-unified-refs.
+    """
+    is_by = fold_type == "by"
 
     if is_by:
         sorted_items: tuple[FoldItem, ...] | list[FoldItem] = sorted(

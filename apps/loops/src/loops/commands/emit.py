@@ -6,9 +6,21 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from engine import gen_id
 from loops.errors import LoopsError
+
+if TYPE_CHECKING:
+    from loops.cli.output import Reporter
+
+
+def _reporter(reporter: "Reporter | None") -> "Reporter":
+    """Resolve a Reporter — caller-supplied or the module default."""
+    if reporter is None:
+        from loops.cli.output import default_reporter
+        return default_reporter()
+    return reporter
 
 
 def _build_receipt_lines(
@@ -167,8 +179,14 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     return payload
 
 
-def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> int:
+def cmd_emit(
+    args: argparse.Namespace,
+    *,
+    vertex_path: Path | None = None,
+    reporter: "Reporter | None" = None,
+) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
+    _ = _reporter(reporter)  # reserved for future error routing
     from atoms import Fact
     from loops.commands.identity import resolve_observer, validate_emit
     from loops.commands.resolve import (
@@ -547,8 +565,15 @@ def cmd_emit(args: argparse.Namespace, *, vertex_path: Path | None = None) -> in
         return 1
 
 
-def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
+def _run_emit(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+    reporter: "Reporter | None" = None,
+) -> int:
     """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
+    _ = _reporter(reporter)  # reserved for future error routing
     parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
     if vertex_path is None:
         parser.add_argument(
@@ -592,7 +617,13 @@ def _run_emit(argv: list[str], *, vertex_path: Path | None = None, observer: str
     return cmd_emit(args, vertex_path=vertex_path)
 
 
-def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
+def _run_close(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+    reporter: "Reporter | None" = None,
+) -> int:
     """Close a thread — resolve it and capture what it produced.
 
     Volitional boundary: the observer decides when a thread is done.
@@ -611,8 +642,8 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
     from painted.palette import current_palette
     from loops.commands.identity import resolve_local_vertex, resolve_observer, validate_emit
     from loops.commands.resolve import _resolve_vertex_for_dispatch, _resolve_writable_vertex
-    from loops.main import _err
 
+    rep = _reporter(reporter)
     p = current_palette()
 
     parser = argparse.ArgumentParser(prog="loops close", add_help=False)
@@ -664,7 +695,7 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
                     break
 
     if target_item is None:
-        _err(f"No {args.kind} named '{args.name}' found in fold state.")
+        rep.err(f"No {args.kind} named '{args.name}' found in fold state.")
         return 1
 
     # Collect produced artifacts via two strategies:
@@ -758,7 +789,7 @@ def _run_close(argv: list[str], *, vertex_path: Path | None = None, observer: st
     # Validate and emit through runtime
     err = validate_emit(vertex_path, obs, args.kind)
     if err is not None:
-        _err(f"Error: {err}")
+        rep.err(f"Error: {err}")
         return 1
 
     from engine import load_vertex_program

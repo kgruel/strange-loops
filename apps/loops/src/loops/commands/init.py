@@ -5,6 +5,18 @@ import argparse
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loops.cli.output import Reporter
+
+
+def _reporter(reporter: "Reporter | None") -> "Reporter":
+    """Resolve a Reporter — caller-supplied or the module default."""
+    if reporter is None:
+        from loops.cli.output import default_reporter
+        return default_reporter()
+    return reporter
 
 
 _ROOT_VERTEX = """\
@@ -244,7 +256,12 @@ def _register_with_aggregator(name: str, local_vertex: Path) -> None:
     config_vertex.write_text(updated)
 
 
-def _seed_config_facts(vertex_path: Path, config: dict[str, str]) -> None:
+def _seed_config_facts(
+    vertex_path: Path,
+    config: dict[str, str],
+    *,
+    reporter: "Reporter | None" = None,
+) -> None:
     """Emit config facts into a newly-created vertex store.
 
     Each key=value pair becomes a fact with kind="config" and
@@ -253,8 +270,8 @@ def _seed_config_facts(vertex_path: Path, config: dict[str, str]) -> None:
     """
     from atoms import Fact
     from engine import load_vertex_program
-    from loops.main import _msg
 
+    rep = _reporter(reporter)
     key_aliases = {"metric": "primary_metric"}
 
     program = load_vertex_program(vertex_path, validate_ast=False, skip_sources=True)
@@ -276,10 +293,15 @@ def _seed_config_facts(vertex_path: Path, config: dict[str, str]) -> None:
     if hasattr(v, '_store') and v._store is not None:
         v._store.close()
 
-    _msg(f"Seeded {len(config)} config facts")
+    rep.msg(f"Seeded {len(config)} config facts")
 
 
-def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> None:
+def _scaffold_artifacts(
+    config: dict[str, str],
+    *,
+    vertex_name: str = "",
+    reporter: "Reporter | None" = None,
+) -> None:
     """Scaffold executable artifacts based on config values.
 
     If 'benchmark' is provided, creates autoresearch.sh.
@@ -288,8 +310,8 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
     Idempotent — won't overwrite existing scripts.
     """
     from loops.commands.resolve import loops_home
-    from loops.main import _msg
 
+    rep = _reporter(reporter)
     cwd = Path.cwd()
 
     benchmark = config.get("benchmark")
@@ -302,7 +324,7 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
                 f"{benchmark}\n"
             )
             script.chmod(0o755)
-            _msg(f"Created {script}")
+            rep.msg(f"Created {script}")
 
     checks = config.get("checks")
     if checks:
@@ -314,7 +336,7 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
                 f"{checks}\n"
             )
             script.chmod(0o755)
-            _msg(f"Created {script}")
+            rep.msg(f"Created {script}")
 
     if not vertex_name:
         return
@@ -375,10 +397,10 @@ def _scaffold_artifacts(config: dict[str, str], *, vertex_name: str = "") -> Non
                 "fi\n"
             )
         script.chmod(0o755)
-        _msg(f"Created {script}")
+        rep.msg(f"Created {script}")
 
 
-def cmd_init(args: argparse.Namespace) -> int:
+def cmd_init(args: argparse.Namespace, *, reporter: "Reporter | None" = None) -> int:
     """Initialize a loops vertex.
 
     No args: create root .vertex in LOOPS_HOME.
@@ -387,8 +409,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     """
     from loops.commands.resolve import loops_home
     from loops.commands.emit import _parse_emit_parts
-    from loops.main import _msg
 
+    rep = _reporter(reporter)
     name = getattr(args, "name", None)
     template = getattr(args, "template", None)
     seed_parts = getattr(args, "seed", None) or []
@@ -408,7 +430,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             return 0
         home.mkdir(parents=True, exist_ok=True)
         root.write_text(_ROOT_VERTEX)
-        _msg(f"Created {root}")
+        rep.msg(f"Created {root}")
         return 0
 
     # Name and/or template → local instance in .loops/
@@ -427,16 +449,16 @@ def cmd_init(args: argparse.Namespace) -> int:
             pass
 
     vertex_path = _init_local_vertex(target, source_name=template, iterations=iterations)
-    _msg(f"Created {vertex_path}")
+    rep.msg(f"Created {vertex_path}")
 
     if seed_config:
-        _seed_config_facts(vertex_path, seed_config)
-        _scaffold_artifacts(seed_config, vertex_name=target)
+        _seed_config_facts(vertex_path, seed_config, reporter=rep)
+        _scaffold_artifacts(seed_config, vertex_name=target or "", reporter=rep)
 
     return 0
 
 
-def _run_init(argv: list[str]) -> int:
+def _run_init(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Thin wrapper: parse argv for init, delegate to cmd_init.
 
     Accepts key=value pairs after the name for seeding config facts:
@@ -460,4 +482,4 @@ def _run_init(argv: list[str]) -> int:
         help="key=value pairs to emit as config facts after creation",
     )
     args = parser.parse_args(argv)
-    return cmd_init(args)
+    return cmd_init(args, reporter=reporter)

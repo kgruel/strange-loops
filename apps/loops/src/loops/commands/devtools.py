@@ -3,15 +3,28 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loops.cli.output import Reporter
 
 
-def _run_validate(argv: list[str]) -> int:
+def _reporter(reporter: "Reporter | None") -> "Reporter":
+    """Resolve a Reporter — caller-supplied or the module default."""
+    if reporter is None:
+        from loops.cli.output import default_reporter
+        return default_reporter()
+    return reporter
+
+
+def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run validate command via painted CLI harness."""
     from painted import run_cli
     from painted.cli import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from loops.lenses.validate import validate_view
-    from loops.main import _err
+
+    _ = _reporter(reporter)  # reserved for future error routing
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("files", nargs="*")
@@ -89,7 +102,7 @@ def _run_validate(argv: list[str]) -> int:
     return 0
 
 
-def _run_test(argv: list[str]) -> int:
+def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Test a .loop file — preview facts without persistence.
 
     Without --input: run the command, stream output through parse, show facts.
@@ -99,7 +112,8 @@ def _run_test(argv: list[str]) -> int:
     from painted.cli import HelpArg
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
-    from loops.main import _err
+
+    rep = _reporter(reporter)
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file")
@@ -109,11 +123,11 @@ def _run_test(argv: list[str]) -> int:
 
     path = Path(known.file)
     if not path.exists():
-        _err(f"Error: {path} does not exist")
+        rep.err(f"Error: {path} does not exist")
         return 1
 
     if path.suffix != ".loop":
-        _err("Error: test command only works with .loop files")
+        rep.err("Error: test command only works with .loop files")
         return 1
 
     if known.input:
@@ -232,14 +246,15 @@ def _run_test(argv: list[str]) -> int:
         )
 
 
-def _run_compile(argv: list[str]) -> int:
+def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run compile command via painted CLI harness."""
     from painted import run_cli
     from painted.cli import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from engine import compile_loop, compile_vertex
     from loops.lenses.compile import compile_view
-    from loops.main import _err
+
+    rep = _reporter(reporter)
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file")
@@ -247,7 +262,7 @@ def _run_compile(argv: list[str]) -> int:
 
     path = Path(known.file)
     if not path.exists():
-        _err(f"Error: {path} does not exist")
+        rep.err(f"Error: {path} does not exist")
         return 1
 
     def fetch():

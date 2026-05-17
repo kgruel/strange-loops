@@ -197,93 +197,16 @@ class TestExtractRefsDepth:
 
 
 class TestRunFoldRefsBothPaths:
-    """Asymmetric-pair regression: --refs must apply consistently across
-    slow path (_run_fold via run_cli) AND fast-path bail (_is_static_plain
-    returns False at the call site when refs_depth > 0).
+    """Retired: the fast/slow asymmetric-pair tests covered the now-removed
+    ``_run_fold_fast`` plain-text fast path. Step 4 of the CLI refactor
+    collapsed both paths into ``cli.views.fold`` — every read goes through
+    the same dispatch, so the asymmetric-pair bug class can't surface here
+    by construction. See decision/cli-refactor-fast-path-retired.
 
-    Tracks the bug class exercising-catches-coherence-gaps — yesterday's
-    pattern that catches "feature works in path A, silently breaks in path B."
-    The bug was actually shipped on first A1 implementation attempt: the
-    has_refs check inside _is_static_plain saw an already-stripped rest.
+    The ``_extract_refs_depth`` helper itself is still tested in
+    ``TestExtractRefsDepth`` above (it now lives in ``cli.views.fold``).
     """
 
-    @staticmethod
-    def _inject_argparse():
-        """main.py defers argparse import for cold-start perf, injecting it
-        into module globals via main() at line 1990. Tests that call _run_*
-        directly without going through main() must replicate that setup.
-        """
-        import argparse
-        import loops.main as _main
-        _main.__dict__["argparse"] = argparse
-
-    @staticmethod
-    def _mock_dispatch(monkeypatch):
-        """Set up shared mocks for both dispatch tests.
-
-        Returns (run_cli_stub, fast_path_patch) — caller is responsible for
-        entering the fast_path_patch context. main.py does `from painted import
-        run_cli` inside _run_fold, so we patch painted.run_cli (not
-        painted.cli.runner.run_cli — that's where it ORIGINATES, but
-        from-import binds a local reference that bypasses the source module).
-        """
-        from unittest.mock import MagicMock, patch
-        import painted
-        run_cli_stub = MagicMock(return_value=0)
-        monkeypatch.setattr(painted, "run_cli", run_cli_stub)
-        return run_cli_stub, patch("loops.main._run_fold_fast", return_value=0)
-
-    def test_refs_blocks_fast_path_at_call_site(self, tmp_path, monkeypatch):
-        """Verify _run_fold does NOT dispatch to _run_fold_fast when --refs is set.
-
-        Implementation invariant: refs_depth > 0 must bypass the fast path,
-        because the fast-path plain renderer has no edge-decoration support.
-        We exercise _run_fold with --refs + --static + --plain and confirm
-        _run_fold_fast is never called.
-        """
-        vf = tmp_path / "test.vertex"
-        vf.write_text("")
-        monkeypatch.chdir(tmp_path)
-        self._inject_argparse()
-
-        run_cli_stub, fast_path_patch = self._mock_dispatch(monkeypatch)
-        from loops.main import _run_fold
-
-        with fast_path_patch as fast_path:
-            _run_fold(["--refs", "--static", "--plain"], vertex_path=vf)
-            assert fast_path.call_count == 0, (
-                "_run_fold_fast was called with --refs — fast path's plain "
-                "renderer can't decorate edges. Regression: the --refs "
-                "bail-out at the _is_static_plain call site is broken."
-            )
-            assert run_cli_stub.call_count == 1, (
-                "Slow path (run_cli) was not entered; check whether the "
-                "dispatch fell through entirely."
-            )
-
-    def test_no_refs_uses_fast_path_when_static_plain(self, tmp_path, monkeypatch):
-        """Mirror: without --refs, --static --plain SHOULD take the fast path.
-
-        Establishes the asymmetric pair: same flags except --refs. Different
-        dispatch. Together with the previous test, this locks the contract
-        — if either side flips, the pair breaks and someone has to look at it.
-        """
-        vf = tmp_path / "test.vertex"
-        vf.write_text("")
-        monkeypatch.chdir(tmp_path)
-        self._inject_argparse()
-
-        run_cli_stub, fast_path_patch = self._mock_dispatch(monkeypatch)
-        from loops.main import _run_fold
-
-        with fast_path_patch as fast_path:
-            _run_fold(["--static", "--plain"], vertex_path=vf)
-            assert fast_path.call_count == 1, (
-                "Fast path was not taken for --static --plain (no --refs). "
-                "Either the fast-path criteria changed or refs_depth "
-                "extraction is leaking a non-zero value when --refs is absent."
-            )
-            assert run_cli_stub.call_count == 0
     def test_explicit_path(self, tmp_path):
         """_resolve_vertex_path with explicit file arg (L511)."""
         from loops.main import _resolve_vertex_path

@@ -110,12 +110,25 @@ class TestStaticBranchSmoke:
     Step 0 only verifies that unknown lenses produce a clean error rather
     than crashing."""
 
-    def test_unknown_lens_reports_error(self):
+    def test_unknown_lens_reports_error(self, capsys):
+        """Unknown explicit-named lens triggers the strict
+        ``_resolve_render_fn → _exit_lens_not_found → sys.exit(2)`` path.
+
+        Step 4 of the cli refactor wires dispatch through the strict
+        resolver so explicit --lens NAME requests fail loudly rather
+        than silently falling back to the default. The error goes to
+        real stderr (not the Reporter), so we use capsys.
+        """
+        import pytest as _pytest
+
         op = Operation(
             verb="read", fn=lambda: {"sections": []},
-            render_lens="this-lens-does-not-exist",
+            render_lens="fold",
+            lens_override="this-lens-does-not-exist",
         )
         reporter = BufferReporter()
-        rc = dispatch(op, reporter=reporter)
-        assert rc == 2
-        assert any("not found" in line.lower() for line in reporter.err_lines)
+        with _pytest.raises(SystemExit) as exc_info:
+            dispatch(op, reporter=reporter)
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "this-lens-does-not-exist" in captured.err

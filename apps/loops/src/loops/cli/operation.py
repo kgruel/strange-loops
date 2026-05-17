@@ -44,10 +44,19 @@ class Operation:
             commands.emit.cmd_emit, …). ``fn(**params)`` is called by
             ``dispatch``.
         params: kwargs for fn.
-        render_lens: name of the lens to render fn's return value through.
-            ``None`` means action shape (no rendering — fn does its own
-            side-effects and returns either ``None`` or a string/Block to
+        render_lens: name of the BASE lens to render fn's return value
+            through ("fold", "stream", "trace", …). Determines the
+            function name dispatch looks up inside the lens module
+            (``fold_view`` / ``stream_view`` / …). ``None`` means action
+            shape (no rendering — fn does its own side-effects and
+            returns either ``None``, an exit code, or a string/Block to
             ``reporter.show``).
+        lens_override: optional user-supplied lens module name (the
+            ``--lens NAME`` flag). When set, dispatch resolves
+            ``NAME.<render_lens>_view`` through the lens search chain
+            (vertex-local → project → user → built-in). ``render_lens``
+            stays the canonical view-function name regardless of the
+            override.
         fidelity: painted.Fidelity for display ops; may be ``None`` for
             actions.
         render_context: extra kwargs forwarded to the lens (e.g. ``diff=True``
@@ -68,6 +77,7 @@ class Operation:
     fn: Callable[..., Any]
     params: dict[str, Any] = field(default_factory=dict)
     render_lens: str | None = None
+    lens_override: str | None = None
     fidelity: Fidelity | None = None
     render_context: dict[str, Any] = field(default_factory=dict)
     vertex_path: Path | None = None

@@ -52,6 +52,10 @@ async def _run_live_async(
                 r.render(block)
     except KeyboardInterrupt:
         return 130
+    except asyncio.CancelledError:
+        # Tests cancel the loop via a patched asyncio.sleep; a runtime
+        # cancellation reaches the same exit code.
+        return 0
     return 0
 
 

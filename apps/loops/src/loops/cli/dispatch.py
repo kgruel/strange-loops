@@ -55,19 +55,32 @@ _VIEW_SUFFIX = {
 }
 
 
-def _resolve_lens(name: str, vertex_path: Path | None):
-    """Resolve a render_lens name to its callable.
+def _resolve_lens(
+    name: str,
+    vertex_path: Path | None,
+    *,
+    lens_override: str | None = None,
+):
+    """Resolve a render_lens (+ optional override) to its callable.
 
-    The lens lives at ``loops.lenses.<name>`` (or any override location),
-    and the function within the module is named ``<name>_view`` by
-    convention. Unknown names default to ``<name>_view`` — extending the
-    convention without editing the dispatch map.
+    Delegates to ``loops.main._resolve_render_fn`` so the strict
+    "explicit lens request must resolve or sys.exit(2)" discipline
+    applies uniformly — same error surface as the legacy code path the
+    cli refactor is replacing. (_resolve_render_fn moves out of
+    loops.main in step 6; the import goes with it.)
+
+    The function within the lens module is named ``<base>_view`` per
+    ``_VIEW_SUFFIX`` (or ``<name>_view`` for new verbs). When
+    ``lens_override`` is set, the lens *module* is the override but
+    the function-name lookup stays anchored to the base view — so
+    ``--lens autoresearch`` on a fold operation finds
+    ``loops.lenses.autoresearch.fold_view`` (the re-export pattern,
+    see lenses/autoresearch.py).
     """
-    from loops.lens_resolver import resolve_lens
+    from loops.main import _resolve_render_fn  # noqa: PLC0415 — moves step 6
 
     view_name = _VIEW_SUFFIX.get(name, f"{name}_view")
-    vertex_dir = vertex_path.parent if vertex_path else None
-    return resolve_lens(name, view_name, vertex_dir=vertex_dir)
+    return _resolve_render_fn(lens_override, vertex_path, view_name)
 
 
 def _zoom_of(fidelity: "Fidelity | None") -> Zoom:
@@ -86,9 +99,15 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
     Returns the process exit code (0 = success; non-zero = error).
     """
-    # ACTION: fn has side effects; result (if any) is a receipt.
+    # ACTION: fn has side effects; result (if any) is either an exit
+    # code (legacy cmd_* contract returning 0/1) or a renderable receipt
+    # (string/Block to flow through reporter.show). Ints win — keeps
+    # cmd_emit/cmd_init/etc. drop-in for the pilot before we move them
+    # over to "return receipt object" later.
     if op.is_action:
         result = op.fn(**op.params)
+        if isinstance(result, int):
+            return result
         if result is not None:
             reporter.show(result)
         return 0
@@ -111,12 +130,22 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         return _dispatch_live(op, reporter)
 
     # STATIC: fetch → lens → print_block.
-    lens_fn = _resolve_lens(op.render_lens or "", op.vertex_path)
+    lens_fn = _resolve_lens(
+        op.render_lens or "",
+        op.vertex_path,
+        lens_override=op.lens_override,
+    )
     if lens_fn is None:
-        reporter.err(f"Lens not found: {op.render_lens}")
+        target = op.lens_override or op.render_lens
+        reporter.err(f"Lens not found: {target}")
         return 2
 
-    data = op.fn(**op.params)
+    try:
+        data = op.fn(**op.params)
+    except Exception as exc:
+        reporter.err(f"Error: {exc}")
+        return 1
+
     from loops.lens_resolver import call_lens
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
@@ -134,7 +163,11 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         extra.setdefault("vertex_name", _vertex_name(op.vertex_path))
         extra.setdefault("vertex_path", str(op.vertex_path))
 
-    block = call_lens(lens_fn, data, _zoom_of(op.fidelity), reporter.width, **extra)
+    try:
+        block = call_lens(lens_fn, data, _zoom_of(op.fidelity), reporter.width, **extra)
+    except Exception as exc:
+        reporter.err(f"Render error: {exc}")
+        return 2
     if not isinstance(block, Block):
         # Lens may return None when there's nothing to render.
         return 0
@@ -149,9 +182,14 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     reaching here; this assertion narrows for the type-checker.
     """
     assert op.stream_fn is not None, "dispatch() must verify stream_fn before calling _dispatch_live"
-    lens_fn = _resolve_lens(op.render_lens or "", op.vertex_path)
+    lens_fn = _resolve_lens(
+        op.render_lens or "",
+        op.vertex_path,
+        lens_override=op.lens_override,
+    )
     if lens_fn is None:
-        reporter.err(f"Lens not found: {op.render_lens}")
+        target = op.lens_override or op.render_lens
+        reporter.err(f"Lens not found: {target}")
         return 2
 
     from .live import run_live

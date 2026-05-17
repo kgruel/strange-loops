@@ -17,7 +17,7 @@ from painted import Zoom
 from engine.builder import vertex, fold_count, fold_by, fold_collect
 from loops.main import (
     main, cmd_emit, cmd_init,
-    _render_main_help, _run_validate, _run_ticks, _run_fold_fast,
+    _render_main_help, _run_validate, _run_ticks,
     _try_topology_from_store, _resolve_combine_child, _resolve_vertex_for_dispatch,
     _whoami_from_identity_store,
 )
@@ -2065,21 +2065,9 @@ class TestTryFastRead:
         rc = main(["read", "myv", "--static", "--plain"])
         assert rc == 0
 
-    def test_fast_read_unresolvable_vertex_falls_through(self, tmp_path, monkeypatch):
-        """_try_fast_read returns None when vertex name can't be resolved (L1344).
-
-        When _resolve_vertex_for_dispatch returns None (vertex not found),
-        _try_fast_read returns None to let full dispatch handle it.
-        Test directly so we don't depend on full dispatch error-handling.
-        """
-        from loops.main import _try_fast_read
-
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        monkeypatch.chdir(tmp_path)
-        # Must include "read" verb so len check passes (needs ≥4 args)
-        # Unresolvable name → _resolve_vertex_for_dispatch returns None → L1344
-        result = _try_fast_read(["read", "no-such-vertex", "--static", "--plain"])
-        assert result is None
+    # test_fast_read_unresolvable_vertex_falls_through retired in step 6 —
+    # _try_fast_read is gone with the fast path. Equivalent end-user
+    # behaviour is exercised via main() in test_unknown_command_errors.
 
 
 class TestRunCompile:
@@ -2176,16 +2164,10 @@ class TestRenderFoldPlainEdges:
         rc = main(["read", str(vpath), "--static", "--plain"])
         assert rc == 0
 
-    def test_narrow_width_body_truncation(self, fold_collect_vertex):
-        """Very narrow width triggers body truncation (L2275-2277)."""
-        tmp_path, vpath = fold_collect_vertex
-        _emit(vpath, "event", service="a-very-long-name-here", action="deploy-action")
-        from loops.main import _render_fold_plain
-        from loops.commands.fetch import fetch_fold
-        data = fetch_fold(vpath)
-        # Width=15 is small enough to trigger truncation of body
-        text = _render_fold_plain(data, zoom_level=1, width=15)
-        assert text is not None
+    # test_narrow_width_body_truncation retired in step 6 — _render_fold_plain
+    # was the fast-path's pure-text renderer; removed when the fast path went
+    # away in step 4. Width truncation is now tested through fold_view's own
+    # rendering path via the goldens.
 
 
 class TestMiscEdgePaths:

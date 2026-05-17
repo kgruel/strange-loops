@@ -66,6 +66,7 @@ class Reporter(Protocol):
     """
 
     width: int | None
+    use_ansi: bool
 
     def err(self, message: str) -> None:
         """Print an error message (stderr in production)."""
@@ -93,12 +94,17 @@ class PaintedReporter:
     ``width`` reflects the current terminal width when stdout is a TTY,
     or ``None`` when piped (signaling "no truncation/padding" per
     painted's convention).
+
+    ``use_ansi`` controls colour/escape output for ``print_block``. Views
+    set it to False to honour ``--plain``; defaults to True (the painted
+    writer itself further suppresses colour for non-TTY stdout).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, use_ansi: bool = True) -> None:
         # Resolve width once at construction. Reporter instances are
         # short-lived (one per main() call) so this is fine.
         self.width: int | None = self._detect_width()
+        self.use_ansi: bool = use_ansi
 
     @staticmethod
     def _detect_width() -> int | None:
@@ -115,13 +121,17 @@ class PaintedReporter:
         show(Block.text(message, palette.error), file=sys.stderr)
 
     def msg(self, message: str) -> None:
-        show(message)
+        # Match the original loops.main._msg styling — non-error messages
+        # render in the success palette (green checkmark vibe) so init/emit
+        # confirmation lines remain visually distinct from plain output.
+        palette = current_palette()
+        show(Block.text(message, palette.success))
 
     def show(self, value: Any) -> None:
         show(value)
 
     def print_block(self, block: Block) -> None:
-        print_block(block)
+        print_block(block, use_ansi=self.use_ansi)
 
 
 class BufferReporter:
@@ -132,8 +142,9 @@ class BufferReporter:
     terminal width used in golden tests; override per-test as needed.
     """
 
-    def __init__(self, *, width: int | None = 80) -> None:
+    def __init__(self, *, width: int | None = 80, use_ansi: bool = True) -> None:
         self.width: int | None = width
+        self.use_ansi: bool = use_ansi
         self.err_lines: list[str] = []
         self.out_lines: list[str] = []
         self.shown: list[Any] = []

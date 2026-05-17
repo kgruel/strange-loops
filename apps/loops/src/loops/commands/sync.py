@@ -4,8 +4,20 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loops.errors import LoopsError
+
+if TYPE_CHECKING:
+    from loops.cli.output import Reporter
+
+
+def _reporter(reporter: "Reporter | None") -> "Reporter":
+    """Resolve a Reporter — caller-supplied or the module default."""
+    if reporter is None:
+        from loops.cli.output import default_reporter
+        return default_reporter()
+    return reporter
 
 
 def _resolve_combine_vertex_paths(vertex_path: Path) -> list[Path]:
@@ -32,7 +44,13 @@ def _resolve_combine_vertex_paths(vertex_path: Path) -> list[Path]:
     return child_paths
 
 
-def _execute_boundary_run(command: str, tick_name: str, vertex_path: Path) -> None:
+def _execute_boundary_run(
+    command: str,
+    tick_name: str,
+    vertex_path: Path,
+    *,
+    reporter: "Reporter | None" = None,
+) -> None:
     """Execute a boundary run clause — fire and forget.
 
     Engine produces ticks with run metadata. This function executes
@@ -42,10 +60,10 @@ def _execute_boundary_run(command: str, tick_name: str, vertex_path: Path) -> No
     Errors are logged to stderr but don't fail the sync.
     """
     import subprocess
-    from loops.main import _err
 
+    rep = _reporter(reporter)
     cwd = vertex_path.parent
-    _err(f"  boundary {tick_name} → run: {command}")
+    rep.err(f"  boundary {tick_name} → run: {command}")
     try:
         subprocess.Popen(
             command,
@@ -54,7 +72,7 @@ def _execute_boundary_run(command: str, tick_name: str, vertex_path: Path) -> No
             start_new_session=True,  # detach from parent process group
         )
     except OSError as e:
-        _err(f"  [ERROR] boundary run failed: {e}")
+        rep.err(f"  [ERROR] boundary run failed: {e}")
 
 
 def _run_sync_aggregate(
@@ -64,14 +82,15 @@ def _run_sync_aggregate(
     force: bool,
     parent_name: str,
     rest: list[str],
+    reporter: "Reporter | None" = None,
 ) -> int:
     """Sync each combine child independently and aggregate results."""
     from painted import run_cli, show, Block
     from painted.cli import HelpArg
     from painted.palette import current_palette
     from engine import load_vertex_program
-    from loops.main import _err
 
+    rep = _reporter(reporter)
     label = "force" if force else "cadence-gated"
     show(
         Block.text(
@@ -83,7 +102,7 @@ def _run_sync_aggregate(
 
     def log_error(fact):
         payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
-        _err(f"[ERROR] {fact.observer}: {payload}")
+        rep.err(f"[ERROR] {fact.observer}: {payload}")
 
     def fetch():
         all_ran: list[str] = []
@@ -164,7 +183,12 @@ def _run_sync_aggregate(
     )
 
 
-def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
+def _run_sync(
+    argv: list[str],
+    *,
+    vertex_path: Path | None = None,
+    reporter: "Reporter | None" = None,
+) -> int:
     """Sync verb — cadence-gated source execution.
 
     ``loops sync [vertex] [--force] [--var KEY=VALUE]``
@@ -176,8 +200,10 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
     from painted.cli import HelpArg
     from painted.palette import current_palette
     from engine import load_vertex_program
-    from loops.commands.resolve import _resolve_named_vertex, loops_home
-    from loops.main import _err, _parse_vars, _resolve_vertex_path
+    from loops.commands.resolve import _resolve_named_vertex
+    from loops.main import _parse_vars, _resolve_vertex_path
+
+    rep = _reporter(reporter)
 
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
@@ -198,7 +224,7 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
                 try:
                     vertex_path = _resolve_named_vertex(vname)
                 except LoopsError as e:
-                    _err(str(e))
+                    rep.err(str(e))
                     return 1
         else:
             vertex_path = _resolve_vertex_path(None)
@@ -206,13 +232,13 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
                 return 1
 
     if not vertex_path.exists():
-        _err(f"Error: {vertex_path} does not exist")
+        rep.err(f"Error: {vertex_path} does not exist")
         return 1
 
     try:
         vars = _parse_vars(known.var)
     except ValueError as e:
-        _err(str(e))
+        rep.err(str(e))
         return 1
 
     program = load_vertex_program(
@@ -225,20 +251,20 @@ def _run_sync(argv: list[str], *, vertex_path: Path | None = None) -> int:
         if child_paths:
             return _run_sync_aggregate(
                 child_paths, vars=vars or None, force=known.force,
-                parent_name=program.name, rest=rest,
+                parent_name=program.name, rest=rest, reporter=rep,
             )
         # Sourceless vertex with a store: still sync to evaluate boundaries.
         # Vertices like orchestration have no sources but boundaries with
         # run clauses that fire on externally-emitted facts.
         if not program.has_store:
-            _err("No sources configured")
+            rep.err("No sources configured")
             return 1
 
     force = known.force
 
     def log_error(fact):
         payload = dict(fact.payload) if hasattr(fact.payload, "items") else fact.payload
-        _err(f"[ERROR] {fact.observer}: {payload}")
+        rep.err(f"[ERROR] {fact.observer}: {payload}")
 
     label = "force" if force else "cadence-gated"
     show(

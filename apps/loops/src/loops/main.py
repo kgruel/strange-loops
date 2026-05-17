@@ -27,28 +27,36 @@ Commands:
 
 from __future__ import annotations
 
+import argparse  # noqa: F401 — many _run_* functions below reference it lazily
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 # typing deferred — TextIO only used in annotations (strings with __future__)
-# argparse deferred — imported lazily in main() after fast-path check (~3ms cold)
 
 
 def _err(msg: str, file: TextIO | None = None) -> None:
-    """Show an error message through painted."""
-    from painted import show, Block
-    from painted.palette import current_palette
+    """Show an error message — thin alias to cli.output.err.
 
-    show(Block.text(msg, current_palette().error), file=file or sys.stderr)
+    Kept through step 6 of the CLI refactor for back-compat with tests and
+    callers that haven't been threaded with a Reporter yet. ``file`` is
+    accepted for legacy signature parity but ignored — cli.output.err
+    always writes to stderr via PaintedReporter.
+    """
+    from loops.cli.output import err as _err_impl
+    _ = file
+    _err_impl(msg)
 
 
 def _msg(msg: str, file: TextIO | None = None) -> None:
-    """Show a success/info message through painted."""
-    from painted import show, Block
-    from painted.palette import current_palette
+    """Show a success/info message — thin alias to cli.output.msg.
 
-    show(Block.text(msg, current_palette().success), file=file or sys.stdout)
+    See _err for the back-compat note. ``file`` is accepted for legacy
+    signature parity but ignored.
+    """
+    from loops.cli.output import msg as _msg_impl
+    _ = file
+    _msg_impl(msg)
 
 
 def _parse_vars(raw: list[str]) -> dict[str, str]:
@@ -369,6 +377,9 @@ def _resolve_render_fn(
     elif view_name == "ticks_view":
         from .lenses.ticks import ticks_view
         return ticks_view
+    elif view_name == "trace_view":
+        from .lenses.trace import trace_view
+        return trace_view
 
     from .lenses.fold import fold_view
     return fold_view
@@ -550,89 +561,36 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
 
 
 
-def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
-    """Extract ``--refs [N]`` from rest; return ``(refs_depth, cleaned_rest)``.
-
-    Manual scan rather than argparse ``nargs='?'`` because the latter is
-    brittle when the optional integer is followed by another flag or a
-    positional that argparse might try to consume as the int value.
-
-    Semantics:
-      - ``--refs``                 → depth 1 (bare flag = walk one hop)
-      - ``--refs 2`` / ``--refs=N`` → depth N
-      - absent                    → depth 0 (no walk, no edge decoration)
-      - ``--refs <non-int>``       → depth 1, ``<non-int>`` is left in rest
-
-    Removes the consumed tokens from rest so downstream parsers (painted)
-    don't double-consume them.
-    """
-    depth = 0
-    out: list[str] = []
-    i = 0
-    while i < len(rest):
-        arg = rest[i]
-        if arg == "--refs":
-            # Greedy peek: if the next token parses as int, consume both;
-            # otherwise treat as bare flag and leave next token for others.
-            if i + 1 < len(rest):
-                try:
-                    depth = int(rest[i + 1])
-                    i += 2
-                    continue
-                except ValueError:
-                    pass
-            depth = 1
-            i += 1
-            continue
-        if arg.startswith("--refs="):
-            try:
-                depth = int(arg.split("=", 1)[1])
-            except ValueError:
-                depth = 1
-            i += 1
-            continue
-        out.append(arg)
-        i += 1
-    return depth, out
-
-
-def _looks_like_vertex_path(s: str) -> bool:
-    """True when ``s`` looks like a filesystem path to a vertex file.
-
-    Used by _run_fold to disambiguate the first positional: a file path is
-    a vertex, a slash-containing non-path is a ``kind/key`` entity. The
-    heuristics are conservative — they recognize the forms tests and
-    callers actually use without claiming to be a full path classifier.
-
-    True when ``s``:
-      - is absolute (starts with ``/``)
-      - is relative-current (starts with ``./``)
-      - ends with ``.vertex`` (the canonical extension)
-    """
-    if s.startswith("/") or s.startswith("./") or s.startswith("../"):
-        return True
-    if s.endswith(".vertex"):
-        return True
-    return False
+# --- Fold helpers moved to cli.views.fold; re-exported for test back-compat ---
+from loops.cli.views.fold import (  # noqa: E402
+    _extract_refs_depth,
+    _looks_like_vertex_path,
+)
 
 
 def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
     """Run fold command — show collapsed vertex state.
 
-    Positional forms supported:
-      sl read                          — local vertex, all kinds
-      sl read project                  — named vertex, all kinds
-      sl read project decision/        — named vertex, kind drill (kind-wide)
-      sl read project decision/design/ — named vertex, kind + key prefix
-      sl read project decision/design/foo — named vertex, single entity
-      sl read decision/design/foo      — local vertex, single entity (entity is
-                                          recognized by containing "/" )
-
-    B of trace-dissolution: read absorbs trace's positional kind/key form.
-    The disambiguation rule for the first positional: if it contains "/",
-    treat as entity (and resolve vertex locally); otherwise, treat as
-    vertex name (and the second positional, if any, is the entity).
+    Thin shim around ``cli.views.fold.run`` post-step-4 of the CLI refactor:
+    constructs a CliContext from the legacy kwargs and delegates. Kept so
+    callers that still go through the legacy router (``_run_read``) work
+    unchanged — the registry routes ``read`` through ``_run_read`` until
+    step 5 lands the dedicated read router.
     """
+    from loops.cli.context import CliContext
+    from loops.cli.output import default_reporter
+    from loops.cli.views.fold import run
+
+    ctx = CliContext(
+        reporter=default_reporter(),
+        vertex_path=vertex_path,
+        observer=observer,
+    )
+    return run(argv, ctx)
+
+
+# _run_fold_legacy placeholder retired in step 6 — see git history for the
+# original orchestrator (last live at commit 68500ba pre-cli-refactor).
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         # Two positionals: first is vertex-or-entity (disambiguated below),
@@ -888,326 +846,8 @@ def _is_static_plain(rest: list[str]) -> bool:
     return has_static and has_plain and not has_help and not has_json and not has_live and not has_interactive
 
 
-def _render_fold_plain(
-    data: Any, zoom_level: int, width: int,
-    *, lines: int = 0, chars: int = 0,
-) -> str:
-    """Render fold state as plain text without importing painted (~15ms saved).
-
-    Produces identical output to fold_view + print_block(use_ansi=False)
-    for MINIMAL and SUMMARY zoom levels. Falls back to None for DETAILED/FULL
-    which need the full lens for metadata rendering.
-
-    This avoids the painted.core.block → _text_width → wcwidth import chain
-    (~13ms) and the writer/icon_set imports (~2ms).
-
-    Density budgets (0 = unlimited):
-      lines: max items shown per section. Items beyond budget collapse to "(N more)".
-      chars: max display width for body text. Caps width-based budget.
-    """
-    populated = [s for s in data.sections if s.items]
-    if not populated:
-        return "No data yet."
-
-    # MINIMAL: one-liner counts
-    if zoom_level == 0:
-        parts = [f"{s.count} {s.kind}s" for s in populated]
-        return ", ".join(parts)
-
-    # SUMMARY: section headers + item lines
-    out: list[str] = []
-    for s in populated:
-        if out:
-            out.append("")
-
-        # Header
-        label = s.kind.title()
-        if not s.kind.endswith("s"):
-            label += "s"
-        out.append(f"{label} ({s.count}):")
-
-        # Items — apply lines budget
-        is_by = s.fold_type == "by"
-        all_items = list(s.items)
-        total = len(all_items)
-        shown_items = all_items[:lines] if lines > 0 and total > lines else all_items
-
-        for item in shown_items:
-            payload = item.payload
-            if is_by and s.key_field:
-                item_label = str(payload.get(s.key_field, ""))
-                used_label_field = s.key_field
-            else:
-                item_label = "?"
-                used_label_field = None
-                for k, v in payload.items():
-                    if v:
-                        item_label = str(v)
-                        used_label_field = k
-                        break
-
-            # Body: first non-label payload field
-            body = None
-            skip = {used_label_field} if used_label_field else set()
-            for k, v in payload.items():
-                if k in skip or not v:
-                    continue
-                body = str(v)
-                break
-
-            if body:
-                # Truncate body to fit within width (matches fold_view logic)
-                reserved = len(item_label) + 6  # "  label: snippet"
-                max_body = width - reserved
-                if max_body < 10:
-                    max_body = 10
-                if chars > 0:
-                    max_body = min(max_body, chars)
-                if len(body) > max_body:
-                    body = body[: max_body - 1] + "\u2026"
-                line = f"  {item_label}: {body}"
-            else:
-                line = f"  {item_label}"
-            out.append(line)
-
-        remaining = total - len(shown_items)
-        if remaining > 0:
-            out.append(f"  ({remaining} more)")
-
-    return "\n".join(out)
-
-
-def _run_fold_diff(
-    known, rest: list[str], refs_depth: int,
-    *,
-    vertex_path: Path | None = None,
-    observer: str | None = None,
-) -> int:
-    """Run read in --diff mode — cumulative field-deltas for one entity.
-
-    C of the trace-dissolution arc. Routes the entity's source-fact
-    lifecycle through fetch_trace (which can also walk outbound refs at
-    ``refs_depth`` for cross-entity diff partitioning) and renders via
-    ``trace_view`` with ``_diff=True``. The lens code stays in
-    ``lenses/trace.py`` because the diff-render is the load-bearing piece
-    we're absorbing — only the trace command goes away in D.
-
-    Requires an entity (kind/key) — diff is meaningless without a target
-    entity. Errors loudly when invoked without one.
-    """
-    from painted import run_cli
-    from painted.cli import HelpArg
-
-    # --diff requires a target entity. By the time we get here, _run_fold
-    # has routed any positional kind/key into known.kind. If known.kind is
-    # None or has no key part, we have no entity to diff.
-    target = known.kind if "/" in (known.kind or "") else None
-    if target is None:
-        _err(
-            "usage: sl read [vertex] <kind>/<key> --diff\n"
-            "  --diff renders cumulative field-deltas of one entity's "
-            "lifecycle; supply a kind/key."
-        )
-        return 2
-
-    diff_kind, diff_key = target.split("/", 1)
-
-    def fetch():
-        nonlocal vertex_path, observer
-        if vertex_path is None:
-            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
-            vname = getattr(known, "vertex", None)
-            if vname is not None:
-                local = _resolve_vertex_for_dispatch(vname)
-                vertex_path = local if local is not None else _resolve_named_vertex(vname)
-            else:
-                vertex_path = _resolve_local_vertex()
-        observer = _apply_vertex_scope(observer, vertex_path)
-        obs_for_engine = observer if observer else None
-        _validate_kind_or_exit(diff_kind, vertex_path)
-
-        from .commands.fetch import fetch_trace
-        data = fetch_trace(
-            vertex_path,
-            kind=diff_kind,
-            key=diff_key,
-            observer=obs_for_engine,
-            refs_depth=refs_depth,
-        )
-        data["_diff"] = True
-        return data
-
-    def render(ctx, data):
-        # --lens override still respected; otherwise default to trace_view
-        # (which dispatches to _render_diff internally on _diff=True).
-        lens_name = getattr(known, "lens", None)
-        if lens_name is not None:
-            render_fn = _resolve_render_fn(lens_name, vertex_path, "trace_view")
-        else:
-            from .lenses.trace import trace_view
-            render_fn = trace_view
-        w = ctx.width if ctx.is_tty else None
-        from .lens_resolver import call_lens
-        return call_lens(
-            render_fn, data, ctx.zoom, w,
-            vertex_name=_vertex_name(vertex_path),
-        )
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops read --diff",
-        description="Cumulative field-deltas of one entity's lifecycle",
-        help_args=[
-            HelpArg("entity", "kind/key positional (already consumed at this point)", positional=True),
-            HelpArg("--diff", "Render cumulative field-deltas (this flag)"),
-            HelpArg("--refs", "Also include outbound refs in the diff (partitioned per entity)"),
-            HelpArg("--observer", "Filter by observer (default: you)"),
-            HelpArg("--lens", "Override the default diff lens"),
-        ],
-    )
-
-
-def _run_fold_fast(
-    known, rest: list[str],
-    *,
-    vertex_path: Path | None = None,
-    observer: str | None = None,
-) -> int:
-    """Fast path for --static --plain: skip CLI framework import.
-
-    For MINIMAL/SUMMARY zoom with no custom lens, renders fold state
-    directly as plain text — skipping the entire painted import chain
-    (~15ms: Block→wcwidth, writer, icons). Falls back to painted for
-    DETAILED/FULL zoom or custom lenses.
-    """
-    import shutil
-
-    # Resolve zoom + key drilldown from rest args (lightweight, no painted import)
-    zoom_level = 1  # SUMMARY default
-    max_lines = 0
-    max_chars = 0
-    key_filter: str | None = None
-    i = 0
-    while i < len(rest):
-        arg = rest[i]
-        if arg == "-q" or arg == "--quiet":
-            zoom_level = 0
-        elif arg == "-vv":
-            zoom_level = 3
-        elif arg == "-v" or arg == "--verbose":
-            zoom_level = 2
-        elif arg == "--max-lines" and i + 1 < len(rest):
-            try:
-                max_lines = int(rest[i + 1])
-            except ValueError:
-                pass
-            i += 1
-        elif arg.startswith("--max-lines="):
-            try:
-                max_lines = int(arg.split("=", 1)[1])
-            except ValueError:
-                pass
-        elif arg == "--max-chars" and i + 1 < len(rest):
-            try:
-                max_chars = int(rest[i + 1])
-            except ValueError:
-                pass
-            i += 1
-        elif arg.startswith("--max-chars="):
-            try:
-                max_chars = int(arg.split("=", 1)[1])
-            except ValueError:
-                pass
-        elif arg == "--key" and i + 1 < len(rest):
-            key_filter = rest[i + 1]
-            i += 1
-        elif arg.startswith("--key="):
-            key_filter = arg.split("=", 1)[1]
-        i += 1
-
-    # Fetch data
-    if vertex_path is None:
-        from .commands.identity import resolve_local_vertex as _resolve_local_vertex
-        vname = getattr(known, "vertex", None)
-        if vname is not None:
-            local = _resolve_vertex_for_dispatch(vname)
-            vertex_path = local if local is not None else _resolve_named_vertex(vname)
-        else:
-            vertex_path = _resolve_local_vertex()
-
-    observer = _apply_vertex_scope(observer, vertex_path)
-    obs_for_engine = observer if observer else None
-
-    # Kind validation against vertex.declared_kinds (see _validate_kind_or_exit).
-    _validate_kind_or_exit(known.kind, vertex_path)
-
-    # Lens-declared fetch takes precedence. Composition lenses (fold + ticks,
-    # etc.) return a non-FoldState shape — the pure-text fast path can't
-    # render that, so we route those through painted below.
-    # --key may arrive via known.key (when caller pre-parsed it) or via rest
-    # (when called standalone). Prefer known.key.
-    effective_key = getattr(known, "key", None) or key_filter
-
-    lens_fetch = _resolve_lens_fetch(known.lens, vertex_path, "fold_view")
-    try:
-        if lens_fetch is not None:
-            from .lens_resolver import call_lens_fetch
-            data = call_lens_fetch(
-                lens_fetch, vertex_path,
-                kind=known.kind, key=effective_key, observer=obs_for_engine,
-            )
-        else:
-            from .commands.fetch import fetch_fold
-            data = fetch_fold(
-                vertex_path, kind=known.kind, key=effective_key, observer=obs_for_engine,
-            )
-    except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    # Text-only rendering for MINIMAL/SUMMARY with default lens and default
-    # fetch shape — skips the entire painted import chain (~15ms). Lens-
-    # declared fetch shapes go through painted regardless of zoom.
-    if known.lens is None and lens_fetch is None and zoom_level <= 1:
-        width = shutil.get_terminal_size().columns
-        text = _render_fold_plain(
-            data, zoom_level, width,
-            lines=max_lines, chars=max_chars,
-        )
-        print(text)
-        return 0
-
-    # DETAILED/FULL or custom lens: fall back to painted rendering
-    if known.lens is not None:
-        render_fn = _resolve_render_fn(known.lens, vertex_path, "fold_view")
-    else:
-        from .lenses.fold import fold_view
-        render_fn = fold_view
-    from painted.core.zoom import Zoom
-
-    zoom = Zoom(zoom_level)
-    width = shutil.get_terminal_size().columns
-
-    from .lens_resolver import call_lens
-    try:
-        block = call_lens(
-            render_fn, data, zoom, width,
-            vertex_name=_vertex_name(vertex_path),
-            vertex_path=str(vertex_path) if vertex_path else None,
-        )
-    except Exception as exc:
-        print(f"Render error: {exc}", file=sys.stderr)
-        return 2
-
-    # Output — plain text, no ANSI
-    from painted.core.writer import print_block
-    from painted.icon_set import ASCII_ICONS, use_icons
-
-    with use_icons(ASCII_ICONS):
-        print_block(block, use_ansi=False)
-    return 0
+# --- _render_fold_plain / _run_fold_diff / _run_fold_fast retired in step 6 ---
+# See git history at commit 68500ba (pre-cli-refactor) for the legacy bodies.
 
 
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -1918,118 +1558,21 @@ def _dispatch_command(cmd: str, argv: list[str]) -> int:
     )
 
 
-def _try_fast_read(argv: list[str]) -> int | None:
-    """Ultra-fast path for ``read <vertex> --static --plain``.
-
-    Detects the common read pattern before importing argparse (~3ms) or
-    entering the 4-parser dispatch chain (~2ms). Returns exit code on match,
-    None to fall through to regular dispatch.
-
-    Matches: ``read <vertex> [--static] [--plain] [-q|-v|-vv]``
-    Excludes: --facts, --ticks, --kind, --lens, --observer, --help, --json, --live, -i
-    """
-    # Must be verb-first read with at least: read <vertex> --static --plain
-    if len(argv) < 4 or argv[0] != "read":
-        return None
-
-    rest = argv[1:]
-
-    # Check for flags that require full dispatch
-    has_static = False
-    has_plain = False
-    vertex_name = None
-
-    for arg in rest:
-        if arg == "--static":
-            has_static = True
-        elif arg == "--plain":
-            has_plain = True
-        elif arg in ("--facts", "--ticks", "--refs", "--kind", "--lens", "--observer",
-                      "-h", "--help", "--json", "--live", "-i"):
-            return None  # needs full dispatch
-        elif arg.startswith("--") and "=" in arg:
-            # --kind=X, --lens=X, --observer=X etc
-            return None
-        elif not arg.startswith("-") and vertex_name is None:
-            vertex_name = arg
-        elif not arg.startswith("-"):
-            return None  # unexpected positional
-
-    if not (has_static and has_plain and vertex_name):
-        return None
-
-    # Resolve vertex path (no argparse needed).
-    # _resolve_named_vertex checks the same config-level path as _resolve_vertex_for_dispatch,
-    # so the fallback was unreachable — fall through to full dispatch instead.
-    vertex_path = _resolve_vertex_for_dispatch(vertex_name)
-    if vertex_path is None:
-        return None
-
-    # Build fast args — kind=None, lens=None, observer=None (no --observer flag)
-    class _Ns:
-        __slots__ = ("kind", "lens")
-    known = _Ns()
-    known.kind = None
-    known.lens = None
-
-    # Pass remaining flags (--static, --plain, -q, -v, -vv) as rest
-    return _run_fold_fast(known, rest, vertex_path=vertex_path, observer=None)
+# _try_fast_read retired in step 6 — the fast path it served (--static
+# --plain via _run_fold_fast) is gone as of step 4. See git history at
+# commit 68500ba for the original implementation.
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point — three-tier dispatch.
+    """Main entry point — delegates to ``cli.app.main``.
 
-    1. Known verbs (read, emit, sync, close) → verb-first dispatch
-    2. Dev/setup commands (test, compile, validate, ...) → direct dispatch
-    3. Vertex name → implicit read (or vertex-first op for backward compat)
+    Behaviour is owned by the new dispatcher; this function only exists
+    as the legacy entry point that the console-script and ``python -m
+    loops`` resolve to.
     """
-    if argv is None:
-        argv = sys.argv[1:]
+    from loops.cli.app import main as _cli_main
 
-    # No args → help
-    if not argv:
-        return _render_main_help([])
-
-    # Top-level help: -h/--help only when it's the first arg (no command yet)
-    if argv[0] in ("-h", "--help"):
-        return _render_main_help(argv)
-
-    # Ultra-fast path: skip argparse + dispatch chain for common read pattern.
-    # Must be checked before importing argparse (~3ms) and before entering
-    # the 4-parser dispatch chain (~2ms).
-    if argv[0] == "read":
-        fast_result = _try_fast_read(argv)
-        if fast_result is not None:
-            return fast_result
-
-    # Lazy argparse import — only pay the ~3ms cost when actually needed.
-    # Injected into module globals so all functions in this module can use it.
-    import argparse
-    globals()["argparse"] = argparse
-
-    # Tier 1: Known verbs → verb-first dispatch
-    if argv[0] in _VERBS:
-        return _dispatch_verb_first(argv[0], argv[1:])
-
-    # Tier 2: Dev tools and setup commands → direct dispatch
-    if argv[0] in _COMMANDS:
-        return _dispatch_command(argv[0], argv[1:])
-
-    # Tier 3: Try as vertex name → implicit read (with backward compat for old ops)
-    vertex_name = argv[0]
-    vertex_path = _resolve_vertex_for_dispatch(vertex_name)
-
-    if vertex_path is not None:
-        return _dispatch_observer(vertex_name, vertex_path, argv[1:])
-
-    # Path-like arg → suggest the right invocation
-    if vertex_name.endswith(".vertex") or vertex_name.startswith("./") or vertex_name.startswith("/"):
-        _err(f"File arguments go with a command: loops sync {vertex_name}")
-        return 1
-
-    # Unknown command
-    _err(f"Unknown command: {vertex_name}")
-    return 1
+    return _cli_main(argv if argv is not None else sys.argv[1:])
 
 
 if __name__ == "__main__":

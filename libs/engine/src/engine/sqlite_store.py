@@ -47,12 +47,9 @@ from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar
 
 # IDs generated Python-side via python-ulid (see _gen_id above).
-# The sqlite-ulid C extension is no longer loaded — it was only needed
-# when id generation happened SQL-side via the schema's DEFAULT (ulid())
-# clause. INSERTs supply id explicitly, so the SQL-callable ulid()
-# function is not required. The DEFAULT clause in _SCHEMA_STMTS below
-# is vestigial from that era and will be removed once we confirm no
-# external tooling relies on it.
+# The sqlite-ulid C extension is not a dependency — id generation lives
+# entirely in Python. All INSERTs supply id explicitly, so no SQL-callable
+# ulid() function is needed.
 
 
 def _mapping_proxy_default(obj: object) -> object:
@@ -68,7 +65,7 @@ T = TypeVar("T")
 
 _SCHEMA_STMTS = (
     """CREATE TABLE IF NOT EXISTS facts (
-        id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+        id       TEXT NOT NULL PRIMARY KEY,
         kind     TEXT NOT NULL,
         ts       REAL NOT NULL,
         observer TEXT NOT NULL,
@@ -78,7 +75,7 @@ _SCHEMA_STMTS = (
     "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
     "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
     """CREATE TABLE IF NOT EXISTS ticks (
-        id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+        id       TEXT NOT NULL PRIMARY KEY,
         name     TEXT NOT NULL,
         ts       REAL NOT NULL,
         since    REAL,

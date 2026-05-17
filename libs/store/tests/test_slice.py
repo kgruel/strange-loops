@@ -7,7 +7,7 @@ import sqlite3
 import time
 
 import pytest
-import sqlite_ulid
+from ulid import ULID
 
 from store.slice import SliceResult, slice_store
 
@@ -17,16 +17,17 @@ from store.slice import SliceResult, slice_store
 # ---------------------------------------------------------------------------
 
 def _make_store(path, facts=None, ticks=None):
-    """Create a store DB and populate it with test data."""
+    """Create a store DB and populate it with test data.
+
+    Post-2026-05-16 shape: no schema DEFAULT (ulid()), ids supplied
+    explicitly via python-ulid (same primitive as engine.SqliteStore).
+    """
     conn = sqlite3.connect(str(path))
-    conn.enable_load_extension(True)
-    sqlite_ulid.load(conn)
-    conn.enable_load_extension(False)
     conn.execute("PRAGMA journal_mode=WAL")
 
     conn.executescript("""\
         CREATE TABLE facts (
-            id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+            id       TEXT NOT NULL PRIMARY KEY,
             kind     TEXT NOT NULL,
             ts       REAL NOT NULL,
             observer TEXT NOT NULL,
@@ -36,7 +37,7 @@ def _make_store(path, facts=None, ticks=None):
         CREATE INDEX idx_facts_kind ON facts(kind);
         CREATE INDEX idx_facts_ts   ON facts(ts);
         CREATE TABLE ticks (
-            id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+            id       TEXT NOT NULL PRIMARY KEY,
             name     TEXT NOT NULL,
             ts       REAL NOT NULL,
             since    REAL,
@@ -49,15 +50,15 @@ def _make_store(path, facts=None, ticks=None):
 
     for f in (facts or []):
         conn.execute(
-            "INSERT INTO facts (kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (f["kind"], f["ts"], f["observer"], f.get("origin", ""),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(ULID()), f["kind"], f["ts"], f["observer"], f.get("origin", ""),
              json.dumps(f.get("payload", {}))),
         )
 
     for t in (ticks or []):
         conn.execute(
-            "INSERT INTO ticks (name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?)",
-            (t["name"], t["ts"], t.get("since"), t["origin"],
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(ULID()), t["name"], t["ts"], t.get("since"), t["origin"],
              json.dumps(t.get("payload", {}))),
         )
 

@@ -1,8 +1,8 @@
 """Filtered store export — extract a subset of facts/ticks into a standalone DB.
 
 Uses ATTACH DATABASE for efficient cross-DB INSERT...SELECT without
-round-tripping through Python. ULIDs are preserved — same fact keeps
-same identity across slices.
+round-tripping through Python. IDs are preserved — same fact keeps
+same id across slices, enabling merge-time dedup on the id PK.
 """
 
 from __future__ import annotations
@@ -35,7 +35,8 @@ def slice_store(
     """Export filtered facts/ticks into a standalone store.
 
     Uses ATTACH DATABASE for efficient cross-DB INSERT...SELECT.
-    ULIDs are preserved — same fact keeps same identity across slices.
+    IDs are preserved — same fact keeps same id across slices,
+    enabling merge-time dedup on the id PK.
 
     Args:
         source: Path to the source store database.

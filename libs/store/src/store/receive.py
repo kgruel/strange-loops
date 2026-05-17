@@ -30,7 +30,7 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
     """Create-or-merge: receive a source store into a target location.
 
     If the target doesn't exist, the source is copied as-is.
-    If the target exists, the source is merged into it (ULID dedup).
+    If the target exists, the source is merged into it (id-PK dedup).
 
     Validates source has SQLite magic bytes before operating.
 

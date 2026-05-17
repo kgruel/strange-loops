@@ -5,7 +5,7 @@ description = "Store operations — slice, merge, search, transport for vertex s
 readme = "README.md"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["engine", "sqlite-ulid"]
+dependencies = ["engine"]
 
 [tool.uv.sources]
 engine = { workspace = true }

@@ -85,20 +85,30 @@ result = pull_store(Path("data/local.db"), transport, remote_path=Path("data/rem
 
 | Concern | engine.SqliteStore | store |
 |---------|-------------------|-------|
-| PK | `rowid INTEGER` (auto-increment) | `id TEXT DEFAULT (ulid())` |
+| PK | `id TEXT` (ULID, supplied by `_gen_id()`) | `id TEXT` (ULID, supplied by writer) |
+| Ordering column | `rowid` (single-store ordering) | `id` (cross-store interleaving) |
 | Purpose | Runtime append-only writes | Bulk maintenance operations |
 | Operations | append, since, between | slice, merge, search, transport |
 
-The ULID schema is what makes cross-DB operations work — same fact in two stores has the same ID, so merge is just `INSERT OR IGNORE`.
+Both schemas use the same id-PK shape. IDs are 26-char time-sortable ULIDs
+generated Python-side via `python-ulid`. Same id across stores (a fact slice→
+merge round-trip) makes merge a trivial `INSERT OR IGNORE`. ORDER BY id across
+merged stores yields chronological interleaving because ULIDs share the
+millisecond-timestamp prefix encoding.
 
 ```sql
-facts(id TEXT PK DEFAULT (ulid()), kind, ts, observer, origin, payload CHECK json_valid)
-ticks(id TEXT PK DEFAULT (ulid()), name, ts, since, origin, payload CHECK json_valid)
+facts(id TEXT PK, kind, ts, observer, origin, payload CHECK json_valid)
+ticks(id TEXT PK, name, ts, since, origin, payload CHECK json_valid)
 ```
 
+History note: the schema previously declared `DEFAULT (ulid())` backed by the
+`sqlite-ulid` C extension. As of 2026-05-16 all INSERTs supply id explicitly
+(engine.SqliteStore via `_gen_id()`, store production code via SELECT through
+ATTACH DATABASE) so the SQL-callable `ulid()` function is no longer needed.
+See project decision `architecture/id-primitive-python-ulid`.
+
 **Connection internals** (`_conn.py`):
-- `sqlite-ulid` extension loading
-- Schema creation with ULID defaults
+- Schema creation (no extension loading)
 - WAL mode for concurrent reads
 - Read-only URI connections for slice sources
 - `ATTACH DATABASE` for cross-DB operations (no Python round-trip)

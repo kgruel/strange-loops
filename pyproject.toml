@@ -9,7 +9,6 @@ requires-python = ">=3.11"
 dependencies = [
     "painted>=0.1.1",
     "ckdl>=1.0",
-    "sqlite-ulid",
     "pyjwt[crypto]>=2.9",
     "cryptography>=43",
     "python-ulid>=3.0",

@@ -32,9 +32,10 @@ class FoldItem:
             None if no timestamp available.
         observer: Who emitted the fact(s) that produced this item.
         origin: Which vertex/loop produced the source fact(s).
-        id: ULID of the source fact. For "by" folds, the ID of the most
-            recent contributing fact. For "collect" folds, the exact fact.
-            None for computed/synthetic items.
+        id: ID of the source fact (26-char ULID via python-ulid).
+            For "by" folds, the ID of the most recent contributing fact.
+            For "collect" folds, the exact fact. None for computed/
+            synthetic items.
         n: Number of facts compressed into this item. For "by" folds,
             how many times this key has been upserted. For "collect" folds,
             always 1 (each item is one fact). Reconstructed on replay —

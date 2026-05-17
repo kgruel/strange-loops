@@ -1,7 +1,15 @@
 """Internal connection management for store databases.
 
-Handles ULID extension loading, schema creation, WAL mode.
-Not public API — used by slice, merge, search.
+Schema creation, WAL mode, read-only URI opens. Not public API —
+used by slice, merge, search.
+
+IDs are supplied by writers (engine.SqliteStore._gen_id() for fresh emits,
+SELECT'd through for ATTACH-DATABASE cross-store ops in slice/merge). The
+schema declares id as TEXT PRIMARY KEY with no DEFAULT — every INSERT
+must supply an id. This is the post-2026-05-16 shape; prior to that the
+schema used DEFAULT (ulid()) backed by the sqlite-ulid C extension, which
+was needed only because some inserts omitted id. All production paths now
+supply id explicitly, so the extension is no longer required.
 """
 
 from __future__ import annotations
@@ -9,11 +17,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import sqlite_ulid
-
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS facts (
-    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+    id       TEXT NOT NULL PRIMARY KEY,
     kind     TEXT NOT NULL,
     ts       REAL NOT NULL,
     observer TEXT NOT NULL,
@@ -24,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
 CREATE INDEX IF NOT EXISTS idx_facts_ts   ON facts(ts);
 
 CREATE TABLE IF NOT EXISTS ticks (
-    id       TEXT NOT NULL PRIMARY KEY DEFAULT (ulid()),
+    id       TEXT NOT NULL PRIMARY KEY,
     name     TEXT NOT NULL,
     ts       REAL NOT NULL,
     since    REAL,
@@ -36,15 +42,8 @@ CREATE INDEX IF NOT EXISTS idx_ticks_ts   ON ticks(ts);
 """
 
 
-def _load_ulid(conn: sqlite3.Connection) -> None:
-    """Load the sqlite-ulid extension into a connection."""
-    conn.enable_load_extension(True)
-    sqlite_ulid.load(conn)
-    conn.enable_load_extension(False)
-
-
 def _open(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
-    """Open a store database with ULID extension loaded.
+    """Open a store database.
 
     Read-only mode uses URI to avoid WAL/SHM sidecars.
     Write mode sets WAL journal and NORMAL synchronous.
@@ -55,7 +54,6 @@ def _open(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
         conn = sqlite3.connect(str(path))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-    _load_ulid(conn)
     return conn
 
 
@@ -72,6 +70,5 @@ def _create(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    _load_ulid(conn)
     conn.executescript(_SCHEMA)
     return conn

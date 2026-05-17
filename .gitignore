@@ -31,7 +31,6 @@ experiments/coupling-kernels/cache/
 experiments/coupling-kernels/runs/outputs/
 # Per-machine MCP server config (contains auth tokens)
 .mcp.json
-CLAUDE.md
 
 # Personal dev notes — essays, scratch, etc.
 docs/dev/

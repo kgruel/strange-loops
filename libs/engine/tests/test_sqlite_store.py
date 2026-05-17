@@ -284,6 +284,109 @@ class TestMappingProxyDefault:
             _mapping_proxy_default(object())
 
 
+class TestIdGenerationContract:
+    """Regression bar for the 2026-03-15 → 2026-05-16 uuid4 era.
+
+    The original substrate guarantee was that fact IDs are time-sortable —
+    ORDER BY id ≈ ORDER BY emission time. The uuid4 swap silently broke
+    this for two months because no test exercised the property through the
+    production SqliteStore.append() path. These tests assert the contract
+    at the production-path level so a future swap that drops the property
+    fails fast.
+
+    Properties asserted:
+    - id format is 26-char Crockford base32 ULID (uppercase)
+    - ORDER BY id within a single store matches emission order
+    - Two stores merged interleave correctly by id (cross-store ordering)
+    """
+
+    def test_id_format_is_ulid_canonical(self, tmp_db: Path):
+        """Generated IDs are 26-char Crockford base32 ULIDs."""
+        import string
+
+        with make_fact_store(tmp_db) as store:
+            fact_id = store.append(TimestampedEvent(value=1, ts=100.0))
+
+        crockford = set(string.digits + "ABCDEFGHJKMNPQRSTVWXYZ")
+        assert len(fact_id) == 26, f"expected 26 chars, got {len(fact_id)}: {fact_id!r}"
+        assert all(c in crockford for c in fact_id), (
+            f"non-Crockford-base32 char in {fact_id!r} — "
+            f"unexpected chars: {set(fact_id) - crockford}"
+        )
+
+    def test_id_order_matches_emission_order(self, tmp_db: Path):
+        """ORDER BY id returns facts in emission order (time-sortable property).
+
+        This is the regression bar for the uuid4 era — under uuid4 this test
+        fails ~99% of the time (random IDs don't preserve order). Under ULID
+        it passes deterministically because of within-ms monotonicity.
+        """
+        emitted_ids: list[str] = []
+        with make_fact_store(tmp_db) as store:
+            for i in range(20):
+                # ts intentionally non-monotonic to prove id-order is
+                # generation-order-driven, not ts-driven
+                fact_id = store.append(TimestampedEvent(value=i, ts=100.0 - i))
+                emitted_ids.append(fact_id)
+
+        import sqlite3
+        conn = sqlite3.connect(str(tmp_db))
+        try:
+            stored_order = [
+                row[0] for row in conn.execute("SELECT id FROM facts ORDER BY id").fetchall()
+            ]
+        finally:
+            conn.close()
+
+        assert stored_order == emitted_ids, (
+            "ORDER BY id does not match emission order — time-sortable "
+            "property regressed. Under uuid4 this is expected; under ULID "
+            "this is a bug."
+        )
+
+    def test_cross_store_id_order_interleaves(self, tmp_path: Path):
+        """IDs from two independently-emitting stores interleave chronologically.
+
+        This is the cross-store property merge/transport relies on: when
+        facts from multiple stores are combined and sorted by id, the result
+        approximates chronological order across the original stores. Under
+        uuid4 the result is random; under ULID it's monotonic within each
+        store and roughly monotonic across stores (modulo same-ms emissions
+        on different machines).
+        """
+        import time as _time
+
+        store_a_path = tmp_path / "a.db"
+        store_b_path = tmp_path / "b.db"
+
+        a_ids: list[str] = []
+        b_ids: list[str] = []
+        with make_fact_store(store_a_path) as a, make_fact_store(store_b_path) as b:
+            # Interleave emissions across two stores with small real-time gaps
+            # so each store's IDs span different ms windows
+            for i in range(5):
+                a_ids.append(a.append(TimestampedEvent(value=i, ts=100.0 + i)))
+                _time.sleep(0.002)
+                b_ids.append(b.append(TimestampedEvent(value=i + 100, ts=200.0 + i)))
+                _time.sleep(0.002)
+
+        # Independent emissions never collide on id under either uuid4 or ULID
+        assert set(a_ids).isdisjoint(set(b_ids))
+
+        # The interleaving property: sorting all IDs by lex order should
+        # approximate emission order. Under ULID this holds because both
+        # stores' IDs share the millisecond-prefix encoding.
+        all_emitted_in_order: list[str] = []
+        for i in range(5):
+            all_emitted_in_order.append(a_ids[i])
+            all_emitted_in_order.append(b_ids[i])
+
+        assert sorted(a_ids + b_ids) == all_emitted_in_order, (
+            "Cross-store id ordering does not match chronological emission. "
+            "ULID's millisecond-timestamp prefix should make this hold."
+        )
+
+
 class TestDetectFactBuild:
     def test_detects_func_fallback_path(self, tmp_path):
         """Deserializer with __func__ but no __self__.__name__ → __func__ path."""

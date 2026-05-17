@@ -283,6 +283,148 @@ class TestMergeErrors:
             merge_store(target, tmp_path / "nope.db")
 
 
+class TestMergeViaProductionEmitPath:
+    """Regression bar: exercise merge through engine.SqliteStore.append().
+
+    The 2026-03-15 → 2026-05-16 uuid4 regression survived two months because
+    every test in this file constructs fixtures via sqlite_ulid.load(conn)
+    rather than through SqliteStore.append() — so the production id path was
+    never exercised here. This class closes that gap: any future regression
+    in _gen_id that breaks merge semantics will fail one of these tests.
+
+    Asserts both surviving properties:
+    - INSERT OR IGNORE dedup on PK (slice→merge round-trip yields same id)
+    - ORDER BY id ≈ chronological emission order after cross-store merge
+    """
+
+    @staticmethod
+    def _engine_store(path):
+        """Construct a store via the production write path."""
+        from engine.sqlite_store import SqliteStore
+
+        def _serialize(f):
+            return {"kind": f["kind"], "ts": f["ts"], "observer": f["observer"],
+                    "origin": f.get("origin", ""), "payload": f.get("payload", {})}
+
+        return SqliteStore(path=path, serialize=_serialize, deserialize=lambda d: d)
+
+    def test_slice_merge_roundtrip_via_engine_emit(self, tmp_path):
+        """Emit via SqliteStore.append() → slice → merge → ids preserved + dedup works."""
+        from store.slice import slice_store
+
+        original = tmp_path / "original.db"
+        sliced = tmp_path / "sliced.db"
+        merged = tmp_path / "merged.db"
+
+        emitted_ids: list[str] = []
+        with self._engine_store(original) as store:
+            for i in range(3):
+                fact_id = store.append({
+                    "kind": "health",
+                    "ts": _BASE_TS + i,
+                    "observer": "alice",
+                    "payload": {"i": i},
+                })
+                emitted_ids.append(fact_id)
+
+        slice_result = slice_store(original, sliced, kinds=["health"])
+        assert slice_result.facts == 3
+
+        # Fresh empty target — construct via engine so schema matches production
+        with self._engine_store(merged):
+            pass
+
+        merge_result = merge_store(merged, sliced)
+        assert merge_result.facts_added == 3
+        assert merge_result.facts_skipped == 0
+
+        # Slice preserves IDs end-to-end
+        merged_ids = _read_fact_ids(merged)
+        assert sorted(merged_ids) == sorted(emitted_ids)
+
+    def test_merge_dedup_via_engine_emit(self, tmp_path):
+        """Merging the same sliced source twice → second merge dedups all."""
+        from store.slice import slice_store
+
+        original = tmp_path / "original.db"
+        sliced = tmp_path / "sliced.db"
+        target = tmp_path / "target.db"
+
+        with self._engine_store(original) as store:
+            for i in range(4):
+                store.append({
+                    "kind": "deploy",
+                    "ts": _BASE_TS + i,
+                    "observer": "ci",
+                    "payload": {"sha": f"abc{i}"},
+                })
+
+        slice_store(original, sliced, kinds=["deploy"])
+
+        with self._engine_store(target):
+            pass
+
+        # First merge: all added
+        first = merge_store(target, sliced)
+        assert first.facts_added == 4
+        assert first.facts_skipped == 0
+
+        # Second merge of same source: all should dedup (ids match)
+        second = merge_store(target, sliced)
+        assert second.facts_added == 0, (
+            f"dedup failed — second merge added {second.facts_added} facts, "
+            "indicating slice did not preserve ids or merge is not dedup'ing "
+            "on PK. This is the failure mode the uuid4 regression would have "
+            "produced if slice had regenerated ids (it didn't, which is why "
+            "the dedup case survived). Still load-bearing as a regression bar."
+        )
+        assert second.facts_skipped == 4
+
+    def test_cross_store_merge_orders_chronologically(self, tmp_path):
+        """After merging two stores, ORDER BY id ≈ chronological emission.
+
+        This is the property that uuid4 silently broke. Without time-sortable
+        ids, querying the merged store for 'what happened in what order across
+        these stores' returns random order.
+        """
+        import sqlite3
+        import time as _time
+
+        store_a_path = tmp_path / "a.db"
+        store_b_path = tmp_path / "b.db"
+        merged_path = tmp_path / "merged.db"
+
+        emission_order: list[str] = []
+        with self._engine_store(store_a_path) as a, self._engine_store(store_b_path) as b:
+            for i in range(4):
+                emission_order.append(a.append({
+                    "kind": "evt", "ts": _BASE_TS, "observer": "a", "payload": {"i": i},
+                }))
+                _time.sleep(0.002)
+                emission_order.append(b.append({
+                    "kind": "evt", "ts": _BASE_TS, "observer": "b", "payload": {"i": i},
+                }))
+                _time.sleep(0.002)
+
+        # Merge a → merged, then b → merged
+        with self._engine_store(merged_path):
+            pass
+        merge_store(merged_path, store_a_path)
+        merge_store(merged_path, store_b_path)
+
+        conn = sqlite3.connect(str(merged_path))
+        try:
+            id_order = [r[0] for r in conn.execute("SELECT id FROM facts ORDER BY id").fetchall()]
+        finally:
+            conn.close()
+
+        assert id_order == emission_order, (
+            "ORDER BY id after cross-store merge does not match emission order. "
+            "Under uuid4 this fails (random ids); under ULID it passes "
+            "(millisecond-timestamp prefix interleaves across stores)."
+        )
+
+
 class TestSliceMergeRoundTrip:
     """Integration: slice → merge round-trip preserves data."""
 

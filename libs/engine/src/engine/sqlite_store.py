@@ -4,15 +4,26 @@ Implements the Store protocol with durable persistence. Facts are stored
 with kind, ts, observer as real columns (SQL-queryable) and payload as
 JSON text (queryable via json_extract()).
 
-Uses WAL mode for concurrent reads during folds. ULID primary keys for
-globally-unique identity and merge compatibility with libs/store.
+Uses WAL mode for concurrent reads during folds. IDs are ULIDs generated
+Python-side via python-ulid (26-char Crockford base32, time-sortable,
+within-ms monotonic). Time-sortability is load-bearing for cross-store
+fact interleaving (ORDER BY id ≈ chronological) and for merge dedup
+on slice→merge round-trips via INSERT OR IGNORE on the id PK.
+
+History: 2026-03-15 to 2026-05-16 a perf-driven change swapped to
+uuid.uuid4() to avoid loading the sqlite-ulid C extension per connection
+(~0.5ms dlopen). That swap dropped the time-sortable property without
+naming the substrate contract. Restored 2026-05-16 via pure-Python
+python-ulid (no dlopen, ~2.3μs/id, negligible at this scale). See
+project decision architecture/id-primitive-python-ulid.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
+
+from ulid import ULID
 
 # Pre-created decoder for faster JSON parsing in hot paths.
 # raw_decode skips strip() and end-position validation — safe for SQLite
@@ -23,17 +34,25 @@ _raw_decode = json.JSONDecoder().raw_decode
 def _gen_id() -> str:
     """Generate a unique ID for store records.
 
-    Uses UUID4 — compatible with the TEXT PRIMARY KEY schema.
-    Avoids the need to load the sqlite-ulid C extension.
+    Uses python-ulid: 26-char Crockford base32 ULID, time-sortable
+    (lexicographic order matches generation time), within-ms monotonic
+    (sequential calls within the same millisecond have incrementing
+    suffixes). Pure Python — no C extension, no dlopen cost.
     """
-    return str(uuid.uuid4())
+    return str(ULID())
 from datetime import datetime, timezone as _tz
 
 _UTC = _tz.utc
 from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar
 
-# sqlite_ulid no longer loaded at connection time — IDs generated in Python
+# IDs generated Python-side via python-ulid (see _gen_id above).
+# The sqlite-ulid C extension is no longer loaded — it was only needed
+# when id generation happened SQL-side via the schema's DEFAULT (ulid())
+# clause. INSERTs supply id explicitly, so the SQL-callable ulid()
+# function is not required. The DEFAULT clause in _SCHEMA_STMTS below
+# is vestigial from that era and will be removed once we confirm no
+# external tooling relies on it.
 
 
 def _mapping_proxy_default(obj: object) -> object:

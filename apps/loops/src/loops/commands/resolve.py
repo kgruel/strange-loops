@@ -410,43 +410,68 @@ def _resolve_entity_refs(
         except Exception:
             return None
 
-    # Scan payload values for entity address pattern: kind/fold_key_value
+    def _resolve_one(addr: str) -> tuple[str | None, bool]:
+        """Resolve a single ``kind/key`` address to a ULID.
+
+        Returns ``(resolved_id_or_None, addr_kind_was_declared)``. The
+        second bool tells the caller whether to surface this as an
+        unresolved ref (declared kind but no match — likely a typo or
+        stale ref) or silently skip (unknown kind — not an intended ref).
+        """
+        if "/" not in addr:
+            return None, False
+        addr_kind, addr_value = addr.split("/", 1)
+
+        # Try local store first
+        if addr_kind in local_kind_keys:
+            key_field = local_kind_keys[addr_kind]
+            rid = _try_resolve(store_path, addr_kind, key_field, addr_value)
+            if rid is not None:
+                return rid, True
+
+        # Local miss or kind not declared locally — widen to topology
+        topo_kind_keys, topo_stores = _ensure_topology()
+        if addr_kind not in local_kind_keys and addr_kind not in topo_kind_keys:
+            return None, False  # Not a known kind anywhere — not an intended ref
+
+        key_field = topo_kind_keys.get(addr_kind) or local_kind_keys.get(addr_kind)
+        if key_field is None:
+            return None, False  # defensive — both maps lack addr_kind (shouldn't reach here)
+        for sp in topo_stores:
+            if sp.resolve() == store_path.resolve():
+                continue  # Already searched
+            rid = _try_resolve(sp, addr_kind, key_field, addr_value)
+            if rid is not None:
+                return rid, True
+
+        return None, True  # declared kind, no match → caller surfaces as unresolved
+
+    # Scan payload values for entity address pattern: kind/fold_key_value.
+    # The ``ref`` field accumulates comma-separated addresses (parse-side
+    # convention in ``_parse_emit_parts``); resolve each one independently
+    # and concatenate the resolved IDs. All other fields are scanned as
+    # single addresses — preserves single-ref-on-any-field semantics.
     refs: dict[str, str] = {}
     unresolved: list[UnresolvedRef] = []
     for field_name, value in payload.items():
         if not isinstance(value, str) or "/" not in value:
             continue
-        # Split on first / only: decision/design/format-dissolves → ("decision", "design/format-dissolves")
-        addr_kind, addr_value = value.split("/", 1)
-
-        # Try local store first
-        resolved_id: str | None = None
-        if addr_kind in local_kind_keys:
-            key_field = local_kind_keys[addr_kind]
-            resolved_id = _try_resolve(store_path, addr_kind, key_field, addr_value)
-            if resolved_id is not None:
-                refs[f"{field_name}_ref"] = resolved_id
+        addresses = (
+            [a.strip() for a in value.split(",")]
+            if field_name == "ref"
+            else [value]
+        )
+        resolved_ids: list[str] = []
+        for addr in addresses:
+            if not addr or "/" not in addr:
                 continue
-
-        # Local miss or kind not declared locally — widen to topology
-        topo_kind_keys, topo_stores = _ensure_topology()
-        if addr_kind not in local_kind_keys and addr_kind not in topo_kind_keys:
-            continue  # Not a known kind anywhere — not an intended ref
-
-        # addr_kind exists in at least one map; value is always str
-        key_field = topo_kind_keys.get(addr_kind) or local_kind_keys.get(addr_kind)
-
-        for sp in topo_stores:
-            if sp.resolve() == store_path.resolve():
-                continue  # Already searched
-            resolved_id = _try_resolve(sp, addr_kind, key_field, addr_value)
-            if resolved_id is not None:
-                refs[f"{field_name}_ref"] = resolved_id
-                break
-
-        # Surface unresolved refs (addr_kind is a declared kind but no ULID found)
-        if resolved_id is None:
-            unresolved.append(UnresolvedRef(field=field_name, addr=value))
+            rid, declared = _resolve_one(addr)
+            if rid is not None:
+                resolved_ids.append(rid)
+            elif declared:
+                unresolved.append(UnresolvedRef(field=field_name, addr=addr))
+        if resolved_ids:
+            refs[f"{field_name}_ref"] = ",".join(resolved_ids)
 
     if refs:
         payload = {**payload, **refs}

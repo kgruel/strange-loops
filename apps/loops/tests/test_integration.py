@@ -2417,6 +2417,104 @@ class TestResolveEntityRefs:
         # didn't resolve → surfaced as an unresolved ref
         assert any(u.addr == "task/doesnotexist" for u in unresolved)
 
+    def test_multi_ref_comma_separated_resolves_each_address(
+        self, tmp_path, monkeypatch
+    ):
+        """Regression: ``ref=A,B`` (parse-side accumulation) must resolve each
+        address independently. Prior behavior split on first ``/`` and treated
+        the comma-joined value as a single address — every multi-ref failed.
+        """
+        from loops.commands.resolve import _resolve_entity_refs
+        from engine import SqliteStore, StoreReader
+        from atoms import Fact
+        import time as _time
+
+        vpath = tmp_path / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'loops { task { fold { items "by" "name" } } }\n'
+        )
+        store_path = tmp_path / "v.db"
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Seed two resolvable task facts so each ref address can pin a ULID.
+        with SqliteStore(
+            path=store_path,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as s:
+            s.append(Fact(kind="task", payload={"name": "alpha"},
+                          ts=_time.time(), observer="t", origin="t"))
+            s.append(Fact(kind="task", payload={"name": "beta"},
+                          ts=_time.time(), observer="t", origin="t"))
+
+        reader = StoreReader(store_path)
+        try:
+            ulid_alpha = reader.resolve_entity_id("task", "name", "alpha")
+            ulid_beta = reader.resolve_entity_id("task", "name", "beta")
+        finally:
+            reader.close()
+        assert ulid_alpha and ulid_beta
+
+        # Multi-ref payload (the shape _parse_emit_parts produces from
+        # ``ref=task/alpha ref=task/beta`` or ``ref=task/alpha,task/beta``).
+        result, unresolved = _resolve_entity_refs(
+            vpath, store_path, {"ref": "task/alpha,task/beta"}
+        )
+        # Both addresses resolved; ref_ref holds both ULIDs comma-joined.
+        assert result["ref"] == "task/alpha,task/beta"  # original preserved
+        assert "ref_ref" in result
+        resolved_ids = result["ref_ref"].split(",")
+        assert ulid_alpha in resolved_ids
+        assert ulid_beta in resolved_ids
+        assert unresolved == []
+
+    def test_multi_ref_partial_resolution_surfaces_only_failed(
+        self, tmp_path, monkeypatch
+    ):
+        """Per-address unresolved reporting: in ``ref=A,B``, when only A
+        resolves, ref_ref carries A's ULID and B surfaces as an unresolved
+        ref (not "the whole ref field failed")."""
+        from loops.commands.resolve import _resolve_entity_refs
+        from engine import SqliteStore, StoreReader
+        from atoms import Fact
+        import time as _time
+
+        vpath = tmp_path / "v.vertex"
+        vpath.write_text(
+            'name "v"\nstore "./v.db"\n'
+            'loops { task { fold { items "by" "name" } } }\n'
+        )
+        store_path = tmp_path / "v.db"
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        with SqliteStore(
+            path=store_path,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as s:
+            s.append(Fact(kind="task", payload={"name": "alpha"},
+                          ts=_time.time(), observer="t", origin="t"))
+
+        reader = StoreReader(store_path)
+        try:
+            ulid_alpha = reader.resolve_entity_id("task", "name", "alpha")
+        finally:
+            reader.close()
+        assert ulid_alpha
+
+        result, unresolved = _resolve_entity_refs(
+            vpath, store_path, {"ref": "task/alpha,task/ghost"}
+        )
+        # Only alpha resolved; ref_ref carries just its ULID.
+        assert result.get("ref_ref") == ulid_alpha
+        # The unresolved address is reported per-address, not as the whole
+        # comma-joined value.
+        assert any(u.addr == "task/ghost" for u in unresolved)
+        assert not any("," in u.addr for u in unresolved)
+
 
 class TestResolveEdgeCases:
     """Cover resolve.py L71 (OSError) and L576-577 (LoopsError in _apply_vertex_scope)."""

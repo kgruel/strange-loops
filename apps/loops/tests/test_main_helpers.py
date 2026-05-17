@@ -92,6 +92,47 @@ class TestIsStaticPlain:
         assert _is_static_plain(["read", "proj"]) is False
 
 
+class TestLooksLikeVertexPath:
+    """B of trace-dissolution: discriminator between file-path vertices
+    and ``kind/key`` entities for read's first positional.
+
+    The trap (caught by 21 test failures on first B implementation): file
+    paths contain ``/`` too, so a naive "slash means entity" rule
+    misclassifies ``"/tmp/.../t.vertex"`` as an entity. The discriminator
+    looks for path-prefix markers (``/``, ``./``, ``../``) or the canonical
+    ``.vertex`` suffix.
+    """
+
+    def test_absolute_path(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("/tmp/foo.vertex") is True
+
+    def test_relative_current(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("./foo.vertex") is True
+
+    def test_relative_parent(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("../foo.vertex") is True
+
+    def test_dot_vertex_suffix(self):
+        """Bare filename ending in .vertex is path-like, even without prefix."""
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("project.vertex") is True
+
+    def test_kind_slash_entity(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("decision/design/foo") is False
+
+    def test_kind_with_trailing_slash(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("decision/") is False
+
+    def test_bare_vertex_name(self):
+        from loops.main import _looks_like_vertex_path
+        assert _looks_like_vertex_path("project") is False
+
+
 class TestExtractRefsDepth:
     """A1 of trace-dissolution: --refs [N] extraction from rest.
 

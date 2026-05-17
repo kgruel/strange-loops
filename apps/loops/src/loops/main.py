@@ -768,15 +768,101 @@ def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
     return depth, out
 
 
+def _looks_like_vertex_path(s: str) -> bool:
+    """True when ``s`` looks like a filesystem path to a vertex file.
+
+    Used by _run_fold to disambiguate the first positional: a file path is
+    a vertex, a slash-containing non-path is a ``kind/key`` entity. The
+    heuristics are conservative — they recognize the forms tests and
+    callers actually use without claiming to be a full path classifier.
+
+    True when ``s``:
+      - is absolute (starts with ``/``)
+      - is relative-current (starts with ``./``)
+      - ends with ``.vertex`` (the canonical extension)
+    """
+    if s.startswith("/") or s.startswith("./") or s.startswith("../"):
+        return True
+    if s.endswith(".vertex"):
+        return True
+    return False
+
+
 def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
-    """Run fold command — show collapsed vertex state."""
+    """Run fold command — show collapsed vertex state.
+
+    Positional forms supported:
+      sl read                          — local vertex, all kinds
+      sl read project                  — named vertex, all kinds
+      sl read project decision/        — named vertex, kind drill (kind-wide)
+      sl read project decision/design/ — named vertex, kind + key prefix
+      sl read project decision/design/foo — named vertex, single entity
+      sl read decision/design/foo      — local vertex, single entity (entity is
+                                          recognized by containing "/" )
+
+    B of trace-dissolution: read absorbs trace's positional kind/key form.
+    The disambiguation rule for the first positional: if it contains "/",
+    treat as entity (and resolve vertex locally); otherwise, treat as
+    vertex name (and the second positional, if any, is the entity).
+    """
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
-        pre.add_argument("vertex", nargs="?", default=None)
+        # Two positionals: first is vertex-or-entity (disambiguated below),
+        # second is entity (only when first was a vertex name).
+        pre.add_argument("vertex_or_entity", nargs="?", default=None)
+        pre.add_argument("entity", nargs="?", default=None)
+    else:
+        # Vertex already known (verb-first dispatch resolved it); first
+        # positional is the entity.
+        pre.add_argument("entity", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     pre.add_argument("--key", default=None)
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
+
+    # Resolve entity / vertex from positionals. Disambiguation rules:
+    #   - File paths (absolute, relative starting with ./, or ending in
+    #     .vertex) are vertices, not entities — passed as the explicit
+    #     vertex file.
+    #   - Otherwise, "kind/key" entities are recognized by containing "/"
+    #     somewhere (the runbook convention: kind/, kind/prefix/, kind/key).
+    #   - Bare strings without "/" are treated as named-vertex references.
+    entity: str | None = None
+    if vertex_path is None:
+        first = getattr(known, "vertex_or_entity", None)
+        if first is not None and _looks_like_vertex_path(first):
+            # File path → vertex. Second positional (if any) is entity.
+            known.vertex = first
+            entity = known.entity
+        elif first is not None and "/" in first:
+            # Entity form (kind/key); vertex resolves locally.
+            entity = first
+            known.vertex = None
+        elif first is not None:
+            # Named vertex; second positional (if any) is entity.
+            known.vertex = first
+            entity = known.entity
+        else:
+            known.vertex = None
+            entity = None
+    else:
+        entity = getattr(known, "entity", None)
+
+    # Route entity into --kind for fetch_fold's existing embedded-key split.
+    # Only entities containing "/" are recognized — matches trace's convention
+    # that an entity is always "kind/" (kind-wide), "kind/prefix/" (namespace
+    # drill), or "kind/full-key" (single entity). Bare strings without "/"
+    # are ambiguous (could be a stray arg, a typo, a kind name with no key)
+    # and stay in rest unchanged — preserves the pre-B behavior where extra
+    # positionals fell through without error. Use --kind/--key flags when
+    # you want to filter by kind alone.
+    # When --kind is already set explicitly, the entity positional is ignored
+    # (flag wins — explicit beats positional). Same for --key.
+    if (
+        entity is not None and "/" in entity
+        and known.kind is None and known.key is None
+    ):
+        known.kind = entity  # fetch_fold splits "decision/design/foo" via _split_kind_key
 
     # Pre-check --facts for fetch (it stays in rest for painted's parser too)
     want_facts = "--facts" in rest

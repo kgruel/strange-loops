@@ -16,6 +16,6 @@ from ..context import CliContext
 
 def run(argv: list[str], ctx: CliContext) -> int:
     """Delegate to ``loops.main._run_stream`` with ctx-shaped kwargs."""
-    from loops.main import _run_stream
+    from loops.commands.stream import _run_stream
 
     return _run_stream(argv, vertex_path=ctx.vertex_path, observer=ctx.observer)

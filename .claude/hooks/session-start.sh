@@ -35,15 +35,13 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 #      what transitioned at each emit, refs added/removed. Renders
 #      what changed since I last looked at the arc, not just where it
 #      ended up. Composes with TOUCHED; doesn't duplicate it.
-#   4. EXPERIMENTS — active experimental vertices (hypothesis status,
-#      recent run receipts). Currently hardcoded to coupling-kernels.
-#   5. COMMS SUMMARY — count-level signal (discord: N native: M). Tail
-#      of context: a glance signal, not an action signal.
 #
-# Read comms BEFORE emitting check — so "new" means "since last session."
+# Comms-via-vertex was previously surfaced here; removed 2026-05-16 because
+# we stopped using it lately and the mcp comms work likely dissolves into
+# transport + vertex config once vouch-as-lib lands. Re-add when the
+# replacement shape is clear.
 mentions=$($HOME/.config/loops/bin/mentions-block "$observer" 2>/dev/null || true)
 project=$($LOOPS read project --lens session_landing --plain 2>/dev/null || true)
-comms=$($LOOPS read comms --observer all --lens comms --plain -q 2>/dev/null || true)
 
 # ARCS IN FLIGHT — lifecycle diff for the most-recently-touched open threads.
 # Why: session_landing's TOUCHED block shows the current state of each thread,
@@ -57,21 +55,10 @@ export REPO_ROOT
 export LOOPS_BIN="$LOOPS"
 arcs=$("$REPO_ROOT/.venv/bin/python3" "$REPO_ROOT/.claude/hooks/arcs-block.py" 2>/dev/null || true)
 
-# Active experimental vertices — surface what's in flight (hypothesis status,
-# recent receipts). Currently hardcoded to coupling-kernels; generalize when
-# more experimental vertices have receipt machinery. The fold view here
-# answers "what experiments am I in the middle of and what's their state."
-exp_coupling=$($LOOPS read coupling-kernels --plain 2>/dev/null || true)
-
-# Advance cursor after reading — marks what we've seen
-$LOOPS emit comms/native check name="$observer" >/dev/null 2>&1 || true
-
 context=""
 [[ -n "$mentions" ]] && context+="$mentions"$'\n'
 [[ -n "$project" ]]  && context+="$project"$'\n\n'
 [[ -n "$arcs" ]] && context+="$arcs"$'\n'
-[[ -n "$exp_coupling" ]] && context+="## EXPERIMENTS — coupling-kernels"$'\n\n'"$exp_coupling"$'\n\n'
-[[ -n "$comms" && "$comms" != "(quiet)" ]] && context+="$comms"
 
 # --- Emit as JSON additionalContext for reliable injection ---
 if [[ -n "$context" ]]; then

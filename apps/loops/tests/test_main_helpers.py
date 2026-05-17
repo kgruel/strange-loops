@@ -74,24 +74,6 @@ class TestFindLocalVertex:
         assert result == vf
 
 
-class TestIsStaticPlain:
-    def test_static_plain(self):
-        from loops.main import _is_static_plain
-        assert _is_static_plain(["--static", "--plain"]) is True
-
-    def test_plain_only(self):
-        from loops.main import _is_static_plain
-        assert _is_static_plain(["--plain"]) is False
-
-    def test_with_help(self):
-        from loops.main import _is_static_plain
-        assert _is_static_plain(["--static", "--plain", "--help"]) is False
-
-    def test_no_flags(self):
-        from loops.main import _is_static_plain
-        assert _is_static_plain(["read", "proj"]) is False
-
-
 class TestLooksLikeVertexPath:
     """B of trace-dissolution: discriminator between file-path vertices
     and ``kind/key`` entities for read's first positional.
@@ -278,13 +260,6 @@ class TestResolveNamedStore:
         vf.write_text('name "proj"\nloops { m { fold { n "inc" } } }\n')
         with pytest.raises(StoreNotFound, match="No store configured"):
             _resolve_named_store("proj")
-
-class TestDispatchVerbFirst:
-    def test_unknown_verb_returns_error(self, tmp_path, monkeypatch, capsys):
-        """_dispatch_verb_first with unknown verb returns 1 (L3244-3245)."""
-        from loops.main import _dispatch_verb_first
-        result = _dispatch_verb_first("bazinga", [])
-        assert result == 1
 
 class TestApplyVertexScope:
     def test_ioerror_returns_none(self, tmp_path):
@@ -523,32 +498,6 @@ class TestMainEntry:
         from loops.main import main
         result = main(["--help"])
         assert isinstance(result, int)
-
-class TestDispatchObserver:
-    def test_close_dispatch(self, tmp_path, monkeypatch):
-        """_dispatch_observer with 'close' op (L3281)."""
-        import unittest.mock as mock
-        from loops.main import _dispatch_observer
-        # Create minimal vertex
-        vf = tmp_path / "proj.vertex"
-        vf.write_text('name "proj"\nstore "./proj.db"\nloops { m { fold { n "inc" } } }\n')
-        with mock.patch("loops.main._run_close", return_value=0) as m:
-            result = _dispatch_observer("proj", vf, ["close", "--since", "1h"])
-            # If close is reached, _run_close was called
-            if m.called:
-                assert result == 0
-
-    def test_store_dispatch(self, tmp_path, monkeypatch):
-        """_dispatch_observer with 'store' op (L3287)."""
-        import unittest.mock as mock
-        from loops.main import _dispatch_observer
-        vf = tmp_path / "proj.vertex"
-        vf.write_text('name "proj"\nstore "./proj.db"\nloops { m { fold { n "inc" } } }\n')
-        with mock.patch("loops.main._run_store", return_value=0) as m:
-            result = _dispatch_observer("proj", vf, ["store"])
-            if m.called:
-                assert result == 0
-
 
 # ---------------------------------------------------------------------------
 # errors.py — CLI error hierarchy

@@ -45,7 +45,7 @@ def trace_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
     kind = trace_meta.get("kind", "")
     key = trace_meta.get("key", "")
-    header_text = f"trace {kind}/{key}"
+    header_text = f"diff {kind}/{key}"
     facts = data.get("facts", []) if isinstance(data, dict) else []
 
     if zoom == Zoom.MINIMAL:

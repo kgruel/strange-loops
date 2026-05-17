@@ -549,178 +549,6 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
     )
 
 
-def _run_trace(
-    argv: list[str], *,
-    vertex_path: Path | None = None,
-    observer: str | None = None,
-) -> int:
-    """Run trace command — lifecycle of a single ``kind/key`` entity.
-
-    Verb-first: ``sl trace <kind>/<key>`` (local vertex) or
-    ``sl trace <vertex> <kind>/<key>`` (explicit vertex). Vertex-op form:
-    ``sl <vertex> trace <kind>/<key>``.
-
-    Returns facts in ASC order (oldest first) — changelog-style narrative
-    of how the entity evolved across emits. Pairs with fold-merge default:
-    each fact's payload IS the patch that was applied to the fold state.
-    """
-    from painted import run_cli
-    from painted.cli import HelpArg
-
-    # No args at all → show help instead of bare usage line.
-    # When invoked as `sl trace` (no vertex, no entity, no flags), there's
-    # nothing meaningful to do; surface the full help with all flags rather
-    # than a one-line usage that hides what's available.
-    if not argv and vertex_path is None:
-        argv = ["--help"]
-
-    pre = argparse.ArgumentParser(add_help=False)
-    if vertex_path is None:
-        pre.add_argument("vertex_or_entity", nargs="?", default=None)
-        pre.add_argument("entity", nargs="?", default=None)
-    else:
-        pre.add_argument("entity", nargs="?", default=None)
-    pre.add_argument("--lens", default=None)
-    pre.add_argument("--diff", action="store_true", default=False)
-    pre.add_argument("--refs", action="store_true", default=False,
-                     help="Walk outbound refs one hop")
-    pre.add_argument("--depth", type=int, default=None,
-                     help="Walk outbound refs N hops (implies --refs)")
-    known, rest = pre.parse_known_args(argv)
-
-    # If --help/-h is in argv, defer to run_cli (painted) — it intercepts
-    # help before fetch/render run, so we don't need a valid entity.
-    help_requested = "-h" in argv or "--help" in argv
-
-    # Resolve refs_depth: --depth N takes precedence; --refs alone = 1; default 0.
-    if known.depth is not None:
-        refs_depth = max(0, known.depth)
-    elif known.refs:
-        refs_depth = 1
-    else:
-        refs_depth = 0
-
-    # Resolve entity = "kind/key". If the first positional contains "/",
-    # treat it as the entity and use the local vertex. Otherwise treat
-    # it as a vertex name and the second positional is the entity.
-    entity: str | None = None
-    if vertex_path is None:
-        first = getattr(known, "vertex_or_entity", None)
-        if first is not None and "/" in first:
-            entity = first
-        elif first is not None:
-            # First positional is a vertex name
-            resolved = _resolve_vertex_for_dispatch(first)
-            if resolved is None:
-                from .errors import VertexNotFound
-                try:
-                    resolved = _resolve_named_vertex(first)
-                except VertexNotFound:
-                    resolved = None
-            if resolved is not None:
-                vertex_path = resolved
-                entity = known.entity
-            else:
-                # Not a vertex — last-chance: treat first as entity even
-                # though it has no slash (will error below at parse).
-                entity = first
-    else:
-        entity = known.entity
-
-    # Three modes:
-    #   help_mode  : --help / -h → painted renders help, fetch never runs
-    #   index_mode : vertex resolved, entity missing-or-invalid → kind index
-    #   trace_mode : entity has kind/key → render lifecycle
-    #
-    # Bare `sl trace` (no args at all) was redirected to --help above.
-    # `sl trace <flag>` with no vertex/entity still has nothing to fetch
-    # against — fall through to the usage error.
-    index_mode = False
-    if not help_requested:
-        entity_has_slash = entity is not None and "/" in entity
-        if vertex_path is not None and not entity_has_slash:
-            # Vertex known, no valid entity → kind index. This also covers
-            # `sl trace <vertex> foo` (incomplete entity) — show the menu
-            # of valid kinds rather than a terse error.
-            index_mode = True
-        elif not entity_has_slash:
-            _err("usage: sl trace [vertex] <kind>/<key>")
-            return 2
-
-    # Safe split — when help_requested or index_mode, the trace fetch path
-    # never runs (painted short-circuits on help; index_mode uses its own
-    # fetch), so empty sentinels are harmless.
-    if entity is not None and "/" in entity:
-        trace_kind, trace_key = entity.split("/", 1)
-    else:
-        trace_kind, trace_key = "", ""
-
-    def fetch():
-        nonlocal vertex_path, observer
-        if vertex_path is None:
-            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
-            vertex_path = _resolve_local_vertex()
-        observer = _apply_vertex_scope(observer, vertex_path)
-        obs_for_engine = observer if observer else None
-
-        if index_mode:
-            # Kind-index: no kind/key filter — fetch full fold, render as menu.
-            from .commands.fetch import fetch_fold
-            return fetch_fold(vertex_path, observer=obs_for_engine)
-
-        _validate_kind_or_exit(trace_kind, vertex_path)
-
-        from .commands.fetch import fetch_trace
-        data = fetch_trace(
-            vertex_path,
-            kind=trace_kind,
-            key=trace_key,
-            observer=obs_for_engine,
-            refs_depth=refs_depth,
-        )
-        if known.diff:
-            data["_diff"] = True
-        return data
-
-    resolved_render_fn = None
-
-    def render(ctx, data):
-        nonlocal resolved_render_fn
-        if resolved_render_fn is None:
-            # Default lens depends on mode; --lens overrides either.
-            if known.lens is not None:
-                resolved_render_fn = _resolve_render_fn(
-                    known.lens, vertex_path, "trace_view",
-                )
-            elif index_mode:
-                from .lenses.trace_index import trace_index_view
-                resolved_render_fn = trace_index_view
-            else:
-                from .lenses.trace import trace_view
-                resolved_render_fn = trace_view
-        w = ctx.width if ctx.is_tty else None
-        from .lens_resolver import call_lens
-        return call_lens(
-            resolved_render_fn, data, ctx.zoom, w,
-            vertex_name=_vertex_name(vertex_path),
-        )
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops trace",
-        description="Lifecycle of one kind/key entity",
-        help_args=[
-            HelpArg("entity", "kind/key (e.g. decision/design/foo); omit for kind index; kind/ for kind-wide listing", positional=True),
-            HelpArg("--diff", "Show cumulative field-deltas instead of snapshots"),
-            HelpArg("--refs", "Walk outbound refs one hop (depth=1)"),
-            HelpArg("--depth", "Walk outbound refs N hops (implies --refs)"),
-            HelpArg("--observer", "Filter by observer (default: you)"),
-            HelpArg("--lens", "Override default trace lens"),
-        ],
-    )
-
 
 def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
     """Extract ``--refs [N]`` from rest; return ``(refs_depth, cleaned_rest)``.
@@ -1601,8 +1429,10 @@ def _whoami_from_identity_store() -> str:
 
 
 # Verb-first dispatch: `loops <verb> [vertex] [args]`.
-# These are the primary CLI verbs — read (implicit default), emit, sync, close, cite, trace.
-_VERBS = frozenset({"read", "emit", "close", "sync", "cite", "trace"})
+# These are the primary CLI verbs — read (implicit default), emit, sync, close, cite.
+# `trace` retired 2026-05-17 (D of trace-dissolution); use `read --diff`
+# for entity lifecycle, optionally with --refs N for ref-graph walks.
+_VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 
 # Dev and setup commands dispatched directly.
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
@@ -1613,7 +1443,7 @@ _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 
 # Vertex-first operations: `loops <vertex> <op>`.
 _VERTEX_OPS = frozenset({
-    "read", "emit", "close", "sync", "store", "cite", "trace",
+    "read", "emit", "close", "sync", "store", "cite",
     "ls", "add", "rm", "export",
 })
 
@@ -1873,12 +1703,11 @@ def _render_main_help(argv: list[str]) -> int:
         hint="loops <verb> [vertex] [args]",
         detail="Implicit read: loops project = loops read project",
         flags=(
-            HelpFlag(None, "read", "Read vertex state (default)", detail="[vertex] [--facts] [--ticks] [--kind KIND] [--since SINCE]"),
+            HelpFlag(None, "read", "Read vertex state", detail="[vertex] [kind/key] [--diff] [--refs [N]] [--facts] [--ticks] [--kind K] [--key PREFIX]"),
             HelpFlag(None, "emit", "Inject a fact", detail="[vertex] <kind> [KEY=VALUE ...] [--dry-run]"),
             HelpFlag(None, "sync", "Run sources (cadence-gated)", detail="[vertex] [--force] [--var KEY=VALUE]"),
             HelpFlag(None, "close", "Resolve and capture artifacts", detail="[vertex] <kind> <name> [message] [--dry-run]"),
             HelpFlag(None, "cite", "Attention signal — inform current work with prior refs", detail="[vertex] <ref1> <ref2> ... [--context NAME] [-m MSG]"),
-            HelpFlag(None, "trace", "Lifecycle of one kind/key entity", detail="[vertex] <kind>/<key> [--diff] [--refs] [--depth N] [--lens NAME]"),
         ),
     )
 
@@ -1973,8 +1802,6 @@ def _dispatch_verb_first(verb: str, rest: list[str]) -> int:
         return _run_sync(rest, vertex_path=None)
     if verb == "cite":
         return _run_cite(rest, vertex_path=None, observer=observer)
-    if verb == "trace":
-        return _run_trace(rest, vertex_path=None, observer=observer)
 
     _err(f"Unknown verb: {verb}")
     return 1
@@ -2018,8 +1845,6 @@ def _dispatch_observer(
         return _run_sync(args, vertex_path=vertex_path)
     if op == "cite":
         return _run_cite(args, vertex_path=vertex_path, observer=observer)
-    if op == "trace":
-        return _run_trace(args, vertex_path=vertex_path, observer=observer)
 
     # Dev tools
     if op == "store":

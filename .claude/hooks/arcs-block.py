@@ -2,11 +2,14 @@
 """Render the ARCS-IN-FLIGHT context block for session_start.
 
 Selects the top-N open/partial threads by recency and renders each as a
-cumulative `sl trace --diff` — showing what changed across the thread's
-lifecycle rather than re-rendering current state. This composes with
-session_landing's TOUCHED block (which carries current state) by adding
-the trajectory: where each arc has been, what transitioned at each
-emit.
+cumulative `sl read <vertex> thread/<name> --diff` — showing what changed
+across the thread's lifecycle rather than re-rendering current state.
+This composes with session_landing's TOUCHED block (which carries current
+state) by adding the trajectory: where each arc has been, what
+transitioned at each emit.
+
+The `trace` verb retired 2026-05-17 (D of trace-dissolution); the
+underlying diff rendering moved into `read --diff`.
 
 Env in:
 - REPO_ROOT: monorepo root (where .loops/project.vertex lives)
@@ -70,18 +73,18 @@ def main() -> int:
     out_lines: list[str] = ["## ARCS", ""]
     for _, name, _ in top:
         result = subprocess.run(
-            [loops_bin, "trace", "project", f"thread/{name}",
+            [loops_bin, "read", "project", f"thread/{name}",
              "--diff", "--plain"],
             capture_output=True, text=True, timeout=10,
         )
-        trace_out = result.stdout.strip()
-        if not trace_out:
+        diff_out = result.stdout.strip()
+        if not diff_out:
             continue
-        lines = trace_out.splitlines()
+        lines = diff_out.splitlines()
         if len(lines) > MAX_LINES_PER_ARC:
             elided = len(lines) - MAX_LINES_PER_ARC
             lines = lines[:MAX_LINES_PER_ARC] + [
-                f"  ... ({elided} more — sl trace project thread/{name} --diff)"
+                f"  ... ({elided} more — sl read project thread/{name} --diff)"
             ]
         out_lines.extend(lines)
         out_lines.append("")

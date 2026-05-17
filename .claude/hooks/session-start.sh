@@ -30,7 +30,7 @@ $LOOPS sync ~/.config/loops/comms/discord/discord.vertex --force >/dev/null 2>&1
 #   2. PROJECT LANDING — session_landing lens output: NOW (window
 #      dashboard), TOUCHED (focus-marked items), UNPACK (drill-down
 #      commands). Answers "what was happening, what's already in flight."
-#   3. ARCS — `sl trace --diff` of the top-N open/partial threads.
+#   3. ARCS — `sl read project thread/<name> --diff` of the top-N open/partial threads.
 #      Where TOUCHED carries current state, ARCS carries trajectory —
 #      what transitioned at each emit, refs added/removed. Renders
 #      what changed since I last looked at the arc, not just where it
@@ -45,7 +45,7 @@ project=$($LOOPS read project --lens session_landing --plain 2>/dev/null || true
 
 # ARCS IN FLIGHT — lifecycle diff for the most-recently-touched open threads.
 # Why: session_landing's TOUCHED block shows the current state of each thread,
-# but the actionable signal is "what changed since you last looked." trace
+# but the actionable signal is "what changed since you last looked." read
 # --diff renders that — status transitions, ref churn, just the deltas — which
 # is much sharper than re-reading the full body of each touched item.
 # Selection: top 2 open/partial threads by recency. Both signal "in-flight"

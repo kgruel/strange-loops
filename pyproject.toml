@@ -7,7 +7,7 @@ license = "MIT"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "painted>=0.1.1",
+    "painted>=0.1.8",
     "ckdl>=1.0",
     "pyjwt[crypto]>=2.9",
     "cryptography>=43",
@@ -53,7 +53,6 @@ packages = [
 members = [
     "libs/atoms",
     "libs/engine",
-    "libs/painted",
     "libs/lang",
     "libs/sign",
     "libs/store",
@@ -61,6 +60,3 @@ members = [
     "apps/loops",
     "apps/tasks",
 ]
-
-[tool.uv.sources]
-painted = { workspace = true }

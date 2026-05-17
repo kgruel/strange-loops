@@ -12,7 +12,6 @@ dev = ["pytest>=8.0", "pytest-cov>=6.0"]
 lang = { workspace = true }
 atoms = { workspace = true }
 engine = { workspace = true }
-painted = { workspace = true }
 
 [project.scripts]
 loops = "loops.main:main"

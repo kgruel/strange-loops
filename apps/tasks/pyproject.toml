@@ -18,7 +18,6 @@ dev = [
 lang = { workspace = true }
 atoms = { workspace = true }
 engine = { workspace = true }
-painted = { workspace = true }
 
 [project.scripts]
 strange-loops = "strange_loops.cli:main"

@@ -96,6 +96,14 @@ from loops.commands.init import (  # noqa: E402 — re-export for back-compat
     _seed_config_facts, _scaffold_artifacts, cmd_init, _run_init,
 )
 
+# --- Store cluster moved to commands/store.py ---
+from loops.commands.store import _run_store  # noqa: E402,F401 — re-export for back-compat
+
+# --- Population cluster moved to commands/population.py ---
+from loops.commands.population import (  # noqa: E402,F401 — re-export for back-compat
+    _run_ls, _run_ls_root, _run_add, _run_rm, _run_export,
+)
+
 
 def _resolve_vertex_path(file_arg: str | None) -> Path | None:
     """Resolve a vertex file path, defaulting to LOOPS_HOME/.vertex."""
@@ -383,178 +391,11 @@ from loops.cli.views.fold import (  # noqa: E402
 )
 
 
-def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
-    """Run store command via painted CLI harness."""
-    from painted import run_cli, OutputMode
-    from painted.cli import HelpArg
-
-    pre = argparse.ArgumentParser(add_help=False)
-    if vertex_path is None:
-        pre.add_argument("file", nargs="?", default=None)
-    known, rest = pre.parse_known_args(argv)
-    file_arg = getattr(known, "file", None)
-
-    def _resolve_store_target() -> Path:
-        """Resolve file arg: vertex name, path, or LOOPS_HOME/.vertex fallback."""
-        if vertex_path is not None:
-            return vertex_path
-        if file_arg is not None:
-            p = Path(file_arg)
-            # If it looks like a path (has extension or path separators), use directly
-            if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
-                return p
-            # Otherwise treat as vertex name
-            from lang.population import resolve_vertex
-
-            return resolve_vertex(file_arg, loops_home())
-        home = loops_home()
-        root = home / ".vertex"
-        if root.exists():
-            return root
-        raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
-
-    def fetch():
-        from .commands.store import make_fetcher
-
-        path = _resolve_store_target().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"{path} does not exist")
-        return make_fetcher(path, zoom=3)()
-
-    def render(ctx, data):
-        from .lenses.store import store_view
-
-        return store_view(data, ctx.zoom, ctx.width)
-
-    async def fetch_stream():
-        import asyncio
-
-        while True:
-            try:
-                yield fetch()
-            except FileNotFoundError:
-                pass
-            await asyncio.sleep(2.0)
-
-    def handle_interactive(ctx):
-        import asyncio as _asyncio
-        from .tui import StoreExplorerApp
-
-        path = _resolve_store_target().resolve()
-        app = StoreExplorerApp(path)
-        _asyncio.run(app.run())
-        return 0
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        fetch_stream=fetch_stream,
-        render=render,
-        handlers={OutputMode.INTERACTIVE: handle_interactive},
-        default_mode=OutputMode.STATIC,
-        prog="loops store",
-        description="Inspect store contents",
-        help_args=[
-            HelpArg("file", "Store file, vertex name, or path", positional=True),
-        ],
-    )
-
-
-def _run_ls(argv: list[str]) -> int:
-    """Run ls command via painted CLI harness."""
-    from painted import run_cli
-    from painted.cli import HelpArg
-    from .commands.pop import fetch_ls
-    from .lenses.pop import pop_view
-
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("target")
-    known, rest = pre.parse_known_args(argv)
-
-    def fetch():
-        return fetch_ls(known.target)
-
-    def render(ctx, data):
-        return pop_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops ls",
-        description="List template populations",
-        help_args=[
-            HelpArg("target", "Population target name", positional=True),
-        ],
-    )
-
-
-def _run_ls_root(argv: list[str]) -> int:
-    """Run root-level ls: list all discovered vertices."""
-    from painted import run_cli
-    from .commands.vertices import fetch_vertices
-    from .lenses.vertices import vertices_view
-
-    home = loops_home()
-
-    def fetch():
-        return fetch_vertices(home)
-
-    def render(ctx, data):
-        return vertices_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        argv,
-        fetch=fetch,
-        render=render,
-        prog="loops ls",
-        description="List vertices",
-    )
 
 
 
 
 
-
-
-
-
-
-def _run_add(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for add, delegate to cmd_add."""
-    from .commands.pop import cmd_add
-
-    parser = argparse.ArgumentParser(prog="loops add", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument("values", nargs="+", help="Column values in header order")
-    args = parser.parse_args(argv)
-    return cmd_add(args)
-
-
-def _run_rm(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for rm, delegate to cmd_rm."""
-    from .commands.pop import cmd_rm
-
-    parser = argparse.ArgumentParser(prog="loops rm", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument("key", help="Key (first column) to remove")
-    args = parser.parse_args(argv)
-    return cmd_rm(args)
-
-
-def _run_export(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for export, delegate to cmd_export."""
-    from .commands.pop import cmd_export
-
-    parser = argparse.ArgumentParser(prog="loops export", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="(deprecated) ignored; export materializes configured .list",
-    )
-    args = parser.parse_args(argv)
-    return cmd_export(args)
 
 
 # --- whoami cluster moved to commands/whoami.py ---

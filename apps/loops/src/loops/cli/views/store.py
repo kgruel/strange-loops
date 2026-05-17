@@ -15,6 +15,6 @@ def run(argv: list[str], ctx: CliContext) -> int:
     ``_run_store`` doesn't accept observer (store is observer-agnostic),
     so we only thread vertex_path.
     """
-    from loops.main import _run_store
+    from loops.commands.store import _run_store
 
     return _run_store(argv, vertex_path=ctx.vertex_path)

@@ -108,6 +108,80 @@ def make_fetcher(path: Path, zoom: int):
     return fetch
 
 
+def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Run store command via painted CLI harness."""
+    import argparse
+    from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
+    from .resolve import loops_home
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = getattr(known, "file", None)
+
+    def _resolve_store_target() -> Path:
+        if vertex_path is not None:
+            return vertex_path
+        if file_arg is not None:
+            p = Path(file_arg)
+            if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
+                return p
+            from lang.population import resolve_vertex
+
+            return resolve_vertex(file_arg, loops_home())
+        home = loops_home()
+        root = home / ".vertex"
+        if root.exists():
+            return root
+        raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
+
+    def fetch():
+        path = _resolve_store_target().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"{path} does not exist")
+        return make_fetcher(path, zoom=3)()
+
+    def render(ctx, data):
+        from ..lenses.store import store_view
+
+        return store_view(data, ctx.zoom, ctx.width)
+
+    async def fetch_stream():
+        import asyncio
+
+        while True:
+            try:
+                yield fetch()
+            except FileNotFoundError:
+                pass
+            await asyncio.sleep(2.0)
+
+    def handle_interactive(ctx):
+        import asyncio as _asyncio
+        from ..tui import StoreExplorerApp
+
+        path = _resolve_store_target().resolve()
+        app = StoreExplorerApp(path)
+        _asyncio.run(app.run())
+        return 0
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        fetch_stream=fetch_stream,
+        render=render,
+        handlers={OutputMode.INTERACTIVE: handle_interactive},
+        default_mode=OutputMode.STATIC,
+        prog="loops store",
+        description="Inspect store contents",
+        help_args=[
+            HelpArg("file", "Store file, vertex name, or path", positional=True),
+        ],
+    )
+
+
 def make_fidelity_fetcher(path: Path):
     """Create a fetcher for fidelity drill data.
 

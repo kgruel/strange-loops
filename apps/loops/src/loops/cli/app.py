@@ -2,9 +2,9 @@
 
 Owns the three-tier dispatch logic that used to live in
 ``loops.main.main`` + ``_dispatch_verb_first`` + ``_dispatch_observer`` +
-``_dispatch_command``. Routing only — the actual ``_run_*`` work still
-happens in ``loops.main`` (or the migrating ``cli/views/*``) and is looked
-up through ``cli.registry``.
+``_dispatch_command``. Routing only — the actual ``_run_*`` work happens
+in the views under ``cli/views/*`` (and, for the legacy shims, in
+``loops.commands.*``) looked up through ``cli.registry``.
 
 Dispatch tiers:
 
@@ -13,13 +13,14 @@ Dispatch tiers:
   3. Vertex shorthand (``loops <vertex> …``) — implicit read or a
      vertex-first op from ``registry.VERTEX_OPS``
 
-The fast-path ``_try_fast_read`` short-circuit and the ``argparse``
-lazy-import optimisation remain in ``loops.main`` for step 2 — they
-move (or retire) in step 6. ``loops.main.main`` becomes a thin
-delegator to ``cli.app.main`` once those pieces have been disentangled
-from the in-module global tricks.
+``cli.app.main`` is the canonical entry point. ``loops.main.main`` is a
+back-compat shim that delegates here. The previous fast-path
+``_try_fast_read`` short-circuit was retired (see
+``decision/cli-refactor-fast-path-retired``) and the ``argparse``
+lazy-import optimisation moved out with it.
 
-Design anchor: decision/design/cli-refactor-option-2-siftd-shape.
+Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
+decision/cli-refactor-fast-path-retired.
 """
 from __future__ import annotations
 
@@ -132,11 +133,10 @@ def _command(cmd: str, argv: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Top-level CLI entry point.
 
-    Behaviour is identical to the legacy ``loops.main.main`` — verb-first,
-    then command, then vertex-first dispatch. The fast-path
-    ``_try_fast_read`` short-circuit and the ``argparse`` lazy injection
-    still live in ``loops.main.main``; this function is invoked *after*
-    those are dealt with.
+    Verb-first, then command, then vertex-first dispatch.
+    ``loops.main.main`` is a back-compat shim that delegates here; the
+    legacy fast-path was retired (see
+    ``decision/cli-refactor-fast-path-retired``).
     """
     if argv is None:
         argv = sys.argv[1:]

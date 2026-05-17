@@ -1,15 +1,19 @@
 """cli.views.population — template population ops (ls / add / rm / export).
 
-Step 5 entry-point shims for the population verbs reached either as
-top-level commands (``loops add``) or via vertex-first dispatch
-(``loops <vertex> add``). The vertex-first router in ``cli.app``
-embeds the vertex name into argv before calling these.
+Operation IR refactor paused — these surfaces remain entry-point shims
+delegating to the legacy ``loops.commands._run_*`` orchestrators (which
+import painted directly for receipt rendering). Conversion to the full
+Operation IR shape (see ``cli/views/fold.py``) is deferred until a
+touch-point justifies the work.
 
-These four ops don't have rendering complexity worth the full
-Operation IR refactor — they parse argv, mutate state, print a
-receipt. The shims keep them on the (argv, ctx) -> int shape so
-they can swap to a full IR migration later without touching the
-registry.
+The shims are reachable via two paths:
+  * top-level commands (``loops add``) — through ``registry.COMMANDS``;
+  * vertex-first dispatch (``loops <vertex> add``) — through
+    ``registry.POPULATION_OPS``; the vertex-first router in ``cli.app``
+    embeds the vertex name into argv before calling these.
+
+Both paths land on the same ``(argv, ctx) -> int`` contract, so a future
+IR conversion can be local to this module.
 """
 from __future__ import annotations
 

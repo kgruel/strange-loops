@@ -1,8 +1,9 @@
 """cli.views.store — store-inspection view.
 
-Step 5 entry-point shim. Same shape as the other display views — the
-heavy argparse → Operation → dispatch refactor is deferred; see
-cli/views/stream.py for the rationale.
+Operation IR refactor paused — this surface remains an entry-point shim
+delegating to the legacy ``loops.commands._run_store`` orchestrator.
+Conversion to the full Operation IR shape (see ``cli/views/fold.py``)
+is deferred until a touch-point justifies the work.
 """
 from __future__ import annotations
 

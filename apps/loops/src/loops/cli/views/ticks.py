@@ -1,7 +1,9 @@
 """cli.views.ticks — tick history and drill-down view.
 
-Step 5 entry-point shim. The argparse → Operation → dispatch full
-refactor is deferred; see cli/views/stream.py for the rationale.
+Operation IR refactor paused — this surface remains an entry-point shim
+delegating to the legacy ``loops.commands._run_ticks`` orchestrator.
+Conversion to the full Operation IR shape (see ``cli/views/fold.py``)
+is deferred until a touch-point justifies the work.
 """
 from __future__ import annotations
 

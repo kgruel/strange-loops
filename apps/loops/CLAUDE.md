@@ -73,49 +73,38 @@ See `~/.config/loops/CLAUDE.md` for the full progressive guide to each of these.
 
 **Trigger**: I need to modify a command, add a new one, or change how the CLI wires things.
 
-**Two command patterns:**
+**Entry point**: `loops.cli.app.main`. The legacy `loops.main.main` is now a 63-LOC back-compat re-export shim that delegates to `cli.app.main` and re-exports `_run_*` symbols from `loops.commands.*` so tests and the registry's `_legacy_view` wrapper keep working.
 
-**Display commands** — fetch data, render through painted:
-```
-main.py routes command
-  → fetch(args) → data           # commands/*.py
-  → lens(data, zoom, width) → Block  # lenses/*.py
-  → run_cli() handles zoom/json/plain/width
-```
+**Three-tier dispatch** (in `cli/app.py`):
 
-Commands: `read` (fold + stream), `store`, `compile`, `validate`, `test`, `ls`.
+1. **Verbs** — `loops <verb> [vertex] …` — `registry.VERBS`
+2. **Commands** — `loops <command> …` — `registry.COMMANDS`
+3. **Vertex shorthand** — `loops <vertex> [op] …` — implicit `read` or a vertex-first op from `registry.VERTEX_OPS`
 
-**Action commands** — parse args, mutate, exit:
-```
-main.py routes command
-  → parse args
-  → act (write to store, create file, etc.)
-  → show(Block.text()) for confirmation
-```
+**Verbs / commands are registered in `loops.cli.registry`** (`VERBS`, `COMMANDS`, `POPULATION_OPS`). Each entry is a `View` — `(argv, ctx) -> int` — that resolves lazily on first call.
 
-Commands: `init`, `emit`, `close`, `add`, `rm`, `export`.
+**Each verb is a view**: `loops/cli/views/<name>.py` exposing `run(argv, ctx) -> int`.
 
-**Adding a display command:**
-1. `commands/your_cmd.py` — `fetch_*(args) -> dict` (data retrieval, no rendering)
-2. `lenses/your_cmd.py` — `your_view(data, zoom, width) -> Block` (pure function)
-3. `main.py` — add to command dispatch, wire subparser
+**Two patterns inside views:**
 
-**Adding an action command:**
-1. Handler in `main.py` or `commands/` — parse args, do work, render confirmation
-2. Wire in `create_parser()` + command dispatch
+**(a) Full Operation IR** — the view parses argv into an `Operation` and calls `dispatch(op, reporter=ctx.reporter)`. Used by **`fold` and `emit` only** (pilot surfaces; `read` and `cite` are thin routers that delegate into them).
 
-**Key wiring — `run_cli()`:**
-```python
-def fetch():
-    return fetch_fold(vertex_path, kind=known.kind)
+**(b) Legacy shim** — the view delegates to `loops.commands._run_<name>`. Used by `stream`, `store`, `ticks`, `close`, `sync`, and the `population.*` ops (ls/add/rm/export).
 
-def render(ctx, data):
-    return render_fn(data, ctx.zoom, ctx.width)
+**The refactor is paused as a pilot.** Two surfaces use the IR; ten do not. Adding a *new* verb in the IR shape (parse → Operation → dispatch) is the preferred path forward. Converting an existing legacy shim is opportunistic — do it when a touch-point justifies the work, not as a sweep.
 
-return run_cli(rest, fetch=fetch, render=render, help_args=[...])
-```
+**Painted-boundary caveat:** within `cli/`, only `output.py`, `live.py`, and `help.py` import painted at runtime (`operation.py` has a TYPE_CHECKING import). `help.py` is scheduled to retire alongside the legacy help renderer. The `commands/` modules (devtools, emit, resolve, pop, sync, ticks, init, whoami, stream, store, population) still import painted directly — the "single painted boundary" applies inside `cli/`, not `commands/`. Reporter injection is the target shape; it is not the current invariant outside `cli/`.
 
-`run_cli` handles zoom resolution, output mode (static/live/interactive), format (ANSI/plain/JSON), and TTY detection. Display commands provide `fetch` and `render`, framework handles the rest.
+**Adding a new verb (IR shape — preferred):**
+1. `cli/views/<verb>.py` — define `run(argv, ctx)`: parse argv with `argparse`, build an `Operation`, call `dispatch(op, reporter=ctx.reporter)`.
+2. Register in `cli/registry.py` via `_view("loops.cli.views.<verb>")`.
+3. If display, add a lens in `lenses/<name>.py` — `(data, zoom, width) -> Block` (pure function).
+
+**Adding a new verb (legacy shim shape):**
+1. `loops/commands/<verb>.py` — `_run_<verb>(argv, *, vertex_path=None, observer=None) -> int`. May call painted directly.
+2. Re-export from `loops/main.py` for back-compat.
+3. `cli/views/<verb>.py` — thin `run(argv, ctx)` that delegates to `_run_<verb>`.
+4. Register in `cli/registry.py` via `_view(...)` (or `_legacy_view(...)` to point straight at `loops.main`).
 
 **Don't reach for yet**: Store resolution internals, vertex template system, lens resolver implementation.
 
@@ -160,7 +149,7 @@ Templates dissolved: `loops init <name>` finds an existing config-level instance
 - Display commands route through painted `run_cli`. Zero raw `print()`.
 - 4 zoom levels: MINIMAL (counts), SUMMARY (default), DETAILED (bodies), FULL (timestamps).
 - Lenses are pure: `(data, zoom, width) -> Block`. No IO, no state.
-- `main.py` is the monolith. Commands/ and lenses/ are extracted concerns.
+- `cli/app.py` is the entry point; `main.py` is a 63-LOC back-compat shim. The refactor that extracted dispatch into `cli/` is paused — `fold` and `emit` use the full Operation IR, the other verbs are entry-point shims over `commands/_run_*`.
 - Golden snapshot tests lock output across all 4 zoom levels. Run `--update-goldens` to regenerate.
 
 ## Build & test

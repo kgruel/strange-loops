@@ -4,24 +4,38 @@ Two tables:
 
   VERBS: the five primary vertex verbs (read, emit, sync, close, cite)
     plus the data-access verbs that share the verb-first dispatch shape
-    (store, ticks). Each entry is a ``View`` — ``(argv, ctx) -> int``.
+    (store). Each entry is a ``View`` — ``(argv, ctx) -> int``.
 
   COMMANDS: the dev-tool and setup commands (test, compile, validate,
     init, ls, add, rm, export, whoami). Same View shape.
 
-In step 2 every entry wraps a legacy ``loops.main._run_*`` function
-through ``_legacy_view``. The wrapper bridges the (argv, kwargs=…)
-signature the legacy code uses to the (argv, ctx) signature the
-registry promises. As individual views migrate (steps 3–5) their
-entries are repointed at the new ``cli/views/<name>.py:run`` directly.
+  POPULATION_OPS: the per-vertex template-population helpers
+    (ls / add / rm / export) reached via ``loops <vertex> <op>``.
+
+Current state (refactor paused after the Operation IR pilot):
+
+  VERBS mixes two shapes. Entries pointing at ``cli/views/<name>.py``
+  via ``_view(...)`` are on the new shape — ``read``, ``emit``, ``cite``,
+  ``store``. The ``read`` and ``cite`` views are thin routers; only
+  ``fold`` (reached via ``read``) and ``emit`` exercise the full
+  ``argparse → Operation → dispatch`` IR. ``close`` and ``sync`` still
+  use ``_legacy_view`` to call ``loops.main._run_*`` directly.
+
+  COMMANDS is mostly ``_legacy_view_argv_only`` pointing at
+  ``loops.main._run_*`` (which re-exports from ``loops.commands.*``).
+  Two entries — the top-level population helpers — point at
+  ``cli/views/population.py`` via ``_view``.
+
+  The registry seam is the migration boundary: each remaining surface
+  can convert to the IR shape independently if a touch-point justifies
+  the work. No registry sweep is required to land a new IR view.
 
 The registry is intentionally lazy: each entry resolves its target
-function on first call via a lambda + ``importlib``. This keeps
-``cli.app`` importable without dragging the whole CLI surface in,
-which preserves the ``loops <vertex>`` fast-path's cold-start budget
-during the migration.
+function on first call via ``importlib``. Keeps ``cli.app`` importable
+without dragging the whole CLI surface in.
 
-Design anchor: decision/design/cli-refactor-option-2-siftd-shape.
+Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
+decision/operation-ir-adoption.
 """
 from __future__ import annotations
 

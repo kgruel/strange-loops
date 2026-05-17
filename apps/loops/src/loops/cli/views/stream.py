@@ -1,13 +1,13 @@
 """cli.views.stream — event-stream view.
 
-Step 5 lands the entry-point shape (``run(argv, ctx) -> int``) and
-threads the resolved CliContext into the legacy ``_run_stream``
-orchestrator. The argparse → Operation → dispatch full refactor is
-deferred — stream is a smaller surface than fold and the legacy
-``run_cli`` path keeps the goldens stable while step 7 reviews fold.
-The interim shape still satisfies the boundary discipline: no painted
-import lives in this module, and the dispatcher only sees the
-CliContext-shaped entry point.
+Operation IR refactor paused — this surface remains an entry-point shim
+delegating to the legacy ``loops.commands._run_stream`` orchestrator.
+Conversion to the full Operation IR shape (see ``cli/views/fold.py``)
+is deferred until a touch-point justifies the work.
+
+The shim still satisfies the (argv, ctx) -> int contract the registry
+promises, so converting later is local to this module: no registry or
+dispatch changes required.
 """
 from __future__ import annotations
 

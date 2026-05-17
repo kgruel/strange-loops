@@ -1,12 +1,24 @@
 """CLI layer for loops.
 
 This package owns CLI presentation: argparse parsing, dispatch, rendering,
-output. Commands (``loops.commands.*``) own domain logic and never import
-from this package — they accept a ``Reporter`` if they need to emit output.
+output.
 
-The single painted-boundary module is ``cli.output``; ``cli.live`` is the
-secondary boundary for ``InPlaceRenderer``. No other module in ``cli/``
-may ``from painted import …``.
+Painted-boundary discipline (current state — refactor paused):
+
+  Within ``cli/``, only ``cli.output``, ``cli.live``, and ``cli.help``
+  import painted at runtime. ``cli.help`` is scheduled to retire
+  alongside the legacy help renderer. (``cli.operation`` has a
+  TYPE_CHECKING-only painted import; it does not exercise painted at
+  runtime.)
+
+  This boundary does *not* yet extend to ``loops.commands.*``. Several
+  command modules — ``devtools``, ``emit``, ``resolve``, ``pop``, ``sync``,
+  ``ticks``, ``init``, ``whoami``, ``stream``, ``store``, ``population`` —
+  still import painted directly. The Reporter-injection contract (commands
+  never importing painted, accepting a ``Reporter`` when they need to emit
+  output) is the *target* shape for future migrations, not the current
+  invariant. Only the ``fold`` and ``emit`` views have been pulled onto
+  the full Operation IR shape; the rest are entry-point shims.
 
 Design anchor: decision/design/cli-refactor-option-2-siftd-shape.
 """

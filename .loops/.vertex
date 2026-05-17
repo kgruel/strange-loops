@@ -1,8 +1,0 @@
-// Root workspace vertex — aggregates all workspace concerns
-// loops read . shows the combined view
-name "loops"
-
-combine {
-    vertex "./project.vertex"
-    vertex "./docs.vertex"
-}

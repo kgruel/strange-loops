@@ -1,4 +1,0 @@
-// Minute timer: triggers data collection
-kind "minute"
-observer "timer"
-every "60s"

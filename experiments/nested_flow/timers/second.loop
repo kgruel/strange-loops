@@ -1,4 +1,0 @@
-// Second timer: base cadence, emits every 1 second
-kind "second"
-observer "timer"
-every "1s"

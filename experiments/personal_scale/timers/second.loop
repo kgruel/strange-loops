@@ -1,4 +1,0 @@
-// Base timer: ticks every second
-kind "second"
-observer "timer"
-every "1s"

@@ -35,3 +35,10 @@ CLAUDE.md
 
 # Personal dev notes — essays, scratch, etc.
 docs/dev/
+
+# Personal state — vertex declarations, lenses, hooks, agents, experiments.
+# Monorepo carries code + public docs; this is per-clone working state.
+.claude/
+.loops/
+experiments/
+meta-discussion/

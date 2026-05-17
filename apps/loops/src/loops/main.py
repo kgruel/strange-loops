@@ -864,7 +864,8 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
             HelpArg("--observer", "Filter by observer (default: you)"),
             HelpArg("--lens", "Render lens (prompt)"),
             HelpArg("--refs", "Walk + decorate ref graph; bare = depth 1, --refs N = depth N"),
-            HelpArg("--facts", "Show source facts per item"),
+            # --facts is added via _add_fold_args so painted auto-renders it
+            # from the argparse parser; listing it here too produces a dup line.
         ],
     )
 

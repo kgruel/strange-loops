@@ -127,7 +127,8 @@ def _run_ticks(
         def render(ctx, data):
             nonlocal resolved_render_fn
             from painted import Block, Style, join_vertical
-            from loops.main import _resolve_render_fn, _vertex_name  # noqa: PLC0415 — will move step 6
+            from loops.cli.lens import _resolve_render_fn
+            from loops.commands.resolve import _vertex_name
 
             w = ctx.width if ctx.is_tty else None
 
@@ -177,7 +178,8 @@ def _run_ticks(
 
     def render_listing(ctx, data):
         nonlocal resolved_render_fn
-        from loops.main import _resolve_render_fn, _vertex_name  # noqa: PLC0415 — will move step 6
+        from loops.cli.lens import _resolve_render_fn
+        from loops.commands.resolve import _vertex_name
         if resolved_render_fn is None:
             resolved_render_fn = _resolve_render_fn(
                 known.lens, vertex_path, "ticks_view",

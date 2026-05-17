@@ -201,7 +201,7 @@ def _run_sync(
     from painted.palette import current_palette
     from engine import load_vertex_program
     from loops.commands.resolve import _resolve_named_vertex
-    from loops.main import _parse_vars, _resolve_vertex_path
+    from loops.commands.resolve import _parse_vars, _resolve_vertex_path
 
     rep = _reporter(reporter)
 

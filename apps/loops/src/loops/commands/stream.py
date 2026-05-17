@@ -14,7 +14,9 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
     """
     from painted import run_cli
     from painted.cli import HelpArg
-    from loops.main import _validate_kind_or_exit, _resolve_render_fn, _vertex_name, _err
+    from loops.commands.resolve import _validate_kind_or_exit, _vertex_name
+    from loops.cli.lens import _resolve_render_fn
+    from loops.cli.output import err as _err
     from .resolve import _resolve_vertex_for_dispatch, _apply_vertex_scope
 
     pre = argparse.ArgumentParser(add_help=False)

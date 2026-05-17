@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     # No args / top-level help — defer to the legacy help renderer; it
     # owns the painted HelpData composition that step 6 will retire.
     if not argv or argv[0] in ("-h", "--help"):
-        from loops.main import _render_main_help
+        from loops.cli.help import _render_main_help
 
         return _render_main_help(argv)
 

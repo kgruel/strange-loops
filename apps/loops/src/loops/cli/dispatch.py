@@ -63,11 +63,9 @@ def _resolve_lens(
 ):
     """Resolve a render_lens (+ optional override) to its callable.
 
-    Delegates to ``loops.main._resolve_render_fn`` so the strict
+    Delegates to ``cli.lens._resolve_render_fn`` so the strict
     "explicit lens request must resolve or sys.exit(2)" discipline
-    applies uniformly — same error surface as the legacy code path the
-    cli refactor is replacing. (_resolve_render_fn moves out of
-    loops.main in step 6; the import goes with it.)
+    applies uniformly.
 
     The function within the lens module is named ``<base>_view`` per
     ``_VIEW_SUFFIX`` (or ``<name>_view`` for new verbs). When
@@ -77,7 +75,7 @@ def _resolve_lens(
     ``loops.lenses.autoresearch.fold_view`` (the re-export pattern,
     see lenses/autoresearch.py).
     """
-    from loops.main import _resolve_render_fn  # noqa: PLC0415 — moves step 6
+    from loops.cli.lens import _resolve_render_fn
 
     view_name = _VIEW_SUFFIX.get(name, f"{name}_view")
     return _resolve_render_fn(lens_override, vertex_path, view_name)
@@ -158,7 +156,7 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         extra.setdefault("lines", op.fidelity.lines)
     if op.vertex_path is not None:
         # Vertex name + path are useful for many lenses for headers / refs.
-        from loops.main import _vertex_name  # noqa: PLC0415 — circular avoidance, will move in step 6
+        from loops.commands.resolve import _vertex_name
 
         extra.setdefault("vertex_name", _vertex_name(op.vertex_path))
         extra.setdefault("vertex_path", str(op.vertex_path))
@@ -205,7 +203,7 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     vertex_name = None
     vertex_path_str = None
     if op.vertex_path is not None:
-        from loops.main import _vertex_name  # noqa: PLC0415
+        from loops.commands.resolve import _vertex_name
 
         vertex_name = _vertex_name(op.vertex_path)
         vertex_path_str = str(op.vertex_path)

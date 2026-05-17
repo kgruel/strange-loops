@@ -236,7 +236,7 @@ def _build_fold_fetch(
     obs = _apply_vertex_scope(observer, vertex_path) or None
     _validate_kind_or_exit(kind, vertex_path)
 
-    from loops.main import _resolve_lens_fetch  # noqa: PLC0415 — moves in step 6
+    from loops.cli.lens import _resolve_lens_fetch
 
     lens_fetch = _resolve_lens_fetch(lens, vertex_path, "fold_view")
 
@@ -303,10 +303,10 @@ async def _build_fold_stream(fetch_data) -> AsyncIterator[Any]:
 
 
 def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
-    """Delegate to main's kind-vs-declaration check for now (moves step 6)."""
+    """Validate kind against vertex declarations; exit 2 on mismatch."""
     if vertex_path is None:
         return
-    from loops.main import _validate_kind_or_exit as _impl
+    from loops.commands.resolve import _validate_kind_or_exit as _impl
 
     _impl(kind, vertex_path)
 
@@ -492,11 +492,9 @@ def _build_autoresearch_handler(vertex_path: Path, observer: str | None):
 def _render_fold_help(_ctx: CliContext) -> int:
     """Render fold-specific help.
 
-    Defers to the legacy main-help renderer for now — its painted
-    HelpData composition already documents read's full surface and is
-    used by the goldens. Step 6 / step 7 revisits the per-view help
-    surface once the legacy renderer retires.
+    Defers to the top-level help renderer — its painted HelpData composition
+    already documents read's full surface and is used by the goldens.
     """
-    from loops.main import _render_main_help
+    from loops.cli.help import _render_main_help
 
     return _render_main_help(["read", "--help"])

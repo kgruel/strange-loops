@@ -683,3 +683,108 @@ def _apply_vertex_scope(observer: str | None, vertex_path: Path | None) -> str |
 
     # Unscoped vertex or no vertex resolved yet — show all
     return None
+
+
+# --- Helpers migrated from main.py ---
+
+
+def _parse_vars(raw: list[str]) -> dict[str, str]:
+    """Parse ['KEY=VALUE', ...] into {key: value}."""
+    result: dict[str, str] = {}
+    for item in raw:
+        if "=" not in item:
+            raise ValueError(f"Invalid --var format (expected KEY=VALUE): {item!r}")
+        key, _, value = item.partition("=")
+        result[key] = value
+    return result
+
+
+def _vertex_name(vertex_path: Path | None) -> str | None:
+    """Extract vertex name from path — stem without extension."""
+    if vertex_path is None:
+        return None
+    name = vertex_path.stem
+    # .vertex (bare dotfile) → infer from parent dir
+    if name == "":
+        return vertex_path.parent.name
+    return name
+
+
+def _resolve_vertex_path(file_arg: str | None) -> Path | None:
+    """Resolve a vertex file path, defaulting to LOOPS_HOME/.vertex."""
+    if file_arg is not None:
+        return Path(file_arg)
+    home = loops_home()
+    root = home / ".vertex"
+    if root.exists():
+        return root
+    _err(f"Error: {root} not found. Run 'loops init' first.")
+    return None
+
+
+def _declared_kinds(vertex_path: Path) -> set[str]:
+    """Return the set of kinds declared by a vertex (instance or aggregation).
+
+    For an instance vertex, returns the kinds in its ``loops {}`` block.
+    For an aggregation vertex that defines its own loops, those kinds.
+    For an aggregation vertex with no loops block (pure combine), returns
+    the union of source-vertex kinds — same union ``vertex_fold`` uses.
+
+    Returns an empty set on parse/compile failure (validation is best-effort
+    — callers should treat empty as "couldn't determine" rather than "vertex
+    declares nothing").
+    """
+    try:
+        from lang import parse_vertex_file
+        from engine.compiler import compile_vertex
+        from engine.vertex_reader import _collect_source_specs
+
+        ast = parse_vertex_file(vertex_path)
+        specs = compile_vertex(ast)
+        if (ast.combine is not None or ast.discover is not None) and not specs:
+            source_specs = _collect_source_specs(
+                ast, vertex_path, override_kinds=frozenset(specs),
+            )
+            return set(source_specs.keys()) | set(specs.keys())
+        return set(specs.keys())
+    except Exception:
+        return set()
+
+
+def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
+    """If ``--kind X`` is set and X is not declared by the vertex, exit 2.
+
+    Silent empty results hide the indistinguishability between:
+    - typo in kind name (``--kind decsion``)
+    - real kind that this vertex doesn't declare (``--kind decision`` on
+      coupling-kernels, which only declares hypothesis/query-run/query-comparison)
+    - valid kind with zero facts yet
+
+    Strict validation surfaces the first two as actionable errors; the third
+    keeps current "No data yet" behavior because the kind IS declared.
+
+    Skips validation when ``kind`` is None (no filter requested) or the
+    vertex's declared-kinds set is empty (couldn't determine — don't block).
+    Path-style ``kind/key`` is split: only the kind half is validated.
+    """
+    if kind is None or vertex_path is None:
+        return
+    kind_only = kind.split("/", 1)[0]
+    declared = _declared_kinds(vertex_path)
+    if not declared:
+        return
+    if kind_only in declared:
+        return
+
+    import difflib
+    suggestions = difflib.get_close_matches(
+        kind_only, sorted(declared), n=3, cutoff=0.5,
+    )
+    lines = [
+        f"Vertex '{vertex_path.stem}' does not declare kind '{kind_only}'.",
+    ]
+    if suggestions:
+        lines.append(f"Did you mean: {', '.join(suggestions)}?")
+    lines.append(f"Declared kinds: {', '.join(sorted(declared)) or '(none)'}")
+    print("\n".join(lines), file=sys.stderr)
+    sys.exit(2)

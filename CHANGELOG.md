@@ -2,6 +2,67 @@
 
 ## 2026-05-16
 
+### Substrate: ULID id generation restored
+
+- **`engine._gen_id()` → `str(ULID())`** — restores time-sortable
+  (lexicographic order matches generation time) and within-millisecond
+  monotonic id generation via `python-ulid` (pure Python, no C extension,
+  ~2.3μs per id). The prior `uuid.uuid4()` implementation produced random
+  ids — `ORDER BY id` was meaningless, breaking cross-store interleaving
+  and any downstream consumer that assumed id-as-chronological-key. Single-
+  store ordering survived only because `since()`, `replay_cursor`, and
+  `facts_by_kind` all sort by `rowid` (captured as observation
+  `architecture/rowid-is-load-bearing-for-single-store-ordering`).
+- **Schema cleanup** — dropped vestigial `DEFAULT (ulid())` from engine and
+  store schemas. All INSERTs supply id explicitly (engine via `_gen_id()`,
+  store via `SELECT * FROM src.facts` through `ATTACH DATABASE`) so the
+  SQL-callable `ulid()` function is no longer needed.
+- **`sqlite-ulid` dep removed** — from `libs/engine`, `libs/store`, and
+  top-level `pyproject.toml`. 15 transitive packages purged. python-ulid
+  was already a top-level dep (used by `libs/sign` for JTI generation).
+- **Regression bar added** — engine `TestIdGenerationContract` (3 tests:
+  ULID format, within-store id-order matches emission order, cross-store
+  id-order interleaves chronologically). Store `TestMergeViaProductionEmitPath`
+  (3 tests exercising merge through `SqliteStore.append()` rather than
+  via test fixtures that previously bypassed the production id path —
+  the structural gap that hid the prior regression).
+- **Existing stores** — facts emitted prior to this change keep their
+  original ids (no migration). Mixed-format histories are tolerated; new
+  emits restore the time-sortable property going forward. A future
+  migration may rewrite legacy ids if downstream consumers need uniform
+  chronological-by-id semantics across the full history.
+
+Resolves `friction:ulid-regressed-to-uuid4-in-sqlite-store`. See decision
+`architecture/id-primitive-python-ulid` for rationale.
+
+### Lens: deliberation depth (structural overfit detector)
+
+- **`--lens deliberation`** — reads `--facts` for status-bearing kinds
+  (hypothesis, thread, friction, task) and counts status transitions per
+  fold key. Status entries that landed at a terminal state with one or
+  fewer transitions surface as SUSPICIOUS — too clean to be real
+  deliberation. Captures the "suspicious-cleanness as overfit-check"
+  principle (peer-converged with alcove 2026-05-10) as a structural
+  read-path feature rather than a manual noticing skill.
+- **Calibration** — initially flagged `emit_count<=2` then tightened to
+  `<=1` after advisor-driven re-inspection showed legitimate one-hop
+  resolutions were getting false-flagged.
+
+### Session-start: ARCS context + surface trim
+
+- **ARCS section injected** — `.claude/hooks/arcs-block.py` (invoked by
+  `session-start.sh`) renders the top 2 multi-fact open threads via
+  `sl trace --diff`, capped at 30 lines per arc. First session where the
+  session prompt context is composed by sl trace verb output — three-
+  layer recursion: trace verb shipped this session renders the diff that
+  becomes next session's context.
+- **Discipline lenses co-located** — moved from `~/.config/loops/lenses/`
+  to repo-local `<repo>/.loops/lenses/` (with symlinks back at originals
+  for back-compat). Session-landing and reconcile lenses now version-
+  controlled with the code that consumes them.
+- **Surface trim** — pruned redundant sections from session-start prompt
+  to make room for ARCS without inflating total context.
+
 ### Trace: kind/key lifecycle as a top-level verb
 
 - **`sl trace <kind>/<key>`** — walks a single fold-key entity's source

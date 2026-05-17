@@ -875,6 +875,19 @@ def _run_fold(argv: list[str], *, vertex_path: Path | None = None, observer: str
     # (which adds "refs" to visible when depth > 0 so the lens decorates).
     refs_depth, rest = _extract_refs_depth(rest)
 
+    # Pre-check --diff. When set, read renders cumulative field-deltas
+    # across the entity's source-fact lifecycle (rather than the current
+    # folded snapshot). C of the trace-dissolution arc — the diff rendering
+    # was the one genuinely unique trace capability; absorbed here. Routes
+    # the dispatch entirely to a trace-style path: fetch_trace + trace_view.
+    want_diff = "--diff" in rest
+    if want_diff:
+        # Strip --diff from rest so painted's parser doesn't reject it.
+        rest = [a for a in rest if a != "--diff"]
+        return _run_fold_diff(
+            known, rest, refs_depth, vertex_path=vertex_path, observer=observer,
+        )
+
     # Fast path: --static --plain bypasses the CLI framework import (~7ms).
     # Detect these flags before importing painted.cli. The --refs bail-out
     # is here (not in _is_static_plain) because rest has already had --refs
@@ -1133,6 +1146,98 @@ def _render_fold_plain(
             out.append(f"  ({remaining} more)")
 
     return "\n".join(out)
+
+
+def _run_fold_diff(
+    known, rest: list[str], refs_depth: int,
+    *,
+    vertex_path: Path | None = None,
+    observer: str | None = None,
+) -> int:
+    """Run read in --diff mode — cumulative field-deltas for one entity.
+
+    C of the trace-dissolution arc. Routes the entity's source-fact
+    lifecycle through fetch_trace (which can also walk outbound refs at
+    ``refs_depth`` for cross-entity diff partitioning) and renders via
+    ``trace_view`` with ``_diff=True``. The lens code stays in
+    ``lenses/trace.py`` because the diff-render is the load-bearing piece
+    we're absorbing — only the trace command goes away in D.
+
+    Requires an entity (kind/key) — diff is meaningless without a target
+    entity. Errors loudly when invoked without one.
+    """
+    from painted import run_cli
+    from painted.cli import HelpArg
+
+    # --diff requires a target entity. By the time we get here, _run_fold
+    # has routed any positional kind/key into known.kind. If known.kind is
+    # None or has no key part, we have no entity to diff.
+    target = known.kind if "/" in (known.kind or "") else None
+    if target is None:
+        _err(
+            "usage: sl read [vertex] <kind>/<key> --diff\n"
+            "  --diff renders cumulative field-deltas of one entity's "
+            "lifecycle; supply a kind/key."
+        )
+        return 2
+
+    diff_kind, diff_key = target.split("/", 1)
+
+    def fetch():
+        nonlocal vertex_path, observer
+        if vertex_path is None:
+            from .commands.identity import resolve_local_vertex as _resolve_local_vertex
+            vname = getattr(known, "vertex", None)
+            if vname is not None:
+                local = _resolve_vertex_for_dispatch(vname)
+                vertex_path = local if local is not None else _resolve_named_vertex(vname)
+            else:
+                vertex_path = _resolve_local_vertex()
+        observer = _apply_vertex_scope(observer, vertex_path)
+        obs_for_engine = observer if observer else None
+        _validate_kind_or_exit(diff_kind, vertex_path)
+
+        from .commands.fetch import fetch_trace
+        data = fetch_trace(
+            vertex_path,
+            kind=diff_kind,
+            key=diff_key,
+            observer=obs_for_engine,
+            refs_depth=refs_depth,
+        )
+        data["_diff"] = True
+        return data
+
+    def render(ctx, data):
+        # --lens override still respected; otherwise default to trace_view
+        # (which dispatches to _render_diff internally on _diff=True).
+        lens_name = getattr(known, "lens", None)
+        if lens_name is not None:
+            render_fn = _resolve_render_fn(lens_name, vertex_path, "trace_view")
+        else:
+            from .lenses.trace import trace_view
+            render_fn = trace_view
+        w = ctx.width if ctx.is_tty else None
+        from .lens_resolver import call_lens
+        return call_lens(
+            render_fn, data, ctx.zoom, w,
+            vertex_name=_vertex_name(vertex_path),
+        )
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        prog="loops read --diff",
+        description="Cumulative field-deltas of one entity's lifecycle",
+        help_args=[
+            HelpArg("entity", "kind/key positional (already consumed at this point)", positional=True),
+            HelpArg("--diff", "Render cumulative field-deltas (this flag)"),
+            HelpArg("--refs", "Also include outbound refs in the diff (partitioned per entity)"),
+            HelpArg("--observer", "Filter by observer (default: you)"),
+            HelpArg("--lens", "Override the default diff lens"),
+        ],
+    )
 
 
 def _run_fold_fast(

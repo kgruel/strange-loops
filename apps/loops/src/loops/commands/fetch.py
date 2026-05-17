@@ -84,11 +84,12 @@ def fetch_fold(
     sections — each section uses its own declared key_field. Sections with no
     matches are dropped.
 
-    ``refs_depth`` controls outbound ref-graph walk (currently plumbing only —
-    accepted to thread through call sites, but the walk itself is implemented
-    in A2 of the trace-dissolution arc, see decision/design/trace-dissolves-
-    into-read-with-unified-refs). When > 0, will pull connected entities into
-    the result; depth-0 (default) returns only matched items.
+    ``refs_depth`` controls outbound ref-graph walk. When ``> 0``, walks
+    each primary item's outbound ``ref=kind:key`` entries to fetch the
+    referenced entities (up to N hops) and includes them in the returned
+    state's ``walked`` field. Primary sections are unaffected. See
+    decision/atoms/walked-items-as-foldstate-extension for the shape.
+    A2 of the trace-dissolution arc — walk is outbound only.
     """
     from atoms import FoldSection, FoldState
     from engine import vertex_fold
@@ -102,46 +103,170 @@ def fetch_fold(
         retain_facts=retain_facts,
     )
 
-    if key is None:
-        return state
+    if key is not None:
+        # Filter each section's items by the section's own key_field (prefix match).
+        # When kind was set, state has one section; when kind was None, state has
+        # all sections and we filter each by its own declared key_field.
+        filtered: list[FoldSection] = []
+        surviving_source_keys: set[str] = set()
+        for section in state.sections:
+            matches = tuple(
+                item for item in section.items
+                if _item_matches_key(item, section.key_field, key)
+            )
+            if matches:
+                filtered.append(FoldSection(
+                    kind=section.kind,
+                    items=matches,
+                    sections=section.sections,
+                    fold_type=section.fold_type,
+                    key_field=section.key_field,
+                ))
+                if section.key_field:
+                    for item in matches:
+                        key_value = str(item.payload.get(section.key_field, ""))
+                        surviving_source_keys.add(f"{section.kind}/{key_value}")
 
-    # Filter each section's items by the section's own key_field (prefix match).
-    # When kind was set, state has one section; when kind was None, state has
-    # all sections and we filter each by its own declared key_field.
-    filtered: list[FoldSection] = []
-    surviving_source_keys: set[str] = set()
-    for section in state.sections:
-        matches = tuple(
-            item for item in section.items
-            if _item_matches_key(item, section.key_field, key)
+        # Preserve source_facts for surviving items only (drop entries whose
+        # fold item was filtered out). Without this, retain_facts=True + key
+        # filtering would silently drop the lifecycle data that callers like
+        # fetch_trace depend on.
+        filtered_source_facts = {
+            k: v for k, v in state.source_facts.items()
+            if k in surviving_source_keys
+        }
+
+        state = FoldState(
+            sections=tuple(filtered),
+            vertex=state.vertex,
+            source_facts=filtered_source_facts,
         )
-        if matches:
-            filtered.append(FoldSection(
-                kind=section.kind,
-                items=matches,
-                sections=section.sections,
-                fold_type=section.fold_type,
-                key_field=section.key_field,
-            ))
-            if section.key_field:
-                for item in matches:
-                    key_value = str(item.payload.get(section.key_field, ""))
-                    surviving_source_keys.add(f"{section.kind}/{key_value}")
 
-    # Preserve source_facts for surviving items only (drop entries whose
-    # fold item was filtered out). Without this, retain_facts=True + key
-    # filtering would silently drop the lifecycle data that callers like
-    # fetch_trace depend on.
-    filtered_source_facts = {
-        k: v for k, v in state.source_facts.items()
-        if k in surviving_source_keys
-    }
+    if refs_depth > 0:
+        state = _walk_refs(state, vertex_path, observer, refs_depth)
+
+    return state
+
+
+def _walk_refs(
+    state: "FoldState",
+    vertex_path: Path,
+    observer: str | None,
+    refs_depth: int,
+) -> "FoldState":
+    """Outbound ref-graph walk from primary items, up to ``refs_depth`` hops.
+
+    For each primary item, parses its ``refs`` tuple (entries in ``kind:key``
+    form per the runbook convention; bare or unparseable entries are skipped),
+    fetches the referenced entity's fold item, and adds it to the result's
+    ``walked`` tuple. depth=1 items are direct refs of primaries; depth=2+
+    are refs-of-refs, with ``via_anchor`` preserving the immediate parent so
+    lenses can render lineage chains.
+
+    Cycle protection: a ``visited`` set holds all addresses (primaries +
+    walked) — once visited, an address is never re-added, preventing both
+    cycles and re-rendering an entity twice. The address is the
+    ``section_kind/key`` form.
+
+    Implementation note: each walk-hop calls ``fetch_fold`` recursively with
+    ``refs_depth=0`` (default), so the inner call doesn't loop. The recursive
+    call lets us reuse the kind/key filtering logic unchanged.
+    """
+    from atoms import FoldState, WalkedItem
+
+    # Build primary visited set + initial frontier
+    visited: set[str] = set()
+    frontier: list[tuple[str, str, str, int]] = []  # (via_anchor, target_kind, target_key, depth)
+
+    for section in state.sections:
+        kf = section.key_field
+        if not kf:
+            continue
+        for item in section.items:
+            key_value = str(item.payload.get(kf, ""))
+            if not key_value:
+                continue
+            anchor_addr = f"{section.kind}/{key_value}"
+            visited.add(anchor_addr)
+            for ref in item.refs:
+                parsed = _parse_ref_to_kind_key(ref)
+                if parsed is None:
+                    continue
+                rk, rkey = parsed
+                target_addr = f"{rk}/{rkey}"
+                if target_addr in visited:
+                    continue
+                frontier.append((anchor_addr, rk, rkey, 1))
+
+    walked: list[WalkedItem] = []
+    while frontier:
+        next_frontier: list[tuple[str, str, str, int]] = []
+        for via_anchor, target_kind, target_key, depth in frontier:
+            target_addr = f"{target_kind}/{target_key}"
+            if target_addr in visited:
+                continue
+            visited.add(target_addr)
+            # Fetch this entity (refs_depth=0 so inner call doesn't walk)
+            target_state = fetch_fold(
+                vertex_path, kind=target_kind, key=target_key,
+                observer=observer,
+            )
+            for tsection in target_state.sections:
+                tkf = tsection.key_field
+                if not tkf:
+                    continue
+                for titem in tsection.items:
+                    tkey = str(titem.payload.get(tkf, ""))
+                    this_addr = f"{tsection.kind}/{tkey}"
+                    # The fetched state may include other items (prefix match);
+                    # only add the one matching our exact target.
+                    if this_addr != target_addr:
+                        continue
+                    walked.append(WalkedItem(
+                        item=titem, section_kind=tsection.kind,
+                        key_field=tkf,
+                        via_anchor=via_anchor, depth=depth,
+                    ))
+                    if depth < refs_depth:
+                        for ref in titem.refs:
+                            parsed = _parse_ref_to_kind_key(ref)
+                            if parsed is None:
+                                continue
+                            rk, rkey = parsed
+                            new_addr = f"{rk}/{rkey}"
+                            if new_addr in visited:
+                                continue
+                            next_frontier.append((this_addr, rk, rkey, depth + 1))
+        frontier = next_frontier
 
     return FoldState(
-        sections=tuple(filtered),
+        sections=state.sections,
         vertex=state.vertex,
-        source_facts=filtered_source_facts,
+        unfolded=state.unfolded,
+        source_facts=state.source_facts,
+        walked=tuple(walked),
     )
+
+
+def _parse_ref_to_kind_key(ref: str) -> "tuple[str, str] | None":
+    """Parse a ref string into (kind, key). Returns None if unparseable.
+
+    Refs are stored in two forms in the wild:
+    * ``kind:key`` (newer runbook convention, fully qualified) — supported
+    * ``key`` only (legacy / same-kind-implied) — skipped (ambiguous)
+
+    Trace's ``_parse_fact_refs`` uses the same rule for fact-payload refs.
+    This parser is the fold-item analog — items expose their refs as
+    pre-extracted strings, but the address format follows the same
+    discipline. Bare-key refs lose the cross-kind dispatch info, so we
+    can't safely walk them — the walk would have to guess the kind.
+    """
+    if not ref or ":" not in ref:
+        return None
+    k, v = ref.split(":", 1)
+    if not k or not v:
+        return None
+    return k, v
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:

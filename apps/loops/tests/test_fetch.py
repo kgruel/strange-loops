@@ -919,3 +919,146 @@ class TestFetchTickWindows:
         assert windows[0].index == 0
         assert windows[1].index == 1
 
+
+class TestFetchFoldRefsWalk:
+    """A2 of trace-dissolution: fetch_fold(refs_depth=N) outbound walk.
+
+    Covers the walk primitive — that primary items' outbound refs pull in
+    connected entities up to N hops, with via_anchor preserving the chain
+    and visited-set protecting against cycles.
+
+    Refs format follows the runbook convention: ``kind:key``. Refs without
+    ``:`` are skipped (consistent with trace's _parse_fact_refs).
+    """
+
+    def test_depth_zero_means_no_walk(self, tmp_path):
+        """refs_depth=0 is the back-compat default — empty walked tuple."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="decision:design/bar")
+        _emit(vpath, "decision", topic="design/bar", message="y")
+
+        state = fetch_fold(vpath, kind="decision", refs_depth=0)
+        assert state.walked == ()
+
+    def test_depth_one_pulls_outbound_refs(self, tmp_path):
+        """refs_depth=1 walks each primary's outbound refs once."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="decision:design/bar")
+        _emit(vpath, "decision", topic="design/bar", message="y")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        assert len(state.walked) == 1
+        w = state.walked[0]
+        assert w.section_kind == "decision"
+        assert w.via_anchor == "decision/design/foo"
+        assert w.depth == 1
+        assert w.item.payload["topic"] == "design/bar"
+
+    def test_depth_two_follows_chain(self, tmp_path):
+        """refs_depth=2 walks foo → bar → baz; via_anchor preserves lineage."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="decision:design/bar")
+        _emit(vpath, "decision", topic="design/bar", message="y",
+              ref="decision:design/baz")
+        _emit(vpath, "decision", topic="design/baz", message="z")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=2,
+        )
+        addrs = [(w.depth, w.via_anchor, w.item.payload["topic"])
+                 for w in state.walked]
+        # depth=1: bar via foo
+        # depth=2: baz via bar
+        assert (1, "decision/design/foo", "design/bar") in addrs
+        assert (2, "decision/design/bar", "design/baz") in addrs
+        assert len(state.walked) == 2
+
+    def test_cycle_protection(self, tmp_path):
+        """Walk does not re-visit an address already seen (primary or walked).
+
+        foo → bar, bar → foo. Walking from foo at depth 2 should NOT add
+        foo to walked (it's in primary), and should add bar exactly once.
+        """
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="decision:design/bar")
+        _emit(vpath, "decision", topic="design/bar", message="y",
+              ref="decision:design/foo")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=2,
+        )
+        # Only bar should appear in walked. foo is primary.
+        topics = [w.item.payload["topic"] for w in state.walked]
+        assert topics == ["design/bar"], (
+            f"Expected only design/bar walked once; got {topics}"
+        )
+
+    def test_bare_ref_without_kind_prefix_is_skipped(self, tmp_path):
+        """Refs without ``kind:`` prefix are ambiguous — skip them.
+
+        Matches trace's _parse_fact_refs behavior; the walker can't safely
+        cross kinds without knowing the target kind.
+        """
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        # ref="design/bar" (no kind prefix) — should be skipped
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="design/bar")
+        _emit(vpath, "decision", topic="design/bar", message="y")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        assert state.walked == ()
+
+    def test_cross_kind_walk(self, tmp_path):
+        """Walk crosses kinds — decision can ref thread, thread can ref decision."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="thread:my-arc")
+        _emit(vpath, "thread", name="my-arc", status="open",
+              message="thread body")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        assert len(state.walked) == 1
+        w = state.walked[0]
+        assert w.section_kind == "thread"
+        assert w.key_field == "name"
+        assert w.item.payload["name"] == "my-arc"
+
+    def test_walked_item_carries_key_field(self, tmp_path):
+        """WalkedItem.key_field lets the lens render the entity without
+        re-parsing the vertex AST or maintaining a side-channel map."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="thread:my-arc")
+        _emit(vpath, "thread", name="my-arc", status="open", message="body")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        # The decision section uses topic; the walked thread uses name.
+        for w in state.walked:
+            if w.section_kind == "thread":
+                assert w.key_field == "name"

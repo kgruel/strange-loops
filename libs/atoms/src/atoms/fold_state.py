@@ -97,6 +97,46 @@ class FoldSection:
 
 
 @dataclass(frozen=True)
+class WalkedItem:
+    """An entity reached via ref-graph walk from a primary anchor.
+
+    Populated by ``fetch_fold(refs_depth=N)`` when walking from one or more
+    primary entities through their outbound refs. Lives parallel to primary
+    sections in ``FoldState.walked`` so consumers that ignore the walk
+    keep working unchanged.
+
+    Attributes:
+        item: The folded item at this address (same shape as primary).
+        section_kind: The kind ("decision", "thread", ...) of this entity —
+            preserves the type info that's normally carried by the enclosing
+            FoldSection, so lenses can render appropriately without a join.
+        key_field: The payload field used as fold key for this entity's
+            kind (e.g. ``"topic"`` for decision, ``"name"`` for thread).
+            Carried alongside section_kind so the lens can derive the
+            entity's label without re-parsing the vertex AST or maintaining
+            a side-channel kind→key_field map. None for "collect" kinds.
+        via_anchor: The ``kind/key`` address of the entity whose outbound ref
+            pulled this entity in. For depth=1, that's a primary anchor. For
+            depth=2, that's a depth-1 walked entity. Preserves the lineage
+            chain so lenses can render nested ``↳`` markers.
+        via_direction: Direction of the ref edge that pulled this in.
+            ``"outbound"`` means via_anchor's ``ref=`` pointed here.
+            ``"inbound"`` is reserved for a future inbound-walk extension —
+            A2 walks outbound only.
+        depth: Distance from the nearest primary anchor (1 = direct ref of
+            a primary, 2 = ref-of-ref, etc.). depth=0 is reserved for primaries
+            (which live in ``sections``, not here).
+    """
+
+    item: FoldItem
+    section_kind: str
+    via_anchor: str
+    key_field: str | None = None
+    via_direction: str = "outbound"
+    depth: int = 1
+
+
+@dataclass(frozen=True)
 class FoldState:
     """The complete output of fold computation for a vertex.
 
@@ -110,6 +150,9 @@ class FoldState:
             Maps kind name to fact count. Empty when all store kinds are
             declared. Signals incomplete vertex coverage — data exists
             but isn't being folded (no n, no key, no accumulation).
+        walked: Entities reached via ref-graph walk from primaries (when
+            ``fetch_fold(refs_depth>0)``). Empty by default — back-compat
+            with consumers that don't render the walk. See WalkedItem.
     """
 
     sections: tuple[FoldSection, ...]
@@ -118,6 +161,7 @@ class FoldState:
     source_facts: dict[str, list[dict]] = field(default_factory=dict)
     """When retain_facts=True, maps ``kind/key`` to the source facts that
     were compressed into each fold item. Empty by default."""
+    walked: tuple[WalkedItem, ...] = ()
 
     @property
     def is_empty(self) -> bool:

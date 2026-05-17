@@ -164,6 +164,20 @@ def fold_view(
         )
         blocks.append(section_block)
 
+    # Walked items (when --refs N walked the graph). Renders after primary
+    # sections so the anchor context is established before the walk reveals
+    # what's connected to it.
+    if data.walked:
+        walked_block = _render_walked(
+            data.walked, zoom=zoom, fmt=fmt, width=width,
+            inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key, fp=fp, visible=visible,
+            chars=chars,
+        )
+        if walked_block is not None:
+            blocks.append(Block.text("", Style(), width=width))
+            blocks.append(walked_block)
+
     # Footer: skipped sections + unfolded kinds
     footer_parts: list[str] = []
     if skipped_sections:
@@ -180,6 +194,81 @@ def fold_view(
         blocks.append(Block.text(
             "  ".join(footer_parts), fp.unfolded, width=width,
         ))
+
+    return join_vertical(*blocks)
+
+
+def _render_walked(
+    walked: tuple,  # tuple[WalkedItem, ...]
+    *,
+    zoom: Zoom,
+    fmt,
+    width: int | None,
+    inbound: Counter,
+    inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
+    fp: FoldPalette,
+    visible: frozenset[str] = frozenset(),
+    chars: int = 0,
+) -> Block | None:
+    """Render walked entities grouped by their immediate via_anchor.
+
+    Walked items are produced by --refs N on read; they live parallel to
+    primary sections (atoms.WalkedItem). Render shape:
+
+        ## REFS (N)
+          ┄ via → kind/anchor-key
+            decision/design/foo [...]: body...
+              → outbound refs
+          ┄ via → kind/another-anchor-key
+            ↳ depth-2 items render with ↳ prefix when their via_anchor is
+              itself a walked item (depth-1)
+
+    The ``┄ via → X`` marker addresses the trace-refs-no-visual-marker
+    friction — every walked row carries clear attribution back to its
+    parent in the chain. depth>1 items are visually distinguished by ``↳``
+    prefix and additional indent so the lineage chain reads cleanly.
+    """
+    if not walked:
+        return None
+
+    blocks: list[Block] = []
+    blocks.append(Block.text(
+        f"## REFS ({len(walked)})", fp.section_header, width=width,
+    ))
+
+    last_anchor: str | None = None
+    for w in walked:
+        if w.via_anchor != last_anchor:
+            # Marker for a new via-anchor group. The ┄...┄ frames it
+            # as ambient context, not as primary content.
+            blocks.append(Block.text(
+                f"  ┄ via → {w.via_anchor}", fp.collapse, width=width,
+            ))
+            last_anchor = w.via_anchor
+
+        # depth=1: render at 4-space indent. depth>1: 6+ with ↳ prefix.
+        # _render_item_line takes indent as the leading-pad width — we add
+        # the ↳ marker via a custom prefix when depth > 1 by rendering the
+        # marker as a separate block and following with the standard line.
+        item_indent = 4 if w.depth == 1 else 4 + (w.depth - 1) * 2
+        line = _render_item_line(
+            w.item, w.key_field, zoom, fmt, width,
+            inbound=inbound, inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
+            fp=fp, show_observer=False, visible=visible,
+            indent=item_indent, strip_namespace=False,
+            section_kind=w.section_kind, chars=chars,
+        )
+        if w.depth > 1:
+            # Prepend depth marker as overlay — render a single composed
+            # line with ↳ then the rest. Simpler: emit a tiny marker line
+            # ahead of the item.
+            marker_pad = " " * (item_indent - 2)
+            blocks.append(Block.text(
+                f"{marker_pad}↳ (d{w.depth})", fp.collapse, width=width,
+            ))
+        blocks.append(line)
 
     return join_vertical(*blocks)
 

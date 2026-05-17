@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-05-17
+
+### Read: trace dissolves into read --diff [--refs N]
+
+The `trace` verb shipped 2026-05-16 retires this session — its
+capabilities absorbed entirely into `read`. Five-phase landing per
+decision `design/trace-dissolves-into-read-with-unified-refs`. Trace
+hadn't shipped externally, so this is a clean cut with no deprecation.
+
+- **`--refs [N]` unified** (A1) — bare `--refs` walks depth 1 and
+  decorates inbound/outbound edges; `--refs N` walks N hops. Replaces the
+  pre-existing render-side `--refs` toggle (which filtered to ref-having
+  items only — that behavior is retired; orphans now render unchanged).
+  Single semantic, fetch-side walk + render-side decoration.
+- **Walk semantics in `fetch_fold`** (A2) — new `atoms.WalkedItem` lives
+  parallel to primary sections in `FoldState.walked` (back-compat
+  default = empty tuple). Walked items carry `via_anchor` and `depth` so
+  the lens renders the lineage chain. Cycle-protected, cross-kind
+  capable. Lens renders walked items under a `## REFS (N)` section with
+  `┄ via → kind/anchor-key` markers attributing every walked row to its
+  parent — resolves `friction:trace-refs-no-visual-marker`.
+- **Positional `kind/key` on `read`** (B) — `sl read project
+  decision/design/foo` parses as the equivalent of `--kind decision
+  --key design/foo`. Disambiguates against file-path vertices via
+  `_looks_like_vertex_path()` heuristic (absolute, `./`-relative, or
+  `.vertex` suffix → path; otherwise slash means entity). The B
+  implementation caught a 21-test cascade on first attempt where file
+  paths were misclassified as entities — fixed and locked with new
+  `TestLooksLikeVertexPath` regression tests.
+- **`--diff` routing** (C) — `sl read project kind/key --diff` renders
+  the entity's cumulative field-deltas (status: open → partial, refs:
+  +added -removed). Routes through `fetch_trace` + `trace_view` with
+  `_diff=True` — the lens code stayed; only the verb wrapper went away.
+  Under `--diff --refs N`, the diff accumulator partitions per entity.
+- **`trace` verb deleted** (D) — removed `_run_trace` (171 LOC) and
+  `lenses/trace_index.py` entirely. Removed from `_VERBS`, `_VERTEX_OPS`,
+  verb-first dispatch, vertex-op dispatch, and main help. `lenses/trace.py`
+  (the diff renderer) kept — read invokes it directly.
+- **`arcs-block.py` hook updated** — `sl trace project thread/X --diff
+  --plain` → `sl read project thread/X --diff --plain`. One-line swap as
+  predicted in the dissolution-test report.
+
+The friction list cleared along the way: `default-read-flow-too-limiting`
+(read is now the primary access verb with full ergonomic coverage),
+`trace-refs-no-visual-marker` (graph-render with via-markers),
+`refs-flag-unification-and-propagation` (both render-side and fetch-side
+collapsed into one `--refs [N]` semantic).
+
+Regression bar: 14 new tests added across `TestExtractRefsDepth`,
+`TestRunFoldRefsBothPaths`, `TestLooksLikeVertexPath`, and
+`TestFetchFoldRefsWalk`. The asymmetric-pair pattern from yesterday's
+exercising-catches-coherence-gaps growing edge fired three times during
+landing: once on `_is_static_plain` checking already-stripped rest
+(caught immediately), once on file-path-as-entity misclassification
+(caught by 21 cascading test failures), and once on `--diff` needing an
+entity (caught at design time). All locked with regression tests.
+
+Net diff: +442 / -283 lines on the trace dissolution itself; one new
+atom (`WalkedItem`); one deleted lens (`trace_index.py`); zero new CLI
+verbs (one removed).
+
 ## 2026-05-16
 
 ### Substrate: ULID id generation restored

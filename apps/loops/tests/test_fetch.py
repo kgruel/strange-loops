@@ -343,8 +343,16 @@ class TestFetchIntegration:
         assert result["_trace"]["kind"] == "thread"
         assert result["_trace"]["key"] == "never-existed"
 
-    def test_trace_diff_lens_renders_cumulative_deltas(self, tmp_path):
-        """trace_view with _diff renders scalar deltas + ref set-diff."""
+    def test_trace_diff_lens_renders_scalar_deltas_only(self, tmp_path):
+        """trace_view with _diff renders scalar deltas only — refs go to --refs.
+
+        Anchored 2026-05-18: refs are per-fact immutable attribution that
+        the fold UNIONS. Rendering them as +/- deltas in --diff conflated
+        write-receipt with temporal-query (same shape as the 2026-04-29
+        catch). --refs is the canonical view; --diff stays scalar-only.
+        Ref-only emits render "(refs only — see --refs)" so the lifecycle
+        event remains visible.
+        """
         import time
 
         from engine.builder import fold_by, vertex
@@ -369,10 +377,20 @@ class TestFetchIntegration:
             observer="", dry_run=False,
         ), vertex_path=vpath)
         time.sleep(0.01)
-        # Emit 2: status change + ref churn (remove A, add C)
+        # Emit 2: status change + different refs (B,C). Under the old
+        # broken renderer this produced phantom "-A" + "+C". Under the
+        # honest model refs are out of --diff scope entirely.
         cmd_emit(argparse.Namespace(
             vertex=None, kind="thread",
             parts=["name=arc", "status=refined", "ref=B,C"],
+            observer="", dry_run=False,
+        ), vertex_path=vpath)
+        time.sleep(0.01)
+        # Emit 3: ref-only (no scalar change) — must still appear as a
+        # lifecycle event, with pointer to --refs.
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="thread",
+            parts=["name=arc", "status=refined", "ref=D"],
             observer="", dry_run=False,
         ), vertex_path=vpath)
 
@@ -380,13 +398,16 @@ class TestFetchIntegration:
         data["_diff"] = True
         rendered = _text(trace_view(data, Zoom.SUMMARY, 120))
 
-        # Fact 1: status appears as "new" (.→), refs A,B added
+        # Scalar deltas render normally.
         assert "status: . → open" in rendered
-        assert "+A" in rendered and "+B" in rendered
-        # Fact 2: scalar delta visible, ref set-diff shows -A and +C
         assert "status: open → refined" in rendered
-        assert "+C" in rendered
-        assert "-A" in rendered
+        # Refs are NOT in --diff. No +A/+B/+C/+D, no -A.
+        for token in ("+A", "+B", "+C", "+D", "-A", "-B", "-C", "-D"):
+            assert token not in rendered, f"unexpected ref token {token!r} in --diff"
+        # The literal "refs:" label from old ref-delta rendering must not appear.
+        assert "refs:" not in rendered
+        # Ref-only emit still visible via the pointer line.
+        assert "(refs only — see --refs)" in rendered
 
     def test_fetch_trace_refs_walk_collects_outbound_entities(self, tmp_path):
         """refs_depth=1 walks outbound ref kind:key into the trace."""

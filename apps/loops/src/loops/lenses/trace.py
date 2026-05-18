@@ -94,7 +94,12 @@ def trace_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 # --- Diff rendering ------------------------------------------------------
 
 # Metadata fields that aren't part of the payload-as-patch.
-_DIFF_SKIP_FIELDS = frozenset({"_ts", "_observer", "_origin", "_id"})
+# `ref` is excluded from --diff entirely: refs accumulate (union under fold,
+# per-fact immutable attribution) and are never state. Rendering them as
+# +/- deltas conflates write-receipt with temporal-query — the same
+# write-receipt-vs-temporal-query confusion caught at three sites
+# 2026-04-29. The canonical view for refs is --refs.
+_DIFF_SKIP_FIELDS = frozenset({"_ts", "_observer", "_origin", "_id", "ref"})
 
 # Long-form fields where "→ new" prefix reads better than "old → new".
 _DIFF_LONG_FIELDS = frozenset({"message", "summary"})
@@ -103,10 +108,15 @@ _DIFF_LONG_FIELDS = frozenset({"message", "summary"})
 def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     """Render the lifecycle as cumulative deltas.
 
-    Each fact shown only as the fields it changed from accumulated prior
-    state. Walks ASC; maintains accumulated scalar state and ref-set as
-    it goes. See decision:design/trace-diff-cumulative-replay for the
+    Each fact shown only as the scalar fields it changed from accumulated
+    prior state. Walks ASC; maintains accumulated scalar state per entity
+    as it goes. See decision:design/trace-diff-cumulative-replay for the
     rendering rules.
+
+    Refs are deliberately not rendered here — they accumulate (union under
+    fold), they're not state, and --refs surfaces the cumulative graph.
+    A fact carrying only new refs renders as "(refs only — see --refs)"
+    so the emit still appears in the lifecycle.
 
     Under --refs (or --depth > 0), facts carry ``_entity`` markers
     identifying which ``kind/key`` each belongs to. The accumulator is
@@ -127,7 +137,6 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
     # Per-entity accumulators — each entity's state evolves independently.
     accumulated_by_entity: dict[str, dict[str, Any]] = {}
-    accumulated_refs_by_entity: dict[str, set[str]] = {}
     current_date: str | None = None
 
     # Detect whether --refs/--depth surfaced multiple entities; if so,
@@ -135,10 +144,9 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     entities_seen = {f.get("_entity") for f in facts if f.get("_entity")}
     show_entity = len(entities_seen) > 1
 
-    for i, fact in enumerate(facts):
+    for fact in facts:
         entity = fact.get("_entity") or f"{fact.get('kind', '')}/?"
         accumulated = accumulated_by_entity.setdefault(entity, {})
-        accumulated_refs = accumulated_refs_by_entity.setdefault(entity, set())
         # Date grouping (matches stream_view)
         dt = _to_datetime(fact["ts"])
         date_str = dt.strftime("%Y-%m-%d") if dt else ""
@@ -166,14 +174,11 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
         # Compute scalar deltas: payload fields whose value differs from
         # accumulated prior (or absent from prior). Fields absent from
         # this payload are "didn't touch" under fold-merge — no delta.
+        # `ref` is in _DIFF_SKIP_FIELDS — see module note.
         scalar_deltas: list[tuple[str, Any, Any]] = []
-        new_refs: set[str] | None = None
+        has_refs = "ref" in payload
         for key, value in payload.items():
             if key in _DIFF_SKIP_FIELDS:
-                continue
-            if key == "ref":
-                # Refs handled as set diff below
-                new_refs = _parse_refs(value)
                 continue
             prior = accumulated.get(key)
             if prior != value:
@@ -190,48 +195,22 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
                 line = f"    {key}: {prior} → {value}"
             rows.append((line, dim))
 
-        # Render ref deltas (set diff against prior)
-        if new_refs is not None:
-            added = new_refs - accumulated_refs
-            removed = accumulated_refs - new_refs
-            if added:
-                rows.append((
-                    "    refs: " + ", ".join("+" + r for r in sorted(added)),
-                    dim,
-                ))
-            if removed:
-                rows.append((
-                    "          " + ", ".join("-" + r for r in sorted(removed)),
-                    dim,
-                ))
-            # Write back to per-entity dict — `accumulated_refs` is the
-            # local binding fetched at top of loop; rebinding it doesn't
-            # persist across iterations.
-            accumulated_refs_by_entity[entity] = new_refs
-
         # Update accumulated scalar state
         for key, value in payload.items():
-            if key in _DIFF_SKIP_FIELDS or key == "ref":
+            if key in _DIFF_SKIP_FIELDS:
                 continue
             accumulated[key] = value
 
-        # No-change fact (re-emit with identical payload) — surface it
-        if not scalar_deltas and new_refs is None:
-            rows.append(("    (no field changes)", dim))
-        elif not scalar_deltas and new_refs is not None and not (new_refs ^ (accumulated_refs if i == 0 else (accumulated_refs | (new_refs - accumulated_refs)))):
-            # Edge case: ref field present but no actual delta vs prior — rare
-            pass
+        # No-scalar-change fact — distinguish ref-only emit from
+        # pure no-op. Ref-only emits did change the graph; pointer
+        # users to --refs where that change is visible.
+        if not scalar_deltas:
+            if has_refs:
+                rows.append(("    (refs only — see --refs)", dim))
+            else:
+                rows.append(("    (no field changes)", dim))
 
     return Block.column(rows, width=width) if rows else Block.text("(empty)", dim, width=width or 0)
-
-
-def _parse_refs(value: Any) -> set[str]:
-    """Parse a refs payload field (comma-separated str) into a set."""
-    if value is None:
-        return set()
-    if isinstance(value, (list, tuple, set)):
-        return {str(v).strip() for v in value if str(v).strip()}
-    return {r.strip() for r in str(value).split(",") if r.strip()}
 
 
 def _truncate(s: str, width: int | None) -> str:

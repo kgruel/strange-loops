@@ -10,10 +10,13 @@ from atoms import FoldItem, FoldSection, FoldState
 from painted import Zoom
 
 from loops.lenses.fold import (
-    _compute_inbound_edges, _compute_inbound_refs, _first_field,
-    _format_date, _format_ts_full, _group_by_namespace, _inbound_count,
-    _item_full_key, _recency_tag, _truncate, fold_view,
+    AUTO_ZOOM_MAX_NAV,
+    _compute_inbound_edges, _compute_inbound_refs, _effective_zoom,
+    _first_field, _format_date, _format_ts_full, _group_by_namespace,
+    _inbound_count, _item_full_key, _recency_tag,
+    _render_section_minimal, _truncate, fold_view,
 )
+from loops.lenses.fold import _default_fold_palette
 
 
 def item(payload=None, ts=None, observer="", origin="", n=1, refs=()):
@@ -651,3 +654,197 @@ class TestPreviewRender:
         t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.MINIMAL, 200))
         assert "should-not-leak" not in t
         assert "open" not in t  # The status value also stays out
+
+
+class TestEffectiveZoom:
+    """Cardinality auto-zoom: count → effective per-section zoom mapping."""
+
+    def test_auto_disabled_passthrough_at_any_count(self):
+        for n in (1, 5, 21, 200):
+            assert _effective_zoom(Zoom.SUMMARY, n, auto=False) == Zoom.SUMMARY
+            assert _effective_zoom(Zoom.DETAILED, n, auto=False) == Zoom.DETAILED
+            assert _effective_zoom(Zoom.MINIMAL, n, auto=False) == Zoom.MINIMAL
+            assert _effective_zoom(Zoom.FULL, n, auto=False) == Zoom.FULL
+
+    def test_n_one_bumps_summary_to_detailed(self):
+        assert _effective_zoom(Zoom.SUMMARY, 1, auto=True) == Zoom.DETAILED
+
+    def test_n_one_bumps_minimal_to_summary(self):
+        # Bump from floor still applies — answer mode never starts at MINIMAL.
+        assert _effective_zoom(Zoom.MINIMAL, 1, auto=True) == Zoom.SUMMARY
+
+    def test_n_one_clamps_at_full_ceiling(self):
+        assert _effective_zoom(Zoom.FULL, 1, auto=True) == Zoom.FULL
+
+    def test_navigation_band_unchanged(self):
+        for n in range(2, AUTO_ZOOM_MAX_NAV + 1):
+            assert _effective_zoom(Zoom.SUMMARY, n, auto=True) == Zoom.SUMMARY
+
+    def test_above_threshold_bumps_summary_to_minimal(self):
+        assert _effective_zoom(Zoom.SUMMARY, AUTO_ZOOM_MAX_NAV + 1, auto=True) == Zoom.MINIMAL
+        assert _effective_zoom(Zoom.SUMMARY, 200, auto=True) == Zoom.MINIMAL
+
+    def test_above_threshold_clamps_at_minimal_floor(self):
+        # Bump-down from MINIMAL stays MINIMAL (no underflow).
+        assert _effective_zoom(Zoom.MINIMAL, 200, auto=True) == Zoom.MINIMAL
+
+    def test_above_threshold_bumps_full_to_detailed(self):
+        # Single-step bump-down: FULL → DETAILED, never further.
+        assert _effective_zoom(Zoom.FULL, 200, auto=True) == Zoom.DETAILED
+
+
+class TestRenderSectionMinimal:
+    """The per-section MINIMAL renderer used when auto-zoom drops to floor."""
+
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def test_namespaced_section_renders_ns_count_line(self):
+        items_list = tuple(
+            item({"name": f"design/d{i}"}) for i in range(4)
+        ) + tuple(item({"name": f"arch/a{i}"}) for i in range(2))
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
+        t = self._text(block)
+        # Largest namespace first
+        assert t.index("design/ (4)") < t.index("arch/ (2)")
+        # No item-level rendering
+        assert "design/d0" not in t
+
+    def test_namespaced_section_with_ungrouped_tail(self):
+        items_list = (
+            item({"name": "design/d1"}),
+            item({"name": "design/d2"}),
+            item({"name": "bare-key"}),  # no namespace
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
+        t = self._text(block)
+        assert "design/ (2)" in t
+        assert "(ungrouped: 1)" in t
+
+    def test_flat_section_renders_empty(self):
+        # No namespaces → caller's header is enough; this renderer returns empty.
+        items_list = tuple(item({"name": f"x{i}"}) for i in range(5))
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
+        # Block.empty(0, 0) — no rows.
+        assert block._rows == ()
+
+
+class TestFoldViewAutoZoom:
+    """End-to-end fold_view behavior under auto_zoom=True / False."""
+
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def test_high_n_section_renders_index_mode_with_auto(self):
+        items_list = tuple(
+            item({"name": f"design/d{i}"}, ts=1e9, n=1)
+            for i in range(AUTO_ZOOM_MAX_NAV + 5)  # 25 items
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
+        # Section header is present
+        assert "Decision" in t
+        # Namespace count line is present
+        assert f"design/ ({AUTO_ZOOM_MAX_NAV + 5})" in t
+        # No item-level rendering (any individual key)
+        assert "design/d0" not in t
+
+    def test_high_n_section_renders_items_when_auto_disabled(self):
+        items_list = tuple(
+            item({"name": f"design/d{i}"}, ts=1e9, n=1)
+            for i in range(AUTO_ZOOM_MAX_NAV + 5)
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        # auto_zoom=False (the explicit-flag channel) → SUMMARY everywhere,
+        # even when count crosses the threshold. Item-level rendering
+        # survives — at least one key (or the "(N more)" collapse footer
+        # that only appears in the grouped path) is present, proving the
+        # render_section path ran rather than _render_section_minimal.
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=False))
+        assert "more)" in t or "d0" in t
+
+    def test_single_item_section_bumps_to_detailed_with_auto(self):
+        # DETAILED prints observer + extras. We can detect the bump by the
+        # presence of observer on a multi-observer-pair — but easier: a
+        # single payload field beyond the key/preview shows up at DETAILED.
+        i = item(
+            {"name": "auth", "message": "JWT over sessions", "ops": "extras-line"},
+            ts=1e9,
+            observer="alice",
+        )
+        s = FoldSection(
+            kind="decision",
+            items=(i,),
+            fold_type="by",
+            key_field="name",
+            preview_fields=("message",),
+        )
+        data = FoldState(sections=(s,), vertex="v")
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
+        # Bumped to DETAILED → extras-line ('ops: extras-line') appears.
+        assert "ops: extras-line" in t
+
+    def test_single_item_no_bump_when_auto_disabled(self):
+        i = item(
+            {"name": "auth", "message": "body", "ops": "extras-line"},
+            ts=1e9,
+            observer="alice",
+        )
+        s = FoldSection(
+            kind="decision",
+            items=(i,),
+            fold_type="by",
+            key_field="name",
+            preview_fields=("message",),
+        )
+        data = FoldState(sections=(s,), vertex="v")
+        # auto_zoom=False at SUMMARY: stay SUMMARY → extras-line stays hidden
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=False))
+        assert "ops: extras-line" not in t
+
+    def test_explicit_minimal_renders_one_liner_not_per_section(self):
+        # zoom=MINIMAL is the -q channel: vertex-level one-liner.
+        # auto_zoom flag is harmless — the global MINIMAL branch fires first.
+        items_list = tuple(
+            item({"name": f"design/d{i}"}, ts=1e9, n=1)
+            for i in range(AUTO_ZOOM_MAX_NAV + 5)
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.MINIMAL, 200, auto_zoom=False))
+        assert f"{AUTO_ZOOM_MAX_NAV + 5} decisions" in t
+        # No per-section ns-count line — that's the auto-zoom MINIMAL shape.
+        assert "design/ (" not in t
+
+    def test_mixed_section_counts_render_adaptively(self):
+        # decision section: 30 items (above threshold) → MINIMAL-per-section
+        # friction section: 5 items (in band) → SUMMARY
+        # thread section: 1 item → DETAILED
+        decisions = tuple(
+            item({"name": f"design/d{i}", "message": f"m{i}"}, ts=1e9)
+            for i in range(30)
+        )
+        frictions = tuple(
+            item({"name": f"f{i}", "message": "ok"}, ts=1e9)
+            for i in range(5)
+        )
+        threads = (item({"name": "one", "message": "only"}, ts=1e9),)
+        s_d = section(kind="decision", items=decisions, fold_type="by", key_field="name")
+        s_f = section(kind="friction", items=frictions, fold_type="by", key_field="name")
+        s_t = section(kind="thread", items=threads, fold_type="by", key_field="name")
+        data = state(sections=(s_d, s_f, s_t))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
+        # decision: collapsed to ns-count line
+        assert "design/ (30)" in t
+        assert "design/d0" not in t  # no item rendering
+        # friction: in-band, item-level rendering survives
+        assert "f0" in t
+        # thread (N=1): bumped to DETAILED but the visible signal is just
+        # "preview untruncated" — the single key appears
+        assert "one" in t
+

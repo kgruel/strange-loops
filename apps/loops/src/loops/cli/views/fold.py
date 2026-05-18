@@ -463,6 +463,19 @@ def run(argv: list[str], ctx: CliContext) -> int:
     if mode == "interactive":
         interactive_handler = _build_autoresearch_handler(vertex_path, ctx.observer)
 
+    # auto_zoom is on when the user gave no explicit loudness flag. The
+    # signal lives in the raw Namespace — args.quiet is False and
+    # args.verbose==0 when truly absent. By the time fidelity collapses to
+    # depth=1 (SUMMARY), "default" and "user-explicit SUMMARY" are
+    # indistinguishable, so the bit is captured here. --facts / --refs /
+    # --plain / --json are orthogonal axes (visibility / format, not
+    # loudness) and do not disable auto-zoom. --diff uses a different
+    # lens (trace) so auto-zoom flag is harmless there.
+    auto_zoom = not args.quiet and args.verbose == 0
+    render_context: dict[str, object] = {"auto_zoom": auto_zoom}
+    if args.diff:
+        render_context["_diff"] = True
+
     op = Operation(
         verb="read",
         fn=fetch_data,
@@ -470,7 +483,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
         render_lens=render_lens,
         lens_override=lens_override,
         fidelity=fidelity,
-        render_context={"_diff": True} if args.diff else {},
+        render_context=render_context,
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]

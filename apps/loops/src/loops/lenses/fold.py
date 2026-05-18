@@ -48,6 +48,19 @@ PREVIEW_SEPARATOR = " · "
 # `[+Nc]` truncation hint.
 MIN_FIELD_BUDGET = 12
 
+# Cardinality auto-zoom thresholds (PR B).
+# When auto_zoom is on (user passed no -q/-v/-vv) the effective per-section
+# zoom is bumped by ±1 step based on the section's item count. The base
+# zoom is the incoming zoom (almost always SUMMARY for auto-zoom callers,
+# since -q/-v/-vv disable auto_zoom).
+#   N == 1     → +1 step (answer mode: single item, render rich)
+#   N <= AUTO_ZOOM_MAX_NAV → base (navigation mode: scrollable)
+#   N >  AUTO_ZOOM_MAX_NAV → -1 step (index mode: header + ns counts only)
+# 20 is a tmux-pane-height heuristic — at SUMMARY each item is roughly one
+# line, so 20 items fits ~half a pane. Above that, scrollback grep becomes
+# the user's only navigation, which is the firehose complaint exactly.
+AUTO_ZOOM_MAX_NAV = 20
+
 
 # ---------------------------------------------------------------------------
 # Semantic palette — maps information roles to styles
@@ -113,6 +126,8 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
+    auto_zoom: bool = False,
+    **_extra,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -125,12 +140,23 @@ def fold_view(
       chars: max display width for body text. Caps the body budget that
              width-based truncation already enforces — useful for context-
              window economics where total tokens matter more than terminal fit.
+
+    auto_zoom: when True, each FoldSection's effective zoom is derived
+      from its item count (see ``_effective_zoom``). The view sets this
+      based on whether the user passed an explicit loudness flag — when
+      -q / -v / -vv are present the view passes auto_zoom=False so the
+      caller's zoom is honoured uniformly across sections. The global
+      MINIMAL one-liner branch below stays gated on the incoming zoom
+      (the -q channel) and never fires from auto-zoom — per-section
+      MINIMAL has its own renderer at ``_render_section_minimal``.
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
-    # MINIMAL: one-liner
+    # MINIMAL: one-liner — only fires from explicit -q (or a caller passing
+    # MINIMAL directly). auto-zoom routes its MINIMAL through the
+    # per-section path instead, preserving cross-section header context.
     if zoom == Zoom.MINIMAL:
         parts = [f"{s.count} {s.kind}s" for s in populated]
         if data.unfolded:
@@ -163,14 +189,27 @@ def fold_view(
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
+        # Effective zoom per section — auto-bump from count when enabled,
+        # otherwise identity. The section header always renders; the body
+        # render path depends on effective zoom.
+        eff_zoom = _effective_zoom(zoom, s.count, auto_zoom)
+
         header = _section_header(s.kind, display_count, piped=width is None)
         blocks.append(Block.text(header, fp.section_header, width=width))
+
+        # MINIMAL-per-section (only reachable from auto-zoom — a section
+        # whose item count crossed the AUTO_ZOOM_MAX_NAV cliff). The
+        # explicit -q path returned earlier with the vertex-level
+        # one-liner, so this branch carries no ambiguity.
+        if eff_zoom == Zoom.MINIMAL:
+            blocks.append(_render_section_minimal(s, width=width, fp=fp))
+            continue
 
         observers = {item.observer for item in s.items if item.observer}
         show_observer = len(observers) > 1
 
         section_block = _render_section(
-            s, zoom, fmt, width,
+            s, eff_zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
@@ -210,6 +249,70 @@ def fold_view(
         ))
 
     return join_vertical(*blocks)
+
+
+# ---------------------------------------------------------------------------
+# Cardinality auto-zoom (PR B) — per-section effective zoom
+# ---------------------------------------------------------------------------
+
+
+def _effective_zoom(base: Zoom, count: int, auto: bool) -> Zoom:
+    """Return the effective zoom for a section, given its item count.
+
+    When ``auto`` is False the base zoom passes through unchanged — this
+    is the user-explicit channel (``-q`` / ``-v`` / ``-vv``).
+
+    When ``auto`` is True:
+      - N == 1 → bump up one step (preview renders untruncated; answer mode)
+      - N > AUTO_ZOOM_MAX_NAV → bump down one step (index mode)
+      - otherwise → base zoom (navigation mode)
+
+    Bumps clamp at the FULL ceiling and MINIMAL floor so a single bump
+    never overshoots — stacking would surprise (FULL only with -vv).
+    """
+    if not auto:
+        return base
+    base_v = base.value
+    if count == 1:
+        return Zoom(min(base_v + 1, Zoom.FULL.value))
+    if count > AUTO_ZOOM_MAX_NAV:
+        return Zoom(max(base_v - 1, Zoom.MINIMAL.value))
+    return base
+
+
+def _render_section_minimal(
+    section: "FoldSection",
+    *,
+    width: int | None,
+    fp: FoldPalette,
+) -> Block:
+    """Index-mode renderer: section header (printed by caller) + a
+    namespace-count breakdown line when the section uses namespaced keys.
+    Flat sections render no body line — just the header the caller emits.
+
+    Output shape (caller already printed ``## DECISIONS (187)``):
+      ``  design/ (45)  architecture/ (23)  paradigm/ (18)  (ungrouped: 12)``
+    """
+    items = section.items
+    key_field = section.key_field
+    if not items or not key_field or not _has_namespaces(items, key_field):
+        # Flat sections — nothing useful to add below the header.
+        return Block.empty(0, 0)
+
+    groups = _group_by_namespace(items, key_field)
+    # Sort namespaces by group size descending; ungrouped goes last.
+    named = sorted(
+        ((ns, len(group)) for ns, group in groups.items() if ns),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    parts: list[str] = [f"{ns}/ ({n})" for ns, n in named]
+    ungrouped = len(groups.get("", []))
+    if ungrouped:
+        parts.append(f"(ungrouped: {ungrouped})")
+    if not parts:
+        return Block.empty(0, 0)
+    return Block.text("  " + "  ".join(parts), fp.group_header, width=width)
 
 
 def _render_walked(

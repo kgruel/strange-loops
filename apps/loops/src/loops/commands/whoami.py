@@ -35,6 +35,13 @@ def _run_whoami(argv: list[str]) -> int:
     1. LOOPS_OBSERVER env var / .vertex single-observer (via resolve_observer)
     2. Identity store self/name fact (for multi-observer .vertex files)
     """
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        import argparse as _ap
+        p = _ap.ArgumentParser(prog="loops whoami", description="Show resolved observer identity. No arguments.")
+        p.print_help(_sys.stdout)
+        return 0
+
     from painted import show, Block, Style
     from .identity import resolve_observer
 

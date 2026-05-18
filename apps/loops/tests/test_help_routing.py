@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from loops.main import main
+from loops.cli.registry import VERBS, COMMANDS
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +74,10 @@ class TestTopLevelHelp:
 
 
 class TestVerbHelp:
-    @pytest.mark.parametrize("verb", ["read", "emit", "close", "sync", "cite", "store"])
+    @pytest.mark.parametrize("verb", sorted(VERBS))
     def test_verb_help(self, capsys, verb):
         out = _help(capsys, verb, "--help")
-        assert _has_help(out), f"{verb} --help: output didn't look like help: {out!r}"
+        assert "usage:" in out.lower(), f"{verb} --help: expected argparse 'usage:' but got: {out!r}"
 
     def test_read_flag_descriptions(self, capsys):
         out = _help(capsys, "read", "--help")
@@ -111,10 +112,15 @@ class TestVerbHelp:
 
 
 class TestCommandHelp:
-    @pytest.mark.parametrize("cmd", ["init", "validate"])
+    @pytest.mark.parametrize("cmd", [
+        pytest.param("export", marks=pytest.mark.xfail(
+            reason="export retired in Phase 3; exits 1 with deprecation notice"
+        )),
+        *sorted(c for c in COMMANDS if c != "export"),
+    ])
     def test_command_help(self, capsys, cmd):
         out = _help(capsys, cmd, "--help")
-        assert _has_help(out), f"{cmd} --help: output didn't look like help: {out!r}"
+        assert "usage:" in out.lower(), f"{cmd} --help: expected argparse 'usage:' but got: {out!r}"
 
     def test_ls_help(self, capsys):
         out = _help(capsys, "ls", "--help")

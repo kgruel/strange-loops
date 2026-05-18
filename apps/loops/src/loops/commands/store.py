@@ -114,6 +114,19 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     from painted import run_cli, OutputMode
     from .resolve import loops_home
 
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        p = argparse.ArgumentParser(prog="loops store", description="Inspect store contents.")
+        if vertex_path is None:
+            p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")
+        p.add_argument("-i", "--interactive", action="store_true", help="Interactive TUI explorer")
+        p.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
+        p.add_argument("-v", "--verbose", action="store_true", help="Detailed output")
+        p.add_argument("--json", action="store_true", help="JSON output")
+        p.add_argument("--plain", action="store_true", help="Plain text, no ANSI codes")
+        p.print_help(_sys.stdout)
+        return 0
+
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         pre.add_argument("file", nargs="?", default=None)

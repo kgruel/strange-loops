@@ -25,6 +25,17 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
 
     _ = _reporter(reporter)  # reserved for future error routing
 
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        p = argparse.ArgumentParser(prog="loops validate", description="Validate .loop or .vertex files.")
+        p.add_argument("files", nargs="*", help="Files to validate (default: all .loop/.vertex in cwd)")
+        p.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
+        p.add_argument("-v", "--verbose", action="store_true", help="Detailed output")
+        p.add_argument("--json", action="store_true", help="JSON output")
+        p.add_argument("--plain", action="store_true", help="Plain text, no ANSI codes")
+        p.print_help(_sys.stdout)
+        return 0
+
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("files", nargs="*")
     known, rest = pre.parse_known_args(argv)
@@ -107,6 +118,15 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     from engine import compile_loop
 
     rep = _reporter(reporter)
+
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        p = argparse.ArgumentParser(prog="loops test", description="Test a .loop file — preview facts without persistence.")
+        p.add_argument("file", help="Loop file to test")
+        p.add_argument("--input", "-i", metavar="FILE", help="Input file to feed through parse pipeline")
+        p.add_argument("--limit", "-n", type=int, metavar="N", help="Max facts to show")
+        p.print_help(_sys.stdout)
+        return 0
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file")
@@ -237,6 +257,13 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     from loops.lenses.compile import compile_view
 
     rep = _reporter(reporter)
+
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        p = argparse.ArgumentParser(prog="loops compile", description="Show compiled structure of a .loop or .vertex file.")
+        p.add_argument("file", help="Loop or vertex file to compile")
+        p.print_help(_sys.stdout)
+        return 0
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file")

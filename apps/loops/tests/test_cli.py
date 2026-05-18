@@ -580,8 +580,8 @@ class TestRootLs:
         """`loops <vertex> ls` routes to the unified declarations view, not root ls.
 
         Post-Phase-3 the per-vertex ls succeeds even without template
-        populations — it shows whatever sections the vertex actually
-        declares (KINDS / OBSERVERS / COMBINE / POPULATIONS).
+        sources — it shows whatever sections the vertex actually
+        declares (KINDS / OBSERVERS / COMBINE / SOURCES).
         """
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))

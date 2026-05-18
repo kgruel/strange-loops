@@ -414,6 +414,15 @@ def run(argv: list[str], ctx: CliContext) -> int:
         render_lens = "trace"
         lens_override = args.lens
     else:
+        # "trace" is the internal lens for --diff; requesting it directly
+        # routes trace_view through the fold fetcher (FoldState), which crashes.
+        # The dissolution landing point is --diff — redirect clearly.
+        if args.lens == "trace":
+            ctx.reporter.err(
+                "'trace' is an internal lens — use --diff to render entity deltas:\n"
+                "  sl read [vertex] <kind>/<key> --diff"
+            )
+            return 2
         fetch_data = _build_fold_fetch(
             vertex_path, ctx.observer,
             kind=args.kind, key=args.key,

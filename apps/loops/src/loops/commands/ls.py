@@ -1,14 +1,14 @@
 """`loops ls <vertex>` — unified declarations view + optional subcommand filters.
 
 Phase 3 of plan:vertex-living-document. Aggregates the four declarative
-surfaces (kinds / observers / combine / populations) into one consolidated
+surfaces (kinds / observers / combine / sources) into one consolidated
 view. Subcommands narrow:
 
   loops ls <vertex>             unified
   loops ls <vertex> kind        only KINDS section
   loops ls <vertex> observer    only OBSERVERS section
   loops ls <vertex> combine     only COMBINE section
-  loops ls <vertex> row [TPL]   only POPULATIONS section
+  loops ls <vertex> row [TPL]   only SOURCES section
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def fetch_declarations(
     filter_: str | None = None,
     extra_argv: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Aggregate kinds + observers + combine + populations for the vertex."""
+    """Aggregate kinds + observers + combine + sources for the vertex."""
     from lang import parse_vertex_file
     from lang.population import (
         resolve_vertex,
@@ -141,7 +141,7 @@ def fetch_declarations(
     kinds = _summarize_kinds(vf)
     observers = _summarize_observers(vf)
     combine = _summarize_combine(vf)
-    populations = _summarize_populations(vf, vertex_path, qualifier)
+    sources = _summarize_populations(vf, vertex_path, qualifier)
 
     return {
         "vertex_name": vf.name,
@@ -149,7 +149,7 @@ def fetch_declarations(
         "kinds": kinds,
         "observers": observers,
         "combine": combine,
-        "populations": populations,
+        "sources": sources,
         "filter": filter_,
     }
 

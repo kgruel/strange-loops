@@ -1,4 +1,4 @@
-"""declarations lens — unified vertex view (KINDS / OBSERVERS / COMBINE / POPULATIONS).
+"""declarations lens — unified vertex view (KINDS / OBSERVERS / COMBINE / SOURCES).
 
 Phase 3 of plan:vertex-living-document. Renders the structured output of
 ``loops.commands.ls.fetch_declarations`` at four zoom levels.
@@ -10,19 +10,19 @@ from typing import Any
 from painted import Block, Style, Zoom, join_vertical
 
 
-_SECTIONS = ("kinds", "observers", "combine", "populations")
+_SECTIONS = ("kinds", "observers", "combine", "sources")
 _SECTION_TITLES = {
     "kinds": "KINDS",
     "observers": "OBSERVERS",
     "combine": "COMBINE",
-    "populations": "POPULATIONS",
+    "sources": "SOURCES",
 }
 # Filter subcommand -> section key in data.
 _FILTER_TO_SECTION = {
     "kind": "kinds",
     "observer": "observers",
     "combine": "combine",
-    "row": "populations",
+    "row": "sources",
 }
 
 
@@ -67,7 +67,7 @@ def _render_section(
         "kinds": _render_kind,
         "observers": _render_observer,
         "combine": _render_combine_entry,
-        "populations": _render_population,
+        "sources": _render_population,
     }[section]
     rows = [renderer(item, zoom, width) for item in items]
     return join_vertical(head, *rows)

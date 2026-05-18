@@ -68,7 +68,7 @@ class TestFetchDeclarations:
         obs_names = {o["name"] for o in data["observers"]}
         assert obs_names == {"kyle", "alcove"}
         assert data["combine"] == []
-        assert data["populations"] == []
+        assert data["sources"] == []
 
     def test_fetch_includes_fold_op_details(self, rich_vertex):
         data = fetch_declarations("proj")
@@ -134,7 +134,7 @@ class TestDeclarationsLens:
         assert "KINDS" in text
         assert "OBSERVERS" in text
         assert "COMBINE" in text
-        assert "POPULATIONS" in text
+        assert "SOURCES" in text
         # Entries appear.
         assert "decision" in text
         assert "kyle" in text
@@ -179,7 +179,7 @@ class TestDeclarationsLens:
 
         data = fetch_declarations("proj")
         text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
-        # Combine and populations are empty — section heads still rendered
+        # Combine and sources are empty — section heads still rendered
         # with the "—" placeholder for count.
         assert "COMBINE (—)" in text
-        assert "POPULATIONS (—)" in text
+        assert "SOURCES (—)" in text

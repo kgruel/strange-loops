@@ -1,36 +1,23 @@
-"""Population commands — ls, ls-root, add, rm, export."""
-from __future__ import annotations
+"""Vertex command dispatchers — thin shims over commands/{ls,add,rm}.
 
-import argparse
+After Phase 3 (plan:vertex-living-document) these functions are just
+delegates: the real work happens in commands/ls.py, commands/add.py,
+commands/rm.py. `_run_export` is retired (returns an error message).
+`_run_ls_root` remains for `loops ls` (no vertex) which lists all
+discovered vertices.
+"""
+from __future__ import annotations
 
 
 def _run_ls(argv: list[str]) -> int:
-    """Run ls command via painted CLI harness."""
-    from painted import run_cli
-    from painted.cli import HelpArg
-    from .pop import fetch_ls
-    from ..lenses.pop import pop_view
+    """Dispatch ``loops ls`` — unified declarations view (Phase 3).
 
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("target")
-    known, rest = pre.parse_known_args(argv)
+    Routes to the new ``commands/ls.py`` dispatcher: unified by default,
+    narrowed by subcommand (kind / observer / combine / row).
+    """
+    from .ls import _run_ls as _dispatch
 
-    def fetch():
-        return fetch_ls(known.target)
-
-    def render(ctx, data):
-        return pop_view(data, ctx.zoom, ctx.width)
-
-    return run_cli(
-        rest,
-        fetch=fetch,
-        render=render,
-        prog="loops ls",
-        description="List template populations",
-        help_args=[
-            HelpArg("target", "Population target name", positional=True),
-        ],
-    )
+    return _dispatch(argv)
 
 
 def _run_ls_root(argv: list[str]) -> int:
@@ -58,37 +45,51 @@ def _run_ls_root(argv: list[str]) -> int:
 
 
 def _run_add(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for add, delegate to cmd_add."""
-    from .pop import cmd_add
+    """Dispatch ``loops add`` — vertex declarations or legacy row-add.
 
-    parser = argparse.ArgumentParser(prog="loops add", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument("values", nargs="+", help="Column values in header order")
-    args = parser.parse_args(argv)
-    return cmd_add(args)
+    Phase 2 (plan:vertex-living-document) adds subcommands kind/observer/
+    combine for declaring new entities directly in the vertex file. The
+    bare-positional form (``loops add reading lobsters URL``) is preserved
+    as an implicit ``row`` and will be retired in Phase 3.
+    """
+    from .add import _run_add as _dispatch
+
+    return _dispatch(argv)
 
 
 def _run_rm(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for rm, delegate to cmd_rm."""
-    from .pop import cmd_rm
+    """Dispatch ``loops rm`` — vertex declarations or legacy row-rm.
 
-    parser = argparse.ArgumentParser(prog="loops rm", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument("key", help="Key (first column) to remove")
-    args = parser.parse_args(argv)
-    return cmd_rm(args)
+    Phase 3 (plan:vertex-living-document) adds subcommands kind/observer/
+    combine for removing declared entities from the vertex file. The
+    bare-positional form (``loops rm reading lobsters``) is preserved as
+    an implicit ``row`` and will be retired in a later cleanup.
+    """
+    from .rm import _run_rm as _dispatch
+
+    return _dispatch(argv)
 
 
-def _run_export(argv: list[str]) -> int:
-    """Thin wrapper: parse argv for export, delegate to cmd_export."""
-    from .pop import cmd_export
+def _run_export(argv: list[str]) -> int:  # noqa: ARG001 — argv kept for back-compat
+    """Retired in Phase 3 (plan:vertex-living-document).
 
-    parser = argparse.ArgumentParser(prog="loops export", add_help=False)
-    parser.add_argument("target", help="Vertex name or vertex/template")
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="(deprecated) ignored; export materializes configured .list",
+    `loops export <vertex>` used to materialize a .list file by folding
+    pop.add/pop.rm facts. Phase 3 dissolves the fact-driven indirection:
+    the .list file is canonical; direct edits via `loops add/rm row`
+    are the only path. There is nothing to materialize from.
+    """
+    import sys
+
+    from painted import Block, show
+    from painted.palette import current_palette
+
+    show(
+        Block.text(
+            "loops export was retired in Phase 3. "
+            "The .list file is canonical now; use `loops add/rm <vertex> row` "
+            "to edit it directly.",
+            current_palette().error,
+        ),
+        file=sys.stderr,
     )
-    args = parser.parse_args(argv)
-    return cmd_export(args)
+    return 1

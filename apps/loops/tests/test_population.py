@@ -1,257 +1,187 @@
-"""Tests for population management CLI commands."""
+"""Population command wiring + row-add error paths.
+
+Post-Phase-3 the population machinery is much narrower: `loops add/rm
+<vertex> row K V` writes directly to the .list file via lang.population
+helpers — no facts, no fold materialization. Most of the previous test
+surface tested the retired pop-fact path; that's now covered by
+test_add_declarations.py / test_rm_declarations.py / test_ls_unified.py.
+
+What remains here:
+  * Dispatcher wiring smoke checks
+  * The error-path cases unique to the row-add direct-write path
+"""
+
+from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-import argparse
-
-from loops.main import main
-
 
 # ---------------------------------------------------------------------------
-# Target parsing
+# Dispatcher wiring
 # ---------------------------------------------------------------------------
 
 
-class TestParseTarget:
-    def test_simple_name(self):
-        from loops.commands.pop import parse_target
-
-        assert parse_target("reading") == ("reading", None)
-
-    def test_qualified(self):
-        from loops.commands.pop import parse_target
-
-        assert parse_target("economy/fred") == ("economy", "fred")
-
-    def test_vertex_extension(self):
-        from loops.commands.pop import parse_target
-
-        assert parse_target("feeds.vertex") == ("feeds.vertex", None)
-
-    def test_dotslash_path(self):
-        from loops.commands.pop import parse_target
-
-        assert parse_target("./my.vertex") == ("./my.vertex", None)
-
-    def test_absolute_path(self):
-        from loops.commands.pop import parse_target
-
-        assert parse_target("/tmp/test.vertex") == ("/tmp/test.vertex", None)
-
-
-# ---------------------------------------------------------------------------
-# Parser wiring
-# ---------------------------------------------------------------------------
-
-
-class TestParserWiring:
-    def test_ls_routed_to_display(self):
-        """ls is routed through run_cli, not argparse."""
+class TestDispatcherWiring:
+    def test_run_ls_is_importable(self):
         from loops.main import _run_ls
         assert callable(_run_ls)
 
-    def test_add_rm_export_parsers(self):
-        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("values", nargs="+")
-        args = p.parse_args(["reading", "lobsters", "https://lobste.rs/rss"])
-        assert args.target == "reading" and args.values == ["lobsters", "https://lobste.rs/rss"]
-        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("key")
-        assert p.parse_args(["reading", "lobsters"]).key == "lobsters"
-        p = argparse.ArgumentParser(); p.add_argument("target"); p.add_argument("--output", "-o")
-        assert p.parse_args(["reading"]).target == "reading"
-        assert p.parse_args(["reading", "-o", "my.list"]).output == "my.list"
+    def test_run_add_is_importable(self):
+        from loops.main import _run_add
+        assert callable(_run_add)
 
-    def test_unknown_command(self):
-        """Unknown names that don't resolve as vertices return error."""
-        result = main(["import", "reading"])
-        assert result == 1
+    def test_run_rm_is_importable(self):
+        from loops.main import _run_rm
+        assert callable(_run_rm)
 
-    def test_unknown_command_merge(self):
-        """merge is not a recognized command or vertex."""
-        result = main(["merge", "reading", "external.list"])
-        assert result == 1
+    def test_run_export_returns_retirement_message(self, capsys):
+        from loops.main import _run_export
+        rc = _run_export([])
+        assert rc != 0
+        err = capsys.readouterr().err
+        assert "retired" in err.lower()
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Row-add direct-write error paths
 # ---------------------------------------------------------------------------
 
-_VERTEX_FILE_BACKED = """\
-name "reading"
-store "./data/reading.db"
-sources {
-  template "./sources/feed.loop" {
-    from file "./feeds.list"
-    loop {
-      fold { count "inc" }
-      boundary when="{{kind}}.complete"
-    }
-  }
-}
-"""
 
-
-def _setup_file_backed(home: Path) -> Path:
-    """Create a file-backed vertex under home/reading/."""
+def _make_vertex_with_template(home: Path) -> Path:
+    """Vertex with a file-backed template population, but no .list yet."""
     reading = home / "reading"
     reading.mkdir(parents=True)
-    (reading / "reading.vertex").write_text(_VERTEX_FILE_BACKED)
-    (reading / "feeds.list").write_text(
-        "kind feed_url\nlobsters https://lobste.rs/rss\n"
-    )
     (reading / "sources").mkdir()
     (reading / "sources" / "feed.loop").write_text(
-        'source "curl"\nkind "{{kind}}"\nobserver "feed"\n'
+        'kind "feed"\nobserver "feed"\nsource "curl -s {{feed_url}}"\n'
+    )
+    (reading / "reading.vertex").write_text(
+        'name "reading"\n'
+        'store "./data/reading.db"\n'
+        'sources {\n'
+        '  template "./sources/feed.loop" {\n'
+        '    from file "./feeds.list"\n'
+        '    loop { fold { items "by" "link" } }\n'
+        '  }\n'
+        '}\n'
     )
     return reading
 
 
-# ---------------------------------------------------------------------------
-# ls command
-# ---------------------------------------------------------------------------
+def _make_bare_vertex(home: Path) -> None:
+    """Vertex with no template sources."""
+    bare = home / "bare"
+    bare.mkdir(parents=True)
+    (bare / "bare.vertex").write_text(
+        'name "bare"\n'
+        'store "./data/bare.db"\n'
+        'loops { thread { fold { items "by" "name" } } }\n'
+    )
 
 
-class TestLsCommand:
-    def test_ls_file_backed(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["reading", "ls"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "lobsters" in captured.out
-        assert "feed_url" in captured.out
-
-    def test_ls_queries_store_when_present(self, tmp_path, monkeypatch, capsys):
-        """ls should be a fold over pop facts (not a read of .list rows)."""
-        home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        # Start from an empty list file so bootstrap doesn't seed.
-        (reading / "feeds.list").write_text("kind feed_url\n")
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(
-            [
-                "reading",
-                "emit",
-                "pop.add",
-                "key=lobsters",
-                "feed_url=https://lobste.rs/rss",
-            ]
-        )
-        assert result == 0
-
-        # Corrupt the materialized view; ls should still show store state.
-        (reading / "feeds.list").write_text("kind feed_url\n")
-        result = main(["reading", "ls"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "lobsters" in captured.out
-
-    def test_ls_vertex_not_found(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
-        result = main(["nope", "ls"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Unknown command" in (captured.err + captured.out)
-
-    def test_ls_multi_template_requires_qualifier(
+class TestRowAddErrorPaths:
+    def test_add_row_no_template_vertex(
         self, tmp_path, monkeypatch, capsys
     ):
         home = tmp_path / "home"
-        multi = home / "economy"
-        multi.mkdir(parents=True)
-        (multi / "economy.vertex").write_text(
-            'name "economy"\n'
-            'store "./data/economy.db"\n'
-            "sources {\n"
-            '  template "./sources/fred.loop" {\n'
-            '    from file "./fred.list"\n'
-            "    loop { fold { count \"inc\" }\n"
-            '      boundary when="{{kind}}.complete" }\n'
-            "  }\n"
-            '  template "./sources/bls.loop" {\n'
-            '    from file "./bls.list"\n'
-            "    loop { fold { count \"inc\" }\n"
-            '      boundary when="{{kind}}.complete" }\n'
-            "  }\n"
-            "}\n"
-            "loops { top { fold { count \"inc\" } } }\n"
-        )
-        (multi / "fred.list").write_text("kind series\nFEDFUNDS FEDFUNDS\n")
-        (multi / "bls.list").write_text("kind series\nCPI CPI\n")
+        home.mkdir()
+        _make_bare_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        # Without qualifier: error
-        result = main(["economy", "ls"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "2 templates" in (captured.err + captured.out)
+        from loops.main import _run_add
+        rc = _run_add(["bare", "row", "key", "value"])
+        assert rc != 0
+        assert "Error" in capsys.readouterr().err
 
-        # With qualifier: success
-        result = main(["economy", "ls", "fred"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "FEDFUNDS" in captured.out
-
-
-# ---------------------------------------------------------------------------
-# add command
-# ---------------------------------------------------------------------------
-
-
-class TestAddCommand:
-    def test_add_to_list_file(self, tmp_path, monkeypatch, capsys):
+    def test_add_row_no_list_header(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Empty .list file (no header) errors cleanly."""
         home = tmp_path / "home"
-        reading = _setup_file_backed(home)
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
+        (reading / "feeds.list").write_text("")  # empty, no header
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(
-            ["reading", "add", "danluu", "https://danluu.com/atom.xml"]
-        )
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "Emitted pop.add danluu" in captured.out
+        from loops.main import _run_add
+        rc = _run_add(["reading", "row", "key", "value"])
+        assert rc != 0
+        err = capsys.readouterr().err
+        assert "no .list header" in err
 
+    def test_add_row_wrong_column_count(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
+        (reading / "feeds.list").write_text("kind feed_url\n")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        from loops.main import _run_add
+        rc = _run_add(["reading", "row", "onlyone"])  # missing feed_url value
+        assert rc != 0
+        err = capsys.readouterr().err
+        assert "expected" in err
+
+    def test_add_row_explicit_subcommand_writes_to_list(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
+        (reading / "feeds.list").write_text("kind feed_url\n")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        from loops.main import _run_add
+        rc = _run_add(["reading", "row", "lobsters", "https://lobste.rs/rss"])
+        assert rc == 0
         content = (reading / "feeds.list").read_text()
-        assert "danluu" in content
+        assert "lobsters" in content
+        assert "https://lobste.rs/rss" in content
 
-    def test_add_wrong_column_count(self, tmp_path, monkeypatch, capsys):
+    def test_add_row_bare_positional_backcompat(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """`loops add reading lobsters URL` (no `row` keyword) — implicit row."""
         home = tmp_path / "home"
-        _setup_file_backed(home)
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
+        (reading / "feeds.list").write_text("kind feed_url\n")
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["reading", "add", "only_key"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "expected 2" in captured.err
+        from loops.main import _run_add
+        rc = _run_add(["reading", "lobsters", "https://lobste.rs/rss"])
+        assert rc == 0
+        assert "lobsters" in (reading / "feeds.list").read_text()
 
-    def test_add_last_column_remainder(self, tmp_path, monkeypatch, capsys):
-        """Extra args get joined into last column."""
+
+class TestRowRmErrorPaths:
+    def test_rm_row_missing_key_in_list(
+        self, tmp_path, monkeypatch, capsys
+    ):
         home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(
-            ["reading", "add", "test", "https://example.com/rss?a=1", "extra"]
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
+        (reading / "feeds.list").write_text(
+            "kind feed_url\nlobsters https://lobste.rs/rss\n"
         )
-        assert result == 0
-        content = (reading / "feeds.list").read_text()
-        assert "https://example.com/rss?a=1 extra" in content
+        monkeypatch.setenv("LOOPS_HOME", str(home))
 
+        from loops.main import _run_rm
+        rc = _run_rm(["reading", "row", "ghost"])
+        assert rc != 0
+        err = capsys.readouterr().err
+        assert "no row matching" in err
 
-# ---------------------------------------------------------------------------
-# rm command
-# ---------------------------------------------------------------------------
-
-
-class TestRmCommand:
-    def test_rm_from_list_file(self, tmp_path, monkeypatch, capsys):
+    def test_rm_row_present(
+        self, tmp_path, monkeypatch, capsys
+    ):
         home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        # Add a second feed so we can remove one
+        home.mkdir()
+        reading = _make_vertex_with_template(home)
         (reading / "feeds.list").write_text(
             "kind feed_url\n"
             "lobsters https://lobste.rs/rss\n"
@@ -259,205 +189,9 @@ class TestRmCommand:
         )
         monkeypatch.setenv("LOOPS_HOME", str(home))
 
-        result = main(["reading", "rm", "lobsters"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "Emitted pop.rm lobsters" in captured.out
-
+        from loops.main import _run_rm
+        rc = _run_rm(["reading", "row", "lobsters"])
+        assert rc == 0
         content = (reading / "feeds.list").read_text()
         assert "lobsters" not in content
         assert "danluu" in content
-
-    def test_rm_not_found(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(["reading", "rm", "nope"])
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "Emitted pop.rm nope" in captured.out
-        # No change to materialized list
-        content = (reading / "feeds.list").read_text()
-        assert "lobsters" in content
-
-
-# ---------------------------------------------------------------------------
-# export command
-# ---------------------------------------------------------------------------
-
-
-class TestExportCommand:
-    def test_export_rematerializes_from_store(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        (reading / "feeds.list").write_text("kind feed_url\n")
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(
-            [
-                "reading",
-                "emit",
-                "pop.add",
-                "key=lobsters",
-                "feed_url=https://lobste.rs/rss",
-            ]
-        )
-        assert result == 0
-
-        # Corrupt view, then export should rebuild it from store.
-        (reading / "feeds.list").write_text("kind feed_url\n")
-        result = main(["reading", "export"])
-        assert result == 0
-        content = (reading / "feeds.list").read_text()
-        assert "lobsters" in content
-
-    def test_emit_pop_rm_materializes(self, tmp_path, monkeypatch, capsys):
-        home = tmp_path / "home"
-        reading = _setup_file_backed(home)
-        (reading / "feeds.list").write_text("kind feed_url\n")
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-
-        result = main(
-            [
-                "reading",
-                "emit",
-                "pop.add",
-                "key=lobsters",
-                "feed_url=https://lobste.rs/rss",
-            ]
-        )
-        assert result == 0
-        assert "lobsters" in (reading / "feeds.list").read_text()
-
-        result = main(["reading", "emit", "pop.rm", "key=lobsters"])
-        assert result == 0
-        content = (reading / "feeds.list").read_text()
-        assert "lobsters" not in content
-
-
-# ---------------------------------------------------------------------------
-# cmd_add / cmd_rm error paths
-# ---------------------------------------------------------------------------
-
-def _setup_no_template(home: Path) -> Path:
-    """Vertex with no template sources — _load raises ValueError."""
-    vert = home / "bare"
-    vert.mkdir(parents=True)
-    (vert / "bare.vertex").write_text(
-        'name "bare"\nstore "./data/bare.db"\nloops { ping { fold { n "inc" } } }\n'
-    )
-    return vert
-
-
-class TestAddErrorPaths:
-    def test_add_no_template_vertex_returns_1(self, tmp_path, monkeypatch, capsys):
-        """cmd_add on a vertex with no template sources → _load raises → 1 (L196-198)."""
-        home = tmp_path / "home"
-        _setup_no_template(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["bare", "add", "key", "value"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.err
-
-    def test_rm_no_template_vertex_returns_1(self, tmp_path, monkeypatch, capsys):
-        """cmd_rm on a vertex with no template sources → _load raises → 1 (L264-266)."""
-        home = tmp_path / "home"
-        _setup_no_template(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["bare", "rm", "key"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.err
-
-    def test_add_multi_template_sets_template_field(self, tmp_path, monkeypatch, capsys):
-        """cmd_add on a multi-template vertex sets template= in payload (L222)."""
-        home = tmp_path / "home"
-        # Build a vertex with TWO template sources → is_multi=True
-        multi = home / "multi"
-        multi.mkdir(parents=True)
-        (multi / "sources").mkdir()
-        for name in ("feed", "book"):
-            (multi / "sources" / f"{name}.loop").write_text(
-                f'source "echo test"\nkind "{name}"\nobserver "test"\n'
-            )
-        (multi / "multi.vertex").write_text(
-            'name "multi"\nstore "./data/multi.db"\n'
-            'sources {\n'
-            '  template "./sources/feed.loop" { from file "./multi.list" loop { fold { count "n" } } }\n'
-            '  template "./sources/book.loop" { from file "./multi.list" loop { fold { count "n" } } }\n'
-            '}\n'
-        )
-        (multi / "multi.list").write_text("kind title\nfoo bar\n")
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["multi/feed", "add", "newkey", "New Title"])
-        # Accept 0 or 1 — what matters is the template= field path is exercised
-        assert result in (0, 1)
-
-
-class TestRmErrorPaths:
-    def test_export_no_template_returns_1(self, tmp_path, monkeypatch, capsys):
-        """cmd_export on a vertex with no template → _load raises → 1."""
-        home = tmp_path / "home"
-        _setup_no_template(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["bare", "export"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "Error" in captured.err
-
-
-class TestPopNoHeaderErrors:
-    """Tests for no-list-header error paths in cmd_add, cmd_rm, cmd_export."""
-
-    def _setup_empty_list(self, home: Path) -> Path:
-        """Vertex with template but empty .list file (no header)."""
-        reading = home / "reading"
-        reading.mkdir(parents=True)
-        (reading / "reading.vertex").write_text(
-            'name "reading"\n'
-            'store "./data/reading.db"\n'
-            'sources {\n'
-            '  template "./sources/feed.loop" {\n'
-            '    from file "./feeds.list"\n'
-            '    loop { fold { count "inc" } }\n'
-            '  }\n'
-            '}\n'
-        )
-        (reading / "feeds.list").write_text("")  # EMPTY — no header
-        (reading / "sources").mkdir()
-        (reading / "sources" / "feed.loop").write_text(
-            'source "curl"\nkind "feed"\nobserver "feed"\n'
-        )
-        return reading
-
-    def test_add_no_header_error(self, tmp_path, monkeypatch, capsys):
-        """cmd_add with empty .list file → no header error (L202-203)."""
-        home = tmp_path / "home"
-        self._setup_empty_list(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["reading", "add", "key", "value"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "no .list header" in captured.err
-
-    def test_rm_no_header_error(self, tmp_path, monkeypatch, capsys):
-        """cmd_rm with empty .list file → no header error (L270-271)."""
-        home = tmp_path / "home"
-        self._setup_empty_list(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["reading", "rm", "key"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "no .list header" in captured.err
-
-    def test_export_no_header_error(self, tmp_path, monkeypatch, capsys):
-        """cmd_export with empty .list file → no header error (L320-321)."""
-        home = tmp_path / "home"
-        self._setup_empty_list(home)
-        monkeypatch.setenv("LOOPS_HOME", str(home))
-        result = main(["reading", "export"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "no .list header" in captured.err

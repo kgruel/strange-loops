@@ -194,7 +194,6 @@ def cmd_emit(
         _resolve_writable_vertex, _resolve_vertex_store_path,
         _resolve_entity_refs, classify_emit_status,
     )
-    from loops.pop_store import POP_ADD_KIND, POP_RM_KIND
     from painted import show, Block
     from painted.palette import current_palette
     p = current_palette()
@@ -370,114 +369,6 @@ def cmd_emit(
     try:
         from engine import load_vertex_program
 
-        # Special-case: pop facts also materialize the configured .list file.
-        is_pop = kind in (POP_ADD_KIND, POP_RM_KIND)
-        list_path = None
-        header = None
-        template_name = None
-        include_unscoped = True
-        template = None
-
-        if is_pop:
-            from lang import parse_vertex_file
-            from lang.population import resolve_template, list_file_header, list_file_read
-            from loops.pop_store import pop_materialize_list, pop_store_has_facts
-            ast = parse_vertex_file(vertex_path)
-
-            # Resolve template target:
-            # - prefer explicit vertex/template qualifier
-            # - else payload["template"] if provided
-            # - else allow implicit if only one template exists
-            payload_template = payload.get("template")
-            qualifier = template_qualifier or payload_template
-
-            templates = [
-                s
-                for s in (ast.sources or ())
-                if getattr(s, "template", None) is not None
-            ]
-            is_multi = len(templates) > 1
-            include_unscoped = not is_multi
-
-            if is_multi and not qualifier:
-                show(
-                    Block.text(
-                        "Error: multiple templates in vertex; specify one as "
-                        "'vertex/template' or include template=... in payload",
-                        p.error,
-                    ),
-                    file=sys.stderr,
-                )
-                return 1
-
-            template = resolve_template(ast, qualifier)
-            template_name = template.template.stem if is_multi else None
-
-            if template.from_ is None or not hasattr(template.from_, "path"):
-                show(
-                    Block.text(
-                        "Error: template has no 'from file' population configured",
-                        p.error,
-                    ),
-                    file=sys.stderr,
-                )
-                return 1
-
-            list_path = template.from_.path
-            if not Path(list_path).is_absolute():
-                list_path = (vertex_path.parent / list_path).resolve()
-            else:
-                list_path = Path(list_path)
-
-            header = list_file_header(list_path)
-            if not header:
-                show(
-                    Block.text(
-                        f"Error: no .list header found at {list_path}",
-                        p.error,
-                    ),
-                    file=sys.stderr,
-                )
-                return 1
-
-            if kind == POP_ADD_KIND:
-                if "key" not in payload:
-                    show(
-                        Block.text("Error: pop.add requires key=...", p.error),
-                        file=sys.stderr,
-                    )
-                    return 1
-                missing = [h for h in header[1:] if h not in payload]
-                if missing:
-                    show(
-                        Block.text(
-                            "Error: pop.add requires all non-key columns: "
-                            + ", ".join(missing),
-                            p.error,
-                        ),
-                        file=sys.stderr,
-                    )
-                    return 1
-            if kind == POP_RM_KIND and "key" not in payload:
-                show(
-                    Block.text("Error: pop.rm requires key=...", p.error),
-                    file=sys.stderr,
-                )
-                return 1
-
-            if template_name is not None:
-                if "template" in payload and payload.get("template") != template_name:
-                    show(
-                        Block.text(
-                            f"Error: payload template={payload.get('template')!r} does not match "
-                            f"resolved template {template_name!r}",
-                            p.error,
-                        ),
-                        file=sys.stderr,
-                    )
-                    return 1
-                payload["template"] = template_name
-
         # Load the vertex runtime — facts route through loops, boundaries fire.
         # Inject the run-clause dispatcher so program.receive/sync fire
         # boundary run clauses automatically when ticks have .run set.
@@ -488,33 +379,6 @@ def cmd_emit(
         )
 
         try:
-            if is_pop and list_path is not None and header is not None:
-                # If this is the first pop mutation for this template, seed the store
-                # from the existing .list to avoid clobbering on first materialization.
-                if not pop_store_has_facts(
-                    store_path,
-                    template=template_name,
-                    include_unscoped=include_unscoped,
-                ):
-                    if list_path.exists():
-                        hdr, rows = list_file_read(list_path)
-                        if hdr:
-                            for row in rows:
-                                seed_payload: dict[str, str] = {"key": row.key}
-                                if template_name is not None:
-                                    seed_payload["template"] = template_name
-                                for field in hdr[1:]:
-                                    seed_payload[field] = row.values.get(field, "")
-                                seed_fact = Fact(
-                                    kind=POP_ADD_KIND,
-                                    ts=datetime.now(timezone.utc).timestamp(),
-                                    payload=seed_payload,
-                                    observer=args.observer or "",
-                                    origin="",
-                                )
-                                # Use program.receive so seed-fact boundaries dispatch.
-                                program.receive(seed_fact)
-
             # Route fact through the vertex runtime — fold, boundary check, store.
             # program.receive dispatches the run clause if the resulting tick has one.
             # id_override threads the pre-generated fact_id so the receipt
@@ -551,14 +415,6 @@ def cmd_emit(
             if program.has_store:
                 program.vertex._store.close()
 
-        if is_pop and list_path is not None and header is not None:
-            pop_materialize_list(
-                store_path=store_path,
-                list_path=list_path,
-                header=header,
-                template=template_name,
-                include_unscoped=include_unscoped,
-            )
         return 0
     except Exception as e:
         show(Block.text(f"Error: {e}", p.error), file=sys.stderr)

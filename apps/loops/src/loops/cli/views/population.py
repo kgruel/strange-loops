@@ -1,10 +1,18 @@
-"""cli.views.population — template population ops (ls / add / rm / export).
+"""cli.views.population — vertex add/ls/rm/export ops.
 
 Operation IR refactor paused — these surfaces remain entry-point shims
-delegating to the legacy ``loops.commands._run_*`` orchestrators (which
-import painted directly for receipt rendering). Conversion to the full
+delegating to ``loops.commands._run_*`` orchestrators (which import
+painted directly for receipt rendering). Conversion to the full
 Operation IR shape (see ``cli/views/fold.py``) is deferred until a
 touch-point justifies the work.
+
+As of Phase 2 (plan:vertex-living-document), ``run_add`` routes through
+``loops.commands.add`` which dispatches on the first non-target arg:
+``kind`` / ``observer`` / ``combine`` mutate the .vertex file directly via
+the kdl_splice library; ``row`` (and bare-positional back-compat) delegates
+to the legacy template-population path. ``run_ls``/``run_rm``/``run_export``
+still target template populations only — they will move to the same
+subcommand-dispatch shape in Phase 3.
 
 The shims are reachable via two paths:
   * top-level commands (``loops add``) — through ``registry.COMMANDS``;

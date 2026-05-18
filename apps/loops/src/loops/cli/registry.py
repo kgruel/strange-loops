@@ -134,7 +134,7 @@ COMMANDS: dict[str, View] = {
     "store": _view("loops.cli.views.store"),
     "init": _legacy_view_argv_only("_run_init"),
     "whoami": _legacy_view_argv_only("_run_whoami"),
-    "ls": _view("loops.cli.views.population", "run_ls_root"),
+    "ls": _view("loops.cli.views.population", "run_ls"),
     "add": _view("loops.cli.views.population", "run_add"),
     "rm": _view("loops.cli.views.population", "run_rm"),
     "export": _view("loops.cli.views.population", "run_export"),

@@ -577,16 +577,19 @@ class TestRootLs:
         captured = capsys.readouterr()
         assert "loops init" in (captured.out + captured.err)
 
-    def test_vertex_ls_still_works(self, monkeypatch, tmp_path):
-        """loops <vertex> ls routes to population, not root ls."""
+    def test_vertex_ls_routes_to_unified_view(self, monkeypatch, tmp_path, capsys):
+        """`loops <vertex> ls` routes to the unified declarations view, not root ls.
+
+        Post-Phase-3 the per-vertex ls succeeds even without template
+        populations — it shows whatever sections the vertex actually
+        declares (KINDS / OBSERVERS / COMBINE / POPULATIONS).
+        """
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
-        # session ls should attempt population ls (will fail because no template,
-        # but it should NOT route to root ls)
         result = main(["session", "ls"])
-        # Returns 1 because session has no template population, but the important
-        # thing is it doesn't return vertex listing data
-        assert result == 1
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "KINDS" in out
 
 
 class TestExtractLoopsText:

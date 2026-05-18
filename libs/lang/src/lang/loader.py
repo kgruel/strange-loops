@@ -369,11 +369,13 @@ def _load_boundary_condition(node: ckdl.Node, path: Path | None) -> "BoundaryCon
 
 
 def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
-    """Load a loop definition (fold + boundary + search + parse) from a node's children."""
+    """Load a loop definition (fold + boundary + search + parse + preview) from a node's children."""
     folds: tuple[FoldDecl, ...] = ()
     boundary: Boundary | None = None
     search: tuple[str, ...] = ()
     parse: tuple[ParseStep, ...] = ()
+    preview_fields: tuple[str, ...] = ()
+    preview_seen = False
 
     for child in node.children:
         if child.name == "fold":
@@ -386,10 +388,36 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
                 raise _error("search requires at least one field name", path)
         elif child.name == "parse":
             parse = _load_parse_block(child, path)
+        elif child.name == "preview":
+            if preview_seen:
+                raise _error("preview declared more than once", path)
+            # NOTE: CKDL normalizes empty `{}` to children == [], indistinguishable
+            # from no-block at this loader layer. So `preview "x" { }` (empty child
+            # block) silently accepts, while `preview "x" { something }` rejects.
+            # The empty-block case is unusual input that degrades to correct
+            # args-only behavior. If strictness becomes load-bearing, would need
+            # source-text pre-scan or CKDL block-token-presence metadata.
+            if child.children:
+                raise _error(
+                    "preview is bare-args only; no child block allowed",
+                    path,
+                )
+            fields = tuple(str(a) for a in child.args)
+            if not fields:
+                raise _error("preview requires at least one field name", path)
+            if len(set(fields)) != len(fields):
+                raise _error(
+                    f"preview has duplicate field names: {list(fields)}", path,
+                )
+            preview_fields = fields
+            preview_seen = True
         else:
             raise _error(f"Unknown loop field: {child.name}", path)
 
-    return LoopDef(folds=folds, boundary=boundary, search=search, parse=parse)
+    return LoopDef(
+        folds=folds, boundary=boundary, search=search, parse=parse,
+        preview_fields=preview_fields,
+    )
 
 
 # ---------------------------------------------------------------------------

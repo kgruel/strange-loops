@@ -75,6 +75,18 @@ class TestFoldSection:
         assert section.fold_type == "collect"
         assert section.key_field is None
         assert section.scalars == {}
+        assert section.preview_fields == ()
+
+    def test_preview_fields(self):
+        """preview_fields carries the declared trailing-slot order."""
+        section = FoldSection(
+            kind="friction",
+            items=(FoldItem(payload={"name": "f", "status": "open", "message": "m"}),),
+            fold_type="by",
+            key_field="name",
+            preview_fields=("status", "message"),
+        )
+        assert section.preview_fields == ("status", "message")
 
     def test_scalars(self):
         """Scalar fold targets (count, updated, etc.) are exposed to lenses."""

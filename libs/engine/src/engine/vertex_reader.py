@@ -843,12 +843,16 @@ def _raw_to_fold_state(
                 if val is not None:
                     scalars[fold_op.target] = val
 
+        loop_def = ast.loops.get(kind_name)
+        preview_fields = loop_def.preview_fields if loop_def is not None else ()
+
         sections.append(FoldSection(
             kind=kind_name,
             items=items,
             fold_type=fold_type,
             key_field=key_field,
             scalars=scalars,
+            preview_fields=preview_fields,
         ))
 
     return FoldState(

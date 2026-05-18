@@ -3018,3 +3018,113 @@ parse {
         # Different type → NotImplemented (this triggers L74 not L92-93)
         result = s.__eq__(fake)
         assert result is NotImplemented
+
+
+class TestPreviewDecl:
+    """Per-kind `preview` declaration parses into LoopDef.preview_fields."""
+
+    def test_multi_field(self):
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview "status" "message"
+  }
+}
+""")
+        assert vertex.loops["friction"].preview_fields == ("status", "message")
+
+    def test_single_field(self):
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  decision {
+    fold { items "by" "topic" }
+    preview "message"
+  }
+}
+""")
+        assert vertex.loops["decision"].preview_fields == ("message",)
+
+    def test_default_empty_when_undeclared(self):
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  change { fold { items "collect" 20 } }
+}
+""")
+        assert vertex.loops["change"].preview_fields == ()
+
+    def test_empty_args_rejected(self):
+        with pytest.raises(ParseError, match="preview requires at least one field name"):
+            parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview
+  }
+}
+""")
+
+    def test_duplicate_field_rejected(self):
+        with pytest.raises(ParseError, match="duplicate field names"):
+            parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview "status" "status"
+  }
+}
+""")
+
+    def test_multiple_preview_decls_rejected(self):
+        """Two preview decls in the same kind block — last-wins would be silent.
+        Preview is a singular per-kind declaration; the second is a config bug.
+        """
+        with pytest.raises(ParseError, match="preview declared more than once"):
+            parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview "status"
+    preview "message"
+  }
+}
+""")
+
+    def test_preview_with_child_block_rejected(self):
+        """Grammar is bare-args only. A child block likely signals user confusion
+        between this form and a hypothetical block form — reject so the intent
+        surfaces rather than silently dropping the block.
+        """
+        with pytest.raises(ParseError, match="bare-args only"):
+            parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview "status" { something }
+  }
+}
+""")
+
+    def test_preview_with_empty_child_block_accepted_as_known_limitation(self):
+        """Empty `preview "x" { }` is accepted — CKDL normalizes empty {} to no
+        children, so the loader can't distinguish it from the no-block case.
+        Documented in loader.py near the child-block reject. Remove this test
+        if the limitation gets addressed (e.g. source-text pre-scan).
+        """
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  friction {
+    fold { items "by" "name" }
+    preview "status" { }
+  }
+}
+""")
+        assert vertex.loops["friction"].preview_fields == ("status",)

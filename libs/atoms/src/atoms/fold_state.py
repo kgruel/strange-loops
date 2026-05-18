@@ -74,6 +74,12 @@ class FoldSection:
         scalars: Non-items fold targets — scalar values computed by the fold
             (count, updated, sum, etc.). Keyed by fold target name.
             Empty when no scalar targets are declared.
+        preview_fields: Payload field names that the fold lens should render
+            in the SUMMARY trailing slot, joined by separator. Order is
+            significant — the first field gets the full width budget, later
+            fields shrink-then-drop as the line tightens. Empty tuple means
+            "no declaration" and the lens falls back to its default rule
+            (first non-label payload field).
     """
 
     kind: str
@@ -82,6 +88,7 @@ class FoldSection:
     fold_type: str = "collect"
     key_field: str | None = None
     scalars: dict[str, Any] = field(default_factory=dict)
+    preview_fields: tuple[str, ...] = ()
 
     @property
     def count(self) -> int:

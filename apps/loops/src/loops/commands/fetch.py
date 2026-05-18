@@ -121,6 +121,8 @@ def fetch_fold(
                     sections=section.sections,
                     fold_type=section.fold_type,
                     key_field=section.key_field,
+                    scalars=section.scalars,
+                    preview_fields=section.preview_fields,
                 ))
                 if section.key_field:
                     for item in matches:

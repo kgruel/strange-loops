@@ -214,6 +214,27 @@ class TestVertexFold:
         assert len(section.items) == 1
         assert section.items[0].payload["topic"] == "auth"
 
+    def test_preview_fields_propagate(self, tmp_path):
+        """Per-kind `preview` decl flows through to FoldSection.preview_fields."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(
+            tmp_path,
+            "test",
+            '  friction { fold { items "by" "name" } preview "status" "message" }\n'
+            '  change   { fold { items "collect" 20 } }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "friction", "ts": 1000.0,
+             "payload": {"name": "f", "status": "open", "message": "m"}},
+            {"kind": "change", "ts": 2000.0, "payload": {"summary": "x"}},
+        ])
+
+        result = vertex_fold(vpath)
+        sections = {s.kind: s for s in result.sections}
+        assert sections["friction"].preview_fields == ("status", "message")
+        assert sections["change"].preview_fields == ()
+
 
 class TestVertexFacts:
     """vertex_facts: raw fact access through the vertex."""

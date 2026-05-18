@@ -36,6 +36,20 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Preview render constants
+# ---------------------------------------------------------------------------
+
+# Separator between preview fields in the SUMMARY trailing slot.
+# Middot + spaces reads as "and also" (typographic convention).
+PREVIEW_SEPARATOR = " · "
+
+# Below this remaining budget, a later preview field is dropped rather than
+# truncated to an unreadable nub. The dropped tail is reflected in the
+# `[+Nc]` truncation hint.
+MIN_FIELD_BUDGET = 12
+
+
+# ---------------------------------------------------------------------------
 # Semantic palette — maps information roles to styles
 # ---------------------------------------------------------------------------
 
@@ -302,6 +316,7 @@ def _render_section(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
+            preview_fields=section.preview_fields,
             lines=lines, chars=chars,
         )
     else:
@@ -312,6 +327,7 @@ def _render_section(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=section.kind,
+            preview_fields=section.preview_fields,
             lines=lines, chars=chars,
         )
 
@@ -337,6 +353,7 @@ def _render_grouped(
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
     section_kind: str = "",
+    preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render by-fold items grouped by namespace prefix.
@@ -391,6 +408,7 @@ def _render_grouped(
                 facts_by_key=facts_by_key,
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
+                preview_fields=preview_fields,
                 chars=chars,
             ))
 
@@ -423,6 +441,7 @@ def _render_flat(
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
     section_kind: str = "",
+    preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render items as a flat list — sorted by salience for by-folds.
@@ -456,6 +475,7 @@ def _render_flat(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
+            preview_fields=preview_fields,
             chars=chars,
         ))
 
@@ -490,6 +510,7 @@ def _render_item_line(
     strip_namespace: bool = False,
     is_by: bool = True,
     section_kind: str = "",
+    preview_fields: tuple[str, ...] = (),
     chars: int = 0,
 ) -> Block:
     """Render a single fold item as a composed Block with multi-style.
@@ -523,12 +544,30 @@ def _render_item_line(
     if item.ts:
         recency_text = f" {_recency_tag(item.ts)}"
 
-    # Body
-    body_field, body = _find_body_entry(payload, used_label_field)
+    # Body — either preview-driven (explicit per-kind decl) or fallback
+    # (first non-label payload field, the historical behavior). An empty
+    # preview_fields tuple means "no decl" → fall through to _find_body_entry
+    # for back-compat with kinds that haven't migrated.
+    body_field: str | None = None
+    body: str = ""
+    candidate_vals: list[str] = []
+    if preview_fields:
+        candidate_vals = [
+            str(payload.get(f) or "").strip() for f in preview_fields
+        ]
+        non_empty = [v for v in candidate_vals if v]
+        # body_len = full untruncated render size; the [+Nc] hint then
+        # accurately reflects what the cascade dropped or truncated.
+        body_len = sum(len(v) for v in non_empty) + max(
+            0, (len(non_empty) - 1)
+        ) * len(PREVIEW_SEPARATOR)
+    else:
+        body_field, found = _find_body_entry(payload, used_label_field)
+        body = found or ""
+        body_len = len(body)
 
-    # Truncation hint: show character count when body is truncated
-    body_len = len(body) if body else 0
-    separator = ": " if body else ""
+    has_body = body_len > 0
+    separator = ": " if has_body else ""
 
     # Calculate available width for body (reserve space for badge + truncation hint)
     # Badge: " [" + indicators + "]" = 3 chars + content
@@ -542,27 +581,29 @@ def _render_item_line(
     fixed_len = len(pad) + len(label) + badge_len + len(separator)
     truncation_hint = ""
 
-    if body:
-        # Per-body chars budget: caps width-based budget, or stands alone when piped.
-        # Width-based truncation already accounts for badge/label fixed length;
-        # chars further constrains body text directly.
-        if width is not None:
+    if has_body:
+        # Determine body budget (cap for both preview and fallback paths).
+        # At DETAILED+: preview renders untruncated (no width cap). The fallback
+        # path retains the existing width-budget behavior; preview is the
+        # higher-fidelity path so it overrides.
+        if zoom >= Zoom.DETAILED and preview_fields:
+            body_budget = body_len  # untruncated
+        elif width is not None:
             # Reserve space for potential truncation hint " [+NNNc]"
             hint_reserve = 10
             body_budget = max(10, width - fixed_len - hint_reserve)
             if chars > 0:
                 body_budget = min(body_budget, chars)
-            if body_len > body_budget:
-                body_text = _truncate(body, body_budget)
-                truncation_hint = f" [+{body_len - body_budget}c]"
-            else:
-                body_text = body
         else:
-            if chars > 0 and body_len > chars:
-                body_text = _truncate(body, chars)
-                truncation_hint = f" [+{body_len - chars}c]"
-            else:
-                body_text = body
+            body_budget = chars if chars > 0 else body_len
+
+        if preview_fields:
+            body_text = _render_preview(candidate_vals, body_budget)
+        else:
+            body_text = body if body_len <= body_budget else _truncate(body, body_budget)
+
+        if len(body_text) < body_len:
+            truncation_hint = f" [+{body_len - len(body_text)}c]"
     elif item.ts and not n_text and not ref_in_text:
         body_text = ""
     else:
@@ -621,6 +662,10 @@ def _render_item_line(
         skip = {used_label_field} if used_label_field else set()
         if body_field:
             skip.add(body_field)
+        # Preview fields already render inline (untruncated at DETAILED+) —
+        # don't double-print them as extra-field lines below.
+        if preview_fields:
+            skip.update(preview_fields)
         for k, v in payload.items():
             if k in skip or not v:
                 continue
@@ -822,6 +867,32 @@ def _find_body_entry(payload: dict, used_label_field: str | None) -> tuple[str |
             continue
         return k, str(v)
     return None, None
+
+
+def _render_preview(values: list[str], body_budget: int) -> str:
+    """Join non-empty preview values with PREVIEW_SEPARATOR, cascade-truncating.
+
+    First non-empty value claims the full budget. Each subsequent value gets
+    whatever remains after the separator. A value below MIN_FIELD_BUDGET is
+    dropped (along with all later values) rather than rendered as a useless
+    nub — the caller infers the dropped tail from the difference between
+    body_text length and the candidate body_len.
+    """
+    parts: list[str] = []
+    remaining = body_budget
+    for val in values:
+        if not val:
+            continue
+        sep_cost = len(PREVIEW_SEPARATOR) if parts else 0
+        available = remaining - sep_cost
+        if available < MIN_FIELD_BUDGET:
+            break
+        rendered = val if len(val) <= available else _truncate(val, available)
+        if parts:
+            parts.append(PREVIEW_SEPARATOR)
+        parts.append(rendered)
+        remaining -= sep_cost + len(rendered)
+    return "".join(parts)
 
 
 def _truncate(text: str, max_len: int) -> str:

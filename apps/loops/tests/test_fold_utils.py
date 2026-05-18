@@ -533,3 +533,121 @@ class TestFoldMissLines:
         # Trigger _compute_inbound_edges via refs visible
         t = self._text(fold_view(data, Zoom.SUMMARY, 80, visible=frozenset({"refs"})))
         assert len(t) >= 0  # no crash
+
+
+class TestPreviewRender:
+    """Per-kind `preview` declaration drives the SUMMARY trailing slot."""
+
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def _section(self, payload, preview_fields):
+        return FoldSection(
+            kind="friction",
+            items=(FoldItem(payload=payload, ts=time.time() - 60),),
+            fold_type="by",
+            key_field="name",
+            preview_fields=preview_fields,
+        )
+
+    def test_two_fields_present(self):
+        """preview "status" "message" renders status · message."""
+        s = self._section(
+            {"name": "f", "status": "open", "message": "needs fix"},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 200))
+        assert "open · needs fix" in t
+
+    def test_first_field_empty_falls_to_second(self):
+        """Empty status → only message renders (no leading separator)."""
+        s = self._section(
+            {"name": "f", "status": "", "message": "just a body"},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 200))
+        # No leading separator before the lone field
+        assert "just a body" in t
+        assert " · just a body" not in t
+
+    def test_all_fields_empty_no_body(self):
+        """All preview fields empty → no trailing slot at all."""
+        s = self._section(
+            {"name": "f", "status": "", "message": ""},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 200))
+        # Line should not contain ":" body separator after the badge
+        lines = [ln for ln in t.split("\n") if " f " in ln or ln.strip().startswith("f")]
+        # The badge bracket closes; no ": " after it
+        for ln in lines:
+            if " f " in ln or ln.strip().startswith("f "):
+                # Allow ":" only as part of declaration headers like "Frictions (1):"
+                if "Friction" not in ln:
+                    assert "]: " not in ln
+
+    def test_empty_preview_fields_falls_back(self):
+        """Section with no preview_fields uses _find_body_entry — back-compat."""
+        s = FoldSection(
+            kind="decision",
+            items=(FoldItem(payload={"topic": "auth", "message": "JWT"}, ts=time.time() - 60),),
+            fold_type="by",
+            key_field="topic",
+            preview_fields=(),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 200))
+        # First non-key payload field is "message"; today's behavior must survive.
+        assert ": JWT" in t
+
+    def test_cascade_truncation(self):
+        """Long first field claims most budget; second field truncates or drops."""
+        long_status = "open-with-a-lot-of-context-and-additional-detail"
+        long_msg = "x" * 200
+        s = self._section(
+            {"name": "f", "status": long_status, "message": long_msg},
+            preview_fields=("status", "message"),
+        )
+        # narrow width forces truncation
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 100))
+        # The trailing slot starts with status (first-field-wins). The message
+        # field is either truncated (… visible) or dropped entirely (cascade).
+        # Either way the [+Nc] hint surfaces.
+        assert "[+" in t and "c]" in t
+
+    def test_min_field_budget_drops(self):
+        """When remaining budget < MIN_FIELD_BUDGET the later field drops entirely."""
+        from loops.lenses.fold import MIN_FIELD_BUDGET, _render_preview
+        # First field eats the budget; second can't fit MIN_FIELD_BUDGET, so it drops.
+        first = "a" * 50
+        second = "should-not-render"
+        result = _render_preview([first, second], body_budget=50)
+        assert second not in result
+        # And confirm a wide enough budget DOES render the second
+        result2 = _render_preview([first, second], body_budget=50 + len(" · ") + MIN_FIELD_BUDGET + 10)
+        assert "should-not-render" in result2 or "should-not" in result2
+
+    def test_detailed_zoom_untruncated_no_duplicate(self):
+        """At DETAILED: preview renders untruncated AND fields don't re-appear."""
+        s = self._section(
+            {"name": "f", "status": "open", "message": "a very specific body",
+             "ops": "secondary-info"},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.DETAILED, 200))
+        # Inline preview is present
+        assert "open · a very specific body" in t
+        # The extra-fields loop does NOT re-emit status/message
+        assert "\n    status: open" not in t
+        assert "\n    message: a very specific body" not in t
+        # But other (non-preview) fields DO render in the extras section
+        assert "ops: secondary-info" in t
+
+    def test_minimal_zoom_omits_preview(self):
+        """MINIMAL is counts-only; preview never appears."""
+        s = self._section(
+            {"name": "f", "status": "open", "message": "should-not-leak"},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.MINIMAL, 200))
+        assert "should-not-leak" not in t
+        assert "open" not in t  # The status value also stays out

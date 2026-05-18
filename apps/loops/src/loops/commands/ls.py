@@ -1,18 +1,32 @@
-"""`loops ls <vertex>` — unified declarations view + optional subcommand filters.
+"""`loops ls <vertex>` — unified declarations view, narrowed by flag or positional.
 
-Phase 3 of plan:vertex-living-document. Aggregates the four declarative
+Phase 3 of plan:vertex-living-document, extended to converge with read's
+grammar (fix/ls-flag-grammar, 2026-05-17). Aggregates the four declarative
 surfaces (kinds / observers / combine / sources) into one consolidated
-view. Subcommands narrow:
+view. Narrowing is available in two equivalent shapes:
 
-  loops ls <vertex>             unified
-  loops ls <vertex> kind        only KINDS section
-  loops ls <vertex> observer    only OBSERVERS section
-  loops ls <vertex> combine     only COMBINE section
-  loops ls <vertex> row [TPL]   only SOURCES section
+  Flag form (canonical, composes, matches read):
+    loops ls <vertex> --kind                 only KINDS section
+    loops ls <vertex> --kind decision        narrow KINDS to one entry
+    loops ls <vertex> --kind --observer      KINDS + OBSERVERS sections
+    loops ls <vertex> --observer kyle        narrow OBSERVERS to one entry
+    loops ls <vertex> --row [TEMPLATE]       narrow SOURCES (template sources)
+
+  Positional form (back-compat alias for the bare single-section flag):
+    loops ls <vertex> kind                   equivalent to --kind
+    loops ls <vertex> observer               equivalent to --observer
+    loops ls <vertex> row [TEMPLATE]         equivalent to --row
+
+Mixing the two forms is an error — the helpful message points at the flag
+form as canonical. The principle is the same one that governs `read`:
+filters narrow a unified view and should be flags; positionals identify a
+target the verb operates on. The positional form predates this rule and
+stays for muscle memory and shell-friendly terseness.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -21,43 +35,85 @@ if TYPE_CHECKING:
 
 
 _FILTER_SUBCOMMANDS = frozenset({"kind", "observer", "combine", "row"})
+# Order preserved for both --help rendering and stable filter-list output.
+_SECTION_FLAGS = ("kind", "observer", "combine", "row")
 
 
 def _print_ls_help(target: str | None = None) -> None:
-    import argparse as _ap
-    import sys as _sys
-
     if target is None:
-        p = _ap.ArgumentParser(
+        p = argparse.ArgumentParser(
             prog="loops ls",
-            description="List all vertices, or declarations for one vertex.",
+            description=(
+                "List all vertices, or declarations for one vertex.\n\n"
+                "Section narrowing (flag form, composable):\n"
+                "  --kind [NAME]         show KINDS section (or one named entry)\n"
+                "  --observer [NAME]     show OBSERVERS section (or one named entry)\n"
+                "  --combine [PATH]      show COMBINE section (or one named entry)\n"
+                "  --row [TEMPLATE]      show SOURCES section (or one template)\n\n"
+                "Positional alias (back-compat, single section, no narrowing):\n"
+                "  loops ls <vertex> kind|observer|combine|row\n\n"
+                "Mixing both forms is an error."
+            ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         p.add_argument("vertex", nargs="?", help="Vertex name (omit for root listing)")
-        p.add_argument(
-            "subcommand", nargs="?",
-            choices=["kind", "observer", "combine", "row"],
-            help="kind / observer / combine / row (filter declarations)",
-        )
     else:
-        p = _ap.ArgumentParser(
+        p = argparse.ArgumentParser(
             prog=f"loops ls {target}",
-            description=f"Show declarations for vertex '{target}'.",
+            description=(
+                f"Show declarations for vertex '{target}'.\n\n"
+                "Section narrowing (flag form, composable):\n"
+                "  --kind [NAME]         show KINDS section (or one named entry)\n"
+                "  --observer [NAME]     show OBSERVERS section (or one named entry)\n"
+                "  --combine [PATH]      show COMBINE section (or one named entry)\n"
+                "  --row [TEMPLATE]      show SOURCES section (or one template)\n\n"
+                "Positional alias (back-compat):\n"
+                f"  loops ls {target} kind|observer|combine|row"
+            ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
         )
-        p.add_argument(
-            "subcommand", nargs="?",
-            choices=["kind", "observer", "combine", "row"],
-            help="kind / observer / combine / row (filter; default: all)",
-        )
-    p.print_help(_sys.stdout)
+    p.print_help(sys.stdout)
+
+
+def _peel_section_flags(
+    rest: list[str],
+) -> tuple[list[str], dict[str, str], list[str]]:
+    """Extract --kind/--observer/--combine/--row from rest.
+
+    Each flag uses ``nargs='?'``: bare form selects the section, with a value
+    narrows to one named entry. argparse correctly treats a following ``--*``
+    token as the next flag (verified empirically — see PLAN.md §A).
+
+    Returns ``(filters, narrows, leftover_argv)``:
+      filters — section keys present (e.g. ['kind', 'observer'])
+      narrows — section → name when given a value (e.g. {'kind': 'decision'})
+      leftover_argv — args not consumed (passed through to run_cli)
+    """
+    p = argparse.ArgumentParser(add_help=False)
+    for verb in _SECTION_FLAGS:
+        p.add_argument(f"--{verb}", nargs="?", const=True, default=None)
+    known, leftover = p.parse_known_args(rest)
+
+    filters: list[str] = []
+    narrows: dict[str, str] = {}
+    for verb in _SECTION_FLAGS:
+        val = getattr(known, verb)
+        if val is None:
+            continue
+        filters.append(verb)
+        if val is not True:
+            narrows[verb] = val
+    return filters, narrows, leftover
 
 
 def _run_ls(argv: list[str]) -> int:
     """Dispatch ``loops ls`` — root listing or per-vertex unified view.
 
-    Forms:
-      loops ls                     — list all discovered vertices (root)
-      loops ls <vertex>            — unified declarations for one vertex
-      loops ls <vertex> <filter>   — narrow to KINDS/OBSERVERS/COMBINE/POP
+    Forms (see module docstring for the full grammar):
+      loops ls                          — list all discovered vertices (root)
+      loops ls <vertex>                 — unified declarations for one vertex
+      loops ls <vertex> --kind [NAME]   — flag form (canonical, composable)
+      loops ls <vertex> kind            — positional alias (back-compat)
     """
     if argv and argv[0] in ("-h", "--help"):
         _print_ls_help()
@@ -77,10 +133,28 @@ def _run_ls(argv: list[str]) -> int:
         _print_ls_help(target)
         return 0
 
-    filter_ = None
+    # Positional sub-verb (legacy form): a bare token that names a section.
+    positional_filter: str | None = None
     if rest and rest[0] in _FILTER_SUBCOMMANDS:
-        filter_ = rest[0]
+        positional_filter = rest[0]
         rest = rest[1:]
+
+    flag_filters, flag_narrows, rest = _peel_section_flags(rest)
+
+    if positional_filter and (flag_filters or flag_narrows):
+        _err(
+            "ls: don't mix the positional form with --kind/--observer/--combine/--row.\n"
+            "  flag form is canonical:    sl ls <vertex> --kind [NAME]\n"
+            "  positional is back-compat: sl ls <vertex> kind"
+        )
+        return 2
+
+    if positional_filter is not None:
+        filters: list[str] | None = [positional_filter]
+        narrows: dict[str, str] = {}
+    else:
+        filters = flag_filters or None  # None = all sections visible
+        narrows = flag_narrows
 
     # Render through painted's run_cli for zoom/width handling.
     from painted import run_cli
@@ -88,7 +162,9 @@ def _run_ls(argv: list[str]) -> int:
     from loops.lenses.declarations import declarations_view
 
     def fetch():
-        return fetch_declarations(target, filter_=filter_, extra_argv=rest)
+        return fetch_declarations(
+            target, filters=filters, narrows=narrows, extra_argv=rest,
+        )
 
     def render(ctx, data):
         return declarations_view(data, ctx.zoom, ctx.width)
@@ -106,14 +182,35 @@ def fetch_declarations(
     target: str,
     *,
     filter_: str | None = None,
-    extra_argv: list[str] | None = None,
+    filters: list[str] | None = None,
+    narrows: dict[str, str] | None = None,
+    extra_argv: list[str] | None = None,  # noqa: ARG001 — reserved for future read-style flags
 ) -> dict[str, Any]:
-    """Aggregate kinds + observers + combine + sources for the vertex."""
+    """Aggregate kinds + observers + combine + sources for the vertex.
+
+    Narrowing inputs accept two equivalent shapes:
+      * legacy single-section: ``filter_="kind"`` (kept for callers that
+        predate the flag-grammar convergence)
+      * multi-section + name: ``filters=["kind", "observer"]``,
+        ``narrows={"kind": "decision"}``
+
+    The returned dict exposes both ``filter`` (legacy, single) and
+    ``filters``/``narrows`` (new) so lens code can transition incrementally.
+    """
     from lang import parse_vertex_file
     from lang.population import (
         resolve_vertex,
     )
     from loops.commands.resolve import loops_home
+
+    # Normalise narrowing inputs — legacy filter_ wins when it's the only one set.
+    if filters is None and filter_ is not None:
+        filters = [filter_]
+    narrows = narrows or {}
+    # Back-fill legacy `filter` from `filters` when only the new shape is given.
+    legacy_filter = filter_ if filter_ is not None else (
+        filters[0] if filters and len(filters) == 1 else None
+    )
 
     # Allow `loops ls reading/feeds` to qualify a template.
     if "/" in target and not target.startswith(("./", "/")):
@@ -126,7 +223,9 @@ def fetch_declarations(
         return {
             "error": f"vertex not found: {vertex_path}",
             "vertex_name": vertex_ref,
-            "filter": filter_,
+            "filter": legacy_filter,
+            "filters": filters,
+            "narrows": narrows,
         }
 
     try:
@@ -135,13 +234,15 @@ def fetch_declarations(
         return {
             "error": f"failed to parse {vertex_path.name}: {exc}",
             "vertex_name": vertex_ref,
-            "filter": filter_,
+            "filter": legacy_filter,
+            "filters": filters,
+            "narrows": narrows,
         }
 
     kinds = _summarize_kinds(vf)
     observers = _summarize_observers(vf)
     combine = _summarize_combine(vf)
-    sources = _summarize_populations(vf, vertex_path, qualifier)
+    sources = _summarize_sources(vf, vertex_path, qualifier)
 
     return {
         "vertex_name": vf.name,
@@ -150,7 +251,9 @@ def fetch_declarations(
         "observers": observers,
         "combine": combine,
         "sources": sources,
-        "filter": filter_,
+        "filter": legacy_filter,
+        "filters": filters,
+        "narrows": narrows,
     }
 
 
@@ -222,10 +325,10 @@ def _summarize_combine(vf) -> list[dict[str, str]]:
     return out
 
 
-def _summarize_populations(
+def _summarize_sources(
     vf, vertex_path: Path, qualifier: str | None
 ) -> list[dict[str, Any]]:
-    """For each file-backed template population, return its header + rows."""
+    """For each file-backed template source, return its header + rows."""
     from lang.ast import FromFile, TemplateSource
     from lang.population import list_file_read, template_name
 

@@ -17,12 +17,20 @@ _SECTION_TITLES = {
     "combine": "COMBINE",
     "sources": "SOURCES",
 }
-# Filter subcommand -> section key in data.
+# Filter sub-verb / flag name -> section key in data.
 _FILTER_TO_SECTION = {
     "kind": "kinds",
     "observer": "observers",
     "combine": "combine",
     "row": "sources",
+}
+# Inverse: section key -> the field on each row that names the entry. Used
+# when a per-section narrow (e.g. ``--kind decision``) is in effect.
+_SECTION_NAME_FIELD = {
+    "kinds": "name",
+    "observers": "name",
+    "combine": "path",
+    "sources": "template",
 }
 
 
@@ -30,31 +38,59 @@ def declarations_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Bl
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
 
-    filter_ = data.get("filter")
-    visible_sections = (
-        [_FILTER_TO_SECTION[filter_]] if filter_ else list(_SECTIONS)
-    )
+    # Prefer the new (filters/narrows) shape; fall back to legacy (filter).
+    filters = data.get("filters")
+    if filters is None:
+        legacy = data.get("filter")
+        filters = [legacy] if legacy else None
+    narrows = data.get("narrows") or {}
+
+    if filters:
+        visible_sections = [_FILTER_TO_SECTION[f] for f in filters]
+    else:
+        visible_sections = list(_SECTIONS)
 
     if zoom == Zoom.MINIMAL:
         # One-line counts, only for visible sections.
         parts = [data.get("vertex_name", "?")]
         for s in visible_sections:
-            n = len(data.get(s) or ())
-            parts.append(f"{s}={n}")
+            items = _narrow_section_items(s, data, narrows)
+            parts.append(f"{s}={len(items)}")
         return Block.text(" ".join(parts), Style(), width=width)
 
     blocks: list[Block] = []
     for i, section in enumerate(visible_sections):
         if i > 0:
             blocks.append(Block.text("", Style(), width=width))
-        blocks.append(_render_section(section, data, zoom, width))
+        blocks.append(_render_section(section, data, zoom, width, narrows))
     return join_vertical(*blocks) if blocks else Block.text("", Style(), width=width)
 
 
+def _narrow_section_items(
+    section: str, data: dict[str, Any], narrows: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Apply the optional per-section name narrowing to raw items.
+
+    A narrowing miss (NAME matches nothing) renders an empty section — same
+    convention as ``read --kind <unknown>``.
+    """
+    items = list(data.get(section) or [])
+    # narrows is keyed by the section sub-verb (kind/observer/combine/row),
+    # not the data-section key (kinds/observers/combine/sources).
+    inv = {v: k for k, v in _FILTER_TO_SECTION.items()}
+    verb = inv[section]
+    name_field = _SECTION_NAME_FIELD[section]
+    needle = narrows.get(verb)
+    if needle is None:
+        return items
+    return [it for it in items if it.get(name_field) == needle]
+
+
 def _render_section(
-    section: str, data: dict[str, Any], zoom: Zoom, width: int | None
+    section: str, data: dict[str, Any], zoom: Zoom, width: int | None,
+    narrows: dict[str, str],
 ) -> Block:
-    items = data.get(section) or []
+    items = _narrow_section_items(section, data, narrows)
     title = _SECTION_TITLES[section]
     count_repr = str(len(items)) if items else "—"
     head = Block.text(
@@ -67,7 +103,7 @@ def _render_section(
         "kinds": _render_kind,
         "observers": _render_observer,
         "combine": _render_combine_entry,
-        "sources": _render_population,
+        "sources": _render_source,
     }[section]
     rows = [renderer(item, zoom, width) for item in items]
     return join_vertical(head, *rows)
@@ -108,7 +144,7 @@ def _render_combine_entry(
     return Block.text(f"  {path}", Style(), width=width)
 
 
-def _render_population(
+def _render_source(
     pop: dict[str, Any], zoom: Zoom, width: int | None
 ) -> Block:
     tname = pop["template"]

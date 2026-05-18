@@ -86,7 +86,6 @@ def _run_sync_aggregate(
 ) -> int:
     """Sync each combine child independently and aggregate results."""
     from painted import run_cli, show, Block
-    from painted.cli import HelpArg
     from painted.palette import current_palette
     from engine import load_vertex_program
 
@@ -175,11 +174,6 @@ def _run_sync_aggregate(
         render=render,
         prog="loops sync",
         description=f"Sync vertex {parent_name} (aggregation)",
-        help_args=[
-            HelpArg("vertex", "Vertex name", positional=True),
-            HelpArg("--force", "Run all sources unconditionally"),
-            HelpArg("--var", "Set variable KEY=VALUE"),
-        ],
     )
 
 
@@ -197,13 +191,24 @@ def _run_sync(
     --force: run all sources unconditionally.
     """
     from painted import run_cli, show, Block
-    from painted.cli import HelpArg
     from painted.palette import current_palette
     from engine import load_vertex_program
     from loops.commands.resolve import _resolve_named_vertex
     from loops.commands.resolve import _parse_vars, _resolve_vertex_path
 
     rep = _reporter(reporter)
+
+    # Intercept --help before vertex resolution (pre-parser uses parse_known_args
+    # so argparse would not catch --help itself).
+    if "-h" in argv or "--help" in argv:
+        import sys as _sys
+        _help = argparse.ArgumentParser(prog="loops sync")
+        if vertex_path is None:
+            _help.add_argument("vertex", nargs="?", help="Vertex name or path")
+        _help.add_argument("--force", "-f", action="store_true", help="Run all sources unconditionally")
+        _help.add_argument("--var", action="append", metavar="KEY=VALUE", help="Variable override")
+        _help.print_help(_sys.stdout)
+        return 0
 
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
@@ -317,9 +322,4 @@ def _run_sync(
         render=render,
         prog="loops sync",
         description=f"Sync vertex {program.name}",
-        help_args=[
-            HelpArg("vertex", "Vertex name", positional=True),
-            HelpArg("--force", "Run all sources unconditionally"),
-            HelpArg("--var", "Set variable KEY=VALUE"),
-        ],
     )

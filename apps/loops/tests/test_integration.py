@@ -17,7 +17,7 @@ from painted import Zoom
 from engine.builder import vertex, fold_count, fold_by, fold_collect
 from loops.main import (
     main, cmd_emit, cmd_init,
-    _render_main_help, _run_validate, _run_ticks,
+    _run_validate, _run_ticks,
     _try_topology_from_store, _resolve_combine_child, _resolve_vertex_for_dispatch,
     _whoami_from_identity_store,
 )
@@ -808,14 +808,13 @@ class TestVerticesLens:
 class TestMainEdgePaths:
     """Exercise remaining main.py dispatch paths."""
 
-    def test_render_main_help_json(self, capsys):
-        """_render_main_help with --json flag hits JSON branch (L3156-3159)."""
-        rc = _render_main_help(["--json"])
+    def test_top_level_help(self, capsys):
+        """Top-level --help prints stock argparse usage and returns 0."""
+        rc = main(["--help"])
         assert rc == 0
         out = capsys.readouterr().out
-        import json
-        data = json.loads(out)
-        assert "prog" in data or "groups" in data or isinstance(data, dict)
+        assert "loops" in out
+        assert "verbs" in out
 
     def test_run_sync_nonexistent_vertex(self, tmp_path):
         """_run_sync with non-existent .vertex path errors (L942-943).

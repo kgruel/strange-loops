@@ -100,38 +100,51 @@ def _build_parser(has_vertex_path: bool) -> argparse.ArgumentParser:
     the first positional collapses from ``vertex_or_entity`` to just
     ``entity``.
     """
-    parser = argparse.ArgumentParser(prog="loops read", add_help=False)
+    parser = argparse.ArgumentParser(prog="loops read")
     if not has_vertex_path:
-        parser.add_argument("vertex_or_entity", nargs="?", default=None)
-        parser.add_argument("entity", nargs="?", default=None)
+        parser.add_argument("vertex_or_entity", nargs="?", default=None,
+                            help="Vertex name, path, or kind/key entity")
+        parser.add_argument("entity", nargs="?", default=None,
+                            help="Entity filter (kind/key)")
     else:
-        parser.add_argument("entity", nargs="?", default=None)
-    parser.add_argument("--kind", default=None)
-    parser.add_argument("--key", default=None)
-    parser.add_argument("--lens", default=None)
-    parser.add_argument("--facts", action="store_true", default=False)
-    parser.add_argument("--diff", action="store_true", default=False)
+        parser.add_argument("entity", nargs="?", default=None,
+                            help="Entity filter (kind/key)")
+    parser.add_argument("--kind", default=None, help="Filter by fact kind")
+    parser.add_argument("--key", default=None, help="Filter by fold key (prefix scan with trailing /)")
+    parser.add_argument("--lens", default=None, help="Lens name for rendering")
+    parser.add_argument("--facts", action="store_true", default=False,
+                        help="Show raw fact stream instead of folded state")
+    parser.add_argument("--diff", action="store_true", default=False,
+                        help="Show only facts not yet reflected in the fold")
     parser.add_argument(
         "-q", "--quiet", action="store_true", dest="quiet", default=False,
+        help="Minimal output (counts only)",
     )
     parser.add_argument(
         "-v", "--verbose", action="count", dest="verbose", default=0,
+        help="Increase verbosity (-v detailed, -vv full)",
     )
-    parser.add_argument("--plain", action="store_true", default=False)
-    parser.add_argument("--json", action="store_true", default=False)
+    parser.add_argument("--plain", action="store_true", default=False,
+                        help="Plain text output (no color)")
+    parser.add_argument("--json", action="store_true", default=False,
+                        help="JSON output")
     parser.add_argument(
         "--static", action="store_true", dest="static_mode", default=False,
+        help="Static render (no live updates)",
     )
     parser.add_argument(
         "--live", action="store_true", dest="live_mode", default=False,
+        help="Live updating display",
     )
     parser.add_argument(
         "-i", "--interactive", action="store_true",
         dest="interactive_mode", default=False,
+        help="Interactive TUI explorer",
     )
-    parser.add_argument("--max-chars", type=int, default=None, dest="max_chars")
-    parser.add_argument("--max-lines", type=int, default=None, dest="max_lines")
-    parser.add_argument("-h", "--help", action="store_true", default=False)
+    parser.add_argument("--max-chars", type=int, default=None, dest="max_chars",
+                        help="Truncate output at N characters")
+    parser.add_argument("--max-lines", type=int, default=None, dest="max_lines",
+                        help="Truncate output at N lines")
     return parser
 
 
@@ -357,10 +370,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code or 2)
-
-    if args.help:
-        return _render_fold_help(ctx)
+        return int(exc.code) if exc.code is not None else 2
 
     # Plain / ANSI: --plain forces ANSI off. Reporter exposes use_ansi
     # for PaintedReporter; setting it pre-dispatch is the canonical
@@ -485,16 +495,3 @@ def _build_autoresearch_handler(vertex_path: Path, observer: str | None):
 
     return handle
 
-
-# --- Help ------------------------------------------------------------------
-
-
-def _render_fold_help(_ctx: CliContext) -> int:
-    """Render fold-specific help.
-
-    Defers to the top-level help renderer — its painted HelpData composition
-    already documents read's full surface and is used by the goldens.
-    """
-    from loops.cli.help import _render_main_help
-
-    return _render_main_help(["read", "--help"])

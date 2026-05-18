@@ -502,14 +502,17 @@ def _run_close(
     rep = _reporter(reporter)
     p = current_palette()
 
-    parser = argparse.ArgumentParser(prog="loops close", add_help=False)
+    parser = argparse.ArgumentParser(prog="loops close")
     if vertex_path is None:
         parser.add_argument("vertex", nargs="?", default=None)
     parser.add_argument("kind", help="Fact kind to close (e.g. thread, task)")
     parser.add_argument("name", help="Name/key of the item to close")
     parser.add_argument("message", nargs="?", default=None, help="Resolution summary")
     parser.add_argument("--dry-run", action="store_true", help="Show what would happen")
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 1
 
     # Resolve vertex
     if vertex_path is None:

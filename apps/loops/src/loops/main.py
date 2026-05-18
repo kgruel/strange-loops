@@ -44,8 +44,6 @@ from loops.cli.lens import (  # noqa: F401
     _get_vertex_lens_decl, _exit_lens_not_found, _effective_lens_name,
     _resolve_render_fn, _resolve_lens_fetch,
 )
-from loops.cli.help import _render_main_help  # noqa: F401
-
 _VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
 _SETUP_COMMANDS = frozenset({"init", "whoami", "ls", "add", "rm", "export"})

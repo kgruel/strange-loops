@@ -5,11 +5,9 @@ output.
 
 Painted-boundary discipline (current state — refactor paused):
 
-  Within ``cli/``, only ``cli.output``, ``cli.live``, and ``cli.help``
-  import painted at runtime. ``cli.help`` is scheduled to retire
-  alongside the legacy help renderer. (``cli.operation`` has a
-  TYPE_CHECKING-only painted import; it does not exercise painted at
-  runtime.)
+  Within ``cli/``, only ``cli.output`` and ``cli.live`` import painted
+  at runtime. (``cli.operation`` has a TYPE_CHECKING-only painted
+  import; it does not exercise painted at runtime.)
 
   This boundary does *not* yet extend to ``loops.commands.*``. Several
   command modules — ``devtools``, ``emit``, ``resolve``, ``pop``, ``sync``,

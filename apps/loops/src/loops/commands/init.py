@@ -464,7 +464,7 @@ def _run_init(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     Accepts key=value pairs after the name for seeding config facts:
         loops init autoresearch objective="Reduce latency" metric=emit_ms
     """
-    parser = argparse.ArgumentParser(prog="loops init", add_help=False)
+    parser = argparse.ArgumentParser(prog="loops init")
     parser.add_argument(
         "name",
         nargs="?",
@@ -481,5 +481,8 @@ def _run_init(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
         nargs="*",
         help="key=value pairs to emit as config facts after creation",
     )
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 1
     return cmd_init(args, reporter=reporter)

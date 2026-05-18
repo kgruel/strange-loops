@@ -57,7 +57,6 @@ def _run_ticks(
     ``loops read project --ticks 3``     — drill into 4th most recent tick
     """
     from painted import run_cli
-    from painted.cli import HelpArg
 
     from loops.commands.resolve import _resolve_vertex_for_dispatch
 
@@ -161,11 +160,6 @@ def _run_ticks(
             render=render,
             prog="loops ticks",
             description="Show fold state at tick boundary",
-            help_args=[
-                HelpArg("index", "Tick index or range (0, 0:3)", positional=True),
-                HelpArg("--since", "Time window for tick search (30d)", default="30d"),
-                HelpArg("--lens", "Render lens"),
-            ],
         )
 
     # Listing mode: show tick history
@@ -197,9 +191,4 @@ def _run_ticks(
         render=render_listing,
         prog="loops ticks",
         description="Show tick history",
-        help_args=[
-            HelpArg("index", "Tick index to drill into (0 = most recent)", positional=True),
-            HelpArg("--since", "Time window (30d, 7d, 1h)", default="30d"),
-            HelpArg("--lens", "Render lens"),
-        ],
     )

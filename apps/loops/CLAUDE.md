@@ -93,7 +93,7 @@ See `~/.config/loops/CLAUDE.md` for the full progressive guide to each of these.
 
 **The refactor is paused as a pilot.** Two surfaces use the IR; ten do not. Adding a *new* verb in the IR shape (parse → Operation → dispatch) is the preferred path forward. Converting an existing legacy shim is opportunistic — do it when a touch-point justifies the work, not as a sweep.
 
-**Painted-boundary caveat:** within `cli/`, only `output.py`, `live.py`, and `help.py` import painted at runtime (`operation.py` has a TYPE_CHECKING import). `help.py` is scheduled to retire alongside the legacy help renderer. The `commands/` modules (devtools, emit, resolve, pop, sync, ticks, init, whoami, stream, store, population) still import painted directly — the "single painted boundary" applies inside `cli/`, not `commands/`. Reporter injection is the target shape; it is not the current invariant outside `cli/`.
+**Painted-boundary caveat:** within `cli/`, only `output.py` and `live.py` import painted at runtime (`operation.py` has a TYPE_CHECKING import). The `commands/` modules (devtools, emit, resolve, pop, sync, ticks, init, whoami, stream, store, population) still import painted directly — the "single painted boundary" applies inside `cli/`, not `commands/`. Reporter injection is the target shape; it is not the current invariant outside `cli/`.
 
 **Adding a new verb (IR shape — preferred):**
 1. `cli/views/<verb>.py` — define `run(argv, ctx)`: parse argv with `argparse`, build an `Operation`, call `dispatch(op, reporter=ctx.reporter)`.

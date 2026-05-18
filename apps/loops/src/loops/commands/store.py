@@ -112,7 +112,6 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
     from painted import run_cli, OutputMode
-    from painted.cli import HelpArg
     from .resolve import loops_home
 
     pre = argparse.ArgumentParser(add_help=False)
@@ -176,9 +175,6 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         default_mode=OutputMode.STATIC,
         prog="loops store",
         description="Inspect store contents",
-        help_args=[
-            HelpArg("file", "Store file, vertex name, or path", positional=True),
-        ],
     )
 
 

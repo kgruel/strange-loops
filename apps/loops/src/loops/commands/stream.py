@@ -13,7 +13,6 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
     a vertex name before falling back to search query.
     """
     from painted import run_cli
-    from painted.cli import HelpArg
     from loops.commands.resolve import _validate_kind_or_exit, _vertex_name
     from loops.cli.lens import _resolve_render_fn
     from loops.cli.output import err as _err
@@ -104,12 +103,4 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
         render=render,
         prog="loops stream",
         description="Show event stream",
-        help_args=[
-            HelpArg("query", "Search text (FTS5)", positional=True),
-            HelpArg("--id", "Look up fact by ID or prefix"),
-            HelpArg("--kind", "Filter by fact kind"),
-            HelpArg("--observer", "Filter by observer (default: you)"),
-            HelpArg("--since", "Time window (7d, 24h, 1h)", default="7d"),
-            HelpArg("--lens", "Render lens (prompt)"),
-        ],
     )

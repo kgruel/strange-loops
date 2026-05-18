@@ -120,8 +120,6 @@ def _command(cmd: str, argv: list[str]) -> int:
     The legacy ``_dispatch_command`` wrapped commands in painted's
     ``run_app`` for help rendering. We bypass that here — individual
     commands carry their own help via their internal argparse parsers.
-    For unknown commands we surface the same painted-rendered help
-    surface as the root help via ``loops.main._render_main_help``.
     """
     ctx = CliContext(reporter=default_reporter())
     if cmd not in COMMANDS:
@@ -141,12 +139,21 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # No args / top-level help — defer to the legacy help renderer; it
-    # owns the painted HelpData composition that step 6 will retire.
     if not argv or argv[0] in ("-h", "--help"):
-        from loops.cli.help import _render_main_help
-
-        return _render_main_help(argv)
+        p = argparse.ArgumentParser(
+            prog="loops",
+            description="loops — emit, fold, stream across vertices",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=(
+                "verbs:    " + "  ".join(sorted(VERBS)) + "\n"
+                "commands: " + "  ".join(sorted(set(COMMANDS) - set(VERBS))) + "\n\n"
+                "Run `loops <verb> --help` for verb-specific help.\n"
+                "Zoom: -q (minimal)  default (summary)  -v (detailed)  -vv (full)"
+            ),
+        )
+        p.add_argument("verb", nargs="?", help="verb or command name")
+        p.print_help(sys.stdout)
+        return 0
 
     # Tier 1: known verbs
     if argv[0] in VERBS:

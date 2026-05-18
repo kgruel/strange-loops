@@ -20,7 +20,6 @@ def _reporter(reporter: "Reporter | None") -> "Reporter":
 def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run validate command via painted CLI harness."""
     from painted import run_cli
-    from painted.cli import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from loops.lenses.validate import validate_view
 
@@ -87,11 +86,6 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
         render=render,
         prog="loops validate",
         description="Validate .loop or .vertex files",
-        help_args=[
-            HelpArg(
-                "files", "Files to validate (default: all in cwd)", positional=True
-            ),
-        ],
     )
     # run_cli always returns 0 here — fetch catches all exceptions internally.
     # Preserve exit code: 1 if validation errors or no files found
@@ -109,7 +103,6 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     With --input: use file as input for parse pipeline instead of running.
     """
     from painted import run_cli
-    from painted.cli import HelpArg
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
 
@@ -170,11 +163,6 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
             render=render,
             prog="loops test",
             description="Test parse pipeline against sample input",
-            help_args=[
-                HelpArg("file", "Loop file to test", positional=True),
-                HelpArg("--input", "Input file to feed through parse pipeline"),
-                HelpArg("--limit", "Max facts to show"),
-            ],
         )
 
     else:
@@ -238,18 +226,12 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
             render=render,
             prog="loops test",
             description=f"Run {path.name} — preview facts, no persistence",
-            help_args=[
-                HelpArg("file", "Loop file to test", positional=True),
-                HelpArg("--input", "Input file to feed through parse pipeline"),
-                HelpArg("--limit", "Max facts to show"),
-            ],
         )
 
 
 def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run compile command via painted CLI harness."""
     from painted import run_cli
-    from painted.cli import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from engine import compile_loop, compile_vertex
     from loops.lenses.compile import compile_view
@@ -321,7 +303,4 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
         render=render,
         prog="loops compile",
         description="Show compiled structure",
-        help_args=[
-            HelpArg("file", "Loop or vertex file to compile", positional=True),
-        ],
     )

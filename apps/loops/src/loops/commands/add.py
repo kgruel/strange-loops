@@ -39,6 +39,9 @@ def _run_add(argv: list[str]) -> int:
     if not argv:
         _err("loops add: missing vertex target")
         return 2
+    if argv[0] in ("-h", "--help"):
+        _print_add_help()
+        return 0
 
     target = argv[0]
     rest = argv[1:]
@@ -55,8 +58,28 @@ def _run_add(argv: list[str]) -> int:
         if sub == "row":
             return _legacy_row(target, sub_argv)
 
+    # Intercept --help before bare-positional fallthrough reaches vertex resolution.
+    if rest and rest[0] in ("-h", "--help"):
+        _print_add_help()
+        return 0
+
     # Back-compat: bare positionals == implicit `row` subcommand.
     return _legacy_row(target, rest)
+
+
+def _print_add_help() -> None:
+    import sys
+    p = argparse.ArgumentParser(
+        prog="loops add",
+        description="Add a declaration to a vertex file, or a row to a template population.",
+    )
+    p.add_argument("vertex", help="Vertex name")
+    p.add_argument(
+        "subcommand", nargs="?",
+        choices=["kind", "observer", "combine", "row"],
+        help="kind / observer / combine / row (default: row)",
+    )
+    p.print_help(sys.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +287,9 @@ def _legacy_row(target: str, argv: list[str]) -> int:
     canonical, no facts emitted. Reachable as `loops add <vertex> row K V`
     or via bare-positional back-compat `loops add <vertex> K V`.
     """
+    if argv and argv[0] in ("-h", "--help"):
+        _print_add_help()
+        return 0
     if not argv:
         _err("loops add: missing values for row")
         return 2

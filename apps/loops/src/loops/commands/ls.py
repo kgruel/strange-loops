@@ -23,6 +23,34 @@ if TYPE_CHECKING:
 _FILTER_SUBCOMMANDS = frozenset({"kind", "observer", "combine", "row"})
 
 
+def _print_ls_help(target: str | None = None) -> None:
+    import argparse as _ap
+    import sys as _sys
+
+    if target is None:
+        p = _ap.ArgumentParser(
+            prog="loops ls",
+            description="List all vertices, or declarations for one vertex.",
+        )
+        p.add_argument("vertex", nargs="?", help="Vertex name (omit for root listing)")
+        p.add_argument(
+            "subcommand", nargs="?",
+            choices=["kind", "observer", "combine", "row"],
+            help="kind / observer / combine / row (filter declarations)",
+        )
+    else:
+        p = _ap.ArgumentParser(
+            prog=f"loops ls {target}",
+            description=f"Show declarations for vertex '{target}'.",
+        )
+        p.add_argument(
+            "subcommand", nargs="?",
+            choices=["kind", "observer", "combine", "row"],
+            help="kind / observer / combine / row (filter; default: all)",
+        )
+    p.print_help(_sys.stdout)
+
+
 def _run_ls(argv: list[str]) -> int:
     """Dispatch ``loops ls`` — root listing or per-vertex unified view.
 
@@ -31,6 +59,10 @@ def _run_ls(argv: list[str]) -> int:
       loops ls <vertex>            — unified declarations for one vertex
       loops ls <vertex> <filter>   — narrow to KINDS/OBSERVERS/COMBINE/POP
     """
+    if argv and argv[0] in ("-h", "--help"):
+        _print_ls_help()
+        return 0
+
     if not argv or argv[0].startswith("-"):
         # No target — fall through to the existing root-listing handler.
         from loops.commands.population import _run_ls_root
@@ -39,6 +71,12 @@ def _run_ls(argv: list[str]) -> int:
 
     target = argv[0]
     rest = argv[1:]
+
+    # Intercept --help at vertex level before sub-verb consumption.
+    if rest and rest[0] in ("-h", "--help"):
+        _print_ls_help(target)
+        return 0
+
     filter_ = None
     if rest and rest[0] in _FILTER_SUBCOMMANDS:
         filter_ = rest[0]

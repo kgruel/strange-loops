@@ -18,7 +18,7 @@ from . import emit as emit_view
 
 def run(argv: list[str], ctx: CliContext) -> int:
     """Parse cite-shape args, translate to emit-shape, delegate."""
-    parser = argparse.ArgumentParser(prog="loops cite", add_help=False)
+    parser = argparse.ArgumentParser(prog="loops cite")
     if ctx.vertex_path is None:
         parser.add_argument("vertex", nargs="?", default=None)
     parser.add_argument(
@@ -40,7 +40,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code or 2)
+        return int(exc.code) if exc.code is not None else 2
 
     emit_argv: list[str] = []
     if ctx.vertex_path is None:

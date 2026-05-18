@@ -42,6 +42,9 @@ def _run_rm(argv: list[str]) -> int:
     if not argv:
         _err("loops rm: missing vertex target")
         return 2
+    if argv[0] in ("-h", "--help"):
+        _print_rm_help()
+        return 0
 
     target = argv[0]
     rest = argv[1:]
@@ -58,8 +61,28 @@ def _run_rm(argv: list[str]) -> int:
         if sub == "row":
             return _rm_row(target, sub_argv)
 
+    # Intercept --help before bare-positional fallthrough reaches vertex resolution.
+    if rest and rest[0] in ("-h", "--help"):
+        _print_rm_help()
+        return 0
+
     # Back-compat: bare positional == implicit `row` subcommand.
     return _rm_row(target, rest)
+
+
+def _print_rm_help() -> None:
+    import sys
+    p = argparse.ArgumentParser(
+        prog="loops rm",
+        description="Remove a declaration from a vertex file, or a row from a template population.",
+    )
+    p.add_argument("vertex", help="Vertex name")
+    p.add_argument(
+        "subcommand", nargs="?",
+        choices=["kind", "observer", "combine", "row"],
+        help="kind / observer / combine / row (default: row)",
+    )
+    p.print_help(sys.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +190,9 @@ def _rm_row(target: str, argv: list[str]) -> int:
     no fold materialization. Phase 3 dissolves the rss-era pop-fact surface;
     the .list file IS the canonical source.
     """
+    if argv and argv[0] in ("-h", "--help"):
+        _print_rm_help()
+        return 0
     if not argv:
         _err("loops rm: missing key for row")
         return 2

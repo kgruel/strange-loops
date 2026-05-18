@@ -31,7 +31,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
     ``cmd_emit`` is bound as ``op.fn``; dispatch's action branch invokes
     it and surfaces its int return as the process exit code.
     """
-    parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
+    parser = argparse.ArgumentParser(prog="loops emit")
     if ctx.vertex_path is None:
         parser.add_argument(
             "vertex",
@@ -69,7 +69,10 @@ def run(argv: list[str], ctx: CliContext) -> int:
         action="store_true",
         help="Suppress the 'stored:' success receipt (WARN/ERROR still print).",
     )
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 1
 
     # When dispatch resolved the vertex, neutralise the positional so
     # cmd_emit's vertex-resolution branch is bypassed.

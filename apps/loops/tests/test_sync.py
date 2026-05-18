@@ -200,7 +200,6 @@ class TestSyncHelp:
         assert result == 0
         captured = capsys.readouterr()
         assert "sync" in captured.out
-        assert "cadence" in captured.out.lower()
 
 
 class TestSyncLens:

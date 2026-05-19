@@ -482,7 +482,12 @@ class TestEntityRefResolution:
 
 
 class TestCite:
-    """loops cite — attention signal, emits kind=cite with refs only."""
+    """loops cite — attention signal, emits kind=cite with refs only.
+
+    The cite verb no longer accepts a vertex positional. Vertex targeting
+    uses vertex-first dispatch (``sl <vertex> cite REF1 ...``) or local
+    vertex auto-resolution when running from a vertex directory.
+    """
 
     def _write_cite_vertex(self, home: Path, name: str = "project") -> Path:
         vdir = home / name
@@ -501,14 +506,17 @@ class TestCite:
     def test_cite_emits_kind_cite_with_comma_joined_refs(
         self, tmp_path, monkeypatch, capsys,
     ):
-        """Positional refs become a single comma-separated ref payload."""
+        """Positional refs become a single comma-separated ref payload.
+
+        Vertex-first dispatch: ``sl project cite REF1 REF2 REF3``.
+        """
         home = tmp_path / "home"
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main([
-            "cite", "project",
+            "project", "cite",
             "design/foo", "thread/bar", "atoms/baz",
             "--dry-run",
         ])
@@ -529,7 +537,7 @@ class TestCite:
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main([
-            "cite", "project", "design/foo",
+            "project", "cite", "design/foo",
             "--context", "my-thread",
             "--dry-run",
         ])
@@ -548,7 +556,7 @@ class TestCite:
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main([
-            "cite", "project", "design/foo",
+            "project", "cite", "design/foo",
             "--message", "informs the salience composition",
             "--dry-run",
         ])
@@ -567,7 +575,7 @@ class TestCite:
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main([
-            "cite", "project", "design/foo",
+            "project", "cite", "design/foo",
             "-m", "short form",
             "--dry-run",
         ])
@@ -585,7 +593,7 @@ class TestCite:
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
         result = main([
-            "cite", "project", "design/foo",
+            "project", "cite", "design/foo",
             "--context", "my-thread",
             "--message", "rope-winding moment",
             "--dry-run",
@@ -606,10 +614,10 @@ class TestCite:
         monkeypatch.setenv("LOOPS_OBSERVER", "tester")
         monkeypatch.chdir(tmp_path)
 
-        rc = main(["cite", "project", "design/a", "thread/b"])
+        rc = main(["project", "cite", "design/a", "thread/b"])
         out = capsys.readouterr()
         assert rc == 0, f"cite 1 failed: stdout={out.out!r} stderr={out.err!r}"
-        rc = main(["cite", "project", "design/a"])
+        rc = main(["project", "cite", "design/a"])
         out = capsys.readouterr()
         assert rc == 0, f"cite 2 failed: stdout={out.out!r} stderr={out.err!r}"
 
@@ -621,6 +629,103 @@ class TestCite:
         assert len(cite_section.items) == 2
         assert cite_section.items[0].refs == ("design/a", "thread/b")
         assert cite_section.items[1].refs == ("design/a",)
+
+
+class TestCiteVerbRegression:
+    """Regression tests for sl-cite-malformed-kind (Bug 1).
+
+    Before the fix, ``sl cite REF1 REF2 -m MSG`` silently absorbed REF1
+    into an optional vertex positional and stored only REF2.  These tests
+    lock the correct behaviour: all refs are captured and local vertex
+    resolution fires when no explicit vertex is given.
+    """
+
+    def _write_local_vertex(self, tmp_path: Path) -> Path:
+        """Create a .loops/project.vertex resolvable from tmp_path as cwd."""
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+        vertex_path = loops_dir / "project.vertex"
+        vertex_path.write_text(
+            'name "project"\n'
+            'store "./data/project.db"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        return vertex_path
+
+    def test_cite_verb_captures_all_refs_without_explicit_vertex(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Bug 1 regression: both REF1 and REF2 appear in stored fact.
+
+        Old behaviour: REF1 absorbed into vertex positional → only REF2 stored.
+        New behaviour: no vertex positional → both refs captured in payload.
+        """
+        self._write_local_vertex(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # LOOPS_HOME not set — relies on local vertex discovery from cwd
+
+        result = main([
+            "cite",
+            "decision:design/foo", "thread:open-arc",
+            "-m", "both refs must survive",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["kind"] == "cite"
+        ref = d["payload"]["ref"]
+        assert "decision:design/foo" in ref
+        assert "thread:open-arc" in ref
+
+    def test_cite_verb_vertex_first_form_unchanged(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Vertex-first dispatch (``sl project cite REF1``) is unaffected by Bug 1 fix."""
+        home = tmp_path / "home"
+        vdir = home / "project"
+        vdir.mkdir(parents=True)
+        vertex_path = vdir / "project.vertex"
+        vertex_path.write_text(
+            'name "project"\n'
+            'store "./data/project.db"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main([
+            "project", "cite",
+            "decision:design/bar",
+            "-m", "vertex-first unchanged",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["kind"] == "cite"
+        assert "decision:design/bar" in d["payload"]["ref"]
+
+    def test_cite_no_local_vertex_errors_clearly(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """When no vertex is specified and no local vertex is found, exit 1
+        with a message that clearly identifies the problem.
+        """
+        # chdir to an empty directory — no .vertex files, no LOOPS_HOME
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+        monkeypatch.delenv("LOOPS_HOME", raising=False)
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(["cite", "decision:design/foo", "-m", "should fail"])
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "no vertex specified" in err
 
 
 class TestObserverResolution:

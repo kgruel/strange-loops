@@ -341,6 +341,49 @@ class TestLiveIncidentRegression:
 
 
 # ---------------------------------------------------------------------------
+# Bug 2 regression — cite-kind-not-implicitly-universal
+# ---------------------------------------------------------------------------
+
+
+class TestCiteImplicitlyUniversal:
+    """cite is implicitly declared on every vertex — no WARN should fire.
+
+    Before the fix, a vertex without an explicit ``cite {}`` loop in its
+    ``loops {}`` block caused ``classify_emit_status`` to return
+    ``kind_declared=False``, which the receipt path rendered as a WARN on
+    every cite emit.  The fix short-circuits classify_emit_status for
+    ``kind == "cite"`` and injects an implicit fold loop at materialization
+    time.
+    """
+
+    def test_cite_to_vertex_without_cite_declared_no_warn(
+        self, tmp_path, capsys,
+    ):
+        """Emitting cite to a vertex that only declares 'decision' produces
+        no WARN — cite is universally declared regardless of vertex spec.
+        """
+        # Vertex with decision only — no cite {} block
+        vpath = tmp_path / "rcpt-nodecl.vertex"
+        vpath.write_text(
+            'name "rcpt-nodecl"\n'
+            'store "./rcpt-nodecl.db"\n'
+            "\n"
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        parts = ["ref=decision:design/foo", "message=cite with no explicit declaration"]
+        ns = _ns(kind="cite", parts=parts)
+        rc = cmd_emit(ns, vertex_path=vpath)
+
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "WARN" not in err
+        # Receipt is printed — fact was stored successfully
+        assert "stored: cite/" in err
+
+
+# ---------------------------------------------------------------------------
 # Engine surface — id_override round-trip
 # ---------------------------------------------------------------------------
 

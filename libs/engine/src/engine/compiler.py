@@ -935,6 +935,34 @@ def materialize_vertex(
         )
         vertex.register_loop(loop)
 
+    # Implicit cite kind — collect semantics, unbounded, always available.
+    # Vertices with an explicit cite {} declaration already have "cite" registered
+    # in compiled.specs; this branch only fires for vertices that omit it.
+    # Without this injection, cite facts are stored but never folded, and the
+    # emit receipt emits a WARN for every cite to an undeclared vertex.
+    if "cite" not in compiled.specs:
+        from atoms import Collect
+        from atoms.spec import Spec as _Spec
+        from atoms.facet import Field as _Field
+
+        _cite_spec = _Spec(
+            name="cite",
+            folds=(Collect(target="items", max=0),),
+            state_fields=(_Field("items", "list"),),
+        )
+        vertex.register_loop(Loop(
+            name="cite",
+            initial=_cite_spec.initial_state(),
+            fold=_cite_spec.apply,
+            boundary_kind=None,
+            boundary_count=None,
+            boundary_mode="when",
+            boundary_match=(),
+            boundary_conditions=(),
+            boundary_run=None,
+            reset=True,
+        ))
+
     # Register per-kind parse pipelines
     if compiled.parse_pipelines:
         vertex.set_parse_pipelines(compiled.parse_pipelines)

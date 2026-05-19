@@ -122,6 +122,17 @@ def classify_emit_status(
     "kind not declared" — the receipt's WARN line will mention the missing
     declaration, matching observed behavior from today's live incident.
     """
+    # cite is implicitly universal — every vertex accepts it regardless of whether
+    # it explicitly declares a cite {} loop. Treat as declared with collect semantics
+    # (no fold-key required).
+    if kind == "cite":
+        return EmitStatus(
+            kind_declared=True,
+            fold_key_field=None,
+            fold_key_present=True,
+            fold_key_value=None,
+        )
+
     from lang.ast import FoldBy
 
     # Follow combine chain to the vertex with actual loop declarations

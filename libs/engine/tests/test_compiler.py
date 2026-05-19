@@ -1189,6 +1189,71 @@ loops {{
         assert child.state("pulse") == {"count": 3}
 
 
+class TestImplicitCiteLoop:
+    """Implicit cite loop injection in materialize_vertex (Bug 2 fix).
+
+    Every vertex without an explicit cite {} declaration gets an implicit
+    collect-fold cite loop injected at materialization time. This ensures
+    cite facts fold everywhere and the emit receipt never fires a WARN for
+    cite regardless of vertex declaration.
+    """
+
+    def test_vertex_without_cite_declaration_folds_cite_facts(self):
+        """Vertex with no cite {} loop still folds cite facts via implicit injection."""
+        from engine.compiler import compile_vertex_recursive, materialize_vertex
+        from lang import parse_vertex
+        from atoms import Fact
+
+        vertex = parse_vertex("""\
+name "project"
+loops {
+  decision { fold { items "by" "topic" } }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        runtime = materialize_vertex(compiled)
+
+        # cite is injected even though not declared
+        assert "cite" in runtime.kinds
+
+        # Receiving a cite fact folds it into items
+        fact = Fact.of("cite", "test", ref="decision:design/foo")
+        runtime.receive(fact)
+
+        state = runtime.state("cite")
+        assert "items" in state
+        assert len(state["items"]) == 1
+
+    def test_vertex_with_explicit_cite_declaration_not_doubled(self):
+        """A vertex with explicit cite {} declaration is not registered twice."""
+        from engine.compiler import compile_vertex_recursive, materialize_vertex
+        from lang import parse_vertex
+        from atoms import Fact
+
+        vertex = parse_vertex("""\
+name "project"
+loops {
+  decision { fold { items "by" "topic" } }
+  cite { fold { items "collect" 0 } }
+}
+""")
+        compiled = compile_vertex_recursive(vertex)
+        # compile_vertex_recursive should include cite in compiled.specs
+        assert "cite" in compiled.specs
+
+        runtime = materialize_vertex(compiled)
+        assert "cite" in runtime.kinds
+
+        # Receiving two cite facts folds both — no duplicate / double-count
+        fact1 = Fact.of("cite", "test", ref="decision:design/a")
+        fact2 = Fact.of("cite", "test", ref="thread:open-arc")
+        runtime.receive(fact1)
+        runtime.receive(fact2)
+
+        state = runtime.state("cite")
+        assert len(state["items"]) == 2
+
+
 class TestNewParseStepMapping:
     """Mapping for Explode, Project, Where DSL steps to runtime ops."""
 

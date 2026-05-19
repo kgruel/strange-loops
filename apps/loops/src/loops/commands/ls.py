@@ -257,7 +257,7 @@ def fetch_declarations(
     }
 
 
-def _summarize_kinds(vf) -> list[dict[str, str]]:
+def _summarize_kinds(vf) -> list[dict[str, Any]]:
     """[(kind_name, fold_op_repr, target_field)] for each loop kind."""
     from lang.ast import (
         FoldAvg,
@@ -271,10 +271,10 @@ def _summarize_kinds(vf) -> list[dict[str, str]]:
         FoldWindow,
     )
 
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for kind_name, loop_def in (vf.loops or {}).items():
         if not loop_def.folds:
-            out.append({"name": kind_name, "fold_op": "(no fold)", "target": ""})
+            out.append({"name": kind_name, "fold_op": "(no fold)", "target": "", "preview_fields": ()})
             continue
         # Render the first fold (typical case is one fold per kind).
         fd = loop_def.folds[0]
@@ -299,7 +299,7 @@ def _summarize_kinds(vf) -> list[dict[str, str]]:
             op_repr = f'window {op.size} "{op.field}"'
         else:
             op_repr = type(op).__name__
-        out.append({"name": kind_name, "fold_op": op_repr, "target": fd.target})
+        out.append({"name": kind_name, "fold_op": op_repr, "target": fd.target, "preview_fields": loop_def.preview_fields})
     return out
 
 

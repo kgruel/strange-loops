@@ -114,8 +114,10 @@ def _render_kind(item: dict[str, str], zoom: Zoom, width: int | None) -> Block:
     op = item["fold_op"]
     if zoom >= Zoom.DETAILED:
         target = item.get("target") or "items"
+        preview = item.get("preview_fields") or ()
+        preview_str = f"  preview={','.join(preview)}" if preview else ""
         return Block.text(
-            f"  {name:<14} {target} {op}", Style(), width=width
+            f"  {name:<14} {target} {op}{preview_str}", Style(), width=width
         )
     return Block.text(f"  {name:<14} {op}", Style(), width=width)
 

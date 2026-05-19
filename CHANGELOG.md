@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-05-19
+
+### ls: `preview_fields` surfaced in kind introspection
+
+Closes the preview-ls asymmetry named in `design/lenses-consume-declared-properties`:
+spec-declared `preview "field"` properties now flow all the way through to
+`sl ls <vertex> --kind`.
+
+- **`_summarize_kinds`** — includes `preview_fields: tuple[str, ...]` in each
+  kind dict (empty tuple when undeclared). The `(no fold)` branch also carries
+  it for consistency.
+- **`_render_kind` at DETAILED+** — renders `preview=message,status` alongside
+  `target` and `fold_op`. Mirrors the `grants=read,write` format in
+  `_render_observer`. SUMMARY stays narrow (name + fold_op only).
+- Three new tests in `TestPreviewFieldsSurfaced` covering fetch shape, DETAILED
+  render presence, and SUMMARY omission.
+
+### trace: `_DIFF_SKIP_FIELDS` replaced with `_is_diff_skip` predicate
+
+The old frozenset `{"_ts", "_observer", "_origin", "_id", "ref"}` carried four
+dead entries — those are top-level `Fact` columns, never present in
+`fact["payload"]`. Only `ref` did real work.
+
+- **`_is_diff_skip(key)`** — `key.startswith("_") or key == "ref"`. The `_*`
+  branch is structurally correct and future-proof; the old named entries would
+  never have matched. `ref` documented explicitly as the unprocessed input form
+  of `_refs` (consumed by fold into a union-set; rendering it as +/- deltas
+  conflates write-receipt with temporal-query).
+- **`test_fact_payload_never_contains_column_fields`** — anchors the invariant:
+  `_ts`, `_observer`, `_origin`, `_id` are column-level fields, never payload
+  keys. Makes the dead-code analysis structural rather than asserted-in-prose.
+
+### fold: degenerate namespace breakdown falls back to flat
+
+`_has_namespaces` fired on any item with `/` in its key, routing an entire
+section to grouped rendering even when 2 namespaced items sat among 173 flat
+ones — producing `autoresearch/ (1)  substrate-friction/ (1)  (ungrouped: 173)`
+and burying the actual index.
+
+- **`_should_group_by_namespace`** replaces `_has_namespaces` at the
+  `_render_section` dispatch point. Ratio guard: when ungrouped >
+  `_NAMESPACE_DEGENERATE_RATIO` (2) × namespaced, fall back to flat. The
+  namespaced items still appear — salience-sorted, full key shown — just not
+  behind group headers that hide everything else.
+- Six predicate unit tests (`TestShouldGroupByNamespace`) covering the no-
+  namespace, all-namespaced, balanced, degenerate, boundary, and one-over
+  cases. One rendering test confirming the concrete failure mode is fixed.
+- Closes `friction:thread-namespace-breakdown-degenerate`.
+
 ## 2026-05-17
 
 ### Read: trace dissolves into read --diff [--refs N]

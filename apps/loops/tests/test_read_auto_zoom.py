@@ -42,12 +42,16 @@ def _run_read(argv, vertex_path, *, width=200):
 
 @pytest.fixture
 def flooded_vertex(loops_home):
-    """A project vertex flooded with >AUTO_ZOOM_MAX_NAV decisions.
+    """A project vertex flooded with >AUTO_ZOOM_MAX_NAV decisions across
+    TWO namespaces.
 
-    Decisions are namespaced (``design/d{i}``) so the auto-zoom MINIMAL
-    path produces a visible "design/ (25)" namespace-count line. Also
-    seeds a 1-item ``thread`` and a small ``task`` section so multi-section
-    adaptive rendering can be asserted in a single render.
+    The two-namespace split (design/ + arch/) is load-bearing: it ensures
+    the MINIMAL renderer's namespace-breakdown branch fires (≥2 groups).
+    A single-namespace flood would fall through to the key-list branch —
+    that path is exercised in test_fold_utils.py's auto-zoom unit tests.
+
+    Also seeds a 1-item ``thread`` and a small ``task`` section so
+    multi-section adaptive rendering can be asserted in a single render.
     """
     from engine.builder import fold_by, vertex
 
@@ -64,8 +68,11 @@ def flooded_vertex(loops_home):
 
     db_path = vdir / "data" / "project.db"
     pop = StorePopulator(db_path)
-    for i in range(25):
+    # 15 design/ + 10 arch/ = 25 total, multi-namespace breakdown path.
+    for i in range(15):
         pop = pop.emit("decision", topic=f"design/d{i}", message=f"body-{i}")
+    for i in range(10):
+        pop = pop.emit("decision", topic=f"arch/a{i}", message=f"body-a{i}")
     # 5 tasks (in nav band)
     for i in range(5):
         pop = pop.emit("task", name=f"task-{i}", status="open")
@@ -87,11 +94,12 @@ class TestAutoZoomDefaultPath:
         t = _render_text(reporter)
         # Section header present
         assert "Decision" in t
-        # Namespace-count breakdown line present (from _render_section_minimal)
-        assert "design/ (25)" in t
+        # Multi-namespace breakdown line present (fixture spans design/ + arch/)
+        assert "design/ (15)" in t
+        assert "arch/ (10)" in t
         # No item bodies — bodies in flooded fixture are "body-N"
         assert "body-0" not in t
-        assert "body-24" not in t
+        assert "body-a0" not in t
 
     def test_single_item_section_bumps_to_detailed(self, flooded_vertex):
         # --kind thread narrows to one section with a single item.
@@ -126,7 +134,8 @@ class TestExplicitFlagsOverride:
         t = _render_text(reporter)
         assert "25 decisions" in t
         # Per-section MINIMAL breakdown does NOT appear under -q
-        assert "design/ (25)" not in t
+        assert "design/ (15)" not in t
+        assert "arch/ (10)" not in t
 
     def test_verbose_forces_detailed_even_at_high_n(self, flooded_vertex):
         # -v is the user-explicit DETAILED channel — auto-bump-down to
@@ -159,7 +168,8 @@ class TestOrthogonalFlagsPreserveAutoZoom:
         assert rc == 0
         t = _render_text(reporter)
         # --plain is color-off, not loudness-off — auto-bump-down still fires
-        assert "design/ (25)" in t
+        assert "design/ (15)" in t
+        assert "arch/ (10)" in t
         assert "body-0" not in t
 
     def test_json_short_circuits_before_auto_zoom(self, flooded_vertex):
@@ -174,3 +184,19 @@ class TestOrthogonalFlagsPreserveAutoZoom:
         # contain section data. Just confirm something decision-shaped.
         text = json.dumps(parsed)
         assert "decision" in text or "design" in text
+
+    def test_facts_disables_auto_zoom(self, flooded_vertex):
+        """Anchored 2026-05-18: --facts is the user's explicit ask for more
+        per item (compression history, fact lineage). Auto-zoom-DOWN to
+        MINIMAL hides items entirely, neutralizing --facts. So --facts
+        disables auto-zoom — items render at base SUMMARY. See friction:
+        auto-zoom-neutralizes-facts-flag.
+        """
+        rc, reporter = _run_read(
+            ["--kind", "decision", "--facts", "--plain"], flooded_vertex
+        )
+        assert rc == 0
+        t = _render_text(reporter)
+        # MINIMAL breakdown line MUST NOT appear — auto-zoom disabled.
+        assert "design/ (15)" not in t
+        assert "arch/ (10)" not in t

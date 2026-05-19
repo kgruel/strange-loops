@@ -286,33 +286,83 @@ def _render_section_minimal(
     width: int | None,
     fp: FoldPalette,
 ) -> Block:
-    """Index-mode renderer: section header (printed by caller) + a
-    namespace-count breakdown line when the section uses namespaced keys.
-    Flat sections render no body line — just the header the caller emits.
+    """Index-mode renderer: prefer a namespace-count breakdown when the
+    section's keys span ≥2 namespace groups; otherwise fall back to a
+    one-label-per-line key list. Both shapes answer the same question
+    ("what's in here?") at different cardinality regimes.
 
-    Output shape (caller already printed ``## DECISIONS (187)``):
-      ``  design/ (45)  architecture/ (23)  paradigm/ (18)  (ungrouped: 12)``
+    Output shapes (caller already printed ``## DECISIONS (187)``):
+
+      Namespace breakdown (≥2 groups, firehose-orientation):
+        ``  design/ (45)  architecture/ (23)  paradigm/ (18)  (ungrouped: 12)``
+
+      Key list (single group OR no namespaces, post-narrowing or flat-key kinds):
+        ``  peer-attention-loop``
+        ``  cross-repo-consumer-runtime-contract``
+        ``  ...``
+
+    Anchored 2026-05-18: the prior renderer returned ``Block.empty`` whenever
+    namespace breakdown produced nothing useful (no ``/`` in keys, or all keys
+    sharing a single prefix the user already narrowed to via ``--key``).
+    Result: a section header followed by nothing, or a tautological ``X/ (N)``
+    line that told the user what they typed. See friction:
+    auto-zoom-MINIMAL-degenerate-on-flat-keys.
     """
     items = section.items
-    key_field = section.key_field
-    if not items or not key_field or not _has_namespaces(items, key_field):
-        # Flat sections — nothing useful to add below the header.
+    if not items:
         return Block.empty(0, 0)
 
-    groups = _group_by_namespace(items, key_field)
-    # Sort namespaces by group size descending; ungrouped goes last.
-    named = sorted(
-        ((ns, len(group)) for ns, group in groups.items() if ns),
-        key=lambda x: x[1],
-        reverse=True,
+    key_field = section.key_field
+
+    # Try namespace breakdown first — useful when keys span multiple namespaces
+    # (the root firehose case). Requires a key_field to look up.
+    if key_field and _has_namespaces(items, key_field):
+        groups = _group_by_namespace(items, key_field)
+        named = sorted(
+            ((ns, len(group)) for ns, group in groups.items() if ns),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        ungrouped = len(groups.get("", []))
+        # "Useful" = ≥2 groups (named + ungrouped count as separate groups).
+        # A single named group with no ungrouped tail collapses to "X/ (N)"
+        # which only restates what the user typed — fall through to key list.
+        groups_with_content = len(named) + (1 if ungrouped else 0)
+        if groups_with_content >= 2:
+            parts = [f"{ns}/ ({n})" for ns, n in named]
+            if ungrouped:
+                parts.append(f"(ungrouped: {ungrouped})")
+            return Block.text("  " + "  ".join(parts), fp.group_header, width=width)
+
+    # Key-list fallback. Sort by n descending for by-folds (most-touched first,
+    # a salience proxy); preserve order for collect-folds (chronological).
+    sorted_items = (
+        sorted(items, key=lambda i: -i.n)
+        if section.fold_type == "by"
+        else list(items)
     )
-    parts: list[str] = [f"{ns}/ ({n})" for ns, n in named]
-    ungrouped = len(groups.get("", []))
-    if ungrouped:
-        parts.append(f"(ungrouped: {ungrouped})")
-    if not parts:
-        return Block.empty(0, 0)
-    return Block.text("  " + "  ".join(parts), fp.group_header, width=width)
+
+    # When all by-fold keys share a single namespace prefix, strip it to match
+    # SUMMARY-mode grouped rendering (the prefix is already in the user's
+    # narrowing context).
+    strip_prefix = ""
+    if key_field and section.fold_type == "by" and _has_namespaces(items, key_field):
+        groups = _group_by_namespace(items, key_field)
+        named_groups = [ns for ns in groups if ns]
+        if len(named_groups) == 1 and not groups.get(""):
+            strip_prefix = named_groups[0] + "/"
+
+    rows: list[Block] = []
+    for it in sorted_items:
+        if key_field:
+            label = str(it.payload.get(key_field, "?"))
+            if strip_prefix and label.startswith(strip_prefix):
+                label = label[len(strip_prefix):]
+        else:
+            label = _first_field(it.payload)[0]
+        rows.append(Block.text(f"  {label}", fp.group_header, width=width))
+
+    return join_vertical(*rows) if rows else Block.empty(0, 0)
 
 
 def _render_walked(

@@ -23,7 +23,7 @@ def item(payload=None, ts=None, observer="", origin="", n=1, refs=()):
     return FoldItem(payload=payload or {}, ts=ts, observer=observer, origin=origin, n=n, refs=refs)
 
 
-def section(kind="test", items=(), fold_type="by", key_field="name", scalars=None):
+def section(kind="test", items=(), fold_type="by", key_field: str | None = "name", scalars=None):
     return FoldSection(kind=kind, items=items, fold_type=fold_type, key_field=key_field, scalars=scalars or {})
 
 
@@ -723,13 +723,56 @@ class TestRenderSectionMinimal:
         assert "design/ (2)" in t
         assert "(ungrouped: 1)" in t
 
-    def test_flat_section_renders_empty(self):
-        # No namespaces → caller's header is enough; this renderer returns empty.
-        items_list = tuple(item({"name": f"x{i}"}) for i in range(5))
+    def test_flat_section_renders_key_list(self):
+        """Anchored 2026-05-18: flat-key by-folds fall back to a one-key-per-line
+        index. Prior behavior returned ``Block.empty`` — see friction:
+        auto-zoom-MINIMAL-degenerate-on-flat-keys. The section header alone
+        ("## DECISION") doesn't answer "what's in here?" — the keys do.
+        """
+        items_list = tuple(item({"name": f"x{i}"}, n=i) for i in range(5))
         s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
         block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
-        # Block.empty(0, 0) — no rows.
-        assert block._rows == ()
+        t = self._text(block)
+        # All five keys appear, one per line.
+        for i in range(5):
+            assert f"x{i}" in t
+        # Sorted by n descending — x4 (n=4) before x0 (n=0).
+        assert t.index("x4") < t.index("x0")
+
+    def test_single_namespace_group_falls_back_to_key_list(self):
+        """When all items share a single namespace (the post-``--key X/``
+        narrowing case), don't render the tautological ``X/ (N)`` line —
+        list the keys with the shared prefix stripped (matches SUMMARY-mode
+        grouped rendering).
+        """
+        items_list = tuple(
+            item({"name": f"paradigm/p{i}"}, n=1) for i in range(3)
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
+        t = self._text(block)
+        # No tautological "paradigm/ (3)" line.
+        assert "paradigm/ (3)" not in t
+        # Keys appear with prefix stripped (matches grouped SUMMARY render).
+        for i in range(3):
+            assert f"p{i}" in t
+        # Full prefixed form does NOT appear.
+        assert "paradigm/p0" not in t
+
+    def test_collect_fold_renders_first_field_labels(self):
+        """Collect-folds have no key_field. Fall back to the first non-empty
+        payload field as the label. Anchored 2026-05-18: cite (collect-fold,
+        ``context`` field) previously rendered blank at MINIMAL — the renderer
+        guarded on ``not key_field`` and returned empty.
+        """
+        items_list = tuple(
+            item({"context": f"ctx-{i}", "ref": "r"}) for i in range(4)
+        )
+        s = section(kind="cite", items=items_list, fold_type="collect", key_field=None)
+        block = _render_section_minimal(s, width=200, fp=_default_fold_palette())
+        t = self._text(block)
+        for i in range(4):
+            assert f"ctx-{i}" in t
 
 
 class TestFoldViewAutoZoom:
@@ -738,7 +781,14 @@ class TestFoldViewAutoZoom:
     def _text(self, block):
         return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
 
-    def test_high_n_section_renders_index_mode_with_auto(self):
+    def test_high_n_section_single_namespace_renders_key_list_with_auto(self):
+        """Anchored 2026-05-18: when all 25 items share one namespace, the
+        namespace breakdown would render only ``design/ (25)`` — a tautology
+        if the user typed ``--key design/``. New behavior: fall through to
+        the key-list index with the shared prefix stripped. See friction:
+        auto-zoom-MINIMAL-degenerate-on-flat-keys. Multi-namespace breakdown
+        is exercised separately in test_render_section_minimal cases.
+        """
         items_list = tuple(
             item({"name": f"design/d{i}"}, ts=1e9, n=1)
             for i in range(AUTO_ZOOM_MAX_NAV + 5)  # 25 items
@@ -748,10 +798,31 @@ class TestFoldViewAutoZoom:
         t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
         # Section header is present
         assert "Decision" in t
-        # Namespace count line is present
-        assert f"design/ ({AUTO_ZOOM_MAX_NAV + 5})" in t
-        # No item-level rendering (any individual key)
+        # Tautological breakdown line MUST NOT appear (was the bug).
+        assert f"design/ ({AUTO_ZOOM_MAX_NAV + 5})" not in t
+        # Keys appear with shared prefix stripped (matches grouped SUMMARY).
+        for i in range(AUTO_ZOOM_MAX_NAV + 5):
+            assert f"d{i}" in t
+        # Full prefixed form does NOT appear (prefix stripped).
         assert "design/d0" not in t
+
+    def test_high_n_section_multi_namespace_renders_breakdown_with_auto(self):
+        """Cross-namespace cardinality (the root-firehose case) still gets
+        the namespace-count breakdown — preserves orientation when the user
+        hasn't narrowed yet."""
+        items_list = (
+            tuple(item({"name": f"design/d{i}"}, ts=1e9, n=1) for i in range(15))
+            + tuple(item({"name": f"arch/a{i}"}, ts=1e9, n=1) for i in range(15))
+        )
+        s = section(kind="decision", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
+        # Breakdown line present — largest namespace first.
+        assert "design/ (15)" in t
+        assert "arch/ (15)" in t
+        # No item-level rendering — breakdown stays terse.
+        assert "design/d0" not in t
+        assert "d0" not in t or "design/" in t  # d0 only via the breakdown
 
     def test_high_n_section_renders_items_when_auto_disabled(self):
         items_list = tuple(
@@ -822,12 +893,16 @@ class TestFoldViewAutoZoom:
         assert "design/ (" not in t
 
     def test_mixed_section_counts_render_adaptively(self):
-        # decision section: 30 items (above threshold) → MINIMAL-per-section
+        # decision section: 30 items across TWO namespaces (above threshold)
+        #   → MINIMAL-per-section, namespace breakdown (multi-group).
         # friction section: 5 items (in band) → SUMMARY
         # thread section: 1 item → DETAILED
-        decisions = tuple(
-            item({"name": f"design/d{i}", "message": f"m{i}"}, ts=1e9)
-            for i in range(30)
+        # Use multi-namespace decisions to exercise the breakdown branch;
+        # single-namespace MINIMAL fallback to key-list is exercised separately
+        # in test_high_n_section_single_namespace_renders_key_list_with_auto.
+        decisions = (
+            tuple(item({"name": f"design/d{i}", "message": f"m{i}"}, ts=1e9) for i in range(20))
+            + tuple(item({"name": f"arch/a{i}", "message": f"m{i}"}, ts=1e9) for i in range(10))
         )
         frictions = tuple(
             item({"name": f"f{i}", "message": "ok"}, ts=1e9)
@@ -839,9 +914,10 @@ class TestFoldViewAutoZoom:
         s_t = section(kind="thread", items=threads, fold_type="by", key_field="name")
         data = state(sections=(s_d, s_f, s_t))
         t = self._text(fold_view(data, Zoom.SUMMARY, 200, auto_zoom=True))
-        # decision: collapsed to ns-count line
-        assert "design/ (30)" in t
-        assert "design/d0" not in t  # no item rendering
+        # decision: multi-namespace breakdown — both namespaces present.
+        assert "design/ (20)" in t
+        assert "arch/ (10)" in t
+        assert "design/d0" not in t  # no item-level rendering at MINIMAL
         # friction: in-band, item-level rendering survives
         assert "f0" in t
         # thread (N=1): bumped to DETAILED but the visible signal is just

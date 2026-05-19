@@ -48,19 +48,6 @@ PREVIEW_SEPARATOR = " · "
 # `[+Nc]` truncation hint.
 MIN_FIELD_BUDGET = 12
 
-# Cardinality auto-zoom thresholds (PR B).
-# When auto_zoom is on (user passed no -q/-v/-vv) the effective per-section
-# zoom is bumped by ±1 step based on the section's item count. The base
-# zoom is the incoming zoom (almost always SUMMARY for auto-zoom callers,
-# since -q/-v/-vv disable auto_zoom).
-#   N == 1     → +1 step (answer mode: single item, render rich)
-#   N <= AUTO_ZOOM_MAX_NAV → base (navigation mode: scrollable)
-#   N >  AUTO_ZOOM_MAX_NAV → -1 step (index mode: header + ns counts only)
-# 20 is a tmux-pane-height heuristic — at SUMMARY each item is roughly one
-# line, so 20 items fits ~half a pane. Above that, scrollback grep becomes
-# the user's only navigation, which is the firehose complaint exactly.
-AUTO_ZOOM_MAX_NAV = 20
-
 
 # ---------------------------------------------------------------------------
 # Semantic palette — maps information roles to styles
@@ -126,8 +113,6 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
-    auto_zoom: bool = False,
-    **_extra,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -140,23 +125,12 @@ def fold_view(
       chars: max display width for body text. Caps the body budget that
              width-based truncation already enforces — useful for context-
              window economics where total tokens matter more than terminal fit.
-
-    auto_zoom: when True, each FoldSection's effective zoom is derived
-      from its item count (see ``_effective_zoom``). The view sets this
-      based on whether the user passed an explicit loudness flag — when
-      -q / -v / -vv are present the view passes auto_zoom=False so the
-      caller's zoom is honoured uniformly across sections. The global
-      MINIMAL one-liner branch below stays gated on the incoming zoom
-      (the -q channel) and never fires from auto-zoom — per-section
-      MINIMAL has its own renderer at ``_render_section_minimal``.
     """
     populated = [s for s in data.sections if s.items]
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
-    # MINIMAL: one-liner — only fires from explicit -q (or a caller passing
-    # MINIMAL directly). auto-zoom routes its MINIMAL through the
-    # per-section path instead, preserving cross-section header context.
+    # MINIMAL: one-liner
     if zoom == Zoom.MINIMAL:
         parts = [f"{s.count} {s.kind}s" for s in populated]
         if data.unfolded:
@@ -189,27 +163,14 @@ def fold_view(
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        # Effective zoom per section — auto-bump from count when enabled,
-        # otherwise identity. The section header always renders; the body
-        # render path depends on effective zoom.
-        eff_zoom = _effective_zoom(zoom, s.count, auto_zoom)
-
         header = _section_header(s.kind, display_count, piped=width is None)
         blocks.append(Block.text(header, fp.section_header, width=width))
-
-        # MINIMAL-per-section (only reachable from auto-zoom — a section
-        # whose item count crossed the AUTO_ZOOM_MAX_NAV cliff). The
-        # explicit -q path returned earlier with the vertex-level
-        # one-liner, so this branch carries no ambiguity.
-        if eff_zoom == Zoom.MINIMAL:
-            blocks.append(_render_section_minimal(s, width=width, fp=fp))
-            continue
 
         observers = {item.observer for item in s.items if item.observer}
         show_observer = len(observers) > 1
 
         section_block = _render_section(
-            s, eff_zoom, fmt, width,
+            s, zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
@@ -249,120 +210,6 @@ def fold_view(
         ))
 
     return join_vertical(*blocks)
-
-
-# ---------------------------------------------------------------------------
-# Cardinality auto-zoom (PR B) — per-section effective zoom
-# ---------------------------------------------------------------------------
-
-
-def _effective_zoom(base: Zoom, count: int, auto: bool) -> Zoom:
-    """Return the effective zoom for a section, given its item count.
-
-    When ``auto`` is False the base zoom passes through unchanged — this
-    is the user-explicit channel (``-q`` / ``-v`` / ``-vv``).
-
-    When ``auto`` is True:
-      - N == 1 → bump up one step (preview renders untruncated; answer mode)
-      - N > AUTO_ZOOM_MAX_NAV → bump down one step (index mode)
-      - otherwise → base zoom (navigation mode)
-
-    Bumps clamp at the FULL ceiling and MINIMAL floor so a single bump
-    never overshoots — stacking would surprise (FULL only with -vv).
-    """
-    if not auto:
-        return base
-    base_v = base.value
-    if count == 1:
-        return Zoom(min(base_v + 1, Zoom.FULL.value))
-    if count > AUTO_ZOOM_MAX_NAV:
-        return Zoom(max(base_v - 1, Zoom.MINIMAL.value))
-    return base
-
-
-def _render_section_minimal(
-    section: "FoldSection",
-    *,
-    width: int | None,
-    fp: FoldPalette,
-) -> Block:
-    """Index-mode renderer: prefer a namespace-count breakdown when the
-    section's keys span ≥2 namespace groups; otherwise fall back to a
-    one-label-per-line key list. Both shapes answer the same question
-    ("what's in here?") at different cardinality regimes.
-
-    Output shapes (caller already printed ``## DECISIONS (187)``):
-
-      Namespace breakdown (≥2 groups, firehose-orientation):
-        ``  design/ (45)  architecture/ (23)  paradigm/ (18)  (ungrouped: 12)``
-
-      Key list (single group OR no namespaces, post-narrowing or flat-key kinds):
-        ``  peer-attention-loop``
-        ``  cross-repo-consumer-runtime-contract``
-        ``  ...``
-
-    Anchored 2026-05-18: the prior renderer returned ``Block.empty`` whenever
-    namespace breakdown produced nothing useful (no ``/`` in keys, or all keys
-    sharing a single prefix the user already narrowed to via ``--key``).
-    Result: a section header followed by nothing, or a tautological ``X/ (N)``
-    line that told the user what they typed. See friction:
-    auto-zoom-MINIMAL-degenerate-on-flat-keys.
-    """
-    items = section.items
-    if not items:
-        return Block.empty(0, 0)
-
-    key_field = section.key_field
-
-    # Try namespace breakdown first — useful when keys span multiple namespaces
-    # (the root firehose case). Requires a key_field to look up.
-    if key_field and _has_namespaces(items, key_field):
-        groups = _group_by_namespace(items, key_field)
-        named = sorted(
-            ((ns, len(group)) for ns, group in groups.items() if ns),
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        ungrouped = len(groups.get("", []))
-        # "Useful" = ≥2 groups (named + ungrouped count as separate groups).
-        # A single named group with no ungrouped tail collapses to "X/ (N)"
-        # which only restates what the user typed — fall through to key list.
-        groups_with_content = len(named) + (1 if ungrouped else 0)
-        if groups_with_content >= 2:
-            parts = [f"{ns}/ ({n})" for ns, n in named]
-            if ungrouped:
-                parts.append(f"(ungrouped: {ungrouped})")
-            return Block.text("  " + "  ".join(parts), fp.group_header, width=width)
-
-    # Key-list fallback. Sort by n descending for by-folds (most-touched first,
-    # a salience proxy); preserve order for collect-folds (chronological).
-    sorted_items = (
-        sorted(items, key=lambda i: -i.n)
-        if section.fold_type == "by"
-        else list(items)
-    )
-
-    # When all by-fold keys share a single namespace prefix, strip it to match
-    # SUMMARY-mode grouped rendering (the prefix is already in the user's
-    # narrowing context).
-    strip_prefix = ""
-    if key_field and section.fold_type == "by" and _has_namespaces(items, key_field):
-        groups = _group_by_namespace(items, key_field)
-        named_groups = [ns for ns in groups if ns]
-        if len(named_groups) == 1 and not groups.get(""):
-            strip_prefix = named_groups[0] + "/"
-
-    rows: list[Block] = []
-    for it in sorted_items:
-        if key_field:
-            label = str(it.payload.get(key_field, "?"))
-            if strip_prefix and label.startswith(strip_prefix):
-                label = label[len(strip_prefix):]
-        else:
-            label = _first_field(it.payload)[0]
-        rows.append(Block.text(f"  {label}", fp.group_header, width=width))
-
-    return join_vertical(*rows) if rows else Block.empty(0, 0)
 
 
 def _render_walked(

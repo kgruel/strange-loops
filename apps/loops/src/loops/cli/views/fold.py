@@ -463,28 +463,6 @@ def run(argv: list[str], ctx: CliContext) -> int:
     if mode == "interactive":
         interactive_handler = _build_autoresearch_handler(vertex_path, ctx.observer)
 
-    # auto_zoom is on when the user gave no explicit loudness flag. The
-    # signal lives in the raw Namespace — args.quiet is False and
-    # args.verbose==0 when truly absent. By the time fidelity collapses to
-    # depth=1 (SUMMARY), "default" and "user-explicit SUMMARY" are
-    # indistinguishable, so the bit is captured here.
-    #
-    # --facts ALSO disables auto-zoom (anchored 2026-05-18). --facts is the
-    # user's explicit ask for more per item (compression history, fact
-    # lineage). Auto-zoom-DOWN to MINIMAL hides items entirely, neutralizing
-    # the very enrichment --facts requests. See friction:
-    # auto-zoom-neutralizes-facts-flag. --refs / --plain / --json remain
-    # orthogonal axes (visibility / format, not loudness). --diff uses a
-    # different lens (trace) so auto-zoom flag is harmless there.
-    auto_zoom = (
-        not args.quiet
-        and args.verbose == 0
-        and not getattr(args, "facts", False)
-    )
-    render_context: dict[str, object] = {"auto_zoom": auto_zoom}
-    if args.diff:
-        render_context["_diff"] = True
-
     op = Operation(
         verb="read",
         fn=fetch_data,
@@ -492,7 +470,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
         render_lens=render_lens,
         lens_override=lens_override,
         fidelity=fidelity,
-        render_context=render_context,
+        render_context={"_diff": True} if args.diff else {},
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]

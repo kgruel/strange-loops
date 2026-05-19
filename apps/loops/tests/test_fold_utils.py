@@ -12,7 +12,8 @@ from painted import Zoom
 from loops.lenses.fold import (
     _compute_inbound_edges, _compute_inbound_refs, _first_field,
     _format_date, _format_ts_full, _group_by_namespace, _inbound_count,
-    _item_full_key, _recency_tag, _truncate, fold_view,
+    _item_full_key, _recency_tag, _should_group_by_namespace, _truncate,
+    fold_view,
 )
 
 
@@ -223,6 +224,55 @@ class TestGroupByNamespace:
         assert len(result[""]) == 2
 
 
+class TestShouldGroupByNamespace:
+    """_should_group_by_namespace: fires only when grouping is non-degenerate."""
+
+    def test_no_namespace_keys(self):
+        items = (item({"name": "x"}), item({"name": "y"}))
+        assert not _should_group_by_namespace(items, "name")
+
+    def test_all_namespaced(self):
+        items = (item({"name": "api/auth"}), item({"name": "api/users"}), item({"name": "core/db"}))
+        assert _should_group_by_namespace(items, "name")
+
+    def test_balanced_mixed(self):
+        """Equal split → grouped portion is not degenerate."""
+        items = (
+            item({"name": "api/auth"}),   # namespaced
+            item({"name": "api/users"}),  # namespaced
+            item({"name": "flat-a"}),     # ungrouped
+            item({"name": "flat-b"}),     # ungrouped
+        )
+        # ungrouped (2) == 1× namespaced (2) — within ratio, use grouping
+        assert _should_group_by_namespace(items, "name")
+
+    def test_degenerate_ungrouped_dominates(self):
+        """When ungrouped >> grouped the breakdown is misleading; fall back to flat.
+
+        Concrete: 2 namespaced items + 173 flat items → ungrouped dominates
+        (ratio check: 173 > 2×2 = 4). The '(ungrouped: 173)' label would
+        bury the index; flat rendering surfaces the full salience-sorted list.
+        """
+        namespaced = (item({"name": "autoresearch/foo"}), item({"name": "substrate-friction/bar"}))
+        flat = tuple(item({"name": f"thread-{i}"}) for i in range(173))
+        items = namespaced + flat
+        assert not _should_group_by_namespace(items, "name")
+
+    def test_boundary_at_ratio(self):
+        """Exactly at the 2× threshold: ungrouped == 2× grouped → still groups."""
+        namespaced = tuple(item({"name": f"ns/item-{i}"}) for i in range(3))
+        flat = tuple(item({"name": f"flat-{i}"}) for i in range(6))  # exactly 2×
+        items = namespaced + flat
+        assert _should_group_by_namespace(items, "name")
+
+    def test_one_over_boundary(self):
+        """One item past the 2× threshold → falls back to flat."""
+        namespaced = tuple(item({"name": f"ns/item-{i}"}) for i in range(3))
+        flat = tuple(item({"name": f"flat-{i}"}) for i in range(7))  # 2× + 1
+        items = namespaced + flat
+        assert not _should_group_by_namespace(items, "name")
+
+
 # ---------------------------------------------------------------------------
 # fold_view rendering paths
 # ---------------------------------------------------------------------------
@@ -310,6 +360,33 @@ class TestFoldView:
         data = state(sections=(s,))
         t = self._text(fold_view(data, Zoom.SUMMARY, 80))
         assert "api/" in t or "core/" in t
+
+    def test_degenerate_namespace_falls_back_to_flat(self):
+        """When ungrouped >> namespaced, rendering falls back to flat — no namespace headers.
+
+        Reproduces the thread-namespace-breakdown-degenerate friction:
+        two namespaced items among many flat ones produced:
+            autoresearch/ (1)
+            substrate-friction/ (1)
+            (ungrouped) (173)
+        which buried the actual index. Flat rendering is more honest.
+        """
+        namespaced = (
+            item({"name": "autoresearch/foo"}, ts=1e9),
+            item({"name": "substrate-friction/bar"}, ts=1e9),
+        )
+        flat = tuple(item({"name": f"thread-{i}"}, ts=1e9) for i in range(20))
+        items_list = namespaced + flat
+        s = section(kind="thread", items=items_list, fold_type="by", key_field="name")
+        data = state(sections=(s,))
+        t = self._text(fold_view(data, Zoom.SUMMARY, 80))
+        # Namespace group headers must NOT appear — their shape is "  ns/ (N)"
+        # (namespace prefix followed by a count in parens).
+        assert "autoresearch/ (" not in t
+        assert "substrate-friction/ (" not in t
+        assert "(ungrouped)" not in t
+        # The namespaced items ARE still rendered — flat, full key visible.
+        assert "autoresearch/foo" in t
 
     def test_collect_fold(self):
         """Collect fold renders items flat (not by key)."""

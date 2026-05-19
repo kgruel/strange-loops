@@ -309,7 +309,7 @@ def _render_section(
     """Render a section's items — grouped by namespace or flat."""
     is_by = section.fold_type == "by"
 
-    if is_by and section.key_field and _has_namespaces(section.items, section.key_field):
+    if is_by and section.key_field and _should_group_by_namespace(section.items, section.key_field):
         return _render_grouped(
             section.items, section.key_field, zoom, fmt, width,
             inbound=inbound, inbound_edges=inbound_edges,
@@ -813,13 +813,35 @@ def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> i
 # ---------------------------------------------------------------------------
 
 
-def _has_namespaces(items: tuple[FoldItem, ...], key_field: str) -> bool:
-    """Check if items use namespaced keys (contain '/')."""
-    for item in items:
-        key = item.payload.get(key_field, "")
-        if "/" in str(key):
-            return True
-    return False
+_NAMESPACE_DEGENERATE_RATIO = 2  # ungrouped > ratio × grouped → fall back to flat
+
+def _should_group_by_namespace(items: tuple[FoldItem, ...], key_field: str) -> bool:
+    """True when namespace grouping improves orientation over a flat list.
+
+    Two conditions must both hold:
+
+    1. At least one item has a namespaced key (contains '/').
+    2. The grouped portion is not degenerate — when ungrouped items dominate
+       (ungrouped > ``_NAMESPACE_DEGENERATE_RATIO`` × grouped), the breakdown
+       buries the majority behind an unhelpful '(ungrouped: N)' label and
+       flat rendering is more honest.
+
+    Concrete failure mode this prevents::
+
+        autoresearch/ (1)
+        substrate-friction/ (1)
+        (ungrouped) (173)   ← hides 99% of items
+
+    In that case the ratio check fails (173 > 2×2) and we fall through to
+    flat rendering, surfacing the full index salience-sorted.
+    """
+    namespaced = sum(
+        1 for item in items if "/" in str(item.payload.get(key_field, ""))
+    )
+    if namespaced == 0:
+        return False
+    ungrouped = len(items) - namespaced
+    return ungrouped <= _NAMESPACE_DEGENERATE_RATIO * namespaced
 
 
 def _group_by_namespace(

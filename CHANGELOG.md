@@ -2,6 +2,28 @@
 
 ## 2026-05-19
 
+### cite: ref-stealing bug fixed + implicit universal loop
+
+Two bugs in `sl cite` closed together.
+
+- **`sl-cite-malformed-kind`** — the optional `vertex (nargs="?")` positional in
+  `cite.py` was greedily absorbing the first ref-arg into the vertex slot. `sl cite
+  REF1 REF2 -m MSG` was storing only REF2; REF1 silently became the vertex name.
+  Fix: drop the vertex positional entirely. When `ctx.vertex_path` is not set (verb-first
+  dispatch), the vertex is now resolved via `_find_local_vertex()`. Vertex-first form
+  (`sl project cite REF1 REF2`) is unchanged — that path already sets `ctx.vertex_path`
+  before the cite view is called.
+- **`cite-kind-not-implicitly-universal`** — vertices that didn't explicitly declare
+  `cite {}` stored cite facts without folding them and emitted a WARN on every cite.
+  Fix: `materialize_vertex()` in `compiler.py` now injects an implicit cite loop
+  (collect semantics, unbounded) when the compiled vertex has no explicit cite entry.
+  `classify_emit_status()` short-circuits for `kind == "cite"` so no WARN fires.
+  Every vertex now silently accepts cite without a `.vertex` declaration.
+
+Six new tests: `TestCiteVerbRegression` (3, cite.py dispatch paths),
+`TestImplicitCiteLoop` (2, compiler implicit injection), `TestCiteImplicitlyUniversal`
+(1, no-warn receipt path).
+
 ### ls: `preview_fields` surfaced in kind introspection
 
 Closes the preview-ls asymmetry named in `design/lenses-consume-declared-properties`:

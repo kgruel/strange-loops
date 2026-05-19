@@ -69,6 +69,27 @@ def run(argv: list[str], ctx: CliContext) -> int:
         action="store_true",
         help="Suppress the 'stored:' success receipt (WARN/ERROR still print).",
     )
+    parser.add_argument(
+        "--stdin",
+        metavar="FIELD",
+        default=None,
+        help=(
+            "Read sys.stdin into the named payload field (e.g. --stdin message). "
+            "Sidesteps shell-quoting for natural-voice prose. Errors on TTY. "
+            "Single trailing newline stripped."
+        ),
+    )
+    parser.add_argument(
+        "--file",
+        action="append",
+        metavar="FIELD=PATH",
+        default=None,
+        help=(
+            "Read file contents into the named payload field (e.g. --file message=notes.md). "
+            "May repeat for different fields. Tilde expansion supported. "
+            "Single trailing newline stripped."
+        ),
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:

@@ -140,6 +140,113 @@ def _resolve_strict(args: argparse.Namespace, vertex_path: Path | None) -> tuple
     return (vertex_declared or env_strict or flag_strict, vertex_declared)
 
 
+def _apply_input_sources(
+    parts: list[str],
+    stdin_field: str | None,
+    file_specs: list[str],
+) -> list[str]:
+    """Apply --stdin and --file flags by injecting expanded values into parts.
+
+    ``--stdin FIELD`` reads ``sys.stdin`` once and injects ``FIELD=<content>``.
+    ``--file FIELD=PATH`` reads the file at PATH and injects ``FIELD=<content>``.
+    A single trailing newline is stripped from both sources (matches echo/file
+    convention; internal newlines preserved).
+
+    Errors raised as ``LoopsError``:
+
+    * ``--stdin`` requested but stdin is a TTY (would hang silently)
+    * ``--file FIELD=PATH`` where PATH does not exist or is unreadable
+    * ``--file`` argument missing ``=`` (must be FIELD=PATH form)
+    * field appears both in ``parts`` (as ``FIELD=value``) AND in --stdin/--file
+      (conflicting sources — ambiguous intent, refuse rather than guess)
+    * same field named in multiple --file flags (which read wins?)
+    * field name not a valid identifier
+
+    Returns the augmented parts list. Original ``parts`` is unchanged.
+    """
+    # Parse --file FIELD=PATH specs into (field, path) tuples
+    parsed_files: list[tuple[str, Path]] = []
+    for spec in file_specs:
+        if "=" not in spec:
+            raise LoopsError(
+                f"--file expects FIELD=PATH form, got: {spec!r}"
+            )
+        field, _, path_str = spec.partition("=")
+        if not field.isidentifier():
+            raise LoopsError(
+                f"--file field name is not a valid identifier: {field!r}"
+            )
+        parsed_files.append((field, Path(path_str).expanduser()))
+
+    # Detect duplicate --file fields (ambiguous: which read wins?)
+    file_fields = [f for f, _ in parsed_files]
+    if len(set(file_fields)) != len(file_fields):
+        seen: set[str] = set()
+        dup = next(f for f in file_fields if f in seen or seen.add(f))  # type: ignore[func-returns-value]
+        raise LoopsError(
+            f"--file specified multiple times for field {dup!r}"
+        )
+
+    # Detect --stdin / --file collision on same field
+    if stdin_field is not None and stdin_field in file_fields:
+        raise LoopsError(
+            f"--stdin and --file both target field {stdin_field!r}"
+        )
+
+    # Validate --stdin field name
+    if stdin_field is not None and not stdin_field.isidentifier():
+        raise LoopsError(
+            f"--stdin field name is not a valid identifier: {stdin_field!r}"
+        )
+
+    # Detect conflict with inline parts (FIELD=value already present)
+    inline_fields: set[str] = set()
+    for item in parts:
+        if "=" in item:
+            k, _, _ = item.partition("=")
+            if k.isidentifier():
+                inline_fields.add(k)
+
+    injected_fields = set(file_fields)
+    if stdin_field is not None:
+        injected_fields.add(stdin_field)
+
+    collisions = inline_fields & injected_fields
+    if collisions:
+        names = ", ".join(sorted(collisions))
+        raise LoopsError(
+            f"field(s) {names} specified both inline and via --stdin/--file "
+            "— ambiguous intent, remove one source"
+        )
+
+    augmented = list(parts)
+
+    # Read stdin (once, before files — order of injection is cosmetic since
+    # _parse_emit_parts builds a dict)
+    if stdin_field is not None:
+        if sys.stdin.isatty():
+            raise LoopsError(
+                f"--stdin {stdin_field} requested but stdin is a TTY — "
+                "pipe input or use --file"
+            )
+        content = sys.stdin.read()
+        if content.endswith("\n"):
+            content = content[:-1]
+        augmented.append(f"{stdin_field}={content}")
+
+    # Read files
+    for field, path in parsed_files:
+        try:
+            content = path.read_text()
+        except OSError as e:
+            raise LoopsError(f"--file {field}={path}: {e}")
+        if content.endswith("\n"):
+            content = content[:-1]
+        augmented.append(f"{field}={content}")
+
+    return augmented
+
+
 def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     """Parse emit args into a payload dict.
 
@@ -254,6 +361,18 @@ def cmd_emit(
                     file=sys.stderr,
                 )
                 return 1
+
+    # Apply --stdin / --file flags (inject expanded payload values into parts).
+    # Errors raised as LoopsError → caller-facing message, exit 1.
+    try:
+        parts = _apply_input_sources(
+            parts,
+            getattr(args, "stdin", None),
+            list(getattr(args, "file", None) or []),
+        )
+    except LoopsError as e:
+        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        return 1
 
     payload = _parse_emit_parts(parts)
 
@@ -463,6 +582,27 @@ def _run_emit(
         "-q", "--quiet",
         action="store_true",
         help="Suppress the 'stored:' success receipt line (WARN/ERROR still print).",
+    )
+    parser.add_argument(
+        "--stdin",
+        metavar="FIELD",
+        default=None,
+        help=(
+            "Read sys.stdin into the named payload field (e.g. --stdin message). "
+            "Sidesteps shell-quoting friction for natural-voice prose. "
+            "Errors if stdin is a TTY. Single trailing newline stripped."
+        ),
+    )
+    parser.add_argument(
+        "--file",
+        action="append",
+        metavar="FIELD=PATH",
+        default=None,
+        help=(
+            "Read file contents into the named payload field (e.g. --file message=notes.md). "
+            "May repeat for different fields. Tilde expansion supported. "
+            "Single trailing newline stripped."
+        ),
     )
     args = parser.parse_args(argv)
     if vertex_path is not None:

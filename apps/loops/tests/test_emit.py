@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import io
 import json
 from datetime import datetime as py_datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from atoms import Fact
 from engine import SqliteStore
 
-from loops.commands.emit import _parse_emit_parts
+from loops.commands.emit import _apply_input_sources, _parse_emit_parts
+from loops.errors import LoopsError
 from loops.main import main
 
 
@@ -51,6 +55,154 @@ class TestParseEmitParts:
         """No ref= at all → no ref key in payload (not an empty string)."""
         payload = _parse_emit_parts(["topic=t"])
         assert "ref" not in payload
+
+
+class _FakeStdin:
+    """Fake sys.stdin for testing — read() returns canned text, isatty configurable."""
+
+    def __init__(self, content: str, *, tty: bool = False):
+        self._buf = io.StringIO(content)
+        self._tty = tty
+
+    def read(self) -> str:
+        return self._buf.read()
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+class TestApplyInputSources:
+    """_apply_input_sources — --stdin and --file flag application."""
+
+    def test_no_flags_unchanged(self):
+        """No --stdin, no --file → parts returned unchanged."""
+        out = _apply_input_sources(["topic=t", "message=hi"], None, [])
+        assert out == ["topic=t", "message=hi"]
+
+    def test_stdin_injects_field(self, monkeypatch):
+        """--stdin FIELD reads stdin and appends FIELD=<content>."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("hello world"))
+        out = _apply_input_sources(["topic=t"], "message", [])
+        assert out == ["topic=t", "message=hello world"]
+
+    def test_stdin_strips_single_trailing_newline(self, monkeypatch):
+        """Echo adds a trailing \\n — strip exactly one. Internal newlines kept."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("line one\nline two\n"))
+        out = _apply_input_sources([], "message", [])
+        assert out == ["message=line one\nline two"]
+
+    def test_stdin_preserves_double_trailing_newline(self, monkeypatch):
+        """Two trailing \\n → strip only one (the last); the other is intentional."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("body\n\n"))
+        out = _apply_input_sources([], "message", [])
+        assert out == ["message=body\n"]
+
+    def test_stdin_tty_errors(self, monkeypatch):
+        """--stdin with TTY-attached stdin errors (would hang silently)."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("", tty=True))
+        with pytest.raises(LoopsError, match="stdin is a TTY"):
+            _apply_input_sources([], "message", [])
+
+    def test_stdin_invalid_field_errors(self, monkeypatch):
+        """--stdin with non-identifier field name errors."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("x"))
+        with pytest.raises(LoopsError, match="not a valid identifier"):
+            _apply_input_sources([], "bad-field", [])
+
+    def test_file_injects_field(self, tmp_path):
+        """--file FIELD=PATH reads file and appends FIELD=<content>."""
+        p = tmp_path / "note.md"
+        p.write_text("file body")
+        out = _apply_input_sources(["topic=t"], None, [f"message={p}"])
+        assert out == ["topic=t", "message=file body"]
+
+    def test_file_strips_single_trailing_newline(self, tmp_path):
+        """Files commonly end with \\n — strip one."""
+        p = tmp_path / "note.md"
+        p.write_text("line one\nline two\n")
+        out = _apply_input_sources([], None, [f"message={p}"])
+        assert out == ["message=line one\nline two"]
+
+    def test_file_tilde_expansion(self, tmp_path, monkeypatch):
+        """~/foo expands to user home."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "tilde-note.md").write_text("from home")
+        out = _apply_input_sources([], None, ["message=~/tilde-note.md"])
+        assert out == ["message=from home"]
+
+    def test_file_nonexistent_errors(self, tmp_path):
+        """--file with missing path errors with the path in the message."""
+        missing = tmp_path / "nope.md"
+        with pytest.raises(LoopsError, match="nope.md"):
+            _apply_input_sources([], None, [f"message={missing}"])
+
+    def test_file_missing_equals_errors(self):
+        """--file without FIELD=PATH form errors."""
+        with pytest.raises(LoopsError, match="FIELD=PATH form"):
+            _apply_input_sources([], None, ["just-a-path.md"])
+
+    def test_file_invalid_field_errors(self, tmp_path):
+        """--file with non-identifier field name errors."""
+        p = tmp_path / "x"
+        p.write_text("x")
+        with pytest.raises(LoopsError, match="not a valid identifier"):
+            _apply_input_sources([], None, [f"bad-field={p}"])
+
+    def test_file_duplicate_field_errors(self, tmp_path):
+        """--file specified multiple times for the same field errors."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.write_text("A")
+        b.write_text("B")
+        with pytest.raises(LoopsError, match="multiple times for field 'message'"):
+            _apply_input_sources([], None, [f"message={a}", f"message={b}"])
+
+    def test_stdin_and_file_same_field_errors(self, tmp_path, monkeypatch):
+        """--stdin and --file targeting the same field errors."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("x"))
+        p = tmp_path / "n"
+        p.write_text("y")
+        with pytest.raises(LoopsError, match="both target field"):
+            _apply_input_sources([], "message", [f"message={p}"])
+
+    def test_inline_collision_with_stdin_errors(self, monkeypatch):
+        """parts has message=foo AND --stdin message → error (ambiguous intent)."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("y"))
+        with pytest.raises(LoopsError, match="ambiguous intent"):
+            _apply_input_sources(["message=inline"], "message", [])
+
+    def test_inline_collision_with_file_errors(self, tmp_path):
+        """parts has topic=foo AND --file topic=path → error."""
+        p = tmp_path / "n"
+        p.write_text("x")
+        with pytest.raises(LoopsError, match="ambiguous intent"):
+            _apply_input_sources(["topic=inline"], None, [f"topic={p}"])
+
+    def test_multiple_file_different_fields(self, tmp_path):
+        """--file body=a --file notes=b → both fields appended."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.write_text("body-content")
+        b.write_text("notes-content")
+        out = _apply_input_sources([], None, [f"body={a}", f"notes={b}"])
+        assert out == ["body=body-content", "notes=notes-content"]
+
+    def test_stdin_plus_file_combine(self, tmp_path, monkeypatch):
+        """--stdin and --file on different fields combine cleanly."""
+        monkeypatch.setattr("sys.stdin", _FakeStdin("stdin-msg"))
+        p = tmp_path / "notes"
+        p.write_text("file-notes")
+        out = _apply_input_sources(["topic=t"], "message", [f"notes={p}"])
+        assert out == ["topic=t", "message=stdin-msg", "notes=file-notes"]
+
+    def test_at_in_inline_value_stays_literal(self):
+        """Universal-magic-syntax would break this — explicit flags do not.
+
+        Regression bar: topic=foo@example.com must store the @ literally.
+        Verifying empirically that no @-handling logic touches inline values.
+        """
+        out = _apply_input_sources(["topic=foo@example.com"], None, [])
+        assert out == ["topic=foo@example.com"]
 
 
 def _write_vertex(home: Path, name: str, *, store: str | None) -> Path:
@@ -176,6 +328,70 @@ class TestEmit:
         out = capsys.readouterr().out
         assert json.loads(out)["payload"]["message"] == "literal override bug"
         assert not db_path.exists()
+
+    def test_stdin_flag_end_to_end(self, tmp_path, monkeypatch, capsys):
+        """--stdin message reads sys.stdin and stores it as the message field."""
+        home = tmp_path / "home"
+        _write_vertex(home, "session", store="./data/session.db")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setattr(
+            "sys.stdin",
+            _FakeStdin("Kyle's point: declaration was overreach.\n"),
+        )
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "topic=sigil",
+                "--stdin", "message",
+                "--dry-run",
+            ]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["message"] == "Kyle's point: declaration was overreach."
+        assert d["payload"]["topic"] == "sigil"
+
+    def test_file_flag_end_to_end(self, tmp_path, monkeypatch, capsys):
+        """--file message=path reads the file and stores it as the message field."""
+        home = tmp_path / "home"
+        _write_vertex(home, "session", store="./data/session.db")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        note = tmp_path / "note.md"
+        note.write_text("Multi-line\nfile content with 'apostrophes' and \"quotes\".\n")
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "topic=sigil",
+                "--file", f"message={note}",
+                "--dry-run",
+            ]
+        )
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["message"] == (
+            "Multi-line\nfile content with 'apostrophes' and \"quotes\"."
+        )
+
+    def test_stdin_inline_collision_errors_via_main(self, tmp_path, monkeypatch, capsys):
+        """Inline message=foo + --stdin message → exit 1 with collision error."""
+        home = tmp_path / "home"
+        _write_vertex(home, "session", store="./data/session.db")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.setattr("sys.stdin", _FakeStdin("piped"))
+
+        result = main(
+            [
+                "session", "emit", "decision",
+                "topic=t", "message=inline",
+                "--stdin", "message",
+                "--dry-run",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "ambiguous intent" in err
 
     def test_missing_store_clause_errors(self, tmp_path, monkeypatch, capsys):
         home = tmp_path / "home"

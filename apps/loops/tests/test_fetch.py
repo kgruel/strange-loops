@@ -492,6 +492,43 @@ class TestFetchIntegration:
         assert "name: design/foo →" not in rendered
         assert "topic: arc →" not in rendered
 
+    def test_fact_payload_never_contains_column_fields(self, tmp_path):
+        """_ts, _observer, _origin, _id are top-level Fact columns, not payload.
+
+        This anchors the _is_diff_skip predicate in trace.py: the ``startswith("_")``
+        branch handles internal fold-state keys (``_refs``, ``_n``); the column
+        names are simply never present in ``fact["payload"]`` to begin with.
+        Confirms the old _DIFF_SKIP_FIELDS entries for ``_ts/_observer/_origin/_id``
+        were dead code — they could never match a key in the payload dict.
+        """
+        import argparse
+
+        from engine.builder import fold_by, vertex
+        from loops.commands.fetch import fetch_trace
+        from loops.main import cmd_emit
+
+        vpath = tmp_path / "t.vertex"
+        vertex("t").store("./t.db").loop("decision", fold_by("topic")).write(vpath)
+
+        cmd_emit(argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/test", "message=confirmed", "status=open"],
+            observer="kyle", dry_run=False,
+        ), vertex_path=vpath)
+
+        result = fetch_trace(vpath, kind="decision", key="design/test")
+        assert result["facts"], "test requires at least one fact"
+
+        column_fields = {"_ts", "_observer", "_origin", "_id"}
+        for fact in result["facts"]:
+            payload_keys = set(fact.get("payload", {}).keys())
+            overlap = payload_keys & column_fields
+            assert not overlap, (
+                f"Column-level field(s) {overlap!r} found in fact payload — "
+                "these are top-level Fact attributes, never payload keys. "
+                "The _is_diff_skip predicate relies on this invariant."
+            )
+
     def test_fetch_stream_basic(self, tmp_path):
         from engine.builder import fold_count, vertex
         from loops.commands.fetch import fetch_stream

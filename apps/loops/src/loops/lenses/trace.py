@@ -93,13 +93,21 @@ def trace_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
 # --- Diff rendering ------------------------------------------------------
 
-# Metadata fields that aren't part of the payload-as-patch.
-# `ref` is excluded from --diff entirely: refs accumulate (union under fold,
-# per-fact immutable attribution) and are never state. Rendering them as
-# +/- deltas conflates write-receipt with temporal-query — the same
-# write-receipt-vs-temporal-query confusion caught at three sites
-# 2026-04-29. The canonical view for refs is --refs.
-_DIFF_SKIP_FIELDS = frozenset({"_ts", "_observer", "_origin", "_id", "ref"})
+def _is_diff_skip(key: str) -> bool:
+    """True for keys that should not appear in --diff rendering.
+
+    ``ref`` is raw user input that the fold consumes into ``_refs`` (union-set
+    across upserts). Including it in --diff would conflate write-receipt with
+    temporal-query — see decision:design/write-receipt-vs-temporal-query and
+    the three-site catch 2026-04-29. The canonical view for refs is --refs.
+
+    ``_*`` keys are internal/computed (e.g. ``_refs``, ``_n``) and never appear
+    in raw ``fact["payload"]`` — ``_source_payload_to_fact_dict`` (fetch.py)
+    peels them before the payload is stored. The ``startswith("_")`` check is
+    structurally correct and future-proof; naming individual fields here would
+    be dead code.
+    """
+    return key.startswith("_") or key == "ref"
 
 # Long-form fields where "→ new" prefix reads better than "old → new".
 _DIFF_LONG_FIELDS = frozenset({"message", "summary"})
@@ -174,11 +182,11 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
         # Compute scalar deltas: payload fields whose value differs from
         # accumulated prior (or absent from prior). Fields absent from
         # this payload are "didn't touch" under fold-merge — no delta.
-        # `ref` is in _DIFF_SKIP_FIELDS — see module note.
+        # `ref` and `_*` fields are excluded — see _is_diff_skip.
         scalar_deltas: list[tuple[str, Any, Any]] = []
         has_refs = "ref" in payload
         for key, value in payload.items():
-            if key in _DIFF_SKIP_FIELDS:
+            if _is_diff_skip(key):
                 continue
             prior = accumulated.get(key)
             if prior != value:
@@ -197,7 +205,7 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
         # Update accumulated scalar state
         for key, value in payload.items():
-            if key in _DIFF_SKIP_FIELDS:
+            if _is_diff_skip(key):
                 continue
             accumulated[key] = value
 

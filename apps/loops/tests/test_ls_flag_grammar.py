@@ -612,3 +612,56 @@ class TestHelpOutput:
         assert rc == 0
         assert "--kind" in out
         assert "--observer" in out
+
+
+# ---------------------------------------------------------------------------
+# preview_fields surfaced through ls
+# ---------------------------------------------------------------------------
+
+
+class TestPreviewFieldsSurfaced:
+    """preview_fields declared in spec appear in fetch_declarations and render."""
+
+    @pytest.fixture
+    def proj_with_preview(self, loops_home) -> Path:
+        vdir = loops_home / "prev"
+        vdir.mkdir(parents=True, exist_ok=True)
+        vpath = vdir / "prev.vertex"
+        vpath.write_text(
+            'name "prev"\n'
+            'store "./data/prev.db"\n'
+            'loops {\n'
+            '  decision {\n'
+            '    fold { items "by" "topic" }\n'
+            '    preview "message" "status"\n'
+            '  }\n'
+            '  thread {\n'
+            '    fold { items "by" "name" }\n'
+            '  }\n'
+            '}\n'
+        )
+        return vpath
+
+    def test_fetch_includes_preview_fields(self, proj_with_preview):
+        data = fetch_declarations("prev", filters=["kind"])
+        kinds = {k["name"]: k for k in data["kinds"]}
+        assert kinds["decision"]["preview_fields"] == ("message", "status")
+        assert kinds["thread"]["preview_fields"] == ()  # undeclared → empty
+
+    def test_render_shows_preview_at_detailed(self, proj_with_preview):
+        from painted import Zoom
+
+        from loops.lenses.declarations import declarations_view
+
+        data = fetch_declarations("prev", filters=["kind"])
+        text = block_text(declarations_view(data, Zoom.DETAILED, 80))
+        assert "preview=message,status" in text
+
+    def test_render_omits_preview_at_summary(self, proj_with_preview):
+        from painted import Zoom
+
+        from loops.lenses.declarations import declarations_view
+
+        data = fetch_declarations("prev", filters=["kind"])
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        assert "preview=" not in text

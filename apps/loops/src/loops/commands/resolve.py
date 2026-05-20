@@ -362,6 +362,7 @@ def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
     payload: dict[str, str],
+    kind: str | None = None,
 ) -> tuple[dict[str, str], list[UnresolvedRef]]:
     """Resolve entity addresses in payload values to ULIDs.
 
@@ -372,6 +373,14 @@ def _resolve_entity_refs(
 
     The original field is preserved (navigable address). A sibling field
     {name}_ref is added with the pinned ULID (provenance anchor).
+
+    The emitted kind's own fold-key field (when ``kind`` is supplied) is
+    skipped by the scan: that value names THIS fact's slot in its own kind's
+    fold and is self-identity, not a reference to another entity. Without
+    this skip, slashed topic values like ``topic=pattern/foo`` would be
+    misread as ``pattern/foo`` refs whenever any vertex in the topology
+    happens to declare a ``pattern`` kind — producing false unresolved-ref
+    warnings on every namespace-prefixed emit.
 
     Returns ``(augmented_payload, unresolved_refs)``:
       * ``augmented_payload`` — payload plus any ``{field}_ref`` sibling fields
@@ -395,6 +404,12 @@ def _resolve_entity_refs(
         vertex_path = writable
 
     local_kind_keys = _extract_kind_keys(vertex_path)
+
+    # The emitted kind's own fold-key field is self-identity, not a ref to
+    # another entity — skip it during the scan so namespace-prefixed values
+    # (topic=pattern/foo) don't get misread as kind/key addresses against
+    # topology kinds that happen to share the prefix.
+    self_key_field = local_kind_keys.get(kind) if kind else None
 
     # Lazy topology widening — only computed on first local miss
     _topo: dict | None = None
@@ -467,6 +482,8 @@ def _resolve_entity_refs(
     for field_name, value in payload.items():
         if not isinstance(value, str) or "/" not in value:
             continue
+        if field_name == self_key_field:
+            continue  # fold-key field — self-identity, not a ref
         addresses = (
             [a.strip() for a in value.split(",")]
             if field_name == "ref"

@@ -2545,6 +2545,145 @@ class TestResolveEntityRefs:
         assert any(u.addr == "task/ghost" for u in unresolved)
         assert not any("," in u.addr for u in unresolved)
 
+    def test_fold_key_field_value_not_scanned_as_ref(self, tmp_path, monkeypatch):
+        """Regression: the emitted kind's own fold-key value is self-identity,
+        not a ref to another entity. Without this skip, namespace-prefixed
+        topics (``topic=pattern/foo``) get misread as ``pattern/foo`` refs
+        whenever any vertex in the topology happens to declare a ``pattern``
+        kind — producing false unresolved-ref warnings on every emit.
+
+        Asymmetric-pair shape: must exercise topology widening or the test
+        passes on broken code too. Single-vertex setup wouldn't reproduce
+        because the buggy path only fires once the prefix matches a kind
+        declared by a topology-visible vertex other than the emit target.
+        """
+        from loops.commands.resolve import _resolve_entity_refs
+
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+
+        # Sibling vertex declares 'pattern' kind (folded by topic) — same
+        # shape as ~/.config/loops/docs/docs.vertex in the original bug.
+        sibling_vpath = tmp_path / "sibling.vertex"
+        sibling_vpath.write_text(
+            'name "sibling"\nstore "./sibling.db"\n'
+            'loops { pattern { fold { items "by" "topic" } } }\n'
+        )
+
+        # Target vertex declares 'observation' (folded by topic).
+        target_vpath = tmp_path / "target.vertex"
+        target_vpath.write_text(
+            'name "target"\nstore "./target.db"\n'
+            'loops { observation { fold { items "by" "topic" } } }\n'
+        )
+        target_store = tmp_path / "target.db"
+
+        # Root combines both — makes 'pattern' visible in topology.
+        root_vpath = loops_dir / ".vertex"
+        root_vpath.write_text(
+            f'name "root"\ncombine {{\n'
+            f'    vertex "{sibling_vpath}"\n'
+            f'    vertex "{target_vpath}"\n'
+            f'}}\n'
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Emit observation with topic=pattern/foo. Without the fix, the
+        # resolver scans topic's value, splits 'pattern/foo', finds
+        # 'pattern' in topology kinds, fails the lookup, and surfaces
+        # an unresolved ref.
+        result, unresolved = _resolve_entity_refs(
+            target_vpath,
+            target_store,
+            {"topic": "pattern/foo", "message": "body"},
+            kind="observation",
+        )
+
+        # Topic value preserved, no spurious _ref sibling added.
+        assert result["topic"] == "pattern/foo"
+        assert "topic_ref" not in result
+        # And no false-positive unresolved-ref warning.
+        assert unresolved == [], (
+            f"Fold-key field 'topic' should not surface as unresolved ref; "
+            f"got {unresolved!r}"
+        )
+
+    def test_non_fold_key_field_still_resolves_via_topology(
+        self, tmp_path, monkeypatch
+    ):
+        """Positive case: the fold-key skip does NOT regress the documented
+        'single-ref-on-any-field' feature. Non-fold-key fields whose values
+        look like ``kind/key`` still resolve when the kind is declared and
+        the entity exists in topology.
+        """
+        from loops.commands.resolve import _resolve_entity_refs
+        from engine import SqliteStore, StoreReader
+        from atoms import Fact
+        import time as _time
+
+        loops_dir = tmp_path / ".loops"
+        loops_dir.mkdir()
+
+        sibling_vpath = tmp_path / "sibling.vertex"
+        sibling_vpath.write_text(
+            'name "sibling"\nstore "./sibling.db"\n'
+            'loops { task { fold { items "by" "name" } } }\n'
+        )
+        sibling_store = tmp_path / "sibling.db"
+
+        target_vpath = tmp_path / "target.vertex"
+        target_vpath.write_text(
+            'name "target"\nstore "./target.db"\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        target_store = tmp_path / "target.db"
+
+        root_vpath = loops_dir / ".vertex"
+        root_vpath.write_text(
+            f'name "root"\ncombine {{\n'
+            f'    vertex "{sibling_vpath}"\n'
+            f'    vertex "{target_vpath}"\n'
+            f'}}\n'
+        )
+
+        # Seed a resolvable task in the sibling store.
+        with SqliteStore(
+            path=sibling_store,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as s:
+            s.append(Fact(kind="task", payload={"name": "real-task"},
+                          ts=_time.time(), observer="t", origin="t"))
+
+        reader = StoreReader(sibling_store)
+        try:
+            ulid_task = reader.resolve_entity_id("task", "name", "real-task")
+        finally:
+            reader.close()
+        assert ulid_task
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+
+        # Emit decision with topic=design/foo (fold-key, skipped) AND
+        # superseded_by=task/real-task (non-fold-key, should resolve).
+        result, unresolved = _resolve_entity_refs(
+            target_vpath,
+            target_store,
+            {"topic": "design/foo", "superseded_by": "task/real-task"},
+            kind="decision",
+        )
+
+        # Topic untouched (fold-key skip path).
+        assert result["topic"] == "design/foo"
+        assert "topic_ref" not in result
+        # Non-fold-key ref still resolves through topology widening.
+        assert result.get("superseded_by") == "task/real-task"
+        assert result.get("superseded_by_ref") == ulid_task
+        assert unresolved == []
+
 
 class TestResolveEdgeCases:
     """Cover resolve.py L71 (OSError) and L576-577 (LoopsError in _apply_vertex_scope)."""

@@ -419,7 +419,7 @@ def cmd_emit(
     refs_resolved_count = 0
     if vertex_path is not None and store_path is not None:
         payload_before_refs = payload
-        payload, unresolved_refs = _resolve_entity_refs(vertex_path, store_path, payload)
+        payload, unresolved_refs = _resolve_entity_refs(vertex_path, store_path, payload, kind=kind)
         refs_resolved_count = sum(
             1 for k in payload if k.endswith("_ref") and k not in payload_before_refs
         )

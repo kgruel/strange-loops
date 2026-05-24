@@ -127,7 +127,7 @@ if kind not in grant.horizon:
 
 ```python
 # Full access
-grant = Grant(observer="kyle", potential=None, horizon=None)
+grant = Grant(potential=None, horizon=None)
 
 # Can emit anything, can see anything
 ```
@@ -136,7 +136,7 @@ grant = Grant(observer="kyle", potential=None, horizon=None)
 
 ```python
 # Read-only: can see everything, can emit nothing
-grant = Grant(observer="viewer", potential=frozenset(), horizon=None)
+grant = Grant(potential=frozenset(), horizon=None)
 ```
 
 ---
@@ -340,8 +340,8 @@ monitor = delegate(kyle, "kyle/monitor", potential={"focus"})
 from engine import Grant
 # Observer is just a string
 observer = "kyle/monitor"
-# Policy is a Grant
-grant = Grant(observer=observer, potential=frozenset({"focus"}))
+# Policy is a Grant — observer stays separate; Grant holds only constraints
+grant = Grant(potential=frozenset({"focus"}))
 # Facts carry the observer
 fact = Fact.of("focus", observer, index=3)
 ```

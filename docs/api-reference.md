@@ -19,6 +19,12 @@ The CLI installs as two names — `loops` (long) and `sl` (shorthand). Entry poi
 `loops.cli.app.main`. Output is rendered through `painted` via a single reporter
 boundary; no command prints raw text.
 
+> The tables below are a curated overview. For the **exhaustive, never-drifts
+> catalog** — every verb/command with its status and verbatim `--help` — see
+> [cli-catalog.md](cli-catalog.md), generated from the registry by
+> [`bin/gen-docs.py`](../bin/gen-docs.py). See [generators.md](generators.md) for
+> what is generated versus hand-written and why.
+
 ## Three-tier dispatch
 
 Dispatch resolves an op token in `cli/app.py`, then routes through one of three
@@ -66,7 +72,7 @@ to tick history. `read`/`cite` are thin routers that delegate into the `fold` an
 | `ls` | `loops ls [vertex]` | Top-level: list discovered vertices. Vertex-first: list template population rows. |
 | `add` | `loops add <vertex> <row…>` | Add a template population row to a vertex. |
 | `rm` | `loops rm <vertex> <key>` | Remove a template population row. |
-| `export` | `loops export <vertex>` | Export a vertex's inline population to an external `.list` file. |
+| `export` | `loops export <vertex>` | *Retired (Phase 3)* — still registered but returns an error; the `.list` file is canonical, edit it via `add`/`rm`. |
 | `store` | `loops store <db-path>` | Inspect a store database (shared with the verb tier). |
 
 `ls`/`add`/`rm`/`export` are dual-registered: top-level (`registry.COMMANDS`) and

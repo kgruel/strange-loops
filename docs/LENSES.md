@@ -48,7 +48,7 @@ Every lens receives a zoom level. Control it with `-v` flags:
 | (none) | SUMMARY | Key information — labels, bodies, structure |
 | `-v` | DETAILED | Expanded fields, IDs, additional context |
 | `-vv` | FULL | All metadata — timestamps, observers, origins |
-| `--minimal` | MINIMAL | One-liner counts |
+| `-q` | MINIMAL | One-liner counts |
 
 The lens decides what each level means. The generic fold lens shows counts at MINIMAL, label + body at SUMMARY, all payload fields at DETAILED, and metadata (ts, observer, origin) at FULL. Custom lenses define their own progressive disclosure.
 

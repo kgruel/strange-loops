@@ -47,6 +47,7 @@ import difflib
 import importlib
 import io
 import os
+import re
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -178,7 +179,11 @@ def check_all_coverage() -> list[str]:
         if not exported:
             problems.append(f"{lib}: no __all__ to check")
             continue
-        missing = [s for s in exported if s not in text]
+        # Word-boundary match, not bare substring: a removed short symbol (Min,
+        # Sum, …) could otherwise coincidentally match unrelated prose and pass
+        # silently. \b matches at backtick edges too, so the doc's `Symbol` style
+        # still counts.
+        missing = [s for s in exported if not re.search(rf"\b{re.escape(s)}\b", text)]
         if missing:
             problems.append(
                 f"{lib}: {len(missing)} __all__ symbol(s) not documented in "

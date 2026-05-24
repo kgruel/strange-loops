@@ -181,7 +181,7 @@ loops test <file> --limit N                   # cap output facts
 loops whoami                                  # show resolved observer identity
 loops add <target> <values...>                # add row to template population
 loops rm <target> <key>                       # remove row from template population
-loops export <target>                         # materialize .list from store
+loops export <target>                         # RETIRED (Phase 3) — command still registered but returns an error
 ```
 
 ---

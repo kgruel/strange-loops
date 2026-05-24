@@ -15,6 +15,9 @@ uv tool install . -e                                   # (re)install sl/loops CL
 ```
 
 Each lib and app with a `./dev` script also supports `./dev check` (the CI gate).
+The repo root also has `./dev check` — repo-wide checks, currently documentation
+drift (`bin/gen-docs.py --check`; see `docs/generators.md` for what's generated vs
+hand-written and why).
 
 **After changing CLI code, run `uv tool install . -e` and then exercise via `sl …` directly.**
 The user-installed `sl` is the production install path; `uv run --package loops sl …`

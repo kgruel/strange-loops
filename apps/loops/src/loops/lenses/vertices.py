@@ -9,7 +9,14 @@ from painted import Block, Style, Zoom, join_vertical
 def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     """Render vertex listing at the given zoom level.
 
-    data: {"vertices": [{name, path, kind, loops, store?, combine?, discover?}, ...]}
+    data: {"vertices": [{name, path, kind, loops, store?, combine?, discover?}, ...],
+           "local_vertices": [...]?,  # cwd layer — verbs resolve these first
+           "cwd": str?}
+
+    When ``local_vertices`` is present the listing renders in two labelled
+    groups — local first, matching verb resolution order
+    (thread:global-local-walk-broken). Without it, rendering is unchanged
+    from the single-list form.
 
     Zoom levels:
     - MINIMAL: count only
@@ -18,23 +25,54 @@ def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     - FULL: + store paths, combine targets, discover patterns
     """
     vertices = data.get("vertices", [])
+    local = data.get("local_vertices", [])
 
     if zoom == Zoom.MINIMAL:
         n = len(vertices)
+        if local:
+            m = len(local)
+            return Block.text(
+                f"{m} local + {n} config vertices", Style(), width=width,
+            )
         label = "vertex" if n == 1 else "vertices"
         return Block.text(f"{n} {label}", Style(), width=width)
 
-    if not vertices:
+    if not vertices and not local:
         return Block.text(
             "No vertices discovered.", Style(dim=True), width=width,
         )
 
     dim = Style(dim=True)
-    rows: list[Block] = []
 
-    # Calculate column widths for alignment
-    max_name = max(len(v["name"]) for v in vertices)
-    max_kind = max(len(v["kind"]) for v in vertices)
+    # Column widths computed across both groups so the table stays aligned.
+    every = [*local, *vertices]
+    max_name = max(len(v["name"]) for v in every)
+    max_kind = max(len(v["kind"]) for v in every)
+
+    if not local:
+        return join_vertical(
+            *_vertex_rows(vertices, zoom, width, max_name, max_kind, dim)
+        )
+
+    rows: list[Block] = [
+        Block.text("local — cwd, verbs resolve these first", dim, width=width),
+        *_vertex_rows(local, zoom, width, max_name, max_kind, dim),
+        Block.text("config — ~/.config/loops", dim, width=width),
+        *_vertex_rows(vertices, zoom, width, max_name, max_kind, dim),
+    ]
+    return join_vertical(*rows)
+
+
+def _vertex_rows(
+    vertices: list[dict[str, Any]],
+    zoom: Zoom,
+    width: int,
+    max_name: int,
+    max_kind: int,
+    dim: Style,
+) -> list[Block]:
+    """Rows for one group of vertices — shared by both layers."""
+    rows: list[Block] = []
 
     for v in vertices:
         name = v["name"].ljust(max_name)
@@ -55,8 +93,13 @@ def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
             brief = ""
 
         line = f"  {name}  {kind}  {brief}"
-        if len(line) > width:
-            line = line[: width - 1] + "…"
+        # The shadow marker is the load-bearing signal — it survives
+        # truncation; the brief gives way first.
+        marker = "  ⊳ shadows config" if v.get("shadows") else ""
+        avail = width - len(marker)
+        if len(line) > avail:
+            line = line[: avail - 1] + "…"
+        line += marker
         rows.append(Block.text(line, Style(), width=width))
 
         if zoom >= Zoom.DETAILED and loops:
@@ -75,4 +118,4 @@ def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
             if "discover" in v:
                 rows.append(Block.text(f"    discover: {v['discover']}", dim, width=width))
 
-    return join_vertical(*rows)
+    return rows

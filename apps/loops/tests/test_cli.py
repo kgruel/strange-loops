@@ -531,6 +531,7 @@ class TestRootLs:
     def test_ls_discovers_vertices(self, monkeypatch, tmp_path, capsys):
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
         result = main(["ls"])
         assert result == 0
         captured = capsys.readouterr()
@@ -540,6 +541,7 @@ class TestRootLs:
     def test_ls_minimal(self, monkeypatch, tmp_path, capsys):
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
         result = main(["ls", "-q"])
         assert result == 0
         captured = capsys.readouterr()
@@ -548,6 +550,7 @@ class TestRootLs:
     def test_ls_verbose(self, monkeypatch, tmp_path, capsys):
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
         result = main(["ls", "-v"])
         assert result == 0
         captured = capsys.readouterr()
@@ -560,6 +563,7 @@ class TestRootLs:
 
         home = self._seed_home(tmp_path)
         monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.chdir(tmp_path)
         result = main(["ls", "--json"])
         assert result == 0
         captured = capsys.readouterr()
@@ -571,6 +575,7 @@ class TestRootLs:
 
     def test_ls_no_root_vertex(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
         result = main(["ls"])
         assert result == 1
         captured = capsys.readouterr()

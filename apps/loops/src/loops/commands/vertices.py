@@ -125,32 +125,39 @@ def _walk_root(root_path: Path, home: Path) -> list[dict[str, Any]]:
     return vertices
 
 
-def fetch_vertices_local() -> dict[str, Any] | None:
-    """Discover vertices from the local .loops/.vertex if present.
+def fetch_vertices_local() -> list[dict[str, Any]]:
+    """Discover local vertices — the same locations the verbs resolve first.
 
-    Returns {"vertices": [...], "scope": "local"} or None if no local root.
+    Walks ``.loops/**/*.vertex`` plus ``cwd/*.vertex``, mirroring
+    ``_find_local_vertex`` / ``_resolve_vertex_for_dispatch`` so the listing
+    shows the layer the verbs actually operate in
+    (thread:global-local-walk-broken). Returns [] when no local vertices.
     """
-    local_root = Path.cwd() / ".loops" / ".vertex"
-    if not local_root.exists():
-        return None
-
     from lang import parse_vertex_file
 
-    # Always include the root itself as context
     vertices: list[dict[str, Any]] = []
+    seen: set[Path] = set()
 
-    # Walk sibling .vertex files in .loops/
-    loops_dir = local_root.parent
-    for match in sorted(loops_dir.glob("**/*.vertex")):
-        if match.resolve() == local_root.resolve():
+    candidates: list[Path] = []
+    loops_dir = Path.cwd() / ".loops"
+    if loops_dir.is_dir():
+        candidates.extend(sorted(loops_dir.glob("**/*.vertex")))
+    candidates.extend(sorted(Path.cwd().glob("*.vertex")))
+
+    for match in candidates:
+        resolved = match.resolve()
+        if resolved in seen or match.name == ".vertex":
             continue
+        seen.add(resolved)
         try:
             ast = parse_vertex_file(match)
         except Exception:
             continue
-        vertices.append(_extract_vertex_info(match, ast))
+        info = _extract_vertex_info(match, ast)
+        info["scope"] = "local"
+        vertices.append(info)
 
-    return {"vertices": vertices, "scope": "local"}
+    return vertices
 
 
 def fetch_vertices(home: Path) -> dict[str, Any]:

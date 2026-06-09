@@ -137,7 +137,7 @@ def _add_kind(target: str, argv: list[str]) -> int:
         },
     )
     if rc == 0:
-        _ok(f"added kind {args.name!r} ({op_text.strip()}) to {vertex_path.name}")
+        _ok(f"added kind {args.name!r} ({op_text.strip()}) to {_display_path(vertex_path)}")
     return rc
 
 
@@ -226,7 +226,7 @@ def _add_observer(target: str, argv: list[str]) -> int:
             bits.append(f"identity={args.identity}")
         if grants:
             bits.append(f"grant={','.join(grants)}")
-        _ok(f"added observer {' '.join(bits)} to {vertex_path.name}")
+        _ok(f"added observer {' '.join(bits)} to {_display_path(vertex_path)}")
     return rc
 
 
@@ -271,7 +271,7 @@ def _add_combine(target: str, argv: list[str]) -> int:
         bits = [args.path]
         if args.alias:
             bits.append(f"as={args.alias}")
-        _ok(f"added combine {' '.join(bits)} to {vertex_path.name}")
+        _ok(f"added combine {' '.join(bits)} to {_display_path(vertex_path)}")
     return rc
 
 
@@ -301,24 +301,22 @@ def _legacy_row(target: str, argv: list[str]) -> int:
         list_file_add,
         list_file_header,
         resolve_template,
-        resolve_vertex,
     )
-    from loops.commands.resolve import loops_home
+    from loops.commands.resolve import _resolve_target_or_fail
 
     if "/" in target and not target.startswith(("./", "/")):
         vertex_ref, qualifier = target.split("/", 1)
     else:
         vertex_ref, qualifier = target, None
 
-    vertex_path = resolve_vertex(vertex_ref, loops_home())
-    if not vertex_path.exists():
-        _err(f"vertex not found: {vertex_path}")
+    vertex_path = _resolve_target_or_fail(vertex_ref)
+    if vertex_path is None:
         return 1
 
     try:
         vf = parse_vertex_file(vertex_path)
     except Exception as exc:  # noqa: BLE001
-        _err(f"failed to parse {vertex_path.name}: {exc}")
+        _err(f"failed to parse {_display_path(vertex_path)}: {exc}")
         return 1
 
     try:
@@ -331,7 +329,7 @@ def _legacy_row(target: str, argv: list[str]) -> int:
         template.from_, FromFile
     ):
         _err(
-            f"template in {vertex_path.name} is not file-backed "
+            f"template in {_display_path(vertex_path)} is not file-backed "
             "(no 'from file \"...\"')"
         )
         return 1
@@ -363,7 +361,7 @@ def _legacy_row(target: str, argv: list[str]) -> int:
         values=dict(zip(header, values)),
     )
     list_file_add(list_path, header, row)
-    _ok(f"added row {values[0]!r} to {list_path.name}")
+    _ok(f"added row {values[0]!r} to {_display_path(list_path)}")
     return 0
 
 
@@ -399,7 +397,7 @@ def _splice_into(
     except ValueError:
         if ensure_parent_kdl is None:
             _err(
-                f"vertex {vertex_path.name} has no {'.'.join(parent)} block; "
+                f"vertex {_display_path(vertex_path)} has no {'.'.join(parent)} block; "
                 "cannot insert"
             )
             return 1
@@ -412,7 +410,7 @@ def _splice_into(
     _kind, dup_name = duplicate_check
     if _child_exists(text, parent, dup_name):
         _err(
-            f"{_kind} {dup_name!r} already exists in {vertex_path.name}; "
+            f"{_kind} {dup_name!r} already exists in {_display_path(vertex_path)}; "
             f"use `loops rm` first or pick a different name"
         )
         return 1
@@ -516,14 +514,21 @@ def _maybe_emit_change(vertex_path: Path, payload: dict[str, str]) -> None:
 
 
 def _resolve_or_fail(target: str) -> Path | None:
-    from lang.population import resolve_vertex
-    from loops.commands.resolve import loops_home
+    """Local-first resolution — same path the verbs use (read/emit/cite).
 
-    vertex_path = resolve_vertex(target, loops_home())
-    if not vertex_path.exists():
-        _err(f"vertex not found: {vertex_path}")
-        return None
-    return vertex_path
+    Declaration commands must edit the file the verbs actually read;
+    see thread:global-local-walk-broken for the incident this fixes.
+    """
+    from loops.commands.resolve import _resolve_target_or_fail
+
+    return _resolve_target_or_fail(target)
+
+
+def _display_path(path: Path) -> str:
+    """Receipts print the full path written — never just the basename."""
+    from loops.commands.resolve import _display_path as _dp
+
+    return _dp(path)
 
 
 def _ok(msg: str) -> None:

@@ -21,16 +21,36 @@ def _run_ls(argv: list[str]) -> int:
 
 
 def _run_ls_root(argv: list[str]) -> int:
-    """Run root-level ls: list all discovered vertices."""
+    """Run root-level ls: list all discovered vertices, local layer first."""
+    from pathlib import Path
+
     from painted import run_cli
     from .resolve import loops_home
-    from .vertices import fetch_vertices
+    from .vertices import fetch_vertices, fetch_vertices_local
     from ..lenses.vertices import vertices_view
 
     home = loops_home()
 
     def fetch():
-        return fetch_vertices(home)
+        # Local layer first — same precedence the verbs use
+        # (thread:global-local-walk-broken).
+        from typing import Any
+
+        local = fetch_vertices_local()
+        data: dict[str, Any]
+        try:
+            data = fetch_vertices(home)
+        except FileNotFoundError:
+            if not local:
+                raise
+            data = {"vertices": []}
+        if local:
+            global_names = {v["name"] for v in data["vertices"]}
+            for v in local:
+                v["shadows"] = v["name"] in global_names
+            data["local_vertices"] = local
+            data["cwd"] = str(Path.cwd())
+        return data
 
     def render(ctx, data):
         return vertices_view(data, ctx.zoom, ctx.width)

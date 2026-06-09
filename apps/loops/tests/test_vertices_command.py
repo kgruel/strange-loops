@@ -145,16 +145,20 @@ class TestFetchVertices:
 
 
 class TestFetchVerticesLocal:
-    """Tests for fetch_vertices_local — .loops/.vertex path."""
+    """Tests for fetch_vertices_local — cwd layer discovery.
 
-    def test_no_local_vertex_returns_none(self, tmp_path, monkeypatch):
-        """fetch_vertices_local returns None when .loops/.vertex doesn't exist (L137)."""
+    Contract changed with thread:global-local-walk-broken: returns a flat
+    list (``[]`` when nothing local) and no longer requires a ``.loops/.vertex``
+    root — it mirrors the locations ``_find_local_vertex`` resolves.
+    """
+
+    def test_no_local_vertex_returns_empty(self, tmp_path, monkeypatch):
         from loops.commands.vertices import fetch_vertices_local
         monkeypatch.chdir(tmp_path)
-        assert fetch_vertices_local() is None
+        assert fetch_vertices_local() == []
 
     def test_with_local_vertex_file(self, tmp_path, monkeypatch):
-        """fetch_vertices_local walks .loops directory (L135+)."""
+        """Walks .loops/ even without a .vertex root, skipping the root itself."""
         from loops.commands.vertices import fetch_vertices_local
         monkeypatch.chdir(tmp_path)
         loops_dir = tmp_path / ".loops"
@@ -164,8 +168,19 @@ class TestFetchVerticesLocal:
         child = loops_dir / "proj.vertex"
         child.write_text('name "proj"\nloops {\n    m { fold { n "inc" } }\n}\n')
         result = fetch_vertices_local()
-        assert result is not None
-        assert "vertices" in result
+        names = [v["name"] for v in result]
+        assert names == ["proj"]
+        assert all(v["scope"] == "local" for v in result)
+
+    def test_cwd_vertex_without_dotloops(self, tmp_path, monkeypatch):
+        """A bare cwd *.vertex (pre-.loops projects) is discovered too."""
+        from loops.commands.vertices import fetch_vertices_local
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "solo.vertex").write_text(
+            'name "solo"\nloops {\n    m { fold { n "inc" } }\n}\n'
+        )
+        result = fetch_vertices_local()
+        assert [v["name"] for v in result] == ["solo"]
 
 
 class TestWalkRoot:

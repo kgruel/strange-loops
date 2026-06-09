@@ -118,6 +118,13 @@ def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
         p = Path(file_arg)
         if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
             return p
+        # Local-first — same resolution the verbs use
+        # (thread:global-local-walk-broken).
+        from .resolve import _resolve_vertex_for_dispatch
+
+        resolved = _resolve_vertex_for_dispatch(file_arg)
+        if resolved is not None:
+            return resolved
         from lang.population import resolve_vertex
 
         return resolve_vertex(file_arg, loops_home())

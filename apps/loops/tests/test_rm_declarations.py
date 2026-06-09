@@ -22,9 +22,9 @@ from loops.commands.rm import _run_rm
 
 
 @pytest.fixture
-def project_with_change(loops_home) -> Path:
+def project_with_change(loops_env) -> Path:
     """Project with change kind defined — qualifies for change-fact emission."""
-    vdir = loops_home / "project"
+    vdir = loops_env / "project"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "project.vertex"
     (
@@ -40,9 +40,9 @@ def project_with_change(loops_home) -> Path:
 
 
 @pytest.fixture
-def aggregation_vertex(loops_home) -> Path:
+def aggregation_vertex(loops_env) -> Path:
     """Combine-style aggregation vertex (no store)."""
-    vdir = loops_home / "root"
+    vdir = loops_env / "root"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "root.vertex"
     (
@@ -57,9 +57,9 @@ def aggregation_vertex(loops_home) -> Path:
 
 
 @pytest.fixture
-def project_with_observers(loops_home) -> Path:
+def project_with_observers(loops_env) -> Path:
     """Project with observers pre-declared."""
-    vdir = loops_home / "project"
+    vdir = loops_env / "project"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "project.vertex"
     (
@@ -91,7 +91,7 @@ class TestRmRefusals:
         assert rc != 0
         assert "missing vertex target" in capsys.readouterr().err
 
-    def test_nonexistent_vertex(self, loops_home, capsys):
+    def test_nonexistent_vertex(self, loops_env, capsys):
         rc = _run_rm(["nonexistent", "kind", "decision"])
         assert rc != 0
         assert "not found" in capsys.readouterr().err
@@ -149,10 +149,10 @@ class TestRmRefusals:
         assert rc != 0
         assert "missing key" in capsys.readouterr().err
 
-    def test_rm_row_no_list_file(self, loops_home, capsys):
+    def test_rm_row_no_list_file(self, loops_env, capsys):
         """No template / no .list file — refuses gracefully."""
         # Use a vertex that has no template at all.
-        vdir = loops_home / "proj"
+        vdir = loops_env / "proj"
         vdir.mkdir(parents=True, exist_ok=True)
         vpath = vdir / "proj.vertex"
         (vertex("proj").loop("t", fold_by("name")).write(vpath))

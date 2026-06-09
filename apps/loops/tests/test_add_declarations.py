@@ -21,9 +21,9 @@ from loops.commands.add import _run_add
 
 
 @pytest.fixture
-def project_with_change(loops_home) -> Path:
+def project_with_change(loops_env) -> Path:
     """Project vertex that has a `change` loop — qualifies for change-fact emission."""
-    vdir = loops_home / "project"
+    vdir = loops_env / "project"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "project.vertex"
     (
@@ -38,9 +38,9 @@ def project_with_change(loops_home) -> Path:
 
 
 @pytest.fixture
-def project_no_change(loops_home) -> Path:
+def project_no_change(loops_env) -> Path:
     """Project vertex without a change kind — change-fact emission should skip."""
-    vdir = loops_home / "project"
+    vdir = loops_env / "project"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "project.vertex"
     (
@@ -53,14 +53,14 @@ def project_no_change(loops_home) -> Path:
 
 
 @pytest.fixture
-def aggregation_vertex(loops_home) -> Path:
+def aggregation_vertex(loops_env) -> Path:
     """Combine-style aggregation vertex: no store (validator forbids store+combine).
 
     Has a `loops` block so the parser accepts the file before `combine` is added.
     Change-fact emission is intentionally inert for combine mutations because
     aggregation vertices have no store of their own.
     """
-    vdir = loops_home / "root"
+    vdir = loops_env / "root"
     vdir.mkdir(parents=True, exist_ok=True)
     vpath = vdir / "root.vertex"
     (
@@ -361,7 +361,7 @@ class TestChangeFactEmission:
 
 
 class TestRowBackCompat:
-    def test_explicit_row_subcommand_routes_to_pop(self, loops_home):
+    def test_explicit_row_subcommand_routes_to_pop(self, loops_env):
         """`loops add <vertex> row K V` should delegate to legacy pop add.
 
         We can't easily construct a working population fixture here, so we
@@ -389,7 +389,7 @@ class TestErrors:
         assert rc != 0
         assert "missing vertex target" in capsys.readouterr().err
 
-    def test_nonexistent_vertex(self, loops_home, capsys):
+    def test_nonexistent_vertex(self, loops_env, capsys):
         rc = _run_add(
             ["nonexistent", "kind", "x", "--by", "topic"]
         )

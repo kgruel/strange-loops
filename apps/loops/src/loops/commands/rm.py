@@ -112,7 +112,7 @@ def _rm_kind(target: str, argv: list[str]) -> int:
         change_payload={"op": "rm", "target": "kind", "name": args.name},
     )
     if rc == 0:
-        _ok(f"removed kind {args.name!r} from {vertex_path.name}")
+        _ok(f"removed kind {args.name!r} from {_display_path(vertex_path)}")
     return rc
 
 
@@ -143,7 +143,7 @@ def _rm_observer(target: str, argv: list[str]) -> int:
         change_payload={"op": "rm", "target": "observer", "name": args.name},
     )
     if rc == 0:
-        _ok(f"removed observer {args.name!r} from {vertex_path.name}")
+        _ok(f"removed observer {args.name!r} from {_display_path(vertex_path)}")
     return rc
 
 
@@ -174,7 +174,7 @@ def _rm_combine(target: str, argv: list[str]) -> int:
         change_payload={"op": "rm", "target": "combine", "path": args.path},
     )
     if rc == 0:
-        _ok(f"removed combine {args.path!r} from {vertex_path.name}")
+        _ok(f"removed combine {args.path!r} from {_display_path(vertex_path)}")
     return rc
 
 
@@ -210,9 +210,9 @@ def _rm_row(target: str, argv: list[str]) -> int:
     from lang.population import list_file_rm
     removed = list_file_rm(list_path, args.key)
     if not removed:
-        _err(f"no row matching key {args.key!r} in {list_path.name}")
+        _err(f"no row matching key {args.key!r} in {_display_path(list_path)}")
         return 1
-    _ok(f"removed row {args.key!r} from {list_path.name}")
+    _ok(f"removed row {args.key!r} from {_display_path(list_path)}")
     return 0
 
 
@@ -240,7 +240,7 @@ def _splice_remove(
     try:
         kdl_find_block(text, parent)
     except ValueError:
-        _err(f"no {'.'.join(parent)} block in {vertex_path.name}")
+        _err(f"no {'.'.join(parent)} block in {_display_path(vertex_path)}")
         return 1
 
     try:
@@ -248,7 +248,7 @@ def _splice_remove(
             text, parent, child_name, child_key, key_field=key_field
         )
     except ValueError:
-        _err(f"{not_found_desc} not found in {vertex_path.name}")
+        _err(f"{not_found_desc} not found in {_display_path(vertex_path)}")
         return 1
 
     # Symmetric inverse of add's auto-create: if removing this child empties
@@ -363,14 +363,21 @@ def _maybe_emit_change(vertex_path: Path, payload: dict[str, str]) -> None:
 
 
 def _resolve_or_fail(target: str) -> Path | None:
-    from lang.population import resolve_vertex
-    from loops.commands.resolve import loops_home
+    """Local-first resolution — same path the verbs use (read/emit/cite).
 
-    vertex_path = resolve_vertex(target, loops_home())
-    if not vertex_path.exists():
-        _err(f"vertex not found: {vertex_path}")
-        return None
-    return vertex_path
+    Declaration commands must edit the file the verbs actually read;
+    see thread:global-local-walk-broken for the incident this fixes.
+    """
+    from loops.commands.resolve import _resolve_target_or_fail
+
+    return _resolve_target_or_fail(target)
+
+
+def _display_path(path: Path) -> str:
+    """Receipts print the full path written — never just the basename."""
+    from loops.commands.resolve import _display_path as _dp
+
+    return _dp(path)
 
 
 def _resolve_population_list(target: str) -> Path | None:
@@ -380,8 +387,8 @@ def _resolve_population_list(target: str) -> Path | None:
     """
     from lang import parse_vertex_file
     from lang.ast import FromFile, TemplateSource
-    from lang.population import resolve_template, resolve_vertex
-    from loops.commands.resolve import loops_home
+    from lang.population import resolve_template
+    from loops.commands.resolve import _resolve_target_or_fail
 
     # Support qualified targets like "reading/feeds" for multi-template vertices.
     if "/" in target and not target.startswith(("./", "/")):
@@ -389,15 +396,14 @@ def _resolve_population_list(target: str) -> Path | None:
     else:
         vertex_ref, qualifier = target, None
 
-    vertex_path = resolve_vertex(vertex_ref, loops_home())
-    if not vertex_path.exists():
-        _err(f"vertex not found: {vertex_path}")
+    vertex_path = _resolve_target_or_fail(vertex_ref)
+    if vertex_path is None:
         return None
 
     try:
         vertex = parse_vertex_file(vertex_path)
     except Exception as exc:  # noqa: BLE001
-        _err(f"failed to parse {vertex_path.name}: {exc}")
+        _err(f"failed to parse {_display_path(vertex_path)}: {exc}")
         return None
 
     try:
@@ -410,7 +416,7 @@ def _resolve_population_list(target: str) -> Path | None:
         template.from_, FromFile
     ):
         _err(
-            f"template in {vertex_path.name} is not file-backed "
+            f"template in {_display_path(vertex_path)} is not file-backed "
             "(no 'from file \"...\"')"
         )
         return None

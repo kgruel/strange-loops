@@ -685,6 +685,42 @@ def _resolve_vertex_for_dispatch(name: str) -> Path | None:
     return None
 
 
+def _display_path(path: Path) -> str:
+    """Render a path for receipts — absolute, with $HOME contracted to ~.
+
+    Mutating commands print the FULL path they wrote so the layer hit
+    (local .loops/ vs global config) is always visible
+    (thread:global-local-walk-broken: 'project.vertex' with no path
+    masked a global write while the verbs read local).
+    """
+    resolved = path.resolve()
+    try:
+        return "~/" + str(resolved.relative_to(Path.home()))
+    except ValueError:
+        return str(resolved)
+
+
+def _resolve_target_or_fail(target: str) -> Path | None:
+    """Resolve a vertex target for declaration commands (add/rm/ls).
+
+    Routes through ``_resolve_vertex_for_dispatch`` — the same local-first
+    resolution the verbs (read/emit/cite) use — so declaration commands
+    edit the file the verbs actually read. Before this, add/rm/ls resolved
+    config-level only, silently editing the global template while the verbs
+    operated on the local instance (thread:global-local-walk-broken).
+
+    Prints an error and returns None when the target resolves nowhere.
+    """
+    path = _resolve_vertex_for_dispatch(target)
+    if path is not None:
+        return path
+    from lang.population import resolve_vertex
+
+    candidate = resolve_vertex(target, loops_home())
+    _err(f"vertex not found: {candidate} (and no local {target}.vertex in .loops/ or cwd)")
+    return None
+
+
 # --- Observer resolution ---
 
 

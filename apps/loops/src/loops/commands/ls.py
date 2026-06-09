@@ -201,7 +201,7 @@ def fetch_declarations(
     from lang.population import (
         resolve_vertex,
     )
-    from loops.commands.resolve import loops_home
+    from loops.commands.resolve import _resolve_vertex_for_dispatch, loops_home
 
     # Normalise narrowing inputs — legacy filter_ wins when it's the only one set.
     if filters is None and filter_ is not None:
@@ -218,10 +218,12 @@ def fetch_declarations(
     else:
         vertex_ref, qualifier = target, None
 
-    vertex_path = resolve_vertex(vertex_ref, loops_home())
-    if not vertex_path.exists():
+    # Local-first — same resolution the verbs use (thread:global-local-walk-broken).
+    vertex_path = _resolve_vertex_for_dispatch(vertex_ref)
+    if vertex_path is None:
+        missing = resolve_vertex(vertex_ref, loops_home())
         return {
-            "error": f"vertex not found: {vertex_path}",
+            "error": f"vertex not found: {missing}",
             "vertex_name": vertex_ref,
             "filter": legacy_filter,
             "filters": filters,

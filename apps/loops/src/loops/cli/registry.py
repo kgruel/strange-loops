@@ -119,6 +119,7 @@ VERBS: dict[str, View] = {
     "close": _legacy_view("_run_close"),
     "sync": _legacy_view("_run_sync", takes_observer=False),
     "cite": _view("loops.cli.views.cite"),
+    "seal": _view("loops.cli.views.seal"),
     "store": _view("loops.cli.views.store"),
 }
 
@@ -158,7 +159,7 @@ POPULATION_OPS: dict[str, View] = {
 # vertex name is reconstructed into argv by the dispatcher (ls/add/rm/
 # export), so they go through their _argv_only counterparts.
 VERTEX_OPS: frozenset[str] = frozenset({
-    "read", "emit", "close", "sync", "cite", "store",
+    "read", "emit", "close", "sync", "cite", "seal", "store",
     "ls", "add", "rm", "export",
 })
 

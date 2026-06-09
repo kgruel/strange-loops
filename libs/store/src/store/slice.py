@@ -73,16 +73,28 @@ def slice_store(
         where, params = _build_where(since=since, before=before, kinds=kinds,
                                      observers=observers, origins=origins)
 
-        # Copy facts
-        fact_sql = f"INSERT INTO slice.facts SELECT * FROM facts{where}"
+        # Copy facts — explicit columns (SELECT * couples to schema width)
+        fact_sql = (
+            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload) "
+            f"SELECT id, kind, ts, observer, origin, payload FROM facts{where}"
+        )
         conn.execute(fact_sql, params)
         fact_count = conn.execute(
             f"SELECT COUNT(*) FROM slice.facts"
         ).fetchone()[0]
 
-        # Copy ticks — filtered by time range only (kinds/observers don't apply)
+        # Copy ticks — filtered by time range only (kinds/observers don't apply).
+        # Chain columns (prev_hash/window_start/fact_cursor/window_hash) are
+        # deliberately NOT copied: a slice is a new custody context, and the
+        # source's window commitments reference facts that may be outside the
+        # slice — copying them would produce false tamper alarms. Sliced ticks
+        # land as pre-chain rows; the target starts its own chain on first
+        # append_tick. Same semantics as merge (explicit-column INSERT).
         tick_where, tick_params = _build_where(since=since, before=before)
-        tick_sql = f"INSERT INTO slice.ticks SELECT * FROM ticks{tick_where}"
+        tick_sql = (
+            "INSERT INTO slice.ticks (id, name, ts, since, origin, payload) "
+            f"SELECT id, name, ts, since, origin, payload FROM ticks{tick_where}"
+        )
         conn.execute(tick_sql, tick_params)
         tick_count = conn.execute(
             f"SELECT COUNT(*) FROM slice.ticks"

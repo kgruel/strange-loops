@@ -30,12 +30,16 @@ CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
 CREATE INDEX IF NOT EXISTS idx_facts_ts   ON facts(ts);
 
 CREATE TABLE IF NOT EXISTS ticks (
-    id       TEXT NOT NULL PRIMARY KEY,
-    name     TEXT NOT NULL,
-    ts       REAL NOT NULL,
-    since    REAL,
-    origin   TEXT NOT NULL,
-    payload  TEXT NOT NULL CHECK (json_valid(payload))
+    id           TEXT NOT NULL PRIMARY KEY,
+    name         TEXT NOT NULL,
+    ts           REAL NOT NULL,
+    since        REAL,
+    origin       TEXT NOT NULL,
+    payload      TEXT NOT NULL CHECK (json_valid(payload)),
+    prev_hash    TEXT,
+    window_start TEXT,
+    fact_cursor  TEXT,
+    window_hash  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name);
 CREATE INDEX IF NOT EXISTS idx_ticks_ts   ON ticks(ts);

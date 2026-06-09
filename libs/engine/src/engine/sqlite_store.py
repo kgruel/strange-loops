@@ -20,6 +20,7 @@ project decision architecture/id-primitive-python-ulid.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 
@@ -40,6 +41,60 @@ def gen_id() -> str:
     suffixes). Pure Python — no C extension, no dlopen cost.
     """
     return str(ULID())
+
+
+# --- Tick hash chain -------------------------------------------------------
+#
+# The chain is a STORE-LAYER property, not a Tick-atom property (project
+# decision design/tick-chain-at-store-layer). Each persisted tick row commits
+# to (a) the previous tick row via prev_hash and (b) the fact window
+# (window_start, fact_cursor] via window_hash — making both the tick sequence
+# and the fact stream tamper-evident under verification. The Tick dataclass
+# stays pure; merged/transported stores start fresh chains (new custody
+# context). Rows written before the chain existed keep NULL chain columns —
+# a visible pre-chain era, never retro-claimed.
+
+_CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+
+_TICK_ROW_SQL = (
+    "id, name, ts, since, origin, payload, "
+    "prev_hash, window_start, fact_cursor, window_hash"
+)
+
+
+def _canonical_bytes(obj: object) -> bytes:
+    """Deterministic encoding for chain hashing: sorted keys, compact separators.
+
+    Deliberately NOT RFC 8785 (JCS): chain integrity needs determinism within
+    this implementation, not cross-implementation interop. Stored payload TEXT
+    is embedded verbatim as a string value, so hashes detect byte-level
+    tampering without float/unicode re-serialization concerns. If a
+    federation-facing consumer ever needs interop hashing, upgrade here and
+    re-anchor the chain — the JCS pin (RFC 8785) belongs to the manifest
+    layer, not this one.
+    """
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _tick_row_hash(row: tuple) -> str:
+    """Hash one persisted tick row (column order: _TICK_ROW_SQL)."""
+    envelope = {
+        "id": row[0], "name": row[1], "ts": row[2], "since": row[3],
+        "origin": row[4], "payload": row[5], "prev_hash": row[6],
+        "window_start": row[7], "fact_cursor": row[8], "window_hash": row[9],
+    }
+    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+
+
+def _fact_row_hash(row: tuple) -> str:
+    """Hash one persisted fact row: (id, kind, ts, observer, origin, payload)."""
+    envelope = {
+        "id": row[0], "kind": row[1], "ts": row[2],
+        "observer": row[3], "origin": row[4], "payload": row[5],
+    }
+    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+
+
 from datetime import datetime, timezone as _tz
 
 _UTC = _tz.utc
@@ -75,12 +130,16 @@ _SCHEMA_STMTS = (
     "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
     "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
     """CREATE TABLE IF NOT EXISTS ticks (
-        id       TEXT NOT NULL PRIMARY KEY,
-        name     TEXT NOT NULL,
-        ts       REAL NOT NULL,
-        since    REAL,
-        origin   TEXT NOT NULL,
-        payload  TEXT NOT NULL CHECK (json_valid(payload))
+        id           TEXT NOT NULL PRIMARY KEY,
+        name         TEXT NOT NULL,
+        ts           REAL NOT NULL,
+        since        REAL,
+        origin       TEXT NOT NULL,
+        payload      TEXT NOT NULL CHECK (json_valid(payload)),
+        prev_hash    TEXT,
+        window_start TEXT,
+        fact_cursor  TEXT,
+        window_hash  TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
     "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
@@ -113,6 +172,7 @@ class SqliteStore(Generic[T]):
             is_new = True
             self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
+        self._chain_ready = is_new  # new DBs get chain columns in schema
         if is_new:
             # New DB — set WAL (persistent) and synchronous, create schema
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -260,16 +320,157 @@ class SqliteStore(Generic[T]):
         row = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()
         return row[0]
 
+    def _ensure_chain_columns(self) -> None:
+        """Idempotent migration: add chain columns to a pre-chain ticks table.
+
+        Existing rows keep NULL chain columns — the pre-chain era stays
+        visible as an era (same posture as the uuid4 id wedge: historical
+        fact, not retroactively rewritten).
+        """
+        if self._chain_ready:
+            return
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        for col in _CHAIN_COLUMNS:
+            if col not in cols:
+                self._conn.execute(f"ALTER TABLE ticks ADD COLUMN {col} TEXT")
+        self._conn.commit()
+        self._chain_ready = True
+
+    def _window_hash(self, start: str, end: str) -> str:
+        """Hash the fact window (start, end] by id order (ULID = time order)."""
+        h = hashlib.sha256()
+        for row in self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            "WHERE id > ? AND id <= ? ORDER BY id",
+            (start, end),
+        ):
+            h.update(_fact_row_hash(row).encode())
+        return h.hexdigest()
+
     def append_tick(self, tick: Tick) -> None:
-        """Append a tick to the ticks table."""
+        """Append a tick to the ticks table, extending the hash chain.
+
+        Chain semantics (see design/tick-chain-at-store-layer):
+        - prev_hash: sha256 of the previous tick row (any era) — None for
+          the first row in the store.
+        - window bounds are explicit fact ULIDs, not timestamps:
+          - first tick in a new store: window_start "" (covers all facts);
+          - first chained tick after pre-chain rows: window_start =
+            current max fact id (epoch marker — claims no coverage of
+            history it cannot vouch for);
+          - otherwise: window_start = previous tick's fact_cursor.
+        - window_hash commits to every fact row in (window_start, fact_cursor].
+        """
         self._ensure_sync()
+        self._ensure_chain_columns()
         d = tick.to_dict()
+        payload_text = json.dumps(d["payload"], default=_mapping_proxy_default)
+
+        prev_row = self._conn.execute(
+            f"SELECT {_TICK_ROW_SQL} FROM ticks ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        prev_hash = _tick_row_hash(prev_row) if prev_row is not None else None
+
+        max_row = self._conn.execute("SELECT MAX(id) FROM facts").fetchone()
+        fact_cursor = max_row[0] or ""
+        if prev_row is None:
+            window_start = ""  # new store: cover everything emitted so far
+        elif prev_row[9] is None:
+            window_start = fact_cursor  # pre-chain predecessor: epoch marker
+        else:
+            window_start = prev_row[8]
+        window_hash = self._window_hash(window_start, fact_cursor)
+
         self._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (gen_id(), d["name"], d["ts"], d["since"], d["origin"],
-             json.dumps(d["payload"], default=_mapping_proxy_default)),
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
+            "prev_hash, window_start, fact_cursor, window_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (gen_id(), d["name"], d["ts"], d["since"], d["origin"], payload_text,
+             prev_hash, window_start, fact_cursor, window_hash),
         )
         self._conn.commit()
+
+    def verify_chain(self, *, max_breaks: int = 10) -> dict[str, Any]:
+        """Verify the tick hash chain and fact-window commitments.
+
+        Walks ticks in append order recomputing prev_hash linkage,
+        window_start continuity, and window_hash contents. Any modified,
+        deleted, or inserted fact inside a covered window breaks
+        verification; facts emitted after the last tick are the uncovered
+        live edge (reported, not an error).
+
+        KNOWN SCOPE BOUNDARY: the chain head (the newest tick row) is not
+        self-verifying — its own payload/window columns could be rewritten
+        together without detection, since prev_hash only protects rows that
+        have a successor. Anchoring the head requires a signature or an
+        externally published head hash; that is delta 2 of the provenance
+        arc (tick-signing), deliberately out of scope here.
+
+        Returns a report dict:
+            ok              True when no breaks found
+            ticks           total tick rows
+            chained         rows carrying chain commitments
+            legacy          pre-chain rows (NULL chain columns)
+            covered_facts   facts inside verified windows
+            uncovered_facts facts outside any chained window
+            breaks          list of {tick, name, reason} (capped at max_breaks)
+            truncated       True if the walk stopped at max_breaks
+        """
+        self._ensure_chain_columns()
+        rows = self._conn.execute(
+            f"SELECT {_TICK_ROW_SQL} FROM ticks ORDER BY rowid"
+        ).fetchall()
+
+        breaks: list[dict[str, str]] = []
+        legacy = chained = 0
+        prev_row = None
+        last_cursor: str | None = None   # previous chained tick's fact_cursor
+        first_start: str | None = None   # first chained tick's window_start
+        truncated = False
+
+        for row in rows:
+            if row[9] is None:  # window_hash NULL = pre-chain era
+                legacy += 1
+                prev_row = row
+                continue
+            chained += 1
+            expected_prev = _tick_row_hash(prev_row) if prev_row is not None else None
+            if row[6] != expected_prev:
+                breaks.append({"tick": row[0], "name": row[1],
+                               "reason": "prev_hash mismatch — tick sequence altered"})
+            if last_cursor is not None and row[7] != last_cursor:
+                breaks.append({"tick": row[0], "name": row[1],
+                               "reason": "window_start does not continue previous "
+                                         "fact_cursor — coverage gap"})
+            if self._window_hash(row[7], row[8]) != row[9]:
+                breaks.append({"tick": row[0], "name": row[1],
+                               "reason": "window_hash mismatch — facts in window altered"})
+            if first_start is None:
+                first_start = row[7]
+            last_cursor = row[8]
+            prev_row = row
+            if len(breaks) >= max_breaks:
+                truncated = True
+                break
+
+        covered = 0
+        if first_start is not None and last_cursor:
+            covered = self._conn.execute(
+                "SELECT COUNT(*) FROM facts WHERE id > ? AND id <= ?",
+                (first_start, last_cursor),
+            ).fetchone()[0]
+        total_facts = self.total
+
+        return {
+            "ok": not breaks,
+            "ticks": len(rows),
+            "chained": chained,
+            "legacy": legacy,
+            "covered_facts": covered,
+            "uncovered_facts": total_facts - covered,
+            "breaks": breaks,
+            "truncated": truncated,
+        }
 
     def ticks_since(self, cursor: int) -> list[Tick]:
         """Return ticks with rowid > cursor."""

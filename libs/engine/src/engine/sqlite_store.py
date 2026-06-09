@@ -54,6 +54,20 @@ def gen_id() -> str:
 # context). Rows written before the chain existed keep NULL chain columns —
 # a visible pre-chain era, never retro-claimed.
 #
+# ORDERING AUTHORITY (observation design/event-order-vs-witness-order): window
+# cursors are fact IDS (portable handles), but window MEMBERSHIP and hashing
+# follow APPEND ORDER (rowid) — never id order. The chain's claim is receipt-
+# integrity ("this store received these facts and nothing changed after
+# sealing"), not chronology. Two reasons id order is the wrong authority here:
+# (1) mixed-id-era stores — uuid4-era ids (2026-03-15..05-16) sort above every
+# ULID, so MAX(id) pins to a mid-history fact forever and every window minted
+# after is empty (friction chain-cursor-assumes-ulid-order); (2) late arrival —
+# a backfilled/synced fact honestly carrying an old event timestamp would land
+# INSIDE a sealed id-window and raise a false tamper alarm, where in witness
+# order it lands on the live edge and the next tick seals it as received-now.
+# Event order (ULID, fact.ts) remains the READ path's order; the two orders
+# answer different questions and neither substitutes for the other.
+#
 # Delta 2 (design/tick-signature-on-every-tick): each tick row may carry an
 # Ed25519 signature over its COMMITMENT hash (the 10 chain fields). Signing
 # is injected, never imported — the store takes an optional signer callable
@@ -389,13 +403,40 @@ class SqliteStore(Generic[T]):
         self._conn.commit()
         self._chain_ready = True
 
+    def _cursor_rowid(self, fact_id: str) -> int | None:
+        """Resolve a window cursor (fact id) to its rowid — witness order.
+
+        "" (start-of-store / empty-store sentinel) resolves to 0, before the
+        first rowid. A cursor whose fact no longer exists resolves to None:
+        the window is unresolvable and hashes as empty — any non-empty
+        commitment over it then mismatches. (Deleting a cursor fact that was
+        itself inside a covered window already breaks THAT window's hash.)
+        """
+        if fact_id == "":
+            return 0
+        row = self._conn.execute(
+            "SELECT rowid FROM facts WHERE id = ?", (fact_id,)
+        ).fetchone()
+        return row[0] if row else None
+
     def _window_hash(self, start: str, end: str) -> str:
-        """Hash the fact window (start, end] by id order (ULID = time order)."""
+        """Hash the fact window (start, end] in witness order (rowid).
+
+        Cursors are fact ids; ordering and membership are append order — see
+        the ORDERING AUTHORITY note in the chain comment block. Id order is
+        not append order in mixed-id-era stores, and a late-arriving fact
+        with an old event-time id must not retroactively enter a sealed
+        window.
+        """
         h = hashlib.sha256()
+        lo = self._cursor_rowid(start)
+        hi = self._cursor_rowid(end)
+        if lo is None or hi is None:
+            return h.hexdigest()  # unresolvable cursor → empty commitment
         for row in self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            "WHERE id > ? AND id <= ? ORDER BY id",
-            (start, end),
+            "WHERE rowid > ? AND rowid <= ? ORDER BY rowid",
+            (lo, hi),
         ):
             h.update(_fact_row_hash(row).encode())
         return h.hexdigest()
@@ -406,10 +447,12 @@ class SqliteStore(Generic[T]):
         Chain semantics (see design/tick-chain-at-store-layer):
         - prev_hash: sha256 of the previous tick row (any era) — None for
           the first row in the store.
-        - window bounds are explicit fact ULIDs, not timestamps:
+        - window bounds are explicit fact ids; membership and ordering are
+          APPEND ORDER (rowid), never id order — the cursor is the id of the
+          newest fact BY ROWID, not MAX(id) (see ORDERING AUTHORITY above):
           - first tick in a new store: window_start "" (covers all facts);
           - first chained tick after pre-chain rows: window_start =
-            current max fact id (epoch marker — claims no coverage of
+            current append edge (epoch marker — claims no coverage of
             history it cannot vouch for);
           - otherwise: window_start = previous tick's fact_cursor.
         - window_hash commits to every fact row in (window_start, fact_cursor].
@@ -426,8 +469,10 @@ class SqliteStore(Generic[T]):
         ).fetchone()
         prev_hash = _tick_row_hash(prev_row) if prev_row is not None else None
 
-        max_row = self._conn.execute("SELECT MAX(id) FROM facts").fetchone()
-        fact_cursor = max_row[0] or ""
+        edge_row = self._conn.execute(
+            "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        fact_cursor = edge_row[0] if edge_row else ""
         if prev_row is None:
             window_start = ""  # new store: cover everything emitted so far
         elif prev_row[9] is None:
@@ -461,9 +506,16 @@ class SqliteStore(Generic[T]):
 
         Walks ticks in append order recomputing prev_hash linkage,
         window_start continuity, and window_hash contents. Any modified,
-        deleted, or inserted fact inside a covered window breaks
+        deleted, or displaced fact inside a covered window breaks
         verification; facts emitted after the last tick are the uncovered
         live edge (reported, not an error).
+
+        Windows are WITNESS-ORDER (rowid) ranges — see ORDERING AUTHORITY
+        in the chain comment block. A late-arriving fact carrying an old
+        event timestamp (backfill, peer sync) lands on the live edge and is
+        sealed by the next tick as received-now: honest history, not a
+        break. The chain attests receipt order; event order is the read
+        path's concern.
 
         Signatures (delta 2): ``verifier`` is an injected callable
         (signature str, commitment digest str) -> bool — apps/loops composes
@@ -568,10 +620,13 @@ class SqliteStore(Generic[T]):
 
         covered = 0
         if first_start is not None and last_cursor:
-            covered = self._conn.execute(
-                "SELECT COUNT(*) FROM facts WHERE id > ? AND id <= ?",
-                (first_start, last_cursor),
-            ).fetchone()[0]
+            lo = self._cursor_rowid(first_start)
+            hi = self._cursor_rowid(last_cursor)
+            if lo is not None and hi is not None:
+                covered = self._conn.execute(
+                    "SELECT COUNT(*) FROM facts WHERE rowid > ? AND rowid <= ?",
+                    (lo, hi),
+                ).fetchone()[0]
         total_facts = self.total
 
         return {

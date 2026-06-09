@@ -1,7 +1,9 @@
 """Tick hash chain — tamper-evidence at the store layer.
 
-Covers design/tick-chain-at-store-layer: prev_hash linkage, explicit
-id-based fact windows, window_hash commitments, pre-chain era migration.
+Covers design/tick-chain-at-store-layer: prev_hash linkage, fact windows
+(id cursors, witness-order/rowid membership — see ORDERING AUTHORITY in
+sqlite_store and observation design/event-order-vs-witness-order),
+window_hash commitments, pre-chain era migration.
 
 Delta 2 (design/tick-signature-on-every-tick,
 design/tick-signature-in-chain-envelope): injected tick signing flips the
@@ -161,17 +163,47 @@ class TestTamperDetection:
         assert report["ok"] is False
         assert any("window_hash" in b["reason"] for b in report["breaks"])
 
-    def test_inserted_fact_breaks_window(self, tmp_db: Path):
+    def test_displaced_fact_breaks_window(self, tmp_db: Path):
+        """Windows are witness-order (rowid) ranges — moving a covered row
+        out of its sealed range changes window content: break. Append-only
+        leaves no rowid gaps, so wedging a row INTO a sealed window requires
+        displacing one — equally detected."""
         store = make_store(tmp_db)
-        emit(store, 2)
+        ids = emit(store, 3)
         tick(store)
 
-        # "0"*26 sorts before any real ULID — lands inside the first window
-        store.append(Fact.of("note", "intruder", body="backdated"), id_override="0" * 26)
+        store._conn.execute(
+            "UPDATE facts SET rowid = 1000 WHERE id = ?", (ids[1],)
+        )
+        store._conn.commit()
 
         report = store.verify_chain()
         assert report["ok"] is False
         assert any("window_hash" in b["reason"] for b in report["breaks"])
+
+    def test_backdated_arrival_is_live_edge_not_break(self, tmp_db: Path):
+        """DELIBERATE semantics flip from the id-window era (which pinned
+        this exact insert as a break): a fact arriving with an old
+        event-time id (backfill, peer sync) is honest history received
+        now — it lands on the live edge in witness order and the next tick
+        seals it. A false tamper alarm caused by truthfulness is the bug,
+        not the arrival (design/event-order-vs-witness-order)."""
+        store = make_store(tmp_db)
+        emit(store, 2)
+        tick(store)
+
+        # "0"*26 sorts before any real ULID — old event time, received now
+        store.append(Fact.of("note", "syncer", body="backfilled"), id_override="0" * 26)
+
+        report = store.verify_chain()
+        assert report["ok"] is True
+        assert report["covered_facts"] == 2
+        assert report["uncovered_facts"] == 1  # live edge, awaiting next seal
+
+        tick(store)
+        report = store.verify_chain()
+        assert report["ok"] is True
+        assert report["covered_facts"] == 3  # sealed as received-now
 
     def test_modified_tick_breaks_successor_link(self, tmp_db: Path):
         store = make_store(tmp_db)
@@ -363,6 +395,78 @@ class TestTickSignatures:
         report = store.verify_chain(verifier=fake_verifier())
         assert report["ok"] is True  # documented gap, not a regression
         assert report["signed"] == 0
+
+
+class TestMixedIdEras:
+    """Regression: friction chain-cursor-assumes-ulid-order.
+
+    Stores carrying uuid4-era facts (2026-03-15..05-16) violate
+    id-order == append-order: lowercase-hex uuid4 ids sort above every
+    ULID, so MAX(id) pins to a mid-history uuid4 forever and every window
+    minted after it is empty — chain intact but vacuous. Witness order
+    (rowid) is immune to id-era mixing by construction.
+    """
+
+    UUID4_IDS = (
+        "ffecb74d-8474-4de3-97ed-287849461877",  # the actual production pin
+        "a1b2c3d4-0000-4000-8000-000000000001",
+    )
+
+    def mixed_store(self, path: Path) -> SqliteStore[Fact]:
+        """uuid4-era facts first, then ULID-era facts — production shape."""
+        store = make_store(path)
+        for uid in self.UUID4_IDS:
+            store.append(Fact.of("note", "tester", body="uuid4-era"), id_override=uid)
+        emit(store, 2)  # ULID era
+        return store
+
+    def test_cursor_is_append_edge_not_lexicographic_max(self, tmp_db: Path):
+        store = self.mixed_store(tmp_db)
+        tick(store)
+
+        cursor = store._conn.execute(
+            "SELECT fact_cursor FROM ticks"
+        ).fetchone()[0]
+        edge = store._conn.execute(
+            "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()[0]
+        assert cursor == edge          # newest by rowid (a ULID)
+        assert cursor not in self.UUID4_IDS  # NOT MAX(id)
+
+    def test_coverage_accrues_in_mixed_store(self, tmp_db: Path):
+        """Under MAX(id) cursors this store sealed empty windows forever
+        (covered 0 in perpetuity); under witness order coverage accrues."""
+        store = self.mixed_store(tmp_db)
+        tick(store)   # new store: window_start "" covers all 4
+        emit(store, 2)
+        tick(store)   # covers the 2 new ULID facts
+
+        report = store.verify_chain()
+        assert report["ok"] is True
+        assert report["covered_facts"] == 6
+        assert report["uncovered_facts"] == 0
+
+    def test_epoch_after_legacy_in_mixed_store(self, tmp_db: Path):
+        """The exact production shape: legacy ticks + uuid4-era facts, then
+        the chain epoch. The epoch tick must anchor at the true append edge
+        so coverage begins at the NEXT tick instead of never."""
+        make_legacy_db(tmp_db)
+        store = make_store(tmp_db)
+        for uid in self.UUID4_IDS:
+            store.append(Fact.of("note", "tester", body="uuid4-era"), id_override=uid)
+        emit(store, 2)
+        tick(store)   # epoch marker: empty window at the append edge
+        emit(store, 3)
+        tick(store)   # first covering tick
+
+        report = store.verify_chain()
+        assert report["ok"] is True
+        assert report["legacy"] == 1
+        assert report["chained"] == 2
+        assert report["covered_facts"] == 3   # exactly the post-epoch facts
+        # pre-epoch history (legacy fact + uuid4 era + pre-epoch ULIDs)
+        # stays honestly uncovered: 1 + 2 + 2
+        assert report["uncovered_facts"] == 5
 
 
 LEGACY_SCHEMA = (

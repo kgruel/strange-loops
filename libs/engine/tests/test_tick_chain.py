@@ -1,12 +1,18 @@
 """Tick hash chain — tamper-evidence at the store layer.
 
 Covers design/tick-chain-at-store-layer: prev_hash linkage, explicit
-id-based fact windows, window_hash commitments, pre-chain era migration,
-and the documented chain-head scope boundary.
+id-based fact windows, window_hash commitments, pre-chain era migration.
+
+Delta 2 (design/tick-signature-on-every-tick,
+design/tick-signature-in-chain-envelope): injected tick signing flips the
+old chain-head boundary — a signed head is self-verifying. Signing here
+uses fake callables; engine's contract is the callable, not the algorithm
+(real Ed25519 composition is exercised at the apps/loops layer).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -16,7 +22,7 @@ import pytest
 from atoms import Fact
 
 from engine import Tick
-from engine.sqlite_store import SqliteStore
+from engine.sqlite_store import SqliteStore, _tick_row_hash
 
 
 @pytest.fixture
@@ -26,6 +32,30 @@ def tmp_db(tmp_path: Path) -> Path:
 
 def make_store(path: Path) -> SqliteStore[Fact]:
     return SqliteStore(path=path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict)
+
+
+def fake_signer(secret: str = "k1"):
+    """Deterministic stand-in for the injected signer callable."""
+    def signer(digest: str) -> str:
+        return hashlib.sha256(f"{secret}:{digest}".encode()).hexdigest()
+    return signer
+
+
+def fake_verifier(secret: str = "k1"):
+    """Verifier counterpart of fake_signer — same (sig, digest) contract."""
+    expected = fake_signer(secret)
+    def verifier(signature: str, digest: str) -> bool:
+        return signature == expected(digest)
+    return verifier
+
+
+def make_signed_store(path: Path, secret: str = "k1") -> SqliteStore[Fact]:
+    return SqliteStore(
+        path=path,
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+        tick_signer=fake_signer(secret),
+    )
 
 
 def emit(store: SqliteStore[Fact], n: int, *, kind: str = "note") -> list[str]:
@@ -173,12 +203,12 @@ class TestTamperDetection:
         report = store.verify_chain()
         assert report["ok"] is False
 
-    def test_chain_head_unanchored_documented_boundary(self, tmp_db: Path):
-        """The newest tick row is NOT self-verifying — known delta-1 scope.
+    def test_unsigned_chain_head_unanchored_documented_boundary(self, tmp_db: Path):
+        """An UNSIGNED head is not self-verifying — pre-signature era posture.
 
-        An attacker rewriting the head row's payload escapes detection
-        because prev_hash only protects rows with a successor. This test
-        pins the boundary so delta 2 (tick-signing) flips it deliberately.
+        Delta 1 pinned this for all stores; delta 2 flips it for signed
+        stores (see TestTickSignatures.test_tampered_head_detected_when_signed).
+        It remains the honest boundary of the unsigned era.
         """
         store = make_store(tmp_db)
         emit(store, 1)
@@ -191,7 +221,148 @@ class TestTamperDetection:
         store._conn.commit()
 
         report = store.verify_chain()
+        assert report["ok"] is True  # documented gap of the unsigned era
+
+
+class TestTickSignatures:
+    def test_signed_store_verifies(self, tmp_db: Path):
+        store = make_signed_store(tmp_db)
+        emit(store, 2)
+        tick(store, "first")
+        emit(store, 1)
+        tick(store, "second")
+
+        report = store.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is True
+        assert report["chained"] == 2
+        assert report["signed"] == 2
+        assert report["sig_checked"] is True
+
+    def test_tampered_head_detected_when_signed(self, tmp_db: Path):
+        """Delta 2 flips the delta-1 head boundary: a signed head IS
+        self-verifying — rewriting its payload invalidates the signature."""
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store, "only")
+
+        store._conn.execute(
+            "UPDATE ticks SET payload = ? WHERE name = ?",
+            (json.dumps({"n": 999}), "only"),
+        )
+        store._conn.commit()
+
+        report = store.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is False
+        assert any("signature invalid" in b["reason"] for b in report["breaks"])
+
+    def test_wrong_key_detected(self, tmp_db: Path):
+        store = make_signed_store(tmp_db, secret="k1")
+        emit(store, 1)
+        tick(store)
+
+        report = store.verify_chain(verifier=fake_verifier("k2"))
+        assert report["ok"] is False
+        assert any("signature invalid" in b["reason"] for b in report["breaks"])
+
+    def test_stripped_signature_breaks_successor_link(self, tmp_db: Path):
+        """The successor's prev_hash commits to the signature
+        (design/tick-signature-in-chain-envelope): stripping a signed row's
+        signature is detected WITHOUT any verifier."""
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store, "first")
+        emit(store, 1)
+        tick(store, "second")
+
+        store._conn.execute(
+            "UPDATE ticks SET signature = NULL WHERE name = ?", ("first",)
+        )
+        store._conn.commit()
+
+        report = store.verify_chain()  # no verifier — structural check
+        assert report["ok"] is False
+        assert any("prev_hash" in b["reason"] for b in report["breaks"])
+
+    def test_stripped_head_signature_is_era_regression(self, tmp_db: Path):
+        """The head has no successor to protect it, but signature
+        era-monotonicity catches the strip: unsigned-after-signed = break,
+        verifier or not."""
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store, "first")
+        emit(store, 1)
+        tick(store, "second")
+
+        store._conn.execute(
+            "UPDATE ticks SET signature = NULL WHERE name = ?", ("second",)
+        )
+        store._conn.commit()
+
+        report = store.verify_chain()  # no verifier — structural check
+        assert report["ok"] is False
+        assert any("unsigned tick after signed era" in b["reason"]
+                   for b in report["breaks"])
+
+    def test_signing_era_can_begin_mid_chain(self, tmp_db: Path):
+        """Unsigned ticks BEFORE the signing era are honest history, not
+        breaks — same posture as the pre-chain era."""
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store, "pre-signing")
+        store.close()
+
+        signed = make_signed_store(tmp_db)
+        emit(signed, 1)
+        tick(signed, "signed")
+
+        report = signed.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is True
+        assert report["chained"] == 2
+        assert report["signed"] == 1
+
+    def test_verify_without_verifier_counts_but_does_not_check(self, tmp_db: Path):
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+
+        report = store.verify_chain()
+        assert report["ok"] is True
+        assert report["signed"] == 1
+        assert report["sig_checked"] is False
+
+    def test_total_strip_renders_as_unsigned_documented_boundary(self, tmp_db: Path):
+        """KNOWN SCOPE BOUNDARY (delta 2): a forger who strips EVERY
+        signature and recomputes every prev_hash forward produces a store
+        indistinguishable from honest unsigned history. A self-contained
+        chain cannot detect a total rewrite — the anchor is the key
+        registry in the .vertex (declared key + zero signed ticks = CLI
+        tripwire) and, in a later delta, external witnessing. This test
+        pins the boundary so that delta flips it deliberately.
+        """
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store, "first")
+        emit(store, 1)
+        tick(store, "second")
+
+        rows = store._conn.execute(
+            "SELECT id, name, ts, since, origin, payload, prev_hash, "
+            "window_start, fact_cursor, window_hash, signature "
+            "FROM ticks ORDER BY rowid"
+        ).fetchall()
+        prev: tuple | None = None
+        for row in rows:
+            new_prev = _tick_row_hash(prev) if prev is not None else None
+            store._conn.execute(
+                "UPDATE ticks SET signature = NULL, prev_hash = ? WHERE id = ?",
+                (new_prev, row[0]),
+            )
+            prev = (*row[:6], new_prev, *row[7:10], None)
+        store._conn.commit()
+
+        report = store.verify_chain(verifier=fake_verifier())
         assert report["ok"] is True  # documented gap, not a regression
+        assert report["signed"] == 0
 
 
 LEGACY_SCHEMA = (
@@ -279,3 +450,20 @@ class TestPreChainMigration:
         # verify must NOT migrate schema — that's the write path's job
         cols = {r[1] for r in store._conn.execute("PRAGMA table_info(ticks)")}
         assert "window_hash" not in cols
+
+    def test_delta1_db_without_signature_column_verifies_read_only(self, tmp_db: Path):
+        """A delta-1 store (chain columns, no signature column) verifies
+        as-is: rows normalize to unsigned, and verify never ALTERs."""
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+        store._conn.execute("ALTER TABLE ticks DROP COLUMN signature")
+        store._conn.commit()
+
+        report = store.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is True
+        assert report["chained"] == 1
+        assert report["signed"] == 0
+
+        cols = {r[1] for r in store._conn.execute("PRAGMA table_info(ticks)")}
+        assert "signature" not in cols

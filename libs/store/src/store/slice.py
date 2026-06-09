@@ -84,7 +84,8 @@ def slice_store(
         ).fetchone()[0]
 
         # Copy ticks — filtered by time range only (kinds/observers don't apply).
-        # Chain columns (prev_hash/window_start/fact_cursor/window_hash) are
+        # Chain columns (prev_hash/window_start/fact_cursor/window_hash) and
+        # the delta-2 signature column are
         # deliberately NOT copied: a slice is a new custody context, and the
         # source's window commitments reference facts that may be outside the
         # slice — copying them would produce false tamper alarms. Sliced ticks

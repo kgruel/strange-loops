@@ -52,6 +52,26 @@ element; the shape anticipates key rotation.
 `audience` is a required `str`. Use the self-verify path with
 `keystore.public_keys()` or the remote-verify path with `jwks.parse(fetched_doc)`.
 
+### `sign.ed25519` (namespaced-only: `from sign import ed25519`)
+
+Detached digest signatures with mandatory domain separation — the loops
+provenance-arc primitive (tick signing, delta 2). Deterministic Ed25519
+(RFC 8032). Not re-exported flat: names mirror `sign.keys` by design.
+
+- `Keypair(private, public)` — frozen; `.public_b64` is the raw-32-byte
+  base64 wire/registry format (44 chars, inline-able in declarations).
+- `load_or_generate(dir)` — `ed25519.key` (PKCS8 PEM, 0600) +
+  `ed25519.pub` (the base64 registry string verbatim).
+- `sign(keypair, digest, *, domain) -> str` — base64 signature over
+  `domain + b":" + digest`. Empty domain raises.
+- `verify(public, signature_b64, digest, *, domain) -> bool` — False on any
+  verification failure (bad base64, wrong key/domain/digest), never raises
+  for those.
+- `public_key_b64` / `public_key_from_b64` — registry format conversions.
+
+The domain constant (e.g. `loops-tick-v1`) belongs to the composing layer,
+not this library.
+
 ### `sign.jwks`
 
 - `build_document(keystore) -> dict` — JWKS document per RFC 7517.

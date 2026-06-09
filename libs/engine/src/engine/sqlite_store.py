@@ -53,10 +53,31 @@ def gen_id() -> str:
 # stays pure; merged/transported stores start fresh chains (new custody
 # context). Rows written before the chain existed keep NULL chain columns —
 # a visible pre-chain era, never retro-claimed.
+#
+# Delta 2 (design/tick-signature-on-every-tick): each tick row may carry an
+# Ed25519 signature over its COMMITMENT hash (the 10 chain fields). Signing
+# is injected, never imported — the store takes an optional signer callable
+# (digest str -> signature str); verify_chain takes an optional verifier
+# (signature str, digest str -> bool). apps/loops composes both with
+# libs/sign. Pre-signature rows keep NULL — a visible era, same posture as
+# the pre-chain era. The successor's prev_hash commits to the signature
+# (design/tick-signature-in-chain-envelope): the row-IDENTITY hash is
+# era-aware (includes the signature key only when non-NULL), so stripping a
+# signature breaks the successor's link and a forger must rewrite the whole
+# chain ahead — at which point only the registry outside the store (and
+# external witnessing, a later delta) anchors the truth.
 
-_CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+_CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
+                  "signature")
 
 _TICK_ROW_SQL = (
+    "id, name, ts, since, origin, payload, "
+    "prev_hash, window_start, fact_cursor, window_hash, signature"
+)
+
+# Delta-1 column set — used by the read-only verify path against stores that
+# predate the signature column (verify never migrates schema).
+_TICK_ROW_SQL_V1 = (
     "id, name, ts, since, origin, payload, "
     "prev_hash, window_start, fact_cursor, window_hash"
 )
@@ -76,13 +97,36 @@ def _canonical_bytes(obj: object) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
 
 
-def _tick_row_hash(row: tuple) -> str:
-    """Hash one persisted tick row (column order: _TICK_ROW_SQL)."""
-    envelope = {
+def _tick_envelope(row: tuple) -> dict:
+    """The 10 commitment fields of a tick row (column order: _TICK_ROW_SQL)."""
+    return {
         "id": row[0], "name": row[1], "ts": row[2], "since": row[3],
         "origin": row[4], "payload": row[5], "prev_hash": row[6],
         "window_start": row[7], "fact_cursor": row[8], "window_hash": row[9],
     }
+
+
+def _tick_commitment_hash(row: tuple) -> str:
+    """Hash the commitment fields — what the signer signs.
+
+    Never includes the signature (sign-the-content; a signature cannot
+    sign itself).
+    """
+    return hashlib.sha256(_canonical_bytes(_tick_envelope(row))).hexdigest()
+
+
+def _tick_row_hash(row: tuple) -> str:
+    """Era-aware identity hash — what the successor's prev_hash commits to.
+
+    Includes the signature key only when the row carries one, so every
+    pre-signature row (and every pre-chain row) hashes byte-identically to
+    delta 1 — no re-anchoring. For signed rows the successor chains over
+    content+signature, making signature-stripping a detectable break
+    (design/tick-signature-in-chain-envelope).
+    """
+    envelope = _tick_envelope(row)
+    if len(row) > 10 and row[10] is not None:
+        envelope["signature"] = row[10]
     return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
 
 
@@ -139,7 +183,8 @@ _SCHEMA_STMTS = (
         prev_hash    TEXT,
         window_start TEXT,
         fact_cursor  TEXT,
-        window_hash  TEXT
+        window_hash  TEXT,
+        signature    TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
     "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
@@ -159,10 +204,18 @@ class SqliteStore(Generic[T]):
         path: Path,
         serialize: Callable[[T], dict],
         deserialize: Callable[[dict], T],
+        tick_signer: Callable[[str], str] | None = None,
     ) -> None:
+        """tick_signer: optional callable (commitment digest str -> signature
+        str, e.g. base64 Ed25519). Injected, never imported — custody is a
+        property of the store handle (the key lives next to the db), so the
+        signer rides the constructor rather than each append_tick call.
+        None = ticks append unsigned (pre-signature era, honest NULL).
+        """
         self._path = Path(path)
         self._serialize = serialize
         self._deserialize = deserialize
+        self._tick_signer = tick_signer
         self._direct_fact_build: bool | None = None  # lazy detection
         self._fact_class: type | None = None
 
@@ -360,6 +413,8 @@ class SqliteStore(Generic[T]):
             history it cannot vouch for);
           - otherwise: window_start = previous tick's fact_cursor.
         - window_hash commits to every fact row in (window_start, fact_cursor].
+        - signature (delta 2): when a tick_signer was injected, signs the
+          commitment hash of the new row; NULL otherwise (pre-signature era).
         """
         self._ensure_sync()
         self._ensure_chain_columns()
@@ -381,17 +436,28 @@ class SqliteStore(Generic[T]):
             window_start = prev_row[8]
         window_hash = self._window_hash(window_start, fact_cursor)
 
+        row = (gen_id(), d["name"], d["ts"], d["since"], d["origin"],
+               payload_text, prev_hash, window_start, fact_cursor, window_hash)
+        signature = (
+            self._tick_signer(_tick_commitment_hash(row))
+            if self._tick_signer is not None else None
+        )
+
         self._conn.execute(
             "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (gen_id(), d["name"], d["ts"], d["since"], d["origin"], payload_text,
-             prev_hash, window_start, fact_cursor, window_hash),
+            "prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (*row, signature),
         )
         self._conn.commit()
 
-    def verify_chain(self, *, max_breaks: int = 10) -> dict[str, Any]:
-        """Verify the tick hash chain and fact-window commitments.
+    def verify_chain(
+        self,
+        *,
+        max_breaks: int = 10,
+        verifier: Callable[[str, str], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Verify the tick hash chain, fact-window commitments, and signatures.
 
         Walks ticks in append order recomputing prev_hash linkage,
         window_start continuity, and window_hash contents. Any modified,
@@ -399,44 +465,67 @@ class SqliteStore(Generic[T]):
         verification; facts emitted after the last tick are the uncovered
         live edge (reported, not an error).
 
-        KNOWN SCOPE BOUNDARY: the chain head (the newest tick row) is not
-        self-verifying — its own payload/window columns could be rewritten
-        together without detection, since prev_hash only protects rows that
-        have a successor. Anchoring the head requires a signature or an
-        externally published head hash; that is delta 2 of the provenance
-        arc (tick-signing), deliberately out of scope here.
+        Signatures (delta 2): ``verifier`` is an injected callable
+        (signature str, commitment digest str) -> bool — apps/loops composes
+        it from the observer-key registry in the .vertex. When provided,
+        every signed tick's signature is checked against its commitment
+        hash. Two checks run regardless of verifier presence, because they
+        are structural properties of the store:
+        - the successor's prev_hash commits to the signature (era-aware row
+          hash), so a stripped/altered signature breaks the link;
+        - signature era-monotonicity — an unsigned chained tick after a
+          signed one is a break (signing is structural from the moment it
+          starts, never quietly regressed).
+
+        KNOWN SCOPE BOUNDARY (delta 2): a TOTAL rewrite — stripping every
+        signature and recomputing every hash forward — renders as a clean
+        pre-signature store. A self-contained chain cannot distinguish that
+        from honest history; the anchor is the key registry in the .vertex
+        (outside the store; a declared key with zero signed ticks is the
+        tripwire, checked at the CLI layer) and external witnessing (a
+        later delta).
 
         Returns a report dict:
             ok              True when no breaks found
             ticks           total tick rows
             chained         rows carrying chain commitments
             legacy          pre-chain rows (NULL chain columns)
+            signed          chained rows carrying a signature
+            sig_checked     True when a verifier was provided
             covered_facts   facts inside verified windows
             uncovered_facts facts outside any chained window
             breaks          list of {tick, name, reason} (capped at max_breaks)
             truncated       True if the walk stopped at max_breaks
 
         Read-only: never migrates schema. A pre-chain database (no chain
-        columns yet) reports all ticks as legacy rather than being ALTERed —
-        migration happens only on the write path (append_tick).
+        columns yet) reports all ticks as legacy rather than being ALTERed;
+        a delta-1 database (no signature column) verifies with all ticks
+        unsigned — migration happens only on the write path (append_tick).
         """
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        sig_checked = verifier is not None
         if "window_hash" not in cols:
             tick_count = self.tick_total
             return {
                 "ok": True, "ticks": tick_count, "chained": 0,
-                "legacy": tick_count, "covered_facts": 0,
+                "legacy": tick_count, "signed": 0, "sig_checked": sig_checked,
+                "covered_facts": 0,
                 "uncovered_facts": self.total, "breaks": [], "truncated": False,
             }
-        rows = self._conn.execute(
-            f"SELECT {_TICK_ROW_SQL} FROM ticks ORDER BY rowid"
-        ).fetchall()
+        row_sql = _TICK_ROW_SQL if "signature" in cols else _TICK_ROW_SQL_V1
+        rows = [
+            r if len(r) > 10 else (*r, None)
+            for r in self._conn.execute(
+                f"SELECT {row_sql} FROM ticks ORDER BY rowid"
+            )
+        ]
 
         breaks: list[dict[str, str]] = []
-        legacy = chained = 0
+        legacy = chained = signed = 0
         prev_row = None
         last_cursor: str | None = None   # previous chained tick's fact_cursor
         first_start: str | None = None   # first chained tick's window_start
+        saw_signature = False
         truncated = False
 
         for row in rows:
@@ -456,6 +545,19 @@ class SqliteStore(Generic[T]):
             if self._window_hash(row[7], row[8]) != row[9]:
                 breaks.append({"tick": row[0], "name": row[1],
                                "reason": "window_hash mismatch — facts in window altered"})
+            if row[10] is not None:
+                signed += 1
+                saw_signature = True
+                if verifier is not None and not verifier(
+                    row[10], _tick_commitment_hash(row)
+                ):
+                    breaks.append({"tick": row[0], "name": row[1],
+                                   "reason": "signature invalid — tick contents "
+                                             "do not match signature"})
+            elif saw_signature:
+                breaks.append({"tick": row[0], "name": row[1],
+                               "reason": "unsigned tick after signed era — "
+                                         "signature stripped or era regressed"})
             if first_start is None:
                 first_start = row[7]
             last_cursor = row[8]
@@ -477,6 +579,8 @@ class SqliteStore(Generic[T]):
             "ticks": len(rows),
             "chained": chained,
             "legacy": legacy,
+            "signed": signed,
+            "sig_checked": sig_checked,
             "covered_facts": covered,
             "uncovered_facts": total_facts - covered,
             "breaks": breaks,

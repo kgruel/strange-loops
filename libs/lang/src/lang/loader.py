@@ -623,10 +623,13 @@ def _load_observer_decl(node: ckdl.Node, path: Path | None) -> ObserverDecl:
     name = node.name
     identity: str | None = None
     grant: GrantDecl | None = None
+    key: str | None = None
 
     for child in node.children:
         if child.name == "identity":
             identity = _require_arg(child, 0, "identity vertex name", path)
+        elif child.name == "key":
+            key = _require_arg(child, 0, "public key (base64)", path)
         elif child.name == "grant":
             potential: list[str] = []
             for gc in child.children:
@@ -640,7 +643,7 @@ def _load_observer_decl(node: ckdl.Node, path: Path | None) -> ObserverDecl:
         else:
             raise _error(f"Unknown observer field: {child.name}", path)
 
-    return ObserverDecl(name=name, identity=identity, grant=grant)
+    return ObserverDecl(name=name, identity=identity, grant=grant, key=key)
 
 
 def _load_observers_block(node: ckdl.Node, path: Path | None) -> tuple[ObserverDecl, ...]:

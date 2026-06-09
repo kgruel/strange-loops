@@ -633,6 +633,9 @@ class ObserverDecl:
     name: str
     identity: str | None = None  # vertex name for identity store
     grant: GrantDecl | None = None  # emission constraints
+    key: str | None = None  # Ed25519 public key, raw-32-byte base64
+    # (design/observer-key-registry: the registry IS the vertex file —
+    # observer-name → public key, used to verify tick signatures)
 
 
 # -----------------------------------------------------------------------------

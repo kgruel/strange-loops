@@ -197,10 +197,68 @@ def _init_local_vertex(
             if not dest.exists():
                 shutil.copy2(lens_file, dest)
 
+    # Delta 2 bootstrap: tick-signing custody + self-observer registration
+    _bootstrap_signing(name, vertex_path)
+
     # Register with config-level aggregator
     _register_with_aggregator(source_key, vertex_path)
 
     return vertex_path
+
+
+def _bootstrap_signing(name: str, vertex_path: Path) -> None:
+    """Generate the tick-signing keypair and register the vertex as an
+    observer of its own stream.
+
+    design/tick-key-custody-colocated: the private key lives at
+    .loops/keys/ next to the store it signs; init OWNS gitignoring the
+    keys directory (convenience is the mitigation for the committed-key
+    failure mode, not discipline). design/observer-key-registry: the
+    vertex registers its own name with the public key inline — the
+    registry IS the vertex file. Idempotent: existing keys load, existing
+    observer declarations are left alone — re-running init on an existing
+    .loops upgrades it into the signing era.
+    """
+    from sign import ed25519
+
+    from loops.commands.signing import keys_dir_for
+
+    keypair = ed25519.load_or_generate(keys_dir_for(vertex_path))
+
+    gitignore = vertex_path.parent / ".gitignore"
+    if gitignore.exists():
+        lines = gitignore.read_text().splitlines()
+        if "keys/" not in (ln.strip() for ln in lines):
+            gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nkeys/\n")
+    else:
+        gitignore.write_text("keys/\n")
+
+    # The minimal stub (empty loops block) does not parse until the user
+    # fills it in — skip observer registration rather than let the splice
+    # report a misleading "result would not parse". Key + gitignore are
+    # already in place; a later `loops init <name>` re-run registers the
+    # observer once the vertex parses (bootstrap is idempotent).
+    try:
+        from lang import parse_vertex_file
+
+        parse_vertex_file(vertex_path)
+    except Exception:  # noqa: BLE001 — any parse failure defers registration
+        return
+
+    from loops.commands.add import _child_exists, _splice_into
+
+    if not _child_exists(vertex_path.read_text(), ["observers"], name):
+        _splice_into(
+            vertex_path=vertex_path,
+            parent=["observers"],
+            ensure_parent_kdl="observers {\n}\n",
+            child_text=f'{name} {{\n  key "{keypair.public_b64}"\n}}',
+            duplicate_check=("observer", name),
+            change_payload={
+                "op": "add", "target": "observer",
+                "name": name, "key": keypair.public_b64,
+            },
+        )
 
 
 def _register_with_aggregator(name: str, local_vertex: Path) -> None:

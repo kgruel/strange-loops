@@ -492,9 +492,11 @@ def cmd_emit(
         # Inject the run-clause dispatcher so program.receive/sync fire
         # boundary run clauses automatically when ticks have .run set.
         store_path.parent.mkdir(parents=True, exist_ok=True)
+        from loops.commands.signing import tick_signer_for
         from loops.commands.sync import _execute_boundary_run
         program = load_vertex_program(
             writable_path, validate_ast=False, run_dispatcher=_execute_boundary_run,
+            tick_signer=tick_signer_for(writable_path),
         )
 
         try:
@@ -792,10 +794,13 @@ def _run_close(
         return 1
 
     from engine import load_vertex_program
+    from loops.commands.signing import tick_signer_for
     from loops.commands.sync import _execute_boundary_run
 
     vp = _resolve_writable_vertex(vertex_path)
-    program = load_vertex_program(vp, run_dispatcher=_execute_boundary_run)
+    program = load_vertex_program(
+        vp, run_dispatcher=_execute_boundary_run, tick_signer=tick_signer_for(vp),
+    )
     program.receive(fact)
 
     show(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))

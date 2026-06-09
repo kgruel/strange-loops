@@ -173,13 +173,18 @@ def _format_fold_op(args: argparse.Namespace) -> tuple[str, dict[str, str]]:
 
 
 def _add_observer(target: str, argv: list[str]) -> int:
-    """``loops add <vertex> observer <NAME> [--identity X] [--grant K1,K2,...]``."""
+    """``loops add <vertex> observer <NAME> [--identity X] [--grant K1,K2,...] [--key B64]``."""
     p = argparse.ArgumentParser(prog="loops add <vertex> observer", add_help=True)
     p.add_argument("name", help="Observer name")
     p.add_argument("--identity", help="Vertex name backing this observer's identity store")
     p.add_argument(
         "--grant", default="",
         help="Comma-separated kinds this observer is allowed to emit",
+    )
+    p.add_argument(
+        "--key",
+        help="Ed25519 public key (raw-32-byte base64) — registers this "
+             "observer in the tick-signature verification registry",
     )
     try:
         args = p.parse_args(argv)
@@ -188,13 +193,25 @@ def _add_observer(target: str, argv: list[str]) -> int:
 
     grants = [k.strip() for k in args.grant.split(",") if k.strip()] if args.grant else []
 
+    if args.key:
+        # Validate before splicing — a malformed key in the registry would
+        # silently verify nothing.
+        from sign import ed25519
+        try:
+            ed25519.public_key_from_b64(args.key)
+        except ValueError as exc:
+            _err(f"invalid --key: {exc}")
+            return 1
+
     # Render the observer KDL block.
-    if not args.identity and not grants:
+    if not args.identity and not grants and not args.key:
         child_text = f"{args.name} {{ }}"
     else:
         body_lines = []
         if args.identity:
             body_lines.append(f'  identity "{args.identity}"')
+        if args.key:
+            body_lines.append(f'  key "{args.key}"')
         if grants:
             kinds = " ".join(f'"{k}"' for k in grants)
             body_lines.append("  grant {")
@@ -218,6 +235,7 @@ def _add_observer(target: str, argv: list[str]) -> int:
             "name": args.name,
             **({"identity": args.identity} if args.identity else {}),
             **({"grants": ",".join(grants)} if grants else {}),
+            **({"key": args.key} if args.key else {}),
         },
     )
     if rc == 0:
@@ -226,6 +244,8 @@ def _add_observer(target: str, argv: list[str]) -> int:
             bits.append(f"identity={args.identity}")
         if grants:
             bits.append(f"grant={','.join(grants)}")
+        if args.key:
+            bits.append(f"key={args.key[:8]}…")
         _ok(f"added observer {' '.join(bits)} to {_display_path(vertex_path)}")
     return rc
 

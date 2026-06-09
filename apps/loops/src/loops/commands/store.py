@@ -156,16 +156,24 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return 0
     args = p.parse_args(argv)
 
-    db_path = resolve_store_path(_resolve_target(getattr(args, "file", None), vertex_path).resolve())
+    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+    db_path = resolve_store_path(target_path)
     if not db_path.exists():
         raise FileNotFoundError(f"{db_path} does not exist")
+
+    # Tick-signature verification composes here (injection, not import):
+    # the observer-key registry lives in the .vertex, so a raw .db target
+    # verifies the chain but cannot check signatures.
+    from loops.commands.signing import tick_verifier_for
+
+    verifier, declared_keys = tick_verifier_for(target_path)
 
     from atoms import Fact
     from engine.sqlite_store import SqliteStore
 
     store = SqliteStore(path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict)
     try:
-        report = store.verify_chain()
+        report = store.verify_chain(verifier=verifier)
     finally:
         store.close()
 
@@ -179,9 +187,28 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     verdict = "chain intact" if report["ok"] else "CHAIN BROKEN"
     lines = [
         f"{'✓' if report['ok'] else '✗'} {db_path.name}: {verdict}",
-        f"  ticks: {report['ticks']} ({report['chained']} chained, {report['legacy']} legacy)",
+        f"  ticks: {report['ticks']} ({report['chained']} chained, "
+        f"{report['legacy']} legacy, {report['signed']} signed)",
         f"  facts: {report['covered_facts']} covered, {report['uncovered_facts']} uncovered (live edge)",
     ]
+    if report["signed"] and report["sig_checked"]:
+        lines.append(
+            f"  signatures: {report['signed']} checked against registry "
+            f"({len(declared_keys)} key{'s' if len(declared_keys) != 1 else ''})"
+        )
+    elif report["signed"]:
+        lines.append(
+            f"  signatures: {report['signed']} present, unchecked "
+            "(no keys in registry — verify via the .vertex, not the raw .db)"
+        )
+    if declared_keys and report["chained"] and not report["signed"]:
+        # The strip-attack tripwire: a total signature strip renders as
+        # honest unsigned history INSIDE the store; the registry outside it
+        # is the anchor (see verify_chain's documented scope boundary).
+        lines.append(
+            "  ⚠ registry declares signing key(s) but no tick is signed — "
+            "pre-signing store, or signatures stripped"
+        )
     for b in report["breaks"]:
         lines.append(f"  ✗ {b['name']} ({b['tick']}): {b['reason']}")
     if report["truncated"]:

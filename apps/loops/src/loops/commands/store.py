@@ -108,15 +108,96 @@ def make_fetcher(path: Path, zoom: int):
     return fetch
 
 
+def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
+    """Resolve the store target: explicit vertex_path > file/name arg > local root."""
+    from .resolve import loops_home
+
+    if vertex_path is not None:
+        return vertex_path
+    if file_arg is not None:
+        p = Path(file_arg)
+        if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
+            return p
+        from lang.population import resolve_vertex
+
+        return resolve_vertex(file_arg, loops_home())
+    home = loops_home()
+    root = home / ".vertex"
+    if root.exists():
+        return root
+    raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
+
+
+def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Verify the tick hash chain of a store. Exit 0 = intact, 1 = broken.
+
+    Read-only — never migrates schema. Pre-chain stores report all ticks
+    as legacy and pass (nothing to verify yet).
+    """
+    import argparse
+    import sys as _sys
+
+    p = argparse.ArgumentParser(
+        prog="loops store verify",
+        description="Verify tick hash chain and fact-window commitments.",
+    )
+    if vertex_path is None:
+        p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")
+    p.add_argument("--json", action="store_true", help="JSON report")
+    if "-h" in argv or "--help" in argv:
+        p.print_help(_sys.stdout)
+        return 0
+    args = p.parse_args(argv)
+
+    db_path = resolve_store_path(_resolve_target(getattr(args, "file", None), vertex_path).resolve())
+    if not db_path.exists():
+        raise FileNotFoundError(f"{db_path} does not exist")
+
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    store = SqliteStore(path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict)
+    try:
+        report = store.verify_chain()
+    finally:
+        store.close()
+
+    if args.json:
+        import json as _json
+        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
+        return 0 if report["ok"] else 1
+
+    from painted import Block, Style, show
+
+    verdict = "chain intact" if report["ok"] else "CHAIN BROKEN"
+    lines = [
+        f"{'✓' if report['ok'] else '✗'} {db_path.name}: {verdict}",
+        f"  ticks: {report['ticks']} ({report['chained']} chained, {report['legacy']} legacy)",
+        f"  facts: {report['covered_facts']} covered, {report['uncovered_facts']} uncovered (live edge)",
+    ]
+    for b in report["breaks"]:
+        lines.append(f"  ✗ {b['name']} ({b['tick']}): {b['reason']}")
+    if report["truncated"]:
+        lines.append(f"  … stopped after {len(report['breaks'])} breaks")
+    show(Block.text("\n".join(lines), Style(dim=False)))
+    return 0 if report["ok"] else 1
+
+
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
     from painted import run_cli, OutputMode
-    from .resolve import loops_home
+
+    if argv and argv[0] == "verify":
+        return _run_verify(argv[1:], vertex_path=vertex_path)
 
     if "-h" in argv or "--help" in argv:
         import sys as _sys
-        p = argparse.ArgumentParser(prog="loops store", description="Inspect store contents.")
+        p = argparse.ArgumentParser(
+            prog="loops store",
+            description="Inspect store contents. Subcommand: "
+                        "'loops store verify [target]' checks the tick hash chain.",
+        )
         if vertex_path is None:
             p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")
         p.add_argument("-i", "--interactive", action="store_true", help="Interactive TUI explorer")
@@ -134,20 +215,7 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     file_arg = getattr(known, "file", None)
 
     def _resolve_store_target() -> Path:
-        if vertex_path is not None:
-            return vertex_path
-        if file_arg is not None:
-            p = Path(file_arg)
-            if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
-                return p
-            from lang.population import resolve_vertex
-
-            return resolve_vertex(file_arg, loops_home())
-        home = loops_home()
-        root = home / ".vertex"
-        if root.exists():
-            return root
-        raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
+        return _resolve_target(file_arg, vertex_path)
 
     def fetch():
         path = _resolve_store_target().resolve()

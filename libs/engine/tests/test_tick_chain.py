@@ -267,7 +267,7 @@ class TestPreChainMigration:
         assert report["ok"] is True
         assert report["covered_facts"] == 2
 
-    def test_verify_on_pure_legacy_store(self, tmp_db: Path):
+    def test_verify_on_pure_legacy_store_is_read_only(self, tmp_db: Path):
         make_legacy_db(tmp_db)
         store = make_store(tmp_db)
 
@@ -275,3 +275,7 @@ class TestPreChainMigration:
         assert report["ok"] is True
         assert report["legacy"] == 1
         assert report["chained"] == 0
+
+        # verify must NOT migrate schema — that's the write path's job
+        cols = {r[1] for r in store._conn.execute("PRAGMA table_info(ticks)")}
+        assert "window_hash" not in cols

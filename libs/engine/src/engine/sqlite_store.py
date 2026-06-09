@@ -415,8 +415,19 @@ class SqliteStore(Generic[T]):
             uncovered_facts facts outside any chained window
             breaks          list of {tick, name, reason} (capped at max_breaks)
             truncated       True if the walk stopped at max_breaks
+
+        Read-only: never migrates schema. A pre-chain database (no chain
+        columns yet) reports all ticks as legacy rather than being ALTERed —
+        migration happens only on the write path (append_tick).
         """
-        self._ensure_chain_columns()
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        if "window_hash" not in cols:
+            tick_count = self.tick_total
+            return {
+                "ok": True, "ticks": tick_count, "chained": 0,
+                "legacy": tick_count, "covered_facts": 0,
+                "uncovered_facts": self.total, "breaks": [], "truncated": False,
+            }
         rows = self._conn.execute(
             f"SELECT {_TICK_ROW_SQL} FROM ticks ORDER BY rowid"
         ).fetchall()

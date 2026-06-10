@@ -177,6 +177,16 @@ def _tick_row_hash(row: tuple) -> str:
     return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
 
 
+# Public name: the row-identity hash is a cross-lib contract. libs/store's
+# rebirth receipt records the source chain head with THE chain's hash
+# function — a reimplementation could silently diverge from what verify
+# walks. Same function, two names: _tick_row_hash stays the internal
+# spelling, tick_row_hash is the exported contract.
+def tick_row_hash(row: tuple) -> str:
+    """Era-aware tick row-identity hash (see _tick_row_hash)."""
+    return _tick_row_hash(row)
+
+
 def _fact_row_hash(row: tuple) -> str:
     """Hash one persisted fact row: (id, kind, ts, observer, origin, payload)."""
     envelope = {

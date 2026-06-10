@@ -241,6 +241,126 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if report["ok"] else 1
 
 
+def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Rebirth a store: transform-replay into a new store, with receipt.
+
+    The reborn store is a NEW custody context — facts replay in witness
+    order through a deterministic transform, old ticks re-enter as facts
+    (envelope verbatim), a receipt fact records the source's identity
+    (content hash, file hash, chain head), and a genesis tick seals
+    everything including the receipt. The source is never modified;
+    swapping the reborn store in is a deliberate, separate act.
+
+    Signing composes from the source vertex's key custody: the new
+    incarnation is the same identity's next chapter, so the lineage's
+    key signs its genesis. A rebirth is immediately verified (re-run
+    the transform, diff); ``--check`` re-verifies an existing one.
+    """
+    import argparse
+    import os
+    import sys as _sys
+
+    p = argparse.ArgumentParser(
+        prog="loops store rebirth",
+        description="Replay a store through a transform into a new store, "
+                    "with a verifiable receipt and a sealed genesis tick.",
+    )
+    if vertex_path is None:
+        p.add_argument("source", help="Source store .db or .vertex file, or vertex name")
+    p.add_argument("target", help="Path for the reborn .db (must not exist; with --check: must exist)")
+    p.add_argument(
+        "--rule", default="identity", choices=["identity", "ulid-migration"],
+        help="Transform: identity (re-seal/cleanup) or ulid-migration "
+             "(deterministically migrate uuid4-era ids to event-time ULIDs)",
+    )
+    p.add_argument(
+        "--observer", default=None,
+        help="Who performs the rebirth (default: $LOOPS_OBSERVER or 'rebirth')",
+    )
+    p.add_argument(
+        "--check", action="store_true",
+        help="Verify an existing rebirth instead of performing one "
+             "(re-run the transform, diff the target)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON receipt/report")
+    if "-h" in argv or "--help" in argv:
+        p.print_help(_sys.stdout)
+        return 0
+    args = p.parse_args(argv)
+
+    src_target = _resolve_target(getattr(args, "source", None), vertex_path).resolve()
+    src_db = resolve_store_path(src_target)
+    if not src_db.exists():
+        raise FileNotFoundError(f"{src_db} does not exist")
+    target = Path(args.target)
+
+    from store import identity, rebirth_store, ulid_migration, verify_rebirth
+
+    transform = {"identity": identity, "ulid-migration": ulid_migration}[args.rule]()
+    observer = args.observer or os.environ.get("LOOPS_OBSERVER") or "rebirth"
+
+    # Signing/verification compose from the SOURCE vertex's custody — the
+    # reborn store is the same lineage's next incarnation (injection, not
+    # import; raw .db source → unsigned genesis, honest pre-signature era).
+    from loops.commands.signing import tick_signer_for, tick_verifier_for
+
+    signer = tick_signer_for(src_target)
+    verifier, _keys = tick_verifier_for(src_target)
+
+    result = None
+    if not args.check:
+        result = rebirth_store(
+            src_db, target,
+            transform=transform,
+            tick_signer=signer,
+            observer=observer,
+            source_name=src_db.stem,
+        )
+    verification = verify_rebirth(src_db, target, transform=transform, verifier=verifier)
+
+    if args.json:
+        import dataclasses
+        import json as _json
+
+        report = {"verification": dataclasses.asdict(verification)}
+        if result is not None:
+            report["rebirth"] = dataclasses.asdict(result)
+        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
+        return 0 if verification.ok else 1
+
+    from painted import Block, Style, show
+
+    mark = "✓" if verification.ok else "✗"
+    lines = []
+    if result is not None:
+        lines.append(f"{mark} {src_db.name} → {target.name}: rebirth (rule={args.rule})")
+        lines.append(
+            f"  facts: {result.facts_in} in, {result.facts_out} out "
+            f"({result.ids_migrated} ids migrated, {result.filtered} filtered)"
+        )
+        lines.append(f"  ticks: {result.ticks_in} re-entered as facts")
+        lines.append(
+            f"  receipt: {result.receipt_id} · genesis tick "
+            f"{'signed' if result.tick_signed else 'unsigned (no key for source vertex)'}"
+        )
+    else:
+        lines.append(f"{mark} {src_db.name} → {target.name}: rebirth check (rule={args.rule})")
+    checks = [
+        ("re-run diff clean" if not verification.mismatches
+         else f"{len(verification.mismatches)} row mismatches"),
+        ("receipt found" if verification.receipt_found else "RECEIPT MISSING"),
+        ("counts match" if verification.counts_match else "COUNTS DISAGREE"),
+        ("source content match" if verification.source_content_match
+         else "SOURCE CHANGED since rebirth"),
+        ("chain intact" if verification.chain_ok else "CHAIN BROKEN"),
+    ]
+    lines.append(f"  verified: {' · '.join(checks)} ({verification.facts_checked} facts checked)")
+    for m in verification.mismatches:
+        lines.append(f"  ✗ {m}")
+    show(Block.text("\n".join(lines), Style(dim=False)))
+    return 0 if verification.ok else 1
+
+
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
@@ -248,13 +368,17 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     if argv and argv[0] == "verify":
         return _run_verify(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "rebirth":
+        return _run_rebirth(argv[1:], vertex_path=vertex_path)
 
     if "-h" in argv or "--help" in argv:
         import sys as _sys
         p = argparse.ArgumentParser(
             prog="loops store",
-            description="Inspect store contents. Subcommand: "
-                        "'loops store verify [target]' checks the tick hash chain.",
+            description="Inspect store contents. Subcommands: "
+                        "'loops store verify [target]' checks the tick hash chain; "
+                        "'loops store rebirth <source> <target>' replays a store "
+                        "through a transform with a verifiable receipt.",
         )
         if vertex_path is None:
             p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")

@@ -79,6 +79,45 @@ result = pull_store(Path("data/local.db"), transport, remote_path=Path("data/rem
 
 ---
 
+## Level 1.5 — Rebirth
+
+**Trigger**: I need to migrate, clean, or re-seal a whole store as a new custody context — with a verifiable receipt.
+
+```python
+from store import rebirth_store, verify_rebirth, ulid_migration
+
+# Replay through a transform into a NEW store: facts in witness order,
+# old ticks re-enter as facts (envelope verbatim), receipt fact last,
+# genesis tick seals everything (window_start "" covers all).
+result = rebirth_store(
+    source=Path("data/project.db"),
+    target=Path("data/project-reborn.db"),
+    transform=ulid_migration(),     # or identity(), filtered(pred, rule=...)
+    tick_signer=signer,             # injected, never imported (engine posture)
+)
+# RebirthResult(facts_in=2049, facts_out=2049, ids_migrated=1791, ...)
+
+# Receipt verification = re-run the transform, diff. An operation, not a promise.
+v = verify_rebirth(Path("data/project.db"), Path("data/project-reborn.db"))
+# RebirthVerification(ok=True, mismatches=(), source_content_match=True, ...)
+```
+
+**Transforms are deterministic** — that's what makes verification a re-run.
+`ulid_migration` re-mints every non-canonical id (uuid4 era AND lowercase
+sqlite-ulid era — both sort wrong) as `ULID(ms(fact.ts) || sha256(old_id)[:10])`;
+canonical ULIDs pass through untouched. No ref rewriting: payload refs are
+entity-keyed (`kind:key`) and resolve at read time.
+
+**Receipt claims**: `source_content_sha256` (witness-order row hash — the
+verifiable claim), `source_file_sha256` (forensic), `source_chain_head`
+(`engine.tick_row_hash` of the source's newest tick), rule, counts.
+
+CLI: `loops store rebirth <source> <target> --rule ulid-migration` (auto-verifies; `--check` re-verifies later).
+
+**Don't reach for yet**: Schema internals, connection management.
+
+---
+
 ## Level 2 — Schema and connection internals
 
 **Trigger**: I need to know how this differs from engine's SqliteStore, or how cross-DB operations work.

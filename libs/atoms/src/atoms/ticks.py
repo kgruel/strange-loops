@@ -96,3 +96,15 @@ class TickWindow:
     delta_updated: int = 0
     added_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
     updated_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    # Attestation — witness-era envelope of the STORED tick (chain link,
+    # signature, window cursor). Deliberately not on the Tick primitive:
+    # a Tick is the produced snapshot; the envelope is added at append.
+    # Defaults are the pre-chain / aggregate-read case (no attestation
+    # claim). cursor_kind/cursor_preview are the read-path dereference of
+    # fact_cursor — affordance, not commitment.
+    chained: bool = False
+    signed: bool = False
+    fact_cursor: str = ""
+    cursor_kind: str = ""
+    cursor_preview: str = ""

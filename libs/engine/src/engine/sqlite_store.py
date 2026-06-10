@@ -129,6 +129,39 @@ def _tick_commitment_hash(row: tuple) -> str:
     return hashlib.sha256(_canonical_bytes(_tick_envelope(row))).hexdigest()
 
 
+def cursor_fact_summary(conn, fact_id: str) -> dict:
+    """Resolve a fact_cursor id to a terse summary of its target fact.
+
+    Read-path affordance, NOT part of any commitment — the chain commits
+    to ids and hashes; this is the human-facing dereference. Returns
+    ``{"cursor_kind": str, "cursor_preview": str}``. An empty cursor
+    resolves to empty fields; a dangling cursor (fact deleted) is named
+    explicitly rather than silently blank — verify reports that case as
+    a break, but read paths still render honestly.
+    """
+    if not fact_id:
+        return {"cursor_kind": "", "cursor_preview": ""}
+    row = conn.execute(
+        "SELECT kind, payload FROM facts WHERE id = ?", (fact_id,)
+    ).fetchone()
+    if row is None:
+        return {"cursor_kind": "", "cursor_preview": "(cursor fact missing)"}
+    try:
+        payload = json.loads(row[1])
+    except (TypeError, ValueError):
+        payload = {}
+    preview = ""
+    if isinstance(payload, dict):
+        for key in ("message", "topic", "name", "status"):
+            val = payload.get(key)
+            if isinstance(val, str) and val:
+                preview = val
+                break
+    if len(preview) > 80:
+        preview = preview[:79] + "…"
+    return {"cursor_kind": row[0], "cursor_preview": preview}
+
+
 def _tick_row_hash(row: tuple) -> str:
     """Era-aware identity hash — what the successor's prev_hash commits to.
 
@@ -501,6 +534,7 @@ class SqliteStore(Generic[T]):
         *,
         max_breaks: int = 10,
         verifier: Callable[[str, str], bool] | None = None,
+        include_ticks: bool = False,
     ) -> dict[str, Any]:
         """Verify the tick hash chain, fact-window commitments, and signatures.
 
@@ -548,6 +582,16 @@ class SqliteStore(Generic[T]):
             uncovered_facts facts outside any chained window
             breaks          list of {tick, name, reason} (capped at max_breaks)
             truncated       True if the walk stopped at max_breaks
+            tick_detail     (only when ``include_ticks``) per-chained-tick
+                            attestation rows in append order: {tick, name,
+                            ts, signed, sig_ok, ok, fact_cursor,
+                            window_facts, cursor_kind, cursor_preview}.
+                            ``sig_ok`` is True/False when a verifier checked
+                            a signed tick, None otherwise. ``window_facts``
+                            is the fact count in this tick's window — the
+                            number whose wrongness surfaced the witness-order
+                            bug. Legacy ticks stay aggregate-only (they have
+                            no envelope to detail).
 
         Read-only: never migrates schema. A pre-chain database (no chain
         columns yet) reports all ticks as legacy rather than being ALTERed;
@@ -558,12 +602,15 @@ class SqliteStore(Generic[T]):
         sig_checked = verifier is not None
         if "window_hash" not in cols:
             tick_count = self.tick_total
-            return {
+            report: dict[str, Any] = {
                 "ok": True, "ticks": tick_count, "chained": 0,
                 "legacy": tick_count, "signed": 0, "sig_checked": sig_checked,
                 "covered_facts": 0,
                 "uncovered_facts": self.total, "breaks": [], "truncated": False,
             }
+            if include_ticks:
+                report["tick_detail"] = []
+            return report
         row_sql = _TICK_ROW_SQL if "signature" in cols else _TICK_ROW_SQL_V1
         rows = [
             r if len(r) > 10 else (*r, None)
@@ -573,6 +620,7 @@ class SqliteStore(Generic[T]):
         ]
 
         breaks: list[dict[str, str]] = []
+        tick_detail: list[dict[str, Any]] = []
         legacy = chained = signed = 0
         prev_row = None
         last_cursor: str | None = None   # previous chained tick's fact_cursor
@@ -586,6 +634,8 @@ class SqliteStore(Generic[T]):
                 prev_row = row
                 continue
             chained += 1
+            breaks_before = len(breaks)
+            sig_ok: bool | None = None
             expected_prev = _tick_row_hash(prev_row) if prev_row is not None else None
             if row[6] != expected_prev:
                 breaks.append({"tick": row[0], "name": row[1],
@@ -600,16 +650,34 @@ class SqliteStore(Generic[T]):
             if row[10] is not None:
                 signed += 1
                 saw_signature = True
-                if verifier is not None and not verifier(
-                    row[10], _tick_commitment_hash(row)
-                ):
-                    breaks.append({"tick": row[0], "name": row[1],
-                                   "reason": "signature invalid — tick contents "
-                                             "do not match signature"})
+                if verifier is not None:
+                    sig_ok = verifier(row[10], _tick_commitment_hash(row))
+                    if not sig_ok:
+                        breaks.append({"tick": row[0], "name": row[1],
+                                       "reason": "signature invalid — tick contents "
+                                                 "do not match signature"})
             elif saw_signature:
                 breaks.append({"tick": row[0], "name": row[1],
                                "reason": "unsigned tick after signed era — "
                                          "signature stripped or era regressed"})
+            if include_ticks:
+                lo = self._cursor_rowid(row[7])
+                hi = self._cursor_rowid(row[8])
+                window_facts = 0
+                if lo is not None and hi is not None:
+                    window_facts = self._conn.execute(
+                        "SELECT COUNT(*) FROM facts WHERE rowid > ? AND rowid <= ?",
+                        (lo, hi),
+                    ).fetchone()[0]
+                tick_detail.append({
+                    "tick": row[0], "name": row[1], "ts": row[2],
+                    "signed": row[10] is not None,
+                    "sig_ok": sig_ok,
+                    "ok": len(breaks) == breaks_before,
+                    "fact_cursor": row[8],
+                    "window_facts": window_facts,
+                    **cursor_fact_summary(self._conn, row[8]),
+                })
             if first_start is None:
                 first_start = row[7]
             last_cursor = row[8]
@@ -629,7 +697,7 @@ class SqliteStore(Generic[T]):
                 ).fetchone()[0]
         total_facts = self.total
 
-        return {
+        report = {
             "ok": not breaks,
             "ticks": len(rows),
             "chained": chained,
@@ -641,6 +709,9 @@ class SqliteStore(Generic[T]):
             "breaks": breaks,
             "truncated": truncated,
         }
+        if include_ticks:
+            report["tick_detail"] = tick_detail
+        return report
 
     def ticks_since(self, cursor: int) -> list[Tick]:
         """Return ticks with rowid > cursor."""

@@ -151,6 +151,11 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     if vertex_path is None:
         p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")
     p.add_argument("--json", action="store_true", help="JSON report")
+    p.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Per-tick attestation rows for the chained era "
+             "(signature status, window fact count, cursor target)",
+    )
     if "-h" in argv or "--help" in argv:
         p.print_help(_sys.stdout)
         return 0
@@ -173,7 +178,7 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     store = SqliteStore(path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict)
     try:
-        report = store.verify_chain(verifier=verifier)
+        report = store.verify_chain(verifier=verifier, include_ticks=args.verbose)
     finally:
         store.close()
 
@@ -213,6 +218,25 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         lines.append(f"  ✗ {b['name']} ({b['tick']}): {b['reason']}")
     if report["truncated"]:
         lines.append(f"  … stopped after {len(report['breaks'])} breaks")
+    if args.verbose and report.get("tick_detail"):
+        from datetime import datetime, timezone
+
+        lines.append("  chained ticks (append order):")
+        for t in report["tick_detail"]:
+            ts = datetime.fromtimestamp(t["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+            if not t["signed"]:
+                sig = "unsigned"
+            elif t["sig_ok"] is None:
+                sig = "signed (unchecked)"
+            else:
+                sig = "sig ✓" if t["sig_ok"] else "sig ✗"
+            cursor = t["cursor_kind"] or "?"
+            if t["cursor_preview"]:
+                cursor += f': "{t["cursor_preview"]}"'
+            lines.append(
+                f"    {'✓' if t['ok'] else '✗'} {ts} {t['name']} · {sig} · "
+                f"{t['window_facts']} facts · cursor → {cursor}"
+            )
     show(Block.text("\n".join(lines), Style(dim=False)))
     return 0 if report["ok"] else 1
 

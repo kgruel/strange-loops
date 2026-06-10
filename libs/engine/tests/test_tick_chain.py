@@ -571,3 +571,141 @@ class TestPreChainMigration:
 
         cols = {r[1] for r in store._conn.execute("PRAGMA table_info(ticks)")}
         assert "signature" not in cols
+
+
+class TestVerifyTickDetail:
+    """verify_chain(include_ticks=True) — per-tick attestation rows.
+
+    Covers decision/design/attestation-envelope-read-path: the walk
+    already computes era, signature validity, and window bounds per tick;
+    include_ticks keeps them instead of discarding. window_facts is the
+    per-window count whose wrongness surfaced the witness-order bug.
+    """
+
+    def test_default_report_omits_detail(self, tmp_db: Path):
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+        assert "tick_detail" not in store.verify_chain()
+
+    def test_detail_rows_in_append_order_with_window_counts(self, tmp_db: Path):
+        store = make_store(tmp_db)
+        emit(store, 2)
+        tick(store)
+        emit(store, 3)
+        tick(store)
+
+        detail = store.verify_chain(include_ticks=True)["tick_detail"]
+        assert [d["window_facts"] for d in detail] == [2, 3]
+        assert all(d["ok"] for d in detail)
+        assert all(d["signed"] is False and d["sig_ok"] is None for d in detail)
+
+    def test_cursor_dereference(self, tmp_db: Path):
+        store = make_store(tmp_db)
+        store.append(Fact.of("seal", "tester", message="deliberate boundary"))
+        tick(store)
+
+        d = store.verify_chain(include_ticks=True)["tick_detail"][0]
+        assert d["cursor_kind"] == "seal"
+        assert d["cursor_preview"] == "deliberate boundary"
+        assert d["fact_cursor"]  # the id the chain committed to
+
+    def test_signed_detail_records_sig_ok(self, tmp_db: Path):
+        store = make_signed_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+
+        d = store.verify_chain(
+            include_ticks=True, verifier=fake_verifier()
+        )["tick_detail"][0]
+        assert d["signed"] is True
+        assert d["sig_ok"] is True
+
+        # No verifier injected → signature present but unchecked, not failed
+        d2 = store.verify_chain(include_ticks=True)["tick_detail"][0]
+        assert d2["signed"] is True
+        assert d2["sig_ok"] is None
+
+    def test_bad_signature_marks_row_not_ok(self, tmp_db: Path):
+        store = make_signed_store(tmp_db, secret="k1")
+        emit(store, 1)
+        tick(store)
+
+        d = store.verify_chain(
+            include_ticks=True, verifier=fake_verifier("k2")
+        )["tick_detail"][0]
+        assert d["sig_ok"] is False
+        assert d["ok"] is False
+
+    def test_legacy_ticks_stay_aggregate_only(self, tmp_db: Path):
+        make_legacy_db(tmp_db)
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+
+        report = store.verify_chain(include_ticks=True)
+        assert report["legacy"] == 1
+        assert len(report["tick_detail"]) == 1  # only the chained tick
+
+    def test_pure_legacy_store_detail_empty(self, tmp_db: Path):
+        make_legacy_db(tmp_db)
+        store = make_store(tmp_db)
+        assert store.verify_chain(include_ticks=True)["tick_detail"] == []
+
+
+class TestEnvelopeReadPath:
+    """StoreReader.ticks_between(with_envelope=True) — the witness-era
+    envelope crossing into the read path (single query, no join)."""
+
+    def test_plain_call_shape_unchanged(self, tmp_db: Path):
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+        store.close()
+
+        from engine.store_reader import StoreReader
+
+        with StoreReader(tmp_db) as r:
+            ticks = r.ticks_between(0, 4e9)
+            assert isinstance(ticks[0], Tick)
+
+    def test_envelope_chained_signed_and_cursor_deref(self, tmp_db: Path):
+        store = make_signed_store(tmp_db)
+        store.append(Fact.of("seal", "tester", message="boundary reason"))
+        tick(store)
+        store.close()
+
+        from engine.store_reader import StoreReader
+
+        with StoreReader(tmp_db) as r:
+            [(t, env)] = r.ticks_between(0, 4e9, with_envelope=True)
+            assert isinstance(t, Tick)
+            assert env["chained"] is True
+            assert env["signed"] is True
+            assert env["cursor_kind"] == "seal"
+            assert env["cursor_preview"] == "boundary reason"
+
+    def test_pre_chain_schema_reports_unchained(self, tmp_db: Path):
+        make_legacy_db(tmp_db)
+
+        from engine.store_reader import StoreReader
+
+        with StoreReader(tmp_db) as r:
+            [(_, env)] = r.ticks_between(0, 4e9, with_envelope=True)
+            assert env == {
+                "chained": False, "signed": False, "fact_cursor": "",
+                "cursor_kind": "", "cursor_preview": "",
+            }
+
+    def test_mixed_eras_in_one_read(self, tmp_db: Path):
+        make_legacy_db(tmp_db)
+        store = make_store(tmp_db)
+        emit(store, 1)
+        tick(store)
+        store.close()
+
+        from engine.store_reader import StoreReader
+
+        with StoreReader(tmp_db) as r:
+            pairs = r.ticks_between(0, 4e9, with_envelope=True)
+            assert [e["chained"] for _, e in pairs] == [False, True]

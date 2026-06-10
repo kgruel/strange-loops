@@ -14,6 +14,29 @@ def _block(text: str, style: Style, width: int | None) -> Block:
     return Block.text(text, style)
 
 
+def attest_line(envelope: dict | None) -> str:
+    """Render a tick's witness-era envelope as one header line.
+
+    The envelope is the attestation metadata added at append time
+    (chain link, signature, fact cursor) — see StoreReader.ticks_between.
+    Absent envelope (not read, or range mode) renders nothing. An
+    unchained envelope renders explicitly — pre-chain tick or aggregate
+    read, neither of which attests.
+    """
+    if envelope is None:
+        return ""
+    if not envelope.get("chained"):
+        return "  attest: none (no chain envelope)"
+    parts = ["chained", "signed" if envelope.get("signed") else "unsigned"]
+    line = f"  attest: {' · '.join(parts)}"
+    kind = envelope.get("cursor_kind", "")
+    if kind:
+        preview = envelope.get("cursor_preview", "")
+        target = f'{kind}: "{preview}"' if preview else kind
+        line += f" · cursor → {target}"
+    return line
+
+
 def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None) -> Block:
     """Render event stream at the given zoom level.
 
@@ -84,6 +107,9 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         ))
         if tick_meta.get("since") and tick_meta.get("ts"):
             rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", dim_style))
+        attest = attest_line(tick_meta.get("envelope"))
+        if attest:
+            rows.append((attest, dim_style))
         rows.append((f"  {len(facts)} facts", dim_style))
         rows.append(("", Style()))
 

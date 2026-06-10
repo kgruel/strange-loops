@@ -107,26 +107,67 @@ class StoreReader:
         since_ts: float,
         until_ts: float,
         name: str | None = None,
-    ) -> list[Tick]:
-        """Ticks within a time range, optionally filtered by name."""
-        if name is not None:
-            rows = self._conn.execute(
-                "SELECT name, ts, since, origin, payload FROM ticks "
-                "WHERE ts >= ? AND ts <= ? AND name = ? ORDER BY ts",
-                (since_ts, until_ts, name),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT name, ts, since, origin, payload FROM ticks "
-                "WHERE ts >= ? AND ts <= ? ORDER BY ts",
-                (since_ts, until_ts),
-            ).fetchall()
-        return [
+        *,
+        with_envelope: bool = False,
+    ) -> list[Tick] | list[tuple[Tick, dict]]:
+        """Ticks within a time range, optionally filtered by name.
+
+        With ``with_envelope=True``, returns ``(Tick, envelope)`` pairs.
+        The envelope is the witness-era attestation metadata added at
+        append time — deliberately NOT on ``Tick`` itself (a Tick is the
+        produced snapshot; chain link and signature are properties of the
+        stored, witnessed row). Shape::
+
+            {"chained": bool, "signed": bool, "fact_cursor": str,
+             "cursor_kind": str, "cursor_preview": str}
+
+        Pre-chain rows (and pre-chain schemas) report ``chained=False``
+        with empty cursor fields. Both shapes come from a single query so
+        tick↔envelope pairing never relies on a join.
+        """
+        env_cols = ""
+        have_chain = have_sig = False
+        if with_envelope:
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+            have_chain = "window_hash" in cols
+            have_sig = "signature" in cols
+            if have_chain:
+                env_cols = ", window_hash, fact_cursor"
+                if have_sig:
+                    env_cols += ", signature"
+        name_clause = " AND name = ?" if name is not None else ""
+        params: tuple = (since_ts, until_ts) + ((name,) if name is not None else ())
+        rows = self._conn.execute(
+            f"SELECT name, ts, since, origin, payload{env_cols} FROM ticks "
+            f"WHERE ts >= ? AND ts <= ?{name_clause} ORDER BY ts",
+            params,
+        ).fetchall()
+        ticks = [
             Tick.from_dict(
                 {"name": r[0], "ts": r[1], "since": r[2], "origin": r[3], "payload": json.loads(r[4])}
             )
             for r in rows
         ]
+        if not with_envelope:
+            return ticks
+
+        from .sqlite_store import cursor_fact_summary
+
+        envelopes: list[dict] = []
+        for r in rows:
+            chained = have_chain and r[5] is not None
+            cursor = (r[6] or "") if chained else ""
+            env = {
+                "chained": chained,
+                "signed": bool(have_sig and chained and r[7] is not None),
+                "fact_cursor": cursor,
+            }
+            env.update(
+                cursor_fact_summary(self._conn, cursor) if cursor
+                else {"cursor_kind": "", "cursor_preview": ""}
+            )
+            envelopes.append(env)
+        return list(zip(ticks, envelopes, strict=True))
 
     @property
     def freshness(self) -> datetime | None:

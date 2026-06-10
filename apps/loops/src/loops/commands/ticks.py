@@ -39,6 +39,12 @@ def _tick_drill_header(tick_meta: dict, width: int | None) -> "Block":
     if tick_meta.get("since") and tick_meta.get("ts"):
         rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", Style(dim=True)))
 
+    from loops.lenses.stream import attest_line
+
+    attest = attest_line(tick_meta.get("envelope"))
+    if attest:
+        rows.append((attest, Style(dim=True)))
+
     rows.append(("", Style()))
     return Block.column(rows, width=width)
 

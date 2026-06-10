@@ -638,15 +638,26 @@ def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
     return fold_meta
 
 
-def _load_ticks_newest(vertex_path: Path, since: str | None = None):
-    """Load ticks newest-first from a vertex store."""
+def _load_ticks_newest(
+    vertex_path: Path,
+    since: str | None = None,
+    *,
+    with_envelope: bool = False,
+):
+    """Load ticks newest-first from a vertex store.
+
+    With ``with_envelope=True``, items are ``(Tick, envelope)`` pairs —
+    the witness-era attestation metadata (see StoreReader.ticks_between).
+    """
     from engine import vertex_ticks
 
     since_secs = _parse_duration(since or "30d")
     now = datetime.now(timezone.utc)
     since_ts = (now - timedelta(seconds=since_secs)).timestamp()
 
-    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp())
+    ticks = vertex_ticks(
+        vertex_path, since_ts, now.timestamp(), with_envelope=with_envelope
+    )
     return list(reversed(ticks))
 
 
@@ -664,7 +675,7 @@ def fetch_tick_facts(
     from engine import vertex_facts
     from lang import parse_vertex_file
 
-    ticks_newest = _load_ticks_newest(vertex_path, since)
+    ticks_newest = _load_ticks_newest(vertex_path, since, with_envelope=True)
 
     if tick_index < 0 or tick_index >= len(ticks_newest):
         return {
@@ -672,7 +683,7 @@ def fetch_tick_facts(
             "_tick_error": f"Tick index {tick_index} out of range (have {len(ticks_newest)} ticks)",
         }
 
-    tick = ticks_newest[tick_index]
+    tick, envelope = ticks_newest[tick_index]
 
     # Retrieve facts in the tick's window.
     # Engine invariant: tick.since is always set to the period's first-fact
@@ -690,20 +701,14 @@ def fetch_tick_facts(
             f["ts"] = f["ts"].isoformat()
 
     ast = parse_vertex_file(vertex_path)
-    boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
 
     return {
         "facts": facts,
         "fold_meta": _get_fold_meta(vertex_path),
         "vertex": ast.name,
-        "_tick": {
-            "name": tick.name,
-            "ts": tick.ts.isoformat(),
-            "since": tick.since.isoformat() if tick.since else None,
-            "boundary": boundary,
-            "index": tick_index,
-            "total": len(ticks_newest),
-        },
+        "_tick": _tick_metadata(
+            tick, index=tick_index, total=len(ticks_newest), envelope=envelope,
+        ),
     }
 
 
@@ -787,10 +792,15 @@ def fetch_tick_range(
     }
 
 
-def _tick_metadata(tick, *, index: int, total: int) -> dict:
-    """Build tick metadata dict for a single tick."""
+def _tick_metadata(tick, *, index: int, total: int, envelope: dict | None = None) -> dict:
+    """Build tick metadata dict for a single tick.
+
+    *envelope* is the witness-era attestation metadata (chained, signed,
+    cursor dereference). Included under ``"envelope"`` only when provided —
+    absence means "not read", not "not attested".
+    """
     boundary = tick.payload.get("_boundary", {}) if isinstance(tick.payload, dict) else {}
-    return {
+    meta = {
         "name": tick.name,
         "ts": tick.ts.isoformat(),
         "since": tick.since.isoformat() if tick.since else None,
@@ -798,6 +808,9 @@ def _tick_metadata(tick, *, index: int, total: int) -> dict:
         "index": index,
         "total": total,
     }
+    if envelope is not None:
+        meta["envelope"] = envelope
+    return meta
 
 
 def _tick_range_metadata(selected, *, start: int, end: int, total: int) -> dict:
@@ -837,7 +850,7 @@ def fetch_tick_fold(
     """
     from engine import vertex_tick_fold
 
-    ticks_newest = _load_ticks_newest(vertex_path, since)
+    ticks_newest = _load_ticks_newest(vertex_path, since, with_envelope=True)
 
     if tick_index < 0 or tick_index >= len(ticks_newest):
         return {
@@ -845,12 +858,14 @@ def fetch_tick_fold(
             "_tick_error": f"Tick index {tick_index} out of range (have {len(ticks_newest)} ticks)",
         }
 
-    tick = ticks_newest[tick_index]
+    tick, envelope = ticks_newest[tick_index]
     fold_state = vertex_tick_fold(vertex_path, tick)
 
     return {
         "fold_state": fold_state,
-        "_tick": _tick_metadata(tick, index=tick_index, total=len(ticks_newest)),
+        "_tick": _tick_metadata(
+            tick, index=tick_index, total=len(ticks_newest), envelope=envelope,
+        ),
     }
 
 
@@ -1078,8 +1093,12 @@ def fetch_tick_windows(
     now = datetime.now(timezone.utc)
     since_ts = (now - timedelta(seconds=since_secs)).timestamp()
 
-    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp(), name=name)
-    ticks_newest = list(reversed(ticks))  # newest first
+    pairs = vertex_ticks(
+        vertex_path, since_ts, now.timestamp(), name=name, with_envelope=True
+    )
+    pairs_newest = list(reversed(pairs))  # newest first
+    ticks_newest = [t for t, _ in pairs_newest]
+    envelopes_newest = [e for _, e in pairs_newest]
 
     # One stats pass per tick, reused for density fields and delta comparison.
     payload_stats = [
@@ -1110,6 +1129,7 @@ def fetch_tick_windows(
         else:
             delta_added, delta_updated, added, updated = 0, 0, {}, {}
 
+        env = envelopes_newest[i]
         windows.append(TickWindow(
             index=i,
             name=tick.name,
@@ -1127,6 +1147,11 @@ def fetch_tick_windows(
             delta_updated=delta_updated,
             added_keys=added,
             updated_keys=updated,
+            chained=env.get("chained", False),
+            signed=env.get("signed", False),
+            fact_cursor=env.get("fact_cursor", ""),
+            cursor_kind=env.get("cursor_kind", ""),
+            cursor_preview=env.get("cursor_preview", ""),
         ))
 
     return tuple(windows)

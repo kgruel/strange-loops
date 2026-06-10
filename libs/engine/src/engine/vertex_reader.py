@@ -1123,11 +1123,18 @@ def vertex_ticks(
     since_ts: float,
     until_ts: float,
     name: str | None = None,
+    *,
+    with_envelope: bool = False,
 ) -> list:
     """Read ticks from a vertex's store within a time range.
 
     Parallels vertex_facts for tick access through the vertex.
-    Returns Tick objects (from StoreReader.ticks_between).
+    Returns Tick objects (from StoreReader.ticks_between), or
+    ``(Tick, envelope)`` pairs when ``with_envelope=True``.
+
+    Combined/aggregation vertices return EMPTY envelopes (``chained=False``,
+    blank cursor fields): attestation is a per-store property — an
+    aggregate combines ticks from many stores and does not itself attest.
     """
     from lang import parse_vertex_file
 
@@ -1136,7 +1143,12 @@ def vertex_ticks(
     ast = parse_vertex_file(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
-        return _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
+        ticks = _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
+        if not with_envelope:
+            return ticks
+        empty = {"chained": False, "signed": False, "fact_cursor": "",
+                 "cursor_kind": "", "cursor_preview": ""}
+        return [(t, dict(empty)) for t in ticks]
 
     if ast.store is None:
         return []
@@ -1149,7 +1161,9 @@ def vertex_ticks(
         return []
 
     with StoreReader(store_path) as reader:
-        return reader.ticks_between(since_ts, until_ts, name=name)
+        return reader.ticks_between(
+            since_ts, until_ts, name=name, with_envelope=with_envelope
+        )
 
 
 def vertex_summary(vertex_path: Path) -> dict:

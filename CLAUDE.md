@@ -99,7 +99,7 @@ sl read meta --facts --kind decision --since 7d # recent cross-cutting decisions
 
 **Project store** (`.loops/project.vertex`): architecture, API design, lib boundaries.
 
-**Meta store** (`meta-discussion/meta.vertex`): cross-cutting patterns that apply to any project.
+**Meta store** (`~/Code/meta-discussion/meta.vertex`, external repo, read via the config-level `meta` aggregation): cross-cutting patterns that apply to any project.
 
 ### Principles
 

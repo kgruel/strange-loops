@@ -346,7 +346,7 @@ class SqliteStore(Generic[T]):
         cursor=0 returns all events (rowid starts at 1 in SQLite).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
@@ -371,14 +371,27 @@ class SqliteStore(Generic[T]):
         """Return (kind, payload) tuples for replay — no Fact construction.
 
         Avoids MappingProxyType wrapping and full Fact dataclass overhead.
-        Only returns the fields needed for fold replay.
+        Only returns the fields needed for fold replay. The event timestamp
+        is injected as ``_ts`` (Latest folds consume it — replay must never
+        consult the wall clock).
+
+        FOLD REPLAY ORDER is (ts, id) — event order, deterministic across
+        custody contexts, so merge(A,B) and merge(B,A) re-fold to the same
+        state. Witness order (rowid) remains the chain/window authority;
+        the two orders answer different questions (see ORDERING AUTHORITY
+        on append_tick).
         """
         rows = self._conn.execute(
-            "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
-        return [(r[0], loads(r[1])[0]) for r in rows]
+        out = []
+        for r in rows:
+            payload = loads(r[2])[0]
+            payload["_ts"] = r[1]
+            out.append((r[0], payload))
+        return out
 
     def replay_cursor(self, cursor: int):
         """Yield (kind, payload) pairs by streaming from the SQL cursor.
@@ -386,14 +399,17 @@ class SqliteStore(Generic[T]):
         No intermediate list allocation — rows are decoded and yielded
         one at a time. The caller handles fold dispatch; the store just
         provides data. This keeps fold logic in the Projection layer
-        where it belongs.
+        where it belongs. Same (ts, id) fold-replay order and ``_ts``
+        injection as since_raw.
         """
         loads = _raw_decode
         for r in self._conn.execute(
-            "SELECT kind, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
             (cursor,),
         ):
-            yield r[0], loads(r[1])[0]
+            payload = loads(r[2])[0]
+            payload["_ts"] = r[1]
+            yield r[0], payload
 
     def last_tick_ts(self, name: str) -> datetime | None:
         """Return the timestamp of the most recent tick with the given name.
@@ -760,7 +776,7 @@ class SqliteStore(Generic[T]):
     def latest_by_kind(self, kind: str) -> T | None:
         """Return the most recent fact of a given kind, or None."""
         row = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE kind = ? ORDER BY rowid DESC LIMIT 1",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE kind = ? ORDER BY ts DESC, id DESC LIMIT 1",
             (kind,),
         ).fetchone()
         if row is None:
@@ -775,7 +791,7 @@ class SqliteStore(Generic[T]):
         row = self._conn.execute(
             "SELECT kind, ts, observer, origin, payload FROM facts "
             "WHERE kind = ? AND json_extract(payload, ?) = ? "
-            "ORDER BY rowid DESC LIMIT 1",
+            "ORDER BY ts DESC, id DESC LIMIT 1",
             (kind, path, value),
         ).fetchone()
         if row is None:

@@ -245,7 +245,7 @@ class StoreReader:
         """
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            "WHERE kind = ? ORDER BY rowid ASC",
+            "WHERE kind = ? ORDER BY ts, id",
             (kind,),
         ).fetchall()
         return [
@@ -273,7 +273,7 @@ class StoreReader:
         row = self._conn.execute(
             "SELECT id FROM facts "
             "WHERE kind = ? AND json_extract(payload, ?) = ? "
-            "ORDER BY rowid DESC LIMIT 1",
+            "ORDER BY ts DESC, id DESC LIMIT 1",
             (kind, path, value),
         ).fetchone()
         return row[0] if row else None

@@ -9,7 +9,6 @@ Typed fold classes: Latest, Count, Sum, Collect, Upsert, TopN, Min, Max, Avg, Wi
 
 from __future__ import annotations
 
-import time
 from typing import Callable
 
 from .fold import (
@@ -32,10 +31,39 @@ from .fold import (
 # =============================================================================
 
 
+def _is_number(value: object) -> bool:
+    """R2 type rule for numeric folds: int/float only — bool is off-type.
+
+    Python bool-is-int would otherwise silently fold true as 1 (and bump
+    Avg's denominator), diverging from any typed implementation.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _reject(state: dict, target: str) -> None:
+    """R2 off-type rule: skip the fold, record the rejection in state.
+
+    Errors-as-state — the `{target}_rejected` counter is deterministic
+    under replay (no clock, no IO) and visible in every snapshot, unlike
+    a silent skip. See decision:design/fold-off-type-skip-with-counter.
+    """
+    key = f"{target}_rejected"
+    state[key] = state.get(key, 0) + 1
+
+
 def _make_latest(target: str) -> Callable[[dict, dict], None]:
-    """state[target] = event timestamp."""
+    """state[target] = event timestamp (the engine-injected ``_ts``).
+
+    A payload without ``_ts`` is rejected, never substituted with the
+    wall clock — time.time() here made fold state depend on WHEN replay
+    ran, which breaks replay determinism (rebirth --check, chain audit).
+    """
     def fold(state: dict, payload: dict) -> None:
-        state[target] = payload.get("_ts", time.time())
+        ts = payload.get("_ts")
+        if ts is None:
+            _reject(state, target)
+            return
+        state[target] = ts
     return fold
 
 
@@ -49,7 +77,12 @@ def _make_count(target: str) -> Callable[[dict, dict], None]:
 def _make_sum(target: str, value_field: str) -> Callable[[dict, dict], None]:
     """Add payload[value_field] to state[target]."""
     def fold(state: dict, payload: dict) -> None:
-        value = payload.get(value_field, 0)
+        value = payload.get(value_field)
+        if value is None:
+            return
+        if not _is_number(value):
+            _reject(state, target)
+            return
         state[target] = state.get(target, 0) + value
     return fold
 
@@ -136,6 +169,9 @@ def _make_top_n(
         by_value = payload.get(by_field)
         if key_value is None or by_value is None:
             return
+        if not _is_number(by_value):
+            _reject(state, target)
+            return
 
         items = state[target]
         # Convert to dict in case payload is MappingProxyType
@@ -161,6 +197,9 @@ def _make_min(target: str, value_field: str) -> Callable[[dict, dict], None]:
         value = payload.get(value_field)
         if value is None:
             return
+        if not _is_number(value):
+            _reject(state, target)
+            return
         current = state.get(target)
         if current is None or value < current:
             state[target] = value
@@ -172,6 +211,9 @@ def _make_max(target: str, value_field: str) -> Callable[[dict, dict], None]:
     def fold(state: dict, payload: dict) -> None:
         value = payload.get(value_field)
         if value is None:
+            return
+        if not _is_number(value):
+            _reject(state, target)
             return
         current = state.get(target)
         if current is None or value > current:
@@ -190,6 +232,11 @@ def _make_avg(target: str, value_field: str) -> Callable[[dict, dict], None]:
     def fold(state: dict, payload: dict) -> None:
         value = payload.get(value_field)
         if value is None:
+            return
+        if not _is_number(value):
+            # Rejected values must not bump the denominator — a persisted
+            # _count that includes them diverges from any re-fold.
+            _reject(state, target)
             return
         state[sum_key] = state.get(sum_key, 0.0) + value
         state[count_key] = state.get(count_key, 0) + 1

@@ -389,13 +389,15 @@ class TestSpecApply:
         result = s.apply({"last_ts": None}, {"_ts": 1234567890})
         assert result == {"last_ts": 1234567890}
 
-    def test_apply_latest_uses_time_when_no_ts(self):
+    def test_apply_latest_rejects_when_no_ts(self):
+        """No _ts → rejected, never the wall clock (replay determinism)."""
         s = Spec(
             name="tracker",
             folds=(Latest(target="last_ts"),),
         )
         result = s.apply({"last_ts": None}, {})
-        assert isinstance(result["last_ts"], float)
+        assert result["last_ts"] is None
+        assert result["last_ts_rejected"] == 1
 
     def test_apply_collect(self):
         s = Spec(

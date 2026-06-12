@@ -412,6 +412,62 @@ class TestMergeViaProductionEmitPath:
         )
 
 
+class TestMergeFoldCommutativity:
+    """merge(A,B) and merge(B,A) must re-fold to the same state.
+
+    Fold replay orders by (ts, id) — a store-independent total order — so
+    the direction of a merge changes the witness history (rowid) but never
+    the semantics. Pinned against the loops-go oracle finding that scan-
+    order insertion + rowid replay made merge non-commutative for
+    order-sensitive folds (thread:python-bugs-from-go-oracle).
+    """
+
+    @staticmethod
+    def _engine_store(path):
+        from engine.sqlite_store import SqliteStore
+
+        def _serialize(f):
+            return {"kind": f["kind"], "ts": f["ts"], "observer": f["observer"],
+                    "origin": f.get("origin", ""), "payload": f.get("payload", {})}
+
+        return SqliteStore(path=path, serialize=_serialize, deserialize=lambda d: d)
+
+    def _emit(self, path, facts):
+        with self._engine_store(path) as store:
+            for ts, payload in facts:
+                store.append({
+                    "kind": "event", "ts": ts, "observer": "x",
+                    "payload": payload,
+                })
+
+    @staticmethod
+    def _replayed(path):
+        """Replay via the production raw path, return ordered payload list."""
+        from engine.sqlite_store import SqliteStore
+
+        with SqliteStore(path=path, serialize=lambda d: d,
+                         deserialize=lambda d: d) as store:
+            return [p for _, p in store.since_raw(0)]
+
+    def test_merge_direction_does_not_change_fold_order(self, tmp_path):
+        a_facts = [(_BASE_TS + 0, {"n": "a0"}), (_BASE_TS + 2, {"n": "a1"})]
+        b_facts = [(_BASE_TS + 1, {"n": "b0"}), (_BASE_TS + 3, {"n": "b1"})]
+
+        a1, b1 = tmp_path / "a1.db", tmp_path / "b1.db"
+        a2, b2 = tmp_path / "a2.db", tmp_path / "b2.db"
+        self._emit(a1, a_facts)
+        self._emit(b1, b_facts)
+        self._emit(a2, a_facts)
+        self._emit(b2, b_facts)
+
+        merge_store(a1, b1)  # A ← B
+        merge_store(b2, a2)  # B ← A
+
+        order_ab = [p["n"] for p in self._replayed(a1)]
+        order_ba = [p["n"] for p in self._replayed(b2)]
+        assert order_ab == order_ba == ["a0", "b0", "a1", "b1"]
+
+
 class TestSliceMergeRoundTrip:
     """Integration: slice → merge round-trip preserves data."""
 

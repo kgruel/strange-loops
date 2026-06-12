@@ -17,6 +17,15 @@ def fact(kind: str, observer: str = "test", **payload) -> Fact:
     return Fact.of(kind, observer, **payload)
 
 
+def no_ts(state):
+    """Strip the engine-injected _ts for exact-equality state comparison."""
+    if isinstance(state, list):
+        return [no_ts(e) for e in state]
+    if isinstance(state, dict):
+        return {k: no_ts(v) for k, v in state.items() if k != "_ts"}
+    return state
+
+
 def sum_fold(state: int, payload: dict) -> int:
     return state + payload["value"]
 
@@ -201,7 +210,7 @@ class TestVertexCollectFold:
         v.receive(fact("log", msg="start"))
         v.receive(fact("log", msg="end"))
 
-        assert v.state("log") == [{"msg": "start"}, {"msg": "end"}]
+        assert no_ts(v.state("log")) == [{"msg": "start"}, {"msg": "end"}]
 
     def test_tick_with_collect_fold(self):
         v = Vertex()
@@ -210,7 +219,7 @@ class TestVertexCollectFold:
         v.receive(fact("log", msg="hello"))
 
         tick = v.tick("collector", NOW)
-        assert tick.payload == {"log": [{"msg": "hello"}]}
+        assert no_ts(tick.payload) == {"log": [{"msg": "hello"}]}
 
 
 class TestVertexBoundaryRegistration:
@@ -457,14 +466,14 @@ class TestVertexGrantGating:
         # Alice can update her own (observer matches kind suffix)
         v.receive(fact("scroll.alice", "alice", y=100))
         v.receive(fact("selection.alice", "alice", start=5, end=10))
-        assert v.state("scroll.alice") == {"y": 100}
-        assert v.state("selection.alice") == {"start": 5, "end": 10}
+        assert no_ts(v.state("scroll.alice")) == {"y": 100}
+        assert no_ts(v.state("selection.alice")) == {"start": 5, "end": 10}
 
         # Bob cannot (observer="bob" doesn't match "alice" suffix)
         v.receive(fact("scroll.alice", "bob", y=200))
         v.receive(fact("selection.alice", "bob", start=0, end=0))
-        assert v.state("scroll.alice") == {"y": 100}  # unchanged
-        assert v.state("selection.alice") == {"start": 5, "end": 10}  # unchanged
+        assert no_ts(v.state("scroll.alice")) == {"y": 100}  # unchanged
+        assert no_ts(v.state("selection.alice")) == {"start": 5, "end": 10}  # unchanged
 
     def test_non_observer_state_kinds_unaffected(self):
         """Regular kinds without observer-state pattern are not ownership-checked."""
@@ -804,7 +813,7 @@ class TestVertexLevelBoundary:
         tick = v.receive(fact("flush"))
 
         assert tick is not None
-        assert tick.payload["metric"] == [{"value": 1}, {"value": 2}]
+        assert no_ts(tick.payload["metric"]) == [{"value": 1}, {"value": 2}]
 
     def test_vertex_boundary_conflicts_with_loop_boundary(self):
         """Can't register vertex boundary for a kind already claimed by a loop."""
@@ -1056,7 +1065,7 @@ class TestVertexReplay:
         count = v2.replay()
 
         assert count == 2
-        assert v2.state("decision") == {
+        assert no_ts(v2.state("decision")) == {
             "auth": {"topic": "auth", "position": "JWT"},
             "store": {"topic": "store", "position": "SQLite"},
         }
@@ -1287,7 +1296,7 @@ class TestParseAtVertex:
         v.receive(fact("exchange", prompt="hello", response="world", model="gpt-4", extra="noise"))
         state = v.state("exchange")
         assert len(state) == 1
-        assert state[0] == {"prompt": "hello", "response": "world"}
+        assert no_ts(state[0]) == {"prompt": "hello", "response": "world"}
 
     def test_parse_preserves_unregistered_kinds(self):
         """Facts for kinds without parse pipelines pass through unmodified."""
@@ -1347,7 +1356,7 @@ class TestParseAtVertex:
         v.receive(fact("exchange.siftd", prompt="hello", model="gpt-4"))
         state = v.state("exchange")
         assert len(state) == 1
-        assert state[0] == {"prompt": "hello"}
+        assert no_ts(state[0]) == {"prompt": "hello"}
 
     def test_integration_parse_then_fold(self):
         """End-to-end: parse transforms payload, then fold accumulates."""
@@ -1368,9 +1377,9 @@ class TestParseAtVertex:
 
         state = v.state("decision")
         assert "auth" in state
-        assert state["auth"] == {"topic": "auth", "position": "JWT"}
+        assert no_ts(state["auth"]) == {"topic": "auth", "position": "JWT"}
         assert "deploy" in state
-        assert state["deploy"] == {"topic": "deploy", "position": "k8s"}
+        assert no_ts(state["deploy"]) == {"topic": "deploy", "position": "k8s"}
         # "extra" and "tags" were stripped by Select
 
     def test_parse_none_skips_fold(self):

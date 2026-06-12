@@ -418,7 +418,12 @@ class Vertex:
         loop = self._loops.get(routed_kind)
         count_boundary_fire = False
         if loop is not None:
-            count_boundary_fire = loop.receive(payload, ts=fact_ts)
+            # Inject the event timestamp the same way the replay/read paths
+            # do — Latest folds consume _ts; without it the live fold would
+            # diverge from every re-fold of the same store.
+            count_boundary_fire = loop.receive(
+                {**payload, "_ts": fact.ts}, ts=fact_ts
+            )
 
         # Forward to children that accept this kind
         # Skip the child that produced this fact (prevents loopback)
@@ -652,7 +657,10 @@ class Vertex:
                         continue
                 loop = self._loops.get(routed_kind)
                 if loop is not None:
-                    loop.receive(payload, ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc))
+                    loop.receive(
+                        {**payload, "_ts": fact.ts},
+                        ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc),
+                    )
                 if self._has_children:
                     for child in self._children:
                         if child.accepts(fact.kind):

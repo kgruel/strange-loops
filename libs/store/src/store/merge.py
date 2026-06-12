@@ -70,11 +70,16 @@ def merge_store(
         if dry_run:
             conn.execute("SAVEPOINT merge_dry_run")
 
-        # Merge facts — INSERT OR IGNORE dedup on id PK
+        # Merge facts — INSERT OR IGNORE dedup on id PK.
+        # ORDER BY (ts, id): insertion (witness) order is deterministic for
+        # a given source content, never scan-order. Fold replay also orders
+        # by (ts, id), so merge(A,B) and merge(B,A) re-fold identically —
+        # the witness histories differ (they ARE different custody events),
+        # the semantics do not.
         conn.execute("""
             INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload)
             SELECT id, kind, ts, observer, origin, payload
-            FROM src.facts
+            FROM src.facts ORDER BY ts, id
         """)
         facts_added = conn.execute("SELECT changes()").fetchone()[0]
 
@@ -82,7 +87,7 @@ def merge_store(
         conn.execute("""
             INSERT OR IGNORE INTO ticks (id, name, ts, since, origin, payload)
             SELECT id, name, ts, since, origin, payload
-            FROM src.ticks
+            FROM src.ticks ORDER BY ts, id
         """)
         ticks_added = conn.execute("SELECT changes()").fetchone()[0]
 

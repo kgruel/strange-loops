@@ -106,12 +106,14 @@ class TestTypedFoldApply:
         assert result == {"last_ts": 1234567890}
 
     def test_latest_without_ts(self):
+        """No _ts → rejected, never the wall clock (replay determinism)."""
         s = Shape(
             name="tracker",
             folds=(Latest(target="last_ts"),),
         )
         result = s.apply({"last_ts": None}, {})
-        assert isinstance(result["last_ts"], float)
+        assert result["last_ts"] is None
+        assert result["last_ts_rejected"] == 1
 
     def test_count_increments(self):
         s = Shape(

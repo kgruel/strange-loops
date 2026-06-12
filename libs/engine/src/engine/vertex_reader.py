@@ -352,11 +352,11 @@ def _combined_read(
 
     conn, aliases = _open_combined(store_paths)
     try:
-        # Single query for all facts, ordered by ts.
-        # NOTE: ORDER BY ts has undefined row order at timestamp ties across
-        # stores — there is no global ordering column. For idempotent folds
-        # (Upsert, Latest, Max, Min) this is harmless. For order-sensitive
-        # folds (Collect, Window) ties may produce non-deterministic ordering.
+        # Single query for all facts, fold-replay-ordered by (ts, id) —
+        # event order with the ULID as deterministic tie-break, the same
+        # total order the engine replay paths use. Store- and merge-order
+        # independent, so combined reads re-fold identically regardless of
+        # which store a fact lives in.
         selects = [
             f"SELECT id, kind, ts, observer, origin, payload "
             f"FROM {'[' + a + '].' if a != 'main' else ''}facts"
@@ -367,7 +367,7 @@ def _combined_read(
         rows = conn.execute(sql).fetchall()
         # Sort in Python — avoids SQLite index scan for ORDER BY ts
         # which causes random I/O (~14ms vs ~1ms for unsorted read).
-        rows.sort(key=lambda r: r[2])
+        rows.sort(key=lambda r: (r[2], r[0]))
 
         # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
         # "thread.foo" → "thread" if "thread" is a spec kind.
@@ -455,7 +455,7 @@ def _combined_facts(
                 f"WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ? || '.%')"
                 for a in aliases
             ]
-            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
             params: list[Any] = []
             for _ in aliases:
                 params.extend([since_ts, until_ts, kind, kind])
@@ -466,7 +466,7 @@ def _combined_facts(
                 f"WHERE ts >= ? AND ts <= ?"
                 for a in aliases
             ]
-            sql = " UNION ALL ".join(selects) + " ORDER BY ts"
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
             params = []
             for _ in aliases:
                 params.extend([since_ts, until_ts])

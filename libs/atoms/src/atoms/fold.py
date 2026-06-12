@@ -19,7 +19,9 @@ from dataclasses import dataclass
 class Latest:
     """Store timestamp of last event.
 
-    Updates target with the event's _ts field (or current time if missing).
+    Updates target with the event's _ts field. A payload without _ts is
+    rejected (counted in {target}_rejected) — never the wall clock, which
+    would break replay determinism.
 
     Attributes:
         target: State facet name to update.

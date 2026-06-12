@@ -709,3 +709,131 @@ class TestEnvelopeReadPath:
         with StoreReader(tmp_db) as r:
             pairs = r.ticks_between(0, 4e9, with_envelope=True)
             assert [e["chained"] for _, e in pairs] == [False, True]
+
+
+# ---------------------------------------------------------------------------
+# Re-anchor — the canon-migration ceremony (SPEC §8.1)
+# ---------------------------------------------------------------------------
+
+def _old_canon(obj: object) -> bytes:
+    """The pre-JCS canonical encoding (json.dumps, ensure_ascii=True)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+
+
+def fake_fact_signer(secret: str = "fk"):
+    """Per-observer fact signer stand-in — engine contract (observer, digest)."""
+    def signer(observer: str, digest: str) -> str:
+        return hashlib.sha256(f"{secret}:{observer}:{digest}".encode()).hexdigest()
+    return signer
+
+
+def fake_fact_verifier(secret: str = "fk"):
+    expected = fake_fact_signer(secret)
+    def verifier(observer: str, signature: str, digest: str) -> bool:
+        return signature == expected(observer, digest)
+    return verifier
+
+
+class TestReanchor:
+    def _signed_store(self, path: Path) -> SqliteStore[Fact]:
+        return SqliteStore(
+            path=path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=fake_signer(),
+            fact_signer=fake_fact_signer(),
+        )
+
+    def _build_old_canon_store(self, path: Path, monkeypatch) -> SqliteStore[Fact]:
+        """Build a signed, chained store whose commitments used the OLD canon.
+
+        Divergence comes from non-ASCII ENVELOPE FIELDS (observer, tick
+        name): ensure_ascii escapes where JCS mandates raw UTF-8. Payload
+        TEXT cannot diverge — it is serialized with ensure_ascii at append
+        time and embedded verbatim, so it reaches the canon layer already
+        ASCII. (Pure-ASCII envelopes hash identically under both canons —
+        re-anchoring those is an idempotent no-op.)
+        """
+        from engine import sqlite_store as mod
+        with monkeypatch.context() as m:
+            m.setattr(mod, "_canonical_bytes", _old_canon)
+            store = self._signed_store(path)
+            store.append(Fact.of("note", "josé", body="café crème"))
+            store.append(Fact.of("note", "josé", body="naïve"))
+            tick(store, "première")
+            store.append(Fact.of("note", "josé", body="emoji"))
+            tick(store, "deuxième")
+        return store
+
+    def test_old_canon_store_reads_broken_under_jcs(self, tmp_db, monkeypatch):
+        store = self._build_old_canon_store(tmp_db, monkeypatch)
+        report = store.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is False  # the false-tamper-alarm SPEC §8 warns of
+
+    def test_reanchor_restores_verification(self, tmp_db, monkeypatch):
+        store = self._build_old_canon_store(tmp_db, monkeypatch)
+
+        receipt = store.reanchor()
+        assert receipt["facts_resigned"] == 3
+        assert receipt["ticks_rechained"] == 2
+        assert receipt["ticks_resigned"] == 2
+        assert receipt["head"] is not None
+
+        report = store.verify_chain(verifier=fake_verifier())
+        assert report["ok"] is True
+        assert report["signed"] == 2
+        fact_report = store.verify_facts(verifier=fake_fact_verifier())
+        assert fact_report["ok"] is True
+
+    def test_reanchor_is_idempotent(self, tmp_db, monkeypatch):
+        store = self._build_old_canon_store(tmp_db, monkeypatch)
+        first = store.reanchor()
+        second = store.reanchor()
+        assert first["head"] == second["head"]
+        assert store.verify_chain(verifier=fake_verifier())["ok"] is True
+
+    def test_reanchor_preserves_event_columns(self, tmp_db, monkeypatch):
+        store = self._build_old_canon_store(tmp_db, monkeypatch)
+        before = store._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts ORDER BY rowid"
+        ).fetchall()
+        store.reanchor()
+        after = store._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts ORDER BY rowid"
+        ).fetchall()
+        assert before == after  # append-only boundary: events untouched
+
+    def test_reanchor_refuses_partial_without_fact_key(self, tmp_db, monkeypatch):
+        self._build_old_canon_store(tmp_db, monkeypatch).close()
+        # Reopen WITHOUT signers: signed rows exist, keys unavailable.
+        store = make_store(tmp_db)
+        with pytest.raises(ValueError, match="refusing partial"):
+            store.reanchor()
+
+    def test_reanchor_leaves_prechain_era_untouched(self, tmp_db, monkeypatch):
+        # Legacy ticks (chain columns NULL) predate the chain; re-anchor
+        # must not retro-claim them.
+        store = make_store(tmp_db)
+        emit(store, 1)
+        store._conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) "
+            "VALUES ('t-legacy', 'legacy', 1.0, NULL, '', '{}')"
+        )
+        store._conn.commit()
+        store.close()
+
+        from engine import sqlite_store as mod
+        with monkeypatch.context() as m:
+            m.setattr(mod, "_canonical_bytes", _old_canon)
+            store = self._signed_store(tmp_db)
+            store.append(Fact.of("note", "tester", body="époque"))
+            tick(store, "chained")
+
+        receipt = store.reanchor()
+        assert receipt["ticks_rechained"] == 1  # legacy row not counted
+        legacy = store._conn.execute(
+            "SELECT prev_hash, window_start, fact_cursor, window_hash, signature "
+            "FROM ticks WHERE id = 't-legacy'"
+        ).fetchone()
+        assert legacy == (None, None, None, None, None)
+        assert store.verify_chain(verifier=fake_verifier())["ok"] is True

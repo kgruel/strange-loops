@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+import rfc8785
 import sqlite3
 
 from ulid import ULID
@@ -98,17 +100,20 @@ _TICK_ROW_SQL_V1 = (
 
 
 def _canonical_bytes(obj: object) -> bytes:
-    """Deterministic encoding for chain hashing: sorted keys, compact separators.
+    """Canonical encoding for commitment hashing: JCS, RFC 8785.
 
-    Deliberately NOT RFC 8785 (JCS): chain integrity needs determinism within
-    this implementation, not cross-implementation interop. Stored payload TEXT
-    is embedded verbatim as a string value, so hashes detect byte-level
-    tampering without float/unicode re-serialization concerns. If a
-    federation-facing consumer ever needs interop hashing, upgrade here and
-    re-anchor the chain — the JCS pin (RFC 8785) belongs to the manifest
-    layer, not this one.
+    Upgraded from implementation-local json.dumps 2026-06-12
+    (decision design/attestation-canonicalization-jcs): the Go conformance
+    oracle is the federation-facing consumer the original docstring named
+    as the upgrade trigger, and cross-implementation hash divergence
+    renders as a false tamper alarm. Pre-JCS chains were re-anchored at
+    the swap (sl store reanchor), not grandfathered — SPEC §8.1.
+
+    Stored payload TEXT is still embedded verbatim as a string value, so
+    hashes detect byte-level tampering without re-serialization concerns
+    leaking in from payload content.
     """
-    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+    return rfc8785.dumps(obj)
 
 
 def _tick_envelope(row: tuple) -> dict:
@@ -663,6 +668,101 @@ class SqliteStore(Generic[T]):
             (*row, signature),
         )
         self._conn.commit()
+
+    def reanchor(self) -> dict[str, Any]:
+        """Recompute every commitment under the CURRENT canonical encoding.
+
+        The canon-migration ceremony (SPEC §8.1: pre-migration chains are
+        re-anchored, not grandfathered). Walks the store once and re-derives
+        the attestation layer: signed facts get fresh signatures over their
+        JCS commitment, chained ticks get recomputed window hashes, re-linked
+        prev_hash, and (when previously signed) fresh tick signatures.
+
+        Append-only boundary: facts' EVENT columns (id, kind, ts, observer,
+        origin, payload) and ticks' event fields are never touched. The
+        attestation columns (signature, prev_hash, window_hash) are DERIVED
+        data — a commitment computed over events. Re-deriving them under a
+        new canon is replay at the attestation layer, not mutation of
+        history. (Window cursors are fact ids — event-layer references —
+        and are preserved verbatim.)
+
+        Era rules hold: pre-chain ticks and unsigned rows are untouched —
+        absence stays absent, nothing is retro-claimed. Refuses to proceed
+        (raises ValueError, no partial write) when a signed row exists whose
+        key is unavailable: a partial re-anchor would strip authorship.
+
+        Requires the store be constructed WITH its signers (tick_signer /
+        fact_signer) when signed rows exist. Returns a receipt dict:
+        {facts_resigned, ticks_rechained, ticks_resigned, head} where head
+        is the new chain-head row hash.
+        """
+        self._ensure_sync()
+        self._ensure_chain_columns()
+
+        # --- Pass 1: re-sign signed facts (commitments change under the
+        # new canon; window hashes below must seal the NEW signatures). ---
+        facts_resigned = 0
+        if self._facts_have_signature_column():
+            signed = self._conn.execute(
+                "SELECT rowid, kind, ts, observer, origin, payload "
+                "FROM facts WHERE signature IS NOT NULL ORDER BY rowid"
+            ).fetchall()
+            updates = []
+            for rowid, kind, ts, observer, origin, payload in signed:
+                digest = _fact_commitment_hash(kind, ts, observer, origin, payload)
+                sig = (self._fact_signer(observer, digest)
+                       if self._fact_signer is not None else None)
+                if sig is None:
+                    raise ValueError(
+                        f"reanchor: no signing key for observer {observer!r} "
+                        "(fact rowid {0}) — refusing partial re-anchor; a "
+                        "signed fact must not lose authorship".format(rowid)
+                    )
+                updates.append((sig, rowid))
+            self._conn.executemany(
+                "UPDATE facts SET signature = ? WHERE rowid = ?", updates
+            )
+            facts_resigned = len(updates)
+
+        # --- Pass 2: walk ticks in witness order, re-deriving the chain. ---
+        ticks_rechained = 0
+        ticks_resigned = 0
+        running_hash: str | None = None
+        rows = self._conn.execute(
+            f"SELECT rowid, {_TICK_ROW_SQL} FROM ticks ORDER BY rowid"
+        ).fetchall()
+        for raw in rows:
+            rowid, row10, old_sig = raw[0], raw[1:11], raw[11]
+            if row10[9] is None:  # pre-chain era: untouched, but its row
+                running_hash = _tick_row_hash(row10)  # hash anchors successors
+                continue
+            new_row = (*row10[:6], running_hash, row10[7], row10[8],
+                       self._window_hash(row10[7], row10[8]))
+            new_sig = None
+            if old_sig is not None:
+                if self._tick_signer is None:
+                    raise ValueError(
+                        "reanchor: store has signed ticks but no tick_signer "
+                        "— refusing partial re-anchor"
+                    )
+                new_sig = self._tick_signer(_tick_commitment_hash(new_row))
+                ticks_resigned += 1
+            self._conn.execute(
+                "UPDATE ticks SET prev_hash = ?, window_hash = ?, "
+                "signature = ? WHERE rowid = ?",
+                (new_row[6], new_row[9], new_sig, rowid),
+            )
+            ticks_rechained += 1
+            running_hash = _tick_row_hash(
+                (*new_row, new_sig) if new_sig is not None else new_row
+            )
+        self._conn.commit()
+        return {
+            "facts_resigned": facts_resigned,
+            "ticks_rechained": ticks_rechained,
+            "ticks_resigned": ticks_resigned,
+            "head": running_hash,
+        }
 
     def verify_chain(
         self,

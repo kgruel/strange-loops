@@ -401,6 +401,84 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if verification.ok else 1
 
 
+def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Re-anchor a store's attestation layer under the current canonical
+    encoding (SPEC §8.1: canon migrations re-anchor, never grandfather).
+
+    Requires a .vertex target — the signing keys and observer registry
+    live in the custody context, not the raw .db. Re-signs signed facts,
+    re-links the chain, then verifies the result against the registry.
+    Exit 0 = re-anchored and verified, 1 = post-reanchor verify failed.
+    """
+    import argparse
+    import sys as _sys
+
+    p = argparse.ArgumentParser(
+        prog="loops store reanchor",
+        description="Recompute chain hashes and signatures under the "
+                    "current canonical encoding, then verify.",
+    )
+    if vertex_path is None:
+        p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
+    p.add_argument("--json", action="store_true", help="JSON receipt")
+    if "-h" in argv or "--help" in argv:
+        p.print_help(_sys.stdout)
+        return 0
+    args = p.parse_args(argv)
+
+    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+    if target_path.suffix != ".vertex":
+        raise ValueError(
+            "reanchor requires a .vertex target — re-signing needs the "
+            "keys and registry co-located with the store"
+        )
+    db_path = resolve_store_path(target_path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"{db_path} does not exist")
+
+    from loops.commands.signing import (
+        fact_signer_for, fact_verifier_for, tick_signer_for, tick_verifier_for,
+    )
+
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    store = SqliteStore(
+        path=db_path,
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+        tick_signer=tick_signer_for(target_path),
+        fact_signer=fact_signer_for(target_path),
+    )
+    try:
+        receipt = store.reanchor()
+        verifier, _keys = tick_verifier_for(target_path)
+        fact_verifier, _fkeys = fact_verifier_for(target_path)
+        report = store.verify_chain(verifier=verifier)
+        fact_report = store.verify_facts(verifier=fact_verifier)
+    finally:
+        store.close()
+
+    ok = report["ok"] and fact_report["ok"]
+    if args.json:
+        import json as _json
+        print(_json.dumps({**receipt, "verified": ok}, indent=2))  # noqa: T201 — machine output path
+        return 0 if ok else 1
+
+    from painted import Block, Style, show
+
+    head = receipt["head"][:16] + "…" if receipt["head"] else "(no chain)"
+    show(Block.text(
+        f"{'✓' if ok else '✗'} {db_path.name}: re-anchored — "
+        f"{receipt['facts_resigned']} facts re-signed, "
+        f"{receipt['ticks_rechained']} ticks re-chained "
+        f"({receipt['ticks_resigned']} re-signed) · head {head} · "
+        f"verify {'ok' if ok else 'FAILED'}",
+        Style(),
+    ))
+    return 0 if ok else 1
+
+
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
@@ -410,6 +488,8 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return _run_verify(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "rebirth":
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "reanchor":
+        return _run_reanchor(argv[1:], vertex_path=vertex_path)
 
     if "-h" in argv or "--help" in argv:
         import sys as _sys

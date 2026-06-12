@@ -237,6 +237,48 @@ class TestAddObserver:
         assert rc != 0
         assert "already exists" in capsys.readouterr().err
 
+    def test_add_observer_keygen_mints_and_registers(
+        self, project_with_change
+    ):
+        """--keygen generates the custody-co-located keypair and registers
+        its public key — the signing-era entry move for an existing vertex."""
+        keys_dir = project_with_change.parent / "keys"
+        assert not keys_dir.exists()
+        rc = _run_add(["project", "observer", "project", "--keygen"])
+        assert rc == 0
+        assert (keys_dir / "ed25519.key").exists()
+        from sign import ed25519
+
+        keypair = ed25519.load_or_generate(keys_dir)  # exists → pure load
+        vf = parse_vertex_file(project_with_change)
+        obs = next(o for o in (vf.observers or ()) if o.name == "project")
+        assert obs.key == keypair.public_b64
+        # Key creation owns gitignoring the keys directory.
+        gitignore = project_with_change.parent / ".gitignore"
+        assert "keys/" in gitignore.read_text().splitlines()
+
+    def test_add_observer_keygen_loads_existing_key(
+        self, project_with_change
+    ):
+        """Idempotent custody: an existing keypair is loaded, not replaced."""
+        from sign import ed25519
+
+        keys_dir = project_with_change.parent / "keys"
+        existing = ed25519.load_or_generate(keys_dir)
+        rc = _run_add(["project", "observer", "project", "--keygen"])
+        assert rc == 0
+        vf = parse_vertex_file(project_with_change)
+        obs = next(o for o in (vf.observers or ()) if o.name == "project")
+        assert obs.key == existing.public_b64
+
+    def test_add_observer_keygen_excludes_key(
+        self, project_with_change, capsys
+    ):
+        rc = _run_add(
+            ["project", "observer", "project", "--keygen", "--key", "AAAA"]
+        )
+        assert rc != 0
+
 
 # ---------------------------------------------------------------------------
 # Subcommand: combine

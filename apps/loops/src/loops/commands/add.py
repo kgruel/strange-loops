@@ -181,10 +181,17 @@ def _add_observer(target: str, argv: list[str]) -> int:
         "--grant", default="",
         help="Comma-separated kinds this observer is allowed to emit",
     )
-    p.add_argument(
+    key = p.add_mutually_exclusive_group()
+    key.add_argument(
         "--key",
         help="Ed25519 public key (raw-32-byte base64) — registers this "
              "observer in the tick-signature verification registry",
+    )
+    key.add_argument(
+        "--keygen", action="store_true",
+        help="Generate (or load) the vertex's custody-co-located keypair "
+             "at <vertex dir>/keys/ and register its public key — the "
+             "signing-era entry move for an existing vertex",
     )
     try:
         args = p.parse_args(argv)
@@ -194,14 +201,25 @@ def _add_observer(target: str, argv: list[str]) -> int:
     grants = [k.strip() for k in args.grant.split(",") if k.strip()] if args.grant else []
 
     if args.key:
-        # Validate before splicing — a malformed key in the registry would
-        # silently verify nothing.
+        # Validate before resolving or splicing — a malformed key in the
+        # registry would silently verify nothing.
         from sign import ed25519
         try:
             ed25519.public_key_from_b64(args.key)
         except ValueError as exc:
             _err(f"invalid --key: {exc}")
             return 1
+
+    vertex_path = _resolve_or_fail(target)
+    if vertex_path is None:
+        return 1
+
+    keys_note = ""
+    if args.keygen:
+        from loops.commands.signing import ensure_signing_key, keys_dir_for
+
+        args.key = ensure_signing_key(vertex_path).public_b64
+        keys_note = f" (key at {_display_path(keys_dir_for(vertex_path))})"
 
     # Render the observer KDL block.
     if not args.identity and not grants and not args.key:
@@ -218,10 +236,6 @@ def _add_observer(target: str, argv: list[str]) -> int:
             body_lines.append(f"    potential {kinds}")
             body_lines.append("  }")
         child_text = f"{args.name} {{\n" + "\n".join(body_lines) + "\n}"
-
-    vertex_path = _resolve_or_fail(target)
-    if vertex_path is None:
-        return 1
 
     rc = _splice_into(
         vertex_path=vertex_path,
@@ -246,7 +260,7 @@ def _add_observer(target: str, argv: list[str]) -> int:
             bits.append(f"grant={','.join(grants)}")
         if args.key:
             bits.append(f"key={args.key[:8]}…")
-        _ok(f"added observer {' '.join(bits)} to {_display_path(vertex_path)}")
+        _ok(f"added observer {' '.join(bits)} to {_display_path(vertex_path)}{keys_note}")
     return rc
 
 

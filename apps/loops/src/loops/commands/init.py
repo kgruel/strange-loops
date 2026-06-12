@@ -219,19 +219,9 @@ def _bootstrap_signing(name: str, vertex_path: Path) -> None:
     observer declarations are left alone — re-running init on an existing
     .loops upgrades it into the signing era.
     """
-    from sign import ed25519
+    from loops.commands.signing import ensure_signing_key
 
-    from loops.commands.signing import keys_dir_for
-
-    keypair = ed25519.load_or_generate(keys_dir_for(vertex_path))
-
-    gitignore = vertex_path.parent / ".gitignore"
-    if gitignore.exists():
-        lines = gitignore.read_text().splitlines()
-        if "keys/" not in (ln.strip() for ln in lines):
-            gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nkeys/\n")
-    else:
-        gitignore.write_text("keys/\n")
+    keypair = ensure_signing_key(vertex_path)
 
     # The minimal stub (empty loops block) does not parse until the user
     # fills it in — skip observer registration rather than let the splice

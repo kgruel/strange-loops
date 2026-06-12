@@ -16,9 +16,10 @@ colocated: INJECTION NOT IMPORT). This module is the composition layer:
   (anticipates rotation and multi-writer without a key-id column today).
 
 Progressive policy is structural: no key material → tick_signer_for
-returns None → ticks append unsigned (honest pre-signature era). ``loops
-init`` owns key generation and gitignoring; this module only LOADS what
-init created — it never generates implicitly.
+returns None → ticks append unsigned (honest pre-signature era). Key
+generation + gitignoring happens only through ``ensure_signing_key``
+(reached via ``loops init`` or ``loops add <v> observer --keygen``);
+the load-side helpers never generate implicitly.
 """
 
 from __future__ import annotations
@@ -34,6 +35,32 @@ _KEY_FILE = "ed25519.key"
 def keys_dir_for(vertex_path: Path) -> Path:
     """The custody-co-located key directory for a vertex file."""
     return vertex_path.parent / "keys"
+
+
+def ensure_signing_key(vertex_path: Path):
+    """Generate (or load) the custody-co-located keypair for a vertex.
+
+    design/tick-key-custody-colocated: the private key lives at
+    ``<vertex dir>/keys/`` next to the store it signs, and key CREATION
+    owns gitignoring that directory (convenience is the mitigation for
+    the committed-key failure mode, not discipline). Idempotent: an
+    existing key loads untouched. This is the single entry point for
+    minting custody — ``loops init`` and ``loops add ... observer
+    --keygen`` both ride it; everything else only LOADS.
+    """
+    from sign import ed25519
+
+    keypair = ed25519.load_or_generate(keys_dir_for(vertex_path))
+
+    gitignore = vertex_path.parent / ".gitignore"
+    if gitignore.exists():
+        lines = gitignore.read_text().splitlines()
+        if "keys/" not in (ln.strip() for ln in lines):
+            gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nkeys/\n")
+    else:
+        gitignore.write_text("keys/\n")
+
+    return keypair
 
 
 def tick_signer_for(vertex_path: Path) -> Callable[[str], str] | None:

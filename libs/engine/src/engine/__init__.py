@@ -35,6 +35,7 @@ __all__ = [
     "Tailer",
     "gen_id",
     "replay",
+    "fact_commitment_hash",
     "tick_row_hash",
     # Utilities
     "Forward",
@@ -105,6 +106,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "replay": ("engine.replay", "replay"),
     "SqliteStore": ("engine.sqlite_store", "SqliteStore"),
     "gen_id": ("engine.sqlite_store", "gen_id"),
+    "fact_commitment_hash": ("engine.sqlite_store", "fact_commitment_hash"),
     "tick_row_hash": ("engine.sqlite_store", "tick_row_hash"),
     "EventStore": ("engine.store", "EventStore"),
     "Store": ("engine.store", "Store"),

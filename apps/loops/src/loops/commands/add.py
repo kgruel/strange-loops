@@ -216,14 +216,31 @@ def _add_observer(target: str, argv: list[str]) -> int:
 
     keys_note = ""
     if args.keygen:
-        from loops.commands.signing import ensure_signing_key, keys_dir_for
+        from loops.commands.signing import (
+            ensure_signing_key,
+            keys_dir_for,
+            observer_keys_dir_for,
+        )
 
-        args.key = ensure_signing_key(vertex_path).public_b64
-        keys_note = f" (key at {_display_path(keys_dir_for(vertex_path))})"
+        # Per-observer custody (delta 3): a non-self observer's key mints
+        # into keys/<observer>/; the self-observer keeps the flat layout.
+        args.key = ensure_signing_key(vertex_path, observer=args.name).public_b64
+        key_dir = (
+            keys_dir_for(vertex_path)
+            if args.name == vertex_path.stem
+            else observer_keys_dir_for(vertex_path, args.name)
+        )
+        keys_note = f" (key at {_display_path(key_dir)})"
 
-    # Render the observer KDL block.
+    # Render the observer KDL block. Names with non-identifier chars
+    # (slashed observers like kyle/loops-claude) must be quoted — KDL
+    # rejects them bare, and the splice's parse-gate would refuse the
+    # write AFTER --keygen already minted the key.
+    node_name = args.name
+    if not node_name.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        node_name = f'"{node_name}"'
     if not args.identity and not grants and not args.key:
-        child_text = f"{args.name} {{ }}"
+        child_text = f"{node_name} {{ }}"
     else:
         body_lines = []
         if args.identity:
@@ -235,7 +252,7 @@ def _add_observer(target: str, argv: list[str]) -> int:
             body_lines.append("  grant {")
             body_lines.append(f"    potential {kinds}")
             body_lines.append("  }")
-        child_text = f"{args.name} {{\n" + "\n".join(body_lines) + "\n}"
+        child_text = f"{node_name} {{\n" + "\n".join(body_lines) + "\n}"
 
     rc = _splice_into(
         vertex_path=vertex_path,

@@ -112,10 +112,11 @@ def _run_sync_aggregate(
         children: list[dict] = []
 
         for child_path in child_paths:
-            from loops.commands.signing import tick_signer_for
+            from loops.commands.signing import fact_signer_for, tick_signer_for
             child_program = load_vertex_program(
                 child_path, vars=vars, run_dispatcher=_execute_boundary_run,
                 tick_signer=tick_signer_for(child_path),
+                fact_signer=fact_signer_for(child_path),
             )
             if not child_program.sources:
                 continue
@@ -248,10 +249,11 @@ def _run_sync(
         rep.err(str(e))
         return 1
 
-    from loops.commands.signing import tick_signer_for
+    from loops.commands.signing import fact_signer_for, tick_signer_for
     program = load_vertex_program(
         vertex_path, vars=vars or None, run_dispatcher=_execute_boundary_run,
         tick_signer=tick_signer_for(vertex_path),
+        fact_signer=fact_signer_for(vertex_path),
     )
 
     # Aggregation vertex: no own sources but has combine children — sync each child

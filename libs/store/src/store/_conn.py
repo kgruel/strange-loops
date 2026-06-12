@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS facts (
     ts       REAL NOT NULL,
     observer TEXT NOT NULL,
     origin   TEXT NOT NULL DEFAULT '',
-    payload  TEXT NOT NULL CHECK (json_valid(payload))
+    payload  TEXT NOT NULL CHECK (json_valid(payload)),
+    signature TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
 CREATE INDEX IF NOT EXISTS idx_facts_ts   ON facts(ts);

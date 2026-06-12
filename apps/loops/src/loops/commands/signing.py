@@ -28,6 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 TICK_DOMAIN = "loops-tick-v1"
+FACT_DOMAIN = "loops-fact-v1"
 
 _KEY_FILE = "ed25519.key"
 
@@ -37,7 +38,7 @@ def keys_dir_for(vertex_path: Path) -> Path:
     return vertex_path.parent / "keys"
 
 
-def ensure_signing_key(vertex_path: Path):
+def ensure_signing_key(vertex_path: Path, observer: str | None = None):
     """Generate (or load) the custody-co-located keypair for a vertex.
 
     design/tick-key-custody-colocated: the private key lives at
@@ -47,10 +48,18 @@ def ensure_signing_key(vertex_path: Path):
     existing key loads untouched. This is the single entry point for
     minting custody — ``loops init`` and ``loops add ... observer
     --keygen`` both ride it; everything else only LOADS.
+
+    ``observer`` (delta 3): mint into the per-observer layout
+    ``keys/<observer>/`` instead of the flat (self-observer) layout.
+    The self-observer keeps the flat layout — fact_signer_for resolves
+    both, and the flat key remains what tick_signer_for loads.
     """
     from sign import ed25519
 
-    keypair = ed25519.load_or_generate(keys_dir_for(vertex_path))
+    key_dir = keys_dir_for(vertex_path)
+    if observer is not None and observer != vertex_path.stem:
+        key_dir = key_dir / observer
+    keypair = ed25519.load_or_generate(key_dir)
 
     gitignore = vertex_path.parent / ".gitignore"
     if gitignore.exists():
@@ -77,6 +86,109 @@ def tick_signer_for(vertex_path: Path) -> Callable[[str], str] | None:
 
     keypair = ed25519.load_or_generate(key_dir)  # exists → pure load
     return lambda digest: ed25519.sign(keypair, digest.encode(), domain=TICK_DOMAIN)
+
+
+def observer_keys_dir_for(vertex_path: Path, observer: str) -> Path:
+    """Per-observer key directory (delta 3) — ``keys/<observer>/``.
+
+    Observer names may carry slashes (``kyle/loops-claude``); they nest
+    as directories. The FLAT layout (``keys/ed25519.key``, delta 2) is
+    the SELF-observer's key — fact_signer_for falls back to it for the
+    vertex's own name, so existing single-key vertices sign facts
+    without a key migration.
+    """
+    return keys_dir_for(vertex_path) / observer
+
+
+def fact_signer_for(vertex_path: Path):
+    """Build the per-observer fact signer for a vertex, or None when the
+    vertex has no key material at all.
+
+    Returns a callable (observer str, content digest str) -> signature
+    str | None, matching engine's fact_signer contract
+    (design/fact-signing-per-observer-keys). Key resolution per observer:
+
+    1. ``keys/<observer>/ed25519.key`` — the per-observer layout;
+    2. flat ``keys/ed25519.key`` — ONLY for the self-observer (the
+       vertex's own name), delta-2 back-compat;
+    3. otherwise None — that observer's facts append unsigned (honest
+       per-observer pre-signature era).
+
+    Keypairs are loaded lazily and cached per observer for the life of
+    the signer (one CLI invocation). Returns None (no signer at all)
+    when the keys/ directory doesn't exist — structurally identical to
+    the pre-signature era, same posture as tick_signer_for.
+    """
+    keys_root = keys_dir_for(vertex_path)
+    if not keys_root.exists():
+        return None
+    from sign import ed25519
+
+    self_observer = vertex_path.stem
+    cache: dict[str, ed25519.Keypair | None] = {}
+
+    def _keypair(observer: str):
+        # An empty observer must never sign: ``keys_root / ""`` collapses
+        # to the flat layout, which would mint the VERTEX key's authorship
+        # claim for an anonymous writer. Same guard for path traversal —
+        # an observer name is a key, not a path expression.
+        if not observer or ".." in observer.split("/"):
+            return None
+        if observer in cache:
+            return cache[observer]
+        key_dir = keys_root / observer
+        if not (key_dir / _KEY_FILE).exists():
+            if observer == self_observer and (keys_root / _KEY_FILE).exists():
+                key_dir = keys_root  # flat delta-2 layout = self-observer
+            else:
+                cache[observer] = None
+                return None
+        cache[observer] = ed25519.load_or_generate(key_dir)  # exists → pure load
+        return cache[observer]
+
+    def signer(observer: str, digest: str) -> str | None:
+        keypair = _keypair(observer)
+        if keypair is None:
+            return None
+        return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
+
+    return signer
+
+
+def fact_verifier_for(
+    vertex_path: Path,
+) -> tuple[Callable[[str, str, str], bool] | None, dict[str, str]]:
+    """Build the fact verifier from a vertex's observer-key registry.
+
+    Returns (verifier, declared_keys). verifier is a callable
+    (observer, signature, content digest) -> bool that checks against
+    THAT observer's declared key EXACTLY — authorship is a per-observer
+    claim, so the tick path's any-key relaxation (a receipt-claim
+    affordance) deliberately does not apply here. An observer with no
+    declared key fails verification of any signature attributed to it
+    (a signed fact from an unregistered observer is unverifiable, which
+    verify reports as a break — the registry is the trust anchor).
+    None when the registry declares no keys.
+    """
+    keys = declared_observer_keys(vertex_path)
+    if not keys:
+        return None, keys
+    from sign import ed25519
+
+    publics = {}
+    for name, b64 in keys.items():
+        try:
+            publics[name] = ed25519.public_key_from_b64(b64)
+        except ValueError:
+            continue  # malformed declared key: cannot verify against it
+
+    def verifier(observer: str, signature: str, digest: str) -> bool:
+        pub = publics.get(observer)
+        if pub is None:
+            return False
+        return ed25519.verify(pub, signature, digest.encode(), domain=FACT_DOMAIN)
+
+    return verifier, keys
 
 
 def declared_observer_keys(vertex_path: Path) -> dict[str, str]:

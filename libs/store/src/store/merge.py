@@ -76,9 +76,28 @@ def merge_store(
         # by (ts, id), so merge(A,B) and merge(B,A) re-fold identically —
         # the witness histories differ (they ARE different custody events),
         # the semantics do not.
-        conn.execute("""
-            INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload)
-            SELECT id, kind, ts, observer, origin, payload
+        #
+        # The fact SIGNATURE travels (design/fact-signature-at-store-column):
+        # it is a per-observer authorship claim over content only — unlike
+        # the tick chain columns (receipt custody, store-local, stripped
+        # below). Carried verbatim, never re-signed. Era-aware: a source
+        # predating the column merges as NULL (honest pre-signature era).
+        src_cols = {r[1] for r in conn.execute("PRAGMA src.table_info(facts)")}
+        tgt_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        if "signature" in src_cols and "signature" not in tgt_cols:
+            conn.execute("ALTER TABLE facts ADD COLUMN signature TEXT")
+            tgt_cols.add("signature")
+        if "signature" in tgt_cols:
+            sig_src = "signature" if "signature" in src_cols else "NULL"
+            ins_cols, sel_cols = (
+                "id, kind, ts, observer, origin, payload, signature",
+                f"id, kind, ts, observer, origin, payload, {sig_src}",
+            )
+        else:  # both pre-delta-3
+            ins_cols = sel_cols = "id, kind, ts, observer, origin, payload"
+        conn.execute(f"""
+            INSERT OR IGNORE INTO facts ({ins_cols})
+            SELECT {sel_cols}
             FROM src.facts ORDER BY ts, id
         """)
         facts_added = conn.execute("SELECT changes()").fetchone()[0]

@@ -169,9 +169,10 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
     # verifies the chain but cannot check signatures.
-    from loops.commands.signing import tick_verifier_for
+    from loops.commands.signing import fact_verifier_for, tick_verifier_for
 
     verifier, declared_keys = tick_verifier_for(target_path)
+    fact_verifier, _fact_keys = fact_verifier_for(target_path)
 
     from atoms import Fact
     from engine.sqlite_store import SqliteStore
@@ -179,19 +180,26 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     store = SqliteStore(path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict)
     try:
         report = store.verify_chain(verifier=verifier, include_ticks=args.verbose)
+        fact_report = store.verify_facts(verifier=fact_verifier)
     finally:
         store.close()
 
     if args.json:
         import json as _json
-        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
-        return 0 if report["ok"] else 1
+        print(_json.dumps({**report, "fact_signatures": fact_report}, indent=2))  # noqa: T201 — machine output path
+        return 0 if report["ok"] and fact_report["ok"] else 1
 
     from painted import Block, Style, show
 
-    verdict = "chain intact" if report["ok"] else "CHAIN BROKEN"
+    ok = report["ok"] and fact_report["ok"]
+    if not report["ok"]:
+        verdict = "CHAIN BROKEN"
+    elif not fact_report["ok"]:
+        verdict = "FACT SIGNATURES BROKEN"
+    else:
+        verdict = "chain intact"
     lines = [
-        f"{'✓' if report['ok'] else '✗'} {db_path.name}: {verdict}",
+        f"{'✓' if ok else '✗'} {db_path.name}: {verdict}",
         f"  ticks: {report['ticks']} ({report['chained']} chained, "
         f"{report['legacy']} legacy, {report['signed']} signed)",
         f"  facts: {report['covered_facts']} covered, {report['uncovered_facts']} uncovered (live edge)",
@@ -214,10 +222,42 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
             "  ⚠ registry declares signing key(s) but no tick is signed — "
             "pre-signing store, or signatures stripped"
         )
+    # Fact authorship signatures (delta 3) — a separate claim from the
+    # chain: per-observer authorship over content, transport-stable.
+    if fact_report["signed"]:
+        checked = "checked against registry" if fact_report["sig_checked"] else (
+            "present, unchecked (no keys in registry)"
+        )
+        lines.append(
+            f"  fact signatures: {fact_report['signed']} signed, "
+            f"{fact_report['unsigned']} unsigned · {checked}"
+        )
+    elif fact_report["facts"]:
+        lines.append(
+            f"  fact signatures: none ({fact_report['facts']} pre-signature facts)"
+        )
+    if _fact_keys:
+        # Per-observer era tripwire (analog of the tick strip tripwire):
+        # a keyed observer with zero signed facts is either pre-signing
+        # history or a live-edge strip.
+        silent = [
+            name for name in _fact_keys
+            if fact_report["observers"].get(name, {}).get("signed", 0) == 0
+            and fact_report["observers"].get(name, {}).get("unsigned", 0) > 0
+        ]
+        if silent and fact_report["signed"]:
+            lines.append(
+                f"  ⚠ keyed observer(s) with no signed facts: {', '.join(silent)} "
+                "— pre-signing era, or signatures stripped on the live edge"
+            )
     for b in report["breaks"]:
         lines.append(f"  ✗ {b['name']} ({b['tick']}): {b['reason']}")
-    if report["truncated"]:
-        lines.append(f"  … stopped after {len(report['breaks'])} breaks")
+    for b in fact_report["breaks"]:
+        lines.append(f"  ✗ fact {b['fact']} ({b['observer']}/{b['kind']}): {b['reason']}")
+    if report["truncated"] or fact_report["truncated"]:
+        lines.append(
+            f"  … stopped after {len(report['breaks']) + len(fact_report['breaks'])} breaks"
+        )
     if args.verbose and report.get("tick_detail"):
         from datetime import datetime, timezone
 
@@ -238,7 +278,7 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
                 f"{t['window_facts']} facts · cursor → {cursor}"
             )
     show(Block.text("\n".join(lines), Style(dim=False)))
-    return 0 if report["ok"] else 1
+    return 0 if ok else 1
 
 
 def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:

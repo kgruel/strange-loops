@@ -186,6 +186,7 @@ def load_vertex_program(
     skip_sources: bool = False,
     run_dispatcher: Callable[[str, str, Path], None] | None = None,
     tick_signer: Callable[[str], str] | None = None,
+    fact_signer: Callable[[str, str], str | None] | None = None,
 ) -> VertexProgram:
     """Load a .vertex file into a runnable (vertex, sources) program.
 
@@ -202,6 +203,10 @@ def load_vertex_program(
         validate_ast: Whether to validate the parsed VertexFile AST.
         tick_signer: Optional tick-signing callable injected into the
             store (see materialize_vertex). Opaque to the engine.
+        fact_signer: Optional per-observer fact-signing callable
+            (observer str, content digest str) -> signature | None,
+            injected into the store (see materialize_vertex). Opaque
+            to the engine.
 
     Returns:
         VertexProgram with materialized Vertex, compiled Sources, and
@@ -233,7 +238,8 @@ def load_vertex_program(
         overrides.update(fold_overrides)
 
     vertex = materialize_vertex(
-        compiled, fold_overrides=overrides or None, tick_signer=tick_signer
+        compiled, fold_overrides=overrides or None, tick_signer=tick_signer,
+        fact_signer=fact_signer,
     )
 
     # Replay stored facts to rebuild fold state — makes one-shot CLI

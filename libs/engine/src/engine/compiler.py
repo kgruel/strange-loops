@@ -853,6 +853,7 @@ def materialize_vertex(
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
     tick_signer=None,
+    fact_signer=None,
 ) -> "Vertex":
     """Instantiate a runtime Vertex tree from a CompiledVertex.
 
@@ -869,6 +870,10 @@ def materialize_vertex(
             the engine — the composing layer (apps/loops) builds it from
             libs/sign + the vertex's key material. Only applies to
             SQLite-backed stores.
+        fact_signer: Optional callable (observer str, content digest str
+            -> signature str | None) injected into the SqliteStore for
+            per-observer fact authorship signing (delta 3). Same posture
+            as tick_signer: opaque, composed at apps/loops, SQLite only.
 
     Returns:
         A fully wired Vertex with children attached. Child ticks will
@@ -902,6 +907,7 @@ def materialize_vertex(
                 serialize=Fact.to_dict,
                 deserialize=Fact.from_dict,
                 tick_signer=tick_signer,
+                fact_signer=fact_signer,
             )
         else:
             from .store import EventStore

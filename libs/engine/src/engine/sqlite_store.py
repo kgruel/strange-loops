@@ -188,12 +188,54 @@ def tick_row_hash(row: tuple) -> str:
 
 
 def _fact_row_hash(row: tuple) -> str:
-    """Hash one persisted fact row: (id, kind, ts, observer, origin, payload)."""
+    """Era-aware hash of one persisted fact row.
+
+    Row shape: (id, kind, ts, observer, origin, payload[, signature]).
+    The signature key is included only when the row carries one, so every
+    pre-signature fact row hashes byte-identically to delta 1/2 — already-
+    sealed window hashes never re-anchor. For signed facts the window
+    commits over content+signature, making fact-signature-stripping a
+    detectable break in any sealed window (delta-2 envelope trick, one
+    layer down — design/fact-signing-per-observer-keys).
+    """
     envelope = {
         "id": row[0], "kind": row[1], "ts": row[2],
         "observer": row[3], "origin": row[4], "payload": row[5],
     }
+    if len(row) > 6 and row[6] is not None:
+        envelope["signature"] = row[6]
     return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+
+
+def _fact_commitment_hash(
+    kind: str, ts: float, observer: str, origin: str, payload_text: str
+) -> str:
+    """Hash the fact's CONTENT commitment — what the fact signer signs.
+
+    Content-only by design (design/fact-signature-at-store-column):
+    excludes id and rowid, which are custody context, not authored
+    content. This is what makes the signature transport-stable — any
+    store holding the row can re-derive the commitment and verify
+    authorship against the observer registry without trusting the
+    sender. Stored payload TEXT is embedded verbatim (same posture as
+    the tick envelope: byte-level tamper detection, no re-serialization).
+    Never includes the signature (a signature cannot sign itself).
+    """
+    envelope = {
+        "kind": kind, "ts": ts, "observer": observer,
+        "origin": origin, "payload": payload_text,
+    }
+    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+
+
+# Public name: the content commitment is a cross-lib contract —
+# libs/store's transport paths and any receive-side verifier must hash
+# the same envelope the signer signed. Same function, two names.
+def fact_commitment_hash(
+    kind: str, ts: float, observer: str, origin: str, payload_text: str
+) -> str:
+    """Content commitment hash for fact signing (see _fact_commitment_hash)."""
+    return _fact_commitment_hash(kind, ts, observer, origin, payload_text)
 
 
 from datetime import datetime, timezone as _tz
@@ -226,7 +268,8 @@ _SCHEMA_STMTS = (
         ts       REAL NOT NULL,
         observer TEXT NOT NULL,
         origin   TEXT NOT NULL DEFAULT '',
-        payload  TEXT NOT NULL CHECK (json_valid(payload))
+        payload  TEXT NOT NULL CHECK (json_valid(payload)),
+        signature TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
     "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
@@ -262,17 +305,26 @@ class SqliteStore(Generic[T]):
         serialize: Callable[[T], dict],
         deserialize: Callable[[dict], T],
         tick_signer: Callable[[str], str] | None = None,
+        fact_signer: Callable[[str, str], str | None] | None = None,
     ) -> None:
         """tick_signer: optional callable (commitment digest str -> signature
         str, e.g. base64 Ed25519). Injected, never imported — custody is a
         property of the store handle (the key lives next to the db), so the
         signer rides the constructor rather than each append_tick call.
         None = ticks append unsigned (pre-signature era, honest NULL).
+
+        fact_signer (delta 3): optional callable (observer str, content
+        commitment digest str -> signature str | None). Per-observer
+        authorship (design/fact-signing-per-observer-keys): the callable
+        selects a key by observer and returns None for observers without
+        one — those facts append unsigned (honest NULL, a per-observer
+        era rather than a per-store epoch). Injected, never imported.
         """
         self._path = Path(path)
         self._serialize = serialize
         self._deserialize = deserialize
         self._tick_signer = tick_signer
+        self._fact_signer = fact_signer
         self._direct_fact_build: bool | None = None  # lazy detection
         self._fact_class: type | None = None
 
@@ -283,6 +335,7 @@ class SqliteStore(Generic[T]):
             self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
         self._chain_ready = is_new  # new DBs get chain columns in schema
+        self._fact_sig_ready = is_new  # new DBs get facts.signature in schema
         if is_new:
             # New DB — set WAL (persistent) and synchronous, create schema
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -319,19 +372,48 @@ class SqliteStore(Generic[T]):
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._sync_set = True
 
-    def append(self, event: T, *, id_override: str | None = None) -> str:
+    def append(
+        self,
+        event: T,
+        *,
+        id_override: str | None = None,
+        signature_override: str | None = None,
+    ) -> str:
         """Append one event to the store. Returns the ID assigned.
 
         If id_override is provided, that ID is used; otherwise a new ID
         is generated via gen_id(). The ID is returned in either case so
         callers (e.g. emit's receipt path) can reference the stored row.
+
+        Signature (delta 3): when a fact_signer was injected, signs the
+        CONTENT commitment of the new row under the fact's own observer;
+        NULL when the signer returns None for that observer (per-observer
+        pre-signature era). signature_override carries an EXISTING
+        signature verbatim — replay/rebirth/transport paths must preserve
+        the original authorship signature, never re-sign (re-signing
+        another observer's fact under a local key would be forgery; the
+        override bypasses the signer entirely).
         """
         self._ensure_sync()
+        self._ensure_fact_signature_column()
         d = self._serialize(event)
         fact_id = id_override if id_override is not None else gen_id()
+        observer = d["observer"]
+        origin = d.get("origin", "")
+        payload_text = json.dumps(d["payload"])
+        if signature_override is not None:
+            signature = signature_override
+        elif self._fact_signer is not None:
+            signature = self._fact_signer(
+                observer,
+                _fact_commitment_hash(d["kind"], d["ts"], observer, origin, payload_text),
+            )
+        else:
+            signature = None
         self._conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (fact_id, d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature),
         )
         self._conn.commit()
         return fact_id
@@ -462,6 +544,26 @@ class SqliteStore(Generic[T]):
         self._conn.commit()
         self._chain_ready = True
 
+    def _ensure_fact_signature_column(self) -> None:
+        """Idempotent migration: add the signature column to a pre-delta-3
+        facts table. Existing rows keep NULL — the pre-signature fact era
+        stays visible, never retro-claimed (same posture as the chain
+        columns and the uuid4 id wedge)."""
+        if self._fact_sig_ready:
+            return
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
+        if "signature" not in cols:
+            self._conn.execute("ALTER TABLE facts ADD COLUMN signature TEXT")
+            self._conn.commit()
+        self._fact_sig_ready = True
+
+    def _facts_have_signature_column(self) -> bool:
+        """Read-only column probe for verify paths (never migrates)."""
+        if self._fact_sig_ready:
+            return True
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
+        return "signature" in cols
+
     def _cursor_rowid(self, fact_id: str) -> int | None:
         """Resolve a window cursor (fact id) to its rowid — witness order.
 
@@ -492,8 +594,15 @@ class SqliteStore(Generic[T]):
         hi = self._cursor_rowid(end)
         if lo is None or hi is None:
             return h.hexdigest()  # unresolvable cursor → empty commitment
+        # Era-aware row hash: include the signature column when it exists.
+        # Unsigned rows hash identically either way (the signature key is
+        # only added when non-NULL), so pre-delta-3 sealed windows verify
+        # unchanged; signed facts are strip-detectable once sealed.
+        cols = "id, kind, ts, observer, origin, payload"
+        if self._facts_have_signature_column():
+            cols += ", signature"
         for row in self._conn.execute(
-            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            f"SELECT {cols} FROM facts "
             "WHERE rowid > ? AND rowid <= ? ORDER BY rowid",
             (lo, hi),
         ):
@@ -738,6 +847,103 @@ class SqliteStore(Generic[T]):
         if include_ticks:
             report["tick_detail"] = tick_detail
         return report
+
+    def verify_facts(
+        self,
+        *,
+        verifier: Callable[[str, str, str], bool] | None = None,
+        max_breaks: int = 10,
+    ) -> dict[str, Any]:
+        """Verify fact authorship signatures (delta 3).
+
+        A fact signature is a per-observer AUTHORSHIP claim over the
+        content commitment (kind, ts, observer, origin, payload) — a
+        different claim from the tick chain's receipt attestation, and
+        transport-stable because it commits to nothing store-local
+        (design/fact-signature-at-store-column).
+
+        ``verifier`` is an injected callable (observer str, signature str,
+        commitment digest str) -> bool — apps/loops composes it from the
+        observer-key registry, checking against THAT observer's declared
+        key exactly (authorship, not the tick path's any-key receipt
+        relaxation). When None, signatures are counted but not checked.
+
+        Tamper coverage note: an invalid signature here means content or
+        signature was altered. STRIPPING a signature is not detectable at
+        this layer alone (NULL is also the honest pre-signature era); the
+        sealed-window hashes walked by verify_chain catch strips, since
+        the fact row hash is era-aware. Live-edge facts (not yet sealed
+        by a tick) are strippable without trace until the next boundary —
+        the same custody boundary delta 2 accepted for ticks.
+
+        Returns a report dict:
+            ok            True when no breaks found
+            facts         total fact rows
+            signed        rows carrying a signature
+            unsigned      rows without (pre-signature era / unkeyed observers)
+            sig_checked   True when a verifier was provided
+            observers     {observer: {"signed": n, "unsigned": n}}
+            breaks        list of {fact, observer, kind, reason} (capped)
+            truncated     True if the walk stopped at max_breaks
+
+        Read-only: never migrates schema. A pre-delta-3 facts table (no
+        signature column) reports everything unsigned.
+        """
+        sig_checked = verifier is not None
+        observers: dict[str, dict[str, int]] = {}
+        breaks: list[dict[str, str]] = []
+        truncated = False
+
+        def _obs(name: str) -> dict[str, int]:
+            return observers.setdefault(name, {"signed": 0, "unsigned": 0})
+
+        if not self._facts_have_signature_column():
+            for name, n in self._conn.execute(
+                "SELECT observer, COUNT(*) FROM facts GROUP BY observer"
+            ):
+                _obs(name)["unsigned"] = n
+            total = self.total
+            return {
+                "ok": True, "facts": total, "signed": 0, "unsigned": total,
+                "sig_checked": sig_checked, "observers": observers,
+                "breaks": [], "truncated": False,
+            }
+
+        signed = unsigned = 0
+        for row in self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload, signature "
+            "FROM facts ORDER BY rowid"
+        ):
+            fact_id, kind, ts, observer, origin, payload_text, signature = row
+            if signature is None:
+                unsigned += 1
+                _obs(observer)["unsigned"] += 1
+                continue
+            signed += 1
+            _obs(observer)["signed"] += 1
+            if verifier is not None and not verifier(
+                observer, signature,
+                _fact_commitment_hash(kind, ts, observer, origin, payload_text),
+            ):
+                breaks.append({
+                    "fact": fact_id, "observer": observer, "kind": kind,
+                    "reason": "signature invalid — content does not match "
+                              "the observer's authorship signature",
+                })
+                if len(breaks) >= max_breaks:
+                    truncated = True
+                    break
+
+        return {
+            "ok": not breaks,
+            "facts": self.total,  # signed/unsigned are partial when truncated
+            "signed": signed,
+            "unsigned": unsigned,
+            "sig_checked": sig_checked,
+            "observers": observers,
+            "breaks": breaks,
+            "truncated": truncated,
+        }
 
     def ticks_since(self, cursor: int) -> list[Tick]:
         """Return ticks with rowid > cursor."""

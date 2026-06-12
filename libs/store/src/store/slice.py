@@ -73,10 +73,16 @@ def slice_store(
         where, params = _build_where(since=since, before=before, kinds=kinds,
                                      observers=observers, origins=origins)
 
-        # Copy facts — explicit columns (SELECT * couples to schema width)
+        # Copy facts — explicit columns (SELECT * couples to schema width).
+        # The fact signature TRAVELS (design/fact-signature-at-store-column):
+        # it is a per-observer authorship claim over content only, verifiable
+        # in any custody context — unlike the tick chain columns stripped
+        # below. Era-aware: a source predating the column slices as NULL.
+        src_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        sig_src = "signature" if "signature" in src_cols else "NULL"
         fact_sql = (
-            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload) "
-            f"SELECT id, kind, ts, observer, origin, payload FROM facts{where}"
+            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload, signature) "
+            f"SELECT id, kind, ts, observer, origin, payload, {sig_src} FROM facts{where}"
         )
         conn.execute(fact_sql, params)
         fact_count = conn.execute(

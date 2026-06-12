@@ -67,7 +67,15 @@ _TICK_CHAIN_COLS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
 
 @dataclass(frozen=True)
 class FactRow:
-    """One source fact row. ``payload`` is the stored JSON TEXT, verbatim."""
+    """One source fact row. ``payload`` is the stored JSON TEXT, verbatim.
+
+    ``signature`` is the fact's authorship signature (delta 3), carried
+    verbatim through rebirth — it commits to content only (no id), so an
+    id migration preserves its validity. The replay spine drops it to
+    None when a transform alters any CONTENT field (kind, ts, observer,
+    origin, payload): the original authorship claim no longer holds and
+    rebirth must not re-assert it.
+    """
 
     id: str
     kind: str
@@ -75,6 +83,7 @@ class FactRow:
     observer: str
     origin: str
     payload: str
+    signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +181,13 @@ def _tick_columns(conn: sqlite3.Connection) -> list[str]:
     return [c for c in (*_TICK_BASE_COLS, *_TICK_CHAIN_COLS) if c in have]
 
 
+def _facts_have_signature(conn: sqlite3.Connection) -> bool:
+    """Whether this store's facts table carries the delta-3 signature column."""
+    return "signature" in {
+        r[1] for r in conn.execute("PRAGMA table_info(facts)")
+    }
+
+
 def _content_sha256(conn: sqlite3.Connection) -> str:
     """Witness-order content hash: every fact row, then every tick row.
 
@@ -181,10 +197,17 @@ def _content_sha256(conn: sqlite3.Connection) -> str:
     could false-alarm. Two claims, two fields (see receipt payload).
     """
     h = hashlib.sha256()
+    sig_col = _facts_have_signature(conn)
     for row in conn.execute(
-        "SELECT id, kind, ts, observer, origin, payload "
-        "FROM facts ORDER BY rowid"
+        "SELECT id, kind, ts, observer, origin, payload"
+        + (", signature" if sig_col else "")
+        + " FROM facts ORDER BY rowid"
     ):
+        # Era-aware: the signature joins the row hash only when non-NULL,
+        # so a store's content hash is stable across the column's arrival
+        # (same posture as engine's fact row hash).
+        if sig_col and row[6] is None:
+            row = row[:6]
         h.update(json.dumps(list(row), separators=(",", ":")).encode())
     cols = _tick_columns(conn)
     for row in conn.execute(
@@ -258,18 +281,29 @@ def _expected_rows(
     """
     rows: list[FactRow] = []
     facts_in = dropped = migrated = 0
+    sig_col = _facts_have_signature(src)
     for raw in src.execute(
-        "SELECT id, kind, ts, observer, origin, payload "
-        "FROM facts ORDER BY rowid"
+        "SELECT id, kind, ts, observer, origin, payload"
+        + (", signature" if sig_col else "")
+        + " FROM facts ORDER BY rowid"
     ):
         facts_in += 1
-        row = FactRow(*raw)
+        row = FactRow(*raw) if sig_col else FactRow(*raw, signature=None)
         mapped = transform.map_fact(row)
         if mapped is None:
             dropped += 1
             continue
         if mapped.id != row.id:
             migrated += 1
+        if mapped.signature is not None and (
+            (mapped.kind, mapped.ts, mapped.observer,
+             mapped.origin, mapped.payload)
+            != (row.kind, row.ts, row.observer, row.origin, row.payload)
+        ):
+            # Content changed: the authorship signature no longer matches
+            # its commitment. Drop rather than carry a stale claim —
+            # rebirth cannot re-sign on another observer's behalf.
+            mapped = replace(mapped, signature=None)
         rows.append(mapped)
     cols = _tick_columns(src)
     for raw in src.execute(
@@ -377,10 +411,12 @@ def rebirth_store(
 
     dst = _create(target)
     try:
+        # Fact signatures ride VERBATIM (never re-signed — see FactRow);
+        # the spine already dropped any signature whose content changed.
         dst.executemany(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload)
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
              for r in rows],
         )
         dst.execute(
@@ -517,10 +553,15 @@ def verify_rebirth(
                 )
             transform = factory()
 
-        actual_rows = tgt.execute(
-            "SELECT id, kind, ts, observer, origin, payload "
-            "FROM facts ORDER BY rowid"
+        tgt_sig = _facts_have_signature(tgt)
+        fetched = tgt.execute(
+            "SELECT id, kind, ts, observer, origin, payload"
+            + (", signature" if tgt_sig else "")
+            + " FROM facts ORDER BY rowid"
         ).fetchall()
+        actual_rows: list[tuple] = (
+            fetched if tgt_sig else [(*r, None) for r in fetched]
+        )
         if receipt_found:
             actual_rows = actual_rows[:-1]  # receipt is checked separately
     finally:
@@ -551,9 +592,10 @@ def verify_rebirth(
         if len(mismatches) >= max_mismatches:
             break
         exp_tuple = (exp.id, exp.kind, exp.ts, exp.observer, exp.origin,
-                     exp.payload)
+                     exp.payload, exp.signature)
         if exp_tuple != tuple(act):
-            fields = ("id", "kind", "ts", "observer", "origin", "payload")
+            fields = ("id", "kind", "ts", "observer", "origin", "payload",
+                      "signature")
             diffs = [
                 f"{f}: expected {e!r}, got {a!r}"
                 for f, e, a in zip(fields, exp_tuple, act, strict=True)

@@ -156,3 +156,60 @@ class TestStoreVerify:
         rc = _run_store(["verify", str(vpath)])
         assert rc == 0
         assert "chain intact" in capsys.readouterr().out
+
+
+class TestStoreErrorBoundary:
+    """The store view boundary renders operator-facing refusals as clean
+    errors (reporter.err + exit 1), never raw tracebacks.
+
+    Regression for reanchor's no-vertex / no-key refusal escaping as an
+    uncaught ``ValueError`` — which read as a crash and made the refusal
+    look like a verdict contradicting ``store verify`` (the smoke-test's
+    "verify-vs-reanchor opposite verdict" turned out to be exactly this
+    rendering gap, not an integrity divergence).
+    """
+
+    @staticmethod
+    def _ctx_with_reporter():
+        from loops.cli.context import CliContext
+        from loops.cli.output import BufferReporter
+
+        reporter = BufferReporter()
+        return CliContext(reporter=reporter, vertex_path=None), reporter
+
+    def test_reanchor_db_target_is_clean_error(self, tmp_path):
+        # reanchor refuses a raw .db (keys + registry live with the .vertex).
+        # The suffix guard fires before any existence check, so the db need
+        # not exist. Must surface as a clean reporter error, not a traceback.
+        from loops.cli.views.store import run
+
+        ctx, reporter = self._ctx_with_reporter()
+        rc = run(["reanchor", str(tmp_path / "x.db")], ctx)
+        assert rc == 1
+        assert any("requires a .vertex" in line for line in reporter.err_lines)
+
+    def test_missing_store_is_clean_error(self, tmp_path):
+        # A .vertex with no store directive raises ValueError("No store
+        # configured") deep in resolve_store_path — also operator-facing.
+        from loops.cli.views.store import run
+
+        vpath = tmp_path / "x.vertex"
+        vpath.write_text('name "x"\nloops { ping { fold { n "inc" } } }\n')
+        ctx, reporter = self._ctx_with_reporter()
+        rc = run(["verify", str(vpath)], ctx)
+        assert rc == 1
+        assert any("No store configured" in line for line in reporter.err_lines)
+
+    def test_unexpected_errors_still_propagate(self, monkeypatch):
+        # The catch is scoped to operator-error types — a genuine bug
+        # (e.g. RuntimeError) must still raise so it stays debuggable.
+        import loops.commands.store as store_cmds
+        from loops.cli.views.store import run
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("genuine bug")
+
+        monkeypatch.setattr(store_cmds, "_run_store", boom)
+        ctx, _reporter = self._ctx_with_reporter()
+        with pytest.raises(RuntimeError, match="genuine bug"):
+            run(["reanchor", "/tmp/whatever.db"], ctx)

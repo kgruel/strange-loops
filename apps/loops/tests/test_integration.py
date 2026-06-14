@@ -809,12 +809,13 @@ class TestMainEdgePaths:
     """Exercise remaining main.py dispatch paths."""
 
     def test_top_level_help(self, capsys):
-        """Top-level --help prints stock argparse usage and returns 0."""
+        """Top-level --help renders painted's command roster and returns 0."""
         rc = main(["--help"])
         assert rc == 0
         out = capsys.readouterr().out
         assert "loops" in out
-        assert "verbs" in out
+        assert "Commands" in out
+        assert "read" in out
 
     def test_run_sync_nonexistent_vertex(self, tmp_path):
         """_run_sync with non-existent .vertex path errors (L942-943).

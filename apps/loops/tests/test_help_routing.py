@@ -50,22 +50,21 @@ def _has_help(out: str) -> bool:
 
 class TestTopLevelHelp:
     def test_no_args(self, capsys):
+        # painted's run_app renders the roster under a "Commands" group.
         out = _help(capsys)
         assert "loops" in out
-        assert "verbs" in out.lower()
+        assert "read" in out and "emit" in out
 
     def test_help_flag(self, capsys):
         out = _help(capsys, "--help")
         assert "loops" in out
 
     def test_store_not_duplicated(self, capsys):
+        # `store` is registered as both a verb and a command; the unified
+        # painted roster must list it exactly once (verb shape wins).
         out = _help(capsys, "--help")
-        # "store" should appear in the verbs line but NOT the commands line.
-        lines = out.splitlines()
-        verbs_line = next((l for l in lines if l.startswith("verbs:")), "")
-        commands_line = next((l for l in lines if l.startswith("commands:")), "")
-        assert "store" in verbs_line
-        assert "store" not in commands_line
+        store_rows = [l for l in out.splitlines() if l.strip().startswith("store ")]
+        assert len(store_rows) == 1, f"expected one store row, got: {store_rows!r}"
 
 
 # ---------------------------------------------------------------------------

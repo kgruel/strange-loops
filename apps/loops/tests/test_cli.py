@@ -391,10 +391,14 @@ class TestHelpUpdated:
         assert "read" in captured.out
 
     def test_help_shows_verbs_group(self, capsys):
+        # painted's run_app renders the command roster under a "Commands"
+        # group (adopt-painted-help; the old argparse "verbs:" line dissolved).
         result = main(["--help"])
         assert result == 0
         captured = capsys.readouterr()
-        assert "verbs" in captured.out.lower()
+        out = captured.out.lower()
+        assert "commands" in out
+        assert "read" in out and "emit" in out
 
     def test_help_hides_legacy_aliases(self, capsys):
         """Help no longer shows fold/stream/status/log/search."""

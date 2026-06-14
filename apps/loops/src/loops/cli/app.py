@@ -24,9 +24,10 @@ decision/cli-refactor-fast-path-retired.
 """
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
+
+from painted.cli import AppCommand, run_app
 
 from .invocation import Invocation
 from .output import default_reporter
@@ -200,72 +201,138 @@ def _vertex_first(
     return 1
 
 
-def _verb_first(verb: str, rest: list[str]) -> int:
-    """Dispatch ``loops <verb> [vertex] [args]`` — verb known, vertex inside argv.
+# ---------------------------------------------------------------------------
+# run_app integration — painted owns dispatch and top-level help rendering.
+#
+# Tiers 1 (verbs) and 2 (dev/setup commands) collapse into ONE painted
+# ``run_app`` call over a unified ``AppCommand`` list. painted routes
+# ``argv[0]`` → handler, renders the top-level help (``loops`` / ``loops -h``)
+# through its doc_lens, and forwards per-command ``-h`` to each view's own
+# argparse. The hand-rolled three-tier dispatcher + argparse help epilog
+# dissolve into the framework (decision/design/full-painted-integration-residue:
+# "anything painted can do, prefer painted").
+#
+# What stays loops-side (domain residue, correctly):
+#   - Observer peeling (``--observer`` as identity override) — a verb-only
+#     selector painted has no concept of.
+#   - The vertex-shorthand pre-router (``loops <vertex> [op]``) — painted's
+#     run_app routes known arg0 → command; it does not model "unknown arg0 ⇒
+#     default handler with arg0 as data."
+# ---------------------------------------------------------------------------
 
-    Observer is peeled from ``rest`` here; vertex resolution stays inside
-    each view (the legacy ``_run_*`` functions resolve it from the first
-    positional / local-vertex fallback themselves).
+# One-line descriptions for the painted top-level help. Source of truth for
+# the command roster shown by ``loops`` / ``loops -h``.
+_DESCRIPTIONS: dict[str, str] = {
+    # verbs (peel --observer)
+    "read": "Fold and show vertex state",
+    "emit": "Append a fact to a vertex",
+    "close": "Close a session — mint a boundary tick",
+    "sync": "Sync facts between stores",
+    "cite": "Bump prior facts that informed this turn",
+    "seal": "Seal a window — mint a signed tick",
+    "store": "Inspect a store database",
+    # dev / setup commands (do not peel --observer)
+    "test": "Run a .loop source and preview facts",
+    "compile": "Compile a .loop / .vertex file",
+    "validate": "Validate .loop / .vertex syntax",
+    "init": "Scaffold a vertex from a template",
+    "whoami": "Show the resolved observer identity",
+    "ls": "List vertices (or template populations)",
+    "add": "Add a template-population row",
+    "rm": "Remove a template-population row",
+    "export": "Export a template population",
+}
+
+# Verbs peel a leading ``--observer NAME`` from their post-verb argv as an
+# identity override; dev/setup commands do not (``ls`` overloads ``--observer``
+# as a section selector and interprets it itself — preserved from the legacy
+# ``_command`` path, which never peeled).
+_PEEL_OBSERVER: frozenset[str] = frozenset(VERBS)
+
+
+def _make_handler(view, *, peel_observer: bool):
+    """Adapt a registry ``View`` (argv, Invocation)->int to a painted handler.
+
+    painted's ``AppCommand.handler`` receives only the post-command argv and
+    returns an exit code. The Invocation (domain phase) is constructed here:
+    observer is peeled for verbs, vertex_path stays ``None`` (verb-first
+    resolves the vertex inside the view from the first positional / local
+    fallback, unchanged from the legacy ``_verb_first`` / ``_command``).
     """
-    observer, rest = _peel_observer(rest)
-    ctx = Invocation(
-        reporter=default_reporter(),
-        vertex_path=None,
-        observer=observer,
-    )
-    return VERBS[verb](rest, ctx)
+
+    def handler(argv: list[str]) -> int:
+        if peel_observer:
+            observer, rest = _peel_observer(argv)
+        else:
+            observer, rest = None, argv
+        ctx = Invocation(
+            reporter=default_reporter(),
+            vertex_path=None,
+            observer=observer,
+        )
+        return view(rest, ctx)
+
+    return handler
 
 
-def _command(cmd: str, argv: list[str]) -> int:
-    """Dispatch a top-level dev/setup command via ``registry.COMMANDS``.
+def _build_commands() -> list[AppCommand]:
+    """Build the unified painted ``AppCommand`` roster (verbs ∪ commands).
 
-    The legacy ``_dispatch_command`` wrapped commands in painted's
-    ``run_app`` for help rendering. We bypass that here — individual
-    commands carry their own help via their internal argparse parsers.
+    ``store`` is registered under both VERBS and COMMANDS; the verb shape
+    (which peels observer) wins, and the duplicate command entry is skipped
+    so painted's one-name-one-command invariant holds.
     """
-    ctx = Invocation(reporter=default_reporter())
-    if cmd not in COMMANDS:
-        ctx.reporter.err(f"Unknown command: {cmd}")
-        return 1
-    return COMMANDS[cmd](argv, ctx)
+    cmds: list[AppCommand] = []
+    for name, view in VERBS.items():
+        cmds.append(
+            AppCommand(
+                name,
+                _DESCRIPTIONS[name],
+                _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+            )
+        )
+    for name, view in COMMANDS.items():
+        if name in VERBS:  # `store` — already registered as a verb
+            continue
+        cmds.append(
+            AppCommand(
+                name,
+                _DESCRIPTIONS[name],
+                _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+            )
+        )
+    return cmds
+
+
+_APP_DESCRIPTION = (
+    "loops — emit, fold, stream across vertices\n"
+    "Zoom: -q minimal · default summary · -v detailed · -vv full"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Top-level CLI entry point.
 
-    Verb-first, then command, then vertex-first dispatch.
-    ``loops.main.main`` is a back-compat shim that delegates here; the
-    legacy fast-path was retired (see
-    ``decision/cli-refactor-fast-path-retired``).
+    painted's ``run_app`` owns verb/command dispatch + top-level help. The
+    loops-side residue is the vertex-shorthand pre-router (tier 3) and the
+    observer peel inside each handler. ``loops.main.main`` is a back-compat
+    shim that delegates here.
     """
     if argv is None:
         argv = sys.argv[1:]
 
-    if not argv or argv[0] in ("-h", "--help"):
-        p = argparse.ArgumentParser(
-            prog="loops",
-            description="loops — emit, fold, stream across vertices",
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog=(
-                "verbs:    " + "  ".join(sorted(VERBS)) + "\n"
-                "commands: " + "  ".join(sorted(set(COMMANDS) - set(VERBS))) + "\n\n"
-                "Run `loops <verb> --help` for verb-specific help.\n"
-                "Zoom: -q (minimal)  default (summary)  -v (detailed)  -vv (full)"
-            ),
+    commands = _build_commands()
+    known = {c.name for c in commands}
+
+    # Tiers 1+2 and top-level help → painted run_app.
+    if not argv or argv[0] in ("-h", "--help") or argv[0] in known:
+        return run_app(
+            argv, commands, prog="loops", description=_APP_DESCRIPTION
         )
-        p.add_argument("verb", nargs="?", help="verb or command name")
-        p.print_help(sys.stdout)
-        return 0
 
-    # Tier 1: known verbs
-    if argv[0] in VERBS:
-        return _verb_first(argv[0], argv[1:])
-
-    # Tier 2: dev / setup commands
-    if argv[0] in COMMANDS:
-        return _command(argv[0], argv[1:])
-
-    # Tier 3: try as vertex name → vertex-first dispatch
+    # Tier 3: vertex shorthand — ``loops <vertex> [op] …``. painted has no
+    # notion of "unknown arg0 ⇒ default command", so this stays the loops
+    # pre-router in front of the framework.
     vertex_name = argv[0]
     from loops.commands.resolve import _resolve_vertex_for_dispatch
 

@@ -28,9 +28,11 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
+from painted.cli import OutputMode
+from painted.cli.types import add_cli_args, parse_fidelity, parse_zoom
+
 from ..invocation import Invocation
 from ..dispatch import dispatch
-from ..fidelity import fidelity_from_args
 from ..operation import Operation
 
 
@@ -112,39 +114,19 @@ def _build_parser(has_vertex_path: bool) -> argparse.ArgumentParser:
     parser.add_argument("--kind", default=None, help="Filter by fact kind")
     parser.add_argument("--key", default=None, help="Filter by fold key (prefix scan with trailing /)")
     parser.add_argument("--lens", default=None, help="Lens name for rendering")
+    # Domain-query selectors — these change WHAT is fetched (folded vs raw
+    # stream; entity-delta trace), not how much of fixed data is shown, so
+    # they stay loops-side (decision/design/disclosure-vs-domain-query-axis).
     parser.add_argument("--facts", action="store_true", default=False,
                         help="Show raw fact stream instead of folded state")
     parser.add_argument("--diff", action="store_true", default=False,
                         help="Show only facts not yet reflected in the fold")
-    parser.add_argument(
-        "-q", "--quiet", action="store_true", dest="quiet", default=False,
-        help="Minimal output (counts only)",
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="count", dest="verbose", default=0,
-        help="Increase verbosity (-v detailed, -vv full)",
-    )
-    parser.add_argument("--plain", action="store_true", default=False,
-                        help="Plain text output (no color)")
-    parser.add_argument("--json", action="store_true", default=False,
-                        help="JSON output")
-    parser.add_argument(
-        "--static", action="store_true", dest="static_mode", default=False,
-        help="Static render (no live updates)",
-    )
-    parser.add_argument(
-        "--live", action="store_true", dest="live_mode", default=False,
-        help="Live updating display",
-    )
-    parser.add_argument(
-        "-i", "--interactive", action="store_true",
-        dest="interactive_mode", default=False,
-        help="Interactive TUI explorer",
-    )
-    parser.add_argument("--max-chars", type=int, default=None, dest="max_chars",
-                        help="Truncate output at N characters")
-    parser.add_argument("--max-lines", type=int, default=None, dest="max_lines",
-                        help="Truncate output at N lines")
+    # Pure-terminal axes (depth, format, mode, density budgets) dissolve into
+    # painted: add_cli_args owns -q/-v, --plain/--json, --static/--live/-i,
+    # and --max-chars/--max-lines (decision/design/full-painted-integration-
+    # residue; grow-painted-over-workaround). dests are painted's standard
+    # ones (quiet/verbose/static/live/interactive/max_chars/max_lines).
+    add_cli_args(parser, modes={OutputMode.LIVE, OutputMode.INTERACTIVE}, budgets=True)
     return parser
 
 
@@ -219,9 +201,9 @@ def _resolve_mode(args: argparse.Namespace, lens: str | None) -> str:
     for fold. ``--live`` wins over ``--static``; ``-i`` only triggers
     INTERACTIVE for views that bind a handler (autoresearch lens).
     """
-    if args.live_mode:
+    if args.live:
         return "live"
-    if args.interactive_mode and lens == "autoresearch":
+    if args.interactive and lens == "autoresearch":
         return "interactive"
     return "static"
 
@@ -442,14 +424,19 @@ def run(argv: list[str], ctx: Invocation) -> int:
             return 1
         return _render_json(data, ctx.reporter)
 
-    # Fidelity: -q / -v / -vv → depth; visibility tags from --facts and
-    # --refs (refs_depth > 0 adds "refs").
-    visible_map: dict[str, str] = {}
+    # Fidelity: painted compiles the pure-terminal axes (depth from -q/-v,
+    # density from --max-chars/--max-lines). The domain-query selectors'
+    # visibility (--facts, --refs N>0) is merged in loops-side — they are not
+    # painted disclosure tags (decision/design/disclosure-vs-domain-query-axis).
+    from dataclasses import replace as _replace
+
+    base = parse_fidelity(args, parse_zoom(args), tags=None)
+    domain_visible = set(base.visible)
     if args.facts:
-        visible_map["facts"] = "facts"
-    visible_args = argparse.Namespace(**vars(args), refs=refs_depth)
-    visible_map["refs"] = "refs"
-    fidelity = fidelity_from_args(visible_args, visible=visible_map)
+        domain_visible.add("facts")
+    if refs_depth > 0:
+        domain_visible.add("refs")
+    fidelity = _replace(base, visible=frozenset(domain_visible))
 
     mode = _resolve_mode(args, args.lens)
 

@@ -494,9 +494,15 @@ def cmd_emit(
         store_path.parent.mkdir(parents=True, exist_ok=True)
         from loops.commands.signing import fact_signer_for, tick_signer_for
         from loops.commands.sync import _execute_boundary_run
+        # Capture the tick signer so the boundary receipt can disclose the
+        # signing outcome: a minted tick is signed iff a key was available
+        # (the engine signs iff tick_signer is non-None). Silence on this is
+        # what let an unsigned tick masquerade as attested
+        # (observation:implementation/seal-no-era-guard-silent-unsigned).
+        _tick_signer = tick_signer_for(writable_path)
         program = load_vertex_program(
             writable_path, validate_ast=False, run_dispatcher=_execute_boundary_run,
-            tick_signer=tick_signer_for(writable_path),
+            tick_signer=_tick_signer,
             fact_signer=fact_signer_for(writable_path),
         )
 
@@ -507,10 +513,13 @@ def cmd_emit(
             # reports the same ULID the store assigns.
             tick = program.receive(fact, id_override=fact_id)
             if tick is not None:
-                # Boundary fired — a tick was produced
+                # Boundary fired — a tick was produced. Disclose its signing
+                # outcome (signed iff a key was wired, matching the engine's
+                # mint) so an unsigned tick can never masquerade as attested.
+                mark = "signed" if _tick_signer is not None else "unsigned"
                 show(
                     Block.text(
-                        f"tick: {tick.name} ({len(tick.payload)} fields)",
+                        f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
                         p.muted,
                     ),
                 )

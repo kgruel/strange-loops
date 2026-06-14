@@ -148,3 +148,81 @@ class TestSeal:
         assert report["chained"] == 1
         assert report["covered_facts"] == 2  # session fact + seal reason
         assert report["uncovered_facts"] == 0
+
+
+class TestSealEraGuard:
+    """decision:design/tick-signing-era-is-a-floor — once a store carries
+    signed ticks, a keyless seal REFUSES rather than minting an unsigned tick
+    that would break chain era-monotonicity (verify -> CHAIN BROKEN). A
+    never-signed (pre-era) store seals unsigned freely. Every seal discloses
+    its signing outcome (· signed / · unsigned).
+    """
+
+    def test_pre_era_seal_mints_unsigned_and_discloses(self, loops_env, capsys):
+        # No key, never signed → an unsigned tick is legitimate; seal proceeds
+        # and discloses the outcome.
+        _write_vertex(loops_env)
+        assert main(["emit", "project", "decision", "topic=x", "message=w"]) == 0
+        assert main(["seal", "project", "-m", "pre-era"]) == 0
+        out = capsys.readouterr()
+        assert "· unsigned" in out.out + out.err
+        conn = sqlite3.connect(_db(loops_env))
+        assert conn.execute(
+            "SELECT COUNT(*), SUM(signature IS NULL) FROM ticks"
+        ).fetchone() == (1, 1)
+
+    def test_keyed_seal_signs_and_discloses(self, loops_env, capsys):
+        from loops.commands.signing import ensure_signing_key
+
+        vpath = _write_vertex(loops_env)
+        ensure_signing_key(vpath)
+        assert main(["emit", "project", "decision", "topic=x", "message=w"]) == 0
+        assert main(["seal", "project", "-m", "keyed"]) == 0
+        out = capsys.readouterr()
+        assert "· signed" in out.out + out.err
+        conn = sqlite3.connect(_db(loops_env))
+        assert conn.execute(
+            "SELECT signature IS NOT NULL FROM ticks ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()[0] == 1
+
+    def test_signed_era_keyless_seal_refuses(self, loops_env, capsys):
+        import shutil
+
+        from loops.commands.signing import ensure_signing_key, keys_dir_for
+
+        vpath = _write_vertex(loops_env)
+        ensure_signing_key(vpath)
+        # Enter the signed era.
+        assert main(["emit", "project", "decision", "topic=x", "message=w"]) == 0
+        assert main(["seal", "project", "-m", "first"]) == 0
+        # Lose the key, then accumulate more work.
+        shutil.rmtree(keys_dir_for(vpath))
+        capsys.readouterr()  # discard prior receipts
+        assert main(["emit", "project", "decision", "topic=y", "message=w2"]) == 0
+        # A keyless seal in the signed era must REFUSE, not mint unsigned.
+        assert main(["seal", "project", "-m", "second"]) == 1
+        err = capsys.readouterr().err
+        assert "signed era" in err
+        assert "refusing to mint an unsigned tick" in err
+        # Chain not broken: still exactly one (signed) tick, zero unsigned.
+        conn = sqlite3.connect(_db(loops_env))
+        assert conn.execute(
+            "SELECT COUNT(*), SUM(signature IS NULL) FROM ticks"
+        ).fetchone() == (1, 0)
+
+    def test_dry_run_exempt_from_era_guard(self, loops_env, capsys):
+        # --dry-run mints nothing, so the era-guard must not block it even
+        # when the key is gone in the signed era.
+        import shutil
+
+        from loops.commands.signing import ensure_signing_key, keys_dir_for
+
+        vpath = _write_vertex(loops_env)
+        ensure_signing_key(vpath)
+        assert main(["emit", "project", "decision", "topic=x", "message=w"]) == 0
+        assert main(["seal", "project", "-m", "first"]) == 0
+        shutil.rmtree(keys_dir_for(vpath))
+        capsys.readouterr()
+        assert main(["seal", "project", "-m", "preview", "--dry-run"]) == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["kind"] == "seal"

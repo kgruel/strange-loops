@@ -27,9 +27,42 @@ decision/design/chain-witness-order.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from ..context import CliContext
 from . import emit as emit_view
+
+
+def _store_in_signed_era(vertex_path: Path) -> bool:
+    """True when the store behind *vertex_path* already carries signed ticks.
+
+    The signed era is the state — not a declaration — where regressing to an
+    unsigned tick breaks chain era-monotonicity (``verify`` reports CHAIN
+    BROKEN). Drives the seal era-guard below
+    (decision:design/tick-signing-era-is-a-floor). A missing store / absent
+    signature column means "not yet in the era" → False.
+    """
+    import sqlite3
+
+    from loops.commands.store import resolve_store_path
+
+    try:
+        db = resolve_store_path(vertex_path)
+    except (ValueError, FileNotFoundError):
+        return False
+    if not db.exists():
+        return False
+    conn = sqlite3.connect(str(db))
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        if "signature" not in cols:
+            return False
+        row = conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM ticks WHERE signature IS NOT NULL)"
+        ).fetchone()
+        return bool(row and row[0])
+    finally:
+        conn.close()
 
 
 def run(argv: list[str], ctx: CliContext) -> int:
@@ -104,6 +137,12 @@ def run(argv: list[str], ctx: CliContext) -> int:
     from loops.commands.resolve import _resolve_writable_vertex
 
     writable = _resolve_writable_vertex(vertex_path)
+    if writable is None:
+        ctx.reporter.err(
+            "seal: no writable vertex with a store found — an aggregator "
+            "with no constituent store cannot mint a tick"
+        )
+        return 1
     try:
         ast = parse_vertex_file(writable)
     except Exception as e:
@@ -115,6 +154,32 @@ def run(argv: list[str], ctx: CliContext) -> int:
             f"seal: vertex '{ast.name}' declares no seal boundary\n"
             "  hint: add `boundary when=\"seal\"` to its loops block — "
             "a seal that cannot mint a tick is not a seal"
+        )
+        return 1
+
+    # Era-guard (decision:design/tick-signing-era-is-a-floor): once a store has
+    # signed ticks, a seal that cannot sign would mint an UNSIGNED tick and
+    # break chain era-monotonicity (verify -> CHAIN BROKEN). Match reanchor's
+    # refusal — a hard stop, not a silent downgrade to unauthenticated (SSH:
+    # missing key denies, it does not fall back). A never-signed (pre-era)
+    # store sealing unsigned is legitimate and proceeds. --dry-run mints
+    # nothing, so it is exempt. (Scoped to the seal verb — and so also the
+    # SessionEnd hook, which seals through here; promoting the guard into the
+    # engine mint to cover emit-triggered boundaries is thread:
+    # seal-era-boundary-guard.)
+    from loops.commands.signing import tick_signer_for
+
+    if (
+        not args.dry_run
+        and tick_signer_for(writable) is None
+        and _store_in_signed_era(writable)
+    ):
+        ctx.reporter.err(
+            "seal: store is in the signed era but no signing key found — "
+            "refusing to mint an unsigned tick (it would break chain "
+            "era-monotonicity).\n"
+            "  the window's facts are stored; run seal again once the key is "
+            "available to close the accumulated window."
         )
         return 1
 

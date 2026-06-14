@@ -11,10 +11,10 @@ dispatch changes required.
 """
 from __future__ import annotations
 
-from ..context import CliContext
+from ..invocation import Invocation
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Delegate to ``loops.main._run_stream`` with ctx-shaped kwargs."""
     from loops.commands.stream import _run_stream
 

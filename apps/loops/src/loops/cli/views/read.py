@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import argparse
 
-from ..context import CliContext
+from ..invocation import Invocation
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Pre-parse routing flags, delegate to fold / stream / ticks."""
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--facts", action="store_true", default=False)

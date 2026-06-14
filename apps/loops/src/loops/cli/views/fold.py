@@ -28,7 +28,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from ..context import CliContext
+from ..invocation import Invocation
 from ..dispatch import dispatch
 from ..fidelity import fidelity_from_args
 from ..operation import Operation
@@ -178,7 +178,7 @@ def _resolve_positionals(
 
 
 def _resolve_vertex_path(
-    ctx: CliContext, vname: str | None,
+    ctx: Invocation, vname: str | None,
 ) -> Path | None:
     """Resolve the fold's target vertex.
 
@@ -350,7 +350,7 @@ def _render_json(data: Any, reporter) -> int:
 # --- Entry point -----------------------------------------------------------
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Fold view entry — single argparse → Operation → dispatch.
 
     Steps:

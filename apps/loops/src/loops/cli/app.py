@@ -28,7 +28,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .context import CliContext
+from .invocation import Invocation
 from .output import default_reporter
 from .registry import COMMANDS, POPULATION_OPS, VERBS
 
@@ -162,7 +162,7 @@ def _vertex_first(
         rest = before_op + after_op
     else:
         observer, rest = _peel_observer(rest)
-    ctx = CliContext(
+    ctx = Invocation(
         reporter=default_reporter(),
         vertex_path=vertex_path,
         vertex_name=vertex_name,
@@ -208,7 +208,7 @@ def _verb_first(verb: str, rest: list[str]) -> int:
     positional / local-vertex fallback themselves).
     """
     observer, rest = _peel_observer(rest)
-    ctx = CliContext(
+    ctx = Invocation(
         reporter=default_reporter(),
         vertex_path=None,
         observer=observer,
@@ -223,7 +223,7 @@ def _command(cmd: str, argv: list[str]) -> int:
     ``run_app`` for help rendering. We bypass that here — individual
     commands carry their own help via their internal argparse parsers.
     """
-    ctx = CliContext(reporter=default_reporter())
+    ctx = Invocation(reporter=default_reporter())
     if cmd not in COMMANDS:
         ctx.reporter.err(f"Unknown command: {cmd}")
         return 1

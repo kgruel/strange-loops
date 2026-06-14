@@ -171,11 +171,11 @@ class TestStoreErrorBoundary:
 
     @staticmethod
     def _ctx_with_reporter():
-        from loops.cli.context import CliContext
+        from loops.cli.invocation import Invocation
         from loops.cli.output import BufferReporter
 
         reporter = BufferReporter()
-        return CliContext(reporter=reporter, vertex_path=None), reporter
+        return Invocation(reporter=reporter, vertex_path=None), reporter
 
     def test_reanchor_db_target_is_clean_error(self, tmp_path):
         # reanchor refuses a raw .db (keys + registry live with the .vertex).

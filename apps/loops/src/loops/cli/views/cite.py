@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import argparse
 
-from ..context import CliContext
+from ..invocation import Invocation
 from . import emit as emit_view
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Parse cite-shape args, translate to emit-shape, delegate."""
     parser = argparse.ArgumentParser(prog="loops cite")
     parser.add_argument(
@@ -62,7 +62,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
                 "  hint: use `sl <vertex> cite ...` or run from a vertex directory"
             )
             return 1
-        emit_ctx = CliContext(
+        emit_ctx = Invocation(
             reporter=ctx.reporter,
             vertex_path=local.resolve(),
             vertex_name=_vertex_name(local),

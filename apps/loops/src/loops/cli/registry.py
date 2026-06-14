@@ -43,11 +43,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .context import CliContext
+    from .invocation import Invocation
 
 
 # A view is a callable that takes argv + context and returns an exit code.
-View = Callable[[list[str], "CliContext"], int]
+View = Callable[[list[str], "Invocation"], int]
 
 
 def _legacy_view(
@@ -63,7 +63,7 @@ def _legacy_view(
     that accept it (``sync`` and ``store`` don't).
     """
 
-    def view(argv: list[str], ctx: "CliContext") -> int:
+    def view(argv: list[str], ctx: "Invocation") -> int:
         import loops.main as main_mod
 
         fn = getattr(main_mod, fn_name)
@@ -83,7 +83,7 @@ def _legacy_view_argv_only(fn_name: str) -> View:
     ls/add/rm/export — which take vertex embedded in argv).
     """
 
-    def view(argv: list[str], ctx: "CliContext") -> int:  # noqa: ARG001 — ctx reserved
+    def view(argv: list[str], ctx: "Invocation") -> int:  # noqa: ARG001 — ctx reserved
         import loops.main as main_mod
 
         fn = getattr(main_mod, fn_name)
@@ -101,7 +101,7 @@ def _view(module_path: str, fn_name: str = "run") -> View:
     re-uses one module for ls/add/rm/export).
     """
 
-    def view(argv: list[str], ctx: "CliContext") -> int:
+    def view(argv: list[str], ctx: "Invocation") -> int:
         from importlib import import_module
 
         mod = import_module(module_path)

@@ -1,15 +1,25 @@
-"""CliContext — per-invocation context object threaded through views.
+"""Invocation — the domain-phase context threaded through views.
 
 Carries the resolved vertex (``vertex_path`` + ``vertex_name``), the
 resolved observer, the Reporter, terminal-mode hints, and the LOOPS_HOME
 root. Constructed once in ``cli.app.main`` and passed to whichever view
 runs.
 
+This is the loops-side **domain** phase of an invocation — *what* and
+*where* to operate (vertex resolution, observer-as-selector, signer
+injection, store handle). It is deliberately NOT painted's ``CliContext``,
+which is the **render** phase — *how* to draw (fidelity, width, is_tty).
+The two never co-occur in one call: ``Invocation`` lives in dispatch/fetch;
+painted's ctx lives in the render call. Keeping them as distinct names is
+the phase split (decision/design/cli-context-phase-split) made explicit —
+no more two same-named context objects flowing under one umbrella.
+
 Mirrors siftd's per-invocation context pattern. The dataclass is mutable
 on construction (fields are computed late) but should be treated as
 immutable from a view's perspective.
 
-Design anchor: decision/design/cli-refactor-option-2-siftd-shape.
+Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
+decision/design/cli-context-phase-split.
 """
 from __future__ import annotations
 
@@ -33,8 +43,8 @@ def _default_isatty() -> bool:
 
 
 @dataclass
-class CliContext:
-    """Per-invocation CLI context.
+class Invocation:
+    """Per-invocation domain context (the FETCH/DISPATCH phase).
 
     Fields:
         reporter: output sink — production PaintedReporter or test

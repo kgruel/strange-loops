@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ..context import CliContext
+from ..invocation import Invocation
 from . import emit as emit_view
 
 
@@ -74,7 +74,7 @@ def _store_in_signed_era(vertex_path: Path) -> bool:
         conn.close()
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Parse seal-shape args, pre-check sealability, delegate to emit."""
     parser = argparse.ArgumentParser(prog="loops seal")
     if ctx.vertex_path is None:
@@ -130,7 +130,7 @@ def run(argv: list[str], ctx: CliContext) -> int:
                 )
                 return 1
             vertex_path = vertex_path.resolve()
-        ctx = CliContext(
+        ctx = Invocation(
             reporter=ctx.reporter,
             vertex_path=vertex_path,
             vertex_name=_vertex_name(vertex_path),

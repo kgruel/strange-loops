@@ -20,12 +20,12 @@ import argparse
 
 from loops.commands.emit import cmd_emit
 
-from ..context import CliContext
+from ..invocation import Invocation
 from ..dispatch import dispatch
 from ..operation import Operation
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Parse argv, build an Operation, dispatch.
 
     ``cmd_emit`` is bound as ``op.fn``; dispatch's action branch invokes

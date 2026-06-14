@@ -7,10 +7,10 @@ is deferred until a touch-point justifies the work.
 """
 from __future__ import annotations
 
-from ..context import CliContext
+from ..invocation import Invocation
 
 
-def run(argv: list[str], ctx: CliContext) -> int:
+def run(argv: list[str], ctx: Invocation) -> int:
     """Delegate to ``loops.main._run_store`` with ctx-shaped kwargs.
 
     ``_run_store`` doesn't accept observer (store is observer-agnostic),

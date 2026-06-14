@@ -210,6 +210,29 @@ class TestSealEraGuard:
             "SELECT COUNT(*), SUM(signature IS NULL) FROM ticks"
         ).fetchone() == (1, 0)
 
+    def test_signed_era_emit_seal_bypass_refused(self, loops_env, capsys):
+        # The HIGH the review caught: "sl emit <v> seal" fires the boundary
+        # directly, routing AROUND the seal-verb pre-check. The engine floor
+        # (append_tick enforce_floor) must still refuse the unsigned mint —
+        # a store-level invariant cannot be enforced at the verb alone.
+        import shutil
+
+        from loops.commands.signing import ensure_signing_key, keys_dir_for
+
+        vpath = _write_vertex(loops_env)
+        ensure_signing_key(vpath)
+        assert main(["emit", "project", "decision", "topic=x", "message=w"]) == 0
+        assert main(["seal", "project", "-m", "first"]) == 0  # enter signed era
+        shutil.rmtree(keys_dir_for(vpath))  # lose the key
+        capsys.readouterr()
+        # Bypass attempt via emit — refused by the engine floor, exit 1.
+        assert main(["emit", "project", "seal", "message=bypass"]) == 1
+        # No unsigned tick minted; the chain still has only the one signed tick.
+        conn = sqlite3.connect(_db(loops_env))
+        assert conn.execute(
+            "SELECT COUNT(*), SUM(signature IS NULL) FROM ticks"
+        ).fetchone() == (1, 0)
+
     def test_dry_run_exempt_from_era_guard(self, loops_env, capsys):
         # --dry-run mints nothing, so the era-guard must not block it even
         # when the key is gone in the signed era.

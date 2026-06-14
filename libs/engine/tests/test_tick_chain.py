@@ -74,6 +74,69 @@ def tick(store: SqliteStore[Fact], name: str = "boundary") -> None:
     )
 
 
+def _new_tick(name: str = "b") -> Tick:
+    return Tick(name=name, ts=datetime.now(UTC), payload={"n": 1}, origin="test")
+
+
+class TestEraFloor:
+    """append_tick(enforce_floor=True) refuses to mint an unsigned tick once
+    the store is in the signed era — decision design/tick-signing-era-is-a-floor.
+    The single store-level chokepoint the live boundary mint passes through;
+    rebirth/slice keep the default enforce_floor=False and stay exempt.
+    """
+
+    def _enter_signed_era(self, tmp_db: Path) -> None:
+        signed = make_signed_store(tmp_db)
+        emit(signed, 1)
+        tick(signed)  # a chained + signed tick
+        signed.close()
+
+    def test_unsigned_after_signed_era_refused(self, tmp_db: Path):
+        from engine.sqlite_store import UnsignedTickInSignedEra
+
+        self._enter_signed_era(tmp_db)
+        keyless = make_store(tmp_db)  # re-open WITHOUT a signer (key lost)
+        emit(keyless, 1)
+        with pytest.raises(UnsignedTickInSignedEra):
+            keyless.append_tick(_new_tick(), enforce_floor=True)
+        # Nothing was appended; the chain still verifies.
+        assert keyless.verify_chain()["ok"] is True
+
+    def test_floor_off_is_exempt(self, tmp_db: Path):
+        # rebirth/slice path: enforce_floor defaults False, so an unsigned mint
+        # is allowed even in the signed era (they re-mint with their own signer).
+        self._enter_signed_era(tmp_db)
+        keyless = make_store(tmp_db)
+        emit(keyless, 1)
+        keyless.append_tick(_new_tick())  # default enforce_floor=False — no raise
+
+    def test_pre_era_unsigned_allowed_with_floor(self, tmp_db: Path):
+        # Never-signed store: minting unsigned with the floor on is legitimate.
+        store = make_store(tmp_db)
+        emit(store, 1)
+        store.append_tick(_new_tick(), enforce_floor=True)  # no raise
+        assert store.verify_chain()["ok"] is True
+
+    def test_legacy_signed_row_does_not_open_era(self, tmp_db: Path):
+        # A signed but LEGACY (window_hash NULL) row must NOT count as the
+        # signed era — matches verify_chain, which skips pre-chain rows before
+        # setting saw_signature. Guards the predicate alignment.
+        store = make_store(tmp_db)
+        store._ensure_chain_columns()
+        emit(store, 1)
+        conn = sqlite3.connect(str(tmp_db))
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
+            "prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES ('t0','legacy',0,NULL,'x','{}',NULL,NULL,NULL,NULL,'FAKESIG')"
+        )
+        conn.commit()
+        conn.close()
+        # Floor on, no signer: a legacy signed row does not open the era, so the
+        # mint is allowed (would raise if the predicate counted legacy rows).
+        store.append_tick(_new_tick(), enforce_floor=True)
+
+
 class TestChainedAppend:
     def test_clean_store_verifies(self, tmp_db: Path):
         store = make_store(tmp_db)

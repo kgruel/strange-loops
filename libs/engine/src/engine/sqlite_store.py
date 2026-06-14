@@ -296,6 +296,21 @@ _SCHEMA_STMTS = (
 )
 
 
+class UnsignedTickInSignedEra(Exception):
+    """A guarded mint would append an unsigned tick to a store already in the
+    signed era — the tick-signing floor (decision design/tick-signing-era-is-a
+    -floor). Minting it would break chain era-monotonicity (verify_chain flags
+    "unsigned tick after signed era"). Raised ONLY on the live boundary mint
+    (``append_tick(..., enforce_floor=True)``, set by ``Vertex._store_tick``);
+    rebirth/slice/replay re-mint with their own signer wiring and pass the
+    default ``enforce_floor=False``, so they are exempt.
+
+    The signed-era predicate matches verify_chain exactly: a *chained* signed
+    tick (``signature IS NOT NULL AND window_hash IS NOT NULL``) — a legacy
+    pre-chain signed row does not open the era.
+    """
+
+
 class SqliteStore(Generic[T]):
     """Append-only SQLite event store.
 
@@ -614,8 +629,18 @@ class SqliteStore(Generic[T]):
             h.update(_fact_row_hash(row).encode())
         return h.hexdigest()
 
-    def append_tick(self, tick: Tick) -> None:
+    def append_tick(self, tick: Tick, *, enforce_floor: bool = False) -> None:
         """Append a tick to the ticks table, extending the hash chain.
+
+        ``enforce_floor`` (the tick-signing floor, decision design/tick-signing
+        -era-is-a-floor): when True AND no signature was produced AND the store
+        is already in the signed era, refuse — raise ``UnsignedTickInSignedEra``
+        BEFORE writing, so no unsigned tick is appended and the chain's
+        era-monotonicity holds. The live boundary mint (Vertex._store_tick)
+        passes True; rebirth/slice/replay keep the default False and re-mint
+        with their own signer wiring. This is the single store-level mint
+        point, so the floor cannot be bypassed by any verb that fires a
+        boundary (e.g. ``sl emit <v> seal`` as well as ``sl seal``).
 
         Chain semantics (see design/tick-chain-at-store-layer):
         - prev_hash: sha256 of the previous tick row (any era) — None for
@@ -660,6 +685,22 @@ class SqliteStore(Generic[T]):
             self._tick_signer(_tick_commitment_hash(row))
             if self._tick_signer is not None else None
         )
+
+        if enforce_floor and signature is None:
+            # Floor: don't regress out of the signed era. Keyed off the actual
+            # signature outcome (covers no-signer AND signer-returned-None), and
+            # the predicate matches verify_chain's era boundary (chained signed
+            # tick), so the guard refuses exactly what verify would condemn.
+            prior_signed = self._conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM ticks "
+                "WHERE signature IS NOT NULL AND window_hash IS NOT NULL)"
+            ).fetchone()
+            if prior_signed and prior_signed[0]:
+                raise UnsignedTickInSignedEra(
+                    "refusing to mint an unsigned tick: the store is in the "
+                    "signed era (prior signed ticks exist) and no signing key "
+                    "is available — minting would break chain era-monotonicity"
+                )
 
         self._conn.execute(
             "INSERT INTO ticks (id, name, ts, since, origin, payload, "

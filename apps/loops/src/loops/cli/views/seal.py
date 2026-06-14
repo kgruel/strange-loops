@@ -57,8 +57,13 @@ def _store_in_signed_era(vertex_path: Path) -> bool:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
         if "signature" not in cols:
             return False
+        # Match verify_chain's era boundary exactly: a *chained* signed tick
+        # (window_hash NOT NULL), not a legacy pre-chain signed row — so the
+        # friendly verb pre-check refuses precisely what the engine floor and
+        # verify_chain would, no over-refusal divergence.
         row = conn.execute(
-            "SELECT EXISTS(SELECT 1 FROM ticks WHERE signature IS NOT NULL)"
+            "SELECT EXISTS(SELECT 1 FROM ticks "
+            "WHERE signature IS NOT NULL AND window_hash IS NOT NULL)"
         ).fetchone()
         return bool(row and row[0])
     finally:

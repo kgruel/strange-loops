@@ -236,11 +236,11 @@ class TestRender:
         return DashboardState(**defaults)
 
     def test_summary_contains_task_names(self):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         ctx = CliContext(
-            zoom=Zoom.SUMMARY,
+            fidelity=Fidelity(depth=Zoom.SUMMARY),
             mode=OutputMode.STATIC,
             use_ansi=False,
             is_tty=False,
@@ -257,11 +257,11 @@ class TestRender:
         assert "working" in text
 
     def test_minimal_one_liner(self):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         ctx = CliContext(
-            zoom=Zoom.MINIMAL,
+            fidelity=Fidelity(depth=Zoom.MINIMAL),
             mode=OutputMode.STATIC,
             use_ansi=False,
             is_tty=False,
@@ -274,11 +274,11 @@ class TestRender:
         assert "2 tasks" in text
 
     def test_project_header_in_output(self):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         ctx = CliContext(
-            zoom=Zoom.SUMMARY,
+            fidelity=Fidelity(depth=Zoom.SUMMARY),
             mode=OutputMode.STATIC,
             use_ansi=False,
             is_tty=False,
@@ -658,7 +658,7 @@ class TestRenderStatusBar:
 
 class TestDashboardSurfaceState:
     def test_construction(self, workspace: Path, monkeypatch):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
@@ -666,7 +666,7 @@ class TestDashboardSurfaceState:
         main(["task", "create", "t1", "--base", "main"])
 
         ctx = CliContext(
-            zoom=Zoom.DETAILED,
+            fidelity=Fidelity(depth=Zoom.DETAILED),
             mode=OutputMode.INTERACTIVE,
             use_ansi=True,
             is_tty=True,
@@ -681,7 +681,7 @@ class TestDashboardSurfaceState:
         assert len(surface._state.tasks) == 1
 
     def test_selected_name(self, workspace: Path, monkeypatch):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
@@ -690,7 +690,7 @@ class TestDashboardSurfaceState:
         main(["task", "create", "t2", "--base", "main"])
 
         ctx = CliContext(
-            zoom=Zoom.DETAILED,
+            fidelity=Fidelity(depth=Zoom.DETAILED),
             mode=OutputMode.INTERACTIVE,
             use_ansi=True,
             is_tty=True,
@@ -703,14 +703,14 @@ class TestDashboardSurfaceState:
         assert surface._selected_name() == "t2"
 
     def test_selected_name_empty(self, workspace: Path, monkeypatch):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
         main(["session", "start"])
 
         ctx = CliContext(
-            zoom=Zoom.DETAILED,
+            fidelity=Fidelity(depth=Zoom.DETAILED),
             mode=OutputMode.INTERACTIVE,
             use_ansi=True,
             is_tty=True,
@@ -721,7 +721,7 @@ class TestDashboardSurfaceState:
         assert surface._selected_name() is None
 
     def test_move_selection_clamps(self, workspace: Path, monkeypatch):
-        from painted import CliContext, Zoom
+        from painted import CliContext, Fidelity, Zoom
         from painted.cli import OutputMode
 
         monkeypatch.chdir(workspace)
@@ -730,7 +730,7 @@ class TestDashboardSurfaceState:
         main(["task", "create", "t2", "--base", "main"])
 
         ctx = CliContext(
-            zoom=Zoom.DETAILED,
+            fidelity=Fidelity(depth=Zoom.DETAILED),
             mode=OutputMode.INTERACTIVE,
             use_ansi=True,
             is_tty=True,

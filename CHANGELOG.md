@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.4.0 — 2026-06-14
+
+The dominant arc is a **federated attestation substrate**: tamper-evident tick
+hash chains, Ed25519 tick + per-observer fact signatures, JCS/RFC 8785
+canonicalization, and a verifiable `store rebirth`. Second arc: a **CLI
+architecture refactor** (cli/ package + Operation IR pilot) and **read-path
+grammar overhaul** (`trace` dissolved into `read`). Validated against
+**painted 0.2.0** (pin moved to `>=0.2.0,<0.3`; drop-in — full loops suite green,
+zero golden drift).
+
+### Added
+- **`sl seal [vertex] [-m] [--observer] [--dry-run] [-q]`** — draws an attestation
+  boundary (requires `boundary when="seal"`). Emit receipt discloses
+  `tick: <name> · signed|unsigned`.
+- **Sign-on-emit** — `emit`/`close`/`sync` inject tick + fact signers; honest
+  pre-signature era when no key is present.
+- **Per-observer fact signatures** + **Ed25519 tick signatures** (domains
+  `loops-tick-v1`/`loops-fact-v1`) via `libs/sign`'s `sign.ed25519`.
+- **`loops add <vertex> observer <NAME> --key <b64>` / `--keygen`**; **`loops init`**
+  bootstraps a keypair at `.loops/keys/ed25519.key`, gitignores `keys/`, and
+  self-registers the vertex as a keyed observer (idempotent upgrade).
+- **`sl store verify [target] [-v] [--json]`** — verifies chain, fact-window
+  commitments, and signatures; strip-attack tripwire.
+- **`sl store rebirth <source> <target> [--rule identity|ulid-migration] [--check]`**
+  and **`sl store reanchor <vertex>`** (JCS canon-migration ceremony).
+- **Read-path:** positional `sl read [vertex] <kind>/<key>`, `--diff` (field-delta
+  lifecycle), `--refs [N]` (ref-graph walk), `--key <prefix>/` (prefix scan).
+- **Declarative vertex management:** `loops add/rm <vertex> kind|observer|combine|row`,
+  `loops ls <vertex>` (KDL-splice, re-parse before write).
+- **Emit ergonomics:** `--stdin FIELD`, `--file FIELD=PATH`; `sl cite` accumulate+dedup.
+- **Fold rendering:** per-kind `preview` fields; attestation line in stream/tick.
+
+### Changed
+- **Fold upsert is now merge, not replace** — re-emitting a changed field overlays;
+  un-supplied fields preserved (clear via explicit `field=` sentinel).
+- **Fact ids are ULIDs again** (26-char Crockford, time-sortable).
+- **Fold/read row ordering is `(ts, id)`** — `merge(A,B)` and `merge(B,A)` re-fold
+  identically.
+- **Canonical bytes are JCS / RFC 8785** for every commitment.
+- **`main.py` is a 61-line back-compat shim**; entry point `loops.cli.app.main`
+  (new `cli/` package: app/registry/operation/dispatch/output/context/views).
+- Numeric folds + Latest **record off-type/missing-`_ts` rejections** in
+  `{target}_rejected` counters instead of coercing/crashing.
+
+### Breaking
+- **Keyless `seal`/`close`/emit-with-boundary REFUSES on a signed-era store**
+  (`UnsignedTickInSignedEra`, exit 1, facts stored / tick deferred). Migration:
+  ensure the signing key is present (`loops init`), or re-seal once keyed. Only
+  `rebirth` genesis is exempt.
+- **JCS canon migration invalidates pre-existing chains/signatures** — old
+  attestations report CHAIN BROKEN until `sl store reanchor`.
+- **Latest fold rejects payloads missing `_ts`**; **numeric folds reject off-type**
+  (bool excluded).
+- **Store schema gained attestation columns** (`facts += signature`;
+  `ticks += prev_hash, window_start, fact_cursor, window_hash, signature`); both
+  `id` PKs dropped `DEFAULT (ulid())` — ids supplied at INSERT.
+- **Dependency swap:** `sqlite-ulid` → `python-ulid>=3.0`, plus `rfc8785>=0.1.4`.
+  **painted pin → `>=0.2.0,<0.3`.**
+- **`Store.append` signature** → `append(event, *, id_override=None) -> Any`.
+- **`trace` verb removed** (capabilities live on `read`). **`read --refs` no longer
+  FILTERS** — renders all items + a separate `## REFS` section.
+- **pop-fact machinery retired**; **`.claude/` no longer tracked** (bring-your-own
+  hooks/agents/settings).
+
+### Fixed
+- **Fold determinism (R2):** removed all wall-clock fallbacks from `engine.py`;
+  fold is a pure function of the fact stream (restores `rebirth --check`).
+- **Global/local vertex resolution unified local-first.**
+- **Chain witness order is append order (rowid), not id order** — fixes false
+  tamper alarms in mixed-id-era stores.
+- `reanchor`/store-path refusals render as clean one-line errors, not tracebacks.
+
 ## 2026-05-19
 
 ### cite: ref-stealing bug fixed + implicit universal loop

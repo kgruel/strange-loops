@@ -114,6 +114,30 @@ sl read meta --facts --kind decision --since 7d # recent cross-cutting decisions
   working memory or defer to "later." Ignored friction compounds; named
   friction can be addressed. If a specific fix isn't yet clear, emit as
   `thread status=open` and promote to friction once the fix surfaces.
+- **Reroutes log at reflex speed.** Below the friction threshold sits the
+  silent reroute — anything worked around instead of stopped for (tool
+  fought you, verb missing, syntax retried, hand-edit where machinery
+  exists). One line, zero ceremony, at the moment of rerouting:
+  `sl emit project log message="..."`. No naming, no status, no
+  deliberation — that's what makes it fire. A Stop hook backstops the
+  noticing (thread:reroute-capture-practice).
+
+### Review cadence — sweep and reconcile
+
+Two tiers, two speeds. Capture happens at reflex speed (log), triage at
+review speed — never the reverse.
+
+- **Sweep** (every session wrap, fast): before the close, scan this
+  session's `log` entries and unresolved moments. Repeat patterns promote
+  to `friction` with proper naming; one-offs stay as log history and age
+  out of the collect window. Also the moment for thread status updates
+  and the session-arc emit. The sweep precedes the seal.
+- **Reconcile** (own session, slower regular cadence — weekly-ish):
+  `sl read project --lens reconcile` + friction backlog + stale threads
+  + hypothesis staleness. Deeper structural review: does the vertex
+  still fit the work, which open arcs died silently, what does the
+  salience graph say. Reconcile sessions are first-class work, not
+  overhead — schedule them, don't squeeze them.
 
 ### Vertex selection
 

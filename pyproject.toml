@@ -6,12 +6,20 @@ readme = "README.md"
 license = "MIT"
 authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
 requires-python = ">=3.11"
+# This is a FLAT vendored build: hatchling bundles every libs/*/src into one
+# wheel (see [tool.hatch.build] below), so this list must mirror the UNION of
+# all vendored libs' third-party deps by hand — the root does not depend on the
+# workspace members, it inlines their source. A dep added to a lib's pyproject
+# (e.g. engine's rfc8785, added with the JCS migration) is invisible to
+# `uv tool install .` until it is also added here. `uv run --package` masks the
+# gap because it resolves the workspace env, not this flat wheel.
 dependencies = [
     "painted>=0.1.8",
     "ckdl>=1.0",
     "pyjwt[crypto]>=2.9",
     "cryptography>=43",
     "python-ulid>=3.0",
+    "rfc8785>=0.1.4",  # engine._canonical_bytes (JCS, RFC 8785)
     # python-ulid 3.1.0 imports typing_extensions unconditionally but doesn't
     # declare it. Pinning here until upstream (mdomke/python-ulid) fixes the
     # metadata. Drop when that ships.

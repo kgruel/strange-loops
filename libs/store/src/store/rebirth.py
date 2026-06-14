@@ -442,6 +442,12 @@ def rebirth_store(
         tick_signer=tick_signer,
     )
     try:
+        # Named exemption from the tick-signing floor (decision design/tick
+        # -signing-era-is-a-floor): rebirth reconstructs a FRESH lineage whose
+        # genesis tick may legitimately start unsigned (keyless rebirth) — it is
+        # not a regression within an existing signed chain. The genesis tick's
+        # signed-ness is governed by the injected tick_signer above, separately
+        # (see thread:rebirth-keyless-attestation-drop).
         estore.append_tick(Tick(
             name="rebirth",
             ts=now,
@@ -452,7 +458,7 @@ def rebirth_store(
                 "receipt": receipt_id,
                 "facts": facts_out + tick_facts + 1,
             },
-        ))
+        ), enforce_floor=False)
     finally:
         estore.close()
 

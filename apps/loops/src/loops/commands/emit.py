@@ -548,6 +548,18 @@ def cmd_emit(
 
         return 0
     except Exception as e:
+        # Distinguish a policy refusal (the tick-signing floor — a boundary
+        # that would regress a signed chain) from a genuine engine failure.
+        # Lazy import keeps engine off the CLI-startup import path.
+        from engine.sqlite_store import UnsignedTickInSignedEra
+        if isinstance(e, UnsignedTickInSignedEra):
+            show(Block.text(
+                f"seal refused: {e}\n"
+                "  the window's facts are stored; run again once the signing "
+                "key is available to close the accumulated window.",
+                p.error,
+            ), file=sys.stderr)
+            return 1
         show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 

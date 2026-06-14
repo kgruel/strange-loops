@@ -55,7 +55,11 @@ def _store_in_signed_era(vertex_path: Path) -> bool:
     conn = sqlite3.connect(str(db))
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
-        if "signature" not in cols:
+        # Both columns are referenced by the predicate below; on a partially
+        # migrated/legacy ticks table either may be absent (bare connection,
+        # no _ensure_chain_columns) — guard both or the query raises
+        # OperationalError, which this except does not catch.
+        if "signature" not in cols or "window_hash" not in cols:
             return False
         # Match verify_chain's era boundary exactly: a *chained* signed tick
         # (window_hash NOT NULL), not a legacy pre-chain signed row — so the

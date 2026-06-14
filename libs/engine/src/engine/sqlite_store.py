@@ -297,13 +297,17 @@ _SCHEMA_STMTS = (
 
 
 class UnsignedTickInSignedEra(Exception):
-    """A guarded mint would append an unsigned tick to a store already in the
-    signed era — the tick-signing floor (decision design/tick-signing-era-is-a
-    -floor). Minting it would break chain era-monotonicity (verify_chain flags
-    "unsigned tick after signed era"). Raised ONLY on the live boundary mint
-    (``append_tick(..., enforce_floor=True)``, set by ``Vertex._store_tick``);
-    rebirth/slice/replay re-mint with their own signer wiring and pass the
-    default ``enforce_floor=False``, so they are exempt.
+    """``append_tick`` was asked to append an unsigned tick to a store already
+    in the signed era — the tick-signing floor (decision design/tick-signing
+    -era-is-a-floor). Minting it would break chain era-monotonicity
+    (verify_chain flags "unsigned tick after signed era").
+
+    The floor is enforced BY DEFAULT (``enforce_floor=True``): the invariant
+    lives on the store mint, so every caller — every verb that fires a boundary
+    AND every other live mint (e.g. the tasks harness) — is fail-safe without
+    having to opt in. Only re-mint paths that legitimately reconstruct history
+    under their own signer wiring (rebirth/slice/replay) opt OUT explicitly
+    with ``enforce_floor=False``; the exemptions are named, not the enforcement.
 
     The signed-era predicate matches verify_chain exactly: a *chained* signed
     tick (``signature IS NOT NULL AND window_hash IS NOT NULL``) — a legacy
@@ -629,18 +633,20 @@ class SqliteStore(Generic[T]):
             h.update(_fact_row_hash(row).encode())
         return h.hexdigest()
 
-    def append_tick(self, tick: Tick, *, enforce_floor: bool = False) -> None:
+    def append_tick(self, tick: Tick, *, enforce_floor: bool = True) -> None:
         """Append a tick to the ticks table, extending the hash chain.
 
         ``enforce_floor`` (the tick-signing floor, decision design/tick-signing
-        -era-is-a-floor): when True AND no signature was produced AND the store
-        is already in the signed era, refuse — raise ``UnsignedTickInSignedEra``
-        BEFORE writing, so no unsigned tick is appended and the chain's
-        era-monotonicity holds. The live boundary mint (Vertex._store_tick)
-        passes True; rebirth/slice/replay keep the default False and re-mint
-        with their own signer wiring. This is the single store-level mint
-        point, so the floor cannot be bypassed by any verb that fires a
-        boundary (e.g. ``sl emit <v> seal`` as well as ``sl seal``).
+        -era-is-a-floor) is ON BY DEFAULT: when no signature was produced AND
+        the store is already in the signed era, refuse — raise
+        ``UnsignedTickInSignedEra`` BEFORE writing, so no unsigned tick is
+        appended and the chain's era-monotonicity holds. Default-on makes the
+        invariant fail-safe: every live mint (each verb that fires a boundary —
+        ``sl seal``, ``sl emit <v> seal``, count/predicate boundaries — and any
+        other live caller such as the tasks harness) is protected without
+        opting in. Only re-mint paths that reconstruct history under their own
+        signer wiring (rebirth/slice/replay) pass ``enforce_floor=False`` — the
+        exemptions are named, not the enforcement.
 
         Chain semantics (see design/tick-chain-at-store-layer):
         - prev_hash: sha256 of the previous tick row (any era) — None for

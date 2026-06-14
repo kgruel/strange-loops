@@ -899,16 +899,14 @@ class Vertex:
     def _store_tick(self, tick: Tick) -> None:
         """Persist tick to store if it supports tick persistence.
 
-        This is the live boundary mint — every tick from a fired boundary
-        (seal, count, predicate) lands here regardless of which verb triggered
-        it. ``enforce_floor=True`` makes it the single chokepoint for the
-        tick-signing floor (decision design/tick-signing-era-is-a-floor): a
-        keyless mint in the signed era is refused here, so no verb that fires a
-        boundary can regress the chain (rebirth/slice call append_tick directly
-        and stay exempt).
+        A live boundary mint — every tick from a fired boundary (seal, count,
+        predicate) lands here. The tick-signing floor (decision design/tick
+        -signing-era-is-a-floor) is enforced BY DEFAULT on append_tick, so a
+        keyless mint in the signed era is refused without this path opting in;
+        only re-mint paths (rebirth/slice) opt out explicitly.
         """
         if self._store is not None and hasattr(self._store, 'append_tick'):
-            self._store.append_tick(tick, enforce_floor=True)
+            self._store.append_tick(tick)
 
     def _tick_to_fact(self, tick: Tick, child_name: str) -> Fact:
         """Convert a child's Tick to a Fact for re-entry.

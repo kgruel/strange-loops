@@ -102,13 +102,41 @@ class TestEraFloor:
         # Nothing was appended; the chain still verifies.
         assert keyless.verify_chain()["ok"] is True
 
-    def test_floor_off_is_exempt(self, tmp_db: Path):
-        # rebirth/slice path: enforce_floor defaults False, so an unsigned mint
-        # is allowed even in the signed era (they re-mint with their own signer).
+    def test_default_enforces_floor(self, tmp_db: Path):
+        # Fail-safe: enforce_floor is ON BY DEFAULT, so a caller that does NOT
+        # opt out is protected — the tasks-harness class of forgotten live mint.
+        from engine.sqlite_store import UnsignedTickInSignedEra
+
         self._enter_signed_era(tmp_db)
         keyless = make_store(tmp_db)
         emit(keyless, 1)
-        keyless.append_tick(_new_tick())  # default enforce_floor=False — no raise
+        with pytest.raises(UnsignedTickInSignedEra):
+            keyless.append_tick(_new_tick())  # no opt-out → enforced by default
+
+    def test_explicit_exempt_does_not_enforce(self, tmp_db: Path):
+        # The named rebirth/slice exemption: enforce_floor=False allows an
+        # unsigned mint even in the signed era (they re-mint a fresh lineage
+        # under their own signer wiring).
+        self._enter_signed_era(tmp_db)
+        keyless = make_store(tmp_db)
+        emit(keyless, 1)
+        keyless.append_tick(_new_tick(), enforce_floor=False)  # opt-out — no raise
+
+    def test_signer_returning_none_is_refused(self, tmp_db: Path):
+        # The floor keys off the signature OUTCOME, not signer presence: a
+        # signer that returns None (signing unavailable) is still refused.
+        from engine.sqlite_store import UnsignedTickInSignedEra
+
+        self._enter_signed_era(tmp_db)
+        broken = SqliteStore(
+            path=tmp_db,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=lambda digest: None,  # type: ignore[return-value, arg-type]
+        )
+        emit(broken, 1)
+        with pytest.raises(UnsignedTickInSignedEra):
+            broken.append_tick(_new_tick())
 
     def test_pre_era_unsigned_allowed_with_floor(self, tmp_db: Path):
         # Never-signed store: minting unsigned with the floor on is legitimate.

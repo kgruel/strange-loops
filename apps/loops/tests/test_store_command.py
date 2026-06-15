@@ -143,9 +143,14 @@ class TestStoreVerify:
         assert report["chained"] >= 1
 
     def test_help_exits_zero(self, capsys):
+        # `store verify -h` is now owned by argparse (add_help=True): the
+        # parser prints help and raises SystemExit(0) natively, replacing the
+        # hand-rolled `return 0` block (decision:design/devtools-help-args-idiom).
+        import pytest
         from loops.commands.store import _run_verify
-        rc = _run_verify(["--help"])
-        assert rc == 0
+        with pytest.raises(SystemExit) as exc:
+            _run_verify(["--help"])
+        assert exc.value.code == 0
         assert "usage:" in capsys.readouterr().out
 
     def test_verify_routes_through_run_store(self, tmp_path, capsys):

@@ -76,7 +76,15 @@ class TestVerbHelp:
     @pytest.mark.parametrize("verb", sorted(VERBS))
     def test_verb_help(self, capsys, verb):
         out = _help(capsys, verb, "--help")
-        assert "usage:" in out.lower(), f"{verb} --help: expected argparse 'usage:' but got: {out!r}"
+        # `store` renders its base help through painted's run_cli (doc-lens
+        # shape), not argparse's raw "usage:" — its subcommand args are
+        # pre-parsed and described via help_args
+        # (decision:design/devtools-help-args-idiom). The other verbs still
+        # own help through their own argparse parsers.
+        if verb == "store":
+            assert _has_help(out), f"store --help: expected help output but got: {out!r}"
+        else:
+            assert "usage:" in out.lower(), f"{verb} --help: expected argparse 'usage:' but got: {out!r}"
 
     def test_read_flag_descriptions(self, capsys):
         out = _help(capsys, "read", "--help")

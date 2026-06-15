@@ -142,7 +142,6 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     as legacy and pass (nothing to verify yet).
     """
     import argparse
-    import sys as _sys
 
     p = argparse.ArgumentParser(
         prog="loops store verify",
@@ -156,9 +155,8 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         help="Per-tick attestation rows for the chained era "
              "(signature status, window fact count, cursor target)",
     )
-    if "-h" in argv or "--help" in argv:
-        p.print_help(_sys.stdout)
-        return 0
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
     target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
@@ -298,7 +296,6 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """
     import argparse
     import os
-    import sys as _sys
 
     p = argparse.ArgumentParser(
         prog="loops store rebirth",
@@ -323,9 +320,8 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
              "(re-run the transform, diff the target)",
     )
     p.add_argument("--json", action="store_true", help="JSON receipt/report")
-    if "-h" in argv or "--help" in argv:
-        p.print_help(_sys.stdout)
-        return 0
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
     src_target = _resolve_target(getattr(args, "source", None), vertex_path).resolve()
@@ -411,7 +407,6 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     Exit 0 = re-anchored and verified, 1 = post-reanchor verify failed.
     """
     import argparse
-    import sys as _sys
 
     p = argparse.ArgumentParser(
         prog="loops store reanchor",
@@ -421,9 +416,8 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     if vertex_path is None:
         p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
     p.add_argument("--json", action="store_true", help="JSON receipt")
-    if "-h" in argv or "--help" in argv:
-        p.print_help(_sys.stdout)
-        return 0
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
     target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
@@ -483,6 +477,7 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
     from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
 
     if argv and argv[0] == "verify":
         return _run_verify(argv[1:], vertex_path=vertex_path)
@@ -491,30 +486,20 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
 
-    if "-h" in argv or "--help" in argv:
-        import sys as _sys
-        p = argparse.ArgumentParser(
-            prog="loops store",
-            description="Inspect store contents. Subcommands: "
-                        "'loops store verify [target]' checks the tick hash chain; "
-                        "'loops store rebirth <source> <target>' replays a store "
-                        "through a transform with a verifiable receipt.",
-        )
-        if vertex_path is None:
-            p.add_argument("file", nargs="?", help="Store .db or .vertex file, or vertex name")
-        p.add_argument("-i", "--interactive", action="store_true", help="Interactive TUI explorer")
-        p.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
-        p.add_argument("-v", "--verbose", action="store_true", help="Detailed output")
-        p.add_argument("--json", action="store_true", help="JSON output")
-        p.add_argument("--plain", action="store_true", help="Plain text, no ANSI codes")
-        p.print_help(_sys.stdout)
-        return 0
-
+    # Base inspect: pre-parse the optional ``file`` target; run_cli owns -h
+    # and the -i/-q/-v/--json/--plain axes, listing ``file`` (when accepted)
+    # via help_args (decision:design/devtools-help-args-idiom).
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         pre.add_argument("file", nargs="?", default=None)
     known, rest = pre.parse_known_args(argv)
     file_arg = getattr(known, "file", None)
+
+    help_args = (
+        [HelpArg("file", "Store .db or .vertex file, or vertex name",
+                 positional=True)]
+        if vertex_path is None else []
+    )
 
     def _resolve_store_target() -> Path:
         return _resolve_target(file_arg, vertex_path)
@@ -557,7 +542,14 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         handlers={OutputMode.INTERACTIVE: handle_interactive},
         default_mode=OutputMode.STATIC,
         prog="loops store",
-        description="Inspect store contents",
+        description=(
+            "Inspect store contents. Subcommands: "
+            "'loops store verify [target]' checks the tick hash chain; "
+            "'loops store rebirth <source> <target>' replays a store "
+            "through a transform with a verifiable receipt; "
+            "'loops store reanchor <vertex>' recomputes chain hashes."
+        ),
+        help_args=help_args,
     )
 
 

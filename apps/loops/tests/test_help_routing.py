@@ -63,7 +63,7 @@ class TestTopLevelHelp:
         # `store` is registered as both a verb and a command; the unified
         # painted roster must list it exactly once (verb shape wins).
         out = _help(capsys, "--help")
-        store_rows = [l for l in out.splitlines() if l.strip().startswith("store ")]
+        store_rows = [ln for ln in out.splitlines() if ln.strip().startswith("store ")]
         assert len(store_rows) == 1, f"expected one store row, got: {store_rows!r}"
 
 
@@ -119,7 +119,11 @@ class TestCommandHelp:
     ])
     def test_command_help(self, capsys, cmd):
         out = _help(capsys, cmd, "--help")
-        assert "usage:" in out.lower(), f"{cmd} --help: expected argparse 'usage:' but got: {out!r}"
+        # test/compile/validate now route help through painted's run_cli
+        # (add_args owns the command positionals); their help renders in
+        # painted's doc-lens shape, not argparse's raw "usage:" string.
+        # _has_help accepts both (decision:design/devtools-run-cli-args-bridge).
+        assert _has_help(out), f"{cmd} --help: expected help output but got: {out!r}"
 
     def test_ls_help(self, capsys):
         out = _help(capsys, "ls", "--help")

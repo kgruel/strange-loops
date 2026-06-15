@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from datetime import datetime, timezone
 
-from painted import Block, Style, Zoom, join_horizontal, join_vertical
+from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
 from painted.palette import current_palette
 
 if TYPE_CHECKING:
@@ -597,13 +597,23 @@ def _render_item_line(
         else:
             body_budget = chars if chars > 0 else body_len
 
-        if preview_fields:
-            body_text = _render_preview(candidate_vals, body_budget)
+        # Field budgeting dissolves into painted.budget_fields — the
+        # shrink-then-drop allocator (wcwidth-measured, fixing the latent
+        # len()/CJK bug; min_field gates *truncation* not presence, so short
+        # whole values are kept where the old guard dropped them —
+        # decision:design/budget-fields-truncation-gate-contract).
+        if preview_fields and zoom >= Zoom.DETAILED:
+            # DETAILED+: untruncated — join every non-empty field, no budget.
+            body_text = PREVIEW_SEPARATOR.join(v for v in candidate_vals if v)
         else:
-            body_text = body if body_len <= body_budget else _truncate(body, body_budget)
-
-        if len(body_text) < body_len:
-            truncation_hint = f" [+{body_len - len(body_text)}c]"
+            fields = candidate_vals if preview_fields else [body]
+            fit = budget_fields(
+                fields, body_budget,
+                min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+            )
+            body_text = fit.text
+            if fit.dropped > 0:
+                truncation_hint = f" [+{fit.dropped}c]"
     elif item.ts and not n_text and not ref_in_text:
         body_text = ""
     else:
@@ -889,41 +899,6 @@ def _find_body_entry(payload: dict, used_label_field: str | None) -> tuple[str |
             continue
         return k, str(v)
     return None, None
-
-
-def _render_preview(values: list[str], body_budget: int) -> str:
-    """Join non-empty preview values with PREVIEW_SEPARATOR, cascade-truncating.
-
-    First non-empty value claims the full budget. Each subsequent value gets
-    whatever remains after the separator. A value below MIN_FIELD_BUDGET is
-    dropped (along with all later values) rather than rendered as a useless
-    nub — the caller infers the dropped tail from the difference between
-    body_text length and the candidate body_len.
-    """
-    parts: list[str] = []
-    remaining = body_budget
-    for val in values:
-        if not val:
-            continue
-        sep_cost = len(PREVIEW_SEPARATOR) if parts else 0
-        available = remaining - sep_cost
-        if available < MIN_FIELD_BUDGET:
-            break
-        rendered = val if len(val) <= available else _truncate(val, available)
-        if parts:
-            parts.append(PREVIEW_SEPARATOR)
-        parts.append(rendered)
-        remaining -= sep_cost + len(rendered)
-    return "".join(parts)
-
-
-def _truncate(text: str, max_len: int) -> str:
-    """Truncate text to max_len, adding ellipsis if needed."""
-    if max_len < 10:
-        max_len = 10
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 1] + "\u2026"
 
 
 def _recency_tag(ts) -> str:

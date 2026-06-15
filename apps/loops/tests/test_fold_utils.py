@@ -4,7 +4,6 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
-import pytest
 from atoms import FoldItem, FoldSection, FoldState
 
 from painted import Zoom
@@ -12,7 +11,7 @@ from painted import Zoom
 from loops.lenses.fold import (
     _compute_inbound_edges, _compute_inbound_refs, _first_field,
     _format_date, _format_ts_full, _group_by_namespace, _inbound_count,
-    _item_full_key, _recency_tag, _should_group_by_namespace, _truncate,
+    _item_full_key, _recency_tag, _should_group_by_namespace,
     fold_view,
 )
 
@@ -29,22 +28,9 @@ def state(sections=(), vertex="v", unfolded=None):
     return FoldState(sections=sections, vertex=vertex, unfolded=unfolded or {})
 
 
-# ---------------------------------------------------------------------------
-# _truncate
-# ---------------------------------------------------------------------------
-
-class TestTruncate:
-    def test_short_text(self):
-        assert _truncate("hello", 20) == "hello"
-
-    def test_long_text(self):
-        result = _truncate("a" * 50, 20)
-        assert len(result) == 20
-        assert result.endswith("\u2026")
-
-    def test_min_len_floor(self):
-        result = _truncate("a" * 50, 3)
-        assert len(result) == 10  # min floor is 10
+# Field budgeting / truncation moved to painted.budget_fields (tested in
+# painted): the fold lens no longer owns _truncate / _render_preview
+# (decision:design/budget-fields-truncation-gate-contract).
 
 
 # ---------------------------------------------------------------------------
@@ -691,17 +677,21 @@ class TestPreviewRender:
         # Either way the [+Nc] hint surfaces.
         assert "[+" in t and "c]" in t
 
-    def test_min_field_budget_drops(self):
-        """When remaining budget < MIN_FIELD_BUDGET the later field drops entirely."""
-        from loops.lenses.fold import MIN_FIELD_BUDGET, _render_preview
-        # First field eats the budget; second can't fit MIN_FIELD_BUDGET, so it drops.
-        first = "a" * 50
-        second = "should-not-render"
-        result = _render_preview([first, second], body_budget=50)
-        assert second not in result
-        # And confirm a wide enough budget DOES render the second
-        result2 = _render_preview([first, second], body_budget=50 + len(" · ") + MIN_FIELD_BUDGET + 10)
-        assert "should-not-render" in result2 or "should-not" in result2
+    def test_short_whole_trailing_field_kept(self):
+        """budget_fields contract divergence: min_field gates *truncation*,
+        not presence — a short whole trailing value is kept even when its
+        slot is narrower than MIN_FIELD_BUDGET, where the old _render_preview
+        drop-guard would have shed it
+        (decision:design/budget-fields-truncation-gate-contract).
+        """
+        # status eats most of the trailing slot; "ok" lands in a sub-min_field
+        # slot but fits whole, so the new allocator keeps it.
+        s = self._section(
+            {"name": "f", "status": "open-with-a-fair-amount-of-context", "message": "ok"},
+            preview_fields=("status", "message"),
+        )
+        t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 70))
+        assert "· ok" in t  # kept whole, not dropped
 
     def test_detailed_zoom_untruncated_no_duplicate(self):
         """At DETAILED: preview renders untruncated AND fields don't re-appear."""

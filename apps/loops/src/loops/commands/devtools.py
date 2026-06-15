@@ -20,37 +20,27 @@ def _reporter(reporter: "Reporter | None") -> "Reporter":
 def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run validate command via painted CLI harness.
 
-    Help (``-h``) and the ``files`` positional are owned by ``run_cli``'s
-    parser via the ``add_args`` hook — no hand-rolled help block. The
-    parsed namespace is captured through the ``build_fidelity`` callback
-    (the only run_cli hook that sees it today) so ``fetch`` can read
-    ``files``. This is a bridge until painted exposes the namespace on
-    CliContext (thread:painted-run-cli-args-seam,
-    decision:design/devtools-run-cli-args-bridge).
+    The ``files`` positional is pre-parsed; ``run_cli`` owns ``-h`` and
+    lists the arg in --help via ``help_args`` (painted's pre-parse +
+    describe-for-help idiom — decision:design/devtools-help-args-idiom).
+    No hand-rolled help block.
     """
     from painted import run_cli
+    from painted.cli import HelpArg
     from lang import parse_loop_file, parse_vertex_file, validate
     from loops.lenses.validate import validate_view
 
     _ = _reporter(reporter)  # reserved for future error routing
 
-    captured: dict[str, argparse.Namespace] = {}
-
-    def add_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument(
-            "files", nargs="*",
-            help="Files to validate (default: all .loop/.vertex in cwd)",
-        )
-
-    def build_fidelity(ns, fidelity):
-        captured["ns"] = ns
-        return fidelity
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("files", nargs="*")
+    known, rest = pre.parse_known_args(argv)
 
     # Capture fetch result for exit code check
     fetch_result: list[dict] = []
 
     def fetch():
-        files = captured["ns"].files
+        files = known.files
         if not files:
             cwd = Path.cwd()
             files = sorted(
@@ -98,13 +88,15 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
         return validate_view(data, ctx.zoom, w)
 
     run_cli(
-        argv,
+        rest,
         fetch=fetch,
         render=render,
         prog="loops validate",
         description="Validate .loop or .vertex files",
-        add_args=add_args,
-        build_fidelity=build_fidelity,
+        help_args=[HelpArg(
+            "files", "Files to validate (default: all .loop/.vertex in cwd)",
+            positional=True,
+        )],
     )
     # run_cli always returns 0 here — fetch catches all exceptions internally.
     # Preserve exit code: 1 if validation errors or no files found
@@ -122,6 +114,7 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     With --input: use file as input for parse pipeline instead of running.
     """
     from painted import run_cli
+    from painted.cli import HelpArg
     from lang import parse_loop_file, validate_loop
     from engine import compile_loop
 
@@ -129,28 +122,33 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
 
     # test branches on --input *before* dispatching to run_cli (the two
     # modes call run_cli differently — run mode adds fetch_stream), so a
-    # pre-parse is inherent here. run_cli still owns -h and lists these
-    # args via add_args; fetch closes over the pre-parsed ``known``.
-    def add_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("file", help="Loop file to test")
-        p.add_argument("--input", "-i", metavar="FILE",
-                       help="Input file to feed through parse pipeline")
-        p.add_argument("--limit", "-n", type=int, metavar="N",
-                       help="Max facts to show")
+    # pre-parse is inherent here. run_cli owns -h and lists these args via
+    # help_args; the fetch closures close over the pre-parsed ``known``.
+    _HELP_ARGS = [
+        HelpArg("file", "Loop file to test", positional=True),
+        HelpArg("--input, -i", "Input file to feed through parse pipeline"),
+        HelpArg("--limit, -n", "Max facts to show"),
+    ]
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file", nargs="?", default=None)
     pre.add_argument("--input", "-i", default=None)
     pre.add_argument("--limit", "-n", type=int, default=None)
-    known, _ = pre.parse_known_args(argv)
+    known, rest = pre.parse_known_args(argv)
 
-    # No file → let run_cli's parser raise the required-arg error (with -h
-    # already handled by run_cli if requested).
+    # -h must reach run_cli before the required-file guard. Route a bare
+    # help request straight to run_cli's help renderer (stub fetch/render —
+    # help short-circuits before either runs).
+    if "-h" in rest or "--help" in rest:
+        return run_cli(
+            rest, fetch=lambda: None, render=lambda c, d: None,
+            prog="loops test", help_args=_HELP_ARGS,
+            description="Test a .loop file — preview facts",
+        )
+
     if known.file is None:
-        from painted import run_cli as _run_cli
-        return _run_cli(argv, fetch=lambda: None, render=lambda c, d: None,
-                        prog="loops test", add_args=add_args,
-                        description="Test a .loop file — preview facts")
+        rep.err("Error: test requires a .loop file")
+        return 2
 
     path = Path(known.file)
     if not path.exists():
@@ -196,12 +194,12 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
             return test_view(data, ctx.zoom, w)
 
         return run_cli(
-            argv,
+            rest,
             fetch=fetch,
             render=render,
             prog="loops test",
             description="Test parse pipeline against sample input",
-            add_args=add_args,
+            help_args=_HELP_ARGS,
         )
 
     else:
@@ -259,13 +257,13 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
             return run_facts_view(data, ctx.zoom, w)
 
         return run_cli(
-            argv,
+            rest,
             fetch=fetch,
             fetch_stream=fetch_stream,
             render=render,
             prog="loops test",
             description=f"Run {path.name} — preview facts, no persistence",
-            add_args=add_args,
+            help_args=_HELP_ARGS,
         )
 
 
@@ -276,31 +274,28 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     from engine import compile_vertex
     from loops.lenses.compile import compile_view
 
+    from painted.cli import HelpArg
+
     rep = _reporter(reporter)
 
-    captured: dict[str, argparse.Namespace] = {}
-
-    def add_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("file", help="Loop or vertex file to compile")
-
-    def build_fidelity(ns, fidelity):
-        captured["ns"] = ns
-        return fidelity
-
-    # Pre-resolve the path for the existence guard. run_cli owns -h + the
-    # ``file`` positional via add_args; the namespace reaches fetch through
-    # the build_fidelity capture (bridge — thread:painted-run-cli-args-seam).
+    # Pre-parse the ``file`` positional (drives the existence guard and the
+    # fetch closure); run_cli owns -h and lists it via help_args.
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("file", nargs="?", default=None)
-    known, _ = pre.parse_known_args(argv)
-    if known.file is not None:
-        path = Path(known.file)
-        if not path.exists():
-            rep.err(f"Error: {path} does not exist")
-            return 1
+    known, rest = pre.parse_known_args(argv)
+    # -h must reach run_cli (which renders help + exits before fetch); don't
+    # let the required-file guard pre-empt it.
+    want_help = "-h" in rest or "--help" in rest
+    if known.file is None and not want_help:
+        rep.err("Error: compile requires a .loop or .vertex file")
+        return 2
+    path = Path(known.file) if known.file else None
+    if path is not None and not path.exists():
+        rep.err(f"Error: {path} does not exist")
+        return 1
 
     def fetch():
-        path = Path(captured["ns"].file)
+        assert path is not None  # guaranteed: help short-circuits before fetch
         abs_path = str(path.resolve())
         if path.suffix == ".loop":
             ast = parse_loop_file(path)
@@ -351,11 +346,12 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
         return compile_view(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        argv,
+        rest,
         fetch=fetch,
         render=render,
         prog="loops compile",
         description="Show compiled structure",
-        add_args=add_args,
-        build_fidelity=build_fidelity,
+        help_args=[HelpArg(
+            "file", "Loop or vertex file to compile", positional=True,
+        )],
     )

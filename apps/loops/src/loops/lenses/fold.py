@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING
 from datetime import datetime, timezone
 
 from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
+
+from ._helpers import elide
 from painted.palette import current_palette
 
 if TYPE_CHECKING:
@@ -717,8 +719,7 @@ def _render_item_line(
                         break
                 if sf_body and width is not None:
                     max_body = max(10, width - len(fact_pad) - len(ts_str) - 3)
-                    if len(sf_body) > max_body:
-                        sf_body = sf_body[:max_body - 1] + "…"
+                    sf_body = elide(sf_body, max_body)
                 lines.append(Block.text(
                     f"{fact_pad}▸ {ts_str} {sf_body}", fp.meta, width=width
                 ))

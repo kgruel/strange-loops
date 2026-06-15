@@ -16,6 +16,25 @@ if TYPE_CHECKING:
 
 RESOLVED_STATUSES = frozenset({"resolved", "completed", "done", "closed"})
 
+
+def elide(text: str, budget: int) -> str:
+    """Clip ``text`` to ``budget`` columns, appending an ellipsis if cut.
+
+    The single string-level truncation primitive for the lens layer —
+    replaces the ``text[:n-1] + "…"`` idiom that was copy-pasted across
+    fold / gist / trace / vertices. ``len()``-based today (byte-identical to
+    the per-lens copies it dissolves); this one call-site is where the lens
+    layer collapses onto ``painted.truncate(block)`` once the lenses
+    re-ground on record_line block composition
+    (thread:cli-render-rebuild-on-painted-020). painted offers only
+    block-level truncation today, so string clips stay loops-side until then.
+    """
+    if budget <= 0:
+        return ""
+    if len(text) <= budget:
+        return text
+    return text[: budget - 1] + "…"
+
 LABEL_FIELDS = ("topic", "name", "title", "trigger", "summary", "message")
 
 

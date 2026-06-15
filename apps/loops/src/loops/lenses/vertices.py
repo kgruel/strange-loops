@@ -5,6 +5,8 @@ from typing import Any
 
 from painted import Block, Style, Zoom, join_vertical
 
+from ._helpers import elide
+
 
 def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     """Render vertex listing at the given zoom level.
@@ -87,7 +89,7 @@ def _vertex_rows(
             else:
                 brief = ""
         elif loops:
-            loop_names = [l["name"] for l in loops]
+            loop_names = [lp["name"] for lp in loops]
             brief = ", ".join(loop_names)
         else:
             brief = ""
@@ -97,17 +99,14 @@ def _vertex_rows(
         # truncation; the brief gives way first.
         marker = "  ⊳ shadows config" if v.get("shadows") else ""
         avail = width - len(marker)
-        if len(line) > avail:
-            line = line[: avail - 1] + "…"
+        line = elide(line, avail)
         line += marker
         rows.append(Block.text(line, Style(), width=width))
 
         if zoom >= Zoom.DETAILED and loops:
-            for l in loops:
-                folds_str = ", ".join(l["folds"]) if l["folds"] else "no folds"
-                detail = f"    {l['name']} ({folds_str})"
-                if len(detail) > width:
-                    detail = detail[: width - 1] + "…"
+            for lp in loops:
+                folds_str = ", ".join(lp["folds"]) if lp["folds"] else "no folds"
+                detail = elide(f"    {lp['name']} ({folds_str})", width)
                 rows.append(Block.text(detail, dim, width=width))
 
         if zoom >= Zoom.FULL:

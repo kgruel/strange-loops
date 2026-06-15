@@ -123,11 +123,6 @@ _KIND_EXTRACTORS: dict[str, Callable[[dict], str]] = {
 
 
 def _truncate(text: str, max_width: int) -> str:
-    """Truncate to max_width, adding ellipsis if needed."""
-    # Collapse newlines to spaces
-    text = text.replace("\n", " ").strip()
-    if max_width <= 0:
-        return ""
-    if len(text) <= max_width:
-        return text
-    return text[:max_width - 1] + "\u2026"
+    """Collapse newlines, then clip to max_width via the shared elide."""
+    from ._helpers import elide
+    return elide(text.replace("\n", " ").strip(), max_width)

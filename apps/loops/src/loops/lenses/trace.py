@@ -222,13 +222,12 @@ def _render_diff(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
 
 def _truncate(s: str, width: int | None) -> str:
-    """Truncate string for diff render — wide budget at full-width, snug otherwise."""
+    """Diff-render clip — wide budget at full-width, snug otherwise."""
     if width is None:
         return s
-    budget = max(width - 10, 40)  # leave room for indent + field label
-    if len(s) <= budget:
-        return s
-    return s[: budget - 1] + "…"
+    from ._helpers import elide
+    # leave room for indent + field label
+    return elide(s, max(width - 10, 40))
 
 
 def _to_datetime(ts: Any) -> datetime | None:

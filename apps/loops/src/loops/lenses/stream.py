@@ -1,10 +1,12 @@
 """Stream lens — zoom-aware rendering of event history."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Style, Zoom, join_vertical, pad
+from painted.views import record_line
 
 
 def _block(text: str, style: Style, width: int | None) -> Block:
@@ -37,7 +39,9 @@ def attest_line(envelope: dict | None) -> str:
     return line
 
 
-def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None) -> Block:
+def stream_view(
+    data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None
+) -> Block:
     """Render event stream at the given zoom level.
 
     Accepts either:
@@ -82,9 +86,8 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
             summary = f"tick #{tick_meta['index']}: {summary}"
         return _block(summary, Style(), width)
 
-    rows: list[tuple[str, Style]] = []
+    blocks: list[Block] = []
     dim_style = Style(dim=True)
-    id_style = Style(dim=True)
     current_date = None
 
     # Tick drill-down header
@@ -101,23 +104,38 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
             title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}"
         else:
             title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
-        rows.append((
-            title,
-            Style(bold=True),
-        ))
+        blocks.append(_block(title, Style(bold=True), width))
         if tick_meta.get("since") and tick_meta.get("ts"):
-            rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", dim_style))
+            blocks.append(
+                _block(
+                    f"  window: {tick_meta['since']} → {tick_meta['ts']}",
+                    dim_style,
+                    width,
+                )
+            )
         attest = attest_line(tick_meta.get("envelope"))
         if attest:
-            rows.append((attest, dim_style))
-        rows.append((f"  {len(facts)} facts", dim_style))
-        rows.append(("", Style()))
+            blocks.append(_block(attest, dim_style, width))
+        blocks.append(_block(f"  {len(facts)} facts", dim_style, width))
+        blocks.append(_block("", Style(), width))
 
     if not facts:
-        return Block.column(rows, width=width) if rows else _block("No facts.", Style(dim=True), width)
+        return (
+            join_vertical(*blocks)
+            if blocks
+            else _block("No facts.", Style(dim=True), width)
+        )
 
     # Detect single-fact lookup (--id mode) — show full detail
     is_id_lookup = isinstance(data, dict) and "_id_lookup" in data
+
+    # Per-kind summary lens: painted's record_line renders ts+kind+payload; the
+    # one loops-domain bit it can't know is the fold-declared key_field, so we
+    # wrap _stream_summary as the PayloadLens. Metadata not in the payload
+    # (fact id, observer, origin) is grafted as continuation lines below —
+    # record_line owns the record, loops owns the fact-envelope context.
+    plens = _stream_payload_lens(fold_meta)
+    rec_width = None if width is None else max(width - 2, 1)
 
     for f in facts:
         ts = f["ts"]
@@ -131,50 +149,56 @@ def stream_view(data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: 
         date_str = dt.strftime("%Y-%m-%d")
         if date_str != current_date:
             if current_date is not None:
-                rows.append(("", Style()))
-            rows.append((f"{date_str}:", Style(bold=True)))
+                blocks.append(_block("", Style(), width))
+            blocks.append(_block(f"{date_str}:", Style(bold=True), width))
             current_date = date_str
 
-        time_str = dt.strftime("%H:%M")
         kind_str = f["kind"]
         payload = f["payload"]
         fact_id = f.get("id", "")
+        # --id lookup forces full fidelity regardless of zoom.
+        rec_zoom = Zoom.FULL if is_id_lookup else zoom
 
-        # Short ID suffix for DETAILED+, full for FULL or --id lookup
-        id_suffix = ""
+        # The record itself — dissolved onto painted.record_line.
+        rec = record_line(
+            dt, kind_str, payload, rec_zoom, rec_width, payload_lens=plens
+        )
+        blocks.append(pad(rec, left=2))
+
+        # Fact-envelope graft: id (DETAILED+), observer/origin (FULL/--id).
+        # These are not payload fields, so record_line never renders them.
+        graft: list[str] = []
         if fact_id:
             if is_id_lookup or zoom >= Zoom.FULL:
-                id_suffix = f" {fact_id}"
+                graft.append(f"id: {fact_id}")
             elif zoom >= Zoom.DETAILED:
-                id_suffix = f" {fact_id[:8]}"
-
-        # Use fold_meta key_field for summary, fall back to heuristic
-        key_field = fold_meta.get(kind_str, {}).get("key_field")
-        summary = _stream_summary(payload, key_field)
-        rows.append((f"  {time_str} [{kind_str}] {summary}", Style()))
-
-        # Show ID on a detail line when present
-        if id_suffix:
-            rows.append((f"           id:{id_suffix.strip()}", id_style))
-
+                graft.append(f"id: {fact_id[:8]}")
         if is_id_lookup or zoom >= Zoom.FULL:
-            # --id lookup or FULL: show all fields — no truncation
             if f.get("observer"):
-                rows.append((f"           observer: {f['observer']}", dim_style))
+                graft.append(f"observer: {f['observer']}")
             if f.get("origin"):
-                rows.append((f"           origin: {f['origin']}", dim_style))
-            for key, val in payload.items():
-                if val:
-                    rows.append((f"           {key}: {val}", dim_style))
-        elif zoom >= Zoom.DETAILED:
-            # DETAILED: show non-summary fields on next line
-            summary_fields = _summary_fields(payload, key_field)
-            for key, val in payload.items():
-                if key in summary_fields or not val:
-                    continue
-                rows.append((f"           {key}: {val}", dim_style))
+                graft.append(f"origin: {f['origin']}")
+        for line in graft:
+            blocks.append(_block(f"    {line}", dim_style, width))
 
-    return Block.column(rows, width=width)
+    return join_vertical(*blocks)
+
+
+def _stream_payload_lens(fold_meta: dict):
+    """Build a PayloadLens that honors fold-declared key_fields.
+
+    painted.record_line knows the common kinds (decision→topic:msg,
+    thread→name [status]) but not loops' per-vertex ``key_field`` declarations.
+    This closure routes the summary through ``_stream_summary`` so a kind whose
+    key_field is not a well-known label (e.g. metric keyed on ``custom_id``)
+    still labels correctly.
+    """
+
+    def _lens(kind: str, payload: dict, zoom: Zoom) -> str:
+        key_field = fold_meta.get(kind, {}).get("key_field")
+        return _stream_summary(payload, key_field)
+
+    return _lens
 
 
 # --- Heuristic label fields (same priority as fold lens) ---

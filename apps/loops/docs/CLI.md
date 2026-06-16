@@ -31,7 +31,7 @@ Event stream — chronological facts.
 
 ```
 2025-01-15:
-  10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for
+  10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for…
   09:30 [task] implement fold: Wire up Spec.apply.
 
 2025-01-14:

@@ -14,7 +14,7 @@ requires-python = ">=3.11"
 # `uv tool install .` until it is also added here. `uv run --package` masks the
 # gap because it resolves the workspace env, not this flat wheel.
 dependencies = [
-    "painted>=0.3.0,<0.4",
+    "painted>=0.3.1,<0.4",
     "ckdl>=1.0",
     "pyjwt[crypto]>=2.9",
     "cryptography>=43",

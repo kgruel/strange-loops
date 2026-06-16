@@ -101,6 +101,43 @@ class TestLiveBranch:
         assert rc == 2
         assert any("no stream_fn" in line for line in reporter.err_lines)
 
+    def test_live_folds_onto_run_cli_surface(self, monkeypatch):
+        """Live mode delegates to painted.run_cli with the surface tier.
+
+        Locks the step-6 dissolution: loops no longer owns an InPlaceRenderer
+        wrapper — the live loop is painted's run_cli(fetch_stream=,
+        live_delivery="surface"). We capture the call rather than drive a
+        real terminal (surface needs a TTY).
+        """
+        captured = {}
+
+        def fake_run_cli(args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 0
+
+        import painted
+
+        monkeypatch.setattr(painted, "run_cli", fake_run_cli)
+
+        async def _stream():
+            yield {"sections": (), "vertex": "x"}
+
+        def stream_fn():
+            return _stream()
+
+        op = Operation(
+            verb="read", fn=lambda: None,
+            render_lens="fold", mode="live", stream_fn=stream_fn,
+        )
+        rc = dispatch(op, reporter=BufferReporter())
+        assert rc == 0
+        assert captured["args"] == ["--live"]
+        assert captured["kwargs"]["live_delivery"] == "surface"
+        assert captured["kwargs"]["fetch_stream"] is stream_fn
+        assert callable(captured["kwargs"]["render"])
+        assert callable(captured["kwargs"]["fetch"])
+
 
 # --- Static branch — minimal smoke -----------------------------------------
 

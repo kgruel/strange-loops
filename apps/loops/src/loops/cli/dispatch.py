@@ -16,7 +16,7 @@ Branches:
       return op.interactive_handler()
 
   LIVE (op.mode == "live" and op.stream_fn):
-      defer to cli.live.run_live with resolved lens callable
+      fold onto painted run_cli(fetch_stream=, live_delivery="surface")
 
   STATIC (default for display ops):
       data = op.fn(**op.params)
@@ -174,10 +174,17 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
 
 def _dispatch_live(op: Operation, reporter: Reporter) -> int:
-    """Live-mode delegate. Resolves the lens, hands off to cli.live.
+    """Live-mode delegate — folds onto painted's ``run_cli`` surface tier.
+
+    The live render loop, alt-screen ``surface`` delivery (tear-free,
+    absolute per-cell diff), terminal setup/restore, and final-frame
+    deposit are all painted's now: ``run_cli(fetch_stream=,
+    live_delivery="surface")``. loops contributes only the resolved lens
+    and the async stream closure. This replaced the hand-rolled
+    ``cli/live.py`` ``InPlaceRenderer`` wrapper.
 
     Caller (dispatch) guarantees ``op.stream_fn is not None`` before
-    reaching here; this assertion narrows for the type-checker.
+    reaching here; the assertion narrows for the type-checker.
     """
     assert op.stream_fn is not None, "dispatch() must verify stream_fn before calling _dispatch_live"
     lens_fn = _resolve_lens(
@@ -190,37 +197,44 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
         reporter.err(f"Lens not found: {target}")
         return 2
 
-    from .live import run_live
+    from painted import run_cli
 
-    # call_lens-style adapter so the existing lens signature is honored.
-    # Live mode doesn't go through lens_resolver.call_lens because we
-    # want a per-frame closure with fidelity unpacked once.
-    fidelity = op.fidelity
-    visible = fidelity.visible if fidelity is not None else frozenset()
-    chars = fidelity.chars if fidelity is not None else 0
-    lines = fidelity.lines if fidelity is not None else 0
-    zoom = _zoom_of(fidelity)
-    vertex_name = None
-    vertex_path_str = None
+    from loops.lens_resolver import call_lens
+
+    # Fidelity was already resolved upstream in the view (domain visibility,
+    # zoom, --diff context). Capture it into the per-frame closure; run_cli
+    # receives only ``--live``, so its own fidelity parse is a deliberate
+    # no-op — the render contract is driven by what we captured, not by
+    # re-parsing flags painted's argparse never saw (--kind/--facts/--diff…).
+    zoom = _zoom_of(op.fidelity)
+    extra = dict(op.render_context)
+    if op.fidelity is not None:
+        extra.setdefault("visible", op.fidelity.visible)
+        extra.setdefault("chars", op.fidelity.chars)
+        extra.setdefault("lines", op.fidelity.lines)
     if op.vertex_path is not None:
         from loops.commands.resolve import _vertex_name
 
-        vertex_name = _vertex_name(op.vertex_path)
-        vertex_path_str = str(op.vertex_path)
+        extra.setdefault("vertex_name", _vertex_name(op.vertex_path))
+        extra.setdefault("vertex_path", str(op.vertex_path))
 
-    def render(data, fid, *, width: int | None, **kwargs):
-        # fid carried for signature parity with the lens-call contract;
-        # we use the closure-captured pre-unpacked values for speed.
-        extra = dict(op.render_context)
-        extra.update(kwargs)
-        extra.setdefault("visible", visible)
-        extra.setdefault("chars", chars)
-        extra.setdefault("lines", lines)
-        if vertex_name is not None:
-            extra.setdefault("vertex_name", vertex_name)
-            extra.setdefault("vertex_path", vertex_path_str)
-        from loops.lens_resolver import call_lens
-
+    def render(ctx, data):
+        # painted's render contract: (CliContext, data) -> Block. Width is
+        # the terminal width on a TTY, None when piped (no-truncation).
+        width = ctx.width if ctx.is_tty else None
         return call_lens(lens_fn, data, zoom, width, **extra)
 
-    return run_live(op.stream_fn, render, op.fidelity, reporter)
+    def fetch():
+        # run_cli requires a static fetch; the live+stream path renders
+        # frames from fetch_stream and deposits the stream's last frame, so
+        # this is only a fallback. Reuse the op's one-shot fetch.
+        return op.fn(**op.params)
+
+    return run_cli(
+        ["--live"],
+        fetch=fetch,
+        render=render,
+        fetch_stream=op.stream_fn,
+        live_delivery="surface",
+        prog=f"loops {op.verb}",
+    )

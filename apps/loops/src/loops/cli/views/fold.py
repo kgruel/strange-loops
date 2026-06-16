@@ -14,9 +14,9 @@ The single parser handles every fold flag (entity disambiguation,
 ``--kind`` / ``--key`` / ``--lens``, visibility layers, ``--diff``,
 ``--refs [N]``, output mode, fidelity, density budgets, ``--plain`` /
 ``--json``). The view then builds one ``Operation`` and hands it to
-``dispatch``. Painted is never imported at view scope — every renderer
-boundary lives in ``cli.output`` (Reporter) or ``cli.live``
-(InPlaceRenderer).
+``dispatch``. Painted is never imported at view scope — the renderer
+boundary lives in ``cli.output`` (Reporter); live mode folds onto
+painted ``run_cli`` inside ``dispatch``'s live branch.
 
 Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
 decision/cli-refactor-fast-path-retired.

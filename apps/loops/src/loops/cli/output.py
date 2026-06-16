@@ -1,9 +1,10 @@
 """Reporter Protocol — the single painted-boundary module for cli/.
 
-``cli.output`` is the *only* module in ``cli/`` allowed to ``from painted
-import …`` at runtime (with ``cli.live`` as the secondary boundary for
-``InPlaceRenderer``). Everyone else uses the ``Reporter`` Protocol or the
-re-exports below.
+``cli.output`` is the primary module in ``cli/`` allowed to ``from painted
+import …`` at runtime (with ``cli.dispatch``'s live branch as the secondary
+boundary, where live mode folds onto painted ``run_cli`` for surface
+delivery). Everyone else uses the ``Reporter`` Protocol or the re-exports
+below.
 
 Mirrors siftd's ``output/painted_bridge.py`` discipline: one place owns
 the painted contract, the rest of the CLI imports from here. This makes

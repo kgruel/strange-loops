@@ -1,0 +1,15 @@
+diff thread/vertex-routing
+
+2025-01-14:
+  09:00 [thread]
+    name: . → vertex-routing
+    status: . → open
+    message: → How should vertex names resolve to stores?
+  15:00 [thread]
+    status: open → active
+    message: → Local-first walk chosen.
+
+2025-01-15:
+  10:00 [thread]
+    status: active → resolved
+    message: → Shipped; resolution unified local-first.

@@ -1,0 +1,15 @@
+KINDS (3)
+  decision       topic by:topic  preview=topic,message
+  thread         name by:name  preview=name,status
+  change         items collect
+
+OBSERVERS (1)
+  kaygee  identity=kyle/loops-claude  grants=read,emit
+
+COMBINE (1)
+  ~/Code/loops/.loops/project.vertex  (as project)
+
+SOURCES (1)
+  reading  [reading]  (1 rows)
+    name      url
+    lobsters  https://lobste.rs/rss

@@ -292,3 +292,88 @@ SAMPLE_TICKS = [
         "origin": "memory.loop",
     },
 ]
+
+# ── trace ────────────────────────────────────────────────────────────────────
+# One entity's lifecycle (oldest first — changelog narrative). The trace lens
+# input is stream_view's shape plus a `_trace` key naming the kind/key.
+SAMPLE_TRACE = {
+    "_trace": {"kind": "thread", "key": "vertex-routing"},
+    "facts": [
+        {
+            "kind": "thread",
+            "ts": "2025-01-14T09:00:00+00:00",
+            "payload": {"name": "vertex-routing", "status": "open",
+                        "message": "How should vertex names resolve to stores?"},
+            "observer": "kaygee",
+        },
+        {
+            "kind": "thread",
+            "ts": "2025-01-14T15:00:00+00:00",
+            "payload": {"name": "vertex-routing", "status": "active",
+                        "message": "Local-first walk chosen."},
+            "observer": "kaygee",
+        },
+        {
+            "kind": "thread",
+            "ts": "2025-01-15T10:00:00+00:00",
+            "payload": {"name": "vertex-routing", "status": "resolved",
+                        "message": "Shipped; resolution unified local-first."},
+            "observer": "kaygee",
+        },
+    ],
+    "fold_meta": {"thread": {"key_field": "name"}},
+    "vertex": "session",
+}
+
+# Same lifecycle rendered as cumulative scalar deltas (--diff). The diff path
+# is loops-side (not record_line) — it shows field transitions, not records.
+SAMPLE_TRACE_DIFF = {**SAMPLE_TRACE, "_diff": True}
+
+# ── declarations (sl vertices) ───────────────────────────────────────────────
+# Exercises the declarations lens AND the preview_fields decl rendering.
+SAMPLE_DECLARATIONS = {
+    "vertex_name": "session",
+    "kinds": [
+        {"name": "decision", "fold_op": "by:topic", "target": "topic",
+         "preview_fields": ["topic", "message"]},
+        {"name": "thread", "fold_op": "by:name", "target": "name",
+         "preview_fields": ["name", "status"]},
+        {"name": "change", "fold_op": "collect"},
+    ],
+    "observers": [
+        {"name": "kaygee", "identity": "kyle/loops-claude",
+         "grants": ["read", "emit"]},
+    ],
+    "combine": [
+        {"path": "~/Code/loops/.loops/project.vertex", "alias": "project"},
+    ],
+    "sources": [
+        {"template": "reading", "list_path": "config/reading",
+         "header": ["name", "url"],
+         "rows": [{"name": "lobsters", "url": "https://lobste.rs/rss"}]},
+    ],
+}
+
+# ── fold: preview-fields path ────────────────────────────────────────────────
+# A section that declares preview_fields exercises the explicit per-kind
+# preview render in _render_item_line (vs the heuristic first-field fallback).
+SAMPLE_FOLD_PREVIEW = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            preview_fields=("message", "rationale"),
+            items=(
+                FoldItem(
+                    payload={"topic": "Use SQLite",
+                             "message": "Atomic writes and query support.",
+                             "rationale": "Filesystem lacks transactions."},
+                    ts="2025-01-15T10:00:00+00:00",
+                    n=3,
+                ),
+            ),
+        ),
+    ),
+    vertex="session",
+)

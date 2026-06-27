@@ -6,7 +6,6 @@ from atoms import (
     Avg,
     Collect,
     Count,
-    Facet,
     Latest,
     Max,
     Min,

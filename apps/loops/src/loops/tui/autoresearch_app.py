@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from painted import Block, Style, Wrap, Zoom
+from painted import Block, Style, Wrap
 from painted import join_horizontal, join_vertical, border, pad
 from painted.core.cell import Cell
 from painted.core.span import Line, Span

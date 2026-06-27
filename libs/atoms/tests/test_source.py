@@ -1,6 +1,5 @@
 """Tests for Source and SequentialSource."""
 
-import asyncio
 
 import pytest
 

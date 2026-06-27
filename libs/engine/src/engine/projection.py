@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 if TYPE_CHECKING:
-    from .store import EventStore, Store
+    from .store import EventStore
 
 S = TypeVar("S")  # State type
 T = TypeVar("T")  # Event type

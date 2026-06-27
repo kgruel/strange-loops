@@ -9,7 +9,7 @@ from __future__ import annotations
 # re deferred to function bodies (avoids enum ~5ms import)
 from typing import TYPE_CHECKING
 
-from .ast import FromFile, SourceParams, TemplateSource, VertexFile
+from .ast import FromFile, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
     from pathlib import Path

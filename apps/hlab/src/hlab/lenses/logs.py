@@ -13,7 +13,7 @@ from typing import Any
 
 from painted import Block, Style, Span, Line
 
-from ..theme import Theme, DEFAULT_THEME
+from ..theme import Theme
 
 
 # Level detection patterns

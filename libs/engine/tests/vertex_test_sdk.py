@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from atoms import Fact, Spec, Count, Latest, Sum, Collect
+from atoms import Fact, Spec, Count, Latest, Sum
 from engine import Loop, Vertex
 from engine.sqlite_store import SqliteStore
 

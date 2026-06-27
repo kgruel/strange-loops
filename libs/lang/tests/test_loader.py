@@ -2094,7 +2094,6 @@ parse {
 
     def test_transform_lstrip(self):
         from lang import parse_loop
-        from lang.ast import LStrip
 
         loop = parse_loop("""\
 kind "metric"
@@ -2109,7 +2108,6 @@ parse {
 
     def test_transform_rstrip(self):
         from lang import parse_loop
-        from lang.ast import RStrip
 
         loop = parse_loop("""\
 kind "metric"
@@ -2123,7 +2121,6 @@ parse {
 
     def test_transform_replace(self):
         from lang import parse_loop
-        from lang.ast import Replace
 
         loop = parse_loop("""\
 kind "metric"

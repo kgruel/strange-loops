@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from painted import Block, Zoom
+    from painted import Block
 
 
 # Type alias for lens render functions

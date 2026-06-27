@@ -6,22 +6,18 @@ the public API and test behavior, not implementation details.
 
 from pathlib import Path
 
-import pytest
 
 from atoms import Fact
 from engine import EventStore, FileWriter, Forward, Stream, Tailer, Tick, Vertex
 from engine.projection import Projection
 
 from tests.helpers import (
-    CountProjection,
     Event,
     NamedEvent,
     NamedSumProjection,
     SumProjection,
     deserialize_event,
-    deserialize_named,
     serialize_event,
-    serialize_named,
 )
 
 

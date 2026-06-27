@@ -12,7 +12,6 @@ from painted.views import (
     data_explorer,
     ListState,
     list_view,
-    shape_lens,
 )
 from painted.core.span import Line, Span
 from painted.tui import Surface

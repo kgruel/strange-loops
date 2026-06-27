@@ -31,7 +31,6 @@ from .fixtures import (
     SAMPLE_LS,
     SAMPLE_FACTS,
     SAMPLE_TICKS,
-    REF_DT,
 )
 from .test_store import _frozen_relative_time
 from .helpers import block_to_text

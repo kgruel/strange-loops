@@ -1,8 +1,6 @@
 """Root conftest — shared pytest fixtures and options for loops app tests."""
 from __future__ import annotations
 
-import time
-from pathlib import Path
 
 import pytest
 

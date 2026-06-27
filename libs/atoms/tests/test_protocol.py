@@ -4,7 +4,6 @@ import asyncio
 
 import pytest
 
-from atoms.protocol import SourceProtocol
 
 
 class _FakeAtomSource:

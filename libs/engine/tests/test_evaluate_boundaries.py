@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from atoms import Fact
 from engine import Vertex
@@ -425,7 +424,7 @@ class TestEvaluateBoundariesWithExecutor:
         v.register_vertex_boundary("task", match=(("status", "open"),))
         v.replay()
 
-        from engine.executor import Executor, SyncResult
+        from engine.executor import Executor
 
         executor = Executor(vertex=v, sources=[])
         result = executor.sync()

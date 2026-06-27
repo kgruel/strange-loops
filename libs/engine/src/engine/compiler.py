@@ -38,7 +38,6 @@ from lang.ast import (
     Split,
     TemplateSource,
     Transform,
-    Trigger,
     VertexFile,
 )
 from lang.ast import Flatten as DslFlatten
@@ -54,7 +53,7 @@ from lang.ast import RStrip as DslRStrip
 from lang.ast import Strip as DslStrip
 
 if TYPE_CHECKING:
-    from atoms import Boundary, Field, Source, Spec
+    from atoms import Boundary, Source, Spec
     from atoms import Coerce as RuntimeCoerce
     from atoms import FoldOp as RuntimeFoldOp
     from atoms import ParseOp as RuntimeParseOp

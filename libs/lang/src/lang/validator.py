@@ -25,7 +25,6 @@ from .ast import (
     Transform,
     VertexFile,
     Where,
-    SourcesBlock,
 )
 from .errors import Location, ValidationError
 

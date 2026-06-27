@@ -20,7 +20,6 @@ from loops.errors import (
     VertexNotFound,
     VertexParseError,
     StoreNotFound,
-    StoreAccessError,
 )
 
 if TYPE_CHECKING:

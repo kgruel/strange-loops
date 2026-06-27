@@ -11,7 +11,7 @@ def _tick_drill_header(tick_meta: dict, width: int | None) -> "Block":
     Shows tick index, boundary trigger, and time window. Returns a
     Block that can be composed above the fold/lens output.
     """
-    from painted import Block, Style, join_vertical
+    from painted import Block, Style
 
     if not tick_meta:
         return Block.text("", Style())

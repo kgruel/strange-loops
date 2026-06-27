@@ -3,7 +3,7 @@
 import pytest
 
 from lang import ValidationError, parse_loop, parse_vertex
-from lang.validator import Shape, ShapeKind, validate, validate_loop, validate_vertex
+from lang.validator import ShapeKind, validate, validate_loop, validate_vertex
 
 
 class TestShapeInference:
@@ -536,7 +536,7 @@ class TestValidatorEdgeCoverage:
     """Tests for uncovered validator.py paths."""
 
     def test_shape_repr(self):
-        from lang.validator import Shape, ShapeKind
+        from lang.validator import Shape
         s = Shape.dict_shape(("a", "b"))
         r = repr(s)
         assert "Shape" in r
@@ -617,7 +617,7 @@ parse {
 
     def test_shape_eq_same(self):
         """Shape.__eq__ same type (L66)."""
-        from lang.validator import Shape, ShapeKind
+        from lang.validator import Shape
         a = Shape.dict_shape(("a", "b"))
         b = Shape.dict_shape(("a", "b"))
         assert a == b

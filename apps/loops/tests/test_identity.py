@@ -1,9 +1,7 @@
 """Tests for observer identity resolution — covers commands/identity.py gaps."""
 
-import os
 from pathlib import Path
 
-import pytest
 
 from loops.commands.identity import (
     find_workspace_root,

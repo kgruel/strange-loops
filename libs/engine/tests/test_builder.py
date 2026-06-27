@@ -2,11 +2,9 @@
 
 from pathlib import Path
 
-import pytest
 
 from engine.builder import (
     LoopBuilder,
-    VertexBuilder,
     fold_avg,
     fold_by,
     fold_collect,

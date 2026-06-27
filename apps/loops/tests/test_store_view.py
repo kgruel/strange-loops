@@ -458,14 +458,12 @@ class TestStoreViewEdges:
 
     def test_render_ticks_empty(self):
         """_render_ticks with no kinds (L181)."""
-        from .helpers import block_text
         data = {"facts": {"kinds": {}, "total": 0}, "ticks": {"kinds": {}}}
         block = store_view(data, Zoom.FULL, 80)
         assert block is not None
 
     def test_render_summary_narrow_fill(self):
         """_render_summary with narrow width → fill = '  ' (L211)."""
-        from .helpers import block_text
         # Kind name + count + freshness that exceeds inner width
         data = {"facts": {"kinds": {
             "very_long_kind_name_xxxx": {"count": 5, "freshness": None, "recent": []}

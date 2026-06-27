@@ -555,7 +555,6 @@ class TestLoopsErrorHierarchy:
 
     def test_all_are_loops_error_subclasses(self):
         """All domain errors inherit from LoopsError."""
-        from pathlib import Path
         from loops.errors import (
             LoopsError, VertexNotFound, VertexParseError,
             ResolutionFailed, StoreNotFound, StoreAccessError, EmitError,
@@ -716,7 +715,6 @@ class TestMainAsDunder:
     def test_main_py_as_main(self, tmp_path, monkeypatch):
         """Running main.py as __main__ hits sys.exit(main()) → L1411."""
         import runpy
-        from loops.main import main as loops_main
 
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.chdir(tmp_path)

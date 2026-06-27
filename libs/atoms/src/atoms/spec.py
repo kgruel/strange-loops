@@ -9,7 +9,7 @@ from typing import Any
 
 from .boundary import Boundary
 from .engine import build_fold_fns
-from .facet import Facet, Field
+from .facet import Field
 from .fold import FoldOp
 from .types import initial_value
 

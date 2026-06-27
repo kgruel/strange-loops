@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from atoms import Avg, Boundary, Collect, Count, Field, Latest, Max, Min, Source, Spec, Sum, Upsert, Window
+from atoms import Avg, Boundary, Collect, Count, Latest, Max, Min, Source, Spec, Sum, Upsert, Window
 from atoms import Coerce as RuntimeCoerce
 from atoms import Pick as RuntimePick
 from atoms import Rename as RuntimeRename
@@ -24,7 +24,6 @@ from engine.compiler import (
     compile_vertex_recursive,
     instantiate_template,
     map_fold_op,
-    map_loop_file,
     map_parse_steps,
     map_pick,
     map_skip,

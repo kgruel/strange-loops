@@ -1,10 +1,10 @@
 """Ticks lens — zoom-aware rendering of tick history and drill-down."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Style, Zoom
 
 
 def _block(text: str, style: Style, width: int | None) -> Block:

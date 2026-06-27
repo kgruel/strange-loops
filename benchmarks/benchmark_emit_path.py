@@ -152,7 +152,6 @@ def create_fixture(tmp: Path) -> Path:
 def run_emit_cycle(vertex_path: Path, fact_i: int) -> dict[str, float]:
     """Run one full emit cycle through load_vertex_program and return phase timings."""
     from atoms import Fact
-    from engine import load_vertex_program
 
     # Phase 1: Compile (parse + compile + source collection + materialize)
     # load_vertex_program does: parse → compile → collect_sources → validate_dag → materialize

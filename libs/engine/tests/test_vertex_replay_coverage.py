@@ -7,13 +7,12 @@ Targets: vertex.py replay fast paths (since_raw, replay_cursor),
 import json
 import time as _time
 
-import pytest
 
 from atoms import Fact, Spec, Count
 from engine import Loop, Vertex
 from engine.sqlite_store import SqliteStore
 
-from tests.vertex_test_sdk import VertexTestBuilder, fact, reopen_store
+from tests.vertex_test_sdk import VertexTestBuilder, fact
 
 
 def inject_fact(store, kind: str, observer: str = "test", ts: float | None = None, **payload):
@@ -228,8 +227,6 @@ class TestReplayBoundaryReconciliationEdges:
 
     def test_replay_with_vertex_boundary_period_start(self, tmp_path):
         """Vertex with vertex-level boundary reads period start from ticks."""
-        from engine import Loop
-        from atoms import Spec, Count, Boundary
 
         v1, store = (VertexTestBuilder("vb")
             .with_store(tmp_path)
@@ -258,7 +255,6 @@ class TestEvaluateBoundariesVertexOnly:
 
     def test_vertex_boundary_no_conditions_fires(self, tmp_path):
         """Vertex-only boundary fires on matching kind — no conditions."""
-        import time
 
         v, store = (VertexTestBuilder("proj")
             .with_store(tmp_path)
@@ -375,7 +371,6 @@ class TestEvaluateBoundariesVertexOnly:
 
     def test_evaluate_with_empty_period(self, tmp_path):
         """No facts in scan period — returns empty."""
-        import time
 
         v, store = (VertexTestBuilder("proj")
             .with_store(tmp_path)

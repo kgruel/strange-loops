@@ -12,10 +12,8 @@ instead of calling through the projection interface.
 """
 
 import ast
-import inspect
 from pathlib import Path
 
-import pytest
 
 ENGINE_SRC = Path(__file__).resolve().parent.parent / "src" / "engine"
 

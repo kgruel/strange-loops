@@ -14,7 +14,7 @@ from datetime import datetime
 from painted import Block, Style, join_vertical, join_horizontal, border, pad, ROUNDED
 from painted.tui import Surface
 
-from engine import Executor, Cadence
+from engine import Executor
 
 from .lenses.status import render_stack_list, render_container_detail, PendingState
 from .theme import DEFAULT_THEME

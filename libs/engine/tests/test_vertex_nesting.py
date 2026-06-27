@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 
-import pytest
 
 from atoms import Fact
 from engine import Tick, Vertex, Loop

@@ -1,8 +1,6 @@
 """Tests for loops CLI."""
 
 from pathlib import Path
-from io import StringIO
-import sys
 
 import pytest
 

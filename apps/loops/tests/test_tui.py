@@ -9,15 +9,12 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
-import pytest
 
 from painted.tui import TestSurface
 
 from loops.tui.autoresearch_app import (
     AppState,
     AutoresearchApp,
-    IterationView,
-    _build_iterations,
     _render_detail,
     _render_footer,
     _render_header_panels,

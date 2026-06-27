@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from painted import Block, Style, Zoom, join_vertical
 
-from .run import run_ticks_view, _format_ts
+from .run import run_ticks_view
 
 
 def _format_ago(epoch_ts: float) -> str:

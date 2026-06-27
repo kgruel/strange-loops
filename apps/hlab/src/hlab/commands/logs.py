@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 from collections import deque
 from pathlib import Path
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Style, join_vertical
 from painted.cli import CliContext
 from painted.inplace import InPlaceRenderer
 from painted.core.writer import print_block
@@ -29,7 +29,6 @@ from ..inventory import (
     ANSIBLE_INVENTORY_CACHE,
 )
 from ..lenses.logs import (
-    LogLine,
     LogLineConfig,
     RenderState,
     parse_compose_log_line,

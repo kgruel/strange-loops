@@ -2,11 +2,9 @@
 
 from pathlib import Path
 
-import pytest
 from lang import parse_vertex_file
 
 from engine.compiler import (
-    CompiledVertex,
     collect_all_sources,
     compile_vertex_recursive,
 )

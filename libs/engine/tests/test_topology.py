@@ -6,7 +6,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
 
 
 def _create_child_vertex(parent_dir: Path, name: str, *, with_store: bool = True) -> Path:

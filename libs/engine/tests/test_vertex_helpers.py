@@ -75,7 +75,6 @@ class TestReplayPaths:
 
     def test_replay_with_cursor(self, tmp_path):
         """Replay with SqliteStore exercises the replay_cursor fast path."""
-        from pathlib import Path
         from engine.builder import vertex, fold_count
         from atoms import Fact
 
@@ -102,7 +101,6 @@ class TestReplayPaths:
 
     def test_replay_with_multiple_kinds(self, tmp_path):
         """Replay dispatches facts to the correct loop by kind."""
-        from pathlib import Path
         from engine.builder import vertex, fold_count, fold_by
         from atoms import Fact
 
@@ -131,7 +129,6 @@ class TestReplayPaths:
 
     def test_replay_empty_store(self, tmp_path):
         """Replay with empty store returns 0."""
-        from pathlib import Path
         from engine.builder import vertex, fold_count
 
         b = vertex("empty").store("./empty.db").loop("ping", fold_count("n"))

@@ -208,7 +208,6 @@ class TestSyncLens:
     @staticmethod
     def _render(data, zoom):
         from loops.lenses.sync import sync_view
-        from painted import Zoom
 
         return block_to_text(sync_view(data, zoom, 80))
 

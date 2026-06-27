@@ -8,8 +8,6 @@ vertex loading, store writing, fold materialization, boundary evaluation.
 from __future__ import annotations
 
 import argparse
-import os
-from pathlib import Path
 
 import pytest
 
@@ -426,7 +424,7 @@ class TestEdgeCases:
 
     def test_multiple_folds_per_loop(self, tmp_path):
         """Loop with multiple fold declarations."""
-        from engine.builder import vertex, fold_count, fold_latest, fold_max
+        from engine.builder import vertex, fold_count, fold_max
         b = (vertex("multi-fold")
             .store("./mf.db")
             .loop("metric", fold_count("n"), fold_max("peak", target="peak")))
@@ -713,7 +711,7 @@ class TestCloseWorkflow:
     @pytest.fixture
     def thread_vertex(self, tmp_path):
         """Vertex configured like a real project store with threads/decisions/tasks."""
-        from engine.builder import vertex, fold_by, fold_count, fold_collect
+        from engine.builder import vertex, fold_by, fold_collect
         b = (vertex("project")
             .store("./project.db")
             .loop("thread", fold_by("name"))
@@ -2721,7 +2719,6 @@ class TestDevtoolsTestLiveMode:
 
     def test_run_test_live_plain_covers_fetch_stream(self, tmp_path, monkeypatch):
         """'loops test <file> --live --plain' covers async fetch_stream → L200-213."""
-        from pathlib import Path
         from loops.main import main
 
         # 'echo hello' yields exactly one fact, then source stops → clean loop exit
@@ -2734,7 +2731,6 @@ class TestDevtoolsTestLiveMode:
 
     def test_run_test_live_plain_limit_break(self, tmp_path, monkeypatch):
         """--limit 1 with 2-line source covers break at L215 in fetch_stream."""
-        from pathlib import Path
         from loops.main import main
 
         # 'printf' outputs 2 lines so fetch_stream processes >1 fact; --limit 1 breaks

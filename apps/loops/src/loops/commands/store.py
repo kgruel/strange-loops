@@ -187,79 +187,103 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         print(_json.dumps({**report, "fact_signatures": fact_report}, indent=2))  # noqa: T201 — machine output path
         return 0 if report["ok"] and fact_report["ok"] else 1
 
-    from painted import Block, Style, show
+    from painted import Block, Style, join_vertical, show
+    from painted.views import Severity, callout
 
     ok = report["ok"] and fact_report["ok"]
+    total_facts = report["covered_facts"] + report["uncovered_facts"]
     if not report["ok"]:
-        verdict = "CHAIN BROKEN"
+        verdict, verdict_sev = "CHAIN BROKEN", Severity.ERROR
     elif not fact_report["ok"]:
-        verdict = "FACT SIGNATURES BROKEN"
+        verdict, verdict_sev = "FACT SIGNATURES BROKEN", Severity.ERROR
     else:
-        verdict = "chain intact"
-    lines = [
-        f"{'✓' if ok else '✗'} {db_path.name}: {verdict}",
-        f"  ticks: {report['ticks']} ({report['chained']} chained, "
-        f"{report['legacy']} legacy, {report['signed']} signed)",
-        f"  facts: {report['covered_facts']} covered, {report['uncovered_facts']} uncovered (live edge)",
+        verdict, verdict_sev = "chain intact", Severity.SUCCESS
+
+    # Composed, never Block.text("\n".join(...)): painted 0.4.0 neutralizes a
+    # raw \n to a space at the cell level, so multi-line must be real rows
+    # (friction:block-text-multiline-passthrough-broke-on-040).
+    blocks: list[Block] = [
+        callout(f"{db_path.name} — {verdict}", severity=verdict_sev),
     ]
+
+    def row(text: str) -> None:
+        blocks.append(Block.text(f"  {text}", Style(dim=False)))
+
+    # Three orthogonal axes, labeled so they stop reading as competing
+    # fractions of one total (disclosure-grammar item b):
+    #   chain      — tick hash chain integrity
+    #   coverage   — which facts are sealed under a tick window
+    #   authorship — per-fact signatures (delta 3); independent of coverage
+    chain_bits = [f"{report['ticks']} ticks"]
+    if report["chained"]:
+        chain_bits.append(f"{report['chained']} chained")
+    if report["legacy"]:
+        chain_bits.append(f"{report['legacy']} legacy")
+    if report["signed"]:
+        chain_bits.append(f"{report['signed']} signed")
+    chain_line = "chain        " + " · ".join(chain_bits)
     if report["signed"] and report["sig_checked"]:
-        lines.append(
-            f"  signatures: {report['signed']} checked against registry "
-            f"({len(declared_keys)} key{'s' if len(declared_keys) != 1 else ''})"
-        )
+        plural = "s" if len(declared_keys) != 1 else ""
+        chain_line += f" · verified against registry ({len(declared_keys)} key{plural})"
     elif report["signed"]:
-        lines.append(
-            f"  signatures: {report['signed']} present, unchecked "
-            "(no keys in registry — verify via the .vertex, not the raw .db)"
+        chain_line += " · unchecked (no keys in registry — verify via the .vertex)"
+    row(chain_line)
+
+    if report["uncovered_facts"]:
+        row(
+            f"coverage     {report['covered_facts']}/{total_facts} facts sealed "
+            f"under a tick · {report['uncovered_facts']} on live edge"
         )
-    if declared_keys and report["chained"] and not report["signed"]:
-        # The strip-attack tripwire: a total signature strip renders as
-        # honest unsigned history INSIDE the store; the registry outside it
-        # is the anchor (see verify_chain's documented scope boundary).
-        lines.append(
-            "  ⚠ registry declares signing key(s) but no tick is signed — "
-            "pre-signing store, or signatures stripped"
-        )
-    # Fact authorship signatures (delta 3) — a separate claim from the
-    # chain: per-observer authorship over content, transport-stable.
+    else:
+        row(f"coverage     {report['covered_facts']}/{total_facts} facts sealed under a tick")
+
     if fact_report["signed"]:
         checked = "checked against registry" if fact_report["sig_checked"] else (
-            "present, unchecked (no keys in registry)"
+            "unchecked (no keys in registry)"
         )
-        lines.append(
-            f"  fact signatures: {fact_report['signed']} signed, "
-            f"{fact_report['unsigned']} unsigned · {checked}"
-        )
+        row(f"authorship   {fact_report['signed']}/{total_facts} facts signed · {checked}")
     elif fact_report["facts"]:
-        lines.append(
-            f"  fact signatures: none ({fact_report['facts']} pre-signature facts)"
-        )
+        row(f"authorship   0/{total_facts} facts signed (pre-signature era)")
+
+    # The strip-attack tripwires stay WARNING: a benign pre-signing store and a
+    # malicious live-edge strip currently look identical here, and under-alarming
+    # a real strip is worse than the false-positive. Honest fix (per-observer
+    # pre-signing-vs-live-edge detection) is deferred to
+    # thread:verify-strip-vs-presigning-detection (disclosure-grammar item c).
+    if declared_keys and report["chained"] and not report["signed"]:
+        blocks.append(callout(
+            "registry declares signing key(s) but no tick is signed",
+            severity=Severity.WARNING,
+            detail="pre-signing store, or signatures stripped — the registry is the external anchor",
+        ))
     if _fact_keys:
-        # Per-observer era tripwire (analog of the tick strip tripwire):
-        # a keyed observer with zero signed facts is either pre-signing
-        # history or a live-edge strip.
         silent = [
             name for name in _fact_keys
             if fact_report["observers"].get(name, {}).get("signed", 0) == 0
             and fact_report["observers"].get(name, {}).get("unsigned", 0) > 0
         ]
         if silent and fact_report["signed"]:
-            lines.append(
-                f"  ⚠ keyed observer(s) with no signed facts: {', '.join(silent)} "
-                "— pre-signing era, or signatures stripped on the live edge"
-            )
+            blocks.append(callout(
+                f"keyed observer(s) with no signed facts: {', '.join(silent)}",
+                severity=Severity.WARNING,
+                detail="pre-signing era, or signatures stripped on the live edge",
+            ))
+
     for b in report["breaks"]:
-        lines.append(f"  ✗ {b['name']} ({b['tick']}): {b['reason']}")
+        blocks.append(callout(
+            f"{b['name']} ({b['tick']})", severity=Severity.ERROR, detail=b["reason"]
+        ))
     for b in fact_report["breaks"]:
-        lines.append(f"  ✗ fact {b['fact']} ({b['observer']}/{b['kind']}): {b['reason']}")
+        blocks.append(callout(
+            f"fact {b['fact']} ({b['observer']}/{b['kind']})",
+            severity=Severity.ERROR, detail=b["reason"],
+        ))
     if report["truncated"] or fact_report["truncated"]:
-        lines.append(
-            f"  … stopped after {len(report['breaks']) + len(fact_report['breaks'])} breaks"
-        )
+        row(f"… stopped after {len(report['breaks']) + len(fact_report['breaks'])} breaks")
     if args.verbose and report.get("tick_detail"):
         from datetime import datetime, timezone
 
-        lines.append("  chained ticks (append order):")
+        row("chained ticks (append order):")
         for t in report["tick_detail"]:
             ts = datetime.fromtimestamp(t["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
             if not t["signed"]:
@@ -271,11 +295,11 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
             cursor = t["cursor_kind"] or "?"
             if t["cursor_preview"]:
                 cursor += f': "{t["cursor_preview"]}"'
-            lines.append(
-                f"    {'✓' if t['ok'] else '✗'} {ts} {t['name']} · {sig} · "
+            row(
+                f"  {'✓' if t['ok'] else '✗'} {ts} {t['name']} · {sig} · "
                 f"{t['window_facts']} facts · cursor → {cursor}"
             )
-    show(Block.text("\n".join(lines), Style(dim=False)))
+    show(join_vertical(*blocks))
     return 0 if ok else 1
 
 
@@ -393,7 +417,10 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     lines.append(f"  verified: {' · '.join(checks)} ({verification.facts_checked} facts checked)")
     for m in verification.mismatches:
         lines.append(f"  ✗ {m}")
-    show(Block.text("\n".join(lines), Style(dim=False)))
+    # Compose real rows — Block.text("\n".join(...)) flattens to one line
+    # under painted 0.4.0 (friction:block-text-multiline-passthrough-broke-on-040).
+    from painted import join_vertical
+    show(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
     return 0 if verification.ok else 1
 
 

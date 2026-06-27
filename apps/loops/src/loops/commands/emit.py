@@ -803,7 +803,14 @@ def _run_close(
 
     if args.dry_run:
         import json as _json
-        show(Block.text(f"\n  dry-run payload: {_json.dumps(resolution_payload)}", Style(dim=True)))
+        # Leading blank as a real empty row — a raw "\n" inside Block.text
+        # flattens to a space under painted 0.4.0
+        # (friction:block-text-multiline-passthrough-broke-on-040).
+        from painted import join_vertical
+        show(join_vertical(
+            Block.text("", Style()),
+            Block.text(f"  dry-run payload: {_json.dumps(resolution_payload)}", Style(dim=True)),
+        ))
         return 0
 
     # Emit the resolution fact

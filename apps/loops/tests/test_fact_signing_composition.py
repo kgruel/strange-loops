@@ -120,7 +120,7 @@ class TestEmitSignsFactsEndToEnd:
         rc = _run_verify([str(vpath)])
         out = capsys.readouterr().out
         assert rc == 0
-        assert "fact signatures: 1 signed" in out
+        assert "authorship   1/1 facts signed" in out
 
     def test_unkeyed_observer_fact_unsigned(self, tmp_path):
         vpath = _make_vertex(tmp_path)

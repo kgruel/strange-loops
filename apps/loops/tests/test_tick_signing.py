@@ -84,7 +84,7 @@ class TestVerifyComposition:
         out = capsys.readouterr().out
         assert rc == 0
         assert "chain intact" in out
-        assert "checked against registry" in out
+        assert "verified against registry" in out
 
     def test_tampered_signed_head_detected(self, tmp_path, capsys):
         """The delta-1 head gap, closed end-to-end: rewrite the newest tick's

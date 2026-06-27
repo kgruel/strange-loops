@@ -4,7 +4,7 @@ import time
 
 from painted import Zoom
 
-from loops.lenses.stream import _stream_summary, _summary_fields, stream_view
+from loops.lenses.stream import _stream_summary, stream_view
 
 from .helpers import block_text as _text
 
@@ -173,23 +173,10 @@ def test_stream_summary_fallback_to_known_field():
     assert _stream_summary({"z_extra": "", "name": "fallback"}) == "fallback"
 
 
-def test_summary_fields_key_not_in_labels():
-    assert "custom" in _summary_fields({"custom": "v", "name": "n"}, key_field="custom")
-
-
-def test_summary_fields_key_in_labels_with_reorder():
-    assert "name" in _summary_fields({"name": "n", "topic": "t"}, key_field="name")
-
-
 def test_stream_summary_helper():
     assert _stream_summary({"topic": "auth", "message": "JWT"}) == "auth: JWT"
     assert _stream_summary({"topic": "auth"}) == "auth"
     assert "42" in _stream_summary({"x": 42})
-
-
-def test_summary_fields():
-    result = _summary_fields({"topic": "a", "message": "b"})
-    assert "topic" in result and "message" in result
 
 
 def test_stream_no_width_error():

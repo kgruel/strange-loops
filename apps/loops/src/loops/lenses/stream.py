@@ -239,23 +239,3 @@ def _stream_summary(payload: dict, key_field: str | None = None) -> str:
     # _LABEL_FIELDS covers all of (topic, name, summary, message), so if
     # primary is None here none of those fields are truthy — fall through.
     return str(payload)
-
-
-def _summary_fields(payload: dict, key_field: str | None = None) -> set[str]:
-    """Return the set of field names used in the summary line."""
-    if key_field and key_field not in _LABEL_FIELDS:
-        fields = (key_field,) + _LABEL_FIELDS
-    elif key_field:
-        fields = (key_field,) + tuple(f for f in _LABEL_FIELDS if f != key_field)
-    else:
-        fields = _LABEL_FIELDS
-
-    used = set()
-    count = 0
-    for f in fields:
-        if payload.get(f):
-            used.add(f)
-            count += 1
-            if count >= 2:
-                break
-    return used

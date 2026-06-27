@@ -252,3 +252,19 @@ repetition (`ref=A ref=B`) or comma (`ref=A,B`).
 - `engine` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
 - Each lib/app has: CLAUDE.md, pyproject.toml, src/, tests/
 - `./dev check` must pass before commit
+
+## Shell notes (zsh)
+
+One-liner Bash here runs under zsh — a few idioms reliably bite:
+
+- **Never put a bare `=` in echo/separator strings** (`echo ===`, `echo a=b`) —
+  zsh treats `=` as globbing. Use `---` separators, or quote the whole string.
+- **Quote glob-looking flag values and unquoted lists** — `--include="*.py"`,
+  not `--include=*.py` (the latter both word-splits and glob-expands).
+- **Prefer `grep -rl ... | while IFS= read -r f`** over `for f in $(...)` on
+  unquoted command substitution — the for-loop word-splits paths with spaces.
+- **Watch for non-ascii punctuation** sneaking in — a full-width semicolon
+  (U+FF1B) reads as text, not a separator, and fails cryptically.
+- **Keep cwd-setting in the same compound line** — cwd does not persist across
+  separate Bash calls, so `cd … && cmd`, not `cd …` then `cmd` next call. For
+  multi-step work prefer a heredoc script over a semicolon-dense one-liner.

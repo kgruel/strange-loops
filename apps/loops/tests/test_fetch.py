@@ -69,8 +69,9 @@ class TestKeyMatchingHelpers:
         fact = {"payload": {"topic": "design/api"}}
         assert _fact_matches_key(fact, None, "design/api") is True
 
-    # Prefix semantics — type the prefix to drill into a subtree;
-    # type the full key for exact match (it's a prefix of only itself).
+    # Prefix semantics — prefix-only via .startswith(); a full key just
+    # narrows to a single item (no exact-match branch). Whole-vs-headline
+    # granularity lives in surface.py.
 
     def test_item_matches_prefix(self):
         from atoms import FoldItem

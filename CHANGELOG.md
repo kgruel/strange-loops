@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+The **structured-surface read/emit wave** (`feat/surface-build1`): a typed,
+addressable `Surface` projection behind the default read path, an agent-grade
+read grammar, a plain-by-default output inversion, and the restored attestation
+read surface — plus ref-resolution fixes found dogfooding it.
+
+### Added
+- **Read grammar:** `--match/--grep QUERY` (FTS5 for indexed kinds, substring
+  fallback), `--full` (force whole-body on every row), `--fields a,b`, `--limit N`
+  (top-N by salience), `--last N` (newest-N by ts), `--count`, `--by FIELD`,
+  comma-OR `--key design/,architecture/`, and `field=value` row predicates
+  (`status=open`, comma-OR `status=open,refined`). These apply to the default
+  fold path — they are inert on custom-lens vertices and under `--lens` overrides.
+- **`sl store ticks <vertex> [--chain]`** — the tick series; `--chain` projects
+  the per-tick attestation envelope (chain linkage, signature presence, window
+  cursor). Requires a `.vertex`; refused on combine aggregates.
+- **`sl store stats <vertex> [--by-kind]`** — store totals; `--by-kind` adds a
+  count-descending per-kind tally. Works on a `.db` or `.vertex`.
+
+### Changed
+- **Plain output is the default** when stdout is not a TTY (or `NO_COLOR` is set);
+  styled output now requires a TTY (or `FORCE_COLOR`). `--plain` force-disables on
+  a TTY.
+- **`--json`** on read now emits the structured `Surface` encoding
+  (`to_dict(surface)` — addressed rows with kind/key/payload/salience; implies
+  `--static`).
+- **Entity refs honor the canonical `kind:key` (colon) form** in emit-time
+  resolution and inbound-salience. Previously only the `kind/key` (slash) form
+  resolved, so colon refs — the documented convention — silently never resolved
+  (write-time typo/stale-ref WARN, `ref_ref` materialization, `-v` inbound-delta)
+  nor counted toward inbound salience.
+- **`sl store ticks --help`** renders help instead of erroring; an invalid target
+  surfaces as a return code + message rather than a raised exception.
+- **`sl store ticks --since <window>`** distinguishes an empty window ("No ticks
+  in the last <window>.") from an empty store.
+
+### Removed
+- **`read --diff`** — the field-delta lifecycle view is dissolved into the new
+  read grammar (`--fields`, `--key`, predicates). (`--diff` shipped in 0.4.0 and
+  is removed by this wave.)
+- **Content search on `stream`** — re-bound onto `read --match`; the dead
+  query branch and the orphaned `trace` snapshot/lens residue are swept.
+
 ## 0.4.0 — 2026-06-14
 
 The dominant arc is a **federated attestation substrate**: tamper-evident tick

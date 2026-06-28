@@ -10,8 +10,10 @@ Supports key drill-down via two equivalent surfaces:
 
 Matching is prefix-based and case-insensitive — ``--key design/`` matches
 ``design/lens-is-the-interface``, ``design/derived-keys-as-focus-filter``, etc.
-For exact match, type the full key (a unique full key matches only itself via
-``.startswith()``).
+The filter is prefix-only; there is no exact-match mode — typing a full key
+just narrows the prefix to a single item. Whether that item then renders
+whole-body or as a headline is a separate concern, decided in ``surface.py``
+by exact key equality, not by this filter.
 """
 
 from __future__ import annotations
@@ -77,8 +79,9 @@ def fetch_fold(
 
     Both produce the same result. Key matching is prefix-based (``.startswith()``,
     case-insensitive) — ``key="design/"`` matches every item whose fold-key field
-    starts with ``design/``. For exact match, pass the full key (a unique full
-    key is a prefix of only itself).
+    starts with ``design/``. There is no exact-match mode here; passing a full
+    key just narrows the prefix to a single item. Whole-vs-headline granularity
+    is decided separately in ``surface.py`` by exact key equality.
 
     When ``kind`` is omitted but ``key`` is provided, filtering runs across all
     sections — each section uses its own declared key_field. Sections with no
@@ -274,8 +277,10 @@ def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool
     """Check if a fold item's key matches a prefix (case-insensitive).
 
     Tries the section's declared key_field first, then common label fields
-    (topic, name, title, summary). Uses ``.startswith()`` — type the full key
-    to match a single item; type a prefix to match a subtree.
+    (topic, name, title, summary). Prefix-only via ``.startswith()`` — a full
+    key narrows the prefix to one item, a shorter prefix matches a subtree;
+    there is no exact-match branch. Whole-vs-headline granularity is decided
+    separately in ``surface.py`` by exact key equality.
     """
     candidates = [key_field] if key_field else []
     candidates.extend(["topic", "name", "title", "summary"])

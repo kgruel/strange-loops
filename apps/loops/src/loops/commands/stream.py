@@ -1,4 +1,4 @@
-"""Stream command — unified event history with optional search."""
+"""Stream command — temporal event history (raw facts, reverse-chrono)."""
 from __future__ import annotations
 
 import argparse

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-06-28
 
 The **structured-surface read/emit wave** (`feat/surface-build1`): a typed,
 addressable `Surface` projection behind the default read path, an agent-grade
@@ -49,13 +49,25 @@ read surface — plus ref-resolution fixes found dogfooding it.
   plain text on the error path).
 - **`emit` explicit `message=` wins** over a trailing bareword (previously the
   bareword silently clobbered it); the ignored words are surfaced as a WARN.
+- **`sl store verify` output rebuilt** on painted callout/Severity — the
+  covered-vs-signed conflation de-conflated into three labeled orthogonal axes:
+  **chain** (hash-chain integrity), **coverage** (facts sealed under a tick), and
+  **authorship** (per-fact signatures).
+- **`painted`** pinned `>=0.4.1,<0.5`.
 
 ### Removed
-- **`read --diff`** — the field-delta lifecycle view is dissolved into the new
-  read grammar (`--fields`, `--key`, predicates). (`--diff` shipped in 0.4.0 and
-  is removed by this wave.)
+- **`read --diff`** — removed; measured cold (32 uses in its ship month, 0
+  after). Entity-lifecycle viewing is served by **`--facts`** (the fact-history
+  event stream: `read <vertex> --kind K --key key --facts`); the synthesized
+  field-delta render (`status: open → refined`) is gone. (`--diff` shipped in
+  0.4.0, removed by this wave.)
 - **Content search on `stream`** — re-bound onto `read --match`; the dead
   query branch and the orphaned `trace` snapshot/lens residue are swept.
+
+### Fixed
+- **Multi-line CLI output** (`store verify`, `reanchor`, `emit --dry-run`)
+  composes real rows again — painted 0.4.0's cell-level C0 neutralization had
+  flattened the raw-`\n` `Block.text` calls these relied on to a single line.
 
 ## 0.4.0 — 2026-06-14
 

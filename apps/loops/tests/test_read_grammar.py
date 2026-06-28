@@ -377,3 +377,30 @@ def test_surface_spec_default_is_empty():
     assert spec.key_or == ()
     assert spec.where == ()
     assert spec.do_count is False
+
+
+def test_spec_has_dropped_transforms_field_set():
+    """The custom-lens inert-note predicate (B3) flags ONLY genuinely-dropped
+    Surface transforms. queried_key (single --key, also flows to fetch_fold),
+    --kind (fetched, not on the spec), and count_by (--by is a no-op without
+    --count on EVERY path) must NOT trip it — else the note over-claims (F3)."""
+    from loops.cli.dispatch import _spec_has_dropped_transforms
+
+    # None / empty → never warns.
+    assert _spec_has_dropped_transforms(None) is False
+    assert _spec_has_dropped_transforms(SurfaceSpec()) is False
+
+    # Excluded: still function (or no-op everywhere) on a custom lens.
+    assert _spec_has_dropped_transforms(SurfaceSpec(queried_key="design/x")) is False
+    assert _spec_has_dropped_transforms(SurfaceSpec(count_by="topic")) is False  # --by, no --count
+
+    # Genuinely Surface-only → warn.
+    assert _spec_has_dropped_transforms(SurfaceSpec(match="auth")) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(key_or=("a/", "b/"))) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(where=(("status", ("open",)),))) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(observer="alice")) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(fields=("topic",))) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(limit=5)) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(last=5)) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(full=True)) is True
+    assert _spec_has_dropped_transforms(SurfaceSpec(do_count=True)) is True  # --count

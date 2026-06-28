@@ -61,6 +61,25 @@ def resolve_store_path(file_path: Path) -> Path:
         raise ValueError(f"Expected .vertex or .db file, got {file_path.suffix}")
 
 
+def _require_materialized_store(target_path: Path) -> Path:
+    """Resolve *target_path* to its store ``.db`` and require it exists.
+
+    State 2 of the store-verb existence contract (decision/design/
+    store-verb-existence-exit-code-parity): a present ``.vertex`` whose store
+    ``.db`` was never written is *not yet materialized* — a distinct condition
+    from *written and empty* (write-receipt-vs-temporal-query at the exit-code
+    layer). All three store verbs (ticks/stats/verify) surface it as a clean
+    RC=1 with a named message rather than ticks' prior silent RC=0-empty.
+    """
+    db_path = resolve_store_path(target_path)
+    if not db_path.exists():
+        raise FileNotFoundError(
+            f"store for '{target_path.stem}' not yet materialized — "
+            f"no facts emitted (no database at {db_path})"
+        )
+    return db_path
+
+
 def make_fetcher(path: Path, zoom: int):
     """Create a zero-arg fetcher for store data.
 
@@ -109,7 +128,15 @@ def make_fetcher(path: Path, zoom: int):
 
 
 def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
-    """Resolve the store target: explicit vertex_path > file/name arg > local root."""
+    """Resolve the store target: explicit vertex_path > file/name arg > local root.
+
+    State 1 of the store-verb existence contract (decision/design/
+    store-verb-existence-exit-code-parity): when a named/explicit target
+    resolves to a path that does not exist, raise a clean ``FileNotFoundError``
+    here — the single shared chokepoint all three store verbs (ticks/stats/
+    verify) pass through — so an absent ``.vertex`` reads as "X does not exist"
+    rather than leaking a raw ``[Errno 2]`` from a downstream parse.
+    """
     from .resolve import loops_home
 
     if vertex_path is not None:
@@ -117,17 +144,27 @@ def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
     if file_arg is not None:
         p = Path(file_arg)
         if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
-            return p
-        # Local-first — same resolution the verbs use
-        # (thread:global-local-walk-broken).
-        from .resolve import _resolve_vertex_for_dispatch
+            target = p
+        else:
+            # Local-first — same resolution the verbs use
+            # (thread:global-local-walk-broken).
+            from .resolve import _resolve_vertex_for_dispatch
 
-        resolved = _resolve_vertex_for_dispatch(file_arg)
-        if resolved is not None:
-            return resolved
-        from lang.population import resolve_vertex
+            resolved = _resolve_vertex_for_dispatch(file_arg)
+            if resolved is not None:
+                target = resolved
+            else:
+                from lang.population import resolve_vertex
 
-        return resolve_vertex(file_arg, loops_home())
+                target = resolve_vertex(file_arg, loops_home())
+        # State 1 covers the .vertex/name target only: an absent .db is a
+        # state-2 (materialization) concern handled downstream by
+        # _require_materialized_store, and the verbs that forbid a .db target
+        # (ticks/reanchor) reject it by suffix with a more useful message — so
+        # an existence check here must not pre-empt those.
+        if target.suffix != ".db" and not target.exists():
+            raise FileNotFoundError(f"{file_arg} does not exist")
+        return target
     home = loops_home()
     root = home / ".vertex"
     if root.exists():
@@ -159,10 +196,21 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
-    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
-    db_path = resolve_store_path(target_path)
-    if not db_path.exists():
-        raise FileNotFoundError(f"{db_path} does not exist")
+    try:
+        target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+        db_path = _require_materialized_store(target_path)
+    except (FileNotFoundError, ValueError) as exc:
+        # F2 — three-verb --json parity: verify is hand-rolled and raises
+        # before its --json branch, so without this an absent target / absent
+        # .db / aggregate would emit PLAIN text under --json (a JSONDecodeError
+        # for a machine consumer) where store stats emits {"error": ...} via
+        # run_cli's _export_json. Match that shape. Non-json errors re-raise to
+        # the cli/views boundary for the normal plain rendering (unchanged).
+        if args.json:
+            import json as _json
+            print(_json.dumps({"error": str(exc)}))  # noqa: T201 — machine output path
+            return 1
+        raise
 
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
@@ -565,6 +613,12 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
                 "point at the instance store, e.g. .loops/<name>.vertex"
             )
 
+        # State 2: present .vertex / absent .db is "not yet materialized" —
+        # RC=1 with a surfaced message, matching stats/verify, not ticks'
+        # prior silent RC=0-empty. (decision/design/
+        # store-verb-existence-exit-code-parity)
+        _require_materialized_store(target_path)
+
         # --chain spans the full hash chain (all_names) to agree with
         # `store verify`/`store stats`; density stays name-scoped (its
         # delta fields are a same-series concept).
@@ -631,9 +685,7 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     def fetch():
         from engine.store_reader import StoreReader
 
-        store_path = resolve_store_path(target_path)
-        if not store_path.exists():
-            raise FileNotFoundError(f"{store_path} does not exist")
+        store_path = _require_materialized_store(target_path)
         with StoreReader(store_path) as reader:
             summary = reader.summary()
         kinds = sorted(

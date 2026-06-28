@@ -28,6 +28,24 @@ class TestParseEmitParts:
         payload = _parse_emit_parts(["name=x", "some", "message", "text"])
         assert payload == {"name": "x", "message": "some message text"}
 
+    def test_explicit_message_wins_over_trailing_bareword(self):
+        # B4: explicit message= beats trailing barewords (explicit-over-implicit);
+        # the ignored words surface via the warnings sink, never a silent clobber.
+        warnings: list[str] = []
+        payload = _parse_emit_parts(
+            ["topic=x", "message=explicit body", "stray", "word"], warnings=warnings
+        )
+        assert payload["message"] == "explicit body"
+        assert warnings and "stray word" in warnings[0]
+
+    def test_trailing_message_without_explicit_emits_no_warning(self):
+        # Boundary: no competing message= → trailing barewords still become the
+        # message and no warning fires (the precedence branch must not trip).
+        warnings: list[str] = []
+        payload = _parse_emit_parts(["topic=x", "trailing", "body"], warnings=warnings)
+        assert payload["message"] == "trailing body"
+        assert warnings == []
+
     def test_ref_comma_separated(self):
         payload = _parse_emit_parts(["topic=t", "ref=a,b,c"])
         assert payload == {"topic": "t", "ref": "a,b,c"}

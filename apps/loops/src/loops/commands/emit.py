@@ -253,11 +253,19 @@ def _apply_input_sources(
     return augmented
 
 
-def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
+def _parse_emit_parts(
+    parts: list[str], *, warnings: list[str] | None = None
+) -> dict[str, str]:
     """Parse emit args into a payload dict.
 
     Any KEY=VALUE tokens become payload entries. Any trailing non-key=value
     tokens are joined with spaces into payload["message"].
+
+    Precedence (B4): an explicit ``message=`` WINS over trailing barewords —
+    ``message="x" word`` keeps ``"x"``, not ``"word"`` (explicit-over-implicit).
+    When both are present the ignored barewords are surfaced via *warnings* (a
+    caller-supplied sink) rather than silently dropped; pass ``warnings=None``
+    (the default) to skip the diagnostic.
 
     The ``ref`` key is special: repeated ``ref=X`` occurrences accumulate into
     a single comma-separated value (matching the downstream fold convention
@@ -287,7 +295,18 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     if refs_accum:
         payload["ref"] = ",".join(refs_accum)
     if message_parts:
-        payload["message"] = " ".join(message_parts)
+        joined = " ".join(message_parts)
+        if "message" in payload:
+            # Explicit message= wins over trailing barewords
+            # (explicit-over-implicit). Surface the ignored tokens rather than
+            # silently clobbering the explicit value (B4).
+            if warnings is not None:
+                warnings.append(
+                    "WARN: explicit message= kept; trailing words ignored: "
+                    f"{joined!r}"
+                )
+        else:
+            payload["message"] = joined
 
     return payload
 
@@ -522,7 +541,10 @@ def cmd_emit(
         show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
-    payload = _parse_emit_parts(parts)
+    emit_warnings: list[str] = []
+    payload = _parse_emit_parts(parts, warnings=emit_warnings)
+    if emit_warnings:
+        _emit_lines([(w, "warn") for w in emit_warnings])
 
     # Thread auto-tagging: inherit LOOPS_THREAD as default thread association.
     # Priority: explicit thread= in payload > LOOPS_THREAD env > none.

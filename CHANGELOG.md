@@ -13,7 +13,11 @@ read surface — plus ref-resolution fixes found dogfooding it.
   (top-N by salience), `--last N` (newest-N by ts), `--count`, `--by FIELD`,
   comma-OR `--key design/,architecture/`, and `field=value` row predicates
   (`status=open`, comma-OR `status=open,refined`). These apply to the default
-  fold path — they are inert on custom-lens vertices and under `--lens` overrides.
+  fold path — they are inert on custom-lens vertices and under `--lens` overrides,
+  and a stderr note now flags when a transform is dropped that way (interim until
+  the salience-lens migration routes custom lenses through the `Surface`).
+- **`sl --version` / `-V`** — report the installed release version (the tagged
+  root `strange-loops` distribution; the `loops` sub-package version is unsynced).
 - **`sl store ticks <vertex> [--chain]`** — the tick series; `--chain` projects
   the per-tick attestation envelope (chain linkage, signature presence, window
   cursor). Requires a `.vertex`; refused on combine aggregates.
@@ -36,6 +40,15 @@ read surface — plus ref-resolution fixes found dogfooding it.
   surfaces as a return code + message rather than a raised exception.
 - **`sl store ticks --since <window>`** distinguishes an empty window ("No ticks
   in the last <window>.") from an empty store.
+- **Store-verb existence/exit-code parity** (`store ticks`/`stats`/`verify`): an
+  absent target reads as a clean "X does not exist" instead of a raw `[Errno 2]`;
+  a present `.vertex` whose `.db` was never written surfaces "store … not yet
+  materialized — no facts emitted" (RC=1) — `store ticks` no longer reports it as
+  an empty store (RC=0), matching its siblings. Under `--json` these errors emit a
+  parseable `{"error": …}` for all three verbs (`store verify` previously emitted
+  plain text on the error path).
+- **`emit` explicit `message=` wins** over a trailing bareword (previously the
+  bareword silently clobbered it); the ignored words are surfaced as a WARN.
 
 ### Removed
 - **`read --diff`** — the field-delta lifecycle view is dissolved into the new

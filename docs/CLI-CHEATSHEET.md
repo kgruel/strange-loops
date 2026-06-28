@@ -16,6 +16,8 @@ loops <vertex> [flags]             # implicit read (= loops read <vertex>)
 
 Vertex resolution chain: `.loops/<name>.vertex` > `cwd/<name>.vertex` > `~/.config/loops/<name>/<name>.vertex`
 
+Top-level: `loops --version` (or `-V`) prints the installed release version; `loops --help` / `loops` lists the command roster.
+
 ---
 
 ## Read

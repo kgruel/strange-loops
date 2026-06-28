@@ -272,3 +272,36 @@ class TestSurfaceInterposition:
         rc = dispatch(op, reporter=reporter)
         assert rc == 0
         assert reporter.blocks
+
+
+class TestVersionFlag:
+    """`sl --version` / `-V` short-circuits at argv[0] before dispatch,
+    reporting the root release dist (Q5)."""
+
+    def test_version_long(self, capsys):
+        from loops.cli.app import main
+
+        rc = main(["--version"])
+        assert rc == 0
+        assert capsys.readouterr().out.startswith("loops ")
+
+    def test_version_short(self, capsys):
+        from loops.cli.app import main
+
+        rc = main(["-V"])
+        assert rc == 0
+        assert "loops " in capsys.readouterr().out
+
+    def test_version_unknown_fallback(self, capsys, monkeypatch):
+        # Both dists missing → honest "unknown", never a crash.
+        from importlib.metadata import PackageNotFoundError
+
+        from loops.cli.app import main
+
+        def _miss(name):
+            raise PackageNotFoundError(name)
+
+        monkeypatch.setattr("importlib.metadata.version", _miss)
+        rc = main(["--version"])
+        assert rc == 0
+        assert "version unknown" in capsys.readouterr().out

@@ -324,8 +324,30 @@ def _build_commands() -> list[AppCommand]:
 
 _APP_DESCRIPTION = (
     "loops — emit, fold, stream across vertices\n"
-    "Zoom: -q minimal · default summary · -v detailed · -vv full"
+    "Zoom: -q minimal · default summary · -v detailed · -vv full\n"
+    "Version: loops --version (-V)"
 )
+
+
+def _print_version() -> int:
+    """Report the installed release version.
+
+    ``sl``/``loops`` ship from the ROOT project (the ``strange-loops``
+    distribution — the tagged release line, 0.4.0+); the ``loops`` sub-package
+    version is unsynced and not what releases track. Resolve the root dist
+    first, fall back to the sub-package, then to an honest "unknown".
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    ver = None
+    for dist in ("strange-loops", "loops"):
+        try:
+            ver = version(dist)
+            break
+        except PackageNotFoundError:
+            continue
+    default_reporter().msg(f"loops {ver}" if ver else "loops (version unknown)")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -338,6 +360,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     if argv is None:
         argv = sys.argv[1:]
+
+    if argv and argv[0] in ("--version", "-V"):
+        return _print_version()
 
     commands = _build_commands()
     known = {c.name for c in commands}

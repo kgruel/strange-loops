@@ -416,3 +416,74 @@ class TestStoreErrorBoundary:
         ctx, _reporter = self._ctx_with_reporter()
         with pytest.raises(RuntimeError, match="genuine bug"):
             run(["reanchor", "/tmp/whatever.db"], ctx)
+
+
+def _run_store_verb_unified(verb: str, target: Path, capsys) -> tuple[int, str]:
+    """Run a store verb through the unified cli/views boundary; return
+    ``(rc, combined_output)``.
+
+    The three verbs render errors through DIFFERENT channels: ticks/stats
+    defer validation into ``run_cli`` (rendered to stdout, returns rc=1),
+    while verify and the shared resolve/materialize guards raise and are
+    caught at the cli/views boundary into ``reporter.err``. Collect BOTH so
+    the existence/exit-code parity asserts path-agnostically.
+    """
+    from loops.cli.invocation import Invocation
+    from loops.cli.output import BufferReporter
+    from loops.cli.views.store import run
+
+    reporter = BufferReporter()
+    ctx = Invocation(reporter=reporter, vertex_path=None)
+    capsys.readouterr()
+    rc = run([verb, str(target)], ctx)
+    out = capsys.readouterr().out
+    combined = " ".join((out + " " + " ".join(reporter.err_lines)).split())
+    return rc, combined
+
+
+class TestStoreExistenceParity:
+    """ticks/stats/verify share ``_resolve_target`` + ``_require_materialized_store``,
+    so existence/exit-code behavior is uniform
+    (decision/design/store-verb-existence-exit-code-parity):
+
+      state 1  absent target             -> RC=1 "does not exist"
+      state 2  present .vertex/absent .db -> RC=1 "not yet materialized" (no .db created)
+      state 3  present .db/no ticks       -> RC=0 (TestStoreTicks.test_empty_store_renders_cleanly)
+    """
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state2_absent_db_not_yet_materialized(self, tmp_path, capsys, verb):
+        # Present .vertex, never emitted -> no .db. This was ticks' RC=0-empty
+        # outlier; now all three surface a clean RC=1 with the same message.
+        # MUTATION anchor: removing the guard regresses ticks back to RC=0.
+        vpath = _make_boundary_vertex(tmp_path)
+        db = tmp_path / "project.db"
+        assert not db.exists()
+        rc, out = _run_store_verb_unified(verb, vpath, capsys)
+        assert rc == 1
+        assert "not yet materialized" in out
+        assert not db.exists()  # surfacing the gap must not create the .db
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state1_absent_target_does_not_exist(self, tmp_path, capsys, verb):
+        # An absent explicit .vertex resolves to a clean RC=1 at the shared
+        # chokepoint, not a raw [Errno 2] / traceback.
+        rc, out = _run_store_verb_unified(verb, tmp_path / "ghost.vertex", capsys)
+        assert rc == 1
+        assert "does not exist" in out
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state2_json_error_is_machine_parseable(self, tmp_path, capsys, verb):
+        # F2: under --json, the absent-db (state 2) error must be parseable
+        # ({"error": ...}) for ALL three verbs — not plain text. verify is the
+        # one that used to emit plain text here (raises before its --json
+        # branch); the F2 guard makes it match ticks/stats' run_cli shape.
+        import json
+        from loops.commands.store import _run_store
+
+        vpath = _make_boundary_vertex(tmp_path)
+        capsys.readouterr()
+        rc = _run_store([verb, str(vpath), "--json"])
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert "not yet materialized" in payload["error"]

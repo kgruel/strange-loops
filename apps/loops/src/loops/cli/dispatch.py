@@ -102,6 +102,35 @@ def _surface_gate(op: Operation, data) -> bool:
     return name in (None, "fold")
 
 
+def _spec_has_dropped_transforms(spec) -> bool:
+    """True when *spec* carries read-grammar transforms that the Surface path
+    would apply but the gate-fail path silently drops.
+
+    Excludes ``queried_key`` (single ``--key`` also flows to
+    ``fetch_fold(key=)``), ``--kind`` (applied at fetch, not on the spec), and
+    ``count_by`` (``--by`` is a no-op without ``--count`` on EVERY path —
+    ``_project_surface`` only counts when ``do_count`` is set — so warning on a
+    bare ``--by`` would over-claim it was dropped for being custom-lens). Each
+    is excluded for the same reason: it still functions (or no-ops everywhere)
+    on a custom-lens vertex, so it is not a genuinely-dropped transform.
+    Everything listed here is Surface-only and genuinely inert when the gate
+    fails (B3 / thread:gate-fail-ignores-surface-transforms).
+    """
+    if spec is None:
+        return False
+    return bool(
+        spec.match
+        or spec.key_or
+        or spec.where
+        or spec.observer
+        or spec.fields
+        or spec.limit is not None
+        or spec.last is not None
+        or spec.do_count
+        or spec.full
+    )
+
+
 def _project_surface(op: Operation, data):
     """Project a FoldState into the Surface to encode, applying the read-grammar
     transforms carried on ``op.surface_spec`` in a FIXED canonical order.
@@ -248,6 +277,22 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
     render_data = data
     gate = _surface_gate(op, data)
+    if not gate and _spec_has_dropped_transforms(op.surface_spec):
+        # Interim signal (B3): the read grammar is inert on custom-lens /
+        # --lens-override vertices — the gate keeps the raw FoldState so the
+        # declared lens renders its own shape, discarding the parsed transforms.
+        # The real fix is the FF (migrate the salience lenses onto Surface);
+        # until then, a stderr note keeps a valid flag from silently no-opping.
+        # This note lives ON the gate-fail branch and is removed when the FF
+        # routes custom lenses through the Surface (thread:gate-fail-ignores-
+        # surface-transforms).
+        vtx = op.vertex_path.stem if op.vertex_path else "this vertex"
+        reporter.err(
+            f"note: read-grammar transforms (--match/--limit/--last/--fields/"
+            f"--full/--count/comma-OR --key/field=value) are inert on "
+            f"custom-lens vertex '{vtx}' — flags ignored "
+            f"(--kind and single --key still apply)."
+        )
     if op.format is Format.JSON:
         if gate:
             import json

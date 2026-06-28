@@ -573,6 +573,7 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
             "vertex": parse_vertex_file(target_path).name,
             "chain_mode": known.chain,
             "chain": chain,
+            "since": known.since,
             "windows": [dataclasses.asdict(w) for w in windows],
         }
 

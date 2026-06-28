@@ -269,7 +269,7 @@ def tick_chain_view(
     say (signed is per-TICK; per-fact signatures are verify's job).
 
     ``data`` shape: ``{vertex, chain_mode: bool, chain: {ticks, chained,
-    signed, legacy}, windows: [TickWindow-as-dict, ...]}``.
+    signed, legacy}, since: str | None, windows: [TickWindow-as-dict, ...]}``.
     """
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")
@@ -278,7 +278,15 @@ def tick_chain_view(
     attest = bool(data.get("chain_mode"))
 
     if not windows:
-        return _line("No ticks in this store.", p.metadata, width)
+        # Distinguish an empty --since window from a genuinely empty store —
+        # "No ticks in this store" on a populated store is a false negative.
+        since = data.get("since")
+        msg = (
+            f"No ticks in the last {since}."
+            if since
+            else "No ticks in this store."
+        )
+        return _line(msg, p.metadata, width)
 
     rollup = f"{vertex} · {len(windows)} ticks"
     if attest:

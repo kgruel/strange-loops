@@ -577,6 +577,17 @@ class TestTickChainView:
         data = _chain_data(chain_mode=True, windows=[])
         text = block_to_text(tick_chain_view(data, Zoom.SUMMARY, 80))
         assert "No ticks" in text
+        # No --since → the store is genuinely empty.
+        assert "in this store" in text
+
+    def test_empty_since_window_is_not_store_empty(self):
+        """An empty --since window on a populated store must not claim the
+        store is empty (B1: the query-blind false negative)."""
+        data = _chain_data(chain_mode=True, windows=[])
+        data["since"] = "1s"
+        text = block_to_text(tick_chain_view(data, Zoom.SUMMARY, 80))
+        assert "No ticks in the last 1s." in text
+        assert "in this store" not in text
 
     def test_piped_width_none_does_not_raise(self):
         data = _chain_data(chain_mode=True, windows=[_tick_window_dict()])

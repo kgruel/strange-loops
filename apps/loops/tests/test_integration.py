@@ -2332,7 +2332,7 @@ class TestResolveEntityRefs:
         vpath = tmp_path / "nonexistent.vertex"
         store_path = tmp_path / "store.db"
 
-        result, unresolved = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
+        result, unresolved, _resolved = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
         # LoopsError caught → writable=None, local_kind_keys={}, no refs resolved
         assert result == {"x": "foo/bar"}
         # addr_kind 'foo' is not declared anywhere → not surfaced as unresolved
@@ -2351,7 +2351,7 @@ class TestResolveEntityRefs:
         store_path = tmp_path / "minimal.db"
 
         # Two unknown kinds → _ensure_topology called twice → L297 fires on 2nd call
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"a": "unknownkind1/val1", "b": "unknownkind2/val2"}
         )
         # Both kinds unknown, no refs resolved, payload unchanged
@@ -2405,7 +2405,7 @@ class TestResolveEntityRefs:
         # Use a value that is NOT in the child store → local _try_resolve returns None
         # → falls through to topology widening → topo_stores includes child_store
         # → L342 fires to skip child_store (already searched locally)
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             child_vpath, child_store, {"project": "task/doesnotexist"}
         )
         # Ref not resolved (not in any store), but L342 was exercised
@@ -2457,7 +2457,7 @@ class TestResolveEntityRefs:
 
         # Multi-ref payload (the shape _parse_emit_parts produces from
         # ``ref=task/alpha ref=task/beta`` or ``ref=task/alpha,task/beta``).
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"ref": "task/alpha,task/beta"}
         )
         # Both addresses resolved; ref_ref holds both ULIDs comma-joined.
@@ -2503,7 +2503,7 @@ class TestResolveEntityRefs:
             reader.close()
         assert ulid_alpha
 
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"ref": "task/alpha,task/ghost"}
         )
         # Only alpha resolved; ref_ref carries just its ULID.
@@ -2562,7 +2562,7 @@ class TestResolveEntityRefs:
         # resolver scans topic's value, splits 'pattern/foo', finds
         # 'pattern' in topology kinds, fails the lookup, and surfaces
         # an unresolved ref.
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             target_vpath,
             target_store,
             {"topic": "pattern/foo", "message": "body"},
@@ -2637,7 +2637,7 @@ class TestResolveEntityRefs:
 
         # Emit decision with topic=design/foo (fold-key, skipped) AND
         # superseded_by=task/real-task (non-fold-key, should resolve).
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             target_vpath,
             target_store,
             {"topic": "design/foo", "superseded_by": "task/real-task"},

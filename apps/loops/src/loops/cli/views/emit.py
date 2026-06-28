@@ -6,19 +6,23 @@ its own receipt and returns an exit code that dispatch surfaces.
 
 Inputs (after observer is peeled off by ``cli.app``):
 
-  loops emit [vertex] <kind> [KEY=VALUE ...] [--dry-run] [--strict] [-q]
+  loops emit [vertex] <kind> [KEY=VALUE ...] \
+      [--dry-run] [--strict] [-q] [-v] [--json] [--declare-observer]
 
-When dispatch handed us a resolved ``vertex_path`` (vertex-first form),
-we skip the positional ``vertex`` argument and rely on ``ctx.vertex_path``.
+A single ``tokens`` bucket (``parse_intermixed_args``) + ``_classify_emit_positionals``
+do the ``[vertex] kind parts`` split — KEY=VALUE is never mistaken for the vertex
+or kind (the old greedy-positional bug). The parser + classifier are shared with
+the legacy ``_run_emit`` via ``_build_emit_parser`` so the grammar lives once.
+
+When dispatch handed us a resolved ``vertex_path`` (vertex-first form), the
+classifier runs with ``has_vertex_path=True`` and the first bareword is the kind.
 
 Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
 decision/operation-ir-adoption.
 """
 from __future__ import annotations
 
-import argparse
-
-from loops.commands.emit import cmd_emit
+from loops.commands.emit import cmd_emit, _build_emit_parser, _classify_emit_positionals
 
 from ..invocation import Invocation
 from ..dispatch import dispatch
@@ -26,79 +30,25 @@ from ..operation import Operation
 
 
 def run(argv: list[str], ctx: Invocation) -> int:
-    """Parse argv, build an Operation, dispatch.
+    """Parse argv, classify positionals, build an Operation, dispatch.
 
     ``cmd_emit`` is bound as ``op.fn``; dispatch's action branch invokes
     it and surfaces its int return as the process exit code.
     """
-    parser = argparse.ArgumentParser(prog="loops emit")
-    if ctx.vertex_path is None:
-        parser.add_argument(
-            "vertex",
-            nargs="?",
-            default=None,
-            help="Vertex name or .vertex path (auto-resolves local vertex)",
-        )
-    parser.add_argument("kind", help="Fact kind")
-    parser.add_argument(
-        "parts",
-        nargs="*",
-        help="KEY=VALUE pairs and optional trailing message text",
-    )
-    parser.add_argument(
-        "--observer",
-        default=None,
-        help="Observer string (defaults to .vertex declaration / $LOOPS_OBSERVER)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the fact JSON without storing",
-    )
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help=(
-            "Refuse on validation failures (unknown kind, missing fold-key, "
-            "unresolved ref). Overridden by vertex 'strict true' declaration."
-        ),
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Suppress the 'stored:' success receipt (WARN/ERROR still print).",
-    )
-    parser.add_argument(
-        "--stdin",
-        metavar="FIELD",
-        default=None,
-        help=(
-            "Read sys.stdin into the named payload field (e.g. --stdin message). "
-            "Sidesteps shell-quoting for natural-voice prose. Errors on TTY. "
-            "Single trailing newline stripped."
-        ),
-    )
-    parser.add_argument(
-        "--file",
-        action="append",
-        metavar="FIELD=PATH",
-        default=None,
-        help=(
-            "Read file contents into the named payload field (e.g. --file message=notes.md). "
-            "May repeat for different fields. Tilde expansion supported. "
-            "Single trailing newline stripped."
-        ),
-    )
+    parser = _build_emit_parser(prog="loops emit")
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_intermixed_args(argv)
     except SystemExit as exc:
-        return int(exc.code) if exc.code is not None else 1
+        return int(exc.code) if exc.code is not None else 2
 
-    # When dispatch resolved the vertex, neutralise the positional so
-    # cmd_emit's vertex-resolution branch is bypassed.
-    if ctx.vertex_path is not None:
-        args.vertex = None
+    vertex, kind, parts = _classify_emit_positionals(
+        list(args.tokens), has_vertex_path=ctx.vertex_path is not None,
+    )
+    # When dispatch resolved the vertex, the classifier yields vertex=None and
+    # cmd_emit relies on ctx.vertex_path.
+    args.vertex = vertex
+    args.kind = kind
+    args.parts = parts
 
     # Observer: command-level --observer wins; otherwise inherit the
     # observer ``cli.app`` peeled at dispatch time.

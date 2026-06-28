@@ -47,6 +47,18 @@ class UnresolvedRef:
     addr: str    # the raw address string the user wrote (e.g. "decision/design/foo")
 
 
+@dataclass(frozen=True)
+class ResolvedRef:
+    """A payload value that resolved to a stored entity's ULID.
+
+    Surfaced so the emit receipt can report the inbound-edge delta — each
+    resolved ref is one new inbound edge landing on its target entity.
+    """
+    field: str    # payload key carrying the address (e.g. "ref" or "superseded_by")
+    addr: str     # the entity address the user wrote (e.g. "decision/design/foo")
+    ref_id: str   # the resolved ULID
+
+
 def loops_home() -> Path:
     """Resolve the loops config directory."""
     if env := os.environ.get("LOOPS_HOME"):
@@ -362,7 +374,7 @@ def _resolve_entity_refs(
     store_path: Path,
     payload: dict[str, str],
     kind: str | None = None,
-) -> tuple[dict[str, str], list[UnresolvedRef]]:
+) -> tuple[dict[str, str], list[UnresolvedRef], list[ResolvedRef]]:
     """Resolve entity addresses in payload values to ULIDs.
 
     Scans payload values for entity addresses (kind/fold_key_value format).
@@ -381,16 +393,20 @@ def _resolve_entity_refs(
     happens to declare a ``pattern`` kind — producing false unresolved-ref
     warnings on every namespace-prefixed emit.
 
-    Returns ``(augmented_payload, unresolved_refs)``:
+    Returns ``(augmented_payload, unresolved_refs, resolved_refs)``:
       * ``augmented_payload`` — payload plus any ``{field}_ref`` sibling fields
         whose addresses resolved to a ULID
       * ``unresolved_refs`` — refs where the value LOOKED like an address
         (addr_kind is a declared kind in this vertex or its topology) but no
         matching entity was found. Values whose addr_kind isn't declared
         anywhere are not surfaced — those weren't intended as refs.
+      * ``resolved_refs`` — refs that DID resolve, one ``ResolvedRef`` per
+        pinned ULID. The receipt path reads these to report the inbound-edge
+        delta (each is one new inbound edge on its target entity).
 
     The receipt path uses ``unresolved_refs`` to emit WARN lines so users
-    notice typos / stale refs at write-time.
+    notice typos / stale refs at write-time, and ``resolved_refs`` for the
+    inbound-delta lines.
     """
     from engine import StoreReader
 
@@ -478,6 +494,7 @@ def _resolve_entity_refs(
     # single addresses — preserves single-ref-on-any-field semantics.
     refs: dict[str, str] = {}
     unresolved: list[UnresolvedRef] = []
+    resolved: list[ResolvedRef] = []
     for field_name, value in payload.items():
         if not isinstance(value, str) or "/" not in value:
             continue
@@ -495,6 +512,7 @@ def _resolve_entity_refs(
             rid, declared = _resolve_one(addr)
             if rid is not None:
                 resolved_ids.append(rid)
+                resolved.append(ResolvedRef(field=field_name, addr=addr, ref_id=rid))
             elif declared:
                 unresolved.append(UnresolvedRef(field=field_name, addr=addr))
         if resolved_ids:
@@ -503,7 +521,7 @@ def _resolve_entity_refs(
     if refs:
         payload = {**payload, **refs}
 
-    return payload, unresolved
+    return payload, unresolved, resolved
 
 
 # --- Vertex resolution (raise on failure) ---

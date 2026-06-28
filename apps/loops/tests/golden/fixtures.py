@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from atoms import FoldItem, FoldSection, FoldState
+from atoms import FoldItem, FoldSection, FoldState, WalkedItem
 
 # Fixed reference point: 2025-01-15T12:00:00 UTC
 REF_TS = 1736942400.0
@@ -376,4 +376,178 @@ SAMPLE_FOLD_PREVIEW = FoldState(
         ),
     ),
     vertex="session",
+)
+
+# ── fold: namespace-grouped path + salience windowing + tied-group tiebreak ──
+# Exercises _render_grouped (multi-namespace, >5-item group → salience>1 window
+# + "(N more)" collapse) AND the tied-group-sum tiebreak that the fold-order
+# decision turns on: groups grpA and grpB both sum to salience 5, but grpA's
+# first item appears FIRST in fold order (index 0), so it must render first —
+# a salience pre-sort would surface grpB/z (salience 5) first and flip them.
+SAMPLE_FOLD_GROUPED = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                # grpA: x(n=2)+y(n=3) → group sum 5; appears first in fold order
+                FoldItem(payload={"topic": "grpA/x", "message": "alpha x"},
+                         ts="2025-01-15T10:00:00+00:00", n=2),
+                # grpB: z(n=5) → group sum 5 (TIE with grpA)
+                FoldItem(payload={"topic": "grpB/z", "message": "beta z"},
+                         ts="2025-01-14T10:00:00+00:00", n=5),
+                FoldItem(payload={"topic": "grpA/y", "message": "alpha y"},
+                         ts="2025-01-13T10:00:00+00:00", n=3),
+            ),
+        ),
+        FoldSection(
+            kind="note",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                # >5 items in one namespace → windowing: salience>1 shown, rest collapse
+                FoldItem(payload={"topic": "big/a", "message": "a"},
+                         ts="2025-01-15T10:00:00+00:00", n=4),
+                FoldItem(payload={"topic": "big/b", "message": "b"},
+                         ts="2025-01-15T09:00:00+00:00", n=2),
+                FoldItem(payload={"topic": "big/c", "message": "c"},
+                         ts="2025-01-15T08:00:00+00:00", n=1),
+                FoldItem(payload={"topic": "big/d", "message": "d"},
+                         ts="2025-01-15T07:00:00+00:00", n=1),
+                FoldItem(payload={"topic": "big/e", "message": "e"},
+                         ts="2025-01-15T06:00:00+00:00", n=1),
+                FoldItem(payload={"topic": "big/f", "message": "f"},
+                         ts="2025-01-15T05:00:00+00:00", n=1),
+                FoldItem(payload={"topic": "big/g", "message": "g"},
+                         ts="2025-01-15T04:00:00+00:00", n=1),
+            ),
+        ),
+    ),
+    vertex="session",
+)
+
+# ── fold: refs edge-expansion path (--refs / visible={"refs"}) ───────────────
+# design/c is referenced by BOTH design/a and design/b (two same-section inbound
+# sources) → the "← source" list order must follow fold order (a before b). Also
+# carries outbound refs and observer/id so DETAILED+/FULL meta lines render.
+SAMPLE_FOLD_REFS = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(payload={"topic": "design/a", "message": "refs c"},
+                         ts="2025-01-15T10:00:00+00:00", observer="ann",
+                         id="01AAAAAAAAAAAAAAAAAAAAAAAA", n=2,
+                         refs=("decision/design/c",)),
+                FoldItem(payload={"topic": "design/b", "message": "also refs c"},
+                         ts="2025-01-15T09:00:00+00:00", observer="bob",
+                         id="01BBBBBBBBBBBBBBBBBBBBBBBB", n=1,
+                         refs=("decision/design/c",)),
+                FoldItem(payload={"topic": "design/c", "message": "referenced twice"},
+                         ts="2025-01-15T08:00:00+00:00", observer="ann",
+                         id="01CCCCCCCCCCCCCCCCCCCCCCCC", n=3),
+            ),
+        ),
+    ),
+    vertex="session",
+)
+
+# ── fold: walked ref-graph path (--refs N → WalkedItem rows) ─────────────────
+# A primary decision whose ref walks to a thread (depth 1) which walks to an
+# observation (depth 2) — exercises _render_walked's via-anchor grouping and
+# the depth>1 ↳ marker.
+SAMPLE_FOLD_WALKED = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(payload={"topic": "design/root", "message": "anchor"},
+                         ts="2025-01-15T10:00:00+00:00",
+                         id="01RRRRRRRRRRRRRRRRRRRRRRRR", n=2,
+                         refs=("thread:walk-target",)),
+            ),
+        ),
+    ),
+    vertex="session",
+    walked=(
+        WalkedItem(
+            item=FoldItem(payload={"name": "walk-target", "status": "open"},
+                          ts="2025-01-15T09:00:00+00:00",
+                          id="01TTTTTTTTTTTTTTTTTTTTTTTT", n=1,
+                          refs=("observation:deep",)),
+            section_kind="thread", key_field="name",
+            via_anchor="decision/design/root", depth=1,
+        ),
+        WalkedItem(
+            item=FoldItem(payload={"topic": "deep", "message": "two hops out"},
+                          ts="2025-01-15T08:00:00+00:00",
+                          id="01DDDDDDDDDDDDDDDDDDDDDDDD", n=1),
+            section_kind="observation", key_field="topic",
+            via_anchor="thread/walk-target", depth=2,
+        ),
+    ),
+)
+
+# ── fold: source-facts drill path (--facts / visible={"facts"}) ──────────────
+# One by-fold item has history (n>1 → drillable, source facts shown), one does
+# not (n=1 → section skipped → "No history:" footer). source_facts keyed by
+# "kind/key"; entries carry _ts for reverse-chrono ordering.
+SAMPLE_FOLD_FACTS = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(payload={"topic": "design/evolved", "message": "v3 body"},
+                         ts="2025-01-15T10:00:00+00:00",
+                         id="01EEEEEEEEEEEEEEEEEEEEEEEE", n=3),
+            ),
+        ),
+        FoldSection(
+            kind="note",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(payload={"topic": "note/fresh", "message": "single"},
+                         ts="2025-01-15T09:00:00+00:00",
+                         id="01FFFFFFFFFFFFFFFFFFFFFFFF", n=1),
+            ),
+        ),
+    ),
+    vertex="session",
+    source_facts={
+        "decision/design/evolved": [
+            {"topic": "design/evolved", "message": "v1 body",
+             "_ts": 1736850000.0, "_id": "01G1"},
+            {"topic": "design/evolved", "message": "v2 body",
+             "_ts": 1736853600.0, "_id": "01G2"},
+            {"topic": "design/evolved", "message": "v3 body",
+             "_ts": 1736942400.0, "_id": "01G3"},
+        ],
+    },
+)
+
+# ── fold: unfolded-kinds coverage signal ─────────────────────────────────────
+# A vertex with one declared kind plus undeclared kinds present in the store —
+# exercises the MINIMAL loose-render and the "Unfolded:" footer.
+SAMPLE_FOLD_UNFOLDED = FoldState(
+    sections=(
+        FoldSection(
+            kind="decision",
+            fold_type="by",
+            key_field="topic",
+            items=(
+                FoldItem(payload={"topic": "design/only", "message": "declared"},
+                         ts="2025-01-15T10:00:00+00:00", n=1),
+            ),
+        ),
+    ),
+    vertex="session",
+    unfolded={"log": 5, "scratch": 2},
 )

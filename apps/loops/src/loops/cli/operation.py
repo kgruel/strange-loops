@@ -25,10 +25,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    # painted.Fidelity carried by reference only. TYPE_CHECKING keeps
+    # painted.Fidelity / Format carried by reference only. TYPE_CHECKING keeps
     # cli/operation.py free of runtime painted imports — the single-
     # boundary discipline applies to RUNTIME imports.
     from painted import Fidelity
+    from painted.cli import Format
 
 
 Mode = Literal["static", "live", "interactive"]
@@ -59,6 +60,10 @@ class Operation:
             override.
         fidelity: painted.Fidelity for display ops; may be ``None`` for
             actions.
+        format: painted.Format (JSON / PLAIN / ANSI / AUTO) parsed from
+            ``--json`` / ``--plain``. dispatch forks on JSON to encode the
+            Surface via ``to_dict`` instead of the text lens. ``None`` when
+            the view doesn't carry a format (legacy shims).
         render_context: extra kwargs forwarded to the lens (e.g. ``diff=True``
             for cumulative-delta rendering).
         vertex_path: resolved vertex path; carried alongside params for
@@ -79,6 +84,7 @@ class Operation:
     render_lens: str | None = None
     lens_override: str | None = None
     fidelity: Fidelity | None = None
+    format: "Format | None" = None
     render_context: dict[str, Any] = field(default_factory=dict)
     vertex_path: Path | None = None
     observer: str | None = None

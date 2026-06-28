@@ -1,0 +1,6 @@
+Decisions (1):
+  design/ (1)
+    only [Jan 15]: declared
+      _ts: 2025-01-15T10:00:00+00:00
+
+Unfolded: 5 log, 2 scratch

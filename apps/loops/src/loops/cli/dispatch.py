@@ -81,6 +81,50 @@ def _resolve_lens(
     return _resolve_render_fn(lens_override, vertex_path, view_name)
 
 
+def _surface_gate(op: Operation, data) -> bool:
+    """True when the DEFAULT fold path should route through the Surface.
+
+    Two conditions: the fetched data is a ``FoldState`` AND the effective fold
+    lens is the built-in (no ``--lens`` override and no vertex ``lens{}`` fold
+    declaration). ``_effective_lens_name`` returning ``None`` (no decl) or
+    ``"fold"`` (explicitly the built-in) both pass; a custom name (e.g.
+    ``identity_prompt``) fails the gate and keeps the raw FoldState so the
+    vertex-declared lens renders its own shape. isinstance is checked first so a
+    non-FoldState shape (the ``--diff`` trace dict) short-circuits.
+    """
+    from atoms import FoldState
+
+    if not isinstance(data, FoldState):
+        return False
+    from loops.cli.lens import _effective_lens_name
+
+    name = _effective_lens_name(op.lens_override, op.vertex_path, "fold_view")
+    return name in (None, "fold")
+
+
+def _render_foldstate_json(data, reporter: Reporter) -> int:
+    """Raw-JSON dump for the legacy / lens-override path.
+
+    The lifted body of the old ``cli/views/fold._render_json``. Used when the
+    Surface gate FAILS — a vertex-declared or ``--lens`` override fold lens, or
+    a non-FoldState shape (the ``--diff`` trace dict) — so ``--json`` keeps
+    emitting the raw fetched shape instead of degrading to a rendered Block.
+    The gate-PASS path emits ``to_dict(surface)`` instead (the structured,
+    ranked encoding).
+    """
+    import json
+
+    def _default(obj):
+        if hasattr(obj, "_asdict"):
+            return obj._asdict()
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        return str(obj)
+
+    reporter.msg(json.dumps(data, default=_default))
+    return 0
+
+
 def _zoom_of(fidelity: "Fidelity | None") -> Zoom:
     """Extract a Zoom enum value from a Fidelity. Defaults to SUMMARY when
     fidelity is None (e.g. action ops carry no fidelity)."""
@@ -144,6 +188,34 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         reporter.err(f"Error: {exc}")
         return 1
 
+    # --- Surface interposition (S2) --------------------------------------
+    # Route the DEFAULT fold path through the typed Surface so plain and
+    # --json encode the SAME structured rows. Gate: the effective fold lens is
+    # the built-in (no --lens override, no vertex lens{} decl) AND the data is
+    # a FoldState. Vertex-declared / override lenses (identity, comms, …) and
+    # non-FoldState shapes (the --diff trace dict) keep the raw FoldState — they
+    # render their own shape, and any that delegate to the built-in fold_view
+    # ride its polymorphic front door (which projects for them).
+    from painted.cli import Format
+
+    render_data = data
+    gate = _surface_gate(op, data)
+    if op.format is Format.JSON:
+        if gate:
+            import json
+
+            from loops.surface import project, to_dict
+
+            reporter.msg(json.dumps(to_dict(project(data))))
+            return 0
+        # Override / vertex-decl lens, or a non-FoldState shape (--diff trace
+        # dict) → keep the legacy raw dump instead of degrading to text.
+        return _render_foldstate_json(data, reporter)
+    if gate:
+        from loops.surface import project
+
+        render_data = project(data)
+
     from loops.lens_resolver import call_lens, normalize_width
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
@@ -163,7 +235,7 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
     try:
         block = call_lens(
-            lens_fn, data, _zoom_of(op.fidelity), normalize_width(reporter.width), **extra
+            lens_fn, render_data, _zoom_of(op.fidelity), normalize_width(reporter.width), **extra
         )
     except Exception as exc:
         reporter.err(f"Render error: {exc}")

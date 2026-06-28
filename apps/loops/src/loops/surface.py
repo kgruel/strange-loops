@@ -278,11 +278,19 @@ def _row_group(row: Row, by: str) -> str:
 
 
 def _row_key(item: FoldItem, key_field: str | None) -> str | None:
-    """The fold-key value for an item, or None for collect/keyless items."""
+    """The fold-key value for an item, or None for collect/keyless items.
+
+    Uses TRUTHINESS (``if not val``) to gate emptiness, byte-matching the lens's
+    old ``_item_full_key`` / ``_inbound_count`` (``if not key``): a falsy fold
+    value (None, "", 0, False) is treated as no-key, so Row.key is None and the
+    address falls back to ``kind/<id>``. Gating only on ``None``/``""`` would
+    make a key of int ``0`` resolve to ``kind/0`` and spuriously hit the
+    edge/facts lookups the old lens skipped.
+    """
     if not key_field:
         return None
     val = item.payload.get(key_field)
-    if val is None or val == "":
+    if not val:
         return None
     return str(val)
 
@@ -629,5 +637,9 @@ def to_dict(surface: Surface) -> dict:
             for kind, kv in surface.schema.items()
         },
         "unfolded": dict(surface.unfolded),
+        "source_facts": {
+            addr: [dict(f) for f in facts]
+            for addr, facts in surface.source_facts.items()
+        },
         "window": _window_to_dict(surface.window),
     }

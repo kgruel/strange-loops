@@ -27,9 +27,12 @@ from loops.surface import (
     whole,
 )
 
-# The lens helpers — the INDEPENDENT reference for the parity guard. surface.py
-# COPIES this logic; the test proves the copy agrees with the original.
-from loops.lenses.fold import (
+# The salience helpers now live in surface.py (lifted from lenses/fold.py and
+# the lens copies DELETED in S2). The cross-module byte-faithfulness of the lift
+# was proven at S1 (AST-segment diff vs the lens originals, in git history); the
+# HAND-COMPUTED assertions below (inbound==2, salience==3, …) remain the genuine
+# independent oracle — they don't depend on either helper being "right".
+from loops.surface import (
     _compute_inbound_refs,
     _inbound_count,
     _salience,
@@ -253,6 +256,27 @@ def test_collect_section_preserves_fold_order():
     )
     surface = project(state)
     assert [r.payload["message"] for r in surface.rows] == ["first", "second", "third"]
+
+
+def test_falsy_fold_key_is_treated_as_keyless():
+    """A falsy fold value (int 0, False, "") is no-key — byte-matching the lens's
+    old _item_full_key/_inbound_count truthiness gate. Row.key is None so the
+    address falls back to kind/<id> and the edge/facts lookups (keyed by
+    address-when-key-not-None) correctly skip it, as the old lens did."""
+    state = FoldState(
+        sections=(
+            FoldSection(
+                kind="thread", fold_type="by", key_field="name",
+                items=(
+                    FoldItem(payload={"name": 0, "status": "zero"}, ts=1.0, id="Z1"),
+                ),
+            ),
+        ),
+        vertex="t",
+    )
+    row = project(state).rows[0]
+    assert row.key is None
+    assert row.address == "thread/Z1"  # not "thread/0"
 
 
 def test_collect_row_address_uses_id():
@@ -499,6 +523,26 @@ def test_source_facts_carried_onto_surface():
     assert surface.source_facts == {
         "decision/design/a": [{"topic": "design/a", "message": "v1"}]
     }
+
+
+def test_to_dict_includes_source_facts():
+    """to_dict carries source_facts so --facts --json honors the SAME content
+    the text encoder renders (the S2 invariant; the old raw dump included it)."""
+    state = FoldState(
+        sections=(
+            FoldSection(kind="decision", items=(_decision("design/a", n=2),),
+                        fold_type="by", key_field="topic"),
+        ),
+        vertex="t",
+        source_facts={"decision/design/a": [
+            {"topic": "design/a", "message": "v1", "_ts": 1.0},
+            {"topic": "design/a", "message": "v2", "_ts": 2.0},
+        ]},
+    )
+    d = to_dict(project(state))
+    encoded = json.loads(json.dumps(d))  # round-trips
+    assert encoded["source_facts"]["decision/design/a"][0]["message"] == "v1"
+    assert len(encoded["source_facts"]["decision/design/a"]) == 2
 
 
 def test_schema_carries_render_hints():

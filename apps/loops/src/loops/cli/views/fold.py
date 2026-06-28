@@ -28,8 +28,8 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from painted.cli import OutputMode
-from painted.cli.types import add_cli_args, parse_fidelity, parse_zoom
+from painted.cli import Format, OutputMode
+from painted.cli.types import add_cli_args, parse_fidelity, parse_format, parse_zoom
 
 from ..invocation import Invocation
 from ..dispatch import dispatch
@@ -306,29 +306,6 @@ def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
     _impl(kind, vertex_path)
 
 
-# --- JSON short-circuit ----------------------------------------------------
-
-
-def _render_json(data: Any, reporter) -> int:
-    """Render the fold data as JSON to stdout and return 0.
-
-    Bypasses dispatch's lens path — JSON wants the raw fetched shape,
-    not a rendered Block. Goes through ``reporter.msg`` so test
-    reporters can capture it.
-    """
-    import json
-
-    def _default(obj):
-        if hasattr(obj, "_asdict"):
-            return obj._asdict()
-        if hasattr(obj, "__dict__"):
-            return obj.__dict__
-        return str(obj)
-
-    reporter.msg(json.dumps(data, default=_default))
-    return 0
-
-
 # --- Entry point -----------------------------------------------------------
 
 
@@ -415,14 +392,10 @@ def run(argv: list[str], ctx: Invocation) -> int:
         render_lens = "fold"
         lens_override = args.lens
 
-    # --json short-circuits the lens path entirely.
-    if args.json:
-        try:
-            data = fetch_data()
-        except Exception as exc:
-            ctx.reporter.err(f"Error: {exc}")
-            return 1
-        return _render_json(data, ctx.reporter)
+    # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on
+    # JSON to encode the Surface via to_dict (gate-pass) or the raw FoldState
+    # dump (gate-fail). No view-level short-circuit — the lens path owns it.
+    fmt_format = parse_format(args)
 
     # Fidelity: painted compiles the pure-terminal axes (depth from -q/-v,
     # density from --max-chars/--max-lines). The domain-query selectors'
@@ -439,6 +412,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
     fidelity = _replace(base, visible=frozenset(domain_visible))
 
     mode = _resolve_mode(args, args.lens)
+    # JSON is a one-shot structured encode — live/interactive make no sense.
+    if fmt_format is Format.JSON:
+        mode = "static"
 
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None
@@ -457,6 +433,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
         render_lens=render_lens,
         lens_override=lens_override,
         fidelity=fidelity,
+        format=fmt_format,
         render_context={"_diff": True} if args.diff else {},
         vertex_path=vertex_path,
         observer=ctx.observer,

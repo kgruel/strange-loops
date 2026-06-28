@@ -169,3 +169,106 @@ class TestStaticBranchSmoke:
         assert exc_info.value.code == 2
         captured = capsys.readouterr()
         assert "this-lens-does-not-exist" in captured.err
+
+
+# --- Surface interposition (S2) --------------------------------------------
+
+
+class TestSurfaceInterposition:
+    """The S2 keystone: the default fold path routes through the Surface so
+    plain and --json encode the SAME structured rows. --json is a HARD BREAK
+    (to_dict(surface), not the raw FoldState). The gate keeps vertex-decl /
+    --lens-override fold lenses (and non-FoldState shapes) on the raw path."""
+
+    @staticmethod
+    def _state():
+        from atoms import FoldItem, FoldSection, FoldState
+
+        return FoldState(
+            sections=(
+                FoldSection(
+                    kind="decision", fold_type="by", key_field="topic",
+                    items=(
+                        FoldItem(payload={"topic": "design/a", "message": "body a"},
+                                 ts=100.0, n=2, refs=("decision/design/b",)),
+                        FoldItem(payload={"topic": "design/b", "message": "body b"},
+                                 ts=90.0, n=1),
+                    ),
+                ),
+            ),
+            vertex="t",
+        )
+
+    def test_json_gate_pass_is_to_dict_surface(self):
+        """--json on the default fold path deep-equals to_dict(project(state))
+        — the hard break + behavioral parity."""
+        import json
+
+        from painted.cli import Format
+
+        from loops.surface import project, to_dict
+
+        state = self._state()
+        op = Operation(
+            verb="read", fn=lambda: state, render_lens="fold",
+            format=Format.JSON,
+        )
+        reporter = BufferReporter()
+        rc = dispatch(op, reporter=reporter)
+        assert rc == 0
+        emitted = json.loads(reporter.out_lines[0])
+        assert emitted == to_dict(project(state))
+        # the structured shape, not the raw FoldState
+        assert "rows" in emitted and "sections" not in emitted
+        a = next(r for r in emitted["rows"] if r["key"] == "design/a")
+        assert a["salience"] == 2 and a["address"] == "decision/design/a"
+
+    def test_json_gate_fail_falls_back_to_raw(self):
+        """A --lens override (not the built-in) fails the gate → --json keeps
+        the legacy raw FoldState dump, not the Surface encoding."""
+        import json
+
+        from painted.cli import Format
+
+        state = self._state()
+        op = Operation(
+            verb="read", fn=lambda: state, render_lens="fold",
+            lens_override="autoresearch",  # resolvable, != built-in fold
+            format=Format.JSON,
+        )
+        reporter = BufferReporter()
+        rc = dispatch(op, reporter=reporter)
+        assert rc == 0
+        raw = json.loads(reporter.out_lines[0])
+        # raw FoldState dump carries "sections"; the Surface shape does not
+        assert "sections" in raw
+        assert "rows" not in raw
+
+    def test_text_gate_pass_renders_block(self):
+        """Gate-pass text path projects → built-in fold_view(Surface) → Block."""
+        state = self._state()
+        op = Operation(verb="read", fn=lambda: state, render_lens="fold")
+        reporter = BufferReporter()
+        rc = dispatch(op, reporter=reporter)
+        assert rc == 0
+        assert reporter.blocks  # a rendered Block landed
+        from loops.lenses.fold import fold_view
+        from loops.surface import project
+        from painted import Zoom
+        # parity: the dispatched render equals fold_view(project(state))
+        from .golden.helpers import block_to_text
+        expected = block_to_text(fold_view(project(state), Zoom.SUMMARY, 80))
+        assert block_to_text(reporter.blocks[0]) == expected
+
+    def test_text_gate_fail_override_still_renders(self):
+        """A --lens override fails the gate but still renders via the lens's
+        polymorphic front door (autoresearch re-exports fold_view)."""
+        state = self._state()
+        op = Operation(
+            verb="read", fn=lambda: state, render_lens="fold",
+            lens_override="autoresearch",
+        )
+        reporter = BufferReporter()
+        rc = dispatch(op, reporter=reporter)
+        assert rc == 0
+        assert reporter.blocks

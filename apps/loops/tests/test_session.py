@@ -154,15 +154,19 @@ class TestStatus:
         assert result == 0
 
         data = json.loads(capsys.readouterr().out)
-        assert "sections" in data
-        assert "vertex" in data
-        # Find sections by kind
-        by_kind = {s["kind"]: s for s in data["sections"]}
-        assert "decision" in by_kind
-        assert "task" in by_kind
-        assert len(by_kind["decision"]["items"]) == 1
-        assert by_kind["decision"]["items"][0]["payload"]["topic"] == "test"
-        assert len(by_kind["task"]["items"]) == 1
+        # S2 hard break: --json is now the Surface encoding (flat addressable
+        # rows + schema + window), not the raw unranked FoldState (sections).
+        assert "rows" in data
+        assert "schema" in data
+        assert "window" in data
+        assert data["vertex"] == "session"
+        by_key = {(r["kind"], r["key"]): r for r in data["rows"]}
+        assert ("decision", "test") in by_key
+        assert by_key[("decision", "test")]["payload"]["topic"] == "test"
+        assert ("task", "task1") in by_key
+        # rows carry materialized salience + address
+        assert by_key[("decision", "test")]["address"] == "decision/test"
+        assert by_key[("decision", "test")]["salience"] >= 1
 
     def test_no_vertex_found(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)

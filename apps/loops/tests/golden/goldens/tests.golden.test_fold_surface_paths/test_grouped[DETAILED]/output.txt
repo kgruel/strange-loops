@@ -1,0 +1,12 @@
+Decisions (3):
+  grpA/ (2)
+    y [×3 Jan 13]: alpha y
+    x [×2 Jan 15]: alpha x
+  grpB/ (1)
+    z [×5 Jan 14]: beta z
+
+Notes (7):
+  big/ (7)
+    a [×4 Jan 15]: a
+    b [×2 Jan 15]: b
+    (5 more)

@@ -8,11 +8,17 @@ from atoms import FoldItem, FoldSection, FoldState
 
 from painted import Zoom
 
+# Render-presentation helpers stay in the lens; the salience helpers were
+# LIFTED to loops.surface in S2 (project materializes them) — import from there.
 from loops.lenses.fold import (
-    _compute_inbound_edges, _compute_inbound_refs, _first_field,
-    _format_date, _format_ts_full, _group_by_namespace, _inbound_count,
-    _item_full_key, _recency_tag, _should_group_by_namespace,
+    _first_field,
+    _format_date, _format_ts_full, _group_by_namespace,
+    _recency_tag, _should_group_by_namespace,
     fold_view,
+)
+from loops.surface import (
+    _compute_inbound_edges, _compute_inbound_refs, _inbound_count,
+    _item_full_key,
 )
 
 

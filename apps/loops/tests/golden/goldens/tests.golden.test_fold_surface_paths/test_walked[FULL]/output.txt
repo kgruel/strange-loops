@@ -1,0 +1,22 @@
+Decisions (1):
+  design/ (1)
+    root [×2 →1 Jan 15]: anchor
+      id:01RRRRRR
+      → thread:walk-target
+      _id: 01RRRRRRRRRRRRRRRRRRRRRRRR
+      _ts: 2025-01-15T10:00:00+00:00
+      _n: 2
+
+## REFS (2)
+  ┄ via → decision/design/root
+    walk-target [→1 Jan 15]: open
+      id:01TTTTTT
+      → observation:deep
+      _id: 01TTTTTTTTTTTTTTTTTTTTTTTT
+      _ts: 2025-01-15T09:00:00+00:00
+  ┄ via → thread/walk-target
+    ↳ (d2)
+      deep [Jan 15]: two hops out
+        id:01DDDDDD
+        _id: 01DDDDDDDDDDDDDDDDDDDDDDDD
+        _ts: 2025-01-15T08:00:00+00:00

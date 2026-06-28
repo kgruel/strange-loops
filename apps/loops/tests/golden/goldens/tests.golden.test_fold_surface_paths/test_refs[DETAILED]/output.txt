@@ -1,0 +1,15 @@
+Decisions (3):
+  design/ (3)
+    c [×3 ←2 Jan 15]: referenced twice
+      observer: ann
+      id:01CCCCCC
+      ← decision/design/a
+      ← decision/design/b
+    a [×2 →1 Jan 15]: refs c
+      observer: ann
+      id:01AAAAAA
+      → decision/design/c
+    b [→1 Jan 15]: also refs c
+      observer: bob
+      id:01BBBBBB
+      → decision/design/c

@@ -714,6 +714,30 @@ class TestFetchTickWindows:
         assert windows[0].index == 0
         assert windows[1].index == 1
 
+    def test_all_names_spans_series_the_name_default_misses(self, tmp_path):
+        # A loop-level boundary produces ticks named after the LOOP ("ping"),
+        # not the vertex ("x"). The name-default (density) filters to "x" and
+        # sees nothing; all_names (the --chain scope) spans the full chain.
+        from engine.builder import fold_count, vertex
+
+        from loops.commands.fetch import fetch_tick_windows
+
+        vpath = tmp_path / "x.vertex"
+        vertex("x").store("./x.db").loop(
+            "ping", fold_count("n"), boundary_every=1
+        ).write(vpath)
+        _emit(vpath, "ping", service="api")
+        _emit(vpath, "ping", service="web")
+
+        # name defaults to the vertex "x" → the "ping" series is invisible
+        assert fetch_tick_windows(vpath, since=None) == ()
+        # all_names spans every series → the loop-named ticks surface
+        allw = fetch_tick_windows(vpath, all_names=True, since=None)
+        assert len(allw) == 2
+        assert all(w.name == "ping" for w in allw)
+        # cross-series adjacency is not a delta — zeroed under all_names
+        assert all(w.delta_added == 0 and w.delta_updated == 0 for w in allw)
+
 
 class TestFetchFoldRefsWalk:
     """A2 of trace-dissolution: fetch_fold(refs_depth=N) outbound walk.

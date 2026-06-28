@@ -8,7 +8,7 @@ import pytest
 from painted import Zoom
 from painted.views import ListState
 from loops.commands.store import _bucket_timestamps, _sparkline_str
-from loops.lenses.store import store_view, _relative_time
+from loops.lenses.store import store_view, stats_view, tick_chain_view, _relative_time
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
 
 from .helpers import block_to_text
@@ -508,4 +508,120 @@ class TestStoreSummaryNarrowFill:
             "ticks": {"total": 0, "names": {}},
         }
         block = store_view(data, Zoom.FULL, width=18)
+        assert block.height >= 1
+
+
+# ── Tick chain view (store ticks [--chain]) ─────────────────
+
+
+def _tick_window_dict(**over):
+    """A TickWindow-as-dict (the asdict shape the lens receives)."""
+    base = {
+        "index": 0, "name": "project", "ts": 1_700_000_000.0,
+        "since": 1_699_999_000.0, "duration_secs": 1000.0,
+        "observer": "kyle", "boundary_trigger": "kyle closed",
+        "total_items": 5, "total_facts": 12,
+        "kind_summary": {"decision": 3, "thread": 2},
+        "kind_compression": {}, "ref_count": 1,
+        "delta_added": 1, "delta_updated": 2,
+        "added_keys": {}, "updated_keys": {},
+        "chained": True, "signed": False, "fact_cursor": "abc",
+        "cursor_kind": "session", "cursor_preview": "kyle closed",
+    }
+    base.update(over)
+    return base
+
+
+def _chain_data(*, chain_mode, windows):
+    return {
+        "vertex": "project",
+        "chain_mode": chain_mode,
+        "chain": {
+            "ticks": len(windows),
+            "chained": sum(1 for w in windows if w["chained"]),
+            "signed": sum(1 for w in windows if w["signed"]),
+            "legacy": sum(1 for w in windows if not w["chained"]),
+        },
+        "windows": windows,
+    }
+
+
+class TestTickChainView:
+    def test_chain_mode_renders_attestation(self):
+        data = _chain_data(chain_mode=True, windows=[_tick_window_dict()])
+        text = block_to_text(tick_chain_view(data, Zoom.DETAILED, 80))
+        assert "linked" in text
+        assert "unsigned" in text
+        assert "cursor" in text
+        assert "session" in text  # cursor_kind dereference
+
+    def test_density_mode_omits_attestation(self):
+        data = _chain_data(chain_mode=False, windows=[_tick_window_dict()])
+        text = block_to_text(tick_chain_view(data, Zoom.DETAILED, 80))
+        assert "linked" not in text
+        assert "items" in text          # density fold line
+        assert "kyle closed" in text    # boundary trigger label
+
+    def test_minimal_is_rollup_only(self):
+        data = _chain_data(
+            chain_mode=True,
+            windows=[_tick_window_dict(), _tick_window_dict(index=1, chained=False)],
+        )
+        text = block_to_text(tick_chain_view(data, Zoom.MINIMAL, 80))
+        assert "2 ticks" in text
+        assert "1 chained" in text
+        assert "1 legacy" in text
+        assert "cursor" not in text  # no per-tick rows at MINIMAL
+
+    def test_empty_windows(self):
+        data = _chain_data(chain_mode=True, windows=[])
+        text = block_to_text(tick_chain_view(data, Zoom.SUMMARY, 80))
+        assert "No ticks" in text
+
+    def test_piped_width_none_does_not_raise(self):
+        data = _chain_data(chain_mode=True, windows=[_tick_window_dict()])
+        block = tick_chain_view(data, Zoom.FULL, None)
+        assert block.height >= 1
+
+
+# ── Stats view (store stats [--by-kind]) ────────────────────
+
+
+def _stats_data(*, by_kind, kinds):
+    return {
+        "vertex": "project",
+        "by_kind": by_kind,
+        "total_facts": sum(k["count"] for k in kinds),
+        "total_ticks": 4,
+        "kind_count": len(kinds),
+        "kinds": kinds,
+    }
+
+
+class TestStatsView:
+    def test_by_kind_table_count_desc(self):
+        kinds = [{"kind": "decision", "count": 10}, {"kind": "thread", "count": 3}]
+        text = block_to_text(stats_view(_stats_data(by_kind=True, kinds=kinds), Zoom.SUMMARY, 80))
+        assert "decision" in text and "thread" in text
+        assert text.index("decision") < text.index("thread")
+
+    def test_default_topline_only(self):
+        kinds = [{"kind": "decision", "count": 10}, {"kind": "thread", "count": 3}]
+        text = block_to_text(stats_view(_stats_data(by_kind=False, kinds=kinds), Zoom.SUMMARY, 80))
+        assert "facts" in text
+        assert "decision" not in text  # table gated on --by-kind
+
+    def test_minimal_suppresses_table(self):
+        kinds = [{"kind": "decision", "count": 10}]
+        text = block_to_text(stats_view(_stats_data(by_kind=True, kinds=kinds), Zoom.MINIMAL, 80))
+        assert "facts" in text
+        assert "decision" not in text
+
+    def test_empty_store(self):
+        text = block_to_text(stats_view(_stats_data(by_kind=True, kinds=[]), Zoom.SUMMARY, 80))
+        assert "empty store" in text
+
+    def test_piped_width_none_does_not_raise(self):
+        kinds = [{"kind": "decision", "count": 10}]
+        block = stats_view(_stats_data(by_kind=True, kinds=kinds), Zoom.FULL, None)
         assert block.height >= 1

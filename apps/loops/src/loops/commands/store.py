@@ -500,6 +500,168 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if ok else 1
 
 
+def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Read a store's tick series — the attestation chain surface.
+
+    Default projection is density (items/facts/delta per window).
+    ``--chain`` projects the stored attestation envelope per tick: chain
+    linkage, signature presence, and the window cursor. This is a READ of
+    the stored flags, not a re-verification — ``store verify`` walks the
+    chain in append order and checks integrity; ``store ticks`` lists what
+    each tick's envelope says. Requires a ``.vertex`` target: the tick
+    series resolves through the vertex name and store. ``--since`` narrows
+    the window; the default is the full chain (genesis and the legacy-era
+    boundary are exactly what an attestation read wants to see).
+    """
+    import argparse
+    from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
+    pre.add_argument("--chain", action="store_true", default=False)
+    pre.add_argument("--since", default=None)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = getattr(known, "file", None)
+
+    target_path = _resolve_target(file_arg, vertex_path).resolve()
+    if target_path.suffix != ".vertex":
+        raise ValueError(
+            "store ticks requires a .vertex target — the tick series "
+            "resolves through the vertex name and store"
+        )
+    # Refuse aggregates: a combine/discover vertex has no own store and no
+    # own chain — vertex_ticks returns empty attestation envelopes for it,
+    # which would render a genuinely-signed chain as a false "all legacy".
+    # The sibling store verbs already refuse storeless aggregates (via
+    # resolve_store_path); ticks bypasses that path, so guard here.
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(target_path)
+    if ast.combine is not None or ast.discover is not None:
+        raise ValueError(
+            "store ticks reads one store's attestation chain; "
+            f"{target_path.name} is an aggregate vertex (no own chain) — "
+            "point at the instance store, e.g. .loops/<name>.vertex"
+        )
+
+    help_args = (
+        [HelpArg("file", "Vertex .vertex file or vertex name", positional=True)]
+        if vertex_path is None else []
+    )
+
+    def fetch():
+        import dataclasses
+        from lang import parse_vertex_file
+
+        from .fetch import fetch_tick_windows
+
+        # --chain spans the full hash chain (all_names) to agree with
+        # `store verify`/`store stats`; density stays name-scoped (its
+        # delta fields are a same-series concept).
+        windows = fetch_tick_windows(
+            target_path, since=known.since, all_names=known.chain
+        )
+        chain = {
+            "ticks": len(windows),
+            "chained": sum(1 for w in windows if w.chained),
+            "signed": sum(1 for w in windows if w.signed),
+            "legacy": sum(1 for w in windows if not w.chained),
+        }
+        return {
+            "vertex": parse_vertex_file(target_path).name,
+            "chain_mode": known.chain,
+            "chain": chain,
+            "windows": [dataclasses.asdict(w) for w in windows],
+        }
+
+    def render(ctx, data):
+        from ..lenses.store import tick_chain_view
+
+        return tick_chain_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        default_mode=OutputMode.STATIC,
+        prog="loops store ticks",
+        description=(
+            "Read a store's tick series. --chain projects the attestation "
+            "envelope (chain linkage, signature, window cursor) per tick; "
+            "the default projects density (items/facts/delta)."
+        ),
+        help_args=help_args,
+    )
+
+
+def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Store statistics — topline totals and (``--by-kind``) a
+    count-descending per-kind tally. Works on a ``.db`` or a ``.vertex``.
+    """
+    import argparse
+    from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
+    pre.add_argument("--by-kind", dest="by_kind", action="store_true", default=False)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = getattr(known, "file", None)
+
+    target_path = _resolve_target(file_arg, vertex_path).resolve()
+
+    help_args = (
+        [HelpArg("file", "Store .db or .vertex file, or vertex name",
+                 positional=True)]
+        if vertex_path is None else []
+    )
+
+    def fetch():
+        from engine.store_reader import StoreReader
+
+        store_path = resolve_store_path(target_path)
+        if not store_path.exists():
+            raise FileNotFoundError(f"{store_path} does not exist")
+        with StoreReader(store_path) as reader:
+            summary = reader.summary()
+        kinds = sorted(
+            (
+                {"kind": k, "count": v["count"]}
+                for k, v in summary["facts"]["kinds"].items()
+            ),
+            key=lambda r: r["count"],
+            reverse=True,
+        )
+        return {
+            "vertex": target_path.stem,
+            "by_kind": known.by_kind,
+            "total_facts": summary["facts"]["total"],
+            "total_ticks": summary["ticks"]["total"],
+            "kind_count": len(kinds),
+            "kinds": kinds,
+        }
+
+    def render(ctx, data):
+        from ..lenses.store import stats_view
+
+        return stats_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        default_mode=OutputMode.STATIC,
+        prog="loops store stats",
+        description=(
+            "Store statistics. --by-kind adds a count-descending per-kind tally."
+        ),
+        help_args=help_args,
+    )
+
+
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
@@ -512,6 +674,10 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "ticks":
+        return _run_store_ticks(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "stats":
+        return _run_store_stats(argv[1:], vertex_path=vertex_path)
 
     # Base inspect: pre-parse the optional ``file`` target; run_cli owns -h
     # and the -i/-q/-v/--json/--plain axes, listing ``file`` (when accepted)

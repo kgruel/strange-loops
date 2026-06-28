@@ -881,13 +881,29 @@ def fetch_tick_windows(
     vertex_path: Path,
     *,
     name: str | None = None,
-    since: str = "30d",
+    since: str | None = "30d",
+    all_names: bool = False,
 ) -> "tuple[TickWindow, ...]":
     """Build ``TickWindow`` objects for a vertex's recent ticks.
 
     When *name* is None or empty, resolves to the vertex name — the tick
     series produced by the vertex-level boundary. Otherwise filters to
     the named loop's tick series.
+
+    *all_names* spans EVERY tick series in the store (no name filter) —
+    the full hash chain, which links all appended ticks regardless of
+    name (genesis/rebirth ticks carry a different name than the vertex
+    boundary series, so the name filter would silently drop them). This
+    is what ``store ticks --chain`` needs to agree with ``store verify``.
+    Because cross-series adjacency is not a real delta, ``delta_*`` are
+    zeroed when *all_names* is set — they are a same-series concept.
+    *all_names* takes precedence over *name*.
+
+    *since* is a duration window (``"30d"``, ``"24h"``); pass ``None`` for
+    the full history (all ticks from epoch). The attestation-chain read
+    (``store ticks --chain``) wants the whole chain — genesis and the
+    legacy-era boundary are exactly the interesting cases — not a recent
+    slice.
 
     Returns newest-first. ``delta_*`` on index *i* compares against index
     *i + 1* (the next-older tick). The oldest tick in the returned slice
@@ -897,13 +913,17 @@ def fetch_tick_windows(
     from engine import vertex_ticks
     from lang import parse_vertex_file
 
-    if not name:
+    if all_names:
+        name = None  # no filter — span the full chain across every series
+    elif not name:
         ast = parse_vertex_file(vertex_path)
         name = ast.name
 
-    since_secs = _parse_duration(since)
     now = datetime.now(timezone.utc)
-    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+    if since is None:
+        since_ts = 0.0
+    else:
+        since_ts = (now - timedelta(seconds=_parse_duration(since))).timestamp()
 
     pairs = vertex_ticks(
         vertex_path, since_ts, now.timestamp(), name=name, with_envelope=True
@@ -934,7 +954,10 @@ def fetch_tick_windows(
         status = str(boundary.get("status", ""))
         trigger = f"{observer} {status}".strip() if observer else ""
 
-        if i + 1 < len(payload_stats):
+        if all_names:
+            # Cross-series adjacency is not a meaningful delta — zero it.
+            delta_added, delta_updated, added, updated = 0, 0, {}, {}
+        elif i + 1 < len(payload_stats):
             delta_added, delta_updated, added, updated = _tick_delta(
                 stats, payload_stats[i + 1],
             )

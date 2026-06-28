@@ -144,7 +144,7 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         reporter.err(f"Error: {exc}")
         return 1
 
-    from loops.lens_resolver import call_lens
+    from loops.lens_resolver import call_lens, normalize_width
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
     # existing lenses accept. visible/chars/lines flow as kwargs; the lens
@@ -162,7 +162,9 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         extra.setdefault("vertex_path", str(op.vertex_path))
 
     try:
-        block = call_lens(lens_fn, data, _zoom_of(op.fidelity), reporter.width, **extra)
+        block = call_lens(
+            lens_fn, data, _zoom_of(op.fidelity), normalize_width(reporter.width), **extra
+        )
     except Exception as exc:
         reporter.err(f"Render error: {exc}")
         return 2
@@ -199,7 +201,7 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
 
     from painted import run_cli
 
-    from loops.lens_resolver import call_lens
+    from loops.lens_resolver import call_lens, normalize_width
 
     # Fidelity was already resolved upstream in the view (domain visibility,
     # zoom, --diff context). Capture it into the per-frame closure; run_cli
@@ -221,7 +223,7 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     def render(ctx, data):
         # painted's render contract: (CliContext, data) -> Block. Width is
         # the terminal width on a TTY, None when piped (no-truncation).
-        width = ctx.width if ctx.is_tty else None
+        width = normalize_width(ctx.width if ctx.is_tty else None)
         return call_lens(lens_fn, data, zoom, width, **extra)
 
     def fetch():

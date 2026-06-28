@@ -9,11 +9,12 @@ Decisions (1):
 
 ## REFS (2)
   ┄ via → decision/design/root
-    walk-target [→1 Jan 15]: open
+    walk-target [←1 →1 Jan 15]: open
       id:01TTTTTT
       → observation:deep
       _id: 01TTTTTTTTTTTTTTTTTTTTTTTT
       _ts: 2025-01-15T09:00:00+00:00
+      _inbound_refs: 1
   ┄ via → thread/walk-target
     ↳ (d2)
       deep [Jan 15]: two hops out

@@ -372,6 +372,14 @@ class TestCiteImplicitlyUniversal:
             '  decision { fold { items "by" "topic" } }\n'
             "}\n"
         )
+        # Seed the referenced decision so the cite's ref resolves cleanly.
+        # Isolates this test to the cite-kind-universality assertion: a ref to
+        # a non-existent entity would (correctly) warn on its own, which is a
+        # different concern from whether the undeclared 'cite' kind warns.
+        seed = _ns(kind="decision", parts=["topic=design/foo", "message=seed"])
+        assert cmd_emit(seed, vertex_path=vpath) == 0
+        capsys.readouterr()  # drain the seed receipt
+
         parts = ["ref=decision:design/foo", "message=cite with no explicit declaration"]
         ns = _ns(kind="cite", parts=parts)
         rc = cmd_emit(ns, vertex_path=vpath)
@@ -480,6 +488,76 @@ class TestInboundDelta:
         assert rc == 0
         err = capsys.readouterr().err
         assert "refs: 2 resolved" in err
+
+    def test_verbose_inbound_delta_for_colon_ref(self, basic_vertex, capsys):
+        """Regression: the CANONICAL colon ref form (kind:key) resolves and
+        fires the inbound-delta. Pre-fix the emit-time resolver only handled
+        the slash form, so colon refs — the documented convention — silently
+        never resolved (0/499 in the live store)."""
+        _emit(basic_vertex, "decision", topic="design/seed", message="seed")
+        capsys.readouterr()  # clear
+
+        ns = _ns(kind="thread",
+                 parts=["name=fu", "status=open", "ref=decision:design/seed"],
+                 verbose=1)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "inbound +1 on decision:design/seed" in err
+        assert "refs: 1 resolved" in err
+
+    def test_colon_comma_ref_count_matches_addresses(self, basic_vertex, capsys):
+        """Comma-joined colon refs each resolve and count."""
+        _emit(basic_vertex, "decision", topic="design/ra", message="a")
+        _emit(basic_vertex, "decision", topic="design/rb", message="b")
+        capsys.readouterr()
+
+        rc, _ = _emit(basic_vertex, "thread", name="multi", status="open",
+                      ref="decision:design/ra,decision:design/rb")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "refs: 2 resolved" in err
+
+    def test_colon_ref_to_missing_entity_warns(self, basic_vertex, capsys):
+        """A colon ref whose kind is declared but key has no match surfaces a
+        write-time WARN — the typo/stale-ref detection that was dead for colon
+        refs pre-fix."""
+        rc, _ = _emit(basic_vertex, "thread", name="typo", status="open",
+                      ref="decision:design/does-not-exist")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "WARN" in err and "did not resolve" in err
+
+
+class TestAddressSplit:
+    """Pure-function guards for the colon-canonical address parser."""
+
+    def test_colon_splits_kind_from_namespaced_key(self):
+        from loops.commands.resolve import _split_addr
+        # Colon binds tighter than the namespace slash in the key.
+        assert _split_addr("decision:design/foo") == ("decision", "design/foo")
+        assert _split_addr("thread:arc-name") == ("thread", "arc-name")
+
+    def test_slash_form_back_compat(self):
+        from loops.commands.resolve import _split_addr
+        assert _split_addr("thread/arc") == ("thread", "arc")
+        assert _split_addr("decision/design/foo") == ("decision", "design/foo")
+
+    def test_no_separator_or_empty_side_is_none(self):
+        from loops.commands.resolve import _split_addr
+        assert _split_addr("barewords") is None
+        assert _split_addr(":key") is None
+        assert _split_addr("kind:") is None
+
+    def test_candidate_requires_separator_and_no_whitespace(self):
+        from loops.commands.resolve import _is_addr_candidate
+        assert _is_addr_candidate("decision:design/foo") is True
+        assert _is_addr_candidate("thread/arc") is True
+        # Free-text prose must not be misread as a ref (false-WARN guard).
+        assert _is_addr_candidate("note: see the foo") is False
+        assert _is_addr_candidate("plain text") is False
+        assert _is_addr_candidate("nosep") is False
+        assert _is_addr_candidate("") is False
 
 
 class TestDryRunWording:

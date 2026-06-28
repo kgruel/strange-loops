@@ -174,14 +174,17 @@ def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
 def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
     """Look up inbound ref count for this item.
 
-    Matches refs in two forms:
-    * Kind-qualified — ``<fact-kind>/<key>`` (e.g. ``decision/design/foo``)
+    Matches refs in three forms:
+    * Kind-qualified colon — ``<fact-kind>:<key>`` (CANONICAL — e.g.
+      ``decision:design/foo``, ``thread:arc-name``)
+    * Kind-qualified slash — ``<fact-kind>/<key>`` (legacy — e.g. ``decision/design/foo``)
     * Bare — the key_field value itself (e.g. ``design/foo``)
 
-    The bare form matters when the key contains a namespace slash:
-    ``endswith("/foo")`` alone misses it. Both forms commonly appear in
-    practice — refs emitted as ``ref=design/foo`` vs ``ref=decision/design/foo``
-    should contribute equivalently to salience.
+    The colon form is the documented ref convention; matching only the slash
+    and bare forms silently dropped EVERY ``kind:key`` inbound ref from
+    salience — the dominant form in practice (the read-side twin of the
+    emit-time colon-blindness fixed in resolve.py). The bare form matters when
+    the key contains a namespace slash: ``endswith("/foo")`` alone misses it.
     """
     if not key_field:
         return 0
@@ -189,9 +192,14 @@ def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> i
     if not key:
         return 0
     count = 0
-    suffix = f"/{key}"
+    suffix_slash = f"/{key}"
+    suffix_colon = f":{key}"
     for ref_key, ref_count in inbound.items():
-        if ref_key == key or ref_key.endswith(suffix):
+        if (
+            ref_key == key
+            or ref_key.endswith(suffix_slash)
+            or ref_key.endswith(suffix_colon)
+        ):
             count += ref_count
     return count
 

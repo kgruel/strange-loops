@@ -369,6 +369,43 @@ def _topology_kind_keys_and_stores(
 # --- Entity reference resolution ---
 
 
+def _split_addr(addr: str) -> tuple[str, str] | None:
+    """Split an entity address into ``(kind, key)``.
+
+    Canonical form is ``kind:key`` (colon) — e.g. ``decision:design/foo``,
+    ``thread:arc-name``. The key itself may contain ``/`` (namespaced
+    topics), so the colon binds tighter: split on the FIRST ``:`` when one
+    is present. ``kind/key`` (slash) is accepted for back-compat with refs
+    emitted before the colon form was the documented convention. Returns
+    ``None`` when neither separator is present or either side is empty.
+    """
+    if ":" in addr:
+        kind, key = addr.split(":", 1)
+    elif "/" in addr:
+        kind, key = addr.split("/", 1)
+    else:
+        return None
+    if not kind or not key:
+        return None
+    return kind, key
+
+
+def _is_addr_candidate(value: str) -> bool:
+    """Whether a payload value is worth scanning as an entity address.
+
+    Must carry a separator (``:`` or ``/``) and contain no whitespace. The
+    whitespace guard keeps free-text prose (``"note: see the foo"``) from
+    being misread as a ref now that the colon separator is honored — without
+    it, a message beginning ``decision: ...`` would split to the declared
+    kind ``decision`` and surface a false unresolved-ref WARN.
+    """
+    return (
+        bool(value)
+        and not any(c.isspace() for c in value)
+        and (":" in value or "/" in value)
+    )
+
+
 def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
@@ -377,7 +414,8 @@ def _resolve_entity_refs(
 ) -> tuple[dict[str, str], list[UnresolvedRef], list[ResolvedRef]]:
     """Resolve entity addresses in payload values to ULIDs.
 
-    Scans payload values for entity addresses (kind/fold_key_value format).
+    Scans payload values for entity addresses. Canonical form is ``kind:key``
+    (colon); the legacy ``kind/key`` (slash) form is also accepted (_split_addr).
     When a value matches a declared kind, looks up the most recent fact ULID
     for that entity — first in the local store, then across the full topology
     if the local store misses.
@@ -459,9 +497,10 @@ def _resolve_entity_refs(
         unresolved ref (declared kind but no match — likely a typo or
         stale ref) or silently skip (unknown kind — not an intended ref).
         """
-        if "/" not in addr:
+        parts = _split_addr(addr)
+        if parts is None:
             return None, False
-        addr_kind, addr_value = addr.split("/", 1)
+        addr_kind, addr_value = parts
 
         # Try local store first
         if addr_kind in local_kind_keys:
@@ -487,16 +526,17 @@ def _resolve_entity_refs(
 
         return None, True  # declared kind, no match → caller surfaces as unresolved
 
-    # Scan payload values for entity address pattern: kind/fold_key_value.
-    # The ``ref`` field accumulates comma-separated addresses (parse-side
-    # convention in ``_parse_emit_parts``); resolve each one independently
-    # and concatenate the resolved IDs. All other fields are scanned as
-    # single addresses — preserves single-ref-on-any-field semantics.
+    # Scan payload values for entity addresses. Canonical form is ``kind:key``
+    # (colon); ``kind/key`` (slash) is accepted for back-compat — see
+    # ``_split_addr``. The ``ref`` field accumulates comma-separated addresses
+    # (parse-side convention in ``_parse_emit_parts``); resolve each one
+    # independently and concatenate the resolved IDs. All other fields are
+    # scanned as single addresses — preserves single-ref-on-any-field semantics.
     refs: dict[str, str] = {}
     unresolved: list[UnresolvedRef] = []
     resolved: list[ResolvedRef] = []
     for field_name, value in payload.items():
-        if not isinstance(value, str) or "/" not in value:
+        if not isinstance(value, str):
             continue
         if field_name == self_key_field:
             continue  # fold-key field — self-identity, not a ref
@@ -507,7 +547,7 @@ def _resolve_entity_refs(
         )
         resolved_ids: list[str] = []
         for addr in addresses:
-            if not addr or "/" not in addr:
+            if not _is_addr_candidate(addr):
                 continue
             rid, declared = _resolve_one(addr)
             if rid is not None:

@@ -6,7 +6,7 @@ Decisions (1):
 
 ## REFS (2)
   ┄ via → decision/design/root
-    walk-target [→1 Jan 15]: open
+    walk-target [←1 →1 Jan 15]: open
       id:01TTTTTT
       → observation:deep
   ┄ via → thread/walk-target

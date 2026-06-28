@@ -421,27 +421,116 @@ def project(
 # ---------------------------------------------------------------------------
 
 
-def search(surface: Surface, query: str) -> Surface:
-    """CONTENT-SEARCH → event-axis rows (S1: engine-free substring fallback).
+def _event_row(fact: dict) -> Row:
+    """Build an event-axis Row from a ``vertex_search`` / ``vertex_facts`` dict.
 
-    S1 scans the already-projected rows' payload text for ``query`` as a
-    case-insensitive substring, re-tagging matches as ``axis="event"`` and
-    ordering ts-desc. S5 re-binds the match source onto ``engine.vertex_search``
-    FTS5 (and adds the ``vertex_path`` param + coverage signal) — this is the
-    seam, kept engine-free here so surface.py stays a leaf.
+    These are RAW facts (one per write, the event axis) — ``{kind, ts, observer,
+    origin, id, payload}`` — with ``ts`` a ``datetime`` and no top-level
+    ``refs``. The address is ``kind/<id>`` (no fold key on the event axis).
     """
+    from datetime import datetime
+
+    ts = fact.get("ts")
+    if isinstance(ts, datetime):
+        ts = ts.timestamp()
+    fid = fact.get("id")
+    kind = fact.get("kind", "")
+    return Row(
+        address=_address(kind, None, fid),
+        kind=kind,
+        payload=dict(fact.get("payload", {})),
+        key=None,
+        axis="event",
+        id=fid,
+        ts=ts,
+        observer=fact.get("observer", ""),
+        origin=fact.get("origin", ""),
+        n=1,
+        refs=(),
+        inbound=0,
+        salience=1,
+        granularity="headline",
+    )
+
+
+def _indexed_kinds(vertex_path) -> set[str]:
+    """The kinds FTS-indexed in a vertex (those declaring ``search`` fields).
+
+    Returns an empty set on any parse failure or when ``vertex_path`` is None —
+    callers then treat every present kind as un-indexed (substring fallback).
+    """
+    if vertex_path is None:
+        return set()
+    try:
+        from lang import parse_vertex_file
+
+        ast = parse_vertex_file(vertex_path)
+    except Exception:
+        return set()
+    return {kind for kind, ld in ast.loops.items() if getattr(ld, "search", ())}
+
+
+def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
+    """CONTENT-SEARCH → event-axis rows: FTS5 for indexed kinds, substring for
+    the rest, with a coverage signal for the gap.
+
+    Two disjoint sources, combined and ordered ts-desc:
+
+    * FTS path — ``engine.vertex_search`` over the kinds that declare ``search``
+      fields. These return RAW facts (the event axis: every matching write, not
+      the folded item), converted to event Rows.
+    * Substring path — for kinds with NO ``search`` declaration (which FTS can't
+      see), a case-insensitive substring scan over the already-projected rows,
+      re-tagged ``axis="event"``. Folded-granularity, but it covers undeclared
+      kinds at all.
+
+    ``Window.unindexed`` records every present kind that lacked FTS coverage (the
+    superset-of-``unfolded`` coverage-K), so the lens can footer ``(K not
+    indexed)`` — the honesty signal that those kinds were substring-scanned, not
+    FTS-searched. The two sets are disjoint by construction (a kind is indexed
+    XOR not), so no fact is double-counted.
+    """
+    indexed = _indexed_kinds(vertex_path)
+    present = {r.kind for r in surface.rows}
+    # FTS covers present-AND-indexed; substring covers present-AND-not-indexed.
+    # Scoping to ``present`` respects the fetch-time --kind narrowing (which only
+    # shrank the surface, not vertex_search's view) — else FTS would leak hits
+    # from other indexed kinds the user filtered out.
+    fts_kinds = present & indexed
+    unindexed = tuple(sorted(present - indexed))
+
+    rows: list[Row] = []
+
+    # FTS path — only meaningful when the vertex is known and a present kind is
+    # indexed.
+    if vertex_path is not None and fts_kinds:
+        try:
+            from engine import vertex_search
+
+            facts = vertex_search(vertex_path, query)
+        except Exception:
+            facts = []
+        rows.extend(_event_row(f) for f in facts if f.get("kind") in fts_kinds)
+
+    # Substring path — over the projected rows of UN-indexed kinds only (disjoint
+    # from the FTS set).
     q = query.lower()
-    matched = [
+    rows.extend(
         replace(r, axis="event")
         for r in surface.rows
-        if q in _payload_text(r.payload).lower()
-    ]
-    matched.sort(key=lambda r: (r.ts if r.ts is not None else 0.0), reverse=True)
-    rows = tuple(matched)
-    window = replace(
-        surface.window, query=query, total=len(rows), shown=len(rows)
+        if r.kind in unindexed and q in _payload_text(r.payload).lower()
     )
-    return replace(surface, rows=rows, window=window)
+
+    rows.sort(key=lambda r: (r.ts if r.ts is not None else 0.0), reverse=True)
+    row_tuple = tuple(rows)
+    window = replace(
+        surface.window,
+        query=query,
+        total=len(row_tuple),
+        shown=len(row_tuple),
+        unindexed=unindexed,
+    )
+    return replace(surface, rows=row_tuple, window=window)
 
 
 def filter(  # noqa: A001 — domain verb; the shadow of builtins.filter is intentional

@@ -50,6 +50,7 @@ class SurfaceSpec:
 
     queried_key: str | None = None   # --key (single) → project() granularity
     full: bool = False               # --full → project(full=True)
+    match: str | None = None         # --match QUERY → search() (runs FIRST)
     key_or: tuple[str, ...] = ()     # comma-OR --key (len>1) → filter(key_or=)
     # field=value predicates (eq + comma-OR), as (field, allowed-values) pairs
     where: tuple[tuple[str, tuple[str, ...]], ...] = ()

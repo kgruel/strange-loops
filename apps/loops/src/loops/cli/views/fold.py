@@ -123,6 +123,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--facts", action="store_true", default=False,
         help="Show raw fact stream instead of folded state",
     )
+    parser.add_argument(
+        "--match", "--grep", default=None, metavar="QUERY", dest="match",
+        help="Content search — FTS5 for indexed kinds, substring for the rest",
+    )
     # Read-grammar transforms (S4) — applied over the projected Surface, so
     # plain and --json carry the same transformed rows.
     parser.add_argument(
@@ -471,6 +475,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     surface_spec = SurfaceSpec(
         queried_key=queried_key,
         full=args.full,
+        match=args.match,
         key_or=key_or,
         where=tuple((f, v) for f, v in where.items()),
         observer=observer_filter,

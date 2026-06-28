@@ -327,28 +327,6 @@ class TestFetchIntegration:
         assert len(result["facts"]) >= 1
         assert all(f["payload"]["service"] == "api" for f in result["facts"])
 
-    def test_fetch_stream_query_path(self, tmp_path):
-        from engine.builder import fold_collect, vertex
-        from loops.commands.fetch import fetch_stream
-        from loops.main import cmd_emit
-        import argparse
-
-        vpath = tmp_path / "t.vertex"
-        vertex("t").store("./t.db").loop("event", fold_collect("items", max_items=100), search=["message"]).write(vpath)
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="event", parts=["message=deploy api"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="event", parts=["message=other"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-
-        result = fetch_stream(vpath, query="deploy")
-        assert len(result["facts"]) >= 1
-        assert any("deploy" in f["payload"].get("message", "") for f in result["facts"])
-
-
 # ---------------------------------------------------------------------------
 # TickWindow plumbing
 # ---------------------------------------------------------------------------

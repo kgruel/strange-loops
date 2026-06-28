@@ -292,15 +292,15 @@ def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool
 def fetch_stream(
     vertex_path: Path,
     *,
-    query: str | None = None,
     kind: str | None = None,
     since: str | None = None,
     observer: str | None = None,
 ) -> dict:
-    """Fetch event stream with three orthogonal filters.
+    """Fetch the temporal event stream (raw facts, reverse-chrono).
 
-    Unifies log + search into a single fetch. When *query* is provided,
-    uses FTS5 search; otherwise returns raw facts in reverse-chrono order.
+    Content search is NOT here anymore — it re-bound onto ``read --match`` (the
+    Surface ``search()`` transform, S5). This is the pure temporal-query path:
+    raw facts in a time window, optionally narrowed by ``kind``/``observer``.
 
     Supports ``kind/key`` drill-down: ``--kind thread/fold-state-types``
     returns only facts whose key field payload starts with the prefix
@@ -309,7 +309,7 @@ def fetch_stream(
 
     Returns ``{"facts": list[dict], "fold_meta": dict, "vertex": str}``.
     """
-    from engine import vertex_facts, vertex_search
+    from engine import vertex_facts
     from lang import parse_vertex_file
     from lang.ast import FoldBy
 
@@ -321,16 +321,10 @@ def fetch_stream(
     now = datetime.now(timezone.utc)
     since_ts = (now - timedelta(seconds=since_secs)).timestamp()
 
-    if query:
-        facts = vertex_search(
-            vertex_path, query, kind=kind_filter, since=since_ts, limit=100,
-            observer=observer,
-        )
-    else:
-        facts = vertex_facts(
-            vertex_path, since_ts, now.timestamp(), kind=kind_filter,
-            observer=observer,
-        )
+    facts = vertex_facts(
+        vertex_path, since_ts, now.timestamp(), kind=kind_filter,
+        observer=observer,
+    )
 
     # Key drill-down: filter facts by payload key field value
     if key_filter is not None:

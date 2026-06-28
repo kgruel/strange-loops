@@ -145,6 +145,11 @@ def fold_view(
     if isinstance(data, FoldState):
         data = project(data)
 
+    # Content-search (--match) switches the lens to the event axis: a flat
+    # ts-desc list of matching facts, with the (K not indexed) coverage footer.
+    if data.window.query is not None:
+        return _render_search(data, zoom, width)
+
     # Primary rows group by kind in fold (== declaration) order; walked rows
     # (depth>0) render after. Salience/inbound are already materialized.
     primary = [r for r in data.rows if r.depth == 0]
@@ -235,6 +240,53 @@ def fold_view(
         blocks.append(Block.text(
             "  ".join(footer_parts), fp.unfolded, width=width,
         ))
+
+    return join_vertical(*blocks)
+
+
+def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
+    """Event-axis render for ``--match`` — a flat ts-desc list of matching facts.
+
+    Each row is one matching FACT (event axis), not a folded item, so there is
+    no kind-grouping; the read is chronological. The footer names the kinds that
+    lacked FTS coverage (``window.unindexed``) — the honesty signal that those
+    were substring-scanned, not FTS-searched.
+    """
+    from loops.lenses.gist import content_gist
+
+    fp = _default_fold_palette()
+    q = data.window.query
+    rows = list(data.rows)
+    n = len(rows)
+
+    if zoom == Zoom.MINIMAL:
+        line = f"{n} match{'es' if n != 1 else ''} for {q!r}"
+        if data.window.unindexed:
+            line += f" ({len(data.window.unindexed)} not indexed)"
+        return Block.text(line, Style(), width=width)
+
+    fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
+    blocks: list[Block] = [
+        Block.text(
+            f"MATCH {q!r} — {n} result{'s' if n != 1 else ''}",
+            fp.section_header, width=width,
+        )
+    ]
+    if not rows:
+        blocks.append(Block.text("  (no matches)", Style(dim=True), width=width))
+    for r in rows:
+        date = fmt(r.ts) if r.ts is not None else ""
+        gist = content_gist(r.kind, r.payload)
+        line = f"  {date}  {r.kind}: {gist}".rstrip()
+        blocks.append(Block.text(line, Style(), width=width))
+
+    if data.window.unindexed:
+        footer = (
+            f"({len(data.window.unindexed)} not indexed: "
+            f"{', '.join(data.window.unindexed)})"
+        )
+        blocks.append(Block.text("", Style(), width=width))
+        blocks.append(Block.text(footer, fp.unfolded, width=width))
 
     return join_vertical(*blocks)
 

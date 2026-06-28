@@ -119,13 +119,19 @@ def _project_surface(op: Operation, data):
     semantic). Budgeting first would instead count only the head of the raw
     population — the count-row salience would never do its job.
     """
-    from loops.surface import budget, count, filter, project, select
+    from loops.surface import budget, count, filter, project, search, select
 
     spec = op.surface_spec
     if spec is None:
         return project(data)
 
     surface = project(data, queried_key=spec.queried_key, full=spec.full)
+
+    # --match runs FIRST — it changes the axis/row set (entity → event rows),
+    # so every later transform (filter/select/budget/count) operates on the
+    # matched event rows.
+    if spec.match:
+        surface = search(surface, spec.match, vertex_path=op.vertex_path)
 
     where = dict(spec.where) if spec.where else None
     if spec.key_or or where or spec.observer is not None:

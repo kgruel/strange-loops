@@ -487,6 +487,89 @@ def test_search_orders_ts_desc():
     assert [r.key for r in found.rows] == ["design/b", "design/c", "design/a"]
 
 
+# --- S5: FTS5 + substring fallback + coverage signal -----------------------
+
+
+def _search_vertex(tmp_path):
+    """A two-kind vertex: ``decision`` FTS-indexed (search=), ``thread`` NOT.
+
+    Returns (vpath) after seeding one searchable fact in each kind.
+    """
+    import argparse
+
+    from engine.builder import fold_by, vertex
+    from loops.main import cmd_emit
+
+    v = (
+        vertex("srch")
+        .store("./srch.db")
+        .loop("decision", fold_by("topic"), search=["topic", "message"])
+        .loop("thread", fold_by("name"))
+    )
+    vpath = tmp_path / "srch.vertex"
+    v.write(vpath)
+
+    def emit(kind, **payload):
+        parts = [f"{k}={val}" for k, val in payload.items()]
+        cmd_emit(
+            argparse.Namespace(vertex=None, kind=kind, parts=parts, observer="", dry_run=False),
+            vertex_path=vpath,
+        )
+
+    emit("decision", topic="design/auth", message="choose JWT over sessions")
+    emit("thread", name="auth-arc", message="revisit JWT rotation later")
+    return vpath
+
+
+def test_search_coverage_signal_lists_unindexed_kinds():
+    # Pure (vertex_path=None) → every present kind is treated as un-indexed and
+    # surfaced in the coverage signal; the substring path still runs.
+    state = _byfold_state(_decision("design/auth"))
+    surface = project(state)
+    found = search(surface, "auth", vertex_path=None)
+    assert found.window.query == "auth"
+    assert found.window.unindexed == ("decision",)
+    assert all(r.axis == "event" for r in found.rows)
+
+
+def test_search_fts_finds_bodies_in_indexed_kind(tmp_path):
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+    # FTS finds the decision body (indexed). thread is un-indexed → flagged.
+    kinds = {r.kind for r in found.rows}
+    assert "decision" in kinds
+    assert "thread" in found.window.unindexed
+    assert found.window.query == "JWT"
+
+
+def test_search_substring_fallback_for_undeclared_kind(tmp_path):
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    state = fetch_fold(vpath)
+    # "rotation" lives only in the thread (un-indexed) — found via substring,
+    # not FTS (vertex_search can't see un-indexed kinds).
+    found = search(project(state), "rotation", vertex_path=vpath)
+    assert any(r.kind == "thread" for r in found.rows)
+    assert "thread" in found.window.unindexed
+
+
+def test_search_fts_respects_kind_scoped_surface(tmp_path):
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    # Both decision (indexed) and thread mention "JWT". A surface already scoped
+    # to decision (the --kind fetch narrowing) must NOT leak thread FTS hits.
+    decision_only = fetch_fold(vpath, kind="decision")
+    found = search(project(decision_only), "JWT", vertex_path=vpath)
+    assert {r.kind for r in found.rows} == {"decision"}
+    # thread was filtered out at fetch → not present → not in the coverage gap.
+    assert "thread" not in found.window.unindexed
+
+
 # ---------------------------------------------------------------------------
 # Encoders + source_facts carry
 # ---------------------------------------------------------------------------

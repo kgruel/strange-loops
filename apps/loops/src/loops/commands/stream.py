@@ -6,11 +6,12 @@ from pathlib import Path
 
 
 def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None) -> int:
-    """Run stream command — unified event history with optional search.
+    """Run stream command — the temporal event history (raw facts, reverse-chrono).
 
-    Dissolves the old log + search into one temporal mode.
-    When vertex_path is None (verb-first), the first positional is tried as
-    a vertex name before falling back to search query.
+    Content search re-bound onto ``read --match`` (S5), so this is now purely a
+    temporal mode: an optional leading vertex name, ``--kind``/``--since``
+    filters, and ``--id`` single-fact lookup. The first positional is a vertex
+    name only (no search-query fallback).
     """
     from painted import run_cli
     from loops.commands.resolve import _validate_kind_or_exit, _vertex_name
@@ -20,10 +21,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
 
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
-        pre.add_argument("vertex_or_query", nargs="?", default=None)
-        pre.add_argument("query", nargs="?", default=None)
-    else:
-        pre.add_argument("query", nargs="?", default=None)
+        pre.add_argument("vertex_name", nargs="?", default=None)
     pre.add_argument("--kind", default=None)
     pre.add_argument("--since", default=None)
     pre.add_argument("--lens", default=None)
@@ -35,22 +33,15 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
 
     def fetch():
         nonlocal vertex_path, observer
-        query = known.query
 
         if vertex_path is None:
             from .identity import resolve_local_vertex as _resolve_local_vertex
 
-            first = getattr(known, "vertex_or_query", None)
+            first = getattr(known, "vertex_name", None)
             if first is not None:
-                # Try as vertex name first; if it fails, treat as query
                 resolved = _resolve_vertex_for_dispatch(first)
                 if resolved is not None:
                     vertex_path = resolved
-                else:
-                    # Not a vertex — it's the query; shift known.query to unused
-                    query = first
-                    if known.query is not None:
-                        query = f"{first} {known.query}"
             if vertex_path is None:
                 vertex_path = _resolve_local_vertex()
 
@@ -78,7 +69,6 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
         from .fetch import fetch_stream
         return fetch_stream(
             vertex_path,
-            query=query,
             kind=known.kind,
             since=known.since,
             observer=obs_for_engine,

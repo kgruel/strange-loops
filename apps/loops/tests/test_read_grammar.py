@@ -184,6 +184,36 @@ class TestTransformFlags:
         assert s["rows"][0]["granularity"] == "whole"
 
 
+class TestMatch:
+    def test_match_switches_to_event_axis(self, grammar_vertex, capsys):
+        # grammar_vertex declares no search= field, so every kind is un-indexed;
+        # --match alpha finds the design/a decision body via the substring path.
+        _, vpath = grammar_vertex
+        _seed(vpath)
+        rc, s = _json_read(capsys, str(vpath), "--match", "alpha")
+        assert rc == 0
+        assert s["window"]["query"] == "alpha"
+        assert all(r["axis"] == "event" for r in s["rows"])
+        assert any("alpha" in str(r["payload"].values()) for r in s["rows"])
+
+    def test_match_coverage_signal_present(self, grammar_vertex, capsys):
+        _, vpath = grammar_vertex
+        _seed(vpath)
+        rc, s = _json_read(capsys, str(vpath), "--match", "open")
+        assert rc == 0
+        # No kind declares search= in grammar_vertex → all present kinds are
+        # un-indexed and surfaced in the coverage signal.
+        assert set(s["window"]["unindexed"]) == {"decision", "thread"}
+
+    def test_match_then_budget_limits_event_rows(self, grammar_vertex, capsys):
+        _, vpath = grammar_vertex
+        _seed(vpath)
+        # --match runs first (event rows), then --last budgets them.
+        rc, s = _json_read(capsys, str(vpath), "--match", "one", "--last", "1")
+        assert rc == 0
+        assert len(s["rows"]) <= 1
+
+
 # --- Predicate grammar across the three dispatch shapes --------------------
 
 

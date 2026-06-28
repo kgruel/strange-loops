@@ -7,7 +7,7 @@ an Operation; ``cli.dispatch.dispatch(op, reporter=…)`` executes it.
 
 The discriminator is ``render_lens``:
   - ``None`` → action shape: fn() runs, result (if any) goes to reporter.show
-  - ``"fold" | "stream" | "trace" | …`` → display shape: fn() returns data,
+  - ``"fold" | "stream" | "ticks" | …`` → display shape: fn() returns data,
     lens renders it, reporter prints the block
 
 This decouples input context (CLI / HTTP / programmatic) from execution
@@ -36,6 +36,32 @@ Mode = Literal["static", "live", "interactive"]
 
 
 @dataclass(frozen=True)
+class SurfaceSpec:
+    """Declarative read-grammar transform spec — assembled by the fold view
+    from flags, applied by dispatch AFTER ``project()`` (and before either
+    encoder), so plain and ``--json`` carry the same transformed rows.
+
+    Carried on a dedicated Operation field rather than ``render_context`` so the
+    transform parameters never leak into the lens's kwargs. Each field maps to
+    one flag; dispatch applies them in a fixed canonical order
+    (filter → select → budget → count). ``queried_key``/``full`` flow into
+    ``project()`` itself (granularity); the rest are Surface→Surface transforms.
+    """
+
+    queried_key: str | None = None   # --key (single) → project() granularity
+    full: bool = False               # --full → project(full=True)
+    key_or: tuple[str, ...] = ()     # comma-OR --key (len>1) → filter(key_or=)
+    # field=value predicates (eq + comma-OR), as (field, allowed-values) pairs
+    where: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    observer: str | None = None      # observer= bareword row filter
+    fields: tuple[str, ...] | None = None  # --fields → select()
+    limit: int | None = None         # --limit → budget(limit=)
+    last: int | None = None          # --last → budget(last=)
+    count_by: str | None = None      # --count --by FIELD → count(by=)
+    do_count: bool = False           # --count → count()
+
+
+@dataclass(frozen=True)
 class Operation:
     """Normalized intent for a CLI invocation.
 
@@ -46,7 +72,7 @@ class Operation:
             ``dispatch``.
         params: kwargs for fn.
         render_lens: name of the BASE lens to render fn's return value
-            through ("fold", "stream", "trace", …). Determines the
+            through ("fold", "stream", "ticks", …). Determines the
             function name dispatch looks up inside the lens module
             (``fold_view`` / ``stream_view`` / …). ``None`` means action
             shape (no rendering — fn does its own side-effects and
@@ -64,8 +90,12 @@ class Operation:
             ``--json`` / ``--plain``. dispatch forks on JSON to encode the
             Surface via ``to_dict`` instead of the text lens. ``None`` when
             the view doesn't carry a format (legacy shims).
-        render_context: extra kwargs forwarded to the lens (e.g. ``diff=True``
-            for cumulative-delta rendering).
+        render_context: extra kwargs forwarded to the lens (e.g. lens-specific
+            render hints). Kept distinct from ``surface_spec`` so transform
+            parameters never leak into the lens's kwargs.
+        surface_spec: the read-grammar transform spec (``SurfaceSpec``) applied
+            by dispatch over the projected Surface — filter/select/budget/count
+            + granularity (queried_key/full). ``None`` for non-Surface ops.
         vertex_path: resolved vertex path; carried alongside params for
             convenience (many ``fn``s need it as their first positional).
         observer: who is invoking — for receipt attribution and store
@@ -85,6 +115,7 @@ class Operation:
     lens_override: str | None = None
     fidelity: Fidelity | None = None
     format: "Format | None" = None
+    surface_spec: "SurfaceSpec | None" = None
     render_context: dict[str, Any] = field(default_factory=dict)
     vertex_path: Path | None = None
     observer: str | None = None

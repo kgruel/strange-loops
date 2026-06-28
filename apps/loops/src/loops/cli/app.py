@@ -93,6 +93,22 @@ def _identify_op_token(
     return None, list(argv), []
 
 
+def _is_predicate_token(tok: str) -> bool:
+    """True when a token is a read-grammar ``field=value`` / ``observer=``
+    predicate rather than an operation name.
+
+    Such tokens route to the implicit read so ``sl <vertex> status=open`` filters
+    rather than erroring as an unknown op. A leading ``-`` (a flag) or a ``.vertex``
+    path is never a predicate. The ``=`` discriminator mirrors the fold view's
+    ``_classify_tokens`` — both must agree on what counts as a predicate.
+    """
+    return (
+        "=" in tok
+        and not tok.startswith("-")
+        and not tok.endswith(".vertex")
+    )
+
+
 def _peel_observer(rest: list[str]) -> tuple[str | None, list[str]]:
     """Strip ``--observer X`` from rest and return (resolved_observer, rest').
 
@@ -170,8 +186,10 @@ def _vertex_first(
         observer=observer,
     )
 
-    # Default: no subcommand or flags only → implicit read (fold).
-    if not rest or rest[0].startswith("-"):
+    # Default: no subcommand, flags only, or a leading read-grammar predicate
+    # (``sl <vertex> status=open``) → implicit read (fold). The predicate guard
+    # keeps ``field=value`` / ``observer=`` from being mis-read as an unknown op.
+    if not rest or rest[0].startswith("-") or _is_predicate_token(rest[0]):
         return VERBS["read"](rest, ctx)
 
     op = rest[0]

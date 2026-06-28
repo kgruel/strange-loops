@@ -134,9 +134,6 @@ def _resolve_render_fn(
     elif view_name == "ticks_view":
         from ..lenses.ticks import ticks_view
         return ticks_view
-    elif view_name == "trace_view":
-        from ..lenses.trace import trace_view
-        return trace_view
 
     from ..lenses.fold import fold_view
     return fold_view

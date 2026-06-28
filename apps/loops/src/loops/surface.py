@@ -449,15 +449,25 @@ def filter(  # noqa: A001 — domain verb; the shadow of builtins.filter is inte
     *,
     kind: str | None = None,
     key: str | None = None,
+    key_or: tuple[str, ...] | None = None,
     where: dict[str, tuple[str, ...]] | None = None,
     observer: str | None = None,
 ) -> Surface:
-    """FILTER rows by kind / key-prefix / where-predicate / observer (all AND)."""
+    """FILTER rows by kind / key-prefix / where-predicate / observer (all AND).
+
+    ``key`` is a single prefix; ``key_or`` is comma-OR — a row survives if ANY
+    of its prefixes match (the ``--key a,b`` grammar). They compose by AND when
+    both are given, but the view supplies exactly one (a lone ``--key`` value is
+    routed to ``project(queried_key=)`` for granularity; a comma list arrives
+    here as ``key_or`` for pure filtering).
+    """
     rows = list(surface.rows)
     if kind is not None:
         rows = [r for r in rows if r.kind == kind]
     if key is not None:
         rows = [r for r in rows if _row_matches_key(r, key)]
+    if key_or:
+        rows = [r for r in rows if any(_row_matches_key(r, k) for k in key_or)]
     if where:
         rows = [r for r in rows if _predicate_match(r.payload, where)]
     if observer is not None:

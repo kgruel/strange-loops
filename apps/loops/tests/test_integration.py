@@ -1334,37 +1334,6 @@ class TestRunFoldPaths:
         assert "Searched:" in captured.err
         assert "built-in: loops.lenses.totally_nonexistent_lens" in captured.err
 
-    def test_read_lens_trace_exits_with_redirect(self, fold_by_vertex, capsys):
-        """--lens trace without --diff exits 2 with a redirect to --diff.
-
-        "trace" is an internal lens consumed by --diff; requesting it directly
-        would route trace_view through the fold fetcher (FoldState), which
-        crashes. Dissolution residue from the standalone sl trace verb.
-        """
-        _, vpath = fold_by_vertex
-        _emit(vpath, "heartbeat", service="api")
-        rc = main(["read", str(vpath), "--lens", "trace", "--plain"])
-        assert rc == 2
-        captured = capsys.readouterr()
-        assert "--diff" in captured.err
-        assert "internal lens" in captured.err
-
-    def test_read_diff_routes_through_trace_view(self, fold_by_vertex, capsys):
-        """--diff end-to-end: CLI route → fetch_trace → trace_view renders field deltas.
-
-        Exercises the load-bearing path that the sl trace dissolution landed on.
-        fold_by_vertex declares heartbeat folded by "service"; emitting service=api
-        seeds one lifecycle fact. The --diff render must show the initial field
-        value ('. → api') from trace_view's cumulative-delta output.
-        """
-        _, vpath = fold_by_vertex
-        _emit(vpath, "heartbeat", service="api")
-        rc = main(["read", str(vpath), "heartbeat/api", "--diff", "--plain"])
-        assert rc == 0
-        captured = capsys.readouterr()
-        # trace_view renders the first emit as ". → <value>" for each field.
-        assert ". → api" in captured.out
-
     def test_read_kind_typo_exits_loudly_with_suggestion(self, fold_by_vertex, capsys):
         """--kind X with X not in vertex.declared_kinds exits 2 with fuzzy hint.
 

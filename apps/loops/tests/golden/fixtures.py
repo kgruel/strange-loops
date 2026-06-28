@@ -293,42 +293,6 @@ SAMPLE_TICKS = [
     },
 ]
 
-# ── trace ────────────────────────────────────────────────────────────────────
-# One entity's lifecycle (oldest first — changelog narrative). The trace lens
-# input is stream_view's shape plus a `_trace` key naming the kind/key.
-SAMPLE_TRACE = {
-    "_trace": {"kind": "thread", "key": "vertex-routing"},
-    "facts": [
-        {
-            "kind": "thread",
-            "ts": "2025-01-14T09:00:00+00:00",
-            "payload": {"name": "vertex-routing", "status": "open",
-                        "message": "How should vertex names resolve to stores?"},
-            "observer": "kaygee",
-        },
-        {
-            "kind": "thread",
-            "ts": "2025-01-14T15:00:00+00:00",
-            "payload": {"name": "vertex-routing", "status": "active",
-                        "message": "Local-first walk chosen."},
-            "observer": "kaygee",
-        },
-        {
-            "kind": "thread",
-            "ts": "2025-01-15T10:00:00+00:00",
-            "payload": {"name": "vertex-routing", "status": "resolved",
-                        "message": "Shipped; resolution unified local-first."},
-            "observer": "kaygee",
-        },
-    ],
-    "fold_meta": {"thread": {"key_field": "name"}},
-    "vertex": "session",
-}
-
-# Same lifecycle rendered as cumulative scalar deltas (--diff). The diff path
-# is loops-side (not record_line) — it shows field transitions, not records.
-SAMPLE_TRACE_DIFF = {**SAMPLE_TRACE, "_diff": True}
-
 # ── declarations (sl vertices) ───────────────────────────────────────────────
 # Exercises the declarations lens AND the preview_fields decl rendering.
 SAMPLE_DECLARATIONS = {

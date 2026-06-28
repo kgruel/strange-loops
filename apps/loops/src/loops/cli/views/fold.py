@@ -1,25 +1,29 @@
 """cli.views.fold — the read/fold view (the big one).
 
-Collapses four legacy entry points and two helpers into a single
-``argparse → Operation → dispatch`` shape:
+Collapses the legacy fold entry points into a single
+``argparse → Operation → dispatch`` shape, and (S4) binds the read grammar
+to the typed Surface transforms:
 
-  retired here: ``_run_fold`` (orchestrator), ``_run_fold_fast`` (the
-    plain-text fast path — see decision/cli-refactor-fast-path-retired),
-    ``_render_fold_plain`` (the fast path's renderer), ``_run_fold_diff``
-    (the --diff lifecycle path)
-  absorbed: ``_extract_refs_depth``, ``_looks_like_vertex_path``,
-    ``_is_static_plain`` (now a no-op — see above)
+  - positionals + intermixed ``field=value`` predicates collect into ONE
+    ``tokens`` bucket (``parse_intermixed_args``); ``_classify_tokens`` sorts
+    them into vertex / entity / where-predicate / observer-filter.
+  - the transform flags (``--full`` / ``--limit`` / ``--last`` / ``--fields`` /
+    ``--count`` / ``--by``) + comma-OR ``--key`` + the ``field=value`` predicate
+    assemble a ``SurfaceSpec`` carried on the Operation; dispatch applies it over
+    the projected Surface so plain and ``--json`` encode the SAME rows.
 
-The single parser handles every fold flag (entity disambiguation,
-``--kind`` / ``--key`` / ``--lens``, visibility layers, ``--diff``,
-``--refs [N]``, output mode, fidelity, density budgets, ``--plain`` /
-``--json``). The view then builds one ``Operation`` and hands it to
-``dispatch``. Painted is never imported at view scope — the renderer
-boundary lives in ``cli.output`` (Reporter); live mode folds onto
-painted ``run_cli`` inside ``dispatch``'s live branch.
+The framework flags (``-q``/``-v``, ``--json``/``--plain``,
+``--static``/``--live``/``-i``) are registered EXPLICITLY here — painted's
+bundled arg-registration was dissolved so the read grammar is self-documenting
+at the parser and the out-of-scope density budgets
+(``--max-chars``/``--max-lines``) drop out. The ``parse_*`` compilers stay (they
+read ``getattr`` dests). Painted
+is never imported at view scope beyond those pure arg compilers; the renderer
+boundary lives in ``cli.output`` (Reporter), live mode in ``dispatch``.
 
 Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
-decision/cli-refactor-fast-path-retired.
+decision/cli-refactor-fast-path-retired;
+decision/design/surface-base-order-is-fold-order.
 """
 from __future__ import annotations
 
@@ -28,12 +32,12 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from painted.cli import Format, OutputMode
-from painted.cli.types import add_cli_args, parse_fidelity, parse_format, parse_zoom
+from painted.cli import Format
+from painted.cli.types import parse_fidelity, parse_format, parse_zoom
 
-from ..invocation import Invocation
 from ..dispatch import dispatch
-from ..operation import Operation
+from ..invocation import Invocation
+from ..operation import Operation, SurfaceSpec
 
 
 # --- Helpers (absorbed from main.py) --------------------------------------
@@ -95,68 +99,148 @@ def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
 # --- Argparse construction -------------------------------------------------
 
 
-def _build_parser(has_vertex_path: bool) -> argparse.ArgumentParser:
-    """Build the unified fold parser.
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the unified read parser.
 
-    When the dispatch layer already resolved a vertex (vertex-first form)
-    the first positional collapses from ``vertex_or_entity`` to just
-    ``entity``.
+    A single ``tokens`` bucket (``nargs='*'``) absorbs the vertex/entity
+    positionals AND intermixed ``field=value`` predicates;
+    ``parse_intermixed_args`` + ``_classify_tokens`` do the disambiguation
+    (the brittle ``nargs='?'``-pair shape is retired — §3.4).
     """
     parser = argparse.ArgumentParser(prog="loops read")
-    if not has_vertex_path:
-        parser.add_argument("vertex_or_entity", nargs="?", default=None,
-                            help="Vertex name, path, or kind/key entity")
-        parser.add_argument("entity", nargs="?", default=None,
-                            help="Entity filter (kind/key)")
-    else:
-        parser.add_argument("entity", nargs="?", default=None,
-                            help="Entity filter (kind/key)")
+    parser.add_argument(
+        "tokens", nargs="*", default=[],
+        help="[vertex] [kind/key] [field=value ...]",
+    )
+    # Domain selectors — change WHAT is fetched (folded state vs raw facts).
     parser.add_argument("--kind", default=None, help="Filter by fact kind")
-    parser.add_argument("--key", default=None, help="Filter by fold key (prefix scan with trailing /)")
+    parser.add_argument(
+        "--key", default=None,
+        help="Filter by fold key (prefix; comma-OR for multiple)",
+    )
     parser.add_argument("--lens", default=None, help="Lens name for rendering")
-    # Domain-query selectors — these change WHAT is fetched (folded vs raw
-    # stream; entity-delta trace), not how much of fixed data is shown, so
-    # they stay loops-side (decision/design/disclosure-vs-domain-query-axis).
-    parser.add_argument("--facts", action="store_true", default=False,
-                        help="Show raw fact stream instead of folded state")
-    parser.add_argument("--diff", action="store_true", default=False,
-                        help="Show only facts not yet reflected in the fold")
-    # Pure-terminal axes (depth, format, mode, density budgets) dissolve into
-    # painted: add_cli_args owns -q/-v, --plain/--json, --static/--live/-i,
-    # and --max-chars/--max-lines (decision/design/full-painted-integration-
-    # residue; grow-painted-over-workaround). dests are painted's standard
-    # ones (quiet/verbose/static/live/interactive/max_chars/max_lines).
-    add_cli_args(parser, modes={OutputMode.LIVE, OutputMode.INTERACTIVE}, budgets=True)
+    parser.add_argument(
+        "--facts", action="store_true", default=False,
+        help="Show raw fact stream instead of folded state",
+    )
+    # Read-grammar transforms (S4) — applied over the projected Surface, so
+    # plain and --json carry the same transformed rows.
+    parser.add_argument(
+        "--full", action="store_true", default=False,
+        help="Force full-body (whole) granularity on every row",
+    )
+    parser.add_argument(
+        "--fields", default=None,
+        help="Comma-separated payload fields to project (narrow each row)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Keep the top-N rows by salience",
+    )
+    parser.add_argument(
+        "--last", type=int, default=None,
+        help="Keep the newest-N rows by timestamp",
+    )
+    parser.add_argument(
+        "--count", action="store_true", default=False,
+        help="Aggregate rows into counts (with --by, one row per group)",
+    )
+    parser.add_argument(
+        "--by", default=None,
+        help="Group --count by a row attribute / payload field",
+    )
+    # Framework survivors — registered explicitly (painted's bundled
+    # registration dissolved). The dests (quiet/verbose/interactive/static/
+    # live/json/plain) match what painted's parse_zoom / parse_mode /
+    # parse_format read via getattr.
+    zoom = parser.add_mutually_exclusive_group()
+    zoom.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Minimal output (zoom=0)",
+    )
+    zoom.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Increase detail (-v detailed, -vv full)",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Interactive TUI mode (autoresearch lens)",
+    )
+    mode.add_argument(
+        "--static", action="store_true",
+        help="Static output, no animation",
+    )
+    mode.add_argument(
+        "--live", action="store_true",
+        help="Live output with in-place updates",
+    )
+    parser.add_argument(
+        "--json", action="store_true",
+        help="JSON output — the structured Surface encoding (implies --static)",
+    )
+    parser.add_argument(
+        "--plain", action="store_true",
+        help="Plain text, no ANSI codes",
+    )
     return parser
 
 
-# --- Entity / vertex resolution -------------------------------------------
+# --- Token classification --------------------------------------------------
 
 
-def _resolve_positionals(
-    args: argparse.Namespace, has_vertex_path: bool,
-) -> tuple[str | None, str | None]:
-    """Disambiguate the leading positionals.
+def _classify_tokens(
+    tokens: list[str], has_vertex_path: bool,
+) -> tuple[str | None, str | None, dict[str, tuple[str, ...]], str | None]:
+    """Sort the intermixed token bucket into (vname, entity, where, observer).
 
-    Returns ``(vname, entity)`` where ``vname`` is the named-vertex
-    reference (or None) and ``entity`` is ``"kind/key"`` (or None).
-    Mirrors the disambiguation rules legacy ``_run_fold`` applied:
+    A token containing ``=`` (and not itself a vertex path) is a PREDICATE:
+    ``observer=NAME`` becomes the row-observer filter (who emitted — distinct
+    from the ``--observer`` identity peel); any other ``field=value`` joins
+    ``where`` (comma-OR within the value). The remaining barewords are
+    positional, disambiguated exactly as the legacy ``_resolve_positionals``
+    did:
 
-      vertex file path → vertex, second positional → entity
+      vertex file path → vertex, next bareword → entity
       contains "/"     → entity, vertex resolves locally
-      bare token       → named vertex, second positional → entity
+      bare token       → named vertex, next bareword → entity
     """
-    if has_vertex_path:
-        return None, getattr(args, "entity", None)
+    barewords: list[str] = []
+    where: dict[str, tuple[str, ...]] = {}
+    observer: str | None = None
+    for tok in tokens:
+        if "=" in tok and not _looks_like_vertex_path(tok):
+            field, _, value = tok.partition("=")
+            field = field.strip()
+            if not field:
+                barewords.append(tok)
+                continue
+            if field == "observer":
+                observer = value
+            else:
+                values = tuple(v for v in value.split(",") if v != "")
+                where[field] = values or (value,)
+        else:
+            barewords.append(tok)
 
-    first = getattr(args, "vertex_or_entity", None)
-    if first is None:
-        return None, None
-    if _looks_like_vertex_path(first):
-        return first, args.entity
-    if "/" in first:
-        return None, first
-    return first, args.entity
+    vname: str | None = None
+    entity: str | None = None
+    if has_vertex_path:
+        entity = barewords[0] if barewords else None
+    elif barewords:
+        first = barewords[0]
+        if _looks_like_vertex_path(first):
+            vname = first
+            entity = barewords[1] if len(barewords) > 1 else None
+        elif "/" in first:
+            entity = first
+        else:
+            vname = first
+            entity = barewords[1] if len(barewords) > 1 else None
+    return vname, entity, where, observer
+
+
+# --- Entity / vertex resolution -------------------------------------------
 
 
 def _resolve_vertex_path(
@@ -256,37 +340,6 @@ def _build_fold_fetch(
     return fetch_data
 
 
-def _build_diff_fetch(
-    vertex_path: Path,
-    observer: str | None,
-    kind: str,
-    key: str,
-    refs_depth: int,
-) -> Any:
-    """Return a zero-arg callable that produces diff (trace) data.
-
-    Reuses the trace fetch path. ``_diff`` flag is set on the returned
-    dict so the trace lens renders the field-delta view.
-    """
-    from loops.commands.resolve import _apply_vertex_scope
-
-    obs = _apply_vertex_scope(observer, vertex_path) or None
-    _validate_kind_or_exit(kind, vertex_path)
-
-    def fetch_data():
-        from loops.commands.fetch import fetch_trace
-
-        data = fetch_trace(
-            vertex_path,
-            kind=kind, key=key, observer=obs,
-            refs_depth=refs_depth,
-        )
-        data["_diff"] = True
-        return data
-
-    return fetch_data
-
-
 async def _build_fold_stream(fetch_data) -> AsyncIterator[Any]:
     """Wrap a sync fetch into an async generator for live mode."""
     import asyncio
@@ -306,103 +359,105 @@ def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
     _impl(kind, vertex_path)
 
 
+# --- Surface-spec assembly -------------------------------------------------
+
+
+def _resolve_kind_key(
+    entity: str | None, kind: str | None, key: str | None,
+) -> tuple[str | None, str | None]:
+    """Resolve the effective (kind, key_raw) from --kind/--key + entity.
+
+    An entity ``kind/key`` splits explicitly (replacing the old args.kind
+    stuffing) so the key can drive both fetch filtering AND project()'s
+    complete-key whole-detection. A bare entity (no "/") is IGNORED — exactly
+    as the legacy view did (it only routed "/"-bearing entities to --kind).
+    Explicit --kind/--key always win (entity is only consulted when both unset).
+    """
+    if entity is not None and "/" in entity and kind is None and key is None:
+        ekind, ekey = entity.split("/", 1)
+        return ekind, ekey
+    return kind, key
+
+
+def _resolve_key_grammar(
+    key_raw: str | None,
+) -> tuple[str | None, str | None, tuple[str, ...]]:
+    """Resolve comma-OR --key into (fetch_key, queried_key, key_or).
+
+    A single value flows to ``fetch_fold(key=)`` + ``project(queried_key=)``
+    (preserves S1's complete-key whole-detection); 2+ values fetch unfiltered
+    and filter in the Surface via ``key_or`` (fetch_fold can't express OR).
+    """
+    if key_raw is None:
+        return None, None, ()
+    parts = [p for p in key_raw.split(",") if p]
+    if len(parts) > 1:
+        return None, None, tuple(parts)
+    if parts:
+        return parts[0], parts[0], ()
+    return None, None, ()
+
+
 # --- Entry point -----------------------------------------------------------
 
 
 def run(argv: list[str], ctx: Invocation) -> int:
-    """Fold view entry — single argparse → Operation → dispatch.
+    """Read/fold view entry — single argparse → Operation → dispatch.
 
     Steps:
       1. Pre-extract ``--refs [N]`` (manual scan; argparse can't model
          the optional-int-or-flag form cleanly).
-      2. Parse remaining argv with the unified parser.
-      3. Resolve positionals → vertex name + entity.
-      4. Route an embedded entity into ``--kind`` (when --kind/--key
-         not already set).
-      5. Resolve the vertex path.
-      6. Build the fetch closure (diff vs fold) and the Operation.
-      7. Dispatch — static / live / interactive branches.
+      2. Parse remaining argv with ``parse_intermixed_args`` (positionals +
+         ``field=value`` predicates intermix freely).
+      3. Classify the token bucket → vertex name + entity + where + observer.
+      4. Resolve effective kind/key (entity split, comma-OR --key grammar).
+      5. Resolve the vertex path; build the fold fetch closure.
+      6. Assemble the SurfaceSpec + Operation; dispatch.
     """
     has_vertex_path = ctx.vertex_path is not None
     refs_depth, argv = _extract_refs_depth(argv)
-    parser = _build_parser(has_vertex_path)
+    parser = _build_parser()
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_intermixed_args(argv)
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    # Plain / ANSI: --plain forces ANSI off. The reporter now DERIVES use_ansi
-    # from env + TTY (NO_COLOR/FORCE_COLOR/isatty — the plain-default inversion),
-    # so this explicit flag is the override that wins over that derived default
-    # (and over FORCE_COLOR on a TTY). Setting it pre-dispatch is the canonical
-    # honour-point; harmless for BufferReporter (carries the attr, buffer
-    # ignores it).
+    # Plain / ANSI: --plain forces ANSI off. The reporter DERIVES use_ansi from
+    # env + TTY (NO_COLOR/FORCE_COLOR/isatty — the plain-default inversion), so
+    # this explicit flag is the override that wins over that derived default
+    # (and over FORCE_COLOR on a TTY). Harmless for BufferReporter.
     if args.plain and hasattr(ctx.reporter, "use_ansi"):
         ctx.reporter.use_ansi = False
 
-    vname, entity = _resolve_positionals(args, has_vertex_path)
+    vname, entity, where, observer_filter = _classify_tokens(
+        list(args.tokens), has_vertex_path,
+    )
 
-    # Entity → --kind when neither --kind nor --key is set. Matches the
-    # legacy disambiguation: "kind/" / "kind/prefix/" / "kind/key" all
-    # fold into fetch_fold's _split_kind_key helper.
-    if (
-        entity is not None and "/" in entity
-        and args.kind is None and args.key is None
-    ):
-        args.kind = entity
+    kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
+    fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)
 
     vertex_path = _resolve_vertex_path(ctx, vname)
     if vertex_path is None:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
-    # --diff routes to the trace fetcher + trace_view lens. Diff requires
-    # a target entity (kind/key); error out clearly when missing.
-    if args.diff:
-        target = args.kind if "/" in (args.kind or "") else None
-        if target is None:
-            ctx.reporter.err(
-                "usage: sl read [vertex] <kind>/<key> --diff\n"
-                "  --diff renders cumulative field-deltas of one entity's "
-                "lifecycle; supply a kind/key."
-            )
-            return 2
-        diff_kind, diff_key = target.split("/", 1)
-        fetch_data = _build_diff_fetch(
-            vertex_path, ctx.observer, diff_kind, diff_key, refs_depth,
-        )
-        # Base view stays "trace" — --lens overrides the *module* only.
-        render_lens = "trace"
-        lens_override = args.lens
-    else:
-        # "trace" is the internal lens for --diff; requesting it directly
-        # routes trace_view through the fold fetcher (FoldState), which crashes.
-        # The dissolution landing point is --diff — redirect clearly.
-        if args.lens == "trace":
-            ctx.reporter.err(
-                "'trace' is an internal lens — use --diff to render entity deltas:\n"
-                "  sl read [vertex] <kind>/<key> --diff"
-            )
-            return 2
-        fetch_data = _build_fold_fetch(
-            vertex_path, ctx.observer,
-            kind=args.kind, key=args.key,
-            refs_depth=refs_depth,
-            want_facts=args.facts,
-            lens=args.lens,
-        )
-        render_lens = "fold"
-        lens_override = args.lens
+    fetch_data = _build_fold_fetch(
+        vertex_path, ctx.observer,
+        kind=kind, key=fetch_key,
+        refs_depth=refs_depth,
+        want_facts=args.facts,
+        lens=args.lens,
+    )
 
     # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on
     # JSON to encode the Surface via to_dict (gate-pass) or the raw FoldState
     # dump (gate-fail). No view-level short-circuit — the lens path owns it.
     fmt_format = parse_format(args)
 
-    # Fidelity: painted compiles the pure-terminal axes (depth from -q/-v,
-    # density from --max-chars/--max-lines). The domain-query selectors'
-    # visibility (--facts, --refs N>0) is merged in loops-side — they are not
-    # painted disclosure tags (decision/design/disclosure-vs-domain-query-axis).
+    # Fidelity: painted compiles the pure-terminal axes (depth from -q/-v). The
+    # domain-query selectors' visibility (--facts, --refs N>0) is merged in
+    # loops-side — they are not painted disclosure tags
+    # (decision/design/disclosure-vs-domain-query-axis).
     from dataclasses import replace as _replace
 
     base = parse_fidelity(args, parse_zoom(args), tags=None)
@@ -413,6 +468,21 @@ def run(argv: list[str], ctx: Invocation) -> int:
         domain_visible.add("refs")
     fidelity = _replace(base, visible=frozenset(domain_visible))
 
+    surface_spec = SurfaceSpec(
+        queried_key=queried_key,
+        full=args.full,
+        key_or=key_or,
+        where=tuple((f, v) for f, v in where.items()),
+        observer=observer_filter,
+        fields=(
+            tuple(f for f in args.fields.split(",") if f) if args.fields else None
+        ),
+        limit=args.limit,
+        last=args.last,
+        count_by=args.by,
+        do_count=args.count,
+    )
+
     mode = _resolve_mode(args, args.lens)
     # JSON is a one-shot structured encode — live/interactive make no sense.
     if fmt_format is Format.JSON:
@@ -421,7 +491,6 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None
     if mode == "live":
-        # Capture the closure-bound fetch_data for the async generator.
         stream_fn = lambda: _build_fold_stream(fetch_data)  # noqa: E731
 
     interactive_handler = None
@@ -432,11 +501,12 @@ def run(argv: list[str], ctx: Invocation) -> int:
         verb="read",
         fn=fetch_data,
         params={},
-        render_lens=render_lens,
-        lens_override=lens_override,
+        render_lens="fold",
+        lens_override=args.lens,
         fidelity=fidelity,
         format=fmt_format,
-        render_context={"_diff": True} if args.diff else {},
+        surface_spec=surface_spec,
+        render_context={},
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]
@@ -469,4 +539,3 @@ def _build_autoresearch_handler(vertex_path: Path, observer: str | None):
         return 0
 
     return handle
-

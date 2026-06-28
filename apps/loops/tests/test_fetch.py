@@ -258,7 +258,7 @@ class TestFetchIntegration:
 
         Regression guard: fetch_fold previously rebuilt FoldState without
         source_facts on the filter path, silently breaking retain_facts +
-        key combinations. fetch_trace depends on this combination, so the
+        key combinations. the retain_facts + key-filter combination, so the
         invariant is load-bearing now.
         """
         from engine.builder import fold_by, vertex
@@ -287,247 +287,6 @@ class TestFetchIntegration:
             f"unexpected source_facts keys: {keys}"
         # Filtered-out item didn't leak
         assert "decision/architecture/store" not in state.source_facts
-
-    def test_fetch_trace_asc_ordering_and_payload(self, tmp_path):
-        """fetch_trace returns the source-fact lifecycle in ASC order."""
-        import time
-
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-        from loops.main import cmd_emit
-        import argparse
-
-        vpath = tmp_path / "t.vertex"
-        vertex("t").store("./t.db").loop("thread", fold_by("name")).write(vpath)
-
-        # Three emits to same fold key — should appear ASC by emit time
-        for status, msg in [
-            ("open", "first emit"),
-            ("refined", "second emit"),
-            ("resolved", "third emit"),
-        ]:
-            cmd_emit(argparse.Namespace(
-                vertex=None, kind="thread",
-                parts=["name=foo-arc", f"status={status}", f"message={msg}"],
-                observer="", dry_run=False,
-            ), vertex_path=vpath)
-            time.sleep(0.01)  # ensure distinct ts
-
-        result = fetch_trace(vpath, kind="thread", key="foo-arc")
-        facts = result["facts"]
-        assert len(facts) == 3
-        # ASC order — oldest first
-        assert [f["payload"]["status"] for f in facts] == [
-            "open", "refined", "resolved",
-        ]
-        # Adapter produces fact-dict shape with nested payload
-        assert facts[0]["kind"] == "thread"
-        assert facts[0]["payload"]["message"] == "first emit"
-        # _trace metadata names the queried entity
-        assert result["_trace"]["kind"] == "thread"
-        assert result["_trace"]["key"] == "foo-arc"
-        assert result["_trace"]["refs_depth"] == 0
-        # fold_meta declared per-kind key_field
-        assert result["fold_meta"]["thread"]["key_field"] == "name"
-
-    def test_fetch_trace_unknown_entity_returns_empty(self, tmp_path):
-        """fetch_trace on a non-existent kind/key returns empty facts."""
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-
-        vpath = tmp_path / "t.vertex"
-        vertex("t").store("./t.db").loop("thread", fold_by("name")).write(vpath)
-
-        result = fetch_trace(vpath, kind="thread", key="never-existed")
-        assert result["facts"] == []
-        assert result["_trace"]["kind"] == "thread"
-        assert result["_trace"]["key"] == "never-existed"
-
-    def test_trace_diff_lens_renders_scalar_deltas_only(self, tmp_path):
-        """trace_view with _diff renders scalar deltas only — refs go to --refs.
-
-        Anchored 2026-05-18: refs are per-fact immutable attribution that
-        the fold UNIONS. Rendering them as +/- deltas in --diff conflated
-        write-receipt with temporal-query (same shape as the 2026-04-29
-        catch). --refs is the canonical view; --diff stays scalar-only.
-        Ref-only emits render "(refs only — see --refs)" so the lifecycle
-        event remains visible.
-        """
-        import time
-
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-        from loops.lenses.trace import trace_view
-        from loops.main import cmd_emit
-        from painted import Zoom
-        import argparse
-
-        def _text(block):
-            return "\n".join(
-                "".join(c.char for c in row).rstrip() for row in block._rows
-            )
-
-        vpath = tmp_path / "t.vertex"
-        vertex("t").store("./t.db").loop("thread", fold_by("name")).write(vpath)
-
-        # Emit 1: initial state with refs A,B
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="thread",
-            parts=["name=arc", "status=open", "ref=A,B"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-        time.sleep(0.01)
-        # Emit 2: status change + different refs (B,C). Under the old
-        # broken renderer this produced phantom "-A" + "+C". Under the
-        # honest model refs are out of --diff scope entirely.
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="thread",
-            parts=["name=arc", "status=refined", "ref=B,C"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-        time.sleep(0.01)
-        # Emit 3: ref-only (no scalar change) — must still appear as a
-        # lifecycle event, with pointer to --refs.
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="thread",
-            parts=["name=arc", "status=refined", "ref=D"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-
-        data = fetch_trace(vpath, kind="thread", key="arc")
-        data["_diff"] = True
-        rendered = _text(trace_view(data, Zoom.SUMMARY, 120))
-
-        # Scalar deltas render normally.
-        assert "status: . → open" in rendered
-        assert "status: open → refined" in rendered
-        # Refs are NOT in --diff. No +A/+B/+C/+D, no -A.
-        for token in ("+A", "+B", "+C", "+D", "-A", "-B", "-C", "-D"):
-            assert token not in rendered, f"unexpected ref token {token!r} in --diff"
-        # The literal "refs:" label from old ref-delta rendering must not appear.
-        assert "refs:" not in rendered
-        # Ref-only emit still visible via the pointer line.
-        assert "(refs only — see --refs)" in rendered
-
-    def test_fetch_trace_refs_walk_collects_outbound_entities(self, tmp_path):
-        """refs_depth=1 walks outbound ref kind:key into the trace."""
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-        from loops.main import cmd_emit
-        import argparse
-
-        vpath = tmp_path / "t.vertex"
-        (vertex("t").store("./t.db")
-            .loop("thread", fold_by("name"))
-            .loop("decision", fold_by("topic"))
-            .write(vpath))
-        # Decision the thread will ref
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="decision",
-            parts=["topic=design/foo", "message=settled"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-        # Thread refs the decision via kind:key format
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="thread",
-            parts=["name=arc", "status=open", "ref=decision:design/foo"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-
-        # Default: only primary entity
-        r0 = fetch_trace(vpath, kind="thread", key="arc")
-        entities = {f.get("_entity") for f in r0["facts"]}
-        assert entities == {"thread/arc"}
-
-        # refs_depth=1: outbound decision pulled in
-        r1 = fetch_trace(vpath, kind="thread", key="arc", refs_depth=1)
-        entities = {f.get("_entity") for f in r1["facts"]}
-        assert "thread/arc" in entities
-        assert "decision/design/foo" in entities
-
-    def test_trace_diff_partitions_per_entity_under_refs(self, tmp_path):
-        """Under refs walk, each entity diffs against its own prior, not the merged stream."""
-        import time
-
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-        from loops.lenses.trace import trace_view
-        from loops.main import cmd_emit
-        from painted import Zoom
-        import argparse
-
-        def _text(block):
-            return "\n".join(
-                "".join(c.char for c in row).rstrip() for row in block._rows
-            )
-
-        vpath = tmp_path / "t.vertex"
-        (vertex("t").store("./t.db")
-            .loop("thread", fold_by("name"))
-            .loop("decision", fold_by("topic"))
-            .write(vpath))
-        # Decision lives independently of the thread
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="decision",
-            parts=["topic=design/foo", "message=verdict"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-        time.sleep(0.01)
-        # Thread refs the decision; both should diff independently
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="thread",
-            parts=["name=arc", "status=open", "ref=decision:design/foo"],
-            observer="", dry_run=False,
-        ), vertex_path=vpath)
-
-        data = fetch_trace(vpath, kind="thread", key="arc", refs_depth=1)
-        data["_diff"] = True
-        rendered = _text(trace_view(data, Zoom.SUMMARY, 120))
-
-        # Each entity surfaces as a first appearance (.→) — no spurious
-        # cross-entity "transitions" like name: design/foo → arc
-        assert "topic: . → design/foo" in rendered  # decision first-appearance
-        assert "name: . → arc" in rendered  # thread first-appearance
-        # No false transition between entities' name/topic fields
-        assert "name: design/foo →" not in rendered
-        assert "topic: arc →" not in rendered
-
-    def test_fact_payload_never_contains_column_fields(self, tmp_path):
-        """_ts, _observer, _origin, _id are top-level Fact columns, not payload.
-
-        This anchors the _is_diff_skip predicate in trace.py: the ``startswith("_")``
-        branch handles internal fold-state keys (``_refs``, ``_n``); the column
-        names are simply never present in ``fact["payload"]`` to begin with.
-        Confirms the old _DIFF_SKIP_FIELDS entries for ``_ts/_observer/_origin/_id``
-        were dead code — they could never match a key in the payload dict.
-        """
-        import argparse
-
-        from engine.builder import fold_by, vertex
-        from loops.commands.fetch import fetch_trace
-        from loops.main import cmd_emit
-
-        vpath = tmp_path / "t.vertex"
-        vertex("t").store("./t.db").loop("decision", fold_by("topic")).write(vpath)
-
-        cmd_emit(argparse.Namespace(
-            vertex=None, kind="decision",
-            parts=["topic=design/test", "message=confirmed", "status=open"],
-            observer="kyle", dry_run=False,
-        ), vertex_path=vpath)
-
-        result = fetch_trace(vpath, kind="decision", key="design/test")
-        assert result["facts"], "test requires at least one fact"
-
-        column_fields = {"_ts", "_observer", "_origin", "_id"}
-        for fact in result["facts"]:
-            payload_keys = set(fact.get("payload", {}).keys())
-            overlap = payload_keys & column_fields
-            assert not overlap, (
-                f"Column-level field(s) {overlap!r} found in fact payload — "
-                "these are top-level Fact attributes, never payload keys. "
-                "The _is_diff_skip predicate relies on this invariant."
-            )
 
     def test_fetch_stream_basic(self, tmp_path):
         from engine.builder import fold_count, vertex
@@ -986,7 +745,7 @@ class TestFetchFoldRefsWalk:
     and visited-set protecting against cycles.
 
     Refs format follows the runbook convention: ``kind:key``. Refs without
-    ``:`` are skipped (consistent with trace's _parse_fact_refs).
+    ``:`` are skipped (consistent with _parse_ref_to_kind_key).
     """
 
     def test_depth_zero_means_no_walk(self, tmp_path):
@@ -1068,7 +827,7 @@ class TestFetchFoldRefsWalk:
     def test_bare_ref_without_kind_prefix_is_skipped(self, tmp_path):
         """Refs without ``kind:`` prefix are ambiguous — skip them.
 
-        Matches trace's _parse_fact_refs behavior; the walker can't safely
+        Matches _parse_ref_to_kind_key behavior; the walker can't safely
         cross kinds without knowing the target kind.
         """
         from loops.commands.fetch import fetch_fold

@@ -49,7 +49,6 @@ if TYPE_CHECKING:
 _VIEW_SUFFIX = {
     "fold": "fold_view",
     "stream": "stream_view",
-    "trace": "trace_view",
     "store": "store_view",
     "ticks": "ticks_view",
 }
@@ -90,7 +89,8 @@ def _surface_gate(op: Operation, data) -> bool:
     ``"fold"`` (explicitly the built-in) both pass; a custom name (e.g.
     ``identity_prompt``) fails the gate and keeps the raw FoldState so the
     vertex-declared lens renders its own shape. isinstance is checked first so a
-    non-FoldState shape (the ``--diff`` trace dict) short-circuits.
+    non-FoldState shape (e.g. a lens-declared fetch returning a dict)
+    short-circuits.
     """
     from atoms import FoldState
 
@@ -102,12 +102,54 @@ def _surface_gate(op: Operation, data) -> bool:
     return name in (None, "fold")
 
 
+def _project_surface(op: Operation, data):
+    """Project a FoldState into the Surface to encode, applying the read-grammar
+    transforms carried on ``op.surface_spec`` in a FIXED canonical order.
+
+    This is the single seam both encoders go through (text lens + ``--json``), so
+    plain and json carry the SAME transformed rows. ``queried_key``/``full`` flow
+    into ``project()`` itself (granularity by address-specificity); the remaining
+    fields are Surface→Surface transforms applied filter → select → count →
+    budget. ``--kind`` is NOT here — it is already applied at fetch time on the
+    FoldState, so it must not be double-applied.
+
+    count BEFORE budget is deliberate: ``count()`` emits one row per group in
+    count-desc order with ``salience=count``, so a following ``budget(limit=N)``
+    takes the top-N GROUPS by count (the ``sort | uniq -c | sort | head``
+    semantic). Budgeting first would instead count only the head of the raw
+    population — the count-row salience would never do its job.
+    """
+    from loops.surface import budget, count, filter, project, select
+
+    spec = op.surface_spec
+    if spec is None:
+        return project(data)
+
+    surface = project(data, queried_key=spec.queried_key, full=spec.full)
+
+    where = dict(spec.where) if spec.where else None
+    if spec.key_or or where or spec.observer is not None:
+        surface = filter(
+            surface,
+            key_or=spec.key_or or None,
+            where=where,
+            observer=spec.observer,
+        )
+    if spec.fields:
+        surface = select(surface, spec.fields)
+    if spec.do_count:
+        surface = count(surface, by=spec.count_by)
+    if spec.limit is not None or spec.last is not None:
+        surface = budget(surface, limit=spec.limit, last=spec.last)
+    return surface
+
+
 def _render_foldstate_json(data, reporter: Reporter) -> int:
     """Raw-JSON dump for the legacy / lens-override path.
 
     The lifted body of the old ``cli/views/fold._render_json``. Used when the
     Surface gate FAILS — a vertex-declared or ``--lens`` override fold lens, or
-    a non-FoldState shape (the ``--diff`` trace dict) — so ``--json`` keeps
+    a non-FoldState shape (a lens-declared fetch's dict) — so ``--json`` keeps
     emitting the raw fetched shape instead of degrading to a rendered Block.
     The gate-PASS path emits ``to_dict(surface)`` instead (the structured,
     ranked encoding).
@@ -193,9 +235,9 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     # --json encode the SAME structured rows. Gate: the effective fold lens is
     # the built-in (no --lens override, no vertex lens{} decl) AND the data is
     # a FoldState. Vertex-declared / override lenses (identity, comms, …) and
-    # non-FoldState shapes (the --diff trace dict) keep the raw FoldState — they
-    # render their own shape, and any that delegate to the built-in fold_view
-    # ride its polymorphic front door (which projects for them).
+    # non-FoldState shapes (a lens-declared fetch's dict) keep the raw FoldState
+    # — they render their own shape, and any that delegate to the built-in
+    # fold_view ride its polymorphic front door (which projects for them).
     from painted.cli import Format
 
     render_data = data
@@ -204,17 +246,15 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         if gate:
             import json
 
-            from loops.surface import project, to_dict
+            from loops.surface import to_dict
 
-            reporter.msg(json.dumps(to_dict(project(data))))
+            reporter.msg(json.dumps(to_dict(_project_surface(op, data))))
             return 0
-        # Override / vertex-decl lens, or a non-FoldState shape (--diff trace
+        # Override / vertex-decl lens, or a non-FoldState shape (lens-fetch
         # dict) → keep the legacy raw dump instead of degrading to text.
         return _render_foldstate_json(data, reporter)
     if gate:
-        from loops.surface import project
-
-        render_data = project(data)
+        render_data = _project_surface(op, data)
 
     from loops.lens_resolver import call_lens, normalize_width
 
@@ -276,10 +316,10 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     from loops.lens_resolver import call_lens, normalize_width
 
     # Fidelity was already resolved upstream in the view (domain visibility,
-    # zoom, --diff context). Capture it into the per-frame closure; run_cli
+    # zoom, refs context). Capture it into the per-frame closure; run_cli
     # receives only ``--live``, so its own fidelity parse is a deliberate
     # no-op — the render contract is driven by what we captured, not by
-    # re-parsing flags painted's argparse never saw (--kind/--facts/--diff…).
+    # re-parsing flags painted's argparse never saw (--kind/--facts/--refs…).
     zoom = _zoom_of(op.fidelity)
     extra = dict(op.render_context)
     if op.fidelity is not None:

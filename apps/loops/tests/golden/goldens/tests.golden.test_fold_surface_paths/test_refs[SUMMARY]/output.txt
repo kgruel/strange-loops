@@ -1,0 +1,9 @@
+Decisions (3):
+  design/ (3)
+    c [×3 ←2 Jan 15]: referenced twice
+      ← decision/design/a
+      ← decision/design/b
+    a [×2 →1 Jan 15]: refs c
+      → decision/design/c
+    b [→1 Jan 15]: also refs c
+      → decision/design/c

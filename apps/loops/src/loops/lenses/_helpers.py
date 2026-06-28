@@ -22,7 +22,7 @@ def elide(text: str, budget: int) -> str:
 
     The single string-level truncation primitive for the lens layer —
     replaces the ``text[:n-1] + "…"`` idiom that was copy-pasted across
-    fold / gist / trace / vertices. ``len()``-based today (byte-identical to
+    fold / gist / vertices. ``len()``-based today (byte-identical to
     the per-lens copies it dissolves); this one call-site is where the lens
     layer collapses onto ``painted.truncate(block)`` once the lenses
     re-ground on record_line block composition

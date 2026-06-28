@@ -468,18 +468,18 @@ class TestOpTokenValueAwareness:
         The observer value is "ls" (an unfortunate but legal identifier).
         Dispatch must identify ``emit`` as the op, peel ``--observer ls``
         as the global identity, and let emit run with observer="ls".
-        Emit will then fail its own strictness check ("ls" isn't declared),
-        but the *dispatch* is correct — the error proves the routing.
+        Since S6 forgives undeclared observers, emit succeeds (dry-run, exit 0)
+        and the WARN "Observer 'ls' not declared" proves the routing reached
+        emit with observer="ls".
         """
         rc, _, err = _capture_main(
             ["proj", "--observer", "ls", "emit", "decision", "topic=t", "--dry-run"],
             capsys,
         )
-        # Dispatch reached emit; emit then refused because "ls" isn't a
-        # declared observer. That's the correct routing — the wrong
-        # routing would have surfaced a different error (e.g. ls-shape
-        # complaints) or rendered ls output.
-        assert rc != 0
+        # Dispatch reached emit; emit forgave the undeclared "ls" observer and
+        # WARNed. The wrong routing would have surfaced a different error (e.g.
+        # ls-shape complaints) or rendered ls output.
+        assert rc == 0
         assert "Observer 'ls' not declared" in err
 
     def test_observer_value_collides_equals_form(self, proj, capsys):
@@ -488,7 +488,7 @@ class TestOpTokenValueAwareness:
             ["proj", "--observer=ls", "emit", "decision", "topic=t", "--dry-run"],
             capsys,
         )
-        assert rc != 0
+        assert rc == 0
         assert "Observer 'ls' not declared" in err
 
     def test_global_observer_before_ls(self, proj, capsys):

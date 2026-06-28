@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from loops.lens_resolver import resolve_lens, call_lens, call_lens_fetch, _view_candidates, _build_search_path
+from loops.lens_resolver import (
+    resolve_lens, call_lens, call_lens_fetch, normalize_width,
+    _view_candidates, _build_search_path,
+)
 
 
 class TestViewCandidates:
@@ -136,6 +139,70 @@ class TestCallLens:
 
         result = call_lens(lens, "d", "z", 80)
         assert result == "ok"
+
+    def test_body_typeerror_surfaces_single_call(self):
+        """A TypeError raised inside the lens BODY surfaces and the body runs
+        EXACTLY ONCE — not swallowed as a kwarg mismatch and retried.
+
+        This is the contract flip from the old try/except call_lens (which
+        ran the body twice on any TypeError) to signature dispatch — the
+        precondition for S2 routing a genuine lens-body error into the
+        reporter instead of silently re-rendering.
+        """
+        calls = []
+
+        def lens(data, zoom, width):
+            calls.append(1)
+            raise TypeError("body error, not a kwarg mismatch")
+
+        with pytest.raises(TypeError):
+            call_lens(lens, "d", "z", 80)
+        assert len(calls) == 1
+
+    def test_partial_kwarg_subset_passed(self):
+        """A lens declaring some named context params receives only the
+        matching kwargs; unrelated kwargs are dropped (no **kwargs)."""
+        received = {}
+
+        def lens(data, zoom, width, *, vertex_name=None):
+            received["vertex_name"] = vertex_name
+            return "ok"
+
+        result = call_lens(
+            lens, "d", "z", 80,
+            vertex_name="project", vertex_path="/x", visible=frozenset(),
+        )
+        assert result == "ok"
+        assert received == {"vertex_name": "project"}
+
+    def test_var_keyword_lens_gets_all(self):
+        """A lens declaring **kwargs opts into every context kwarg."""
+        received = {}
+
+        def lens(data, zoom, width, **kwargs):
+            received.update(kwargs)
+            return "ok"
+
+        call_lens(lens, "d", "z", 80, vertex_name="p", visible=frozenset(["refs"]))
+        assert received == {"vertex_name": "p", "visible": frozenset(["refs"])}
+
+
+class TestNormalizeWidth:
+    """normalize_width is the documented piped-vs-TTY width chokepoint.
+
+    Identity passthrough today — the contract is the seam, not a transform.
+    """
+
+    def test_int_passthrough(self):
+        assert normalize_width(80) == 80
+
+    def test_none_passthrough(self):
+        assert normalize_width(None) is None
+
+    def test_zero_passthrough(self):
+        # 0 is a legitimate width value (distinct from None); must not be
+        # collapsed to None by any future normalization.
+        assert normalize_width(0) == 0
 
 
 class TestCallLensFetch:

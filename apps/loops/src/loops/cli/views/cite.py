@@ -5,11 +5,11 @@ Dissolves into emit with kind=cite. The view's job is to parse the
 shape and translate it into the emit view's argv (``cite ref=R1
 ref=R2 ... [--flags]``), then delegate.
 
-When ctx.vertex_path is None (verb-first dispatch), the local vertex
-is resolved from the working directory. This avoids the argparse
-greedy-positional bug: an optional ``vertex (nargs="?")`` preceding
-``refs (nargs="+")`` causes argparse to absorb the first ref into the
-vertex slot, silently dropping it from the payload.
+Refs are emitted as ``ref=R`` KEY=VALUE tokens, which the shared emit
+grammar (a single ``tokens`` bucket + ``_classify_emit_positionals``)
+keeps strictly as payload — never the vertex or kind. The local vertex
+is resolved here when ``ctx.vertex_path`` is None (verb-first dispatch)
+so no ref is ever absorbed into a positional slot.
 
 Vertex-first form (``sl project cite REF1 REF2``) is unchanged — that
 path sets ctx.vertex_path before calling this view.

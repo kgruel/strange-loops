@@ -28,6 +28,24 @@ class TestParseEmitParts:
         payload = _parse_emit_parts(["name=x", "some", "message", "text"])
         assert payload == {"name": "x", "message": "some message text"}
 
+    def test_explicit_message_wins_over_trailing_bareword(self):
+        # B4: explicit message= beats trailing barewords (explicit-over-implicit);
+        # the ignored words surface via the warnings sink, never a silent clobber.
+        warnings: list[str] = []
+        payload = _parse_emit_parts(
+            ["topic=x", "message=explicit body", "stray", "word"], warnings=warnings
+        )
+        assert payload["message"] == "explicit body"
+        assert warnings and "stray word" in warnings[0]
+
+    def test_trailing_message_without_explicit_emits_no_warning(self):
+        # Boundary: no competing message= → trailing barewords still become the
+        # message and no warning fires (the precedence branch must not trip).
+        warnings: list[str] = []
+        payload = _parse_emit_parts(["topic=x", "trailing", "body"], warnings=warnings)
+        assert payload["message"] == "trailing body"
+        assert warnings == []
+
     def test_ref_comma_separated(self):
         payload = _parse_emit_parts(["topic=t", "ref=a,b,c"])
         assert payload == {"topic": "t", "ref": "a,b,c"}
@@ -424,6 +442,72 @@ class TestEmit:
         db_path = (vertex_path.parent / "data" / "session.db").resolve()
         facts = _read_all_facts(db_path)
         assert facts[0].observer == "human"
+
+    def test_order_stable_flags_intermixed(self, tmp_path, monkeypatch, capsys):
+        """parse_intermixed_args: a flag between kind and parts doesn't break the
+        positional split, and trailing barewords still join as the message."""
+        home = tmp_path / "home"
+        _write_vertex(home, "session", store="./data/session.db")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        result = main([
+            "session", "emit", "decision",
+            "--dry-run", "topic=sigil", "trailing", "message", "words",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["payload"]["topic"] == "sigil"
+        assert d["payload"]["message"] == "trailing message words"
+
+    def test_key_value_never_classified_as_vertex_or_kind(self, tmp_path, monkeypatch, capsys):
+        """Verb-first emit: a leading KEY=VALUE is payload, never the vertex/kind.
+
+        ``emit <vertex> decision topic=design/foo`` keeps topic as payload even
+        though its value carries a slash (the old greedy-positional footgun)."""
+        home = tmp_path / "home"
+        vdir = home / "proj"
+        vdir.mkdir(parents=True)
+        (vdir / "proj.vertex").write_text(
+            'name "proj"\n'
+            'store "./data/proj.db"\n'
+            'loops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        # Verb-first: "emit" verb, "proj" vertex, "decision" kind.
+        result = main([
+            "emit", "proj", "decision", "topic=design/foo", "body", "text",
+            "--dry-run",
+        ])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["kind"] == "decision"
+        assert d["payload"]["topic"] == "design/foo"
+        assert d["payload"]["message"] == "body text"
+
+    def test_missing_kind_errors_cleanly_both_paths(self, tmp_path, monkeypatch, capsys):
+        """All-KEY=VALUE bucket → kind=None must error exit 2 on BOTH dry-run and
+        real path, never a kind:null false-success preview or an opaque crash.
+
+        Regression bar: the token-bucket grammar made kind structurally optional;
+        the guard restores the pre-S6 clean refusal (argparse exit 2)."""
+        home = tmp_path / "home"
+        _write_vertex(home, "session", store="./data/session.db")
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        # dry-run: NO kind:null fact on stdout, clean error on stderr, exit 2.
+        rc = main(["session", "emit", "topic=x", "message=y", "--dry-run"])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "requires a kind" in captured.err
+
+        # real path: same clean refusal (not an opaque NoneType crash).
+        rc = main(["session", "emit", "topic=x", "message=y"])
+        assert rc == 2
+        assert "requires a kind" in capsys.readouterr().err
 
 
 class TestEntityRefResolution:
@@ -1076,8 +1160,39 @@ class TestObserverResolution:
         )
         assert result == 0
 
-    def test_undeclared_observer_rejected(self, tmp_path, monkeypatch, capsys):
-        """Undeclared observer is rejected when observers block exists."""
+    def test_undeclared_observer_forgiven_by_default(self, tmp_path, monkeypatch, capsys):
+        """Undeclared observer is FORGIVEN by default — WARN + store, exit 0 (S6).
+
+        The forgive path (design/declare-observer-print-not-write): the stored
+        Row carries the observer regardless, so a missing observers{} declaration
+        no longer loses the fact. Grant violations and --strict still refuse.
+        """
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  kyle { }\n}',
+        )
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # 'counter' IS declared on this vertex — isolates the observer behavior
+        # from kind-not-declared (which would add its own WARN).
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "unknown-user",
+                "count=1",
+            ]
+        )
+        assert result == 0
+        err = capsys.readouterr().err
+        assert "WARN" in err
+        assert "not declared" in err
+        assert "unknown-user" in err
+
+    def test_undeclared_observer_refused_under_strict(self, tmp_path, monkeypatch, capsys):
+        """--strict turns the forgiven undeclared-observer WARN into a refusal (exit 1)."""
         home = tmp_path / "home"
         self._write_vertex_with_observers(
             home, "session",
@@ -1089,15 +1204,68 @@ class TestObserverResolution:
 
         result = main(
             [
-                "session", "emit", "decision",
+                "session", "emit", "counter",
                 "--observer", "unknown-user",
-                "topic=test",
+                "count=1",
+                "--strict",
             ]
         )
         assert result == 1
         err = capsys.readouterr().err
         assert "not declared" in err
         assert "unknown-user" in err
+
+    def test_declare_observer_prints_even_when_strict_refuses(self, tmp_path, monkeypatch, capsys):
+        """--declare-observer prints the snippet BEFORE the strict refusal — that
+        is exactly when the declaration hint is most actionable."""
+        home = tmp_path / "home"
+        self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  kyle { }\n}',
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "stranger",
+                "count=1",
+                "--strict",
+                "--declare-observer",
+            ]
+        )
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "observers {" in err
+        assert "stranger { }" in err
+
+    def test_undeclared_observer_declare_snippet_printed(self, tmp_path, monkeypatch, capsys):
+        """--declare-observer prints the observers{} KDL snippet (PRINT-not-write)."""
+        home = tmp_path / "home"
+        vertex_path = self._write_vertex_with_observers(
+            home, "session",
+            observers_kdl='observers {\n  kyle { }\n}',
+        )
+        original = vertex_path.read_text()
+
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        result = main(
+            [
+                "session", "emit", "counter",
+                "--observer", "kyle/loops-claude",
+                "count=1",
+                "--declare-observer",
+            ]
+        )
+        assert result == 0
+        err = capsys.readouterr().err
+        assert "observers {" in err
+        assert "loops-claude { }" in err  # bare agent name, namespace stripped
+        # PRINT-NOT-WRITE: the .vertex is byte-identical after.
+        assert vertex_path.read_text() == original
 
     def test_namespaced_observer_matches_bare_declaration(self, tmp_path, monkeypatch, capsys):
         """Namespaced observer kyle/loops-claude matches bare declaration loops-claude."""
@@ -1137,8 +1305,9 @@ class TestObserverResolution:
         d = json.loads(capsys.readouterr().out)
         assert d["observer"] == "kyle/loops-claude"
 
-    def test_namespaced_observer_wrong_agent_rejected(self, tmp_path, monkeypatch, capsys):
-        """kyle/unknown-agent is rejected when only loops-claude is declared."""
+    def test_namespaced_observer_wrong_agent_forgiven(self, tmp_path, monkeypatch, capsys):
+        """kyle/unknown-agent is undeclared (only loops-claude declared) → forgiven
+        by default: WARN + store, exit 0 (S6 forgive path)."""
         home = tmp_path / "home"
         self._write_vertex_with_observers(
             home, "session",
@@ -1155,8 +1324,9 @@ class TestObserverResolution:
                 "count=1",
             ]
         )
-        assert result == 1
+        assert result == 0
         err = capsys.readouterr().err
+        assert "WARN" in err
         assert "not declared" in err
 
     def test_namespaced_grant_potential_enforced(self, tmp_path, monkeypatch, capsys):

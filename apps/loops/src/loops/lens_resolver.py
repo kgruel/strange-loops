@@ -226,16 +226,50 @@ def _load_builtin(name: str, candidates: tuple[str, ...]) -> LensRenderFn | None
     return _extract_view(mod, candidates)
 
 
+def normalize_width(width: int | None) -> int | None:
+    """Normalize the render width sentinel before it reaches a lens.
+
+    Width carries a two-state contract: a concrete ``int`` (terminal columns
+    on a TTY → truncate/pad to fit) or ``None`` (piped → no truncation, full
+    payload flows to the consuming tool/system-prompt). This is the single
+    chokepoint that documents that contract at the dispatch seam.
+
+    Identity passthrough today — no normalization is applied. It exists as the
+    named seam so any future piped-vs-TTY width policy lands in exactly one
+    place instead of being re-derived at every ``call_lens`` site.
+    """
+    return width
+
+
 def call_lens(fn: LensRenderFn, data, zoom, width, **kwargs) -> "Block":
     """Call a lens render function, passing optional context kwargs if accepted.
 
     Existing lenses: fold_view(data, zoom, width) — kwargs silently dropped.
     New lenses: fold_view(data, zoom, width, *, vertex_name=None) — kwargs passed.
+
+    Dispatches by ``inspect.signature`` (symmetric to ``call_lens_fetch``)
+    rather than try/except TypeError, so a genuine ``TypeError`` raised inside
+    the lens body (bad indexing, missing attr) surfaces normally instead of
+    being misread as a kwarg mismatch and silently retried with the body run
+    a second time.
+
+    - Lens declares ``**kwargs`` → receives every kwarg (opts into all).
+    - Lens has named params → receives only the kwargs whose names match.
+    - Lens has neither → receives just ``data, zoom, width``.
     """
-    try:
+    import inspect
+
+    params = inspect.signature(fn).parameters
+
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in params.values()
+    )
+    if has_var_keyword:
         return fn(data, zoom, width, **kwargs)
-    except TypeError:
-        return fn(data, zoom, width)
+
+    accepted = {k: v for k, v in kwargs.items() if k in params}
+    return fn(data, zoom, width, **accepted)
 
 
 def call_lens_fetch(fetch_fn, vertex_path, **all_kwargs):

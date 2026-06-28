@@ -1,0 +1,12 @@
+Decisions (1):
+  design/ (1)
+    root [×2 →1 Jan 15]: anchor
+      → thread:walk-target
+
+## REFS (2)
+  ┄ via → decision/design/root
+    walk-target [←1 →1 Jan 15]: open
+      → observation:deep
+  ┄ via → thread/walk-target
+    ↳ (d2)
+      deep [Jan 15]: two hops out

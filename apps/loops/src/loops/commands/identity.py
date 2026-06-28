@@ -3,6 +3,32 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ObserverCheck:
+    """Pure classification of an observer+kind emit against the vertex chain.
+
+    No printing, no exit code — the caller decides how to act on each status:
+
+    * ``"ok"``         — emit permitted (observer declared & granted, or the
+      vertex declares no observers / no observer was supplied — an open system).
+    * ``"undeclared"`` — observers ARE declared somewhere in the chain but this
+      observer is not among them. FORGIVABLE: the default emit path WARNs and
+      stores (the Row carries the observer regardless); strict refuses.
+    * ``"forbidden"``  — the observer IS declared but its ``grant.potential``
+      excludes this kind. ALWAYS a hard refusal — a declared capability
+      boundary, not a missing declaration.
+    """
+
+    status: str               # "ok" | "undeclared" | "forbidden"
+    message: str | None        # human-facing reason (None when "ok")
+    known: tuple[str, ...]     # declared observer names (for hints / snippets)
 
 
 def _loops_home() -> Path:
@@ -131,22 +157,15 @@ def _collect_combine_observers(vertex_path: Path) -> list:
     return observers
 
 
-def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
-    """Validate observer + kind against vertex declaration chain.
+def _collect_all_observers(vertex_path: Path) -> list:
+    """Collect every observer declared in the vertex's resolution chain.
 
-    Returns error message if rejected, None if allowed.
-    Checks:
-    1. Observer is declared in the vertex itself, .vertex chain, or
-       combine/discover source vertices (cascade)
-    2. Kind is in observer's grant.potential (if grant is declared)
+    Cascade order: the vertex file itself, the nearest project-level
+    ``.loops/.vertex``, the global ``.vertex``, then combine/discover source
+    vertices. Returns the flat list (with duplicates — callers dedup names).
     """
-    if not observer:
-        return None  # No observer to validate
-
-    # Check the vertex file itself first
     vertex_observers = _read_observers(vertex_path)
 
-    # Collect observers from project-level .vertex
     project_observers: tuple = ()
     project_root = vertex_path.parent
     for d in [project_root, *project_root.parents]:
@@ -155,28 +174,46 @@ def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
             project_observers = _read_observers(candidate)
             break
 
-    # Collect observers from global .vertex
     home = _loops_home()
     global_observers: tuple = ()
     global_path = home / ".vertex"
     if global_path.exists() and global_path.resolve() != vertex_path.resolve():
         global_observers = _read_observers(global_path)
 
-    # Collect observers from combine/discover source vertices (cascade)
     combine_observers = _collect_combine_observers(vertex_path)
 
-    all_observers = (
+    return (
         list(vertex_observers)
         + list(project_observers)
         + list(global_observers)
         + combine_observers
     )
 
-    # No observers declared anywhere -> no validation (open system)
-    if not all_observers:
-        return None
 
-    # Find the observer declaration (supports namespaced observers)
+def check_emit(vertex_path: Path, observer: str, kind: str) -> ObserverCheck:
+    """Classify an observer+kind emit against the vertex declaration chain.
+
+    Pure — no printing, no exit. The caller maps ``ObserverCheck.status`` to an
+    action: ``"ok"`` proceeds, ``"undeclared"`` is forgivable (WARN+store in the
+    default emit path; refuse under strict), ``"forbidden"`` is a hard refusal.
+
+    Checks, in order:
+    1. Observer is declared in the vertex itself, the .vertex chain, or
+       combine/discover source vertices (cascade).
+    2. Kind is in the observer's ``grant.potential`` (if a grant is declared).
+    """
+    if not observer:
+        return ObserverCheck("ok", None, ())
+
+    all_observers = _collect_all_observers(vertex_path)
+
+    # No observers declared anywhere -> open system, nothing to validate.
+    if not all_observers:
+        return ObserverCheck("ok", None, ())
+
+    known = tuple(sorted({o.name for o in all_observers}))
+
+    # Find the observer declaration (supports namespaced observers).
     from engine.observer import observer_matches
 
     decl = None
@@ -186,15 +223,40 @@ def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
             break
 
     if decl is None:
-        names = sorted({o.name for o in all_observers})
-        return f"Observer {observer!r} not declared. Known: {', '.join(names)}"
+        return ObserverCheck(
+            "undeclared",
+            f"Observer {observer!r} not declared. Known: {', '.join(known)}",
+            known,
+        )
 
-    # Check grant.potential if declared
+    # Declared but capability-gated: a grant that excludes this kind is a hard
+    # boundary, not a missing declaration — never forgiven.
     if decl.grant is not None and kind not in decl.grant.potential:
         allowed = sorted(decl.grant.potential)
-        return f"Observer {observer!r} cannot emit kind {kind!r}. Allowed: {', '.join(allowed)}"
+        return ObserverCheck(
+            "forbidden",
+            f"Observer {observer!r} cannot emit kind {kind!r}. "
+            f"Allowed: {', '.join(allowed)}",
+            known,
+        )
 
-    return None
+    return ObserverCheck("ok", None, known)
+
+
+def validate_emit(vertex_path: Path, observer: str, kind: str) -> str | None:
+    """Validate observer + kind against the vertex declaration chain.
+
+    Thin wrapper over :func:`check_emit` that REFUSES on both ``undeclared`` and
+    ``forbidden`` — the legacy refuse-on-any-failure contract. ``_run_close`` and
+    direct callers keep this strict behavior; only ``cmd_emit``'s main path
+    rewires to :func:`check_emit` to forgive undeclared observers (S6).
+
+    Returns the error message if rejected, None if allowed.
+    """
+    check = check_emit(vertex_path, observer, kind)
+    if check.status == "ok":
+        return None
+    return check.message
 
 
 def resolve_local_vertex(start: Path | None = None) -> Path:

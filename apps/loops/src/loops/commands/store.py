@@ -61,6 +61,25 @@ def resolve_store_path(file_path: Path) -> Path:
         raise ValueError(f"Expected .vertex or .db file, got {file_path.suffix}")
 
 
+def _require_materialized_store(target_path: Path) -> Path:
+    """Resolve *target_path* to its store ``.db`` and require it exists.
+
+    State 2 of the store-verb existence contract (decision/design/
+    store-verb-existence-exit-code-parity): a present ``.vertex`` whose store
+    ``.db`` was never written is *not yet materialized* — a distinct condition
+    from *written and empty* (write-receipt-vs-temporal-query at the exit-code
+    layer). All three store verbs (ticks/stats/verify) surface it as a clean
+    RC=1 with a named message rather than ticks' prior silent RC=0-empty.
+    """
+    db_path = resolve_store_path(target_path)
+    if not db_path.exists():
+        raise FileNotFoundError(
+            f"store for '{target_path.stem}' not yet materialized — "
+            f"no facts emitted (no database at {db_path})"
+        )
+    return db_path
+
+
 def make_fetcher(path: Path, zoom: int):
     """Create a zero-arg fetcher for store data.
 
@@ -109,7 +128,15 @@ def make_fetcher(path: Path, zoom: int):
 
 
 def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
-    """Resolve the store target: explicit vertex_path > file/name arg > local root."""
+    """Resolve the store target: explicit vertex_path > file/name arg > local root.
+
+    State 1 of the store-verb existence contract (decision/design/
+    store-verb-existence-exit-code-parity): when a named/explicit target
+    resolves to a path that does not exist, raise a clean ``FileNotFoundError``
+    here — the single shared chokepoint all three store verbs (ticks/stats/
+    verify) pass through — so an absent ``.vertex`` reads as "X does not exist"
+    rather than leaking a raw ``[Errno 2]`` from a downstream parse.
+    """
     from .resolve import loops_home
 
     if vertex_path is not None:
@@ -117,17 +144,27 @@ def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
     if file_arg is not None:
         p = Path(file_arg)
         if p.suffix or file_arg.startswith("./") or file_arg.startswith("/"):
-            return p
-        # Local-first — same resolution the verbs use
-        # (thread:global-local-walk-broken).
-        from .resolve import _resolve_vertex_for_dispatch
+            target = p
+        else:
+            # Local-first — same resolution the verbs use
+            # (thread:global-local-walk-broken).
+            from .resolve import _resolve_vertex_for_dispatch
 
-        resolved = _resolve_vertex_for_dispatch(file_arg)
-        if resolved is not None:
-            return resolved
-        from lang.population import resolve_vertex
+            resolved = _resolve_vertex_for_dispatch(file_arg)
+            if resolved is not None:
+                target = resolved
+            else:
+                from lang.population import resolve_vertex
 
-        return resolve_vertex(file_arg, loops_home())
+                target = resolve_vertex(file_arg, loops_home())
+        # State 1 covers the .vertex/name target only: an absent .db is a
+        # state-2 (materialization) concern handled downstream by
+        # _require_materialized_store, and the verbs that forbid a .db target
+        # (ticks/reanchor) reject it by suffix with a more useful message — so
+        # an existence check here must not pre-empt those.
+        if target.suffix != ".db" and not target.exists():
+            raise FileNotFoundError(f"{file_arg} does not exist")
+        return target
     home = loops_home()
     root = home / ".vertex"
     if root.exists():
@@ -159,10 +196,21 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
-    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
-    db_path = resolve_store_path(target_path)
-    if not db_path.exists():
-        raise FileNotFoundError(f"{db_path} does not exist")
+    try:
+        target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+        db_path = _require_materialized_store(target_path)
+    except (FileNotFoundError, ValueError) as exc:
+        # F2 — three-verb --json parity: verify is hand-rolled and raises
+        # before its --json branch, so without this an absent target / absent
+        # .db / aggregate would emit PLAIN text under --json (a JSONDecodeError
+        # for a machine consumer) where store stats emits {"error": ...} via
+        # run_cli's _export_json. Match that shape. Non-json errors re-raise to
+        # the cli/views boundary for the normal plain rendering (unchanged).
+        if args.json:
+            import json as _json
+            print(_json.dumps({"error": str(exc)}))  # noqa: T201 — machine output path
+            return 1
+        raise
 
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
@@ -500,6 +548,181 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if ok else 1
 
 
+def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Read a store's tick series — the attestation chain surface.
+
+    Default projection is density (items/facts/delta per window).
+    ``--chain`` projects the stored attestation envelope per tick: chain
+    linkage, signature presence, and the window cursor. This is a READ of
+    the stored flags, not a re-verification — ``store verify`` walks the
+    chain in append order and checks integrity; ``store ticks`` lists what
+    each tick's envelope says. Requires a ``.vertex`` target: the tick
+    series resolves through the vertex name and store. ``--since`` narrows
+    the window; the default is the full chain (genesis and the legacy-era
+    boundary are exactly what an attestation read wants to see).
+    """
+    import argparse
+    from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
+    pre.add_argument("--chain", action="store_true", default=False)
+    pre.add_argument("--since", default=None)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = getattr(known, "file", None)
+
+    target_path = _resolve_target(file_arg, vertex_path).resolve()
+
+    help_args = (
+        [HelpArg("file", "Vertex .vertex file or vertex name", positional=True)]
+        if vertex_path is None else []
+    )
+    help_args += [
+        HelpArg("--chain", "Project the attestation envelope (chain linkage, "
+                "signature, window cursor) and span the full hash chain"),
+        HelpArg("--since", "Narrow to ticks within a window (e.g. 7d, 24h); "
+                "default is the full chain"),
+    ]
+
+    def fetch():
+        import dataclasses
+        from lang import parse_vertex_file
+
+        from .fetch import fetch_tick_windows
+
+        # Validation is deferred into fetch (mirroring store stats/verify) so
+        # `store ticks --help` reaches run_cli's help handler — an eager guard
+        # would raise on target resolution before help could render.
+        if target_path.suffix != ".vertex":
+            raise ValueError(
+                "store ticks requires a .vertex target — the tick series "
+                "resolves through the vertex name and store"
+            )
+        # Refuse aggregates: a combine/discover vertex has no own store and no
+        # own chain — vertex_ticks returns empty attestation envelopes for it,
+        # which would render a genuinely-signed chain as a false "all legacy".
+        # The sibling store verbs already refuse storeless aggregates (via
+        # resolve_store_path); ticks bypasses that path, so guard here.
+        ast = parse_vertex_file(target_path)
+        if ast.combine is not None or ast.discover is not None:
+            raise ValueError(
+                "store ticks reads one store's attestation chain; "
+                f"{target_path.name} is an aggregate vertex (no own chain) — "
+                "point at the instance store, e.g. .loops/<name>.vertex"
+            )
+
+        # State 2: present .vertex / absent .db is "not yet materialized" —
+        # RC=1 with a surfaced message, matching stats/verify, not ticks'
+        # prior silent RC=0-empty. (decision/design/
+        # store-verb-existence-exit-code-parity)
+        _require_materialized_store(target_path)
+
+        # --chain spans the full hash chain (all_names) to agree with
+        # `store verify`/`store stats`; density stays name-scoped (its
+        # delta fields are a same-series concept).
+        windows = fetch_tick_windows(
+            target_path, since=known.since, all_names=known.chain
+        )
+        chain = {
+            "ticks": len(windows),
+            "chained": sum(1 for w in windows if w.chained),
+            "signed": sum(1 for w in windows if w.signed),
+            "legacy": sum(1 for w in windows if not w.chained),
+        }
+        return {
+            "vertex": ast.name,
+            "chain_mode": known.chain,
+            "chain": chain,
+            "since": known.since,
+            "windows": [dataclasses.asdict(w) for w in windows],
+        }
+
+    def render(ctx, data):
+        from ..lenses.store import tick_chain_view
+
+        return tick_chain_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        default_mode=OutputMode.STATIC,
+        prog="loops store ticks",
+        description=(
+            "Read a store's tick series. --chain projects the attestation "
+            "envelope (chain linkage, signature, window cursor) per tick; "
+            "the default projects density (items/facts/delta)."
+        ),
+        help_args=help_args,
+    )
+
+
+def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Store statistics — topline totals and (``--by-kind``) a
+    count-descending per-kind tally. Works on a ``.db`` or a ``.vertex``.
+    """
+    import argparse
+    from painted import run_cli, OutputMode
+    from painted.cli import HelpArg
+
+    pre = argparse.ArgumentParser(add_help=False)
+    if vertex_path is None:
+        pre.add_argument("file", nargs="?", default=None)
+    pre.add_argument("--by-kind", dest="by_kind", action="store_true", default=False)
+    known, rest = pre.parse_known_args(argv)
+    file_arg = getattr(known, "file", None)
+
+    target_path = _resolve_target(file_arg, vertex_path).resolve()
+
+    help_args = (
+        [HelpArg("file", "Store .db or .vertex file, or vertex name",
+                 positional=True)]
+        if vertex_path is None else []
+    )
+
+    def fetch():
+        from engine.store_reader import StoreReader
+
+        store_path = _require_materialized_store(target_path)
+        with StoreReader(store_path) as reader:
+            summary = reader.summary()
+        kinds = sorted(
+            (
+                {"kind": k, "count": v["count"]}
+                for k, v in summary["facts"]["kinds"].items()
+            ),
+            key=lambda r: r["count"],
+            reverse=True,
+        )
+        return {
+            "vertex": target_path.stem,
+            "by_kind": known.by_kind,
+            "total_facts": summary["facts"]["total"],
+            "total_ticks": summary["ticks"]["total"],
+            "kind_count": len(kinds),
+            "kinds": kinds,
+        }
+
+    def render(ctx, data):
+        from ..lenses.store import stats_view
+
+        return stats_view(data, ctx.zoom, ctx.width)
+
+    return run_cli(
+        rest,
+        fetch=fetch,
+        render=render,
+        default_mode=OutputMode.STATIC,
+        prog="loops store stats",
+        description=(
+            "Store statistics. --by-kind adds a count-descending per-kind tally."
+        ),
+        help_args=help_args,
+    )
+
+
 def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Run store command via painted CLI harness."""
     import argparse
@@ -512,6 +735,10 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "ticks":
+        return _run_store_ticks(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "stats":
+        return _run_store_stats(argv[1:], vertex_path=vertex_path)
 
     # Base inspect: pre-parse the optional ``file`` target; run_cli owns -h
     # and the -i/-q/-v/--json/--plain axes, listing ``file`` (when accepted)

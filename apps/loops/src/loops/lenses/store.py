@@ -248,8 +248,157 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
 
 
 # ---------------------------------------------------------------------------
+# Tick chain — attestation read surface (store ticks [--chain])
+# ---------------------------------------------------------------------------
+
+
+def tick_chain_view(
+    data: dict,
+    zoom: Zoom,
+    width: int | None,
+    palette: LoopsPalette | None = None,
+) -> Block:
+    """Render a store's tick series, newest-first.
+
+    Default projection (plain ``store ticks``) is density — items, facts,
+    and per-window delta. ``--chain`` switches to the attestation
+    projection — chain linkage, signature presence, and the window cursor
+    per tick. The chain projection is a READ of the stored envelope, not a
+    re-verification: ``store verify`` walks the chain in append order and
+    checks integrity; this lists what each tick's stored attestation flags
+    say (signed is per-TICK; per-fact signatures are verify's job).
+
+    ``data`` shape: ``{vertex, chain_mode: bool, chain: {ticks, chained,
+    signed, legacy}, since: str | None, windows: [TickWindow-as-dict, ...]}``.
+    """
+    p = palette or DEFAULT_PALETTE
+    vertex = data.get("vertex", "")
+    windows = data.get("windows", [])
+    chain = data.get("chain", {})
+    attest = bool(data.get("chain_mode"))
+
+    if not windows:
+        # Distinguish an empty --since window from a genuinely empty store —
+        # "No ticks in this store" on a populated store is a false negative.
+        since = data.get("since")
+        msg = (
+            f"No ticks in the last {since}."
+            if since
+            else "No ticks in this store."
+        )
+        return _line(msg, p.metadata, width)
+
+    rollup = f"{vertex} · {len(windows)} ticks"
+    if attest:
+        rollup += (
+            f" · {chain.get('chained', 0)} chained"
+            f" · {chain.get('signed', 0)} signed"
+            f" · {chain.get('legacy', 0)} legacy"
+        )
+    if zoom == Zoom.MINIMAL:
+        return _line(rollup, p.metadata, width)
+
+    dim = Style(dim=True)
+    rows: list[Block] = [_line(rollup, p.header, width)]
+    for w in windows:
+        time_str = _tick_time(w["ts"])
+        idx = f"#{w.get('index', 0)}"
+        name = w.get("name", "")
+        if attest:
+            link = "linked" if w.get("chained") else "legacy"
+            sig = "signed" if w.get("signed") else "unsigned"
+            rows.append(_line(f"  {time_str} {idx} {name} · {link} · {sig}", Style(), width))
+            if zoom >= Zoom.DETAILED and w.get("fact_cursor"):
+                ckind = w.get("cursor_kind") or "?"
+                preview = w.get("cursor_preview") or ""
+                cursor = f'{ckind}: "{preview}"' if preview else ckind
+                rows.append(_line(f"        cursor → {cursor}", dim, width))
+        else:
+            trigger = w.get("boundary_trigger") or name
+            rows.append(_line(f"  {time_str} {idx} {trigger}", Style(), width))
+            if zoom >= Zoom.DETAILED:
+                delta = ""
+                if w.get("delta_added") or w.get("delta_updated"):
+                    delta = f" · +{w.get('delta_added', 0)} ~{w.get('delta_updated', 0)}"
+                rows.append(_line(
+                    f"        fold: {w.get('total_items', 0)} items · "
+                    f"{w.get('total_facts', 0)} facts{delta}",
+                    dim, width,
+                ))
+        if zoom >= Zoom.FULL and w.get("since") is not None:
+            observer = f" · {w['observer']}" if w.get("observer") else ""
+            rows.append(_line(
+                f"        window: {_tick_time(w['since'])} → {time_str}{observer}",
+                dim, width,
+            ))
+
+    return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
+# Stats — count surface (store stats [--by-kind])
+# ---------------------------------------------------------------------------
+
+
+def stats_view(
+    data: dict,
+    zoom: Zoom,
+    width: int | None,
+    palette: LoopsPalette | None = None,
+) -> Block:
+    """Render store statistics — topline totals, and (``--by-kind``) a
+    count-descending per-kind tally.
+
+    ``data`` shape: ``{vertex, by_kind: bool, total_facts, total_ticks,
+    kind_count, kinds: [{kind, count}, ...] sorted count-desc}``. The
+    per-kind table is gated on ``--by-kind`` (honesty rule: the flag is
+    what adds the table).
+    """
+    p = palette or DEFAULT_PALETTE
+    vertex = data.get("vertex", "")
+    total_facts = data.get("total_facts", 0)
+    total_ticks = data.get("total_ticks", 0)
+    kind_count = data.get("kind_count", 0)
+    kinds = data.get("kinds", [])
+    by_kind = bool(data.get("by_kind"))
+
+    rollup = (
+        f"{vertex} · {_format_count(total_facts)} facts · "
+        f"{kind_count} kinds · {_format_count(total_ticks)} ticks"
+    )
+    if zoom == Zoom.MINIMAL or not by_kind:
+        return _line(rollup, p.metadata, width)
+
+    rows: list[Block] = [_line(rollup, p.header, width)]
+    if not kinds:
+        rows.append(_line("  (empty store)", p.metadata, width))
+        return join_vertical(*rows)
+
+    name_w = max((len(str(k["kind"])) for k in kinds), default=4)
+    for k in kinds:  # already count-descending from the fetch
+        count = k["count"]
+        pct = (count / total_facts * 100) if total_facts else 0.0
+        line = f"  {str(k['kind']).ljust(name_w)}  {_format_count(count):>6}  {pct:4.1f}%"
+        rows.append(_line(line, p.kind_style(k["kind"]), width))
+
+    return join_vertical(*rows)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _line(text: str, style: Style, width: int | None) -> Block:
+    """Block.text honoring the piped contract — width=None → natural size."""
+    if width is None:
+        return Block.text(text, style)
+    return Block.text(text, style, width=width)
+
+
+def _tick_time(ts: float) -> str:
+    """Epoch-seconds → 'YYYY-MM-DD HH:MM' (UTC), greppable and stable."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 def _format_count(n: int) -> str:

@@ -372,6 +372,14 @@ class TestCiteImplicitlyUniversal:
             '  decision { fold { items "by" "topic" } }\n'
             "}\n"
         )
+        # Seed the referenced decision so the cite's ref resolves cleanly.
+        # Isolates this test to the cite-kind-universality assertion: a ref to
+        # a non-existent entity would (correctly) warn on its own, which is a
+        # different concern from whether the undeclared 'cite' kind warns.
+        seed = _ns(kind="decision", parts=["topic=design/foo", "message=seed"])
+        assert cmd_emit(seed, vertex_path=vpath) == 0
+        capsys.readouterr()  # drain the seed receipt
+
         parts = ["ref=decision:design/foo", "message=cite with no explicit declaration"]
         ns = _ns(kind="cite", parts=parts)
         rc = cmd_emit(ns, vertex_path=vpath)
@@ -381,6 +389,196 @@ class TestCiteImplicitlyUniversal:
         assert "WARN" not in err
         # Receipt is printed — fact was stored successfully
         assert "stored: cite/" in err
+
+
+# ---------------------------------------------------------------------------
+# S6 — structured receipt (--json), dry-run orphan guard, inbound-delta
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredReceipt:
+    """--json prints the post-emit fold as a canonical Surface dict on stdout."""
+
+    def test_json_receipt_is_surface_dict(self, basic_vertex, capsys):
+        import json
+
+        ns = _ns(kind="decision",
+                 parts=["topic=design/jr", "message=x"], json=True)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        doc = json.loads(capsys.readouterr().out)
+        # Canonical surface.to_dict shape
+        assert set(doc) >= {"vertex", "rows", "schema", "window"}
+        # The just-emitted decision appears, addressed by its complete key.
+        addrs = {r["address"] for r in doc["rows"]}
+        assert "decision/design/jr" in addrs
+
+    def test_json_receipt_absent_by_default(self, basic_vertex, capsys):
+        """Default path is a cheap stderr one-liner — stdout stays empty."""
+        rc, _ = _emit(basic_vertex, "decision", topic="design/none", message="x")
+        assert rc == 0
+        assert capsys.readouterr().out == ""
+
+
+class TestDryRunOrphanGuard:
+    """Dry-run surfaces orphan WARNs to stderr; stdout stays fact.to_dict()."""
+
+    def test_dry_run_warns_on_undeclared_kind_stderr_only(self, basic_vertex, capsys):
+        import json
+
+        ns = _ns(kind="observation",
+                 parts=["topic=oops", "message=m"], dry_run=True)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Orphan guard fires on stderr...
+        assert "WARN" in captured.err
+        assert "not declared" in captured.err
+        # ...and the fact JSON is unchanged on stdout (the ~8-tests contract).
+        d = json.loads(captured.out)
+        assert d["kind"] == "observation"
+        assert d["payload"]["topic"] == "oops"
+
+    def test_dry_run_clean_kind_no_warn(self, basic_vertex, capsys):
+        import json
+
+        ns = _ns(kind="decision",
+                 parts=["topic=design/ok", "message=m"], dry_run=True)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "WARN" not in captured.err
+        assert json.loads(captured.out)["payload"]["topic"] == "design/ok"
+
+
+class TestInboundDelta:
+    """-v adds an inbound-edge delta line per resolved ref."""
+
+    def test_verbose_inbound_delta_for_resolved_ref(self, basic_vertex, capsys):
+        _emit(basic_vertex, "decision", topic="design/seed", message="seed")
+        capsys.readouterr()  # clear
+
+        ns = _ns(kind="thread",
+                 parts=["name=fu", "status=open", "ref=decision/design/seed"],
+                 verbose=1)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "inbound +1 on decision/design/seed" in err
+
+    def test_no_delta_without_verbose(self, basic_vertex, capsys):
+        _emit(basic_vertex, "decision", topic="design/seed2", message="seed")
+        capsys.readouterr()
+
+        rc, _ = _emit(basic_vertex, "thread", name="fu2", status="open",
+                      ref="decision/design/seed2")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "inbound +1" not in err
+
+    def test_comma_ref_count_matches_addresses(self, basic_vertex, capsys):
+        """(refs: N resolved) counts ADDRESSES — ref=A,B reports 2, agreeing with
+        the per-address inbound-delta lines."""
+        _emit(basic_vertex, "decision", topic="design/ra", message="a")
+        _emit(basic_vertex, "decision", topic="design/rb", message="b")
+        capsys.readouterr()
+
+        rc, _ = _emit(basic_vertex, "thread", name="multi", status="open",
+                      ref="decision/design/ra,decision/design/rb")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "refs: 2 resolved" in err
+
+    def test_verbose_inbound_delta_for_colon_ref(self, basic_vertex, capsys):
+        """Regression: the CANONICAL colon ref form (kind:key) resolves and
+        fires the inbound-delta. Pre-fix the emit-time resolver only handled
+        the slash form, so colon refs — the documented convention — silently
+        never resolved (0/499 in the live store)."""
+        _emit(basic_vertex, "decision", topic="design/seed", message="seed")
+        capsys.readouterr()  # clear
+
+        ns = _ns(kind="thread",
+                 parts=["name=fu", "status=open", "ref=decision:design/seed"],
+                 verbose=1)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "inbound +1 on decision:design/seed" in err
+        assert "refs: 1 resolved" in err
+
+    def test_colon_comma_ref_count_matches_addresses(self, basic_vertex, capsys):
+        """Comma-joined colon refs each resolve and count."""
+        _emit(basic_vertex, "decision", topic="design/ra", message="a")
+        _emit(basic_vertex, "decision", topic="design/rb", message="b")
+        capsys.readouterr()
+
+        rc, _ = _emit(basic_vertex, "thread", name="multi", status="open",
+                      ref="decision:design/ra,decision:design/rb")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "refs: 2 resolved" in err
+
+    def test_colon_ref_to_missing_entity_warns(self, basic_vertex, capsys):
+        """A colon ref whose kind is declared but key has no match surfaces a
+        write-time WARN — the typo/stale-ref detection that was dead for colon
+        refs pre-fix."""
+        rc, _ = _emit(basic_vertex, "thread", name="typo", status="open",
+                      ref="decision:design/does-not-exist")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "WARN" in err and "did not resolve" in err
+
+
+class TestAddressSplit:
+    """Pure-function guards for the colon-canonical address parser."""
+
+    def test_colon_splits_kind_from_namespaced_key(self):
+        from loops.commands.resolve import _split_addr
+        # Colon binds tighter than the namespace slash in the key.
+        assert _split_addr("decision:design/foo") == ("decision", "design/foo")
+        assert _split_addr("thread:arc-name") == ("thread", "arc-name")
+
+    def test_slash_form_back_compat(self):
+        from loops.commands.resolve import _split_addr
+        assert _split_addr("thread/arc") == ("thread", "arc")
+        assert _split_addr("decision/design/foo") == ("decision", "design/foo")
+
+    def test_no_separator_or_empty_side_is_none(self):
+        from loops.commands.resolve import _split_addr
+        assert _split_addr("barewords") is None
+        assert _split_addr(":key") is None
+        assert _split_addr("kind:") is None
+
+    def test_candidate_requires_separator_and_no_whitespace(self):
+        from loops.commands.resolve import _is_addr_candidate
+        assert _is_addr_candidate("decision:design/foo") is True
+        assert _is_addr_candidate("thread/arc") is True
+        # Free-text prose must not be misread as a ref (false-WARN guard).
+        assert _is_addr_candidate("note: see the foo") is False
+        assert _is_addr_candidate("plain text") is False
+        assert _is_addr_candidate("nosep") is False
+        assert _is_addr_candidate("") is False
+
+
+class TestDryRunWording:
+    """Dry-run WARNs must not claim a write that did not happen."""
+
+    def test_dry_run_warn_says_would_be_stored(self, basic_vertex, capsys):
+        ns = _ns(kind="observation",
+                 parts=["topic=oops", "message=m"], dry_run=True)
+        rc = cmd_emit(ns, vertex_path=basic_vertex)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "fact would be stored" in err
+        # The real-path phrasing must not appear on a preview.
+        assert "— fact stored" not in err
+
+    def test_real_path_warn_says_fact_stored(self, basic_vertex, capsys):
+        rc, _ = _emit(basic_vertex, "observation", topic="oops2", message="m")
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "fact stored, will not fold" in err
+        assert "would be stored" not in err
 
 
 # ---------------------------------------------------------------------------

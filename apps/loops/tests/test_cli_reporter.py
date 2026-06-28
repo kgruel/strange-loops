@@ -88,6 +88,61 @@ class TestPaintedReporter:
         assert callable(r.show)
         assert callable(r.print_block)
 
+    # --- use_ansi derivation (S3: the plain-default inversion) -----------
+    # Each test constructs a FRESH reporter and clears NO_COLOR/FORCE_COLOR so
+    # the host env can't bleed into the assertion.
+
+    @staticmethod
+    def _clear_color_env(monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+    def test_use_ansi_off_when_piped(self, monkeypatch):
+        """The inversion: piped (non-TTY) stdout → no ANSI by default."""
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        assert PaintedReporter().use_ansi is False
+
+    def test_use_ansi_on_when_tty(self, monkeypatch):
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        assert PaintedReporter().use_ansi is True
+
+    def test_no_color_forces_off_even_on_tty(self, monkeypatch):
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        assert PaintedReporter().use_ansi is False
+
+    def test_no_color_empty_value_still_forces_off(self, monkeypatch):
+        """no-color.org: NO_COLOR present (any value, even empty) → off."""
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setenv("NO_COLOR", "")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        assert PaintedReporter().use_ansi is False
+
+    def test_force_color_forces_on_even_when_piped(self, monkeypatch):
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        assert PaintedReporter().use_ansi is True
+
+    def test_no_color_wins_over_force_color(self, monkeypatch):
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        assert PaintedReporter().use_ansi is False
+
+    def test_explicit_use_ansi_overrides_derivation(self, monkeypatch):
+        """An explicit bool (the --plain force-off, or a forced-on) wins over
+        the env+TTY derivation."""
+        self._clear_color_env(monkeypatch)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        assert PaintedReporter(use_ansi=False).use_ansi is False
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        assert PaintedReporter(use_ansi=True).use_ansi is True
+
 
 class TestModuleConvenience:
     def test_default_reporter_is_singleton(self):

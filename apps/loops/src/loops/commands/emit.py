@@ -32,6 +32,7 @@ def _build_receipt_lines(
     refuse: bool,
     refuse_reasons: list[str],
     vertex_strict_source: bool,
+    dry_run: bool = False,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Build receipt content as (warns, success_or_error) tuples of (line, role).
 
@@ -39,9 +40,14 @@ def _build_receipt_lines(
     Returns (warn_lines, primary_lines):
       * warn_lines — WARN: ... lines (shown unless --quiet AND not strict)
       * primary_lines — either the ERROR + hint (refuse) or the stored: receipt
+
+    ``dry_run`` adjusts the WARN wording to "fact would be stored" so a
+    --dry-run preview never claims a write that did not happen.
     """
     warn_lines: list[tuple[str, str]] = []
     primary_lines: list[tuple[str, str]] = []
+
+    stored = "fact would be stored" if dry_run else "fact stored"
 
     kind_declared = getattr(status, "kind_declared", False)
     fold_key_field = getattr(status, "fold_key_field", None)
@@ -52,13 +58,13 @@ def _build_receipt_lines(
     if not kind_declared:
         warn_lines.append((
             f"WARN: kind '{kind}' not declared on this vertex — "
-            "fact stored, will not fold",
+            f"{stored}, will not fold",
             "warn",
         ))
     elif fold_key_field is not None and not fold_key_present:
         warn_lines.append((
             f"WARN: kind '{kind}' folds by '{fold_key_field}' but payload has no "
-            f"'{fold_key_field}=' field — fact stored, will not fold",
+            f"'{fold_key_field}=' field — {stored}, will not fold",
             "warn",
         ))
 
@@ -247,11 +253,19 @@ def _apply_input_sources(
     return augmented
 
 
-def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
+def _parse_emit_parts(
+    parts: list[str], *, warnings: list[str] | None = None
+) -> dict[str, str]:
     """Parse emit args into a payload dict.
 
     Any KEY=VALUE tokens become payload entries. Any trailing non-key=value
     tokens are joined with spaces into payload["message"].
+
+    Precedence (B4): an explicit ``message=`` WINS over trailing barewords —
+    ``message="x" word`` keeps ``"x"``, not ``"word"`` (explicit-over-implicit).
+    When both are present the ignored barewords are surfaced via *warnings* (a
+    caller-supplied sink) rather than silently dropped; pass ``warnings=None``
+    (the default) to skip the diagnostic.
 
     The ``ref`` key is special: repeated ``ref=X`` occurrences accumulate into
     a single comma-separated value (matching the downstream fold convention
@@ -281,9 +295,149 @@ def _parse_emit_parts(parts: list[str]) -> dict[str, str]:
     if refs_accum:
         payload["ref"] = ",".join(refs_accum)
     if message_parts:
-        payload["message"] = " ".join(message_parts)
+        joined = " ".join(message_parts)
+        if "message" in payload:
+            # Explicit message= wins over trailing barewords
+            # (explicit-over-implicit). Surface the ignored tokens rather than
+            # silently clobbering the explicit value (B4).
+            if warnings is not None:
+                warnings.append(
+                    "WARN: explicit message= kept; trailing words ignored: "
+                    f"{joined!r}"
+                )
+        else:
+            payload["message"] = joined
 
     return payload
+
+
+def _is_path_like(s: str) -> bool:
+    """True when a token looks like a filesystem path to a .vertex file."""
+    return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
+
+
+def _is_kv(tok: str) -> bool:
+    """True when a token is a KEY=VALUE payload part (identifier key before ``=``).
+
+    The load-bearing invariant of the emit grammar: KEY=VALUE tokens are ALWAYS
+    payload — never the vertex or kind. A fold-key value like ``topic=design/foo``
+    must never be classified as a vertex name (the old greedy-positional bug).
+    """
+    if "=" not in tok:
+        return False
+    key, _, _ = tok.partition("=")
+    return key.isidentifier()
+
+
+def _classify_emit_positionals(
+    tokens: list[str], *, has_vertex_path: bool,
+) -> tuple[str | None, str | None, list[str]]:
+    """Split the emit token bucket into ``(vertex, kind, parts)``.
+
+    Grammar: ``[vertex] <kind> [KEY=VALUE ... | message words]``. Rules, in order:
+
+    * KEY=VALUE tokens are ALWAYS parts (never vertex/kind) — see ``_is_kv``.
+    * With a vertex already resolved by dispatch (``has_vertex_path``), the first
+      bareword is the kind; everything from the first non-leading token on is
+      parts.
+    * Verb-first (no vertex yet): the leading barewords carry ``[vertex] kind``.
+      Two leading barewords → the first is the vertex ONLY when it is path-like
+      or resolves to a real vertex; otherwise the first is the kind and the
+      second rejoins parts as a message word (order preserved). One leading
+      bareword is always the kind (a vertex with no kind is meaningless).
+
+    This replaces the old resolve-or-shift heuristic in ``cmd_emit`` — it keeps
+    the KEY=VALUE-never-positional invariant structural rather than post-hoc.
+    """
+    cap = 1 if has_vertex_path else 2
+    lead: list[str] = []
+    i = 0
+    while i < len(tokens) and len(lead) < cap and not _is_kv(tokens[i]):
+        lead.append(tokens[i])
+        i += 1
+    parts = tokens[i:]
+
+    if has_vertex_path:
+        return None, (lead[0] if lead else None), parts
+
+    if len(lead) >= 2:
+        first = lead[0]
+        if _is_path_like(first) or "/" in first:
+            # Path, slashed vertex name (comms/native), or vertex/template form
+            # (parent/native): a kind is always a bare identifier, so a "/" in
+            # the leading token marks the vertex. cmd_emit resolves it (including
+            # the template-qualifier split) and surfaces any not-found error.
+            return first, lead[1], parts
+        from loops.commands.resolve import _resolve_vertex_for_dispatch
+
+        if _resolve_vertex_for_dispatch(first) is not None:
+            return first, lead[1], parts
+        # First bareword is not a vertex — it's the kind; the second bareword
+        # was a message word, so fold it back into parts (order preserved).
+        return None, first, [lead[1], *parts]
+
+    if len(lead) == 1:
+        return None, lead[0], parts
+
+    return None, None, parts
+
+
+def _print_observer_declaration(
+    observer: str, vertex_path: Path, known: tuple[str, ...]
+) -> None:
+    """Print the ``observers{}`` KDL snippet + location for an undeclared observer.
+
+    PRINT-NOT-WRITE (decision/design/declare-observer-print-not-write): loops
+    never mutates the .vertex — ``observers{}`` is also the tick-signature key
+    registry, so the actor (an agent's Edit tool, or a human) applies the printed
+    entry. Goes to STDERR so machine-readable stdout (fact / Surface JSON) stays
+    clean.
+    """
+    from painted import show, Block, join_vertical
+    from painted.palette import current_palette
+
+    p = current_palette()
+    decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
+    # join_vertical, NOT a raw "\n" in Block.text — painted 0.4.0 flattens an
+    # embedded newline to a space (friction:block-text-multiline-passthrough-broke-on-040).
+    show(
+        join_vertical(
+            Block.text(f"declare: add to {vertex_path} —", p.muted),
+            Block.text("observers {", p.muted),
+            Block.text(f"  {decl_name} {{ }}", p.muted),
+            Block.text("}", p.muted),
+        ),
+        file=sys.stderr,
+    )
+
+
+def _emit_json_receipt(vertex_path: Path | None, kind: str) -> None:
+    """Print the post-emit fold as a structured Surface dict to stdout (--json).
+
+    Best-effort: the store write already succeeded, so a receipt failure must
+    not change the exit code. Fetches just the emitted kind's fold (cheap),
+    projects it to a Surface, and serializes via the canonical ``to_dict``.
+    """
+    import json as _json
+
+    from painted import show, Block
+    from painted.palette import current_palette
+
+    if vertex_path is None:
+        return
+    # The whole receipt is best-effort — serialization AND render are inside the
+    # try so a failure here can never flip the already-successful write's exit
+    # code (the caller's outer `except` would otherwise turn 0 into 1).
+    try:
+        from loops.commands.fetch import fetch_fold
+        from loops.surface import project, to_dict
+
+        state = fetch_fold(vertex_path, kind=kind, observer=None)
+        surface = project(state)
+        text = _json.dumps(to_dict(surface), sort_keys=True, default=str)
+        show(Block.text(text, current_palette().muted), file=sys.stdout)
+    except Exception:
+        return  # receipt is best-effort
 
 
 def cmd_emit(
@@ -295,7 +449,7 @@ def cmd_emit(
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     _ = _reporter(reporter)  # reserved for future error routing
     from atoms import Fact
-    from loops.commands.identity import resolve_observer, validate_emit
+    from loops.commands.identity import resolve_observer, check_emit
     from loops.commands.resolve import (
         loops_home, _find_local_vertex, _resolve_vertex_for_dispatch,
         _resolve_writable_vertex, _resolve_vertex_store_path,
@@ -312,15 +466,32 @@ def cmd_emit(
     parts = list(args.parts or [])
     template_qualifier = None
 
+    # A fact has no meaning without a kind. The token-bucket grammar makes kind
+    # structurally optional (an empty or leading-KEY=VALUE bucket yields
+    # kind=None), so guard at this single chokepoint every parser feeds — BOTH
+    # --dry-run and the real path fail cleanly (exit 2, matching argparse's old
+    # "the following arguments are required: kind") instead of previewing a
+    # kind:null fact (false success) or crashing inside program.receive.
+    if kind is None:
+        show(
+            Block.text(
+                "Error: emit requires a kind "
+                "(e.g. `loops emit <vertex> decision topic=…`)",
+                p.error,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
     if vertex_path is not None:
         # Vertex-first dispatch: vertex already resolved, no ambiguity
         pass
     else:
-        # Legacy path: resolve vertex from args
+        # Legacy path: resolve vertex from args.vertex. The vertex-vs-kind split
+        # is done UPSTREAM by _classify_emit_positionals (in the view / _run_emit),
+        # so args.vertex is either None or names a real vertex/path — there is no
+        # kind/vertex shift heuristic here anymore.
         vertex_ref = args.vertex
-
-        def _is_path_like(s: str) -> bool:
-            return s.endswith(".vertex") or s.startswith("./") or s.startswith("/")
 
         if vertex_ref is not None:
             # Local-first resolution (matches vertex-first dispatch behavior)
@@ -338,15 +509,11 @@ def cmd_emit(
                     candidate = resolve_vertex(vertex_ref, loops_home()).resolve()
                 if candidate.exists():
                     vertex_path = candidate
-                elif _is_path_like(vertex_ref):
-                    # Explicit path that doesn't exist — error
+                else:
+                    # Unresolvable explicit vertex — error. (A kind or message word
+                    # never arrives here as args.vertex: classification is upstream.)
                     show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
                     return 1
-                else:
-                    # vertex_ref doesn't resolve — reinterpret as kind, shift args
-                    parts = [kind] + parts
-                    kind = vertex_ref
-                    vertex_ref = None
 
         if vertex_ref is None:
             # No vertex: try local
@@ -374,7 +541,10 @@ def cmd_emit(
         show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
-    payload = _parse_emit_parts(parts)
+    emit_warnings: list[str] = []
+    payload = _parse_emit_parts(parts, warnings=emit_warnings)
+    if emit_warnings:
+        _emit_lines([(w, "warn") for w in emit_warnings])
 
     # Thread auto-tagging: inherit LOOPS_THREAD as default thread association.
     # Priority: explicit thread= in payload > LOOPS_THREAD env > none.
@@ -383,12 +553,41 @@ def cmd_emit(
         if thread_hint:
             payload["thread"] = thread_hint
 
-    # Validate observer + kind against declaration chain
+    # Resolve effective strict mode + receipt flags early — the observer check
+    # forgives undeclared observers UNLESS strict is in force, and the receipt
+    # path below reads quiet/verbose/json.
+    strict_mode, vertex_declared_strict = _resolve_strict(args, vertex_path)
+    quiet = bool(getattr(args, "quiet", False))
+    verbose = int(getattr(args, "verbose", 0) or 0)
+    want_json = bool(getattr(args, "json", False))
+    declare_observer = bool(getattr(args, "declare_observer", False))
+
+    # Validate observer + kind against the declaration chain.
+    #   forbidden  → hard refuse (a declared grant boundary), exit 1
+    #   undeclared → forgive (WARN + store); refuse exit 1 only under strict
+    # The forgiven WARN is emitted now: it survives -q and shows on dry-run too
+    # (the Row carries the observer regardless — design/declare-observer-print-not-write).
+    stored_phrase = "fact would be stored" if args.dry_run else "fact stored"
     if vertex_path is not None:
-        err = validate_emit(vertex_path, observer, kind)
-        if err is not None:
-            show(Block.text(f"Error: {err}", p.error), file=sys.stderr)
+        obs_check = check_emit(vertex_path, observer, kind)
+        if obs_check.status == "forbidden":
+            show(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
             return 1
+        if obs_check.status == "undeclared":
+            if strict_mode:
+                show(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+                # The declaration hint is most useful exactly here — print it
+                # before refusing so the actor can fix the strict rejection.
+                if declare_observer:
+                    _print_observer_declaration(observer, vertex_path, obs_check.known)
+                return 1
+            _emit_lines([(
+                f"WARN: {obs_check.message} — {stored_phrase}, "
+                "observer recorded as-is",
+                "warn",
+            )])
+            if declare_observer:
+                _print_observer_declaration(observer, vertex_path, obs_check.known)
 
     # Resolve store path early — needed for entity reference resolution
     try:
@@ -416,23 +615,22 @@ def cmd_emit(
     # store_path may not exist yet (first emit to this vertex) — cross-vertex
     # resolution can still succeed via topology widening.
     unresolved_refs: list = []
+    resolved_refs: list = []
     refs_resolved_count = 0
     if vertex_path is not None and store_path is not None:
-        payload_before_refs = payload
-        payload, unresolved_refs = _resolve_entity_refs(vertex_path, store_path, payload, kind=kind)
-        refs_resolved_count = sum(
-            1 for k in payload if k.endswith("_ref") and k not in payload_before_refs
+        payload, unresolved_refs, resolved_refs = _resolve_entity_refs(
+            vertex_path, store_path, payload, kind=kind
         )
+        # Count resolved ADDRESSES, not _ref sibling fields — so a comma-ref
+        # (ref=A,B → one ref_ref field, two addresses) reports "2 resolved",
+        # agreeing with the -v inbound-delta lines (one per resolved address).
+        refs_resolved_count = len(resolved_refs)
 
     # Classify emit status for receipt (pure — no side effects)
     if vertex_path is not None:
         emit_status = classify_emit_status(vertex_path, kind, payload)
     else:
         emit_status = None  # no vertex → no classification possible
-
-    # Resolve effective strict mode (vertex.spec.strict > env > flag)
-    strict_mode, vertex_declared_strict = _resolve_strict(args, vertex_path)
-    quiet = bool(getattr(args, "quiet", False))
 
     # If strict and any validation failure: refuse, do not store.
     if strict_mode and emit_status is not None:
@@ -474,6 +672,23 @@ def cmd_emit(
 
     if args.dry_run:
         import json
+        # Dry-run orphan guard: surface the same WARN diagnostics the real path
+        # would (kind-not-declared, fold-key-missing, dropped refs) to STDERR so a
+        # preview shows what would orphan. stdout stays the fact JSON — do not
+        # change (~8 tests parse fact.to_dict()).
+        if emit_status is not None:
+            warn_lines, _ = _build_receipt_lines(
+                kind=kind,
+                fact_id="",
+                status=emit_status,
+                unresolved=unresolved_refs,
+                refs_resolved_count=refs_resolved_count,
+                refuse=False,
+                refuse_reasons=[],
+                vertex_strict_source=vertex_declared_strict,
+                dry_run=True,
+            )
+            _emit_lines(warn_lines)
         show(
             Block.text(
                 json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
@@ -517,11 +732,15 @@ def cmd_emit(
                 # outcome (signed iff a key was wired, matching the engine's
                 # mint) so an unsigned tick can never masquerade as attested.
                 mark = "signed" if _tick_signer is not None else "unsigned"
+                # STDERR: this is a receipt diagnostic. On stdout it would
+                # prepend a non-JSON line to the --json Surface dict and corrupt
+                # the machine-readable contract.
                 show(
                     Block.text(
                         f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
                         p.muted,
                     ),
+                    file=sys.stderr,
                 )
 
             # Emit receipt: WARN lines (kind/fold-key/refs degradation) plus
@@ -541,10 +760,23 @@ def cmd_emit(
                 _emit_lines(warn_lines)
                 if not quiet:
                     _emit_lines(primary_lines)
+                    # Inbound-delta (verbose): each resolved ref is one new
+                    # inbound edge landing on its target entity.
+                    if verbose and resolved_refs:
+                        _emit_lines([
+                            (f"  → inbound +1 on {r.addr}", "muted")
+                            for r in resolved_refs
+                        ])
         finally:
             # Clean up the store connection
             if program.has_store:
                 program.vertex._store.close()
+
+        # Structured receipt (--json): the post-emit fold as a Surface dict on
+        # stdout. Runs AFTER the store connection closes so the read re-opens
+        # cleanly. Best-effort — the write already succeeded.
+        if want_json:
+            _emit_json_receipt(vertex_path, kind)
 
         return 0
     except Exception as e:
@@ -571,19 +803,43 @@ def _run_emit(
     observer: str | None = None,
     reporter: "Reporter | None" = None,
 ) -> int:
-    """Thin wrapper: parse argv for emit, delegate to cmd_emit."""
+    """Thin wrapper: parse argv for emit, classify positionals, delegate.
+
+    Single ``tokens`` bucket parsed with ``parse_intermixed_args`` (so flags and
+    ``field=value`` parts intermix freely and stay order-stable), then
+    ``_classify_emit_positionals`` splits ``[vertex] kind parts`` — KEY=VALUE is
+    never mistaken for the vertex or kind.
+    """
     _ = _reporter(reporter)  # reserved for future error routing
-    parser = argparse.ArgumentParser(prog="loops emit", add_help=False)
-    if vertex_path is None:
-        parser.add_argument(
-            "vertex",
-            nargs="?",
-            default=None,
-            help="Vertex name or .vertex path (optional; auto-resolves local vertex)",
-        )
-    parser.add_argument("kind", help="Fact kind")
+    parser = _build_emit_parser(prog="loops emit", add_help=False)
+    try:
+        args = parser.parse_intermixed_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 2
+
+    vertex, kind, parts = _classify_emit_positionals(
+        list(args.tokens), has_vertex_path=vertex_path is not None,
+    )
+    args.vertex = None if vertex_path is not None else vertex
+    args.kind = kind
+    args.parts = parts
+
+    # Use dispatch-level observer if emit didn't override
+    if args.observer is None:
+        args.observer = observer or None
+    return cmd_emit(args, vertex_path=vertex_path)
+
+
+def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.ArgumentParser:
+    """Build the unified emit parser — a single ``tokens`` bucket + flags.
+
+    Shared by the legacy ``_run_emit`` and the ``cli.views.emit`` pilot so the
+    grammar (and every flag) is declared in exactly one place.
+    """
+    parser = argparse.ArgumentParser(prog=prog, add_help=add_help)
     parser.add_argument(
-        "parts", nargs="*", help="KEY=VALUE pairs and optional trailing message text"
+        "tokens", nargs="*", default=[],
+        help="[vertex] <kind> [KEY=VALUE ... | message text]",
     )
     parser.add_argument(
         "--observer",
@@ -591,21 +847,39 @@ def _run_emit(
         help="Observer string (default: from .vertex declaration or $LOOPS_OBSERVER)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Print the fact JSON without storing"
+        "--dry-run", action="store_true", help="Print the fact JSON without storing",
     )
     parser.add_argument(
         "--strict",
         action="store_true",
         help=(
             "Refuse on validation failures (unknown kind, missing fold-key, "
-            "unresolved ref). Overridden by vertex 'strict true' declaration "
-            "(which always refuses)."
+            "unresolved ref, undeclared observer). Overridden by vertex "
+            "'strict true' declaration (which always refuses)."
         ),
     )
     parser.add_argument(
         "-q", "--quiet",
         action="store_true",
         help="Suppress the 'stored:' success receipt line (WARN/ERROR still print).",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count", default=0,
+        help="Verbose receipt — adds inbound-edge delta lines for resolved refs.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="After storing, print the post-emit fold as a structured Surface dict.",
+    )
+    parser.add_argument(
+        "--declare-observer",
+        action="store_true",
+        help=(
+            "When the observer is undeclared, print the observers{} KDL snippet "
+            "and its location (PRINT-not-write — loops never edits the .vertex)."
+        ),
     )
     parser.add_argument(
         "--stdin",
@@ -628,13 +902,7 @@ def _run_emit(
             "Single trailing newline stripped."
         ),
     )
-    args = parser.parse_args(argv)
-    if vertex_path is not None:
-        args.vertex = None
-    # Use dispatch-level observer if emit didn't override
-    if args.observer is None:
-        args.observer = observer or None
-    return cmd_emit(args, vertex_path=vertex_path)
+    return parser
 
 
 def _run_close(

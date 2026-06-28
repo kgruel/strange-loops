@@ -22,7 +22,7 @@ Palette maps information roles to styles:
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -33,8 +33,12 @@ from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_ver
 from ._helpers import elide
 from painted.palette import current_palette
 
+from atoms import FoldState  # runtime: the polymorphic fold_view front door
+from loops.surface import project  # runtime: FoldState → Surface (idempotent)
+
 if TYPE_CHECKING:
-    from atoms import FoldItem, FoldSection, FoldState
+    from atoms import FoldItem  # grouping-helper hints (duck-typed on .payload)
+    from loops.surface import Row, Surface
 
 
 # ---------------------------------------------------------------------------
@@ -111,12 +115,22 @@ def _default_fold_palette() -> FoldPalette:
 
 
 def fold_view(
-    data: FoldState, zoom: Zoom, width: int | None,
+    data: "Surface | FoldState", zoom: Zoom, width: int | None,
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
 ) -> Block:
     """Render fold data at the given zoom level.
+
+    Accepts a ``Surface`` (the dispatch path, post-S2) or a ``FoldState`` (any
+    caller still handing raw fold data — the autoresearch re-export, the
+    vertex-decl/override gate-fail path, out-of-repo lenses, direct test
+    calls). A FoldState is projected through ``surface.project`` first; the
+    projection is idempotent on a Surface, so this is a safe polymorphic front
+    door and lets the salience math live in ONE place (surface.py).
+
+    The lens reads the materialized ``Row.salience/inbound`` and the
+    ``Surface.inbound_edges`` adjacency instead of recomputing them.
 
     visible gates which concern layers are rendered:
       - "refs": show per-item edge expansion (← inbound, → outbound)
@@ -128,21 +142,32 @@ def fold_view(
              width-based truncation already enforces — useful for context-
              window economics where total tokens matter more than terminal fit.
     """
-    populated = [s for s in data.sections if s.items]
+    if isinstance(data, FoldState):
+        data = project(data)
+
+    # Content-search (--match) switches the lens to the event axis: a flat
+    # ts-desc list of matching facts, with the (K not indexed) coverage footer.
+    if data.window.query is not None:
+        return _render_search(data, zoom, width)
+
+    # Primary rows group by kind in fold (== declaration) order; walked rows
+    # (depth>0) render after. Salience/inbound are already materialized.
+    primary = [r for r in data.rows if r.depth == 0]
+    walked_rows = [r for r in data.rows if r.depth > 0]
+    populated = _group_rows_by_kind(primary)
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
     # MINIMAL: one-liner
     if zoom == Zoom.MINIMAL:
-        parts = [f"{s.count} {s.kind}s" for s in populated]
+        parts = [f"{len(rows)} {kind}s" for kind, rows in populated]
         if data.unfolded:
             loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
             parts.append(f"unfolded: {loose}")
         return Block.text(", ".join(parts), Style(), width=width)
 
-    # Compute once for the whole render
-    inbound = _compute_inbound_refs(data)
-    inbound_edges = _compute_inbound_edges(data) if "refs" in visible else {}
+    # Edge adjacency + source facts come materialized off the Surface.
+    inbound_edges = data.inbound_edges if "refs" in visible else {}
     facts_by_key = data.source_facts if "facts" in visible else {}
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
@@ -151,29 +176,34 @@ def fold_view(
     blocks: list[Block] = []
     skipped_sections: list[tuple[str, int]] = []
 
-    for s in populated:
-        display_count = s.count
+    for kind, rows in populated:
+        kv = data.schema.get(kind)
+        fold_type = kv.fold_type if kv is not None else "collect"
+        key_field = kv.key_field if kv is not None else None
+        preview_fields = kv.preview_fields if kv is not None else ()
+        display_count = len(rows)
 
         # When --facts is active, minimize sections without compression history
         # Collect folds and by-folds where no item has n>1 have nothing to drill into
         if facts_filter:
-            has_history = s.fold_type == "by" and any(i.n > 1 for i in s.items)
+            has_history = fold_type == "by" and any(r.n > 1 for r in rows)
             if not has_history:
-                skipped_sections.append((s.kind, s.count))
+                skipped_sections.append((kind, len(rows)))
                 continue
 
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        header = _section_header(s.kind, display_count, piped=width is None)
+        header = _section_header(kind, display_count, piped=width is None)
         blocks.append(Block.text(header, fp.section_header, width=width))
 
-        observers = {item.observer for item in s.items if item.observer}
+        observers = {r.observer for r in rows if r.observer}
         show_observer = len(observers) > 1
 
         section_block = _render_section(
-            s, zoom, fmt, width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            kind, rows, fold_type, key_field, preview_fields,
+            zoom, fmt, width,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             lines=lines, chars=chars,
@@ -183,10 +213,10 @@ def fold_view(
     # Walked items (when --refs N walked the graph). Renders after primary
     # sections so the anchor context is established before the walk reveals
     # what's connected to it.
-    if data.walked:
+    if walked_rows:
         walked_block = _render_walked(
-            data.walked, zoom=zoom, fmt=fmt, width=width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            walked_rows, zoom=zoom, fmt=fmt, width=width,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key, fp=fp, visible=visible,
             chars=chars,
         )
@@ -214,13 +244,73 @@ def fold_view(
     return join_vertical(*blocks)
 
 
+def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
+    """Event-axis render for ``--match`` — a flat ts-desc list of matching facts.
+
+    Each row is one matching FACT (event axis), not a folded item, so there is
+    no kind-grouping; the read is chronological. The footer names the kinds that
+    lacked FTS coverage (``window.unindexed``) — the honesty signal that those
+    were substring-scanned, not FTS-searched.
+    """
+    from loops.lenses.gist import content_gist
+
+    fp = _default_fold_palette()
+    q = data.window.query
+    rows = list(data.rows)
+    n = len(rows)
+
+    if zoom == Zoom.MINIMAL:
+        line = f"{n} match{'es' if n != 1 else ''} for {q!r}"
+        if data.window.unindexed:
+            line += f" ({len(data.window.unindexed)} not indexed)"
+        return Block.text(line, Style(), width=width)
+
+    fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
+    blocks: list[Block] = [
+        Block.text(
+            f"MATCH {q!r} — {n} result{'s' if n != 1 else ''}",
+            fp.section_header, width=width,
+        )
+    ]
+    if not rows:
+        blocks.append(Block.text("  (no matches)", Style(dim=True), width=width))
+    for r in rows:
+        date = fmt(r.ts) if r.ts is not None else ""
+        gist = content_gist(r.kind, r.payload)
+        line = f"  {date}  {r.kind}: {gist}".rstrip()
+        blocks.append(Block.text(line, Style(), width=width))
+
+    if data.window.unindexed:
+        footer = (
+            f"({len(data.window.unindexed)} not indexed: "
+            f"{', '.join(data.window.unindexed)})"
+        )
+        blocks.append(Block.text("", Style(), width=width))
+        blocks.append(Block.text(footer, fp.unfolded, width=width))
+
+    return join_vertical(*blocks)
+
+
+def _group_rows_by_kind(rows: list["Row"]) -> list[tuple[str, list["Row"]]]:
+    """Group rows by kind, preserving first-appearance (== fold/declaration)
+    order. Mirrors the old ``populated = [s for s in data.sections if s.items]``
+    — only kinds with rows appear, in declaration order."""
+    groups: dict[str, list[Row]] = {}
+    order: list[str] = []
+    for r in rows:
+        if r.kind not in groups:
+            groups[r.kind] = []
+            order.append(r.kind)
+        groups[r.kind].append(r)
+    return [(k, groups[k]) for k in order]
+
+
 def _render_walked(
-    walked: tuple,  # tuple[WalkedItem, ...]
+    walked: list["Row"],  # ref-walk rows (depth>0)
     *,
     zoom: Zoom,
     fmt,
     width: int | None,
-    inbound: Counter,
     inbound_edges: dict[str, list[str]],
     facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
@@ -229,8 +319,8 @@ def _render_walked(
 ) -> Block | None:
     """Render walked entities grouped by their immediate via_anchor.
 
-    Walked items are produced by --refs N on read; they live parallel to
-    primary sections (atoms.WalkedItem). Render shape:
+    Walked rows are produced by --refs N on read; they carry depth>0 and a
+    via_anchor lineage. Render shape:
 
         ## REFS (N)
           ┄ via → kind/anchor-key
@@ -269,12 +359,12 @@ def _render_walked(
         # marker as a separate block and following with the standard line.
         item_indent = 4 if w.depth == 1 else 4 + (w.depth - 1) * 2
         line = _render_item_line(
-            w.item, w.key_field, zoom, fmt, width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            w, w.key_field, zoom, fmt, width,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=False, visible=visible,
             indent=item_indent, strip_namespace=False,
-            section_kind=w.section_kind, chars=chars,
+            section_kind=w.kind, chars=chars,
         )
         if w.depth > 1:
             # Prepend depth marker as overlay — render a single composed
@@ -295,12 +385,15 @@ def _render_walked(
 
 
 def _render_section(
-    section: FoldSection,
+    kind: str,
+    rows: list["Row"],
+    fold_type: str,
+    key_field: str | None,
+    preview_fields: tuple[str, ...],
     zoom: Zoom,
     fmt,
     width: int | None,
     *,
-    inbound: Counter,
     inbound_edges: dict[str, list[str]],
     facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
@@ -308,28 +401,28 @@ def _render_section(
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
 ) -> Block:
-    """Render a section's items — grouped by namespace or flat."""
-    is_by = section.fold_type == "by"
+    """Render a section's rows — grouped by namespace or flat."""
+    is_by = fold_type == "by"
 
-    if is_by and section.key_field and _should_group_by_namespace(section.items, section.key_field):
+    if is_by and key_field and _should_group_by_namespace(rows, key_field):
         return _render_grouped(
-            section.items, section.key_field, zoom, fmt, width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            rows, key_field, zoom, fmt, width,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
-            section_kind=section.kind,
-            preview_fields=section.preview_fields,
+            section_kind=kind,
+            preview_fields=preview_fields,
             lines=lines, chars=chars,
         )
     else:
         return _render_flat(
-            section.items, section.key_field, section.fold_type,
+            rows, key_field, fold_type,
             zoom, fmt, width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
-            section_kind=section.kind,
-            preview_fields=section.preview_fields,
+            section_kind=kind,
+            preview_fields=preview_fields,
             lines=lines, chars=chars,
         )
 
@@ -342,13 +435,12 @@ _GROUP_SHOW_ALL_THRESHOLD = 5
 
 
 def _render_grouped(
-    items: tuple[FoldItem, ...],
+    items: list["Row"],
     key_field: str,
     zoom: Zoom,
     fmt,
     width: int | None,
     *,
-    inbound: Counter,
     inbound_edges: dict[str, list[str]],
     facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
@@ -358,8 +450,9 @@ def _render_grouped(
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
 ) -> Block:
-    """Render by-fold items grouped by namespace prefix.
+    """Render by-fold rows grouped by namespace prefix.
 
+    Reads the materialized ``Row.salience`` for group ordering and windowing.
     As of A1 of the trace-dissolution arc, --refs no longer filters items to
     the ref-connected subset — orphans render normally with edge decoration
     where edges exist. See decision/design/trace-dissolves-into-read-with-
@@ -369,7 +462,7 @@ def _render_grouped(
 
     sorted_groups = sorted(
         groups.items(),
-        key=lambda g: sum(_salience(i, key_field, inbound) for i in g[1]),
+        key=lambda g: sum(i.salience for i in g[1]),
         reverse=True,
     )
 
@@ -382,7 +475,7 @@ def _render_grouped(
 
         sorted_items = sorted(
             group_items,
-            key=lambda i: _salience(i, key_field, inbound),
+            key=lambda i: i.salience,
             reverse=True,
         )
 
@@ -394,7 +487,7 @@ def _render_grouped(
         else:
             show_items = [
                 i for i in sorted_items
-                if _salience(i, key_field, inbound) > 1
+                if i.salience > 1
             ]
             if not show_items:
                 show_items = sorted_items[:1]
@@ -406,7 +499,7 @@ def _render_grouped(
         for item in show_items:
             blocks.append(_render_item_line(
                 item, key_field, zoom, fmt, width,
-                inbound=inbound, inbound_edges=inbound_edges,
+                inbound_edges=inbound_edges,
                 facts_by_key=facts_by_key,
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
@@ -429,14 +522,13 @@ def _render_grouped(
 
 
 def _render_flat(
-    items: tuple[FoldItem, ...],
+    items: list["Row"],
     key_field: str | None,
     fold_type: str,
     zoom: Zoom,
     fmt,
     width: int | None,
     *,
-    inbound: Counter,
     inbound_edges: dict[str, list[str]],
     facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
@@ -446,18 +538,18 @@ def _render_flat(
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
 ) -> Block:
-    """Render items as a flat list — sorted by salience for by-folds.
+    """Render rows as a flat list — sorted by salience for by-folds.
 
-    As of A1 of the trace-dissolution arc, --refs no longer filters items to
-    the ref-connected subset — see decision/design/trace-dissolves-into-read-
-    with-unified-refs.
+    Reads the materialized ``Row.salience``. As of A1 of the trace-dissolution
+    arc, --refs no longer filters items to the ref-connected subset — see
+    decision/design/trace-dissolves-into-read-with-unified-refs.
     """
     is_by = fold_type == "by"
 
     if is_by:
-        sorted_items: tuple[FoldItem, ...] | list[FoldItem] = sorted(
+        sorted_items: list[Row] = sorted(
             items,
-            key=lambda i: _salience(i, key_field, inbound),
+            key=lambda i: i.salience,
             reverse=True,
         )
     else:
@@ -473,7 +565,7 @@ def _render_flat(
     for item in sorted_items:
         blocks.append(_render_item_line(
             item, key_field, zoom, fmt, width,
-            inbound=inbound, inbound_edges=inbound_edges,
+            inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
@@ -496,13 +588,12 @@ def _render_flat(
 
 
 def _render_item_line(
-    item: FoldItem,
+    item: "Row",
     key_field: str | None,
     zoom: Zoom,
     fmt,
     width: int | None,
     *,
-    inbound: Counter,
     inbound_edges: dict[str, list[str]],
     facts_by_key: dict[str, list[dict]],
     fp: FoldPalette,
@@ -537,7 +628,7 @@ def _render_item_line(
 
     # Indicators (before body, always visible)
     n_text = f" ×{item.n}" if is_by and item.n > 1 else ""
-    ref_count = _inbound_count(item, key_field, inbound)
+    ref_count = item.inbound  # materialized in project() (was _inbound_count)
     ref_in_text = f" ←{ref_count}" if ref_count > 0 else ""
     ref_out_text = f" →{len(item.refs)}" if item.refs else ""
 
@@ -687,8 +778,10 @@ def _render_item_line(
     # Edge expansion: gated on "refs" in visible, shown at any zoom >= SUMMARY
     if "refs" in visible and zoom >= Zoom.SUMMARY:
         edge_pad = " " * (indent + 2)
-        # Inbound edges: who references this item?
-        item_key = _item_full_key(item, key_field, section_kind)
+        # Inbound edges: who references this item? Row.address == the old
+        # _item_full_key(item, key_field, kind) for keyed rows; keyless
+        # (collect) rows had "" then and contribute no edges now.
+        item_key = item.address if item.key is not None else ""
         if item_key and item_key in inbound_edges:
             for source in inbound_edges[item_key]:
                 lines.append(Block.text(f"{edge_pad}← {source}", fp.ref_edge_in, width=width))
@@ -699,7 +792,7 @@ def _render_item_line(
     # Source facts: gated on "facts" in visible, shown at any zoom >= SUMMARY
     if "facts" in visible and zoom >= Zoom.SUMMARY:
         fact_pad = " " * (indent + 2)
-        item_key = _item_full_key(item, key_field, section_kind)
+        item_key = item.address if item.key is not None else ""
         item_facts = facts_by_key.get(item_key, [])
         if item_facts:
             # Show in reverse chronological order (most recent first)
@@ -749,74 +842,10 @@ def _render_item_line(
 
 
 # ---------------------------------------------------------------------------
-# Salience computation
+# Salience computation — LIFTED to loops.surface (project materializes
+# Row.salience / Row.inbound / Surface.inbound_edges). The lens reads those
+# materialized scalars; the helpers live in surface.py now.
 # ---------------------------------------------------------------------------
-
-
-def _compute_inbound_refs(data: FoldState) -> Counter:
-    """Count inbound references across all sections."""
-    inbound: Counter = Counter()
-    for section in data.sections:
-        for item in section.items:
-            for ref in item.refs:
-                inbound[ref] += 1
-    return inbound
-
-
-def _compute_inbound_edges(data: FoldState) -> dict[str, list[str]]:
-    """Build adjacency map: target → [source, ...] for edge expansion."""
-    edges: dict[str, list[str]] = {}
-    for section in data.sections:
-        kf = section.key_field
-        for item in section.items:
-            if not item.refs:
-                continue
-            source = _item_full_key(item, kf, section.kind)
-            if not source:
-                continue
-            for ref in item.refs:
-                edges.setdefault(ref, []).append(source)
-    return edges
-
-
-def _item_full_key(item: FoldItem, key_field: str | None, kind: str = "") -> str:
-    """Build the full kind/key reference for an item (e.g. 'decision/atoms/n-on-fold-item')."""
-    if not key_field:
-        return ""
-    key = item.payload.get(key_field, "")
-    if not key:
-        return ""
-    return f"{kind}/{key}" if kind else str(key)
-
-
-def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Salience = n + inbound ref count."""
-    return item.n + _inbound_count(item, key_field, inbound)
-
-
-def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Look up inbound ref count for this item.
-
-    Matches refs in two forms:
-    * Kind-qualified — ``<fact-kind>/<key>`` (e.g. ``decision/design/foo``)
-    * Bare — the key_field value itself (e.g. ``design/foo``)
-
-    The bare form matters when the key contains a namespace slash:
-    ``endswith("/foo")`` alone misses it. Both forms commonly appear in
-    practice — refs emitted as ``ref=design/foo`` vs ``ref=decision/design/foo``
-    should contribute equivalently to salience.
-    """
-    if not key_field:
-        return 0
-    key = item.payload.get(key_field, "")
-    if not key:
-        return 0
-    count = 0
-    suffix = f"/{key}"
-    for ref_key, ref_count in inbound.items():
-        if ref_key == key or ref_key.endswith(suffix):
-            count += ref_count
-    return count
 
 
 # ---------------------------------------------------------------------------

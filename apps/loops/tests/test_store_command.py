@@ -163,6 +163,204 @@ class TestStoreVerify:
         assert "chain intact" in capsys.readouterr().out
 
 
+def _make_boundary_vertex(tmp_path: Path) -> Path:
+    """Project-shaped vertex with a vertex-level boundary on session.closed.
+
+    The builder doesn't expose vertex-level boundaries (test_fetch mirrors
+    this), so write the KDL directly — vertex-level ticks are named after
+    the vertex ("project"), which is what fetch_tick_windows resolves to.
+    """
+    vpath = tmp_path / "project.vertex"
+    vpath.write_text(
+        'name "project"\n'
+        'store "./project.db"\n'
+        '\n'
+        'loops {\n'
+        '  decision { fold { items "by" "topic" } }\n'
+        '  thread   { fold { items "by" "name" } }\n'
+        '  session  { fold { items "by" "name" } }\n'
+        '\n'
+        '  boundary when="session" status="closed"\n'
+        '}\n'
+    )
+    return vpath
+
+
+def _seed_two_ticks(vpath: Path) -> None:
+    """Two vertex-level chain ticks via two session-close boundaries."""
+    _emit(vpath, "decision", topic="auth", message="JWT")
+    _emit(vpath, "session", name="kyle", status="closed")
+    _emit(vpath, "decision", topic="storage", message="SQLite")
+    _emit(vpath, "session", name="kyle", status="closed")
+
+
+class TestStoreTicks:
+    """sl store ticks [--chain] — the attestation read surface."""
+
+    def test_chain_renders_attestation_rows(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _seed_two_ticks(vpath)
+        capsys.readouterr()  # discard emit receipts
+        rc = _run_store(["ticks", "--chain", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "2 ticks" in out
+        assert "linked" in out      # fresh stores chain their ticks
+        assert "unsigned" in out    # no signing key configured
+        assert "chained" in out     # rollup line
+
+    def test_default_density_projection(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _seed_two_ticks(vpath)
+        capsys.readouterr()
+        rc = _run_store(["ticks", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "2 ticks" in out
+        assert "linked" not in out  # density mode omits attestation columns
+
+    def test_json_is_structured(self, tmp_path, capsys):
+        import json
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _seed_two_ticks(vpath)
+        capsys.readouterr()
+        rc = _run_store(["ticks", "--chain", str(vpath), "--json"])
+        assert rc == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["chain"]["ticks"] == 2
+        assert report["chain"]["chained"] == 2
+        assert len(report["windows"]) == 2
+        assert report["windows"][0]["chained"] is True
+
+    def test_requires_vertex_target(self, tmp_path, capsys):
+        from loops.commands.store import _run_store_ticks
+        # A .db can't resolve a named tick series — refuse (RC1 + message),
+        # don't guess. Validation is deferred into fetch (so `--help` still
+        # works), so the refusal surfaces as a return code, not a raise.
+        rc = _run_store_ticks([str(tmp_path / "x.db")])
+        assert rc == 1
+        # Collapse whitespace — the error block wraps at terminal width.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "requires a .vertex" in out
+
+    def test_empty_store_renders_cleanly(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="a")  # db exists, 0 ticks
+        capsys.readouterr()
+        rc = _run_store(["ticks", "--chain", str(vpath)])
+        assert rc == 0
+        assert "No ticks" in capsys.readouterr().out
+
+    def test_refuses_aggregate_vertex(self, tmp_path, capsys):
+        # A combine/discover aggregate has no own store/chain — vertex_ticks
+        # returns empty envelopes for it, so --chain would render a real
+        # signed chain as a false "all legacy". Refuse, like the siblings do.
+        from loops.commands.store import _run_store_ticks
+        agg = tmp_path / "agg.vertex"
+        agg.write_text('name "agg"\ncombine {\n  vertex "./child.vertex"\n}\n')
+        rc = _run_store_ticks([str(agg)])
+        assert rc == 1
+        # Collapse whitespace — the error block wraps at terminal width.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "aggregate vertex" in out
+
+    def test_help_does_not_require_target(self, capsys):
+        # B2: `store ticks --help` must reach run_cli's help handler, not the
+        # eager target guard (validation now lives in fetch). Help surfaces
+        # the pre-parsed --chain / --since flags.
+        from loops.commands.store import _run_store_ticks
+        rc = _run_store_ticks(["--help"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "--chain" in out
+        assert "--since" in out
+
+    def test_chain_spans_all_series_density_scopes(self, tmp_path, capsys):
+        # Loop-level boundary → ticks named "ping", not the vertex "x".
+        # --chain (all_names) spans the full chain and sees them; the density
+        # default is name-scoped to "x" and correctly shows none — the
+        # documented scope difference that keeps --chain agreeing with verify.
+        import json
+
+        from engine.builder import fold_count, vertex
+        from loops.commands.store import _run_store
+        vpath = tmp_path / "x.vertex"
+        vertex("x").store("./x.db").loop(
+            "ping", fold_count("n"), boundary_every=1
+        ).write(vpath)
+        _emit(vpath, "ping", service="api")
+        _emit(vpath, "ping", service="web")
+
+        capsys.readouterr()
+        rc = _run_store(["ticks", "--chain", str(vpath), "--json"])
+        assert rc == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["chain"]["ticks"] == 2
+        assert {w["name"] for w in report["windows"]} == {"ping"}
+
+        capsys.readouterr()
+        rc = _run_store(["ticks", str(vpath)])  # density, name-scoped to "x"
+        assert rc == 0
+        assert "No ticks" in capsys.readouterr().out
+
+
+class TestStoreStats:
+    """sl store stats [--by-kind] — the count surface (.db or .vertex)."""
+
+    def test_by_kind_renders_count_desc(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="a")
+        _emit(vpath, "decision", topic="storage", message="b")
+        _emit(vpath, "thread", name="t1", status="open")
+        capsys.readouterr()
+        rc = _run_store(["stats", "--by-kind", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "decision" in out and "thread" in out
+        assert out.index("decision") < out.index("thread")  # count-desc
+
+    def test_works_on_db_path(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="a")
+        capsys.readouterr()
+        rc = _run_store(["stats", "--by-kind", str(tmp_path / "project.db")])
+        assert rc == 0
+        assert "decision" in capsys.readouterr().out
+
+    def test_default_is_topline_only(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="a")
+        _emit(vpath, "thread", name="t1", status="open")
+        capsys.readouterr()
+        rc = _run_store(["stats", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "facts" in out          # rollup present
+        assert "thread" not in out     # no per-kind table without --by-kind
+
+    def test_json_kinds_sorted_desc(self, tmp_path, capsys):
+        import json
+        from loops.commands.store import _run_store
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="a")
+        _emit(vpath, "decision", topic="storage", message="b")
+        _emit(vpath, "thread", name="t1", status="open")
+        capsys.readouterr()
+        rc = _run_store(["stats", "--by-kind", str(vpath), "--json"])
+        assert rc == 0
+        report = json.loads(capsys.readouterr().out)
+        counts = [k["count"] for k in report["kinds"]]
+        assert counts == sorted(counts, reverse=True)
+        assert report["total_facts"] >= 3
+
+
 class TestStoreErrorBoundary:
     """The store view boundary renders operator-facing refusals as clean
     errors (reporter.err + exit 1), never raw tracebacks.
@@ -218,3 +416,74 @@ class TestStoreErrorBoundary:
         ctx, _reporter = self._ctx_with_reporter()
         with pytest.raises(RuntimeError, match="genuine bug"):
             run(["reanchor", "/tmp/whatever.db"], ctx)
+
+
+def _run_store_verb_unified(verb: str, target: Path, capsys) -> tuple[int, str]:
+    """Run a store verb through the unified cli/views boundary; return
+    ``(rc, combined_output)``.
+
+    The three verbs render errors through DIFFERENT channels: ticks/stats
+    defer validation into ``run_cli`` (rendered to stdout, returns rc=1),
+    while verify and the shared resolve/materialize guards raise and are
+    caught at the cli/views boundary into ``reporter.err``. Collect BOTH so
+    the existence/exit-code parity asserts path-agnostically.
+    """
+    from loops.cli.invocation import Invocation
+    from loops.cli.output import BufferReporter
+    from loops.cli.views.store import run
+
+    reporter = BufferReporter()
+    ctx = Invocation(reporter=reporter, vertex_path=None)
+    capsys.readouterr()
+    rc = run([verb, str(target)], ctx)
+    out = capsys.readouterr().out
+    combined = " ".join((out + " " + " ".join(reporter.err_lines)).split())
+    return rc, combined
+
+
+class TestStoreExistenceParity:
+    """ticks/stats/verify share ``_resolve_target`` + ``_require_materialized_store``,
+    so existence/exit-code behavior is uniform
+    (decision/design/store-verb-existence-exit-code-parity):
+
+      state 1  absent target             -> RC=1 "does not exist"
+      state 2  present .vertex/absent .db -> RC=1 "not yet materialized" (no .db created)
+      state 3  present .db/no ticks       -> RC=0 (TestStoreTicks.test_empty_store_renders_cleanly)
+    """
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state2_absent_db_not_yet_materialized(self, tmp_path, capsys, verb):
+        # Present .vertex, never emitted -> no .db. This was ticks' RC=0-empty
+        # outlier; now all three surface a clean RC=1 with the same message.
+        # MUTATION anchor: removing the guard regresses ticks back to RC=0.
+        vpath = _make_boundary_vertex(tmp_path)
+        db = tmp_path / "project.db"
+        assert not db.exists()
+        rc, out = _run_store_verb_unified(verb, vpath, capsys)
+        assert rc == 1
+        assert "not yet materialized" in out
+        assert not db.exists()  # surfacing the gap must not create the .db
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state1_absent_target_does_not_exist(self, tmp_path, capsys, verb):
+        # An absent explicit .vertex resolves to a clean RC=1 at the shared
+        # chokepoint, not a raw [Errno 2] / traceback.
+        rc, out = _run_store_verb_unified(verb, tmp_path / "ghost.vertex", capsys)
+        assert rc == 1
+        assert "does not exist" in out
+
+    @pytest.mark.parametrize("verb", ["ticks", "stats", "verify"])
+    def test_state2_json_error_is_machine_parseable(self, tmp_path, capsys, verb):
+        # F2: under --json, the absent-db (state 2) error must be parseable
+        # ({"error": ...}) for ALL three verbs — not plain text. verify is the
+        # one that used to emit plain text here (raises before its --json
+        # branch); the F2 guard makes it match ticks/stats' run_cli shape.
+        import json
+        from loops.commands.store import _run_store
+
+        vpath = _make_boundary_vertex(tmp_path)
+        capsys.readouterr()
+        rc = _run_store([verb, str(vpath), "--json"])
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert "not yet materialized" in payload["error"]

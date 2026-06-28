@@ -23,6 +23,7 @@ Above: `~/.config/loops/` holds vertex declarations, lenses, and hooks. See its 
 loops ls                                        # all discovered vertices
 loops read project                              # current folded state
 loops read project --kind decision              # just decisions
+loops read project --kind decision --match auth --last 5  # content search + recency window
 loops read meta --facts --since 7d --kind thread  # filtered event history
 
 # Emit a fact
@@ -45,6 +46,7 @@ loops rm reading lobsters
 ```
 
 Common flags: `-q` (minimal), `-v` (detailed), `-vv` (full), `--json`, `--plain`.
+Read-path grammar (S4–S7): `--match`/`--grep QUERY` (FTS5 content search, substring fallback), `--full` (force whole bodies), `--fields a,b` (project columns), `--limit N`, `--last N` (recency window), `--count` / `--by FIELD` (tally), comma-OR `--key a/,b/` (filter), and bare `field=value` predicates (eq + comma-OR).
 
 **Don't reach for yet**: Vertex files, lenses, command internals.
 
@@ -89,9 +91,9 @@ See `~/.config/loops/CLAUDE.md` for the full progressive guide to each of these.
 
 **(a) Full Operation IR** — the view parses argv into an `Operation` and calls `dispatch(op, reporter=ctx.reporter)`. Used by **`fold` and `emit` only** (pilot surfaces; `read` and `cite` are thin routers that delegate into them).
 
-**(b) Legacy shim** — the view delegates to `loops.commands._run_<name>`. Used by `stream`, `store`, `ticks`, `close`, `sync`, and the `population.*` ops (ls/add/rm/export).
+**(b) Legacy shim** — the view delegates to `loops.commands._run_<name>`. Used by `store`, `close`, `sync`, and the `population.*` ops (ls/add/rm/export). (`stream` and `ticks` are no longer top-level surfaces — `stream` is an internal read-router delegate only, and `ticks` relocated under `store ticks` in S7.)
 
-**The refactor is paused as a pilot.** Two surfaces use the IR; ten do not. Adding a *new* verb in the IR shape (parse → Operation → dispatch) is the preferred path forward. Converting an existing legacy shim is opportunistic — do it when a touch-point justifies the work, not as a sweep.
+**The refactor is paused as a pilot.** Two surfaces use the IR; eight do not. Adding a *new* verb in the IR shape (parse → Operation → dispatch) is the preferred path forward. Converting an existing legacy shim is opportunistic — do it when a touch-point justifies the work, not as a sweep.
 
 **Painted-boundary caveat:** within `cli/`, only `output.py` and `live.py` import painted at runtime (`operation.py` has a TYPE_CHECKING import). The `commands/` modules (devtools, emit, resolve, pop, sync, ticks, init, whoami, stream, store, population) still import painted directly — the "single painted boundary" applies inside `cli/`, not `commands/`. Reporter injection is the target shape; it is not the current invariant outside `cli/`.
 

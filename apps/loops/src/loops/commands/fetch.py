@@ -10,8 +10,10 @@ Supports key drill-down via two equivalent surfaces:
 
 Matching is prefix-based and case-insensitive — ``--key design/`` matches
 ``design/lens-is-the-interface``, ``design/derived-keys-as-focus-filter``, etc.
-For exact match, type the full key (a unique full key matches only itself via
-``.startswith()``).
+The filter is prefix-only; there is no exact-match mode — typing a full key
+just narrows the prefix to a single item. Whether that item then renders
+whole-body or as a headline is a separate concern, decided in ``surface.py``
+by exact key equality, not by this filter.
 """
 
 from __future__ import annotations
@@ -77,8 +79,9 @@ def fetch_fold(
 
     Both produce the same result. Key matching is prefix-based (``.startswith()``,
     case-insensitive) — ``key="design/"`` matches every item whose fold-key field
-    starts with ``design/``. For exact match, pass the full key (a unique full
-    key is a prefix of only itself).
+    starts with ``design/``. There is no exact-match mode here; passing a full
+    key just narrows the prefix to a single item. Whole-vs-headline granularity
+    is decided separately in ``surface.py`` by exact key equality.
 
     When ``kind`` is omitted but ``key`` is provided, filtering runs across all
     sections — each section uses its own declared key_field. Sections with no
@@ -131,8 +134,8 @@ def fetch_fold(
 
         # Preserve source_facts for surviving items only (drop entries whose
         # fold item was filtered out). Without this, retain_facts=True + key
-        # filtering would silently drop the lifecycle data that callers like
-        # fetch_trace depend on.
+        # filtering would silently drop the lifecycle data that retain-facts
+        # consumers (the --facts read path) depend on.
         filtered_source_facts = {
             k: v for k, v in state.source_facts.items()
             if k in surviving_source_keys
@@ -257,11 +260,10 @@ def _parse_ref_to_kind_key(ref: str) -> "tuple[str, str] | None":
     * ``kind:key`` (newer runbook convention, fully qualified) — supported
     * ``key`` only (legacy / same-kind-implied) — skipped (ambiguous)
 
-    Trace's ``_parse_fact_refs`` uses the same rule for fact-payload refs.
-    This parser is the fold-item analog — items expose their refs as
-    pre-extracted strings, but the address format follows the same
-    discipline. Bare-key refs lose the cross-kind dispatch info, so we
-    can't safely walk them — the walk would have to guess the kind.
+    Items expose their refs as pre-extracted strings; the address format
+    follows the ``kind:key`` discipline. Bare-key refs lose the cross-kind
+    dispatch info, so we can't safely walk them — the walk would have to
+    guess the kind.
     """
     if not ref or ":" not in ref:
         return None
@@ -275,8 +277,10 @@ def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool
     """Check if a fold item's key matches a prefix (case-insensitive).
 
     Tries the section's declared key_field first, then common label fields
-    (topic, name, title, summary). Uses ``.startswith()`` — type the full key
-    to match a single item; type a prefix to match a subtree.
+    (topic, name, title, summary). Prefix-only via ``.startswith()`` — a full
+    key narrows the prefix to one item, a shorter prefix matches a subtree;
+    there is no exact-match branch. Whole-vs-headline granularity is decided
+    separately in ``surface.py`` by exact key equality.
     """
     candidates = [key_field] if key_field else []
     candidates.extend(["topic", "name", "title", "summary"])
@@ -293,15 +297,15 @@ def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool
 def fetch_stream(
     vertex_path: Path,
     *,
-    query: str | None = None,
     kind: str | None = None,
     since: str | None = None,
     observer: str | None = None,
 ) -> dict:
-    """Fetch event stream with three orthogonal filters.
+    """Fetch the temporal event stream (raw facts, reverse-chrono).
 
-    Unifies log + search into a single fetch. When *query* is provided,
-    uses FTS5 search; otherwise returns raw facts in reverse-chrono order.
+    Content search is NOT here anymore — it re-bound onto ``read --match`` (the
+    Surface ``search()`` transform, S5). This is the pure temporal-query path:
+    raw facts in a time window, optionally narrowed by ``kind``/``observer``.
 
     Supports ``kind/key`` drill-down: ``--kind thread/fold-state-types``
     returns only facts whose key field payload starts with the prefix
@@ -310,7 +314,7 @@ def fetch_stream(
 
     Returns ``{"facts": list[dict], "fold_meta": dict, "vertex": str}``.
     """
-    from engine import vertex_facts, vertex_search
+    from engine import vertex_facts
     from lang import parse_vertex_file
     from lang.ast import FoldBy
 
@@ -322,16 +326,10 @@ def fetch_stream(
     now = datetime.now(timezone.utc)
     since_ts = (now - timedelta(seconds=since_secs)).timestamp()
 
-    if query:
-        facts = vertex_search(
-            vertex_path, query, kind=kind_filter, since=since_ts, limit=100,
-            observer=observer,
-        )
-    else:
-        facts = vertex_facts(
-            vertex_path, since_ts, now.timestamp(), kind=kind_filter,
-            observer=observer,
-        )
+    facts = vertex_facts(
+        vertex_path, since_ts, now.timestamp(), kind=kind_filter,
+        observer=observer,
+    )
 
     # Key drill-down: filter facts by payload key field value
     if key_filter is not None:
@@ -389,187 +387,6 @@ def fetch_fact_by_id(
     from engine import vertex_fact_by_id
 
     return vertex_fact_by_id(vertex_path, fact_id)
-
-
-def _source_payload_to_fact_dict(payload: dict, kind: str) -> dict:
-    """Adapt source_facts payload shape to fact-dict shape.
-
-    ``source_facts`` entries are flat payloads with metadata under-prefixed
-    (``_ts``, ``_observer``, ``_origin``, ``_id``) — see ``vertex_reader.py``
-    around line 911. The ``stream_view`` lens (and most lens consumers)
-    expect the nested fact-dict shape ``{kind, ts, observer, origin, id,
-    payload}``. This adapter is the consumer-side boundary: it keeps the
-    lens API decoupled from the engine-internal ``source_facts`` shape.
-
-    Anchored by decision:implementation/trace-source-facts-shape-adapter.
-    """
-    nested_payload = {k: v for k, v in payload.items() if not k.startswith("_")}
-    ts = payload.get("_ts")
-    if isinstance(ts, datetime):
-        ts = ts.isoformat()
-    return {
-        "kind": kind,
-        "ts": ts,
-        "observer": payload.get("_observer", ""),
-        "origin": payload.get("_origin", ""),
-        "id": payload.get("_id"),
-        "payload": nested_payload,
-    }
-
-
-def fetch_trace(
-    vertex_path: Path,
-    kind: str,
-    key: str,
-    *,
-    observer: str | None = None,
-    refs_depth: int = 0,
-) -> dict:
-    """Fetch the source-fact lifecycle for one or more ``kind/key`` entities.
-
-    Returns the same shape as ``fetch_stream``: ``{"facts": [...],
-    "fold_meta": {...}, "vertex": str}``, plus a ``_trace`` metadata entry
-    naming the queried kind/key. Facts are returned in **ASC** order
-    (oldest first, changelog-style) — the inverse of ``fetch_stream``,
-    because trace renders a single entity's lifecycle as a forward
-    narrative rather than a recency-ranked log.
-
-    Uses ``vertex_fold(retain_facts=True)`` under the hood via ``fetch_fold``
-    — the same key-prefix semantics apply (``key="design/"`` matches every
-    item under that namespace, exact key matches just one). When the key
-    matches multiple items, all their source facts are interleaved by
-    timestamp, producing a merged lifecycle view across the namespace.
-
-    When ``refs_depth > 0``, walks the outbound ref graph: for each fact's
-    ``ref`` field, follows ``kind/key`` addresses to fetch those entities'
-    lifecycles too, recursing up to ``refs_depth`` hops. Each fact carries
-    an ``_entity`` field marking which ``kind/key`` it belongs to, so the
-    lens can group or label. Cycles are protected by a visited set keyed
-    on ``kind/key`` addresses.
-    """
-    from lang import parse_vertex_file
-    from lang.ast import FoldBy
-
-    # Combine/discover vertices: now supported via engine retain_facts
-    # walking _combined_read's per-kind payloads (vertex_reader.py
-    # _populate_source_facts). No special-case needed at the consumer.
-
-    # Fold metadata for the lens (key_field per kind) — used during ref walk
-    # too, to derive the per-entity address for each source fact.
-    ast = parse_vertex_file(vertex_path)
-    fold_meta: dict[str, dict] = {}
-    for k, loop_def in ast.loops.items():
-        kf = None
-        if loop_def.folds:
-            fold_decl = loop_def.folds[0]
-            if isinstance(fold_decl.op, FoldBy):
-                kf = fold_decl.op.key_field
-        fold_meta[k] = {"key_field": kf}
-
-    facts: list[dict] = []
-    visited: set[str] = set()
-    # Frontier holds (kind, key) pairs to walk in the next hop. Initial
-    # frontier is the primary entity, regardless of whether key is a
-    # full match or a prefix — we expand it via fetch_fold's filter.
-    frontier: list[tuple[str, str]] = [(kind, key)]
-
-    # Walk up to refs_depth + 1 layers (primary + N hops of refs).
-    layers = refs_depth + 1
-    for hop in range(layers):
-        next_frontier: list[tuple[str, str]] = []
-        for ent_kind, ent_key in frontier:
-            for fact, fact_refs in _fetch_entity_facts(
-                vertex_path, ent_kind, ent_key, observer=observer,
-                visited=visited,
-            ):
-                facts.append(fact)
-                # On non-final hops, refs become next frontier (deduped via visited)
-                if hop < layers - 1:
-                    for ref_kind, ref_key in fact_refs:
-                        addr = f"{ref_kind}/{ref_key}"
-                        if addr in visited:
-                            continue
-                        next_frontier.append((ref_kind, ref_key))
-        frontier = next_frontier
-        if not frontier:
-            break
-
-    # ASC ordering — oldest first (changelog-style). Tie-break by id to keep
-    # deterministic order across calls.
-    facts.sort(key=lambda f: (f["ts"] or "", f.get("id") or ""))
-
-    return {
-        "facts": facts,
-        "fold_meta": fold_meta,
-        "vertex": ast.name,
-        "_trace": {"kind": kind, "key": key, "refs_depth": refs_depth},
-    }
-
-
-def _fetch_entity_facts(
-    vertex_path: Path,
-    kind: str,
-    key: str,
-    *,
-    observer: str | None,
-    visited: set[str],
-) -> "list[tuple[dict, list[tuple[str, str]]]]":
-    """Fetch source facts for one entity address; collect outbound refs.
-
-    Returns a list of (fact_dict, ref_addresses) tuples. Each fact dict
-    carries an ``_entity`` field with the matched ``kind/key``. Marks each
-    matched entity address as visited (prevents cycles and re-fetches).
-    """
-    state = fetch_fold(
-        vertex_path, kind=kind, key=key,
-        observer=observer, retain_facts=True,
-    )
-
-    results: list[tuple[dict, list[tuple[str, str]]]] = []
-    for section in state.sections:
-        kf = section.key_field
-        if not kf:
-            continue
-        for item in section.items:
-            key_value = str(item.payload.get(kf, ""))
-            addr = f"{section.kind}/{key_value}"
-            if addr in visited:
-                continue
-            visited.add(addr)
-            source_key = addr
-            for p in state.source_facts.get(source_key, []):
-                fact = _source_payload_to_fact_dict(p, section.kind)
-                fact["_entity"] = addr
-                refs = _parse_fact_refs(fact["payload"].get("ref"))
-                results.append((fact, refs))
-    return results
-
-
-def _parse_fact_refs(value: object) -> "list[tuple[str, str]]":
-    """Parse a fact's ``ref`` field into a list of (kind, key) tuples.
-
-    Refs are written as ``kind:key`` (e.g. ``decision:design/foo``) — colon
-    separates kind from key, key itself may contain slashes (namespace
-    prefixes like ``design/``). This is the runbook convention and the
-    same shape that ``_resolve_entity_refs`` resolves at emit time.
-
-    Accepts the comma-separated string form (``kind:key,kind:key``) and
-    the list form (already split). Items lacking a ``:`` separator are
-    skipped — they aren't well-formed entity addresses.
-    """
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple, set)):
-        parts = [str(v).strip() for v in value]
-    else:
-        parts = [r.strip() for r in str(value).split(",")]
-    out: list[tuple[str, str]] = []
-    for p in parts:
-        if not p or ":" not in p:
-            continue
-        k, v = p.split(":", 1)
-        out.append((k, v))
-    return out
 
 
 def fetch_ticks(
@@ -1069,13 +886,29 @@ def fetch_tick_windows(
     vertex_path: Path,
     *,
     name: str | None = None,
-    since: str = "30d",
+    since: str | None = "30d",
+    all_names: bool = False,
 ) -> "tuple[TickWindow, ...]":
     """Build ``TickWindow`` objects for a vertex's recent ticks.
 
     When *name* is None or empty, resolves to the vertex name — the tick
     series produced by the vertex-level boundary. Otherwise filters to
     the named loop's tick series.
+
+    *all_names* spans EVERY tick series in the store (no name filter) —
+    the full hash chain, which links all appended ticks regardless of
+    name (genesis/rebirth ticks carry a different name than the vertex
+    boundary series, so the name filter would silently drop them). This
+    is what ``store ticks --chain`` needs to agree with ``store verify``.
+    Because cross-series adjacency is not a real delta, ``delta_*`` are
+    zeroed when *all_names* is set — they are a same-series concept.
+    *all_names* takes precedence over *name*.
+
+    *since* is a duration window (``"30d"``, ``"24h"``); pass ``None`` for
+    the full history (all ticks from epoch). The attestation-chain read
+    (``store ticks --chain``) wants the whole chain — genesis and the
+    legacy-era boundary are exactly the interesting cases — not a recent
+    slice.
 
     Returns newest-first. ``delta_*`` on index *i* compares against index
     *i + 1* (the next-older tick). The oldest tick in the returned slice
@@ -1085,13 +918,17 @@ def fetch_tick_windows(
     from engine import vertex_ticks
     from lang import parse_vertex_file
 
-    if not name:
+    if all_names:
+        name = None  # no filter — span the full chain across every series
+    elif not name:
         ast = parse_vertex_file(vertex_path)
         name = ast.name
 
-    since_secs = _parse_duration(since)
     now = datetime.now(timezone.utc)
-    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+    if since is None:
+        since_ts = 0.0
+    else:
+        since_ts = (now - timedelta(seconds=_parse_duration(since))).timestamp()
 
     pairs = vertex_ticks(
         vertex_path, since_ts, now.timestamp(), name=name, with_envelope=True
@@ -1122,7 +959,10 @@ def fetch_tick_windows(
         status = str(boundary.get("status", ""))
         trigger = f"{observer} {status}".strip() if observer else ""
 
-        if i + 1 < len(payload_stats):
+        if all_names:
+            # Cross-series adjacency is not a meaningful delta — zero it.
+            delta_added, delta_updated, added, updated = 0, 0, {}, {}
+        elif i + 1 < len(payload_stats):
             delta_added, delta_updated, added, updated = _tick_delta(
                 stats, payload_stats[i + 1],
             )

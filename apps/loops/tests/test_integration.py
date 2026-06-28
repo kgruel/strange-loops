@@ -1334,37 +1334,6 @@ class TestRunFoldPaths:
         assert "Searched:" in captured.err
         assert "built-in: loops.lenses.totally_nonexistent_lens" in captured.err
 
-    def test_read_lens_trace_exits_with_redirect(self, fold_by_vertex, capsys):
-        """--lens trace without --diff exits 2 with a redirect to --diff.
-
-        "trace" is an internal lens consumed by --diff; requesting it directly
-        would route trace_view through the fold fetcher (FoldState), which
-        crashes. Dissolution residue from the standalone sl trace verb.
-        """
-        _, vpath = fold_by_vertex
-        _emit(vpath, "heartbeat", service="api")
-        rc = main(["read", str(vpath), "--lens", "trace", "--plain"])
-        assert rc == 2
-        captured = capsys.readouterr()
-        assert "--diff" in captured.err
-        assert "internal lens" in captured.err
-
-    def test_read_diff_routes_through_trace_view(self, fold_by_vertex, capsys):
-        """--diff end-to-end: CLI route → fetch_trace → trace_view renders field deltas.
-
-        Exercises the load-bearing path that the sl trace dissolution landed on.
-        fold_by_vertex declares heartbeat folded by "service"; emitting service=api
-        seeds one lifecycle fact. The --diff render must show the initial field
-        value ('. → api') from trace_view's cumulative-delta output.
-        """
-        _, vpath = fold_by_vertex
-        _emit(vpath, "heartbeat", service="api")
-        rc = main(["read", str(vpath), "heartbeat/api", "--diff", "--plain"])
-        assert rc == 0
-        captured = capsys.readouterr()
-        # trace_view renders the first emit as ". → <value>" for each field.
-        assert ". → api" in captured.out
-
     def test_read_kind_typo_exits_loudly_with_suggestion(self, fold_by_vertex, capsys):
         """--kind X with X not in vertex.declared_kinds exits 2 with fuzzy hint.
 
@@ -2363,7 +2332,7 @@ class TestResolveEntityRefs:
         vpath = tmp_path / "nonexistent.vertex"
         store_path = tmp_path / "store.db"
 
-        result, unresolved = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
+        result, unresolved, _resolved = _resolve_entity_refs(vpath, store_path, {"x": "foo/bar"})
         # LoopsError caught → writable=None, local_kind_keys={}, no refs resolved
         assert result == {"x": "foo/bar"}
         # addr_kind 'foo' is not declared anywhere → not surfaced as unresolved
@@ -2382,7 +2351,7 @@ class TestResolveEntityRefs:
         store_path = tmp_path / "minimal.db"
 
         # Two unknown kinds → _ensure_topology called twice → L297 fires on 2nd call
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"a": "unknownkind1/val1", "b": "unknownkind2/val2"}
         )
         # Both kinds unknown, no refs resolved, payload unchanged
@@ -2436,7 +2405,7 @@ class TestResolveEntityRefs:
         # Use a value that is NOT in the child store → local _try_resolve returns None
         # → falls through to topology widening → topo_stores includes child_store
         # → L342 fires to skip child_store (already searched locally)
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             child_vpath, child_store, {"project": "task/doesnotexist"}
         )
         # Ref not resolved (not in any store), but L342 was exercised
@@ -2488,7 +2457,7 @@ class TestResolveEntityRefs:
 
         # Multi-ref payload (the shape _parse_emit_parts produces from
         # ``ref=task/alpha ref=task/beta`` or ``ref=task/alpha,task/beta``).
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"ref": "task/alpha,task/beta"}
         )
         # Both addresses resolved; ref_ref holds both ULIDs comma-joined.
@@ -2534,7 +2503,7 @@ class TestResolveEntityRefs:
             reader.close()
         assert ulid_alpha
 
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             vpath, store_path, {"ref": "task/alpha,task/ghost"}
         )
         # Only alpha resolved; ref_ref carries just its ULID.
@@ -2593,7 +2562,7 @@ class TestResolveEntityRefs:
         # resolver scans topic's value, splits 'pattern/foo', finds
         # 'pattern' in topology kinds, fails the lookup, and surfaces
         # an unresolved ref.
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             target_vpath,
             target_store,
             {"topic": "pattern/foo", "message": "body"},
@@ -2668,7 +2637,7 @@ class TestResolveEntityRefs:
 
         # Emit decision with topic=design/foo (fold-key, skipped) AND
         # superseded_by=task/real-task (non-fold-key, should resolve).
-        result, unresolved = _resolve_entity_refs(
+        result, unresolved, _resolved = _resolve_entity_refs(
             target_vpath,
             target_store,
             {"topic": "design/foo", "superseded_by": "task/real-task"},

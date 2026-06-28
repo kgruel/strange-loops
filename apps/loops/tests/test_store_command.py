@@ -235,11 +235,16 @@ class TestStoreTicks:
         assert len(report["windows"]) == 2
         assert report["windows"][0]["chained"] is True
 
-    def test_requires_vertex_target(self, tmp_path):
+    def test_requires_vertex_target(self, tmp_path, capsys):
         from loops.commands.store import _run_store_ticks
-        # A .db can't resolve a named tick series — refuse, don't guess.
-        with pytest.raises(ValueError, match="requires a .vertex"):
-            _run_store_ticks([str(tmp_path / "x.db")])
+        # A .db can't resolve a named tick series — refuse (RC1 + message),
+        # don't guess. Validation is deferred into fetch (so `--help` still
+        # works), so the refusal surfaces as a return code, not a raise.
+        rc = _run_store_ticks([str(tmp_path / "x.db")])
+        assert rc == 1
+        # Collapse whitespace — the error block wraps at terminal width.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "requires a .vertex" in out
 
     def test_empty_store_renders_cleanly(self, tmp_path, capsys):
         from loops.commands.store import _run_store
@@ -250,15 +255,29 @@ class TestStoreTicks:
         assert rc == 0
         assert "No ticks" in capsys.readouterr().out
 
-    def test_refuses_aggregate_vertex(self, tmp_path):
+    def test_refuses_aggregate_vertex(self, tmp_path, capsys):
         # A combine/discover aggregate has no own store/chain — vertex_ticks
         # returns empty envelopes for it, so --chain would render a real
         # signed chain as a false "all legacy". Refuse, like the siblings do.
         from loops.commands.store import _run_store_ticks
         agg = tmp_path / "agg.vertex"
         agg.write_text('name "agg"\ncombine {\n  vertex "./child.vertex"\n}\n')
-        with pytest.raises(ValueError, match="aggregate vertex"):
-            _run_store_ticks([str(agg)])
+        rc = _run_store_ticks([str(agg)])
+        assert rc == 1
+        # Collapse whitespace — the error block wraps at terminal width.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "aggregate vertex" in out
+
+    def test_help_does_not_require_target(self, capsys):
+        # B2: `store ticks --help` must reach run_cli's help handler, not the
+        # eager target guard (validation now lives in fetch). Help surfaces
+        # the pre-parsed --chain / --since flags.
+        from loops.commands.store import _run_store_ticks
+        rc = _run_store_ticks(["--help"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "--chain" in out
+        assert "--since" in out
 
     def test_chain_spans_all_series_density_scopes(self, tmp_path, capsys):
         # Loop-level boundary → ticks named "ping", not the vertex "x".

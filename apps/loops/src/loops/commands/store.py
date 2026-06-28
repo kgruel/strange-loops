@@ -526,36 +526,44 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
     file_arg = getattr(known, "file", None)
 
     target_path = _resolve_target(file_arg, vertex_path).resolve()
-    if target_path.suffix != ".vertex":
-        raise ValueError(
-            "store ticks requires a .vertex target — the tick series "
-            "resolves through the vertex name and store"
-        )
-    # Refuse aggregates: a combine/discover vertex has no own store and no
-    # own chain — vertex_ticks returns empty attestation envelopes for it,
-    # which would render a genuinely-signed chain as a false "all legacy".
-    # The sibling store verbs already refuse storeless aggregates (via
-    # resolve_store_path); ticks bypasses that path, so guard here.
-    from lang import parse_vertex_file
-
-    ast = parse_vertex_file(target_path)
-    if ast.combine is not None or ast.discover is not None:
-        raise ValueError(
-            "store ticks reads one store's attestation chain; "
-            f"{target_path.name} is an aggregate vertex (no own chain) — "
-            "point at the instance store, e.g. .loops/<name>.vertex"
-        )
 
     help_args = (
         [HelpArg("file", "Vertex .vertex file or vertex name", positional=True)]
         if vertex_path is None else []
     )
+    help_args += [
+        HelpArg("--chain", "Project the attestation envelope (chain linkage, "
+                "signature, window cursor) and span the full hash chain"),
+        HelpArg("--since", "Narrow to ticks within a window (e.g. 7d, 24h); "
+                "default is the full chain"),
+    ]
 
     def fetch():
         import dataclasses
         from lang import parse_vertex_file
 
         from .fetch import fetch_tick_windows
+
+        # Validation is deferred into fetch (mirroring store stats/verify) so
+        # `store ticks --help` reaches run_cli's help handler — an eager guard
+        # would raise on target resolution before help could render.
+        if target_path.suffix != ".vertex":
+            raise ValueError(
+                "store ticks requires a .vertex target — the tick series "
+                "resolves through the vertex name and store"
+            )
+        # Refuse aggregates: a combine/discover vertex has no own store and no
+        # own chain — vertex_ticks returns empty attestation envelopes for it,
+        # which would render a genuinely-signed chain as a false "all legacy".
+        # The sibling store verbs already refuse storeless aggregates (via
+        # resolve_store_path); ticks bypasses that path, so guard here.
+        ast = parse_vertex_file(target_path)
+        if ast.combine is not None or ast.discover is not None:
+            raise ValueError(
+                "store ticks reads one store's attestation chain; "
+                f"{target_path.name} is an aggregate vertex (no own chain) — "
+                "point at the instance store, e.g. .loops/<name>.vertex"
+            )
 
         # --chain spans the full hash chain (all_names) to agree with
         # `store verify`/`store stats`; density stays name-scoped (its
@@ -570,7 +578,7 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
             "legacy": sum(1 for w in windows if not w.chained),
         }
         return {
-            "vertex": parse_vertex_file(target_path).name,
+            "vertex": ast.name,
             "chain_mode": known.chain,
             "chain": chain,
             "since": known.since,

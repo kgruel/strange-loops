@@ -331,10 +331,12 @@ def run(argv: list[str], ctx: Invocation) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    # Plain / ANSI: --plain forces ANSI off. Reporter exposes use_ansi
-    # for PaintedReporter; setting it pre-dispatch is the canonical
-    # honour-point. The mutation is harmless for BufferReporter (it
-    # carries the attr but the buffer doesn't care).
+    # Plain / ANSI: --plain forces ANSI off. The reporter now DERIVES use_ansi
+    # from env + TTY (NO_COLOR/FORCE_COLOR/isatty — the plain-default inversion),
+    # so this explicit flag is the override that wins over that derived default
+    # (and over FORCE_COLOR on a TTY). Setting it pre-dispatch is the canonical
+    # honour-point; harmless for BufferReporter (carries the attr, buffer
+    # ignores it).
     if args.plain and hasattr(ctx.reporter, "use_ansi"):
         ctx.reporter.use_ansi = False
 

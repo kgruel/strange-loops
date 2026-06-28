@@ -22,6 +22,7 @@ Design anchor: decision/design/cli-refactor-option-2-siftd-shape.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from typing import Any, Protocol
@@ -96,16 +97,21 @@ class PaintedReporter:
     or ``None`` when piped (signaling "no truncation/padding" per
     painted's convention).
 
-    ``use_ansi`` controls colour/escape output for ``print_block``. Views
-    set it to False to honour ``--plain``; defaults to True (the painted
-    writer itself further suppresses colour for non-TTY stdout).
+    ``use_ansi`` controls colour/escape output for ``print_block``. When not
+    given explicitly it is DERIVED from the environment + TTY (the plain-default
+    inversion): NO_COLOR → off, FORCE_COLOR → on, else stdout.isatty(). Views
+    still set it to False post-construction to honour ``--plain`` (an explicit
+    flag wins over the derived default, even over FORCE_COLOR).
     """
 
-    def __init__(self, *, use_ansi: bool = True) -> None:
+    def __init__(self, *, use_ansi: bool | None = None) -> None:
         # Resolve width once at construction. Reporter instances are
         # short-lived (one per main() call) so this is fine.
         self.width: int | None = self._detect_width()
-        self.use_ansi: bool = use_ansi
+        # None → derive from env + TTY (the inversion). An explicit bool wins.
+        self.use_ansi: bool = (
+            self._resolve_use_ansi() if use_ansi is None else use_ansi
+        )
 
     @staticmethod
     def _detect_width() -> int | None:
@@ -115,6 +121,21 @@ class PaintedReporter:
             return shutil.get_terminal_size().columns
         except OSError:
             return None
+
+    @staticmethod
+    def _resolve_use_ansi() -> bool:
+        """Derive ANSI output from environment + TTY — the plain-default
+        inversion (piped reads, 58% of traffic, get no escapes by default).
+
+        Precedence: NO_COLOR (present, any value) wins → off; then FORCE_COLOR
+        (present, any value) → on; otherwise stdout.isatty(). NO_COLOR over
+        FORCE_COLOR follows the no-color.org convention.
+        """
+        if "NO_COLOR" in os.environ:
+            return False
+        if "FORCE_COLOR" in os.environ:
+            return True
+        return sys.stdout.isatty()
 
     def err(self, message: str) -> None:
         # Use painted's palette for consistent error color across CLI.

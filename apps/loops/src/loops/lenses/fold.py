@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 
 from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
 
-from ._helpers import elide
 from painted.palette import current_palette
 
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
@@ -265,9 +264,24 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
         blocks.append(Block.text("  (no matches)", Style(dim=True), width=width))
     for r in rows:
         date = fmt(r.ts) if r.ts is not None else ""
-        gist = content_gist(r.kind, r.payload)
-        line = f"  {date}  {r.kind}: {gist}".rstrip()
-        blocks.append(Block.text(line, Style(), width=width))
+        prefix = f"  {date}  {r.kind}: "
+        # Full extraction (newlines collapsed), no 80-cap — search now honors
+        # the same width contract as the fold path
+        # (friction:read-tty-truncation-not-defeatable, --match 80-cap).
+        gist = content_gist(r.kind, r.payload, max_width=None)
+        if width is None:
+            # piped: the whole body — the dominant agent path
+            blocks.append(Block.text(f"{prefix}{gist}".rstrip(), Style(), width=None))
+            continue
+        # TTY: budget the body to the line width (wcwidth) and announce the
+        # magnitude dropped, instead of a silent 80-char clip. Reserve room
+        # for the " [+Nc]" hint so it survives the width fit.
+        budget = max(width - len(prefix) - 10, MIN_FIELD_BUDGET)
+        fit = budget_fields(
+            [gist], budget, min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+        )
+        hint = f" [+{fit.dropped}c]" if fit.dropped > 0 else ""
+        blocks.append(Block.text(f"{prefix}{fit.text}{hint}", Style(), width=width))
 
     if data.window.unindexed:
         footer = (
@@ -800,8 +814,18 @@ def _render_item_line(
                         sf_body = str(fv)
                         break
                 if sf_body and width is not None:
-                    max_body = max(10, width - len(fact_pad) - len(ts_str) - 3)
-                    sf_body = elide(sf_body, max_body)
+                    # wcwidth-aware budget so CJK doesn't silently over-clip and
+                    # the magnitude marker survives the column fit (was a
+                    # len()-based elide → silent loss on wide chars).
+                    avail = width - len(fact_pad) - len(ts_str) - 3
+                    max_body = max(10, avail - 10)  # reserve for " [+Nc]"
+                    fit = budget_fields(
+                        [sf_body], max_body,
+                        min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+                    )
+                    sf_body = fit.text + (
+                        f" [+{fit.dropped}c]" if fit.dropped > 0 else ""
+                    )
                 lines.append(Block.text(
                     f"{fact_pad}▸ {ts_str} {sf_body}", fp.meta, width=width
                 ))

@@ -307,7 +307,7 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     if gate:
         render_data = _project_surface(op, data)
 
-    from loops.lens_resolver import call_lens, normalize_width
+    from loops.lens_resolver import call_lens
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
     # existing lenses accept. visible/chars/lines flow as kwargs; the lens
@@ -325,8 +325,14 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         extra.setdefault("vertex_path", str(op.vertex_path))
 
     try:
+        # Human reads show everything: the truncation budget is dropped on the
+        # read render (decision:design/drop-truncation-from-human-reads). A TTY
+        # read now renders full bodies + all fields like the pipe (width=None =
+        # no-truncation, per normalize_width's contract), just with color. A
+        # width-fit/truncate render can return later as an opt-in, not the
+        # default. (Live keeps its width — the alt-screen needs it.)
         block = call_lens(
-            lens_fn, render_data, _zoom_of(op.fidelity), normalize_width(reporter.width), **extra
+            lens_fn, render_data, _zoom_of(op.fidelity), None, **extra
         )
     except Exception as exc:
         reporter.err(f"Render error: {exc}")

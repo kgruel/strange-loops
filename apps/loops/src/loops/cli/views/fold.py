@@ -388,6 +388,25 @@ def _resolve_kind_key(
     return kind, key
 
 
+def _colon_address_suggestion(
+    entity: str | None, kind: str | None, key: str | None
+) -> str | None:
+    """If ``entity`` uses ':' as the kind/key separator (the ref idiom) where
+    the positional address wants '/', return the '/'-form suggestion; else None.
+
+    A bare no-slash entity used to be silently ignored, so ``kind:key`` widened
+    to the whole fold instead of addressing. Catch the colon slip and suggest
+    the slash form (friction:read-address-separator-colon-vs-slash). Explicit
+    --kind/--key win, so the entity is only consulted when both are unset.
+    """
+    if entity is None or kind is not None or key is not None:
+        return None
+    colon, slash = entity.find(":"), entity.find("/")
+    if colon != -1 and (slash == -1 or colon < slash):
+        return entity.replace(":", "/", 1)
+    return None
+
+
 def _resolve_key_grammar(
     key_raw: str | None,
 ) -> tuple[str | None, str | None, tuple[str, ...]]:
@@ -441,6 +460,16 @@ def run(argv: list[str], ctx: Invocation) -> int:
     vname, entity, where, observer_filter = _classify_tokens(
         list(args.tokens), has_vertex_path,
     )
+
+    # Catch the kind:key (colon) ref-idiom reach where the positional address
+    # wants kind/key (slash); it used to silently widen to the whole fold.
+    suggestion = _colon_address_suggestion(entity, args.kind, args.key)
+    if suggestion is not None:
+        ctx.reporter.err(
+            f"'{entity}': the positional address is kind/key (slash), not "
+            f"kind:key (colon). Did you mean '{suggestion}'?"
+        )
+        return 2
 
     kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
     fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)

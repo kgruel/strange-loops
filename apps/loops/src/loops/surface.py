@@ -23,9 +23,11 @@ json carry the SAME rows in the SAME (faithful fold) order — ranking is an
 opt-in transform (``budget(limit)``), not the base order (see ``project``).
 
 This module is PAINTED-FREE and imports nothing from ``loops.lenses`` — it is a
-leaf so the lens can depend on it, not the reverse. The salience/inbound math is
-COPIED byte-for-byte from ``lenses/fold.py`` (not imported) so the lens can later
-delete its copies and read the materialized scalars.
+leaf so the lens can depend on it, not the reverse. The salience/inbound math
+lives HERE as the single source of truth: the built-in fold lens (build-1) and
+the three orient lenses (session_start / session_landing / identity_prompt, the
+salience-lens-migration fast-follow) read the materialized ``Row.salience`` /
+``Row.inbound`` and no longer carry their own copies.
 
 NOT a store (holds no facts, persists nothing), NOT a query language (a fixed set
 of typed transforms over the existing ``kind/key`` + ULID address grammar), NOT a
@@ -122,11 +124,13 @@ class Surface:
 
 
 # ---------------------------------------------------------------------------
-# Salience / inbound — LIFTED byte-for-byte from lenses/fold.py:756-819.
-# Copied (not imported) to keep this module a painted-free leaf and let the
-# lens delete its copies in S2. The dual-form bare-vs-kind-qualified match in
-# _inbound_count is load-bearing: dropping the bare-key branch silently halves
-# salience for namespaced keys.
+# Salience / inbound — the single source of truth (originally lifted from
+# lenses/fold.py). Kept painted-free so every consumer can depend on it: the
+# built-in fold lens and the orient lenses (session_start / session_landing /
+# identity_prompt) all read the materialized Row scalars and carry no copies.
+# The three-form match in _inbound_count (bare ``key`` / ``/key`` / ``:key``) is
+# load-bearing: dropping the bare-key branch silently halves salience for
+# namespaced keys, and dropping the colon branch drops the dominant ref form.
 # ---------------------------------------------------------------------------
 
 

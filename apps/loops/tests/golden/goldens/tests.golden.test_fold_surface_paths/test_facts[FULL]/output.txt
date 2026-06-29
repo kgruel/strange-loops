@@ -9,4 +9,9 @@ Decisions (1):
       _ts: 2025-01-15T10:00:00+00:00
       _n: 3
 
-No history: 1 note
+Notes (1):
+  note/ (1)
+    fresh [Jan 15]: single
+      id:01FFFFFF
+      _id: 01FFFFFFFFFFFFFFFFFFFFFFFF
+      _ts: 2025-01-15T09:00:00+00:00

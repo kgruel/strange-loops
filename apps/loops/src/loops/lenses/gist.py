@@ -13,7 +13,7 @@ from typing import Callable
 _CONTENT_FIELDS = ("message", "text", "name", "topic", "summary", "title", "description")
 
 
-def content_gist(kind: str, payload: dict, max_width: int = 80) -> str:
+def content_gist(kind: str, payload: dict, max_width: int | None = 80) -> str:
     """Extract the most meaningful content line from a payload.
 
     Kind-aware extractors handle known patterns. Falls back to
@@ -122,7 +122,14 @@ _KIND_EXTRACTORS: dict[str, Callable[[dict], str]] = {
 # ---------------------------------------------------------------------------
 
 
-def _truncate(text: str, max_width: int) -> str:
-    """Collapse newlines, then clip to max_width via the shared elide."""
+def _truncate(text: str, max_width: int | None) -> str:
+    """Collapse newlines, then clip to ``max_width`` via the shared elide.
+
+    ``max_width=None`` means no clip — collapse + strip only (the piped
+    no-cap path; the caller budgets width itself).
+    """
+    collapsed = text.replace("\n", " ").strip()
+    if max_width is None:
+        return collapsed
     from ._helpers import elide
-    return elide(text.replace("\n", " ").strip(), max_width)
+    return elide(collapsed, max_width)

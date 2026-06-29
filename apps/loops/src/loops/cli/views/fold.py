@@ -282,15 +282,20 @@ def _resolve_vertex_path(
 # --- Mode resolution -------------------------------------------------------
 
 
-def _resolve_mode(args: argparse.Namespace, lens: str | None) -> str:
+def _resolve_mode(
+    args: argparse.Namespace, lens: str | None, *, is_tty: bool
+) -> str:
     """Pick an output mode from flags + lens context.
 
     Defaults to ``"static"`` — mirrors the legacy ``default_mode=STATIC``
-    for fold. ``--live`` wins over ``--static``; ``-i`` only triggers
+    for fold. ``--live`` wins over ``--static`` **but requires a TTY**: on a
+    non-tty (pipe/file) the alt-screen + infinite stream would hang with zero
+    output, so it downgrades to ``"static"``
+    (friction:live-mode-hangs-silently-on-pipe). ``-i`` only triggers
     INTERACTIVE for views that bind a handler (autoresearch lens).
     """
     if args.live:
-        return "live"
+        return "live" if is_tty else "static"
     if args.interactive and lens == "autoresearch":
         return "interactive"
     return "static"
@@ -383,6 +388,25 @@ def _resolve_kind_key(
     return kind, key
 
 
+def _colon_address_suggestion(
+    entity: str | None, kind: str | None, key: str | None
+) -> str | None:
+    """If ``entity`` uses ':' as the kind/key separator (the ref idiom) where
+    the positional address wants '/', return the '/'-form suggestion; else None.
+
+    A bare no-slash entity used to be silently ignored, so ``kind:key`` widened
+    to the whole fold instead of addressing. Catch the colon slip and suggest
+    the slash form (friction:read-address-separator-colon-vs-slash). Explicit
+    --kind/--key win, so the entity is only consulted when both are unset.
+    """
+    if entity is None or kind is not None or key is not None:
+        return None
+    colon, slash = entity.find(":"), entity.find("/")
+    if colon != -1 and (slash == -1 or colon < slash):
+        return entity.replace(":", "/", 1)
+    return None
+
+
 def _resolve_key_grammar(
     key_raw: str | None,
 ) -> tuple[str | None, str | None, tuple[str, ...]]:
@@ -437,6 +461,16 @@ def run(argv: list[str], ctx: Invocation) -> int:
         list(args.tokens), has_vertex_path,
     )
 
+    # Catch the kind:key (colon) ref-idiom reach where the positional address
+    # wants kind/key (slash); it used to silently widen to the whole fold.
+    suggestion = _colon_address_suggestion(entity, args.kind, args.key)
+    if suggestion is not None:
+        ctx.reporter.err(
+            f"'{entity}': the positional address is kind/key (slash), not "
+            f"kind:key (colon). Did you mean '{suggestion}'?"
+        )
+        return 2
+
     kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
     fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)
 
@@ -488,10 +522,14 @@ def run(argv: list[str], ctx: Invocation) -> int:
         do_count=args.count,
     )
 
-    mode = _resolve_mode(args, args.lens)
+    mode = _resolve_mode(args, args.lens, is_tty=ctx.isatty)
     # JSON is a one-shot structured encode — live/interactive make no sense.
     if fmt_format is Format.JSON:
         mode = "static"
+    # --live needs a TTY; on a pipe _resolve_mode downgraded it to static —
+    # say so rather than silently swallowing the request.
+    elif args.live and not ctx.isatty:
+        ctx.reporter.err("live mode needs a TTY; rendering static instead")
 
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None
@@ -511,7 +549,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fidelity=fidelity,
         format=fmt_format,
         surface_spec=surface_spec,
-        render_context={},
+        # Presentation register keys on the channel (TTY = human "Threads (N):"
+        # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
+        render_context={"piped": not ctx.isatty},
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]

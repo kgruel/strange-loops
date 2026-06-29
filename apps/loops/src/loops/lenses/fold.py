@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 
 from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
 
-from ._helpers import elide
 from painted.palette import current_palette
 
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
@@ -119,6 +118,7 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
+    piped: bool | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -172,9 +172,14 @@ def fold_view(
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
-    facts_filter = "facts" in visible
     blocks: list[Block] = []
-    skipped_sections: list[tuple[str, int]] = []
+
+    # Presentation register is the CHANNEL, not the width. Truncation is now
+    # dropped on human reads (width=None there too), so width can no longer tell
+    # a human TTY read from a piped one — the explicit `piped` flag does. Default
+    # to the old width-is-None proxy for direct/legacy callers (goldens, tests).
+    # (decision:design/drop-truncation-from-human-reads — presentation half)
+    is_piped = (width is None) if piped is None else piped
 
     for kind, rows in populated:
         kv = data.schema.get(kind)
@@ -183,18 +188,15 @@ def fold_view(
         preview_fields = kv.preview_fields if kv is not None else ()
         display_count = len(rows)
 
-        # When --facts is active, minimize sections without compression history
-        # Collect folds and by-folds where no item has n>1 have nothing to drill into
-        if facts_filter:
-            has_history = fold_type == "by" and any(r.n > 1 for r in rows)
-            if not has_history:
-                skipped_sections.append((kind, len(rows)))
-                continue
-
+        # --facts shows the raw fact stream. For a collect-fold the folded rows
+        # ARE that stream (n=1 each, no compression to expand); for a by-fold
+        # the source facts expand inline where present. Either way the rows
+        # render — skipping them inverted the flag's contract
+        # (friction:facts-empty-for-collect-fold-kinds).
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        header = _section_header(kind, display_count, piped=width is None)
+        header = _section_header(kind, display_count, piped=is_piped)
         blocks.append(Block.text(header, fp.section_header, width=width))
 
         observers = {r.observer for r in rows if r.observer}
@@ -224,14 +226,8 @@ def fold_view(
             blocks.append(Block.text("", Style(), width=width))
             blocks.append(walked_block)
 
-    # Footer: skipped sections + unfolded kinds
+    # Footer: unfolded kinds
     footer_parts: list[str] = []
-    if skipped_sections:
-        parts = [f"{count} {kind}" for kind, count in skipped_sections]
-        # skipped_sections now only populates via the facts_filter path
-        # (refs filtering retired in A1 of the trace-dissolution arc — see
-        # decision/design/trace-dissolves-into-read-with-unified-refs).
-        footer_parts.append(f"No history: {', '.join(parts)}")
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
         footer_parts.append(f"Unfolded: {loose}")
@@ -276,9 +272,24 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
         blocks.append(Block.text("  (no matches)", Style(dim=True), width=width))
     for r in rows:
         date = fmt(r.ts) if r.ts is not None else ""
-        gist = content_gist(r.kind, r.payload)
-        line = f"  {date}  {r.kind}: {gist}".rstrip()
-        blocks.append(Block.text(line, Style(), width=width))
+        prefix = f"  {date}  {r.kind}: "
+        # Full extraction (newlines collapsed), no 80-cap — search now honors
+        # the same width contract as the fold path
+        # (friction:read-tty-truncation-not-defeatable, --match 80-cap).
+        gist = content_gist(r.kind, r.payload, max_width=None)
+        if width is None:
+            # piped: the whole body — the dominant agent path
+            blocks.append(Block.text(f"{prefix}{gist}".rstrip(), Style(), width=None))
+            continue
+        # TTY: budget the body to the line width (wcwidth) and announce the
+        # magnitude dropped, instead of a silent 80-char clip. Reserve room
+        # for the " [+Nc]" hint so it survives the width fit.
+        budget = max(width - len(prefix) - 10, MIN_FIELD_BUDGET)
+        fit = budget_fields(
+            [gist], budget, min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+        )
+        hint = f" [+{fit.dropped}c]" if fit.dropped > 0 else ""
+        blocks.append(Block.text(f"{prefix}{fit.text}{hint}", Style(), width=width))
 
     if data.window.unindexed:
         footer = (
@@ -431,8 +442,6 @@ def _render_section(
 # Namespace-grouped rendering (Strategy C)
 # ---------------------------------------------------------------------------
 
-_GROUP_SHOW_ALL_THRESHOLD = 5
-
 
 def _render_grouped(
     items: list["Row"],
@@ -479,20 +488,20 @@ def _render_grouped(
             reverse=True,
         )
 
-        # Salience windowing: when group is large, show only high-salience items.
-        # The pre-A1 "if refs in visible: show all" branch was retired alongside
-        # the refs filter — normal windowing applies regardless of --refs.
-        if len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
-            show_items = sorted_items
-        else:
-            show_items = [
-                i for i in sorted_items
-                if i.salience > 1
-            ]
-            if not show_items:
-                show_items = sorted_items[:1]
+        # Human reads show every row. The salience auto-window (collapse a large
+        # group to its salience>1 items) was the ROW-level twin of the body
+        # truncation budget, and it forked the umwelt the same way: the text
+        # lens hid rows the Surface — and --json — still carried, with no record
+        # in Surface.window. Dropped, same as truncation, so both channels
+        # deliver the same information (parity first; flood accepted). Curation
+        # returns later as an explicit, DESIGNED budget — the `lines` opt-in
+        # below, an `orient` door, or a Surface-recorded window per the
+        # curation-in-surface arc — never an always-on default.
+        # (decision:design/drop-truncation-from-human-reads — row half)
+        show_items = sorted_items
 
-        # Apply lines budget (highest-salience kept; rest collapse to "more")
+        # Apply lines budget (explicit opt-in; 0 = unlimited, the read default).
+        # Highest-salience kept; the rest collapse into the "(N more)" footer.
         if lines > 0 and len(show_items) > lines:
             show_items = list(show_items)[:lines]
 
@@ -811,8 +820,18 @@ def _render_item_line(
                         sf_body = str(fv)
                         break
                 if sf_body and width is not None:
-                    max_body = max(10, width - len(fact_pad) - len(ts_str) - 3)
-                    sf_body = elide(sf_body, max_body)
+                    # wcwidth-aware budget so CJK doesn't silently over-clip and
+                    # the magnitude marker survives the column fit (was a
+                    # len()-based elide → silent loss on wide chars).
+                    avail = width - len(fact_pad) - len(ts_str) - 3
+                    max_body = max(10, avail - 10)  # reserve for " [+Nc]"
+                    fit = budget_fields(
+                        [sf_body], max_body,
+                        min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+                    )
+                    sf_body = fit.text + (
+                        f" [+{fit.dropped}c]" if fit.dropped > 0 else ""
+                    )
                 lines.append(Block.text(
                     f"{fact_pad}▸ {ts_str} {sf_body}", fp.meta, width=width
                 ))
@@ -906,7 +925,10 @@ def _group_by_namespace(
 
 def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     if piped:
-        return f"## {kind.upper()}"
+        # Carry the section total on the piped/agent surface too — still valid
+        # markdown H2 (friction:read-tty-truncation-not-defeatable kin: the
+        # count was TTY-only, dropped on the dominant pipe path).
+        return f"## {kind.upper()} ({count})"
     label = kind.title()
     if not kind.endswith("s"):
         label += "s"

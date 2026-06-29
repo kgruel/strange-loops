@@ -255,9 +255,13 @@ class TestSurfaceInterposition:
         from loops.lenses.fold import fold_view
         from loops.surface import project
         from painted import Zoom
-        # parity: the dispatched render equals fold_view(project(state))
+        # parity: the dispatched render equals fold_view(project(state)).
+        # The read render drops the truncation budget — dispatch passes
+        # width=None (full body, no truncation) regardless of reporter.width,
+        # so parity is against width=None, not reporter.width=80.
+        # (decision:design/drop-truncation-from-human-reads)
         from .golden.helpers import block_to_text
-        expected = block_to_text(fold_view(project(state), Zoom.SUMMARY, 80))
+        expected = block_to_text(fold_view(project(state), Zoom.SUMMARY, None))
         assert block_to_text(reporter.blocks[0]) == expected
 
     def test_text_gate_fail_override_still_renders(self):

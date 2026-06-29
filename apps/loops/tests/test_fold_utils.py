@@ -269,6 +269,38 @@ class TestShouldGroupByNamespace:
 # fold_view rendering paths
 # ---------------------------------------------------------------------------
 
+class TestPresentationRegister:
+    """The `piped` flag decouples the header register from width/truncation:
+    a human read (TTY) keeps the friendly 'Threads (N):' header even though
+    width=None (no truncation); a pipe gets terse '## KIND (N)'.
+    (decision:design/drop-truncation-from-human-reads — presentation half)"""
+
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def _state(self):
+        s = section(kind="thread", items=(item({"name": "t1", "status": "open"}),),
+                    key_field="name")
+        return state(sections=(s,))
+
+    def test_piped_true_is_terse_markdown_header(self):
+        t = self._text(fold_view(self._state(), Zoom.SUMMARY, None, piped=True))
+        assert "## THREAD (1)" in t
+        assert "Threads (1):" not in t
+
+    def test_piped_false_keeps_human_header_at_width_none(self):
+        # The decoupled case: width=None (full body, no truncation) AND the
+        # human register — exactly what a TTY read now produces.
+        t = self._text(fold_view(self._state(), Zoom.SUMMARY, None, piped=False))
+        assert "Threads (1):" in t
+        assert "## THREAD" not in t
+
+    def test_default_falls_back_to_width_is_none_proxy(self):
+        st = self._state()
+        assert "## THREAD (1)" in self._text(fold_view(st, Zoom.SUMMARY, None))
+        assert "Threads (1):" in self._text(fold_view(st, Zoom.SUMMARY, 80))
+
+
 class TestFoldView:
     def _text(self, block):
         return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)

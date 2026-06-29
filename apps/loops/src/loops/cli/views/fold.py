@@ -549,7 +549,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fidelity=fidelity,
         format=fmt_format,
         surface_spec=surface_spec,
-        render_context={},
+        # Presentation register keys on the channel (TTY = human "Threads (N):"
+        # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
+        render_context={"piped": not ctx.isatty},
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]

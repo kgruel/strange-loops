@@ -118,6 +118,7 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
+    piped: bool | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -173,6 +174,13 @@ def fold_view(
 
     blocks: list[Block] = []
 
+    # Presentation register is the CHANNEL, not the width. Truncation is now
+    # dropped on human reads (width=None there too), so width can no longer tell
+    # a human TTY read from a piped one — the explicit `piped` flag does. Default
+    # to the old width-is-None proxy for direct/legacy callers (goldens, tests).
+    # (decision:design/drop-truncation-from-human-reads — presentation half)
+    is_piped = (width is None) if piped is None else piped
+
     for kind, rows in populated:
         kv = data.schema.get(kind)
         fold_type = kv.fold_type if kv is not None else "collect"
@@ -188,7 +196,7 @@ def fold_view(
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
-        header = _section_header(kind, display_count, piped=width is None)
+        header = _section_header(kind, display_count, piped=is_piped)
         blocks.append(Block.text(header, fp.section_header, width=width))
 
         observers = {r.observer for r in rows if r.observer}

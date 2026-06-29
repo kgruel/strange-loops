@@ -282,15 +282,20 @@ def _resolve_vertex_path(
 # --- Mode resolution -------------------------------------------------------
 
 
-def _resolve_mode(args: argparse.Namespace, lens: str | None) -> str:
+def _resolve_mode(
+    args: argparse.Namespace, lens: str | None, *, is_tty: bool
+) -> str:
     """Pick an output mode from flags + lens context.
 
     Defaults to ``"static"`` — mirrors the legacy ``default_mode=STATIC``
-    for fold. ``--live`` wins over ``--static``; ``-i`` only triggers
+    for fold. ``--live`` wins over ``--static`` **but requires a TTY**: on a
+    non-tty (pipe/file) the alt-screen + infinite stream would hang with zero
+    output, so it downgrades to ``"static"``
+    (friction:live-mode-hangs-silently-on-pipe). ``-i`` only triggers
     INTERACTIVE for views that bind a handler (autoresearch lens).
     """
     if args.live:
-        return "live"
+        return "live" if is_tty else "static"
     if args.interactive and lens == "autoresearch":
         return "interactive"
     return "static"
@@ -488,10 +493,14 @@ def run(argv: list[str], ctx: Invocation) -> int:
         do_count=args.count,
     )
 
-    mode = _resolve_mode(args, args.lens)
+    mode = _resolve_mode(args, args.lens, is_tty=ctx.isatty)
     # JSON is a one-shot structured encode — live/interactive make no sense.
     if fmt_format is Format.JSON:
         mode = "static"
+    # --live needs a TTY; on a pipe _resolve_mode downgraded it to static —
+    # say so rather than silently swallowing the request.
+    elif args.live and not ctx.isatty:
+        ctx.reporter.err("live mode needs a TTY; rendering static instead")
 
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None

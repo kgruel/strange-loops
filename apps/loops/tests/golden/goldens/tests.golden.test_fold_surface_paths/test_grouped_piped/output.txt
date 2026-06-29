@@ -9,4 +9,8 @@
   big/ (7)
     a [×4 Jan 15]: a
     b [×2 Jan 15]: b
-    (5 more)
+    c [Jan 15]: c
+    d [Jan 15]: d
+    e [Jan 15]: e
+    f [Jan 15]: f
+    g [Jan 15]: g

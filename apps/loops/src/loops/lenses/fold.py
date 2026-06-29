@@ -442,8 +442,6 @@ def _render_section(
 # Namespace-grouped rendering (Strategy C)
 # ---------------------------------------------------------------------------
 
-_GROUP_SHOW_ALL_THRESHOLD = 5
-
 
 def _render_grouped(
     items: list["Row"],
@@ -490,20 +488,20 @@ def _render_grouped(
             reverse=True,
         )
 
-        # Salience windowing: when group is large, show only high-salience items.
-        # The pre-A1 "if refs in visible: show all" branch was retired alongside
-        # the refs filter — normal windowing applies regardless of --refs.
-        if len(sorted_items) <= _GROUP_SHOW_ALL_THRESHOLD:
-            show_items = sorted_items
-        else:
-            show_items = [
-                i for i in sorted_items
-                if i.salience > 1
-            ]
-            if not show_items:
-                show_items = sorted_items[:1]
+        # Human reads show every row. The salience auto-window (collapse a large
+        # group to its salience>1 items) was the ROW-level twin of the body
+        # truncation budget, and it forked the umwelt the same way: the text
+        # lens hid rows the Surface — and --json — still carried, with no record
+        # in Surface.window. Dropped, same as truncation, so both channels
+        # deliver the same information (parity first; flood accepted). Curation
+        # returns later as an explicit, DESIGNED budget — the `lines` opt-in
+        # below, an `orient` door, or a Surface-recorded window per the
+        # curation-in-surface arc — never an always-on default.
+        # (decision:design/drop-truncation-from-human-reads — row half)
+        show_items = sorted_items
 
-        # Apply lines budget (highest-salience kept; rest collapse to "more")
+        # Apply lines budget (explicit opt-in; 0 = unlimited, the read default).
+        # Highest-salience kept; the rest collapse into the "(N more)" footer.
         if lines > 0 and len(show_items) > lines:
             show_items = list(show_items)[:lines]
 

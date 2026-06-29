@@ -301,6 +301,46 @@ class TestPresentationRegister:
         assert "Threads (1):" in self._text(fold_view(st, Zoom.SUMMARY, 80))
 
 
+class TestNoSalienceWindow:
+    """Human reads show EVERY row. The salience auto-window — collapse a large
+    namespace group down to its salience>1 items — was the row-level twin of
+    the body truncation budget and forked the umwelt: text hid rows --json
+    still carried. It's gone. A group of N young (n=1, unreferenced) items
+    renders all N, with no '(N more)' footer.
+
+    Regression guard for the umwelt row-parity
+    (decision:design/drop-truncation-from-human-reads — row half) AND the
+    long-standing salience-windowing-collapses-flat-bucket bug, where 17 young
+    items rendered as 1 + '(16 more)', unreachable via any zoom level.
+    """
+
+    def _text(self, block):
+        return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
+
+    def _state(self, n_items):
+        # All under one namespace, all n=1 (salience 1) with no inbound refs —
+        # the exact condition the old salience>1 filter collapsed to [:1].
+        items = tuple(
+            item({"topic": f"workflow/k{i}", "message": f"body {i}"})
+            for i in range(n_items)
+        )
+        return state(sections=(section(kind="decision", items=items,
+                                       key_field="topic"),))
+
+    def test_large_young_group_renders_every_row(self):
+        t = self._text(fold_view(self._state(8), Zoom.SUMMARY, None))
+        for i in range(8):
+            assert f"k{i}" in t, f"row k{i} hidden — salience window regressed"
+        assert "more)" not in t, "a collapse footer reappeared"
+
+    def test_holds_on_tty_width_too(self):
+        # Not a piped-only property: a width-bounded (TTY) render also shows all.
+        t = self._text(fold_view(self._state(8), Zoom.SUMMARY, 80))
+        for i in range(8):
+            assert f"k{i}" in t
+        assert "more)" not in t
+
+
 class TestFoldView:
     def _text(self, block):
         return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)

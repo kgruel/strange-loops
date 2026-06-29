@@ -172,9 +172,7 @@ def fold_view(
     fp = _default_fold_palette()
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
 
-    facts_filter = "facts" in visible
     blocks: list[Block] = []
-    skipped_sections: list[tuple[str, int]] = []
 
     for kind, rows in populated:
         kv = data.schema.get(kind)
@@ -183,14 +181,11 @@ def fold_view(
         preview_fields = kv.preview_fields if kv is not None else ()
         display_count = len(rows)
 
-        # When --facts is active, minimize sections without compression history
-        # Collect folds and by-folds where no item has n>1 have nothing to drill into
-        if facts_filter:
-            has_history = fold_type == "by" and any(r.n > 1 for r in rows)
-            if not has_history:
-                skipped_sections.append((kind, len(rows)))
-                continue
-
+        # --facts shows the raw fact stream. For a collect-fold the folded rows
+        # ARE that stream (n=1 each, no compression to expand); for a by-fold
+        # the source facts expand inline where present. Either way the rows
+        # render — skipping them inverted the flag's contract
+        # (friction:facts-empty-for-collect-fold-kinds).
         if blocks:
             blocks.append(Block.text("", Style(), width=width))
 
@@ -224,14 +219,8 @@ def fold_view(
             blocks.append(Block.text("", Style(), width=width))
             blocks.append(walked_block)
 
-    # Footer: skipped sections + unfolded kinds
+    # Footer: unfolded kinds
     footer_parts: list[str] = []
-    if skipped_sections:
-        parts = [f"{count} {kind}" for kind, count in skipped_sections]
-        # skipped_sections now only populates via the facts_filter path
-        # (refs filtering retired in A1 of the trace-dissolution arc — see
-        # decision/design/trace-dissolves-into-read-with-unified-refs).
-        footer_parts.append(f"No history: {', '.join(parts)}")
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
         footer_parts.append(f"Unfolded: {loose}")

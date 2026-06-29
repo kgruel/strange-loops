@@ -5,4 +5,6 @@ Decisions (1):
       ▸ Jan 14 v2 body
       ▸ Jan 14 v1 body
 
-No history: 1 note
+Notes (1):
+  note/ (1)
+    fresh [Jan 15]: single

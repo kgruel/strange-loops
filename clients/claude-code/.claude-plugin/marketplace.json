@@ -1,0 +1,12 @@
+{
+  "name": "gruel",
+  "description": "Kyle Gruel's local plugin marketplace.",
+  "owner": { "name": "Kyle Gruel", "email": "kyle.gruel@gmail.com" },
+  "plugins": [
+    {
+      "name": "loops",
+      "source": "./",
+      "description": "In-session loops integration for Claude Code."
+    }
+  ]
+}

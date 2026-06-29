@@ -895,7 +895,10 @@ def _group_by_namespace(
 
 def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     if piped:
-        return f"## {kind.upper()}"
+        # Carry the section total on the piped/agent surface too — still valid
+        # markdown H2 (friction:read-tty-truncation-not-defeatable kin: the
+        # count was TTY-only, dropped on the dominant pipe path).
+        return f"## {kind.upper()} ({count})"
     label = kind.title()
     if not kind.endswith("s"):
         label += "s"

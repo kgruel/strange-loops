@@ -42,6 +42,74 @@ def _describe_fold(fold_decl: Any) -> str:
     return cls.lower().removeprefix("fold")
 
 
+def _store_stats(store_path: Path) -> dict[str, Any] | None:
+    """Cheap stat read over an instance store — the `ls -l` columns.
+
+    Returns ``{facts, kind_count, mtime, kind_stats}`` where ``mtime`` is the
+    newest *fact* timestamp (epoch float; decision:design/ls-stat-decisions-a-d
+    A — resumption wants the last emit, not the last seal) and ``kind_stats``
+    is a count-descending ``[{kind, count, latest}]`` lifted straight from
+    ``StoreReader.fact_kind_stats()`` (per-kind MAX(ts) is already computed
+    there — decision C, zero net-new query). Returns ``None`` when the store
+    file does not yet exist (freshly declared vertex).
+    """
+    if not store_path.exists():
+        return None
+    from engine.store_reader import StoreReader
+
+    _TREND_WINDOW = 30 * 86400  # recent-momentum window for the trend sparkline
+    with StoreReader(store_path) as reader:
+        summary = reader.summary()
+        freshness = reader.freshness
+        signed = reader.signed_counts()
+        # Per-kind density over the recent window, on a shared time axis so the
+        # sparklines are comparable across kinds (decision C trend column).
+        density: dict[str, list[int]] = {}
+        if freshness is not None:
+            until = freshness.timestamp()
+            density = reader.fact_density_by_kind(
+                since=until - _TREND_WINDOW, until=until
+            )
+    kind_rows = summary["facts"]["kinds"]
+    kind_stats = sorted(
+        (
+            {
+                "kind": k,
+                "count": v["count"],
+                "latest": v["latest"].timestamp(),
+                "trend": density.get(k, []),
+            }
+            for k, v in kind_rows.items()
+        ),
+        key=lambda r: r["count"],
+        reverse=True,
+    )
+    return {
+        "facts": summary["facts"]["total"],
+        "kind_count": len(kind_rows),
+        "mtime": freshness.timestamp() if freshness is not None else None,
+        "signed": signed,
+        "kind_stats": kind_stats,
+    }
+
+
+def _enrich_with_stats(info: dict[str, Any]) -> None:
+    """Fold the `ls -l` stat columns into a vertex info dict (in place).
+
+    Instance/hybrid vertices stat their own store. Aggregations have no store;
+    their ``mtime`` is the newest combined-child freshness, computed by the
+    caller (it owns child resolution) and pre-set on ``info`` — left untouched
+    here. A missing/empty store leaves the stat keys absent so the lens can
+    render ``—`` rather than a misleading ``0``.
+    """
+    store = info.get("store")
+    if not store:
+        return
+    stats = _store_stats(Path(store))
+    if stats is not None:
+        info.update(stats)
+
+
 def _extract_vertex_info(vpath: Path, ast: Any) -> dict[str, Any]:
     """Extract metadata from a parsed vertex AST."""
     kind = _classify_kind(ast)
@@ -73,7 +141,9 @@ def _extract_vertex_info(vpath: Path, ast: Any) -> dict[str, Any]:
     return info
 
 
-def _walk_root(root_path: Path, home: Path) -> list[dict[str, Any]]:
+def _walk_root(
+    root_path: Path, home: Path, *, with_stats: bool = False
+) -> list[dict[str, Any]]:
     """Walk a .vertex root and collect vertex info from discover/combine."""
     from lang import parse_vertex_file
 
@@ -122,16 +192,61 @@ def _walk_root(root_path: Path, home: Path) -> list[dict[str, Any]]:
                 continue
             vertices.append(_extract_vertex_info(match, ast))
 
+    if with_stats:
+        for info in vertices:
+            if info["kind"] == "aggregation":
+                info["mtime"] = _aggregation_mtime(info, home)
+            else:
+                _enrich_with_stats(info)
+
     return vertices
 
 
-def fetch_vertices_local() -> list[dict[str, Any]]:
+def _aggregation_mtime(info: dict[str, Any], home: Path) -> float | None:
+    """Newest combined-child freshness for an aggregation vertex.
+
+    decision:design/ls-stat-decisions-a-d D — an aggregation answers "anything
+    move under here?" via the freshest fact across its combine targets.
+    """
+    from lang.population import resolve_vertex
+
+    children = info.get("combine") or []
+    newest: float | None = None
+    for name in children:
+        try:
+            cpath = resolve_vertex(name, home)
+        except Exception:  # noqa: BLE001
+            continue
+        if not cpath.exists():
+            continue
+        try:
+            from lang import parse_vertex_file
+
+            cast = parse_vertex_file(cpath)
+        except Exception:  # noqa: BLE001
+            continue
+        if cast.store is None:
+            continue
+        cstore = cast.store
+        if not cstore.is_absolute():
+            cstore = (cpath.parent / cstore).resolve()
+        stats = _store_stats(cstore)
+        if stats and stats.get("mtime") is not None:
+            newest = stats["mtime"] if newest is None else max(newest, stats["mtime"])
+    return newest
+
+
+def fetch_vertices_local(*, with_stats: bool = False) -> list[dict[str, Any]]:
     """Discover local vertices — the same locations the verbs resolve first.
 
     Walks ``.loops/**/*.vertex`` plus ``cwd/*.vertex``, mirroring
     ``_find_local_vertex`` / ``_resolve_vertex_for_dispatch`` so the listing
     shows the layer the verbs actually operate in
     (thread:global-local-walk-broken). Returns [] when no local vertices.
+
+    ``with_stats`` folds in the `ls -l` columns (facts/mtime/kind_stats). The
+    local layer is always stat'd by the root listing — it is the resumption
+    surface (decision:design/ls-as-stat-over-containment).
     """
     from lang import parse_vertex_file
 
@@ -155,16 +270,23 @@ def fetch_vertices_local() -> list[dict[str, Any]]:
             continue
         info = _extract_vertex_info(match, ast)
         info["scope"] = "local"
+        if with_stats:
+            _enrich_with_stats(info)
         vertices.append(info)
 
     return vertices
 
 
-def fetch_vertices(home: Path) -> dict[str, Any]:
+def fetch_vertices(home: Path, *, with_stats: bool = False) -> dict[str, Any]:
     """Discover and describe all vertices under .vertex (workspace root).
 
     Returns {"vertices": [{name, path, kind, loops, ...}, ...]}.
     Raises FileNotFoundError if .vertex is missing.
+
+    ``with_stats`` folds in the `ls -l` columns. The root listing stats the
+    config layer lazily — only when expanded (``sl ls --all``) — since the
+    collapsed default renders it as a single count-line
+    (decision:design/ls-as-stat-over-containment).
     """
     root_path = home / ".vertex"
     if not root_path.exists():
@@ -172,5 +294,5 @@ def fetch_vertices(home: Path) -> dict[str, Any]:
             f"{root_path} not found. Run 'loops init' first."
         )
 
-    vertices = _walk_root(root_path, home)
+    vertices = _walk_root(root_path, home, with_stats=with_stats)
     return {"vertices": vertices}

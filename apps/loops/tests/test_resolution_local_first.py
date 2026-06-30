@@ -159,25 +159,47 @@ class TestVerticesLensLocalGroup:
         "shadows": True,
     }
 
-    def test_no_local_layer_renders_unchanged(self):
+    def test_no_local_layer_renders_config_as_primary(self):
         from loops.lenses.vertices import vertices_view
         from painted import Zoom
 
+        # Outside a project the config layer IS the primary listing — it gets
+        # the "config —" header and its vertices render with stat rows
+        # (decision:design/ls-as-stat-over-containment).
         text = _text(vertices_view({"vertices": [self.BASE]}, Zoom.SUMMARY, 80))
         assert "local —" not in text
-        assert "config —" not in text
+        assert "config — ~/.config/loops" in text
+        assert "ambient" in text
 
     def test_local_layer_renders_groups_and_shadow_marker(self):
         from loops.lenses.vertices import vertices_view
         from painted import Zoom
 
-        data = {"vertices": [self.BASE], "local_vertices": [self.LOCAL]}
+        # --all (expand_config) shows both groups in full; the default collapses
+        # config to a count-line (tested separately below).
+        data = {
+            "vertices": [self.BASE],
+            "local_vertices": [self.LOCAL],
+            "expand_config": True,
+        }
         text = _text(vertices_view(data, Zoom.SUMMARY, 80))
         assert "local — cwd, verbs resolve these first" in text
         assert "config — ~/.config/loops" in text
-        assert "⊳ shadows config" in text
+        # The shadow marker is now a clarifying sub-line ("⊳ shadows <path>")
+        # beneath the shadowing vertex; line 1 stays a clean stat row.
+        assert "⊳ shadows" in text
         # Local group renders before config group.
         assert text.index("project") < text.index("ambient")
+
+    def test_config_collapses_to_count_line_by_default(self):
+        from loops.lenses.vertices import vertices_view
+        from painted import Zoom
+
+        data = {"vertices": [self.BASE], "local_vertices": [self.LOCAL]}
+        text = _text(vertices_view(data, Zoom.SUMMARY, 80))
+        # Default (no --all): config is a drillable count-line, not full rows.
+        assert "sl ls --all" in text
+        assert "ambient" not in text
 
     def test_minimal_zoom_counts_both_layers(self):
         from loops.lenses.vertices import vertices_view

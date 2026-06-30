@@ -148,7 +148,9 @@ class TestLensNarrowing:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filters=["kind"])
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        # The "KINDS" section-header text is the terse (piped) register contract;
+        # the TTY register renders the kind table instead (golden-locked).
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         assert "KINDS" in text
         assert "OBSERVERS" not in text
 
@@ -158,7 +160,7 @@ class TestLensNarrowing:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filters=["kind", "observer"])
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         assert "KINDS" in text
         assert "OBSERVERS" in text
         assert "COMBINE" not in text  # not selected
@@ -187,7 +189,7 @@ class TestLensNarrowing:
         data = fetch_declarations(
             "proj", filters=["kind"], narrows={"kind": "nonexistent"}
         )
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         # Section header present with zero count, no real declarations.
         assert "KINDS (—)" in text or "KINDS (0)" in text
         assert "decision" not in text
@@ -283,13 +285,16 @@ class TestRunLsGrammar:
         assert "OBSERVERS" in out
         assert "KINDS" not in out
 
-    def test_unnarrowed_shows_all_sections(self, proj, capsys):
+    def test_unnarrowed_shows_stat_view(self, proj, capsys):
+        # Default `sl ls <vertex>` is the stat-over-containment view: a vertex
+        # stat header (type) + kinds-as-entries body. Declaration sections fold
+        # into the header subline rather than rendering as top-level heads.
         rc, out, _ = _capture_run_ls(["proj"], capsys)
         assert rc == 0
-        assert "KINDS" in out
-        assert "OBSERVERS" in out
-        assert "COMBINE" in out
-        assert "SOURCES" in out
+        assert "instance" in out
+        assert "decision" in out
+        assert "OBSERVERS" not in out
+        assert "SOURCES" not in out
 
     def test_mixed_form_errors(self, proj, capsys):
         """Positional sub-verb plus any section flag → error with hint."""
@@ -501,9 +506,11 @@ class TestOpTokenValueAwareness:
         """
         rc, out, _ = _capture_main(["proj", "--observer", "kyle", "ls"], capsys)
         assert rc == 0
-        # All sections visible — no narrowing applied to ls.
-        assert "KINDS" in out
-        assert "OBSERVERS" in out
+        # Unnarrowed → the default stat-over-containment view: vertex stat
+        # header (type) + kind entries + observer count subline (no narrowing).
+        assert "instance" in out
+        assert "decision" in out
+        assert "observer" in out
 
     def test_global_observer_then_ls_then_section_observer(self, proj, capsys):
         """sl proj --observer alice ls --observer kyle.
@@ -654,7 +661,9 @@ class TestPreviewFieldsSurfaced:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("prev", filters=["kind"])
-        text = block_text(declarations_view(data, Zoom.DETAILED, 80))
+        # preview= decl detail surfaces in the terse (piped) register; the TTY
+        # register's kind table doesn't carry per-kind declaration sublines.
+        text = block_text(declarations_view(data, Zoom.DETAILED, 80, piped=True))
         assert "preview=message,status" in text
 
     def test_render_omits_preview_at_summary(self, proj_with_preview):

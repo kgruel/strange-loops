@@ -595,7 +595,9 @@ class TestRootLs:
         result = main(["session", "ls"])
         assert result == 0
         out = capsys.readouterr().out
-        assert "KINDS" in out
+        # Stat-over-containment per-vertex view leads with the vertex type
+        # header (instance), not the root multi-vertex listing.
+        assert "instance" in out
 
 
 class TestExtractLoopsText:

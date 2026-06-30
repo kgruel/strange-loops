@@ -1,7 +1,12 @@
-KINDS (3)
-  decision       topic by:topic  preview=topic,message
-  thread         name by:name  preview=name,status
-  change         items collect
+╭─ session · instance ──────────────────╮
+│ 1 observer · 1 combine · 1 source     │
+╰───────────────────────────────────────╯
+
+KIND      FOLD      COUNT           SHARE
+─────────────────────────────────────────
+decision  by:topic      0   ░░░░░░░  0.0%
+thread    by:name       0   ░░░░░░░  0.0%
+change    collect       0   ░░░░░░░  0.0%
 
 OBSERVERS (1)
   kaygee  identity=kyle/loops-claude  grants=read,emit

@@ -1,0 +1,9 @@
+{
+  "name": "loops",
+  "description": "In-session loops integration for Claude Code: session open/orient/close hooks, the reroute-capture backstop, the loops practice skill, and /loops:sweep + /loops:reconcile cadence commands.",
+  "version": "0.1.0",
+  "author": { "name": "Kyle Gruel" },
+  "homepage": "https://github.com/kgruel/strange-loops",
+  "keywords": ["loops", "attention", "fold", "vertex", "dogfood"],
+  "hooks": "./hooks/hooks.json"
+}

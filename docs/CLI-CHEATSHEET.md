@@ -154,14 +154,26 @@ loops sync <vertex> --var KEY=VALUE           # pass variables to sources
 
 ---
 
-## Ls
+## Ls — stat over the containment tree (vertex ⊃ kind ⊃ fact)
 
 ```
-loops ls                                      # all discovered vertices
-loops ls <target>                             # list template population rows
-loops <vertex> ls                             # population for a vertex
-loops <vertex> ls <template>                  # population for a specific template
+loops ls                                      # vertices visible from here (local + config), with stat columns
+loops ls --all / -a                           # expand the config layer (default collapses it to a count-line)
+loops ls -1                                    # terse, names only (scripting)
+loops ls <vertex>                             # descend: list the vertex's kinds (count / share / trend / last-update)
+loops ls <vertex> --kind                      # just the KINDS listing
+loops ls <vertex> --kind NAME                 # descend INTO a kind — its entries one level down (namespaces / keys / observers), a stat view (NOT the facts — use read for those)
+loops ls <vertex> --kind NAME --key PREFIX/   # drill a namespace within the kind (e.g. --kind decision --key design/)
+loops ls <vertex> --observer|--combine|--row  # declaration sections (back-compat narrowing)
 ```
+
+Stat columns are uniform at every level of the containment tree
+(**vertex ⊃ kind ⊃ key ⊃ fact**): **size = Σfacts, mtime = last update
+(newest fact — "where did I leave off?"), type = vertex-kind / fold-op.** Shown
+by default (vertices are few); `-1` opts out. On a TTY the human register adds a
+header card, a share meter, a per-kind activity sparkline, and freshness colour;
+piped/agent output stays terse plain text. `ls` owns the structural levels
+(vertex / kind / key); `read` owns the content level (facts).
 
 ---
 

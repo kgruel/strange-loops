@@ -118,27 +118,26 @@ class TestDeclarationsLens:
         data = fetch_declarations("proj")
         block = declarations_view(data, Zoom.MINIMAL, 80)
         text = block_text(block).strip()
-        # MINIMAL: section counts on one line.
+        # MINIMAL (stat-over-containment): vertex name + kind count on one line.
         assert "proj" in text
-        assert "kinds=3" in text
-        assert "observers=2" in text
-        assert "combine=0" in text or "combine=—" in text
+        assert "3 kinds" in text
 
-    def test_summary_shows_section_heads(self, rich_vertex):
+    def test_summary_leads_with_stat_header_and_kinds(self, rich_vertex):
         from painted import Zoom
 
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj")
         text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
-        assert "KINDS" in text
-        assert "OBSERVERS" in text
-        assert "COMBINE" in text
-        assert "SOURCES" in text
-        # Entries appear.
+        # Default view leads with the vertex stat header (type) and lists the
+        # KINDS as containment entries — observers fold into a count subline,
+        # not a top-level section head.
+        assert "instance" in text
+        assert "2 observers" in text
         assert "decision" in text
-        assert "kyle" in text
-        assert "alcove" in text
+        # The declaration sections do NOT render as heads at SUMMARY anymore.
+        assert "OBSERVERS" not in text
+        assert "COMBINE" not in text
 
     def test_detailed_shows_observer_details(self, rich_vertex):
         from painted import Zoom
@@ -156,7 +155,8 @@ class TestDeclarationsLens:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filter_="kind")
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        # Section-header text is the terse (piped) register contract.
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         # Only KINDS section visible.
         assert "KINDS" in text
         assert "OBSERVERS" not in text
@@ -172,14 +172,15 @@ class TestDeclarationsLens:
         assert "Error" in text
         assert "not found" in text
 
-    def test_empty_sections_show_dash(self, rich_vertex):
+    def test_empty_sections_fold_away(self, rich_vertex):
         from painted import Zoom
 
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj")
         text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
-        # Combine and sources are empty — section heads still rendered
-        # with the "—" placeholder for count.
-        assert "COMBINE (—)" in text
-        assert "SOURCES (—)" in text
+        # Combine and sources are empty — they no longer render as section
+        # heads; the header subline simply omits them (stat-over-containment).
+        assert "COMBINE" not in text
+        assert "SOURCES" not in text
+        assert "combine" not in text.lower()

@@ -15,8 +15,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Align, Block, Line, Style, Wrap, Zoom, join_vertical, vslice
+from painted.views import Column, Fill
 
+from ._statview import (
+    card,
+    card_width,
+    cell,
+    freshness_style,
+    meter_cell,
+    palette_of,
+    spark,
+    stat_table,
+    updated_text,
+)
 from .store import _format_count, _relative_time
 
 
@@ -43,7 +55,18 @@ _SECTION_NAME_FIELD = {
 }
 
 
-def declarations_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
+def declarations_view(
+    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool = False
+) -> Block:
+    """Render the vertex's containment listing.
+
+    Two registers (decision:design/presentation-register-keys-on-channel):
+    the TTY/human path (``piped=False``) draws a rounded stat card over a clean
+    columnar table with a share meter, density sparkline, and freshness-graded
+    "updated" column; the pipe/agent path (``piped=True``) stays terse aligned
+    text, monochrome, with no visual-only columns. Colour strips at the writer
+    regardless of ``piped``; the *structural* divergence is keyed here.
+    """
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
 
@@ -56,10 +79,10 @@ def declarations_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Bl
 
     # Narrowed form — section-focused, back-compat (plan:vertex-living-document).
     if filters:
-        return _render_narrowed(filters, data, zoom, width, narrows)
+        return _render_narrowed(filters, data, zoom, width, narrows, piped)
 
     # Default form — stat-over-containment: header + kinds-as-entries body.
-    return _render_stat_view(data, zoom, width)
+    return _render_stat_view(data, zoom, width, piped)
 
 
 def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
@@ -74,6 +97,11 @@ def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
     cols.append(f"{_format_count(facts)} facts" if facts is not None else "—")
     if kc:
         cols.append(f"{kc} kinds")
+    # signed ratio is data (not chrome) — carry it on both registers (the TTY
+    # card shows it too) so the piped channel stays information-faithful.
+    signed = data.get("signed")
+    if signed:
+        cols.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
     if mtime is not None:
         dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
         cols.append(f"updated {_relative_time(dt)}")
@@ -98,7 +126,7 @@ def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
 
 
 def _render_stat_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None
+    data: dict[str, Any], zoom: Zoom, width: int | None, piped: bool = False
 ) -> Block:
     """Default `sl ls <vertex>` — stat header + kinds-as-entries body."""
     name = data.get("vertex_name", "?")
@@ -113,6 +141,9 @@ def _render_stat_view(
             parts.append(f"{kc} kinds")
         return Block.text(" · ".join(parts), Style(), width=width)
 
+    if not piped:
+        return _render_stat_view_tty(data, zoom, width)
+
     blocks: list[Block] = [*_vertex_header(data, width)]
     blocks.append(Block.text("", Style(), width=width))
     blocks.extend(_render_kind_body(data.get("kinds") or [], zoom, width))
@@ -126,6 +157,407 @@ def _render_stat_view(
                 blocks.append(_render_section(section, data, zoom, width, {}))
 
     return join_vertical(*blocks)
+
+
+# ---------------------------------------------------------------------------
+# TTY register — boxed stat card + clean columnar table
+# ---------------------------------------------------------------------------
+
+
+def _vertex_card_sublines(data: dict[str, Any]) -> list[str]:
+    """The stat lines inside the header card: totals, then a declaration tally."""
+    facts = data.get("facts")
+    kc = data.get("kind_count")
+    signed = data.get("signed")
+    mtime = data.get("mtime")
+
+    bits: list[str] = []
+    if facts is not None:
+        bits.append(f"{_format_count(facts)} facts")
+    if kc:
+        bits.append(f"{kc} kinds")
+    if signed:
+        bits.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
+    if mtime is not None:
+        dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+        bits.append(f"updated {_relative_time(dt)}")
+
+    sub = [" · ".join(bits)] if bits else []
+    decl = _decl_tally(data)
+    if decl:
+        sub.append(decl)
+    return sub
+
+
+def _decl_tally(data: dict[str, Any]) -> str:
+    """`3 observers · 1 combine · 2 sources` — the declaration summary."""
+    nobs = len(data.get("observers") or [])
+    ncomb = len(data.get("combine") or [])
+    nsrc = len(data.get("sources") or [])
+    parts: list[str] = []
+    if nobs:
+        parts.append(f"{nobs} observer{'s' if nobs != 1 else ''}")
+    if ncomb:
+        parts.append(f"{ncomb} combine")
+    if nsrc:
+        parts.append(f"{nsrc} source{'s' if nsrc != 1 else ''}")
+    return " · ".join(parts)
+
+
+def _render_stat_view_tty(
+    data: dict[str, Any], zoom: Zoom, width: int | None
+) -> Block:
+    """Rich TTY listing — header card over the kinds table."""
+    p = palette_of(None)
+    name = data.get("vertex_name", "?")
+    vkind = data.get("vertex_kind", "instance")
+    kinds = data.get("kinds") or []
+
+    body = _kind_table(kinds, width, p)
+    sublines = _vertex_card_sublines(data)
+    title = f"{name} · {vkind}"
+    card_w = card_width(body, title, sublines, width)
+    head = card(title, sublines, card_w, p=p)
+
+    blocks: list[Block] = [head, Block.empty(card_w, 1), body]
+
+    if zoom >= Zoom.DETAILED:
+        for section in ("observers", "combine", "sources"):
+            if data.get(section):
+                blocks.append(Block.empty(card_w, 1))
+                blocks.append(_render_section(section, data, zoom, width, {}))
+
+    return join_vertical(*blocks)
+
+
+def _kind_dt(latest: Any) -> datetime | None:
+    """Coerce a kind's `latest` (epoch float or datetime) to an aware datetime."""
+    if latest is None:
+        return None
+    if isinstance(latest, datetime):
+        return latest
+    return datetime.fromtimestamp(float(latest), tz=timezone.utc)
+
+
+def _share_cell(share: float, max_pct: float, p: Any) -> Line:
+    """Share meter + exact percent — a ranked bar scaled to the listing's max."""
+    return meter_cell(share, max_pct, f"{share:>4.1f}%", p)
+
+
+# A kind below this fact count is "minor" — vestigial/system kinds (old pings,
+# one-off rebirths, stray system kinds). Kept (faithful listing) but demoted
+# below a rule and dimmed, so the eye skips the tail without losing the census.
+_MINOR_FLOOR = 10
+
+# Below this terminal width the decorative TREND column is dropped so the dense
+# six-column kinds table still fits (narrow-terminal graceful degradation).
+_TREND_MIN_WIDTH = 64
+
+
+def _kind_columns(
+    kinds: list[dict[str, Any]], has_trend: bool, has_time: bool
+) -> list[Column]:
+    """Columns sized across *all* kinds, so the substantive and minor sub-tables
+    align under one shared header (the name column fills/shrinks, numerics fixed)."""
+    def w(texts: list[str], header: str) -> int:
+        return max([len(header)] + [len(t) for t in texts])
+
+    name_w = min(22, w([k["name"] for k in kinds], "KIND"))
+    fold_w = w([(k.get("fold_op") or "—").replace('"', "") for k in kinds], "FOLD")
+    count_w = w([_format_count(k.get("count", 0)) for k in kinds], "COUNT")
+    share_w = max(len("SHARE"), 7 + 1 + 6)  # bar + space + "NN.N%"
+    # KIND fills to its natural width (max_width) on a roomy terminal but
+    # shrinks+ellipsizes when the budget is tight — so the table honours width
+    # (Overflow.FIT can only shrink Fill columns). The numeric columns stay fixed.
+    cols = [
+        Column(cell("KIND"), width=Fill(), min_width=6, max_width=name_w, ellipsis=True),
+        Column(cell("FOLD"), width=fold_w),
+        Column(cell("COUNT"), width=count_w, align=Align.END),
+        Column(cell("SHARE"), width=share_w),
+    ]
+    if has_trend:
+        cols.append(Column(cell("TREND"), width=8))
+    if has_time:
+        upd_w = w(
+            [updated_text(_kind_dt(k.get("latest"))) for k in kinds
+             if k.get("latest") is not None] or [""],
+            "UPDATED",
+        )
+        cols.append(Column(cell("UPDATED"), width=upd_w, align=Align.END))
+    return cols
+
+
+def _kind_cells(
+    k: dict[str, Any], max_pct: float, has_trend: bool, has_time: bool,
+    p: Any, *, dim: bool,
+) -> list[Line]:
+    """One kind's row. ``dim`` renders the minor register — no kind colour, no
+    bar/sparkline, freshness flattened — so demoted rows recede."""
+    fold_op = (k.get("fold_op") or "—").replace('"', "")
+    if dim:
+        row = [
+            cell(k["name"], p.metadata),
+            cell(fold_op, p.metadata),
+            cell(_format_count(k.get("count", 0)), p.metadata),
+            cell(f"{k.get('share', 0.0):>4.1f}%", p.metadata),
+        ]
+        if has_trend:
+            row.append(cell("", p.metadata))
+        if has_time:
+            row.append(cell(updated_text(_kind_dt(k.get("latest"))), p.metadata))
+        return row
+    row = [
+        cell(k["name"], p.kind_style(k["name"])),
+        cell(fold_op, p.metadata),
+        cell(_format_count(k.get("count", 0))),
+        _share_cell(k.get("share", 0.0), max_pct, p),
+    ]
+    if has_trend:
+        row.append(cell(spark(k.get("trend") or []), Style(fg="cyan")))
+    if has_time:
+        dt = _kind_dt(k.get("latest"))
+        row.append(cell(updated_text(dt), freshness_style(p, dt)))
+    return row
+
+
+def _labeled_rule(label: str, width: int, p: Any) -> Block:
+    """A centred ``──── label ────`` divider."""
+    tag = f" {label} "
+    fill = max(0, width - len(tag))
+    left = fill // 2
+    line = "─" * left + tag + "─" * (fill - left)
+    return Block.text(line[:width], p.chrome, width=width)
+
+
+def _kind_table(kinds: list[dict[str, Any]], width: int | None, p: Any) -> Block:
+    """The containment body — one stat row per kind. When a substantive set and
+    a low-count tail coexist, the tail demotes below a ``minor`` rule, dimmed."""
+    if not kinds:
+        return Block.text("  (no kinds)", p.metadata, width=width)
+
+    max_pct = max((k.get("share", 0.0) for k in kinds), default=0.0)
+    has_time = any(k.get("latest") is not None for k in kinds)
+    # TREND is decorative; the other columns have hard floors, so when the budget
+    # is too tight to seat all six, drop TREND first (graceful narrow-terminal
+    # degradation — below this the dense table would overflow regardless).
+    has_trend = any(k.get("trend") for k in kinds) and (
+        width is None or width >= _TREND_MIN_WIDTH
+    )
+    cols = _kind_columns(kinds, has_trend, has_time)
+
+    substantive = [k for k in kinds if k.get("count", 0) >= _MINOR_FLOOR]
+    minor = [k for k in kinds if k.get("count", 0) < _MINOR_FLOOR]
+
+    def rows_of(ks: list[dict[str, Any]], *, dim: bool) -> list[list[Line]]:
+        return [_kind_cells(k, max_pct, has_trend, has_time, p, dim=dim) for k in ks]
+
+    # Only split when it earns its keep: a clear substantive set plus a tail.
+    if substantive and len(minor) >= 3:
+        sub_tbl = stat_table(cols, rows_of(substantive, dim=False), width, p=p)
+        min_tbl = stat_table(cols, rows_of(minor, dim=True), width, p=p)
+        # Drop the minor table's own header + separator (rows 0–1); it renders
+        # under the shared header via the labelled rule (sized to the actual
+        # rendered table width, which may be < total after Fill shrinks).
+        min_rows = vslice(min_tbl, 2, len(minor))
+        return join_vertical(sub_tbl, _labeled_rule("minor", sub_tbl.width, p), min_rows)
+
+    return stat_table(cols, rows_of(kinds, dim=False), width, p=p)
+
+
+# ---------------------------------------------------------------------------
+# `ls <vertex> --kind <K>` — the kind stat view (descent to entries, not facts)
+# ---------------------------------------------------------------------------
+
+_ENTRY_CAP = 30
+
+
+def _entry_noun(data: dict[str, Any]) -> str:
+    if data.get("by") == "observer":
+        return "observers"
+    kf = data.get("key_field") or "key"
+    return {"topic": "topics", "name": "names"}.get(kf, f"{kf}s")
+
+
+def _span_str(earliest: Any, latest: Any) -> str:
+    lo, hi = _kind_dt(earliest), _kind_dt(latest)
+    if lo is None or hi is None:
+        return ""
+    return f"{lo:%b %d}–{hi:%b %d}"
+
+
+def _entry_style(key: str, leaf: bool, p: Any) -> Style:
+    """Colour an entry like ``ls`` colours a tree: namespaces (drillable) pop,
+    leaves are plain, the orphan bucket dims."""
+    if key.startswith("(no ") or key == "(none)":
+        return p.metadata
+    if not leaf:
+        return Style(fg="blue", bold=True)
+    return p.content
+
+
+def _kind_card_sublines(data: dict[str, Any]) -> list[str]:
+    count = data.get("count", 0)
+    share = data.get("share", 0.0)
+    vname = data.get("vertex_name", "?")
+    noun = _entry_noun(data)
+    distinct = data.get("distinct_keys", 0)
+
+    line1 = [f"{_format_count(count)} facts", f"{share:.1f}% of {vname}"]
+    if data.get("key_prefix"):
+        line1.append(f"under {data['key_prefix']}")
+    sub = [" · ".join(line1)]
+
+    line2 = [f"{distinct} {noun}"]
+    span = _span_str(data.get("earliest"), data.get("latest"))
+    if span:
+        line2.append(f"span {span}")
+    latest_dt = _kind_dt(data.get("latest"))
+    if latest_dt is not None:
+        line2.append(f"updated {_relative_time(latest_dt)}")
+    sub.append(" · ".join(line2))
+    return sub
+
+
+def _entry_table(
+    data: dict[str, Any], width: int | None, p: Any
+) -> tuple[Block, str]:
+    """The entries body (one stat row per namespace/leaf/observer) + a hint
+    footer. Capped at ``_ENTRY_CAP`` rows with a ``+N more`` note."""
+    entries = data.get("entries") or []
+    by = data.get("by", "key")
+    if not entries:
+        return Block.text("  (no entries)", p.metadata, width=width), ""
+
+    # Share is relative to the *view* (the kind, or the drilled subtree) so each
+    # level reads as "share of its parent"; the bar scales to the leading row.
+    view_total = sum(e["count"] for e in entries) or 1
+    shown = entries[:_ENTRY_CAP]
+    max_count = max((e["count"] for e in shown), default=0)
+    has_time = any(e.get("latest") is not None for e in shown)
+
+    # ENTRY fills, capped at 40 (keys can be long); shrinks+ellipsizes when the
+    # terminal is narrow so the table honours width (FIT shrinks Fill columns).
+    cols = [
+        Column(
+            cell("OBSERVER" if by == "observer" else "ENTRY"),
+            width=Fill(), min_width=10, max_width=40, ellipsis=True,
+        ),
+        Column(cell("COUNT"), align=Align.END),
+        Column(cell("SHARE")),
+    ]
+    if has_time:
+        cols.append(Column(cell("UPDATED"), align=Align.END))
+
+    has_ns = False
+    rows: list[list[Line]] = []
+    for e in shown:
+        key, cnt, leaf = e["key"], e["count"], e.get("leaf", True)
+        has_ns = has_ns or not leaf
+        pct = cnt / view_total * 100
+        row = [
+            cell(key, _entry_style(key, leaf, p)),
+            cell(_format_count(cnt)),
+            meter_cell(cnt, max_count, f"{pct:>4.1f}%", p),
+        ]
+        if has_time:
+            dt = _kind_dt(e.get("latest"))
+            row.append(cell(updated_text(dt), freshness_style(p, dt)))
+        rows.append(row)
+
+    tbl = stat_table(cols, rows, width, p=p)
+
+    foot: list[str] = []
+    if len(entries) > len(shown):
+        foot.append(f"+{len(entries) - len(shown)} more")
+    if has_ns:
+        foot.append("--key <ns>/ to drill")
+    foot.append(f"read {data.get('vertex_name', '?')} --kind {data['kind']} for content")
+    return tbl, "  " + " · ".join(foot)
+
+
+def kind_stat_view(
+    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool = False
+) -> Block:
+    """Render ``ls <vertex> --kind <K>`` — the kind's stat header over its
+    entries one containment level down (namespaces / leaf keys / observers).
+    Never the facts: that is ``read`` (decision:design/ls-as-stat-over-containment).
+    """
+    if "error" in data:
+        return Block.text(f"Error: {data['error']}", Style(), width=width)
+
+    kind = data.get("kind", "?")
+    fold_op = (data.get("fold_op") or "").replace('"', "")
+
+    if zoom == Zoom.MINIMAL:
+        parts = [kind]
+        if fold_op:
+            parts.append(fold_op)
+        parts.append(f"{_format_count(data.get('count', 0))} facts")
+        if data.get("key_prefix"):
+            parts.append(f"under {data['key_prefix']}")
+        parts.append(f"{data.get('distinct_keys', 0)} {_entry_noun(data)}")
+        return Block.text(" · ".join(parts), Style(), width=width)
+
+    if piped:
+        return _kind_stat_plain(data, width)
+
+    p = palette_of(None)
+    body, footer = _entry_table(data, width, p)
+    sublines = _kind_card_sublines(data)
+    title = f"{kind} · {fold_op}" if fold_op else kind
+    card_w = card_width(body, title, sublines, width)
+    head = card(title, sublines, card_w, p=p)
+
+    blocks = [head, Block.empty(card_w, 1), body]
+    if footer:
+        blocks.append(Block.empty(card_w, 1))
+        blocks.append(Block.text(footer, p.metadata, width=width, wrap=Wrap.ELLIPSIS))
+    return join_vertical(*blocks)
+
+
+def _kind_stat_plain(data: dict[str, Any], width: int | None) -> Block:
+    """Pipe/agent register for the kind stat view — terse aligned rows."""
+    kind = data.get("kind", "?")
+    entries = data.get("entries") or []
+    head = f"{kind} ({_format_count(data.get('count', 0))})"
+    if data.get("key_prefix"):
+        head += f" under {data['key_prefix']}"
+    lines: list[Block] = [Block.text(head, Style(bold=True), width=width)]
+
+    # Parity: carry the kind's share / span / freshness the TTY card shows, so
+    # the piped channel is information-faithful (these are data, not chrome).
+    meta = [
+        f"{data.get('share', 0.0):.1f}% of {data.get('vertex_name', '?')}",
+        f"{data.get('distinct_keys', 0)} {_entry_noun(data)}",
+    ]
+    span = _span_str(data.get("earliest"), data.get("latest"))
+    if span:
+        meta.append(f"span {span}")
+    ldt = _kind_dt(data.get("latest"))
+    if ldt is not None:
+        meta.append(f"updated {_relative_time(ldt)}")
+    lines.append(Block.text("  " + " · ".join(meta), Style(dim=True), width=width))
+
+    if not entries:
+        lines.append(Block.text("  (no entries)", Style(dim=True), width=width))
+        return join_vertical(*lines)
+
+    view_total = sum(e["count"] for e in entries) or 1
+    shown = entries[:_ENTRY_CAP]
+    name_w = max((len(str(e["key"])) for e in shown), default=8)
+    for e in shown:
+        pct = e["count"] / view_total * 100
+        upd = updated_text(_kind_dt(e.get("latest")))
+        lines.append(Block.text(
+            f"  {str(e['key']).ljust(name_w)}  {_format_count(e['count']):>6}  "
+            f"{pct:5.1f}%  {upd}",
+            Style(), width=width,
+        ))
+    if len(entries) > len(shown):
+        lines.append(Block.text(
+            f"  +{len(entries) - len(shown)} more", Style(dim=True), width=width
+        ))
+    return join_vertical(*lines)
 
 
 def _render_kind_body(
@@ -185,7 +617,7 @@ def _render_kind_stat(
 
 def _render_narrowed(
     filters: list[str], data: dict[str, Any], zoom: Zoom, width: int | None,
-    narrows: dict[str, str],
+    narrows: dict[str, str], piped: bool = False,
 ) -> Block:
     """Section-focused narrowed view (--kind / --observer / --combine / --row)."""
     visible_sections = [_FILTER_TO_SECTION[f] for f in filters]
@@ -205,10 +637,15 @@ def _render_narrowed(
             # Kinds narrow to the stat body (containment entries), not the
             # old declaration-only rows.
             items = _narrow_section_items("kinds", data, narrows)
-            blocks.append(
-                Block.text(f"KINDS ({len(items) or '—'})", Style(bold=True), width=width)
-            )
-            blocks.extend(_render_kind_body(items, zoom, width))
+            if not piped:
+                blocks.append(_kind_table(items, width, palette_of(None)))
+            else:
+                blocks.append(
+                    Block.text(
+                        f"KINDS ({len(items) or '—'})", Style(bold=True), width=width
+                    )
+                )
+                blocks.extend(_render_kind_body(items, zoom, width))
         else:
             blocks.append(_render_section(section, data, zoom, width, narrows))
     return join_vertical(*blocks) if blocks else Block.text("", Style(), width=width)

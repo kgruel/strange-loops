@@ -52,6 +52,93 @@ class StoreReader:
             for r in rows
         }
 
+    def fact_key_stats(self, kind: str, key_field: str) -> dict:
+        """Per-fold-key stats within one kind — the containment level below kind.
+
+        ``GROUP BY json_extract(payload, '$.<key_field>')`` over the kind
+        partition (rides ``idx_facts_kind``). Returns ``{key_value: {count,
+        earliest, latest}}``, count-descending then latest-descending — the
+        same shape as :meth:`fact_kind_stats`, one containment level down
+        (vertex ⊃ kind ⊃ key). The ``None`` bucket collects facts of this kind
+        that are missing the key field (the silently-orphaned case CLAUDE.md
+        warns about) — it doubles as an orphan diagnostic, rendered ``(no
+        <field>)`` by the lens.
+        """
+        path = "$." + key_field
+        rows = self._conn.execute(
+            "SELECT json_extract(payload, ?) AS k, COUNT(*), MIN(ts), MAX(ts) "
+            "FROM facts WHERE kind = ? "
+            "GROUP BY k ORDER BY COUNT(*) DESC, MAX(ts) DESC",
+            (path, kind),
+        ).fetchall()
+        return {
+            r[0]: {
+                "count": r[1],
+                "earliest": datetime.fromtimestamp(r[2], tz=timezone.utc),
+                "latest": datetime.fromtimestamp(r[3], tz=timezone.utc),
+            }
+            for r in rows
+        }
+
+    def fact_observer_stats(self, kind: str) -> dict:
+        """Per-observer fact counts and freshness within one kind, count-desc.
+
+        The collect-fold descent: kinds with no fold key (``session``, ``log``,
+        ``cite``) have no payload key to group on, so the natural "one level
+        down" is by emitter. ``GROUP BY observer`` over the kind partition.
+        """
+        rows = self._conn.execute(
+            "SELECT observer, COUNT(*), MIN(ts), MAX(ts) FROM facts "
+            "WHERE kind = ? GROUP BY observer ORDER BY COUNT(*) DESC, MAX(ts) DESC",
+            (kind,),
+        ).fetchall()
+        return {
+            r[0]: {
+                "count": r[1],
+                "earliest": datetime.fromtimestamp(r[2], tz=timezone.utc),
+                "latest": datetime.fromtimestamp(r[3], tz=timezone.utc),
+            }
+            for r in rows
+        }
+
+    def fact_density_by_kind(
+        self, *, since: float, until: float, buckets: int = 8
+    ) -> dict[str, list[int]]:
+        """Per-kind activity histogram over ``[since, until]`` in ``buckets`` bins.
+
+        Feeds the trend sparkline — each kind maps to a list of ``buckets``
+        counts, oldest→newest, on a *shared* time axis so sparklines across
+        kinds are directly comparable (a kind dormant in the window reads as an
+        empty/flat trend, which is the honest signal). One ``idx_facts_ts``
+        range scan; bucketing is in-memory.
+        """
+        span = (until - since) or 1.0
+        rows = self._conn.execute(
+            "SELECT kind, ts FROM facts WHERE ts >= ? AND ts <= ?",
+            (since, until),
+        ).fetchall()
+        out: dict[str, list[int]] = {}
+        for kind, ts in rows:
+            arr = out.setdefault(kind, [0] * buckets)
+            b = int((ts - since) / span * buckets)
+            arr[min(buckets - 1, b)] += 1
+        return out
+
+    def signed_counts(self) -> tuple[int, int] | None:
+        """``(signed, total)`` fact counts, or ``None`` on pre-signature stores.
+
+        Guards on a ``PRAGMA table_info`` probe — the ``signature`` column is
+        absent entirely on pre-delta-3 schemas, where a bare query would raise
+        ``no such column``. ``COUNT(signature)`` counts non-NULL signatures.
+        """
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
+        if "signature" not in cols:
+            return None
+        row = self._conn.execute(
+            "SELECT COUNT(signature), COUNT(*) FROM facts"
+        ).fetchone()
+        return (row[0], row[1])
+
     def tick_name_stats(self) -> dict[str, dict]:
         """Per-name tick counts and time ranges."""
         rows = self._conn.execute(

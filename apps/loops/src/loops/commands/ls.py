@@ -6,8 +6,10 @@ surfaces (kinds / observers / combine / sources) into one consolidated
 view. Narrowing is available in two equivalent shapes:
 
   Flag form (canonical, composes, matches read):
-    loops ls <vertex> --kind                 only KINDS section
-    loops ls <vertex> --kind decision        narrow KINDS to one entry
+    loops ls <vertex> --kind                 the KINDS listing
+    loops ls <vertex> --kind decision        DESCEND into the decision kind —
+                                             its entries one level down (the
+                                             kind stat view, not the facts)
     loops ls <vertex> --kind --observer      KINDS + OBSERVERS sections
     loops ls <vertex> --observer kyle        narrow OBSERVERS to one entry
     loops ls <vertex> --row [TEMPLATE]       narrow SOURCES (template sources)
@@ -44,14 +46,16 @@ def _print_ls_help(target: str | None = None) -> None:
         p = argparse.ArgumentParser(
             prog="loops ls",
             description=(
-                "Stat over the containment tree (vertex ⊃ kind ⊃ fact).\n"
+                "Stat over the containment tree (vertex ⊃ kind ⊃ key ⊃ fact).\n"
                 "`ls` lists entries one level down from where you point it,\n"
                 "with stat columns (Σfacts / last-update / type).\n\n"
                 "  loops ls                 vertices visible from here\n"
                 "  loops ls --all  / -a     expand the config layer (vs count-line)\n"
                 "  loops ls -1              terse, names only (scripting)\n"
                 "  loops ls <vertex>        descend — list the vertex's kinds\n"
-                "  loops ls <vertex> --kind NAME   descend to facts (= read --kind)\n\n"
+                "  loops ls <vertex> --kind NAME   descend — the kind's entries\n"
+                "                                  (namespaces / keys; read for facts)\n"
+                "  loops ls <vertex> --kind NAME --key PREFIX/   drill a namespace\n\n"
                 "Declaration narrowing (flag form, composable):\n"
                 "  --kind                show the KINDS listing\n"
                 "  --observer [NAME]     show OBSERVERS section (or one entry)\n"
@@ -66,9 +70,12 @@ def _print_ls_help(target: str | None = None) -> None:
         p = argparse.ArgumentParser(
             prog=f"loops ls {target}",
             description=(
-                f"Show declarations for vertex '{target}'.\n\n"
-                "Section narrowing (flag form, composable):\n"
-                "  --kind [NAME]         show KINDS section (or one named entry)\n"
+                f"Stat over vertex '{target}' (kinds, then a kind's entries).\n\n"
+                "  --kind                show the KINDS listing (count / share / trend)\n"
+                "  --kind NAME           descend into one kind — its entries one level\n"
+                "                        down (namespaces / keys); use read for facts\n"
+                "  --kind NAME --key P/  drill a namespace within the kind\n\n"
+                "Declaration narrowing (flag form, composable):\n"
                 "  --observer [NAME]     show OBSERVERS section (or one named entry)\n"
                 "  --combine [PATH]      show COMBINE section (or one named entry)\n"
                 "  --row [TEMPLATE]      show SOURCES section (or one template)\n\n"
@@ -112,11 +119,11 @@ def _peel_section_flags(
 
 
 def detect_kind_descent(argv: list[str]) -> tuple[str, str, list[str]] | None:
-    """Recognise ``ls <vertex> --kind VALUE`` — the descent to the fact level.
+    """Recognise ``ls <vertex> --kind VALUE`` — the descent into one kind.
 
-    decision:design/ls-stat-decisions-a-d B: kinds are the only containment
-    entries that *contain* facts (observers/combine/sources are leaf metadata),
-    so a named ``--kind VALUE`` descent is `read <vertex> --kind VALUE`. Returns
+    decision:design/ls-as-stat-over-containment: a named ``--kind VALUE`` is a
+    descent one containment level down, to the kind's *entries* (the kind stat
+    view), NOT a dump of its facts (that is ``read``). Returns
     ``(vertex, kind_value, rest_argv)`` when argv is exactly that descent —
     bare ``--kind`` (no value), other section flags, the positional form, or
     ``-h`` all return ``None`` and stay on the listing path.
@@ -195,7 +202,9 @@ def _run_ls(argv: list[str]) -> int:
         )
 
     def render(ctx, data):
-        return declarations_view(data, ctx.zoom, ctx.width)
+        return declarations_view(
+            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+        )
 
     return run_cli(
         rest,
@@ -291,6 +300,7 @@ def fetch_declarations(
         # never contradicts the number of rows listed below it.
         "kind_count": len(merged_kinds) or None,
         "mtime": stat["mtime"],
+        "signed": stat.get("signed"),
         "kinds": merged_kinds,
         "observers": observers,
         "combine": combine,
@@ -299,6 +309,195 @@ def fetch_declarations(
         "filters": filters,
         "narrows": narrows,
     }
+
+
+def _rollup_entries(
+    raw: dict, key_prefix: str | None, field_label: str
+) -> list[dict[str, Any]]:
+    """Roll fold-key stats up to the *next containment level* below the prefix.
+
+    Given per-key ``{key: {count, earliest, latest}}`` and an optional
+    ``key_prefix`` already descended into, group the keys one level deeper:
+    a key with a further ``/`` segment collapses into a namespace entry
+    (``design/`` → drill again with ``--key design/``); a key with no further
+    segment is a leaf. The ``None`` key (facts missing the fold field) collects
+    under ``(no <field>)`` — the orphan diagnostic. Count-descending.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for key, st in raw.items():
+        if key is None:
+            if key_prefix:  # the orphan bucket is not under any prefix
+                continue
+            head, is_leaf = f"(no {field_label})", True
+        else:
+            rest = key
+            if key_prefix:
+                if not key.lower().startswith(key_prefix.lower()):
+                    continue
+                rest = key[len(key_prefix):]
+            if "/" in rest:
+                head = (key_prefix or "") + rest.split("/", 1)[0] + "/"
+                is_leaf = False
+            else:
+                head = (key_prefix or "") + rest
+                is_leaf = True
+        e = out.setdefault(head, {"count": 0, "latest": None, "leaf": is_leaf})
+        e["count"] += st["count"]
+        if e["latest"] is None or st["latest"] > e["latest"]:
+            e["latest"] = st["latest"]
+        if not is_leaf:
+            e["leaf"] = False
+    entries = [{"key": k, **v} for k, v in out.items()]
+    entries.sort(key=lambda r: r["count"], reverse=True)
+    return entries
+
+
+def fetch_kind_stat(
+    target: str, kind: str, *, key_prefix: str | None = None,
+) -> dict[str, Any]:
+    """Stat one kind — its header summary + the entries one containment level
+    down (decision:design/ls-as-stat-over-containment; reverses
+    ls-stat-decisions-a-d B — ``--kind`` descends to entries, NOT to ``read``).
+
+    For a ``by``-fold kind the entries are its fold keys, rolled up to the next
+    namespace level (and re-rolled by ``key_prefix`` when drilling). For a
+    collect-fold (no fold key) the entries degrade to a by-observer breakdown.
+    """
+    from lang import parse_vertex_file
+    from lang.population import resolve_vertex
+
+    from loops.commands.fetch import _get_key_field
+    from loops.commands.resolve import _resolve_vertex_for_dispatch, loops_home
+
+    vertex_path = _resolve_vertex_for_dispatch(target)
+    if vertex_path is None:
+        return {
+            "error": f"vertex not found: {resolve_vertex(target, loops_home())}",
+            "vertex_name": target, "kind": kind,
+        }
+    try:
+        vf = parse_vertex_file(vertex_path)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "error": f"failed to parse {vertex_path.name}: {exc}",
+            "vertex_name": target, "kind": kind,
+        }
+
+    fold_op = ""
+    for k in _summarize_kinds(vf):
+        if k["name"] == kind:
+            fold_op = k["fold_op"]
+            break
+    key_field = _get_key_field(vertex_path, kind)
+
+    # A collect-fold has no fold key, so --key has nothing to scope — reject it
+    # rather than silently ignore it while the header claims "under <prefix>".
+    if key_prefix and key_field is None:
+        return {
+            "error": (
+                f"kind '{kind}' is a collect-fold (no fold key) — "
+                "--key doesn't apply; it lists by observer"
+            ),
+            "vertex_name": vf.name, "kind": kind,
+        }
+
+    store = vf.store
+    if store is None:
+        return {
+            "error": f"{vf.name} is an aggregation vertex — no own store to stat",
+            "vertex_name": vf.name, "kind": kind,
+        }
+    if not store.is_absolute():
+        store = (vertex_path.parent / store).resolve()
+
+    base = {
+        "vertex_name": vf.name, "kind": kind, "fold_op": fold_op,
+        "key_field": key_field, "key_prefix": key_prefix,
+        "by": "key" if key_field else "observer",
+    }
+    if not store.exists():
+        return {**base, "count": 0, "vertex_total": 0, "share": 0.0,
+                "earliest": None, "latest": None, "distinct_keys": 0, "entries": []}
+
+    from engine.store_reader import StoreReader
+
+    with StoreReader(store) as reader:
+        vertex_total = reader.fact_total
+        if key_field:
+            raw = reader.fact_key_stats(kind, key_field)
+        else:
+            raw = reader.fact_observer_stats(kind)
+
+    # When drilling (--key prefix), the header summarizes the *subtree*, not the
+    # whole kind — count / span / distinct all scope to the prefix.
+    if key_field and key_prefix:
+        scoped = {
+            k: v for k, v in raw.items()
+            if k and k.lower().startswith(key_prefix.lower())
+        }
+    else:
+        scoped = raw
+    count = sum(v["count"] for v in scoped.values())
+    earliest = min((v["earliest"] for v in scoped.values()), default=None)
+    latest = max((v["latest"] for v in scoped.values()), default=None)
+    distinct = len([k for k in scoped if k is not None])
+
+    if key_field:
+        entries = _rollup_entries(raw, key_prefix, key_field)
+    else:
+        entries = sorted(
+            (
+                {"key": (k or "(none)"), "count": v["count"],
+                 "latest": v["latest"], "leaf": True}
+                for k, v in raw.items()
+            ),
+            key=lambda r: r["count"], reverse=True,
+        )
+
+    # Coerce timestamps to epoch floats — the same JSON contract as the listing
+    # path (_store_stats) and `read --json`, so `latest` is a number, not a
+    # datetime string, across every ls subcommand.
+    def _epoch(dt: Any) -> float | None:
+        return dt.timestamp() if dt is not None else None
+
+    for e in entries:
+        e["latest"] = _epoch(e["latest"])
+
+    return {
+        **base,
+        "count": count, "vertex_total": vertex_total,
+        "share": (count / vertex_total * 100) if vertex_total else 0.0,
+        "earliest": _epoch(earliest), "latest": _epoch(latest),
+        "distinct_keys": distinct, "entries": entries,
+    }
+
+
+def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
+    """Render ``ls <vertex> --kind <kind>`` — the kind stat view (descent to
+    entries, not facts). ``--key <prefix>`` drills one namespace deeper."""
+    import argparse
+
+    kp = argparse.ArgumentParser(add_help=False)
+    kp.add_argument("--key", default=None)
+    known, leftover = kp.parse_known_args(rest)
+
+    from painted import run_cli
+
+    from loops.lenses.declarations import kind_stat_view
+
+    def fetch():
+        return fetch_kind_stat(vertex, kind, key_prefix=known.key)
+
+    def render(ctx, data):
+        return kind_stat_view(
+            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+        )
+
+    return run_cli(
+        leftover, fetch=fetch, render=render,
+        prog=f"loops ls {vertex} --kind {kind}",
+        description=f"Stat view of kind '{kind}' in {vertex}",
+    )
 
 
 def _vertex_stat(vf, vertex_path: Path) -> dict[str, Any]:
@@ -318,6 +517,7 @@ def _vertex_stat(vf, vertex_path: Path) -> dict[str, Any]:
             "facts": None,
             "kind_count": None,
             "mtime": None,
+            "signed": None,
             "kind_stats": [],
         }
     return {"vertex_kind": vertex_kind, **stats}
@@ -348,6 +548,7 @@ def _merge_kind_stats(
             "count": count,
             "share": share,
             "latest": live["latest"] if live else None,
+            "trend": live.get("trend", []) if live else [],
         })
     for k in kind_stats:
         if k["kind"] in seen:
@@ -362,6 +563,7 @@ def _merge_kind_stats(
             "count": count,
             "share": share,
             "latest": k["latest"],
+            "trend": k.get("trend", []),
         })
     out.sort(key=lambda r: r["count"], reverse=True)
     return out

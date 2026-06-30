@@ -284,3 +284,96 @@ class TestResolveEntityId:
     def test_returns_none_when_no_match(self, populated_db: Path):
         with StoreReader(populated_db) as reader:
             assert reader.resolve_entity_id("page", "url", "missing") is None
+
+
+# ---------------------------------------------------------------------------
+# Containment-stat queries (ls-as-stat-over-containment) — fact_key_stats,
+# fact_observer_stats, fact_density_by_kind, signed_counts
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def keyed_db(tmp_path: Path) -> Path:
+    """A store with namespaced fold keys, an orphan, and a signature column."""
+    db_path = tmp_path / "keyed.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(_SCHEMA.replace(
+        "payload TEXT NOT NULL\n);",
+        "payload TEXT NOT NULL,\n    signature TEXT\n);",
+    ))
+    rows = [
+        # id, kind, ts, observer, payload, signature
+        ("d1", "decision", 100.0, "kyle", '{"topic": "design/a"}', "sig"),
+        ("d2", "decision", 300.0, "kyle", '{"topic": "design/b"}', "sig"),
+        ("d3", "decision", 200.0, "meta", '{"topic": "design/a"}', None),
+        ("d4", "decision", 400.0, "kyle", '{"topic": "arch/x"}', "sig"),
+        ("d5", "decision", 250.0, "kyle", '{}', None),  # orphan — no topic
+    ]
+    conn.executemany(
+        "INSERT INTO facts (id, kind, ts, observer, payload, signature) "
+        "VALUES (?, ?, ?, ?, ?, ?)", rows,
+    )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestFactKeyStats:
+    def test_groups_by_fold_key(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            ks = reader.fact_key_stats("decision", "topic")
+        assert ks["design/a"]["count"] == 2
+        assert ks["design/b"]["count"] == 1
+        assert ks["arch/x"]["count"] == 1
+        # latest is the MAX ts of the group (design/a: 100, 200 -> 200)
+        assert ks["design/a"]["latest"].timestamp() == pytest.approx(200.0, abs=1)
+
+    def test_none_bucket_collects_orphans(self, keyed_db: Path):
+        """A fact missing the fold key groups under None — the orphan diagnostic."""
+        with StoreReader(keyed_db) as reader:
+            ks = reader.fact_key_stats("decision", "topic")
+        assert None in ks
+        assert ks[None]["count"] == 1
+
+    def test_count_descending(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            ks = reader.fact_key_stats("decision", "topic")
+        counts = [v["count"] for v in ks.values()]
+        assert counts == sorted(counts, reverse=True)
+
+
+class TestFactObserverStats:
+    def test_groups_by_observer(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            obs = reader.fact_observer_stats("decision")
+        assert obs["kyle"]["count"] == 4
+        assert obs["meta"]["count"] == 1
+
+
+class TestFactDensityByKind:
+    def test_buckets_activity_on_shared_axis(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            # span 100..400, 3 buckets -> width 100 each
+            dens = reader.fact_density_by_kind(since=100.0, until=400.0, buckets=3)
+        # decision facts at ts 100,200,250,300,400 -> buckets [0,1,1,2,2]
+        assert dens["decision"] == [1, 2, 2]
+        assert sum(dens["decision"]) == 5
+
+    def test_window_excludes_out_of_range(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            dens = reader.fact_density_by_kind(since=250.0, until=400.0, buckets=2)
+        # only ts 250,300,400 in window
+        assert sum(dens["decision"]) == 3
+
+
+class TestSignedCounts:
+    def test_counts_signed_when_column_present(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            sc = reader.signed_counts()
+        # 3 of 5 facts have a non-NULL signature
+        assert sc == (3, 5)
+
+    def test_returns_none_when_column_absent(self, populated_db: Path):
+        """Pre-signature schemas (no signature column) return None, not raise."""
+        with StoreReader(populated_db) as reader:
+            assert reader.signed_counts() is None

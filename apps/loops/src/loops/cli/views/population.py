@@ -29,20 +29,23 @@ from ..invocation import Invocation
 
 
 def run_ls(argv: list[str], ctx: Invocation) -> int:
-    """List a vertex's kinds (stat-over-containment), or descend to facts.
+    """List a vertex's kinds (stat-over-containment), or descend into one kind.
 
-    ``ls <vertex> --kind VALUE`` descends past the kind level to the facts it
-    contains, which *is* ``read`` (decision:design/ls-stat-decisions-a-d B) —
-    delegate to the read router rather than reimplement the fact view.
+    ``ls <vertex> --kind VALUE`` descends one containment level — to the kind's
+    *entries* (fold-key namespaces / leaf keys, or a by-observer breakdown for
+    collect-folds), as a stat view. It does NOT dump the kind's facts: that is
+    ``read``'s job (``ls`` owns the structural levels, ``read`` owns content).
+    A ``--key <prefix>`` drills the next namespace level; reach for ``read``
+    when you want the folded content.
     """
     from loops.commands.ls import detect_kind_descent
 
     descent = detect_kind_descent(argv)
     if descent is not None:
         vertex, kind_value, rest = descent
-        from .read import run as run_read
+        from loops.commands.ls import _run_kind_stat
 
-        return run_read([vertex, "--kind", kind_value, *rest], ctx)
+        return _run_kind_stat(vertex, kind_value, rest)
 
     from loops.commands.population import _run_ls
 

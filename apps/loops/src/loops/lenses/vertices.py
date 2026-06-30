@@ -15,9 +15,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Line, Span, Style, Zoom, join_vertical
 
+from ..palette import DEFAULT_PALETTE
 from ._helpers import elide
+from ._statview import freshness_style
 from .store import _format_count, _relative_time
 
 
@@ -130,6 +132,26 @@ def vertices_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
     return join_vertical(*rows)
 
 
+def _mtime_style(p, mtime: float | None) -> Style:
+    """Freshness-graded style for the `updated …` column (the resumption cue)."""
+    if mtime is None:
+        return p.metadata
+    return freshness_style(p, datetime.fromtimestamp(mtime, tz=timezone.utc))
+
+
+def _preview_line(indent: str, preview: str, width: int, p) -> Block:
+    """The lead-kinds preview, each kind name in its own hue."""
+    full = indent + preview
+    if width and len(full) > width:
+        return Block.text(elide(full, width), p.metadata, width=width)
+    spans = [Span(indent, Style())]
+    for i, nm in enumerate(preview.split(" · ")):
+        if i:
+            spans.append(Span(" · ", p.chrome))
+        spans.append(Span(nm, p.kind_style(nm)))
+    return Line(tuple(spans)).to_block(width)
+
+
 def _stat_rows(
     vertices: list[dict[str, Any]],
     zoom: Zoom,
@@ -138,7 +160,14 @@ def _stat_rows(
     max_kind: int,
     dim: Style,
 ) -> list[Block]:
-    """Stat rows for one group — the `ls -l` columns plus a preview line."""
+    """Stat rows for one group — the `ls -l` columns plus a preview line.
+
+    Layout is identical across registers; the TTY register adds colour on top
+    (vertex name hued, ``updated`` on the freshness gradient, the shadow marker
+    and lead-kind preview tinted). Colour strips at the writer on a pipe, so the
+    piped bytes are unchanged.
+    """
+    p = DEFAULT_PALETTE
     rows: list[Block] = []
 
     for v in vertices:
@@ -158,16 +187,26 @@ def _stat_rows(
         full = f"  {name}  {kind}  {size}" + (
             f"   {kinds_col}" if kinds_col else ""
         ) + f"   {mtime}"
-        line = full if len(full) <= budget else elide(essential, budget)
-        rows.append(Block.text(line + marker, Style(), width=width))
+        if len(full) <= budget:
+            # Build the row as styled spans (text identical to ``full + marker``).
+            mid = f"  {kind}  {size}" + (f"   {kinds_col}" if kinds_col else "") + "   "
+            spans = [
+                Span("  ", Style()),
+                Span(name, p.kind_style(v["name"])),
+                Span(mid, p.metadata),
+                Span(mtime, _mtime_style(p, v.get("mtime"))),
+            ]
+            if marker:
+                spans.append(Span(marker, Style(fg="yellow")))
+            rows.append(Line(tuple(spans)).to_block(width))
+        else:
+            rows.append(Block.text(elide(essential, budget) + marker, Style(), width=width))
 
-        # Preview line — the lead kinds (what's inside), dimmed and indented.
+        # Preview line — the lead kinds (what's inside), kind-tinted and indented.
         preview = _lead_kinds(v)
         if preview:
             indent = "  " + " " * max_name + "  "
-            rows.append(
-                Block.text(elide(indent + preview, width), dim, width=width)
-            )
+            rows.append(_preview_line(indent, preview, width, p))
 
         if zoom >= Zoom.DETAILED:
             for lp in v.get("loops", []):

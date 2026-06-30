@@ -1,6 +1,9 @@
-session   instance   —
-  1 observer · 1 combine · 1 source
+╭─ session · instance ──────────────────╮
+│ 1 observer · 1 combine · 1 source     │
+╰───────────────────────────────────────╯
 
-  decision  by:topic        0     0.0%
-  thread    by:name         0     0.0%
-  change    collect         0     0.0%
+KIND      FOLD      COUNT  SHARE
+─────────────────────────────────────────
+decision  by:topic      0  ░░░░░░░  0.0%
+thread    by:name       0  ░░░░░░░  0.0%
+change    collect       0  ░░░░░░░  0.0%

@@ -148,7 +148,9 @@ class TestLensNarrowing:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filters=["kind"])
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        # The "KINDS" section-header text is the terse (piped) register contract;
+        # the TTY register renders the kind table instead (golden-locked).
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         assert "KINDS" in text
         assert "OBSERVERS" not in text
 
@@ -158,7 +160,7 @@ class TestLensNarrowing:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filters=["kind", "observer"])
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         assert "KINDS" in text
         assert "OBSERVERS" in text
         assert "COMBINE" not in text  # not selected
@@ -187,7 +189,7 @@ class TestLensNarrowing:
         data = fetch_declarations(
             "proj", filters=["kind"], narrows={"kind": "nonexistent"}
         )
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
         # Section header present with zero count, no real declarations.
         assert "KINDS (—)" in text or "KINDS (0)" in text
         assert "decision" not in text
@@ -659,7 +661,9 @@ class TestPreviewFieldsSurfaced:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("prev", filters=["kind"])
-        text = block_text(declarations_view(data, Zoom.DETAILED, 80))
+        # preview= decl detail surfaces in the terse (piped) register; the TTY
+        # register's kind table doesn't carry per-kind declaration sublines.
+        text = block_text(declarations_view(data, Zoom.DETAILED, 80, piped=True))
         assert "preview=message,status" in text
 
     def test_render_omits_preview_at_summary(self, proj_with_preview):

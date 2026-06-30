@@ -57,13 +57,28 @@ def _store_stats(store_path: Path) -> dict[str, Any] | None:
         return None
     from engine.store_reader import StoreReader
 
+    _TREND_WINDOW = 30 * 86400  # recent-momentum window for the trend sparkline
     with StoreReader(store_path) as reader:
         summary = reader.summary()
         freshness = reader.freshness
+        signed = reader.signed_counts()
+        # Per-kind density over the recent window, on a shared time axis so the
+        # sparklines are comparable across kinds (decision C trend column).
+        density: dict[str, list[int]] = {}
+        if freshness is not None:
+            until = freshness.timestamp()
+            density = reader.fact_density_by_kind(
+                since=until - _TREND_WINDOW, until=until
+            )
     kind_rows = summary["facts"]["kinds"]
     kind_stats = sorted(
         (
-            {"kind": k, "count": v["count"], "latest": v["latest"].timestamp()}
+            {
+                "kind": k,
+                "count": v["count"],
+                "latest": v["latest"].timestamp(),
+                "trend": density.get(k, []),
+            }
             for k, v in kind_rows.items()
         ),
         key=lambda r: r["count"],
@@ -73,6 +88,7 @@ def _store_stats(store_path: Path) -> dict[str, Any] | None:
         "facts": summary["facts"]["total"],
         "kind_count": len(kind_rows),
         "mtime": freshness.timestamp() if freshness is not None else None,
+        "signed": signed,
         "kind_stats": kind_stats,
     }
 

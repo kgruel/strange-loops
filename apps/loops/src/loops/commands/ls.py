@@ -44,15 +44,20 @@ def _print_ls_help(target: str | None = None) -> None:
         p = argparse.ArgumentParser(
             prog="loops ls",
             description=(
-                "List all vertices, or declarations for one vertex.\n\n"
-                "Section narrowing (flag form, composable):\n"
-                "  --kind [NAME]         show KINDS section (or one named entry)\n"
-                "  --observer [NAME]     show OBSERVERS section (or one named entry)\n"
-                "  --combine [PATH]      show COMBINE section (or one named entry)\n"
+                "Stat over the containment tree (vertex ⊃ kind ⊃ fact).\n"
+                "`ls` lists entries one level down from where you point it,\n"
+                "with stat columns (Σfacts / last-update / type).\n\n"
+                "  loops ls                 vertices visible from here\n"
+                "  loops ls --all  / -a     expand the config layer (vs count-line)\n"
+                "  loops ls -1              terse, names only (scripting)\n"
+                "  loops ls <vertex>        descend — list the vertex's kinds\n"
+                "  loops ls <vertex> --kind NAME   descend to facts (= read --kind)\n\n"
+                "Declaration narrowing (flag form, composable):\n"
+                "  --kind                show the KINDS listing\n"
+                "  --observer [NAME]     show OBSERVERS section (or one entry)\n"
+                "  --combine [PATH]      show COMBINE section (or one entry)\n"
                 "  --row [TEMPLATE]      show SOURCES section (or one template)\n\n"
-                "Positional alias (back-compat, single section, no narrowing):\n"
-                "  loops ls <vertex> kind|observer|combine|row\n\n"
-                "Mixing both forms is an error."
+                "Positional alias (back-compat): loops ls <vertex> kind|observer|combine|row"
             ),
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
@@ -104,6 +109,29 @@ def _peel_section_flags(
         if val is not True:
             narrows[verb] = val
     return filters, narrows, leftover
+
+
+def detect_kind_descent(argv: list[str]) -> tuple[str, str, list[str]] | None:
+    """Recognise ``ls <vertex> --kind VALUE`` — the descent to the fact level.
+
+    decision:design/ls-stat-decisions-a-d B: kinds are the only containment
+    entries that *contain* facts (observers/combine/sources are leaf metadata),
+    so a named ``--kind VALUE`` descent is `read <vertex> --kind VALUE`. Returns
+    ``(vertex, kind_value, rest_argv)`` when argv is exactly that descent —
+    bare ``--kind`` (no value), other section flags, the positional form, or
+    ``-h`` all return ``None`` and stay on the listing path.
+    """
+    if not argv or argv[0].startswith("-"):
+        return None
+    vertex, rest = argv[0], argv[1:]
+    if rest and rest[0] in ("-h", "--help"):
+        return None
+    if rest and rest[0] in _FILTER_SUBCOMMANDS:  # positional form — not a descent
+        return None
+    flag_filters, flag_narrows, leftover = _peel_section_flags(rest)
+    if flag_filters == ["kind"] and "kind" in flag_narrows:
+        return vertex, flag_narrows["kind"], leftover
+    return None
 
 
 def _run_ls(argv: list[str]) -> int:
@@ -246,10 +274,24 @@ def fetch_declarations(
     combine = _summarize_combine(vf)
     sources = _summarize_sources(vf, vertex_path, qualifier)
 
+    # Stat-over-containment (decision:design/ls-as-stat-over-containment): join
+    # live per-kind stats (count / %, mtime) onto the declared kinds and stamp
+    # the vertex-level header stat. Declared-but-empty kinds keep count 0; live
+    # kinds with no declaration (e.g. tick.<name>, _sync.*) are appended so the
+    # body is a faithful listing of what's actually inside.
+    stat = _vertex_stat(vf, vertex_path)
+    merged_kinds = _merge_kind_stats(kinds, stat["kind_stats"], stat["facts"])
+
     return {
         "vertex_name": vf.name,
         "vertex_path": str(vertex_path),
-        "kinds": kinds,
+        "vertex_kind": stat["vertex_kind"],
+        "facts": stat["facts"],
+        # Header kind-count matches the body (declared ∪ live), so "N kinds"
+        # never contradicts the number of rows listed below it.
+        "kind_count": len(merged_kinds) or None,
+        "mtime": stat["mtime"],
+        "kinds": merged_kinds,
         "observers": observers,
         "combine": combine,
         "sources": sources,
@@ -257,6 +299,72 @@ def fetch_declarations(
         "filters": filters,
         "narrows": narrows,
     }
+
+
+def _vertex_stat(vf, vertex_path: Path) -> dict[str, Any]:
+    """Vertex-level stat header + per-kind live stats (or empties if no store)."""
+    from loops.commands.vertices import _classify_kind, _store_stats
+
+    vertex_kind = _classify_kind(vf)
+    store = vf.store
+    stats: dict[str, Any] | None = None
+    if store is not None:
+        if not store.is_absolute():
+            store = (vertex_path.parent / store).resolve()
+        stats = _store_stats(store)
+    if stats is None:
+        return {
+            "vertex_kind": vertex_kind,
+            "facts": None,
+            "kind_count": None,
+            "mtime": None,
+            "kind_stats": [],
+        }
+    return {"vertex_kind": vertex_kind, **stats}
+
+
+def _merge_kind_stats(
+    declared: list[dict[str, Any]],
+    kind_stats: list[dict[str, Any]],
+    total: int | None,
+) -> list[dict[str, Any]]:
+    """Join declared kinds (fold-op) with live stats (count/%/mtime).
+
+    Output is count-descending, declared-but-empty kinds last (count 0), and
+    any live kind absent from the declaration appended so `sl ls <vertex>`
+    lists what's actually stored, not just what's declared.
+    """
+    by_name = {k["kind"]: k for k in kind_stats}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for d in declared:
+        name = d["name"]
+        seen.add(name)
+        live = by_name.get(name)
+        count = live["count"] if live else 0
+        share = (count / total * 100) if total else 0.0
+        out.append({
+            **d,
+            "count": count,
+            "share": share,
+            "latest": live["latest"] if live else None,
+        })
+    for k in kind_stats:
+        if k["kind"] in seen:
+            continue
+        count = k["count"]
+        share = (count / total * 100) if total else 0.0
+        out.append({
+            "name": k["kind"],
+            "fold_op": "",  # undeclared (system kind, e.g. tick.* / _sync.*)
+            "target": "",
+            "preview_fields": (),
+            "count": count,
+            "share": share,
+            "latest": k["latest"],
+        })
+    out.sort(key=lambda r: r["count"], reverse=True)
+    return out
 
 
 def _summarize_kinds(vf) -> list[dict[str, Any]]:

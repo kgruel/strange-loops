@@ -1,7 +1,11 @@
-KINDS (3)
-  decision       topic by:topic  preview=topic,message
-  thread         name by:name  preview=name,status
-  change         items collect
+session   instance   —
+  1 observer · 1 combine · 1 source
+
+  decision  by:topic        0     0.0%
+    target=topic  preview=topic,message
+  thread    by:name         0     0.0%
+    target=name  preview=name,status
+  change    collect         0     0.0%
 
 OBSERVERS (1)
   kaygee  identity=kyle/loops-claude  grants=read,emit

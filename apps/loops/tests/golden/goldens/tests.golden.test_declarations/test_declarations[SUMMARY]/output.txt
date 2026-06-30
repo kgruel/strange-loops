@@ -1,13 +1,6 @@
-KINDS (3)
-  decision       by:topic
-  thread         by:name
-  change         collect
+session   instance   —
+  1 observer · 1 combine · 1 source
 
-OBSERVERS (1)
-  kaygee
-
-COMBINE (1)
-  ~/Code/loops/.loops/project.vertex  (as project)
-
-SOURCES (1)
-  reading  [reading]  (1 rows)
+  decision  by:topic        0     0.0%
+  thread    by:name         0     0.0%
+  change    collect         0     0.0%

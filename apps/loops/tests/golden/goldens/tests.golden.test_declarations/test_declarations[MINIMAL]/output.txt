@@ -1,1 +1,1 @@
-session kinds=3 observers=1 combine=1 sources=1
+session

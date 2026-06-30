@@ -154,14 +154,21 @@ loops sync <vertex> --var KEY=VALUE           # pass variables to sources
 
 ---
 
-## Ls
+## Ls — stat over the containment tree (vertex ⊃ kind ⊃ fact)
 
 ```
-loops ls                                      # all discovered vertices
-loops ls <target>                             # list template population rows
-loops <vertex> ls                             # population for a vertex
-loops <vertex> ls <template>                  # population for a specific template
+loops ls                                      # vertices visible from here (local + config), with stat columns
+loops ls --all / -a                           # expand the config layer (default collapses it to a count-line)
+loops ls -1                                    # terse, names only (scripting)
+loops ls <vertex>                             # descend: list the vertex's kinds (count / share / last-update)
+loops ls <vertex> --kind                      # just the KINDS listing
+loops ls <vertex> --kind NAME                 # descend to facts — equivalent to `read <vertex> --kind NAME`
+loops ls <vertex> --observer|--combine|--row  # declaration sections (back-compat narrowing)
 ```
+
+Stat columns are uniform at every level: **size = Σfacts, mtime = last update
+(newest fact — "where did I leave off?"), type = vertex-kind / fold-op.** Shown
+by default (vertices are few); `-1` opts out.
 
 ---
 

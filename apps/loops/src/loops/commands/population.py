@@ -21,7 +21,15 @@ def _run_ls(argv: list[str]) -> int:
 
 
 def _run_ls_root(argv: list[str]) -> int:
-    """Run root-level ls: list all discovered vertices, local layer first."""
+    """Run root-level ls: stat-over-containment listing, local layer first.
+
+    `sl ls` is the resumption orient at the front door
+    (decision:design/ls-as-stat-over-containment): the local layer is always
+    stat'd (facts / last-update / kind-count), the config layer collapses to a
+    drillable count-line unless ``--all`` expands it. ``-1`` is the terse
+    names-only opt-out (decision B/C / `-1` in the design doc).
+    """
+    import argparse
     from pathlib import Path
 
     from painted import run_cli
@@ -31,15 +39,27 @@ def _run_ls_root(argv: list[str]) -> int:
 
     home = loops_home()
 
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--all", "-a", dest="all_", action="store_true", default=False)
+    pre.add_argument("-1", dest="terse", action="store_true", default=False)
+    known, rest = pre.parse_known_args(argv)
+    expand_config = known.all_
+    terse = known.terse
+
     def fetch():
         # Local layer first — same precedence the verbs use
-        # (thread:global-local-walk-broken).
+        # (thread:global-local-walk-broken). Local is always stat'd; config is
+        # stat'd lazily, only when --all expands it past the count-line.
         from typing import Any
 
-        local = fetch_vertices_local()
+        local = fetch_vertices_local(with_stats=not terse)
         data: dict[str, Any]
+        # Config is stat'd when expanded OR when it IS the primary listing
+        # (no local layer — outside a project). Collapsed-to-count-line is the
+        # only case that skips the per-vertex stat read.
+        config_stats = (expand_config or not local) and not terse
         try:
-            data = fetch_vertices(home)
+            data = fetch_vertices(home, with_stats=config_stats)
         except FileNotFoundError:
             if not local:
                 raise
@@ -50,17 +70,19 @@ def _run_ls_root(argv: list[str]) -> int:
                 v["shadows"] = v["name"] in global_names
             data["local_vertices"] = local
             data["cwd"] = str(Path.cwd())
+        data["expand_config"] = expand_config
+        data["terse"] = terse
         return data
 
     def render(ctx, data):
         return vertices_view(data, ctx.zoom, ctx.width)
 
     return run_cli(
-        argv,
+        rest,
         fetch=fetch,
         render=render,
         prog="loops ls",
-        description="List vertices",
+        description="List vertices (stat-over-containment)",
     )
 
 

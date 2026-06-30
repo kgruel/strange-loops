@@ -28,8 +28,22 @@ from __future__ import annotations
 from ..invocation import Invocation
 
 
-def run_ls(argv: list[str], _ctx: Invocation) -> int:
-    """List entries in a template population. Vertex-first form only."""
+def run_ls(argv: list[str], ctx: Invocation) -> int:
+    """List a vertex's kinds (stat-over-containment), or descend to facts.
+
+    ``ls <vertex> --kind VALUE`` descends past the kind level to the facts it
+    contains, which *is* ``read`` (decision:design/ls-stat-decisions-a-d B) —
+    delegate to the read router rather than reimplement the fact view.
+    """
+    from loops.commands.ls import detect_kind_descent
+
+    descent = detect_kind_descent(argv)
+    if descent is not None:
+        vertex, kind_value, rest = descent
+        from .read import run as run_read
+
+        return run_read([vertex, "--kind", kind_value, *rest], ctx)
+
     from loops.commands.population import _run_ls
 
     return _run_ls(argv)

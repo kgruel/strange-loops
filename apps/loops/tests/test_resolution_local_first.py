@@ -185,6 +185,8 @@ class TestVerticesLensLocalGroup:
         text = _text(vertices_view(data, Zoom.SUMMARY, 80))
         assert "local — cwd, verbs resolve these first" in text
         assert "config — ~/.config/loops" in text
+        # The shadow marker is now a clarifying sub-line ("⊳ shadows <path>")
+        # beneath the shadowing vertex; line 1 stays a clean stat row.
         assert "⊳ shadows" in text
         # Local group renders before config group.
         assert text.index("project") < text.index("ambient")

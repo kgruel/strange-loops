@@ -70,6 +70,12 @@ def declarations_view(
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
 
+    # The piped/agent register is information-faithful — never truncate to a
+    # terminal edge (ctx.width may inherit COLUMNS even on a pipe). Render
+    # width-free so no stat cell is clipped (e.g. "115d ago" → "115d ag").
+    if piped:
+        width = None
+
     # Prefer the new (filters/narrows) shape; fall back to legacy (filter).
     filters = data.get("filters")
     if filters is None:
@@ -255,14 +261,22 @@ _TREND_MIN_WIDTH = 64
 
 
 def _kind_columns(
-    kinds: list[dict[str, Any]], has_trend: bool, has_time: bool
+    kinds: list[dict[str, Any]], has_trend: bool, has_time: bool,
+    *, name_kinds: list[dict[str, Any]] | None = None,
 ) -> list[Column]:
-    """Columns sized across *all* kinds, so the substantive and minor sub-tables
-    align under one shared header (the name column fills/shrinks, numerics fixed)."""
+    """Columns sized across *all* kinds, so the substantive and minor rows align
+    under one shared header (the name column fills/shrinks, numerics fixed).
+
+    ``name_kinds`` overrides the set the KIND column sizes to: when a minor tail
+    is split off, the column sizes to the *substantive* names so one long
+    vestigial kind name doesn't stretch the important rows — the minor names
+    ellipsize into the shared width instead (Fill + ellipsis). Numeric columns
+    still size across *all* kinds, so a wide minor mtime ("121d ago") fits.
+    """
     def w(texts: list[str], header: str) -> int:
         return max([len(header)] + [len(t) for t in texts])
 
-    name_w = min(22, w([k["name"] for k in kinds], "KIND"))
+    name_w = min(22, w([k["name"] for k in (name_kinds or kinds)], "KIND"))
     fold_w = w([(k.get("fold_op") or "—").replace('"', "") for k in kinds], "FOLD")
     count_w = w([_format_count(k.get("count", 0)) for k in kinds], "COUNT")
     share_w = max(len("SHARE"), 7 + 1 + 6)  # bar + space + "NN.N%"
@@ -273,7 +287,10 @@ def _kind_columns(
         Column(cell("KIND"), width=Fill(), min_width=6, max_width=name_w, ellipsis=True),
         Column(cell("FOLD"), width=fold_w),
         Column(cell("COUNT"), width=count_w, align=Align.END),
-        Column(cell("SHARE"), width=share_w),
+        # END-align so the exact percent right-aligns across the column — the
+        # substantive meter (bar + percent) and a demoted minor row (bare
+        # percent, no bar) then share one decimal-aligned right edge.
+        Column(cell("SHARE"), width=share_w, align=Align.END),
     ]
     if has_trend:
         cols.append(Column(cell("TREND"), width=8))
@@ -343,23 +360,33 @@ def _kind_table(kinds: list[dict[str, Any]], width: int | None, p: Any) -> Block
     has_trend = any(k.get("trend") for k in kinds) and (
         width is None or width >= _TREND_MIN_WIDTH
     )
-    cols = _kind_columns(kinds, has_trend, has_time)
 
     substantive = [k for k in kinds if k.get("count", 0) >= _MINOR_FLOOR]
     minor = [k for k in kinds if k.get("count", 0) < _MINOR_FLOOR]
+    # Only split when it earns its keep: a clear substantive set plus a tail.
+    splitting = bool(substantive) and len(minor) >= 3
+
+    # When splitting, size KIND to the substantive names (minor names ellipsize).
+    cols = _kind_columns(
+        kinds, has_trend, has_time,
+        name_kinds=substantive if splitting else None,
+    )
 
     def rows_of(ks: list[dict[str, Any]], *, dim: bool) -> list[list[Line]]:
         return [_kind_cells(k, max_pct, has_trend, has_time, p, dim=dim) for k in ks]
 
-    # Only split when it earns its keep: a clear substantive set plus a tail.
-    if substantive and len(minor) >= 3:
-        sub_tbl = stat_table(cols, rows_of(substantive, dim=False), width, p=p)
-        min_tbl = stat_table(cols, rows_of(minor, dim=True), width, p=p)
-        # Drop the minor table's own header + separator (rows 0–1); it renders
-        # under the shared header via the labelled rule (sized to the actual
-        # rendered table width, which may be < total after Fill shrinks).
-        min_rows = vslice(min_tbl, 2, len(minor))
-        return join_vertical(sub_tbl, _labeled_rule("minor", sub_tbl.width, p), min_rows)
+    if splitting:
+        # Render as ONE table so the Fill KIND column sizes once across *all*
+        # rows — two separate table() calls would each fit-shrink Fill to their
+        # own content (substantive ~"tick.project" vs minor "friction:emit-…"),
+        # drifting every column right of KIND. Slice the rendered block to drop
+        # the labelled rule between the substantive set and the dimmed tail.
+        all_rows = rows_of(substantive, dim=False) + rows_of(minor, dim=True)
+        full = stat_table(cols, all_rows, width, p=p)
+        n_head = 2  # header row + separator rule
+        top = vslice(full, 0, n_head + len(substantive))
+        bottom = vslice(full, n_head + len(substantive), len(minor))
+        return join_vertical(top, _labeled_rule("minor", full.width, p), bottom)
 
     return stat_table(cols, rows_of(kinds, dim=False), width, p=p)
 
@@ -484,6 +511,11 @@ def kind_stat_view(
     """
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
+
+    # Piped/agent register is information-faithful — render width-free so no
+    # entry row is clipped (see declarations_view).
+    if piped:
+        width = None
 
     kind = data.get("kind", "?")
     fold_op = (data.get("fold_op") or "").replace('"', "")

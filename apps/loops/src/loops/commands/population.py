@@ -65,9 +65,13 @@ def _run_ls_root(argv: list[str]) -> int:
                 raise
             data = {"vertices": []}
         if local:
-            global_names = {v["name"] for v in data["vertices"]}
+            # A local vertex shadows the config one of the same name; carry the
+            # shadowed path so the listing can name what's being overridden.
+            global_paths = {v["name"]: v.get("path") for v in data["vertices"]}
             for v in local:
-                v["shadows"] = v["name"] in global_names
+                v["shadows"] = v["name"] in global_paths
+                if v["shadows"]:
+                    v["shadows_path"] = global_paths[v["name"]]
             data["local_vertices"] = local
             data["cwd"] = str(Path.cwd())
         data["expand_config"] = expand_config
@@ -75,7 +79,9 @@ def _run_ls_root(argv: list[str]) -> int:
         return data
 
     def render(ctx, data):
-        return vertices_view(data, ctx.zoom, ctx.width)
+        return vertices_view(
+            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+        )
 
     return run_cli(
         rest,

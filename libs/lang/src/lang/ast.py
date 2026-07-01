@@ -484,6 +484,21 @@ Boundary = BoundaryWhen | BoundaryAfter | BoundaryEvery
 
 
 @dataclass(frozen=True)
+class EdgeDecl:
+    """A typed-edge declaration on a kind: lift a payload field into the graph.
+
+    ``field`` is the payload field carrying an entity address (e.g.
+    ``stakeholder``); ``target`` is the kind that address resolves against
+    (e.g. ``person``). Late-bound and retroactive: declaring an edge lights
+    up every historical fact carrying that field as a read-time projection —
+    no re-emit. See decision:architecture/typed-edges-overlay-default.
+    """
+
+    field: str
+    target: str
+
+
+@dataclass(frozen=True)
 class LoopDef:
     """Loop definition within a .vertex file."""
 
@@ -492,6 +507,7 @@ class LoopDef:
     search: tuple[str, ...] = ()  # payload field names for FTS5 indexing
     parse: tuple[ParseStep, ...] = ()  # per-kind parse pipeline
     preview_fields: tuple[str, ...] = ()  # render-time trailing-slot field order
+    edges: tuple[EdgeDecl, ...] = ()  # declared typed edges (field → target kind)
 
 
 # -----------------------------------------------------------------------------

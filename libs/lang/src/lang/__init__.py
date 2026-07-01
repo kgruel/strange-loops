@@ -31,6 +31,7 @@ __all__ = [
     # AST types - Vertex file
     "VertexFile",
     "LoopDef",
+    "EdgeDecl",
     "FoldDecl",
     "FoldOp",
     "FoldAvg",
@@ -92,7 +93,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
 # AST types
 _AST_NAMES = [
     "Boundary", "BoundaryAfter", "BoundaryCondition", "BoundaryEvery", "BoundaryWhen",
-    "Coerce", "CombineEntry", "Duration", "Explode", "Flatten",
+    "Coerce", "CombineEntry", "Duration", "EdgeDecl", "Explode", "Flatten",
     "FoldAvg", "FoldBy", "FoldCollect", "FoldCount", "FoldDecl", "FoldLatest",
     "FoldMax", "FoldMin", "FoldOp", "FoldSum", "FoldWindow",
     "FromFile", "FromSource", "GrantDecl", "InlineSource", "LensDecl",

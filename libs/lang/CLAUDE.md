@@ -86,6 +86,12 @@ The fold ops map 1:1 to atoms' fold vocabulary — `FoldBy` → `Upsert`, `FoldC
 
 **Boundary types**: `BoundaryWhen(kind)`, `BoundaryAfter(count)`, `BoundaryEvery(count)`.
 
+**Typed edges**: a `LoopDef` may carry `edges: tuple[EdgeDecl, ...]` from
+`edge "<field>" targets="<kind>"` child-nodes (siblings of `search`/`preview`).
+Each `EdgeDecl(field, target)` declares that a payload field carries an address
+to `target` kind. Grammar-only here — the read-time projection lives in engine
+(`_lift_edges`) and surface. See decision:architecture/typed-edges-overlay-default.
+
 **Don't reach for yet**: Population management, KDL text manipulation.
 
 ---

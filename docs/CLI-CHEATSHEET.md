@@ -126,6 +126,40 @@ loops emit project task name=fix-it thread=thread/auth-refactor
 # adds thread_ref=<ULID> automatically
 ```
 
+The `{field}_ref` is a provenance PIN ("at emit this address pointed at ULID X").
+It stays graph-inert until the field is declared a typed edge (below).
+
+### Typed edges (graph relations)
+
+Capture is declaration-free — emit `stakeholder=acme` naturally. Declaring the
+field as an edge on its kind lights up EVERY historical fact carrying it, as a
+read-time projection (no re-emit):
+
+```kdl
+loops {
+  decision {
+    fold { items "by" "topic" }
+    edge "stakeholder" targets="person"   # field → target kind
+  }
+}
+```
+
+Now `stakeholder=acme` (bare key, normalized to `person:acme`) becomes a graph
+edge: it counts toward the target's inbound salience, walks under `--refs`, and
+renders with a predicate label:
+
+```
+loops read project --refs                 # ← src via stakeholder / → tgt via stakeholder
+loops read project -v                      # inbound: ←5 (3 via stakeholder, 2 via ref)
+loops emit project decision topic=x stakeholder=acme,globex   # comma = multi-valued set
+loops emit project decision topic=x stakeholder=              # empty = clear the edge
+```
+
+**Overlay semantics** — declared edges are last-set-wins (re-emit corrects; the
+old target loses the inbound edge). `ref=` remains the ONE union edge
+(attention-events accumulate). `loops read <v> --lens reconcile` surfaces
+undeclared address-bearing fields as edge-declaration candidates.
+
 ---
 
 ## Close

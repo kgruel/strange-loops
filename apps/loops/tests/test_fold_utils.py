@@ -22,8 +22,11 @@ from loops.surface import (
 )
 
 
-def item(payload=None, ts=None, observer="", origin="", n=1, refs=()):
-    return FoldItem(payload=payload or {}, ts=ts, observer=observer, origin=origin, n=n, refs=refs)
+def item(payload=None, ts=None, observer="", origin="", n=1, refs=(), edges=()):
+    return FoldItem(
+        payload=payload or {}, ts=ts, observer=observer, origin=origin,
+        n=n, refs=refs, edges=edges,
+    )
 
 
 def section(kind="test", items=(), fold_type="by", key_field="name", scalars=None):
@@ -182,12 +185,34 @@ class TestComputeInboundRefs:
 
 
 class TestComputeInboundEdges:
-    def test_with_edges(self):
-        i1 = item({"name": "a"}, refs=("decision/b",))
-        s = section(items=(i1,), kind="thread", key_field="name")
+    def test_ref_edge_to_present_target(self):
+        # source thread/a refers to decision/b; decision/b IS in the fold, so
+        # the adjacency maps the present target → (source, "ref").
+        src = item({"name": "a"}, refs=("decision:b",))
+        tgt = item({"topic": "b"})
+        s_thread = section(items=(src,), kind="thread", key_field="name")
+        s_dec = section(items=(tgt,), kind="decision", key_field="topic")
+        result = _compute_inbound_edges(state(sections=(s_thread, s_dec)))
+        assert result["decision/b"] == [("thread/a", "ref")]
+
+    def test_typed_edge_carries_predicate(self):
+        from atoms import Edge
+        src = item(
+            {"name": "a"},
+            edges=(Edge(predicate="stakeholder", address="person:acme"),),
+        )
+        tgt = item({"handle": "acme"})
+        s_thread = section(items=(src,), kind="thread", key_field="name")
+        s_person = section(items=(tgt,), kind="person", key_field="handle")
+        result = _compute_inbound_edges(state(sections=(s_thread, s_person)))
+        assert result["person/acme"] == [("thread/a", "stakeholder")]
+
+    def test_target_absent_from_fold_yields_no_edge(self):
+        # No decision/b item present → nothing to hang the inbound edge on.
+        src = item({"name": "a"}, refs=("decision:b",))
+        s = section(items=(src,), kind="thread", key_field="name")
         result = _compute_inbound_edges(state(sections=(s,)))
-        assert "decision/b" in result
-        assert "thread/a" in result["decision/b"]
+        assert result == {}
 
     def test_no_refs(self):
         i1 = item({"name": "a"})

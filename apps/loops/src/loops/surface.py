@@ -41,7 +41,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from atoms import FoldItem, FoldState
+    from atoms import Edge, FoldItem, FoldState
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +80,11 @@ class Row:
     observer: str = ""
     origin: str = ""
     n: int = 1  # compression count (1 for event rows)
-    refs: tuple[str, ...] = ()  # OUTBOUND, verbatim
+    refs: tuple[str, ...] = ()  # OUTBOUND ref edges, verbatim (union predicate)
+    edges: tuple["Edge", ...] = ()  # OUTBOUND typed edges (predicate + address)
     inbound: int = 0  # MATERIALIZED (lifted from the lens) — was render-only
+    inbound_predicates: tuple[tuple[str, int], ...] = ()  # ←N broken out by
+    # predicate, e.g. (("stakeholder", 3), ("ref", 2)); sums to ``inbound``
     salience: int = 0  # MATERIALIZED = n + inbound (lifted from _salience)
     depth: int = 0  # >0 for ref-walk rows
     via_anchor: str | None = None  # the anchor whose ref pulled a walked row in
@@ -115,11 +118,12 @@ class Surface:
     schema: dict[str, KindView] = field(default_factory=dict)
     unfolded: dict[str, int] = field(default_factory=dict)
     source_facts: dict[str, list[dict]] = field(default_factory=dict)
-    inbound_edges: dict[str, list[str]] = field(default_factory=dict)
-    """target "kind/key" → [source "kind/key", ...] for --refs edge expansion.
-    Materialized ONCE in project() from the fold-order sections (via the lifted
-    _compute_inbound_edges), so the render reads it instead of rebuilding from
-    salience-ordered rows — which would reorder the per-target source lists."""
+    inbound_edges: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    """target "kind/key" → [(source "kind/key", predicate), ...] for --refs edge
+    expansion. Materialized ONCE in project() from the fold-order sections (via
+    the lifted _compute_inbound_edges), so the render reads it instead of
+    rebuilding from salience-ordered rows. ``predicate`` is the edge field name
+    ("ref" for the grandfathered union edge, else the declared edge field)."""
     window: Window = field(default_factory=Window)
 
 
@@ -134,29 +138,154 @@ class Surface:
 # ---------------------------------------------------------------------------
 
 
-def _compute_inbound_refs(data: FoldState) -> Counter:
-    """Count inbound references across all sections."""
-    inbound: Counter = Counter()
-    for section in data.sections:
-        for item in section.items:
-            for ref in item.refs:
-                inbound[ref] += 1
-    return inbound
+def _edge_corpus(data: FoldState) -> list[tuple[str, str, str]]:
+    """Flatten every OUTBOUND edge in the fold into ``(address, predicate, source)``.
 
+    Two edge kinds share one corpus so counts, predicate breakdowns, and the
+    ``--refs`` adjacency all derive from the SAME matching semantic:
 
-def _compute_inbound_edges(data: FoldState) -> dict[str, list[str]]:
-    """Build adjacency map: target → [source, ...] for edge expansion."""
-    edges: dict[str, list[str]] = {}
+    * ``ref`` — the grandfathered union edge (predicate ``"ref"``), one per
+      accumulated ``item.refs`` value.
+    * typed edges — declared ``edge <field> targets=<kind>`` projections
+      (predicate = field name), one per ``item.edges`` entry.
+
+    ``source`` is the emitting item's ``kind/key`` address (fold-order), so the
+    adjacency map preserves per-target source ordering.
+    """
+    corpus: list[tuple[str, str, str]] = []
     for section in data.sections:
         kf = section.key_field
         for item in section.items:
-            if not item.refs:
+            if not item.refs and not item.edges:
                 continue
             source = _item_full_key(item, kf, section.kind)
             if not source:
-                continue
+                # collect/keyless rows still contribute inbound to their targets
+                source = ""
             for ref in item.refs:
-                edges.setdefault(ref, []).append(source)
+                corpus.append((ref, "ref", source))
+            for edge in item.edges:
+                corpus.append((edge.address, edge.predicate, source))
+    return corpus
+
+
+# ---------------------------------------------------------------------------
+# Promotion candidates — the schema-side of the log→friction promotion pattern.
+# Surfaces UNDECLARED payload fields that already carry resolvable addresses,
+# so a reconcile pass can decide whether they earn an `edge` declaration.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PromotionCandidate:
+    """An undeclared field carrying resolvable addresses — an edge candidate."""
+
+    field: str
+    count: int                      # facts carrying a resolvable address here
+    target_kinds: tuple[str, ...]   # declared kinds its addresses point at
+    source_kinds: tuple[str, ...]   # kinds whose facts carry the field
+
+
+def _candidate_addr_kind(value: object) -> str | None:
+    """The addr-kind of an address-looking value, else None.
+
+    Mirrors resolve._is_addr_candidate + _split_addr (kept local so surface
+    stays a leaf): must be separator-bearing, whitespace-free; returns the
+    ``kind`` half of ``kind:key`` / ``kind/key``.
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or any(c.isspace() for c in v):
+        return None
+    if ":" in v:
+        return v.split(":", 1)[0] or None
+    if "/" in v:
+        return v.split("/", 1)[0] or None
+    return None
+
+
+def promotion_candidates(
+    state: FoldState, *, min_facts: int = 3
+) -> list[PromotionCandidate]:
+    """Undeclared address-bearing fields worth considering for an edge decl.
+
+    A field is a candidate when — across at least ``min_facts`` folded items —
+    it carries a value whose ``kind:key`` address resolves against a kind
+    DECLARED in this fold, and the field is NOT already ``ref``, a declared
+    edge, or the kind's own fold key (self-identity). This mechanizes the
+    log→friction promotion pattern for schema: capture stays declaration-free,
+    reconcile surfaces what has earned a declaration. Returns count-desc.
+    """
+    declared_kinds = {s.kind for s in state.sections}
+    counts: Counter = Counter()
+    targets: dict[str, set] = {}
+    sources: dict[str, set] = {}
+
+    for section in state.sections:
+        edge_fields = {f for f, _ in section.edge_fields}
+        skip = {"ref"} | edge_fields
+        if section.key_field:
+            skip.add(section.key_field)
+        for item in section.items:
+            for fld, value in item.payload.items():
+                if fld in skip or fld.endswith("_ref") or fld.startswith("_"):
+                    continue
+                addr_kind = _candidate_addr_kind(value)
+                if addr_kind is None or addr_kind not in declared_kinds:
+                    continue
+                counts[fld] += 1
+                targets.setdefault(fld, set()).add(addr_kind)
+                sources.setdefault(fld, set()).add(section.kind)
+
+    out = [
+        PromotionCandidate(
+            field=fld,
+            count=count,
+            target_kinds=tuple(sorted(targets[fld])),
+            source_kinds=tuple(sorted(sources[fld])),
+        )
+        for fld, count in counts.items()
+        if count >= min_facts
+    ]
+    out.sort(key=lambda c: (-c.count, c.field))
+    return out
+
+
+def _compute_inbound_refs(data: FoldState) -> Counter:
+    """Count inbound references (ref + typed edges) across all sections."""
+    inbound: Counter = Counter()
+    for addr, _pred, _src in _edge_corpus(data):
+        inbound[addr] += 1
+    return inbound
+
+
+def _address_matches_key(addr: str, key: str) -> bool:
+    """Three-form match (bare / ``/key`` / ``:key``) — the ref/edge semantic."""
+    return addr == key or addr.endswith(f"/{key}") or addr.endswith(f":{key}")
+
+
+def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
+    """Build adjacency map: target ``kind/key`` → [(source, predicate), ...].
+
+    Uses the three-form match (``_address_matches_key``) so an edge in any ref
+    form — bare key, ``kind/key``, or the canonical ``kind:key`` — resolves to
+    the target row's address, and the ``←`` expansion agrees with the ``←N``
+    salience count (both read the same corpus + matcher). Typed edges carry
+    their declared field as the predicate; ref edges carry ``"ref"``.
+    """
+    corpus = _edge_corpus(data)
+    edges: dict[str, list[tuple[str, str]]] = {}
+    for section in data.sections:
+        kf = section.key_field
+        for item in section.items:
+            key = _row_key(item, kf)
+            if not key:
+                continue
+            target = _address(section.kind, key, item.id)
+            for addr, pred, source in corpus:
+                if source and _address_matches_key(addr, key):
+                    edges.setdefault(target, []).append((source, pred))
     return edges
 
 
@@ -173,6 +302,30 @@ def _item_full_key(item: FoldItem, key_field: str | None, kind: str = "") -> str
 def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
     """Salience = n + inbound ref count."""
     return item.n + _inbound_count(item, key_field, inbound)
+
+
+def _inbound_predicates(
+    item: FoldItem,
+    key_field: str | None,
+    corpus: list[tuple[str, str, str]],
+) -> tuple[tuple[str, int], ...]:
+    """Break an item's inbound count out by predicate, count-desc then name.
+
+    Scans the SAME corpus + three-form matcher as ``_inbound_count`` (which
+    keys off ``_compute_inbound_refs``), so the breakdown SUMS to the ``←N``
+    total — the render can show ``←5 (3 via stakeholder, 2 via ref)`` and the
+    parts always reconcile. Keyless (collect) sources contribute here exactly
+    as they contribute to the count, even though they cannot be named in the
+    ``← source`` adjacency expansion.
+    """
+    key = _row_key(item, key_field)
+    if not key:
+        return ()
+    counts: Counter = Counter()
+    for addr, pred, _src in corpus:
+        if _address_matches_key(addr, key):
+            counts[pred] += 1
+    return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
@@ -339,6 +492,7 @@ def project(
     — project() yields every row; the lens/budget transform decides what to hide.
     """
     inbound = _compute_inbound_refs(state)
+    corpus = _edge_corpus(state)
     schema: dict[str, KindView] = {}
     rows: list[Row] = []
 
@@ -369,7 +523,9 @@ def project(
                     origin=item.origin,
                     n=item.n,
                     refs=tuple(item.refs),
+                    edges=tuple(item.edges),
                     inbound=inbound_count,
+                    inbound_predicates=_inbound_predicates(item, kf, corpus),
                     salience=item.n + inbound_count,
                     depth=0,
                     via_anchor=None,
@@ -400,7 +556,9 @@ def project(
                 origin=item.origin,
                 n=item.n,
                 refs=tuple(item.refs),
+                edges=tuple(item.edges),
                 inbound=inbound_count,
+                inbound_predicates=_inbound_predicates(item, kf, corpus),
                 salience=item.n + inbound_count,
                 depth=w.depth,
                 via_anchor=w.via_anchor,
@@ -710,7 +868,11 @@ def _row_to_dict(row: Row) -> dict:
         "origin": row.origin,
         "n": row.n,
         "refs": list(row.refs),
+        "edges": [{"predicate": e.predicate, "address": e.address} for e in row.edges],
         "inbound": row.inbound,
+        "inbound_predicates": [
+            {"predicate": p, "count": c} for p, c in row.inbound_predicates
+        ],
         "salience": row.salience,
         "depth": row.depth,
         "via_anchor": row.via_anchor,

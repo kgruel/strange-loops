@@ -3017,6 +3017,74 @@ parse {
         assert result is NotImplemented
 
 
+class TestEdgeDecl:
+    """Per-kind `edge` declaration parses into LoopDef.edges (typed edges)."""
+
+    def test_targets_prop(self):
+        from lang import EdgeDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  decision {
+    fold { items "by" "topic" }
+    edge "stakeholder" targets="person"
+  }
+}
+""")
+        assert vertex.loops["decision"].edges == (
+            EdgeDecl(field="stakeholder", target="person"),
+        )
+
+    def test_second_bare_arg(self):
+        from lang import EdgeDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  decision {
+    fold { items "by" "topic" }
+    edge "supersedes" "decision"
+  }
+}
+""")
+        assert vertex.loops["decision"].edges == (
+            EdgeDecl(field="supersedes", target="decision"),
+        )
+
+    def test_default_empty_when_undeclared(self):
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  change { fold { items "collect" 20 } }
+}
+""")
+        assert vertex.loops["change"].edges == ()
+
+    def test_missing_target_rejected(self):
+        with pytest.raises(ParseError, match="requires targets"):
+            parse_vertex("""\
+name "v"
+loops {
+  decision {
+    fold { items "by" "topic" }
+    edge "stakeholder"
+  }
+}
+""")
+
+    def test_duplicate_field_rejected(self):
+        with pytest.raises(ParseError, match="declared more than once"):
+            parse_vertex("""\
+name "v"
+loops {
+  decision {
+    fold { items "by" "topic" }
+    edge "stakeholder" targets="person"
+    edge "stakeholder" targets="team"
+  }
+}
+""")
+
+
 class TestPreviewDecl:
     """Per-kind `preview` declaration parses into LoopDef.preview_fields."""
 

@@ -370,12 +370,16 @@ def _load_boundary_condition(node: ckdl.Node, path: Path | None) -> "BoundaryCon
 
 def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
     """Load a loop definition (fold + boundary + search + parse + preview) from a node's children."""
+    from .ast import EdgeDecl
+
     folds: tuple[FoldDecl, ...] = ()
     boundary: Boundary | None = None
     search: tuple[str, ...] = ()
     parse: tuple[ParseStep, ...] = ()
     preview_fields: tuple[str, ...] = ()
     preview_seen = False
+    edges: list[EdgeDecl] = []
+    edge_fields_seen: set[str] = set()
 
     for child in node.children:
         if child.name == "fold":
@@ -411,12 +415,36 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
                 )
             preview_fields = fields
             preview_seen = True
+        elif child.name == "edge":
+            # edge "<field>" targets="<kind>"  (or a second bare arg for the kind)
+            if not child.args:
+                raise _error(
+                    "edge requires a field name (edge \"field\" targets=\"kind\")",
+                    path,
+                )
+            field_name = str(child.args[0])
+            target = child.properties.get("targets")
+            if target is None and len(child.args) >= 2:
+                target = child.args[1]
+            if target is None:
+                raise _error(
+                    f"edge '{field_name}' requires targets=\"<kind>\"",
+                    path,
+                )
+            target = str(target)
+            if field_name in edge_fields_seen:
+                raise _error(
+                    f"edge declared more than once for field '{field_name}'",
+                    path,
+                )
+            edge_fields_seen.add(field_name)
+            edges.append(EdgeDecl(field=field_name, target=target))
         else:
             raise _error(f"Unknown loop field: {child.name}", path)
 
     return LoopDef(
         folds=folds, boundary=boundary, search=search, parse=parse,
-        preview_fields=preview_fields,
+        preview_fields=preview_fields, edges=tuple(edges),
     )
 
 

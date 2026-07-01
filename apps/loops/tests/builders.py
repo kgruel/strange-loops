@@ -459,3 +459,60 @@ class StorePopulator:
     def facts(self) -> list[Fact]:
         """Return queued facts without writing (for inspection before done())."""
         return list(self._facts)
+
+
+# ---------------------------------------------------------------------------
+# Boundary vertex — shared fixture for CLI-smoke slices that need real ticks
+# ---------------------------------------------------------------------------
+#
+# Resolves friction:cli-smoke-needs-shared-boundary-vertex-fixture. The engine
+# builder exposes only loop-level ``boundary_every``, not vertex-level
+# boundaries, so every slice that needs a boundary-triggered tick used to
+# re-roll this KDL by hand (S4/S6/S7/S8, and test_fetch's local
+# ``_write_project_vertex``). This is the one shared definition.
+
+
+def write_boundary_vertex(dir_path: Path, *, name: str = "project") -> Path:
+    """Write a vertex with a vertex-level boundary on ``session.closed``.
+
+    Emitting a ``session status=closed`` fact triggers a boundary → tick. The
+    builder can't express vertex-level boundaries, so the KDL is written
+    directly — matching a real ``.loops/project.vertex``.
+    """
+    vpath = dir_path / f"{name}.vertex"
+    vpath.write_text(
+        f'name "{name}"\n'
+        f'store "./{name}.db"\n'
+        "\n"
+        "loops {\n"
+        '  decision { fold { items "by" "topic" } }\n'
+        '  thread   { fold { items "by" "name" } }\n'
+        '  log      { fold { items "collect" 20 } }\n'
+        '  session  { fold { items "by" "name" } }\n'
+        "\n"
+        '  boundary when="session" status="closed"\n'
+        "}\n",
+    )
+    return vpath
+
+
+def emit_fact(vpath: Path, kind: str, *, observer: str = "kyle", **parts) -> None:
+    """Emit one fact into a vertex's store via the real CLI emit path.
+
+    The end-to-end emit path (not StorePopulator) so boundary triggers,
+    signing, and tick cascade all fire as in production.
+    """
+    import argparse
+
+    from loops.main import cmd_emit
+
+    cmd_emit(
+        argparse.Namespace(
+            vertex=None,
+            kind=kind,
+            parts=[f"{k}={v}" for k, v in parts.items()],
+            observer=observer,
+            dry_run=False,
+        ),
+        vertex_path=vpath,
+    )

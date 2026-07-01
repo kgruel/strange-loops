@@ -464,7 +464,8 @@ class TestInboundDelta:
         rc = cmd_emit(ns, vertex_path=basic_vertex)
         assert rc == 0
         err = capsys.readouterr().err
-        assert "inbound +1 on decision/design/seed" in err
+        # ref is the grandfathered union edge → an inbound EDGE (not a bare pin).
+        assert "inbound edge via ref: decision/design/seed" in err
 
     def test_no_delta_without_verbose(self, basic_vertex, capsys):
         _emit(basic_vertex, "decision", topic="design/seed2", message="seed")
@@ -503,7 +504,7 @@ class TestInboundDelta:
         rc = cmd_emit(ns, vertex_path=basic_vertex)
         assert rc == 0
         err = capsys.readouterr().err
-        assert "inbound +1 on decision:design/seed" in err
+        assert "inbound edge via ref: decision:design/seed" in err
         assert "refs: 1 resolved" in err
 
     def test_colon_comma_ref_count_matches_addresses(self, basic_vertex, capsys):

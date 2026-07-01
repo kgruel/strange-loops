@@ -453,7 +453,7 @@ def cmd_emit(
     from loops.commands.resolve import (
         loops_home, _find_local_vertex, _resolve_vertex_for_dispatch,
         _resolve_writable_vertex, _resolve_vertex_store_path,
-        _resolve_entity_refs, classify_emit_status,
+        _resolve_entity_refs, _extract_edge_fields, classify_emit_status,
     )
     from painted import show, Block
     from painted.palette import current_palette
@@ -760,13 +760,31 @@ def cmd_emit(
                 _emit_lines(warn_lines)
                 if not quiet:
                     _emit_lines(primary_lines)
-                    # Inbound-delta (verbose): each resolved ref is one new
-                    # inbound edge landing on its target entity.
+                    # Inbound-delta (verbose): under the pin/edge split, a
+                    # resolved address is a graph EDGE only when its field is
+                    # declared (ref, or a typed edge field). Undeclared fields
+                    # get a provenance PIN ({field}_ref) that stays graph-inert
+                    # until someone declares the edge — so we must not call it
+                    # an inbound edge.
                     if verbose and resolved_refs:
-                        _emit_lines([
-                            (f"  → inbound +1 on {r.addr}", "muted")
-                            for r in resolved_refs
-                        ])
+                        edge_fields = (
+                            _extract_edge_fields(writable_path)
+                            if writable_path is not None else set()
+                        )
+
+                        def _delta_line(r):
+                            if r.field == "ref" or r.field in edge_fields:
+                                return (
+                                    f"  → inbound edge via {r.field}: {r.addr}",
+                                    "muted",
+                                )
+                            return (
+                                f"  pinned {r.field}_ref → {r.addr} "
+                                f"(declare 'edge {r.field}' to make it a graph edge)",
+                                "muted",
+                            )
+
+                        _emit_lines([_delta_line(r) for r in resolved_refs])
         finally:
             # Clean up the store connection
             if program.has_store:

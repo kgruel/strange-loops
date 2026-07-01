@@ -257,6 +257,26 @@ def _extract_kind_keys(vertex_path: Path) -> dict[str, str]:
     return kind_keys
 
 
+def _extract_edge_fields(vertex_path: Path) -> set[str]:
+    """Return the set of payload fields declared as typed edges by a vertex.
+
+    A declared edge licenses comma-split at emit time (a multi-valued overlay
+    edge is a set literal replaced atomically — ``stakeholder=acme,globex``),
+    mirroring the read-time ``_lift_edges`` split so pins and the projected
+    edge set agree. Best-effort: empty set on any vertex error.
+    """
+    try:
+        ast = _parse_vertex(vertex_path)
+    except LoopsError:
+        return set()
+
+    fields: set[str] = set()
+    for loop_def in ast.loops.values():
+        for edge in getattr(loop_def, "edges", ()):
+            fields.add(edge.field)
+    return fields
+
+
 # --- Topology ---
 
 
@@ -457,6 +477,7 @@ def _resolve_entity_refs(
         vertex_path = writable
 
     local_kind_keys = _extract_kind_keys(vertex_path)
+    local_edge_fields = _extract_edge_fields(vertex_path)
 
     # The emitted kind's own fold-key field is self-identity, not a ref to
     # another entity — skip it during the scan so namespace-prefixed values
@@ -540,9 +561,12 @@ def _resolve_entity_refs(
             continue
         if field_name == self_key_field:
             continue  # fold-key field — self-identity, not a ref
+        # ``ref`` (the union edge) and any DECLARED typed-edge field carry
+        # comma-separated addresses — a multi-valued overlay edge is a set
+        # literal. All other fields are scanned as a single address.
         addresses = (
             [a.strip() for a in value.split(",")]
-            if field_name == "ref"
+            if field_name == "ref" or field_name in local_edge_fields
             else [value]
         )
         resolved_ids: list[str] = []

@@ -169,6 +169,89 @@ def _edge_corpus(data: FoldState) -> list[tuple[str, str, str]]:
     return corpus
 
 
+# ---------------------------------------------------------------------------
+# Promotion candidates — the schema-side of the log→friction promotion pattern.
+# Surfaces UNDECLARED payload fields that already carry resolvable addresses,
+# so a reconcile pass can decide whether they earn an `edge` declaration.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PromotionCandidate:
+    """An undeclared field carrying resolvable addresses — an edge candidate."""
+
+    field: str
+    count: int                      # facts carrying a resolvable address here
+    target_kinds: tuple[str, ...]   # declared kinds its addresses point at
+    source_kinds: tuple[str, ...]   # kinds whose facts carry the field
+
+
+def _candidate_addr_kind(value: object) -> str | None:
+    """The addr-kind of an address-looking value, else None.
+
+    Mirrors resolve._is_addr_candidate + _split_addr (kept local so surface
+    stays a leaf): must be separator-bearing, whitespace-free; returns the
+    ``kind`` half of ``kind:key`` / ``kind/key``.
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or any(c.isspace() for c in v):
+        return None
+    if ":" in v:
+        return v.split(":", 1)[0] or None
+    if "/" in v:
+        return v.split("/", 1)[0] or None
+    return None
+
+
+def promotion_candidates(
+    state: FoldState, *, min_facts: int = 3
+) -> list[PromotionCandidate]:
+    """Undeclared address-bearing fields worth considering for an edge decl.
+
+    A field is a candidate when — across at least ``min_facts`` folded items —
+    it carries a value whose ``kind:key`` address resolves against a kind
+    DECLARED in this fold, and the field is NOT already ``ref``, a declared
+    edge, or the kind's own fold key (self-identity). This mechanizes the
+    log→friction promotion pattern for schema: capture stays declaration-free,
+    reconcile surfaces what has earned a declaration. Returns count-desc.
+    """
+    declared_kinds = {s.kind for s in state.sections}
+    counts: Counter = Counter()
+    targets: dict[str, set] = {}
+    sources: dict[str, set] = {}
+
+    for section in state.sections:
+        edge_fields = {f for f, _ in section.edge_fields}
+        skip = {"ref"} | edge_fields
+        if section.key_field:
+            skip.add(section.key_field)
+        for item in section.items:
+            for fld, value in item.payload.items():
+                if fld in skip or fld.endswith("_ref") or fld.startswith("_"):
+                    continue
+                addr_kind = _candidate_addr_kind(value)
+                if addr_kind is None or addr_kind not in declared_kinds:
+                    continue
+                counts[fld] += 1
+                targets.setdefault(fld, set()).add(addr_kind)
+                sources.setdefault(fld, set()).add(section.kind)
+
+    out = [
+        PromotionCandidate(
+            field=fld,
+            count=count,
+            target_kinds=tuple(sorted(targets[fld])),
+            source_kinds=tuple(sorted(sources[fld])),
+        )
+        for fld, count in counts.items()
+        if count >= min_facts
+    ]
+    out.sort(key=lambda c: (-c.count, c.field))
+    return out
+
+
 def _compute_inbound_refs(data: FoldState) -> Counter:
     """Count inbound references (ref + typed edges) across all sections."""
     inbound: Counter = Counter()

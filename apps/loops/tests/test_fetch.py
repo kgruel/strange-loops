@@ -9,6 +9,11 @@ from loops.commands.fetch import (
     _split_kind_key,
 )
 
+# Shared boundary-vertex fixture + emit helper
+# (friction:cli-smoke-needs-shared-boundary-vertex-fixture).
+from .builders import emit_fact as _emit
+from .builders import write_boundary_vertex
+
 
 class TestParseDuration:
     def test_days(self):
@@ -599,40 +604,7 @@ class TestTickDelta:
 
 
 def _write_project_vertex(tmp_path):
-    """Write a project vertex with a vertex-level boundary on session.closed.
-
-    The builder doesn't expose vertex-level boundaries, so we write the KDL
-    directly — matching what `.loops/project.vertex` looks like in practice.
-    """
-    vpath = tmp_path / "project.vertex"
-    vpath.write_text(
-        'name "project"\n'
-        'store "./project.db"\n'
-        '\n'
-        'loops {\n'
-        '  decision { fold { items "by" "topic" } }\n'
-        '  thread   { fold { items "by" "name" } }\n'
-        '  log      { fold { items "collect" 20 } }\n'
-        '  session  { fold { items "by" "name" } }\n'
-        '\n'
-        '  boundary when="session" status="closed"\n'
-        '}\n',
-    )
-    return vpath
-
-
-def _emit(vpath, kind, **parts):
-    from loops.main import cmd_emit
-    import argparse
-
-    cmd_emit(
-        argparse.Namespace(
-            vertex=None, kind=kind,
-            parts=[f"{k}={v}" for k, v in parts.items()],
-            observer="kyle", dry_run=False,
-        ),
-        vertex_path=vpath,
-    )
+    return write_boundary_vertex(tmp_path)
 
 
 class TestFetchTickWindows:

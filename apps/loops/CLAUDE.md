@@ -160,3 +160,11 @@ Templates dissolved: `loops init <name>` finds an existing config-level instance
 uv run --package loops pytest apps/loops/tests
 uv run --package loops pytest apps/loops/tests/golden  # snapshot tests only
 ```
+
+**Register-split lenses need a parity test.** Any lens with a
+`(data, zoom, width, *, piped)` signature renders one fetch through two
+registers (terse/piped/agent vs rich/TTY). They keep shipping faithfulness
+bugs (piped dropping `signed`/`share`/`span`; `width` clipping the agent
+channel) because each register is tested in isolation. Add a
+`assert_register_parity(...)` test (~3 lines) — see `tests/README.md` and
+`tests/parity.py`.

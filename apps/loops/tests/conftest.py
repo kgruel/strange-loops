@@ -90,6 +90,23 @@ def autoresearch_vertex(loops_home):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
+def boundary_vertex(tmp_path):
+    """A vertex with a vertex-level boundary on ``session.closed``.
+
+    Shared replacement for the ad-hoc boundary KDL every CLI-smoke slice used
+    to re-roll (friction:cli-smoke-needs-shared-boundary-vertex-fixture). Emit
+    facts with ``emit_fact`` and close a session to trigger a tick::
+
+        from .builders import emit_fact
+        emit_fact(boundary_vertex, "decision", topic="auth", message="JWT")
+        emit_fact(boundary_vertex, "session", name="kyle", status="closed")
+    """
+    from .builders import write_boundary_vertex
+
+    return write_boundary_vertex(tmp_path)
+
+
+@pytest.fixture
 def populated_store(project_vertex):
     """Project vertex with a few pre-populated facts. Returns (vertex_path, db_path)."""
     from .builders import StorePopulator

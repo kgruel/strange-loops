@@ -193,7 +193,7 @@ def _walk_refs(
                 continue
             anchor_addr = f"{section.kind}/{key_value}"
             visited.add(anchor_addr)
-            for ref in item.refs:
+            for ref in _outbound_addresses(item):
                 parsed = _parse_ref_to_kind_key(ref)
                 if parsed is None:
                     continue
@@ -233,7 +233,7 @@ def _walk_refs(
                         via_anchor=via_anchor, depth=depth,
                     ))
                     if depth < refs_depth:
-                        for ref in titem.refs:
+                        for ref in _outbound_addresses(titem):
                             parsed = _parse_ref_to_kind_key(ref)
                             if parsed is None:
                                 continue
@@ -251,6 +251,18 @@ def _walk_refs(
         source_facts=state.source_facts,
         walked=tuple(walked),
     )
+
+
+def _outbound_addresses(item) -> "list[str]":
+    """All outbound edge addresses of an item: ``ref`` union edges + typed edges.
+
+    Typed edges are declaration-lit (``edge <field> targets=<kind>``) and
+    normalized to ``kind:key`` at read time, so ``stakeholder=acme`` walks the
+    same as an explicit ``ref=person:acme``. Both feed the ref-graph frontier.
+    """
+    out = list(item.refs)
+    out.extend(edge.address for edge in getattr(item, "edges", ()))
+    return out
 
 
 def _parse_ref_to_kind_key(ref: str) -> "tuple[str, str] | None":

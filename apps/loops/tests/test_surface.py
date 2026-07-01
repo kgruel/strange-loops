@@ -676,9 +676,10 @@ def test_inbound_edges_materialized_in_fold_order():
         _decision("design/c"),
     )
     surface = project(state)
-    # design/c is referenced by a then b — sources in FOLD order
+    # design/c is referenced by a then b — sources in FOLD order, each tagged
+    # with its edge predicate ("ref" for the grandfathered union edge).
     assert surface.inbound_edges["decision/design/c"] == [
-        "decision/design/a", "decision/design/b",
+        ("decision/design/a", "ref"), ("decision/design/b", "ref"),
     ]
 
 

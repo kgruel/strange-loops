@@ -639,7 +639,9 @@ def _render_item_line(
     n_text = f" ×{item.n}" if is_by and item.n > 1 else ""
     ref_count = item.inbound  # materialized in project() (was _inbound_count)
     ref_in_text = f" ←{ref_count}" if ref_count > 0 else ""
-    ref_out_text = f" →{len(item.refs)}" if item.refs else ""
+    # Outbound = ref union edges + typed overlay edges (both point away).
+    out_count = len(item.refs) + len(item.edges)
+    ref_out_text = f" →{out_count}" if out_count else ""
 
     # Recency tag
     recency_text = ""
@@ -784,19 +786,39 @@ def _render_item_line(
             lines.append(Block.text(f"{detail_pad}{k}: {v}", fp.meta, width=width))
         # Outbound refs gated on "refs" visibility — not shown at DETAILED by default
 
+    # Predicate-labeled inbound summary — only when a typed edge is involved
+    # (a bare "N via ref" adds nothing). Shown at DETAILED+ where it fits.
+    if zoom >= Zoom.DETAILED:
+        pred_summary = _predicate_summary(item.inbound_predicates)
+        if pred_summary:
+            detail_pad = " " * (indent + 2)
+            lines.append(Block.text(
+                f"{detail_pad}inbound: ←{ref_count}{pred_summary}",
+                fp.ref_indicator, width=width,
+            ))
+
     # Edge expansion: gated on "refs" in visible, shown at any zoom >= SUMMARY
     if "refs" in visible and zoom >= Zoom.SUMMARY:
         edge_pad = " " * (indent + 2)
         # Inbound edges: who references this item? Row.address == the old
         # _item_full_key(item, key_field, kind) for keyed rows; keyless
-        # (collect) rows had "" then and contribute no edges now.
+        # (collect) rows had "" then and contribute no edges now. Each source
+        # is (source_addr, predicate) — label the predicate when it's a typed
+        # edge (not the grandfathered "ref" union edge).
         item_key = item.address if item.key is not None else ""
         if item_key and item_key in inbound_edges:
-            for source in inbound_edges[item_key]:
-                lines.append(Block.text(f"{edge_pad}← {source}", fp.ref_edge_in, width=width))
-        # Outbound edges
+            for source, predicate in inbound_edges[item_key]:
+                via = "" if predicate == "ref" else f" via {predicate}"
+                lines.append(Block.text(
+                    f"{edge_pad}← {source}{via}", fp.ref_edge_in, width=width))
+        # Outbound edges — ref union edges first, then typed overlay edges
+        # (labeled with their predicate).
         for ref in item.refs:
             lines.append(Block.text(f"{edge_pad}→ {ref}", fp.ref_edge_out, width=width))
+        for edge in item.edges:
+            lines.append(Block.text(
+                f"{edge_pad}→ {edge.address} via {edge.predicate}",
+                fp.ref_edge_out, width=width))
 
     # Source facts: gated on "facts" in visible, shown at any zoom >= SUMMARY
     if "facts" in visible and zoom >= Zoom.SUMMARY:
@@ -933,6 +955,20 @@ def _section_header(kind: str, count: int, *, piped: bool = False) -> str:
     if not kind.endswith("s"):
         label += "s"
     return f"{label} ({count}):"
+
+
+def _predicate_summary(inbound_predicates: tuple[tuple[str, int], ...]) -> str:
+    """Format an inbound predicate breakdown, but only when it adds information.
+
+    Returns e.g. ``" (3 via stakeholder, 2 via ref)"`` when a typed edge is
+    among the inbound predicates. A pure ``"ref"`` breakdown returns "" — the
+    bare ``←N`` badge already carries it, so labeling adds nothing (keeps the
+    grandfathered ref path visually unchanged).
+    """
+    preds = list(inbound_predicates)
+    if not preds or all(p == "ref" for p, _ in preds):
+        return ""
+    return " (" + ", ".join(f"{c} via {p}" for p, c in preds) + ")"
 
 
 def _first_field(payload: dict) -> tuple[str, str | None]:

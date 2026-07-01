@@ -854,7 +854,15 @@ def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.Argument
     Shared by the legacy ``_run_emit`` and the ``cli.views.emit`` pilot so the
     grammar (and every flag) is declared in exactly one place.
     """
-    parser = argparse.ArgumentParser(prog=prog, add_help=add_help)
+    parser = argparse.ArgumentParser(
+        prog=prog, add_help=add_help,
+        epilog=(
+            "Address-valued fields (kind:key) resolve to a {field}_ref pin. "
+            "Declaring 'edge <field> targets=<kind>' on the kind promotes the "
+            "field to a typed graph edge (overlay, retroactive, comma = a "
+            "multi-valued set, empty value clears it)."
+        ),
+    )
     parser.add_argument(
         "tokens", nargs="*", default=[],
         help="[vertex] <kind> [KEY=VALUE ... | message text]",

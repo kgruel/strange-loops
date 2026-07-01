@@ -244,7 +244,15 @@ sl cite REF1 REF2 -m "what prior informed this turn"
 ```
 
 Refs: `ref=decision:design/foo` or `ref=thread:arc-name`. Accumulate via
-repetition (`ref=A ref=B`) or comma (`ref=A,B`).
+repetition (`ref=A ref=B`) or comma (`ref=A,B`). `ref` is a UNION edge
+(attention-events accumulate).
+
+Typed edges: any payload field declared `edge "<field>" targets="<kind>"` on
+its kind becomes an OVERLAY graph edge (last-set wins, `field=` clears,
+`field=a,b` is a multi-valued set). Declaration is late-bound and retroactive —
+it lights up historical facts at read time (no re-emit). Undeclared
+address-fields stay inert provenance pins; `--lens reconcile` surfaces them as
+edge-declaration candidates. See decision:architecture/typed-edges-overlay-default.
 
 ## Conventions
 

@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-from painted import Zoom
 
 from loops.lenses.declarations import declarations_view, kind_stat_view
 from loops.lenses.store import stats_view
@@ -130,6 +128,37 @@ class TestLsVertexParity:
         data = _decl_data()
         assert_register_parity(
             declarations_view, data, load_bearing=["signed 1.2k/1.5k"]
+        )
+
+    def test_end_to_end_over_real_store(self, loops_home):
+        # End-to-end: exercise the real fetch → lens pipeline (not a hand-built
+        # dict) so a fetch path that drops a field on one channel is caught.
+        from engine.builder import fold_by, fold_collect, vertex
+
+        from loops.commands.ls import fetch_declarations
+
+        from .builders import emit_fact
+
+        vdir = loops_home / "e2eproj"
+        vdir.mkdir(parents=True, exist_ok=True)
+        vpath = vdir / "e2eproj.vertex"
+        (
+            vertex("e2eproj")
+            .store("./data/e2eproj.db")
+            .loop("decision", fold_by("topic"))
+            .loop("thread", fold_by("name"))
+            .loop("log", fold_collect("items", max_items=20))
+            .write(vpath)
+        )
+        emit_fact(vpath, "decision", topic="design/a", message="one")
+        emit_fact(vpath, "decision", topic="arch/x", message="two")
+        emit_fact(vpath, "thread", name="wrap", status="open")
+
+        data = fetch_declarations("e2eproj")
+        assert "error" not in data
+        assert data["facts"] == 3
+        assert_register_parity(
+            declarations_view, data, load_bearing=decl_header_tokens(data)
         )
 
 

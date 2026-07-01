@@ -768,7 +768,7 @@ def cmd_emit(
                     # an inbound edge.
                     if verbose and resolved_refs:
                         edge_fields = (
-                            _extract_edge_fields(writable_path)
+                            _extract_edge_fields(writable_path, kind)
                             if writable_path is not None else set()
                         )
 

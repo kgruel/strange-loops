@@ -294,3 +294,39 @@ def test_receipt_wording_edge_vs_pin(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "inbound edge via stakeholder: person:acme" in err
     assert "pinned blocks_ref" in err
+
+
+def test_edge_declaration_is_kind_scoped_at_emit(tmp_path, capsys):
+    """A field declared as an edge on ONE kind is not an edge on another.
+
+    Regression: _extract_edge_fields used to union edge declarations across
+    all kinds, so `stakeholder` (declared only on decision) was comma-split
+    and receipt-claimed as an edge on a team emit too — a write-time claim
+    the read-time per-kind projection never realized.
+    """
+    p = tmp_path / "t.vertex"
+    _write(p, _WITH_EDGE)
+    _emit(p, "person", handle="acme", name="Acme")
+    _emit(p, "person", handle="globex", name="Globex")
+    capsys.readouterr()
+    ns = argparse.Namespace(
+        vertex=None, kind="team",
+        parts=["name=alpha", "stakeholder=acme,globex"],
+        observer="", dry_run=False, verbose=1,
+    )
+    cmd_emit(ns, vertex_path=p)
+    err = capsys.readouterr().err
+    # Not an edge on team: no comma-split, no edge claim in the receipt.
+    assert "inbound edge via stakeholder" not in err
+    state = vertex_fold(p)
+    team = _item(state, "team", "alpha")
+    assert team is not None
+    assert team.edges == ()
+    # Value survives verbatim — not split, not pinned as two refs.
+    assert team.payload.get("stakeholder") == "acme,globex"
+    assert "stakeholder_ref" not in team.payload
+    # And on decision the same field IS an edge with comma-split intact.
+    _emit(p, "decision", topic="design/foo", stakeholder="acme,globex", message="x")
+    state = vertex_fold(p)
+    dec = _item(state, "decision", "design/foo")
+    assert {e.address for e in dec.edges} == {"person:acme", "person:globex"}

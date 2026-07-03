@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from painted import Block, Style, Zoom, border, join_vertical, ROUNDED
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
+from ._grammar import block as _line
+from ._grammar import ensure_utc, recency, stamp
 from .gist import content_gist
 
 
@@ -57,7 +59,7 @@ def _render_minimal(data: dict, width: int, p: LoopsPalette) -> Block:
 
     freshness = data.get("freshness")
     if freshness is not None:
-        parts.append(f"fresh {_relative_time(freshness)}")
+        parts.append(f"fresh {recency(freshness)}")
 
     text = " · ".join(parts)
     return Block.text(text, p.metadata, width=width)
@@ -89,7 +91,7 @@ def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
     for kind, info in fact_kinds.items():
         count = info["count"]
         freshness_dt = info.get("latest")
-        fresh_str = _relative_time(freshness_dt) if freshness_dt else ""
+        fresh_str = recency(freshness_dt) if freshness_dt else ""
         sparkline = tick_sparklines.get(kind, "")
 
         # Kind name — colored
@@ -141,7 +143,7 @@ def _render_detailed(data: dict, width: int, p: LoopsPalette) -> Block:
     for kind, info in fact_kinds.items():
         count = info["count"]
         freshness_dt = info.get("latest")
-        fresh_str = _relative_time(freshness_dt) if freshness_dt else ""
+        fresh_str = recency(freshness_dt) if freshness_dt else ""
         count_str = _format_count(count)
 
         # Section header: kind name + count + freshness
@@ -189,14 +191,14 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
     _epoch_min = datetime.min.replace(tzinfo=timezone.utc)
     sorted_kinds = sorted(
         fact_kinds.items(),
-        key=lambda kv: _ensure_utc(kv[1]["latest"]) if isinstance(kv[1].get("latest"), datetime) else _epoch_min,
+        key=lambda kv: ensure_utc(kv[1]["latest"]) if isinstance(kv[1].get("latest"), datetime) else _epoch_min,
         reverse=True,
     )
 
     for i, (kind, info) in enumerate(sorted_kinds):
         count = info["count"]
         freshness_dt = info.get("latest")
-        fresh_str = _relative_time(freshness_dt) if freshness_dt else "never"
+        fresh_str = recency(freshness_dt) if freshness_dt else "never"
         count_str = _format_count(count)
         kind_style = p.kind_style(kind)
 
@@ -241,7 +243,7 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
     freshness = data.get("freshness")
     title_parts = [f"{kind_count} kinds", f"{_format_count(facts_total)} facts"]
     if freshness is not None:
-        title_parts.append(f"fresh {_relative_time(freshness)}")
+        title_parts.append(f"fresh {recency(freshness)}")
     title = " · ".join(title_parts)
 
     return border(inner, ROUNDED, p.chrome, title=title, title_style=p.header)
@@ -301,7 +303,7 @@ def tick_chain_view(
     dim = Style(dim=True)
     rows: list[Block] = [_line(rollup, p.header, width)]
     for w in windows:
-        time_str = _tick_time(w["ts"])
+        time_str = stamp(w["ts"])
         idx = f"#{w.get('index', 0)}"
         name = w.get("name", "")
         if attest:
@@ -328,7 +330,7 @@ def tick_chain_view(
         if zoom >= Zoom.FULL and w.get("since") is not None:
             observer = f" · {w['observer']}" if w.get("observer") else ""
             rows.append(_line(
-                f"        window: {_tick_time(w['since'])} → {time_str}{observer}",
+                f"        window: {stamp(w['since'])} → {time_str}{observer}",
                 dim, width,
             ))
 
@@ -389,18 +391,6 @@ def stats_view(
 # ---------------------------------------------------------------------------
 
 
-def _line(text: str, style: Style, width: int | None) -> Block:
-    """Block.text honoring the piped contract — width=None → natural size."""
-    if width is None:
-        return Block.text(text, style)
-    return Block.text(text, style, width=width)
-
-
-def _tick_time(ts: float) -> str:
-    """Epoch-seconds → 'YYYY-MM-DD HH:MM' (UTC), greppable and stable."""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-
 def _format_count(n: int) -> str:
     """Human-friendly count: 1703 -> '1.7k', 42 -> '42'."""
     if n >= 10_000:
@@ -408,35 +398,6 @@ def _format_count(n: int) -> str:
     if n >= 1000:
         return f"{n / 1000:.1f}k"
     return str(n)
-
-
-def _ensure_utc(dt: datetime) -> datetime:
-    """Normalize to UTC — assume naive datetimes are UTC."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
-
-def _relative_time(dt: datetime) -> str:
-    """Human-friendly relative timestamp."""
-    if not isinstance(dt, datetime):
-        return "?"
-    now = datetime.now(timezone.utc)
-    delta = now - _ensure_utc(dt)
-    seconds = int(delta.total_seconds())
-
-    if seconds < 0:
-        return "just now"
-    if seconds < 60:
-        return f"{seconds}s ago"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h ago"
-    days = hours // 24
-    return f"{days}d ago"
 
 
 def _time_range(kinds: dict) -> str:
@@ -447,11 +408,11 @@ def _time_range(kinds: dict) -> str:
         e = info.get("earliest")
         l = info.get("latest")
         if isinstance(e, datetime):
-            e = _ensure_utc(e)
+            e = ensure_utc(e)
             if earliest is None or e < earliest:
                 earliest = e
         if isinstance(l, datetime):
-            l = _ensure_utc(l)
+            l = ensure_utc(l)
             if latest is None or l > latest:
                 latest = l
 

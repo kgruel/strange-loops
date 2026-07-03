@@ -63,7 +63,7 @@ def _render_all() -> list[tuple[str, str, str]]:
         block_to_text(stream_view(SAMPLE_STREAM, ZOOM, WIDTH)),
     ))
 
-    with patch("loops.lenses.store._relative_time", _frozen_relative_time):
+    with patch("loops.lenses.store.recency", _frozen_relative_time):
         entries.append((
             "store",
             "Store inspection — ticks, facts, freshness.",

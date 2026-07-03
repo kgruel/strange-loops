@@ -85,6 +85,12 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 - `compile`, `run`, `store`, `test`, `validate`, `vertices`, `pop`
 
 **Utilities** (imported by other lenses):
+- `_grammar` — the shared static-grammar vocabulary: ONE time vocabulary
+  (`recency`/`clock`/`date_key`/`short_date`/`stamp`/`full_iso`/`duration`),
+  the width-honoring `block` helper, `DateGrouper`, and the tick envelope
+  rows (`attest_line`, `tick_drill_rows`). Never hand-roll a timestamp
+  format or a `width=None` guard in a lens — import it from here.
+- `_statview` — rich-TTY stat toolkit (card, stat_table, spark, meters)
 - `gist` — content extraction from payloads (`content_gist(kind, payload)`)
 
 ## Writing a Lens

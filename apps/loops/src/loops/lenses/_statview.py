@@ -32,7 +32,7 @@ from painted import (
 from painted.views import Column, Overflow, TableState, table
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
-from .store import _ensure_utc, _relative_time
+from ._grammar import ensure_utc, recency
 
 # Column gap is two spaces; the header rule fills the gap with ─ so it reads as
 # one continuous line. Corners are unused by table() (it only consumes
@@ -94,12 +94,12 @@ def freshness_style(p: LoopsPalette, dt: datetime | None) -> Style:
     glows — the resumption orient, "where did I leave off", made visible."""
     if dt is None:
         return p.metadata
-    secs = (datetime.now(timezone.utc) - _ensure_utc(dt)).total_seconds()
+    secs = (datetime.now(timezone.utc) - ensure_utc(dt)).total_seconds()
     return p.freshness_style(secs)
 
 
 def updated_text(dt: datetime | None) -> str:
-    return _relative_time(dt) if isinstance(dt, datetime) else "—"
+    return recency(dt) if isinstance(dt, datetime) else "—"
 
 
 # ---------------------------------------------------------------------------

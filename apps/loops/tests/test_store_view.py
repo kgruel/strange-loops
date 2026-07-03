@@ -8,7 +8,8 @@ import pytest
 from painted import Zoom
 from painted.views import ListState
 from loops.commands.store import _bucket_timestamps, _sparkline_str
-from loops.lenses.store import store_view, stats_view, tick_chain_view, _relative_time
+from loops.lenses.store import store_view, stats_view, tick_chain_view
+from loops.lenses._grammar import recency
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
 
 from .helpers import block_to_text
@@ -76,7 +77,7 @@ class TestStoreViewRendering:
     @pytest.mark.parametrize(
         ("zoom", "present", "min_height"),
         [
-            (Zoom.SUMMARY, ["hn.story", "rss.item", "3.2k", "2.8k", "ago"], 3),
+            (Zoom.SUMMARY, ["hn.story", "rss.item", "3.2k", "2.8k", "1h"], 3),
             (Zoom.DETAILED, ["hn.story", "rss.item", "3.2k"], 5),
             (Zoom.FULL, ["3 kinds", "facts"], 5),
         ],
@@ -93,7 +94,6 @@ class TestStoreViewRendering:
         assert "3 kinds" in text
         assert "6.5k facts" in text or "6462" in text or "6.4k" in text
         assert "fresh" in text
-        assert "ago" in text
         assert text.index("kinds") < text.index("facts")
         assert block.height >= 1
 
@@ -103,24 +103,24 @@ class TestStoreViewRendering:
 
 
 class TestRelativeTime:
-    def test_seconds(self):
+    def test_seconds_is_now(self):
         now = datetime.now(timezone.utc)
-        assert "s ago" in _relative_time(now - timedelta(seconds=30))
+        assert recency(now - timedelta(seconds=30)) == "now"
 
     def test_minutes(self):
         now = datetime.now(timezone.utc)
-        assert "m ago" in _relative_time(now - timedelta(minutes=5))
+        assert recency(now - timedelta(minutes=5)) == "5m"
 
     def test_hours(self):
         now = datetime.now(timezone.utc)
-        assert "h ago" in _relative_time(now - timedelta(hours=3))
+        assert recency(now - timedelta(hours=3)) == "3h"
 
     def test_days(self):
         now = datetime.now(timezone.utc)
-        assert "d ago" in _relative_time(now - timedelta(days=2))
+        assert recency(now - timedelta(days=2)) == "2d"
 
-    def test_non_datetime_returns_question(self):
-        assert _relative_time("not a datetime") == "?"
+    def test_non_datetime_returns_empty(self):
+        assert recency("not a datetime") == ""
 
 
 # ── Sparkline tests ─────────────────────────────────────────
@@ -426,16 +426,16 @@ class TestStoreViewEdges:
         assert _format_count(10000) == "10k"
 
     def test_ensure_utc_naive(self):
-        """_ensure_utc with naive datetime (L267)."""
-        from loops.lenses.store import _ensure_utc
+        """ensure_utc with naive datetime."""
+        from loops.lenses._grammar import ensure_utc
         naive = datetime(2024, 1, 1, 12, 0, 0)  # no tzinfo
-        result = _ensure_utc(naive)
+        result = ensure_utc(naive)
         assert result.tzinfo is not None
 
     def test_relative_time_future(self):
-        """_relative_time with future date → 'just now' (L280)."""
+        """recency with future date → 'now'."""
         future = datetime.now(timezone.utc) + timedelta(seconds=5)
-        assert _relative_time(future) == "just now"
+        assert recency(future) == "now"
 
     def test_time_range_empty(self):
         """_time_range with no timestamps → '' (L310)."""

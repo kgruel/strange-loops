@@ -1,6 +1,6 @@
-disk (20)  5m ago
+disk (20)  5m
   /dev/sda1
   /dev/sda2
 
-memory (22)  5m ago
+memory (22)  5m
   {'used_mb': 4096, 'total_mb': 16384}

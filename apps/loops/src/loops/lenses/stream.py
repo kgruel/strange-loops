@@ -8,35 +8,8 @@ from typing import Any
 from painted import Block, Style, Zoom, join_vertical, pad
 from painted.views import record_line
 
-
-def _block(text: str, style: Style, width: int | None) -> Block:
-    """Create a Block, respecting width=None (no truncation)."""
-    if width is not None:
-        return Block.text(text, style, width=width)
-    return Block.text(text, style)
-
-
-def attest_line(envelope: dict | None) -> str:
-    """Render a tick's witness-era envelope as one header line.
-
-    The envelope is the attestation metadata added at append time
-    (chain link, signature, fact cursor) — see StoreReader.ticks_between.
-    Absent envelope (not read, or range mode) renders nothing. An
-    unchained envelope renders explicitly — pre-chain tick or aggregate
-    read, neither of which attests.
-    """
-    if envelope is None:
-        return ""
-    if not envelope.get("chained"):
-        return "  attest: none (no chain envelope)"
-    parts = ["chained", "signed" if envelope.get("signed") else "unsigned"]
-    line = f"  attest: {' · '.join(parts)}"
-    kind = envelope.get("cursor_kind", "")
-    if kind:
-        preview = envelope.get("cursor_preview", "")
-        target = f'{kind}: "{preview}"' if preview else kind
-        line += f" · cursor → {target}"
-    return line
+from ._grammar import DateGrouper, coerce_dt, tick_drill_rows
+from ._grammar import block as _block
 
 
 def stream_view(
@@ -88,34 +61,12 @@ def stream_view(
 
     blocks: list[Block] = []
     dim_style = Style(dim=True)
-    current_date = None
+    grouper = DateGrouper()
 
-    # Tick drill-down header
+    # Tick drill-down header — shared grammar rows + this view's fact count.
     if tick_meta is not None:
-        boundary = tick_meta.get("boundary", {})
-        trigger = ""
-        if boundary:
-            bname = boundary.get("name", "")
-            bstatus = boundary.get("status", "")
-            trigger = f" — {bname} {bstatus}" if bname else ""
-
-        range_end = tick_meta.get("range_end")
-        if range_end is not None:
-            title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}"
-        else:
-            title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
-        blocks.append(_block(title, Style(bold=True), width))
-        if tick_meta.get("since") and tick_meta.get("ts"):
-            blocks.append(
-                _block(
-                    f"  window: {tick_meta['since']} → {tick_meta['ts']}",
-                    dim_style,
-                    width,
-                )
-            )
-        attest = attest_line(tick_meta.get("envelope"))
-        if attest:
-            blocks.append(_block(attest, dim_style, width))
+        for text, style in tick_drill_rows(tick_meta):
+            blocks.append(_block(text, style, width))
         blocks.append(_block(f"  {len(facts)} facts", dim_style, width))
         blocks.append(_block("", Style(), width))
 
@@ -138,20 +89,10 @@ def stream_view(
     rec_width = None if width is None else max(width - 2, 1)
 
     for f in facts:
-        ts = f["ts"]
-        if isinstance(ts, str):
-            dt = datetime.fromisoformat(ts)
-        elif isinstance(ts, datetime):
-            dt = ts
-        else:
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = coerce_dt(f["ts"]) or datetime.fromtimestamp(0, tz=timezone.utc)
 
-        date_str = dt.strftime("%Y-%m-%d")
-        if date_str != current_date:
-            if current_date is not None:
-                blocks.append(_block("", Style(), width))
-            blocks.append(_block(f"{date_str}:", Style(bold=True), width))
-            current_date = date_str
+        for text, style in grouper.header_rows(dt):
+            blocks.append(_block(text, style, width))
 
         kind_str = f["kind"]
         payload = f["payload"]

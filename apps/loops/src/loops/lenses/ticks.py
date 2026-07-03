@@ -1,39 +1,14 @@
 """Ticks lens — zoom-aware rendering of tick history and drill-down."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from painted import Block, Style, Zoom
 
-
-def _block(text: str, style: Style, width: int | None) -> Block:
-    if width is not None:
-        return Block.text(text, style, width=width)
-    return Block.text(text, style)
-
-
-def _format_duration(start: datetime, end: datetime) -> str:
-    """Human-readable duration between two datetimes."""
-    delta = end - start
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return f"{secs}s"
-    if secs < 3600:
-        return f"{secs // 60}m"
-    if secs < 86400:
-        hours = secs // 3600
-        mins = (secs % 3600) // 60
-        return f"{hours}h{mins}m" if mins else f"{hours}h"
-    days = secs // 86400
-    hours = (secs % 86400) // 3600
-    return f"{days}d{hours}h" if hours else f"{days}d"
-
-
-def _parse_ts(ts: str | datetime) -> datetime:
-    if isinstance(ts, datetime):
-        return ts
-    return datetime.fromisoformat(ts)
+from ._grammar import DateGrouper, clock
+from ._grammar import block as _block
+from ._grammar import coerce_dt as _parse_ts
+from ._grammar import duration as _format_duration
 
 
 def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
@@ -58,20 +33,17 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
     rows: list[tuple[str, Style]] = []
     dim = Style(dim=True)
-    current_date = None
+    grouper = DateGrouper()
 
     for i, tick in enumerate(ticks):
         ts = _parse_ts(tick["ts"])
+        if ts is None:
+            continue
         since = _parse_ts(tick["since"]) if tick.get("since") else None
 
-        date_str = ts.strftime("%Y-%m-%d")
-        if date_str != current_date:
-            if current_date is not None:
-                rows.append(("", Style()))
-            rows.append((f"{date_str}:", Style(bold=True)))
-            current_date = date_str
+        rows.extend(grouper.header_rows(ts))
 
-        time_str = ts.strftime("%H:%M")
+        time_str = clock(ts)
         boundary = tick.get("boundary", {})
         kind_counts = tick.get("kind_counts", {})
 

@@ -14,26 +14,23 @@ from .helpers import block_to_text
 
 
 def _frozen_relative_time(dt: datetime) -> str:
-    """Deterministic _relative_time: always relative to REF_DT + 5 minutes."""
-    now = REF_DT + timedelta(minutes=5)
-    delta = now - dt
-    seconds = int(delta.total_seconds())
-    if seconds < 0:
-        return "just now"
-    if seconds < 60:
-        return f"{seconds}s ago"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h ago"
-    days = hours // 24
-    return f"{days}d ago"
+    """Deterministic recency: the grammar vocabulary, frozen at REF_DT + 5m."""
+    age = ((REF_DT + timedelta(minutes=5)) - dt).total_seconds()
+    if age < 60:
+        return "now"
+    if age < 3600:
+        return f"{int(age / 60)}m"
+    if age < 86400:
+        return f"{int(age / 3600)}h"
+    if age < 604800:
+        return f"{int(age / 86400)}d"
+    if age < 2592000:
+        return f"{int(age / 604800)}w"
+    return f"{dt.strftime('%b')} {dt.day}"
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_store_demo(golden, zoom):
-    with patch("loops.lenses.store._relative_time", _frozen_relative_time):
+    with patch("loops.lenses.store.recency", _frozen_relative_time):
         block = store_view(SAMPLE_STORE, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")

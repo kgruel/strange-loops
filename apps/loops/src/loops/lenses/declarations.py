@@ -29,7 +29,8 @@ from ._statview import (
     stat_table,
     updated_text,
 )
-from .store import _format_count, _relative_time
+from ._grammar import recency
+from .store import _format_count
 
 
 _SECTION_TITLES = {
@@ -110,7 +111,7 @@ def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
         cols.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
     if mtime is not None:
         dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-        cols.append(f"updated {_relative_time(dt)}")
+        cols.append(f"updated {recency(dt)}")
     head = Block.text("   ".join(cols), Style(bold=True), width=width)
 
     nobs = len(data.get("observers") or [])
@@ -186,7 +187,7 @@ def _vertex_card_sublines(data: dict[str, Any]) -> list[str]:
         bits.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
     if mtime is not None:
         dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-        bits.append(f"updated {_relative_time(dt)}")
+        bits.append(f"updated {recency(dt)}")
 
     sub = [" · ".join(bits)] if bits else []
     decl = _decl_tally(data)
@@ -440,7 +441,7 @@ def _kind_card_sublines(data: dict[str, Any]) -> list[str]:
         line2.append(f"span {span}")
     latest_dt = _kind_dt(data.get("latest"))
     if latest_dt is not None:
-        line2.append(f"updated {_relative_time(latest_dt)}")
+        line2.append(f"updated {recency(latest_dt)}")
     sub.append(" · ".join(line2))
     return sub
 
@@ -567,7 +568,7 @@ def _kind_stat_plain(data: dict[str, Any], width: int | None) -> Block:
         meta.append(f"span {span}")
     ldt = _kind_dt(data.get("latest"))
     if ldt is not None:
-        meta.append(f"updated {_relative_time(ldt)}")
+        meta.append(f"updated {recency(ldt)}")
     lines.append(Block.text("  " + " · ".join(meta), Style(dim=True), width=width))
 
     if not entries:
@@ -643,7 +644,7 @@ def _render_kind_stat(
         dt = latest if isinstance(latest, datetime) else datetime.fromtimestamp(
             float(latest), tz=timezone.utc
         )
-        cols.append(f"updated {_relative_time(dt)}")
+        cols.append(f"updated {recency(dt)}")
     return Block.text("  " + "   ".join(cols), Style(), width=width)
 
 

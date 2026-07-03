@@ -26,14 +26,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from datetime import datetime, timezone
-
 from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
 
 from painted.palette import current_palette
 
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
 from loops.surface import project  # runtime: FoldState → Surface (idempotent)
+
+from ._grammar import full_iso as _format_ts_full
+from ._grammar import recency as _recency_tag
+from ._grammar import short_date as _format_date
 
 if TYPE_CHECKING:
     from atoms import FoldItem  # grouping-helper hints (duck-typed on .payload)
@@ -989,62 +991,5 @@ def _find_body_entry(payload: dict, used_label_field: str | None) -> tuple[str |
     return None, None
 
 
-def _recency_tag(ts) -> str:
-    """Compact recency indicator from timestamp.
-
-    Returns relative time like '2h', '3d', '2w' for recent items,
-    month abbreviation for older ones.
-    """
-    import time
-
-    if ts is None:
-        return ""
-    if isinstance(ts, str):
-        try:
-            epoch = datetime.fromisoformat(ts).timestamp()
-        except ValueError:
-            return ""
-    elif isinstance(ts, (int, float)):
-        epoch = ts
-    else:
-        return ""
-    age = time.time() - epoch
-    if age < 0:
-        return "now"
-    if age < 3600:
-        return f"{int(age / 60)}m"
-    if age < 86400:
-        return f"{int(age / 3600)}h"
-    if age < 604800:
-        return f"{int(age / 86400)}d"
-    if age < 2592000:
-        return f"{int(age / 604800)}w"
-    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-    return f"{dt.strftime('%b')} {dt.day}"
-
-
-def _format_date(ts) -> str:
-    """Format timestamp as short date (e.g. 'Feb 27')."""
-    if isinstance(ts, str):
-        try:
-            dt = datetime.fromisoformat(ts)
-        except ValueError:
-            return ts[:10] if len(ts) >= 10 else ts
-    elif isinstance(ts, datetime):
-        dt = ts
-    elif isinstance(ts, (int, float)):
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    else:
-        return "?"
-    return f"{dt.strftime('%b')} {dt.day}"
-
-
-def _format_ts_full(ts) -> str:
-    """ISO timestamp for FULL zoom."""
-    if isinstance(ts, str):
-        return ts
-    if isinstance(ts, datetime):
-        return ts.isoformat(timespec="seconds")
-    if isinstance(ts, (int, float)):
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
-    return "?"
+# _recency_tag / _format_date / _format_ts_full now live in ._grammar
+# (recency / short_date / full_iso) — imported at the top of this module.

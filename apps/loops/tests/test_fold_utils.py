@@ -82,7 +82,7 @@ class TestRecencyTag:
     def test_iso_string(self):
         ts = datetime.now(tz=timezone.utc).isoformat()
         result = _recency_tag(ts)
-        assert result.endswith("m") or result == "0m"
+        assert result == "now"
 
 
 # ---------------------------------------------------------------------------

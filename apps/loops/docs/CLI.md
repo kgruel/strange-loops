@@ -44,8 +44,8 @@ Event stream — chronological facts.
 Store inspection — ticks, facts, freshness.
 
 ```
-disk     ▁▂▃▅▇█▅▃     20    5m ago  /dev/sda1
-memory   ▁▃▅▇     22    5m ago  {'used_mb': 4096, 'total_mb': 16384}
+disk     ▁▂▃▅▇█▅▃     20        5m  /dev/sda1
+memory   ▁▃▅▇     22        5m  {'used_mb': 4096, 'total_mb': 16384}
 ```
 
 ## `compile (loop)`

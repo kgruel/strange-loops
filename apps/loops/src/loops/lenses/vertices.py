@@ -20,8 +20,9 @@ from painted import Block, Line, Span, Style, Zoom, join_vertical
 
 from ..palette import DEFAULT_PALETTE
 from ._helpers import elide
+from ._grammar import recency
 from ._statview import freshness_style
-from .store import _format_count, _relative_time
+from .store import _format_count
 
 
 def _fmt_mtime(mtime: float | None) -> str:
@@ -29,7 +30,7 @@ def _fmt_mtime(mtime: float | None) -> str:
     if mtime is None:
         return "—"
     dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-    return f"updated {_relative_time(dt)}"
+    return f"updated {recency(dt)}"
 
 
 def _rel_mtime(mtime: float | None) -> str:
@@ -38,7 +39,7 @@ def _rel_mtime(mtime: float | None) -> str:
     'updated' word (kept on the piped register) is redundant chrome here."""
     if mtime is None:
         return "—"
-    return _relative_time(datetime.fromtimestamp(mtime, tz=timezone.utc))
+    return recency(datetime.fromtimestamp(mtime, tz=timezone.utc))
 
 
 # Vertex-type glyphs — the fill encodes "owns its own facts": ◆ instance (own

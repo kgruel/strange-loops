@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical, pad
+from painted import Block, Style, Zoom, join_horizontal, join_vertical
 from painted.views import record_line
 
-from ._grammar import DateGrouper, coerce_dt, tick_drill_rows
+from ._grammar import DateGrouper, coerce_dt, rail_glyph, tick_drill_rows
 from ._grammar import block as _block
 
 
@@ -38,7 +38,8 @@ def stream_view(
     # Piped register is information-faithful: force width=None so an
     # inherited COLUMNS never clips the agent channel (observation
     # rendering/piped-faithfulness-forces-width-none).
-    if piped or (piped is None and width is None):
+    is_piped = bool(piped or (piped is None and width is None))
+    if is_piped:
         width = None
 
     # Normalize input format
@@ -97,6 +98,9 @@ def stream_view(
     # (fact id, observer, origin) is grafted as continuation lines below —
     # record_line owns the record, loops owns the fact-envelope context.
     plens = _stream_payload_lens(fold_meta)
+    # Leading slot = the rail gutter (TTY: glyph+space) or the TIER column
+    # (piped: tier word). Either way it costs the same 2 (TTY) / column (piped)
+    # the record is inset by, so the record body budget stays aligned.
     rec_width = None if width is None else max(width - 2, 1)
 
     for f in facts:
@@ -115,7 +119,20 @@ def stream_view(
         rec = record_line(
             dt, kind_str, payload, rec_zoom, rec_width, payload_lens=plens
         )
-        blocks.append(pad(rec, left=2))
+        # Rail inheritance (G4): the fact's tier came from the entity Surface
+        # (fetch_stream → tier_map). TTY renders the rail glyph in the gutter;
+        # the piped ledger carries the tier as a WORD (a pipe consumer can't
+        # reconstruct the vertex-population quantile a glyph encodes).
+        tier = f.get("tier", "")
+        if is_piped:
+            label = tier or "untiered"
+            blocks.append(join_horizontal(
+                _block(f"{label:<8}  ", Style(), None), rec,
+            ))
+        else:
+            glyph = rail_glyph(tier)
+            gstyle = Style(bold=True) if tier == "high" else Style(dim=True)
+            blocks.append(join_horizontal(Block.text(f"{glyph} ", gstyle), rec))
 
         # Fact-envelope graft: id (DETAILED+), observer/origin (FULL/--id).
         # These are not payload fields, so record_line never renders them.

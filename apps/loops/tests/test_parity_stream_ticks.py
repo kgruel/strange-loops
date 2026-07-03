@@ -7,6 +7,8 @@ parity CONTRACT now so any divergence must keep both channels
 information-faithful (thread:static-honest-060-spine).
 """
 
+from painted import Zoom
+
 from loops.lenses.stream import stream_view
 from loops.lenses.store import tick_chain_view
 from loops.lenses.ticks import ticks_view
@@ -23,6 +25,7 @@ STREAM_DATA = {
             "id": "01JQ8FAAAAAAAAAAAAAAAAAAAA",
             "payload": {"topic": "design/sqlite-persistence",
                         "message": "Chose SQLite over flat files"},
+            "tier": "high",
         },
         {
             "kind": "task",
@@ -87,6 +90,20 @@ class TestStreamParity:
                 "decision", "task", "2025-01-15", "2025-01-14",
             ],
         )
+
+    def test_tier_carried_on_both_channels(self):
+        """Tier is INHERITED per fact (G4b) and must reach BOTH registers —
+        divergently encoded (glyph on TTY, word on piped), so a literal token
+        check would fail on the chrome-stripped TTY. Assert each encoding on
+        its own channel: the ◆ rail glyph on TTY, the ``high`` word piped."""
+        from .parity import information_text, raw_text
+
+        tty = stream_view(STREAM_DATA, Zoom.SUMMARY, 100, piped=False)
+        piped = stream_view(STREAM_DATA, Zoom.SUMMARY, 40, piped=True)
+        assert "◆" in raw_text(tty)  # high-tier rail glyph in the gutter
+        assert "high" in information_text(piped)  # tier word in the ledger
+        # The untiered task fact (no tier key) never invents a mid glyph.
+        assert "untiered" in information_text(piped)
 
 
 class TestTicksParity:

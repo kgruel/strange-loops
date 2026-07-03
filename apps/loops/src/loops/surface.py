@@ -650,12 +650,33 @@ def project(
 # ---------------------------------------------------------------------------
 
 
-def _event_row(fact: dict) -> Row:
+def tier_map(surface: Surface) -> dict[tuple[str, str], str]:
+    """Map ``(kind, key)`` → tier from a projected surface's ENTITY rows.
+
+    The single inheritance handle (decision:design/tier-one-home-inheritance):
+    tier is assigned exactly once, in ``project()`` via ``_assign_tiers`` over
+    the entity projection. Every other axis — stream events, tick windows —
+    INHERITS through this map, never re-computing. Keyless (collect) rows carry
+    no ``(kind, key)`` handle, so they are absent here and their events render
+    UNTIERED (honest absence, not an invented "mid").
+    """
+    return {
+        (r.kind, r.key): r.tier
+        for r in surface.rows
+        if r.level == "key" and r.key is not None
+    }
+
+
+def _event_row(fact: dict, tier: str = "") -> Row:
     """Build an event-axis Row from a ``vertex_search`` / ``vertex_facts`` dict.
 
     These are RAW facts (one per write, the event axis) — ``{kind, ts, observer,
     origin, id, payload}`` — with ``ts`` a ``datetime`` and no top-level
     ``refs``. The address is ``kind/<id>`` (no fold key on the event axis).
+
+    ``tier`` is INHERITED from the entity projection via ``tier_map`` (the
+    default ``""`` is UNTIERED — no matching folded entity; the JSON must not
+    claim "mid" and the TTY renders the blank gutter, not a rail glyph).
     """
     from datetime import datetime
 
@@ -679,6 +700,7 @@ def _event_row(fact: dict) -> Row:
         refs=(),
         inbound=0,
         salience=1,
+        tier=tier,
         granularity="headline",
     )
 

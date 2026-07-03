@@ -369,7 +369,41 @@ def fetch_stream(
                 key_field = fold_decl.op.key_field
         fold_meta[k] = {"key_field": key_field}
 
+    # Tier inheritance (decision:design/tier-one-home-inheritance): fold the
+    # WHOLE vertex (unfiltered — the same path `sl read` uses), project the
+    # entity Surface compute-only, and derive the (kind,key)→tier map. The
+    # rendered rows stay the windowed facts; each inherits its key's tier by
+    # lookup. No match → untiered "" (collect id aged out, unfolded kind).
+    _tag_facts_with_tier(vertex_path, facts, fold_meta)
+
     return {"facts": facts, "fold_meta": fold_meta, "vertex": ast.name}
+
+
+def _tag_facts_with_tier(
+    vertex_path: Path, facts: list[dict], fold_meta: dict[str, dict]
+) -> None:
+    """Stamp each fact dict with an inherited ``tier`` (in place).
+
+    Folds the full vertex once, projects the entity Surface, and looks each
+    fact's ``(kind, key)`` up in ``tier_map``. Compute-only: the Surface is
+    never rendered — only its tier assignment is borrowed, so the glyph a key
+    shows in the stream is the glyph ``sl read`` gives it.
+    """
+    from loops.surface import project, tier_map
+
+    try:
+        surface = project(fetch_fold(vertex_path))
+    except Exception:
+        # Tier is a decoration; a fold failure must not break the stream.
+        for f in facts:
+            f["tier"] = ""
+        return
+    tmap = tier_map(surface)
+    for f in facts:
+        kind = f.get("kind", "")
+        key_field = fold_meta.get(kind, {}).get("key_field")
+        key = str(f.get("payload", {}).get(key_field, "")) if key_field else ""
+        f["tier"] = tmap.get((kind, key), "") if key else ""
 
 
 def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:

@@ -152,6 +152,9 @@ TIER_GLYPHS: dict[str, str] = {
     "mid": "│",
     "tail": "·",
     "stale": "⊘",
+    "": " ",  # UNTIERED — an event with no matching folded entity (collect id
+    # aged out, unfolded kind). Honest absence: a blank gutter, never an
+    # invented tier glyph (decision:design/tier-one-home-inheritance).
 }
 
 RAIL_LEGEND = "rail  ◆ high  │ mid  · tail  ⊘ stale"

@@ -387,7 +387,10 @@ class Vertex:
         # id_override (when provided by callers like cmd_emit) lets the
         # caller pre-generate the fact ID so the same ID can be reported
         # in the emit receipt — only honored by stores that track IDs.
-        if self._store is not None:
+        # Replay must never append — the fact is being read FROM a store.
+        # replay() nulls self._store for its own pass; this guard covers a
+        # vertex reached via replay forwarding from a parent.
+        if self._store is not None and not self._replaying:
             self._store.append(fact, id_override=id_override)
 
         # Convert fact timestamp for Loop routing
@@ -431,12 +434,27 @@ class Vertex:
             for child in self._children:
                 if child.name == _from_child:
                     continue
-                if child.accepts(kind):
-                    child_tick = child.receive(fact, grant)
-                    if child_tick is not None:
-                        # Child produced a tick — convert to fact and re-enter parent
-                        child_fact = self._tick_to_fact(child_tick, child.name)
-                        self.receive(child_fact, grant, _from_child=child.name)
+                if not child.accepts(kind):
+                    continue
+                if self._replaying:
+                    # Replay forwarding is fold-only. Store-owning children
+                    # replay from their OWN stores (facts were appended there
+                    # live) — re-routing parent history into them duplicates
+                    # facts and re-mints ticks. Storeless children fold with
+                    # replay-mode propagated: no append, no boundary fire.
+                    if child._store is not None:
+                        continue
+                    child._replaying = True
+                    try:
+                        child.receive(fact, grant)
+                    finally:
+                        child._replaying = False
+                    continue
+                child_tick = child.receive(fact, grant)
+                if child_tick is not None:
+                    # Child produced a tick — convert to fact and re-enter parent
+                    child_fact = self._tick_to_fact(child_tick, child.name)
+                    self.receive(child_fact, grant, _from_child=child.name)
 
         # Phase: boundary (live only — replay bypasses receive entirely)
         if self._replaying:
@@ -575,13 +593,27 @@ class Vertex:
         CLI invocation indistinguishable from a persistent runtime — fold
         state reflects all historical facts, not just the current invocation.
 
+        Store-owning children replay recursively from their OWN stores —
+        their facts were appended there live at receive time, so replaying
+        parent history into them would duplicate. Storeless children rebuild
+        via fold-only forwarding during the parent's pass.
+
         After replay, initializes the vertex period start from the last
         stored tick. This ensures the next boundary fire produces a tick
         with ``since`` pointing to the previous boundary, not the first
         fact in history.
 
-        Returns the number of facts replayed.
+        Returns the number of facts replayed, including descendants.
         """
+        count = self._replay_own()
+        if self._has_children:
+            for child in self._children:
+                if child._store is not None:
+                    count += child.replay()
+        return count
+
+    def _replay_own(self) -> int:
+        """Replay this vertex's own store into its folds (see replay())."""
         if self._store is None:
             return 0
 
@@ -662,9 +694,18 @@ class Vertex:
                         ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc),
                     )
                 if self._has_children:
+                    # Fold-only forwarding — same rules as replay forwarding
+                    # in receive(): store-owning children replay themselves,
+                    # storeless children fold with replay-mode set.
                     for child in self._children:
+                        if child._store is not None:
+                            continue
                         if child.accepts(fact.kind):
-                            child.receive(fact)
+                            child._replaying = True
+                            try:
+                                child.receive(fact)
+                            finally:
+                                child._replaying = False
         self._replaying = False
         self._store = store  # restore
 

@@ -12,7 +12,7 @@ from atoms import Fact, Spec, Count
 from engine import Loop, Vertex
 from engine.sqlite_store import SqliteStore
 
-from tests.vertex_test_sdk import VertexTestBuilder, fact
+from tests.vertex_test_sdk import VertexTestBuilder, fact, reopen_store
 
 
 def inject_fact(store, kind: str, observer: str = "test", ts: float | None = None, **payload):
@@ -114,6 +114,147 @@ class TestReplayWithChildren:
         # Child also received the facts
         assert child2.state("metric")["n"] == 2
         store2.close()
+
+
+class TestReplayStoreOwningChildren:
+    """Replay must not duplicate into store-owning children.
+
+    Regression for friction:discover-root-replay-cascade-duplication —
+    a root with its own store forwarded replayed facts to children via a
+    LIVE receive, so every program load appended the root's history into
+    member stores and re-minted child ticks (observed live: relay.db
+    98→106 facts, 3→7 ticks from probes).
+    """
+
+    def _build_pair(self, tmp_path):
+        parent, pstore = (VertexTestBuilder("parent")
+            .with_store(tmp_path, "parent.db")
+            .count_loop("metric")
+            .build())
+        child, cstore = (VertexTestBuilder("child")
+            .with_store(tmp_path, "child.db")
+            .count_loop("metric", boundary_kind="metric", boundary_count=2,
+                        boundary_mode="every")
+            .build())
+        parent.add_child(child)
+        return parent, pstore, child, cstore
+
+    def test_replay_does_not_append_to_child_store(self, tmp_path):
+        parent, pstore, child, cstore = self._build_pair(tmp_path)
+        parent.receive(fact("metric", v=1))
+        parent.receive(fact("metric", v=2))  # child tick fires here (live)
+        child_facts = len(cstore.since(0))
+        child_ticks = len(cstore.ticks_since(0))
+        pstore.close()
+        cstore.close()
+
+        # Fresh materialization + replay — the "program load" moment
+        parent2, pstore2, child2, cstore2 = self._build_pair(tmp_path)
+        parent2.replay()
+
+        assert len(cstore2.since(0)) == child_facts       # no duplicate appends
+        assert len(cstore2.ticks_since(0)) == child_ticks  # no re-minted ticks
+        # And a SECOND load stays stable too
+        pstore2.close()
+        cstore2.close()
+        parent3, pstore3, child3, cstore3 = self._build_pair(tmp_path)
+        parent3.replay()
+        assert len(cstore3.since(0)) == child_facts
+        assert len(cstore3.ticks_since(0)) == child_ticks
+        pstore3.close()
+        cstore3.close()
+
+    def test_store_owning_child_rebuilds_from_own_store(self, tmp_path):
+        parent, pstore = (VertexTestBuilder("parent")
+            .with_store(tmp_path, "parent.db")
+            .count_loop("metric")
+            .build())
+        child, cstore = (VertexTestBuilder("child")
+            .with_store(tmp_path, "child.db")
+            .count_loop("metric")
+            .build())
+        parent.add_child(child)
+        parent.receive(fact("metric", v=1))
+        parent.receive(fact("metric", v=2))
+        parent.receive(fact("metric", v=3))
+        live_state = child.state("metric")
+        pstore.close()
+        cstore.close()
+
+        parent2, pstore2 = (VertexTestBuilder("parent")
+            .with_store(tmp_path, "parent.db")
+            .count_loop("metric")
+            .build())
+        child2, cstore2 = (VertexTestBuilder("child")
+            .with_store(tmp_path, "child.db")
+            .count_loop("metric")
+            .build())
+        parent2.add_child(child2)
+        count = parent2.replay()
+        # Child fold state matches the live run — rebuilt from its OWN store
+        assert child2.state("metric") == live_state == {"n": 3}
+        # Count includes descendant replays: 3 parent facts + 3 child facts
+        assert count == 6
+        pstore2.close()
+        cstore2.close()
+
+    def test_storeless_root_still_replays_children(self, tmp_path):
+        """A discover-style root without its own store must still replay
+        store-owning members."""
+        root = VertexTestBuilder("root").count_loop("metric").build_vertex()
+        child, cstore = (VertexTestBuilder("child")
+            .with_store(tmp_path, "child.db")
+            .count_loop("metric")
+            .build())
+        root.add_child(child)
+        root.receive(fact("metric", v=1))
+        root.receive(fact("metric", v=2))
+        cstore.close()
+
+        root2 = VertexTestBuilder("root").count_loop("metric").build_vertex()
+        child2, cstore2 = (VertexTestBuilder("child")
+            .with_store(tmp_path, "child.db")
+            .count_loop("metric")
+            .build())
+        root2.add_child(child2)
+        count = root2.replay()
+        assert count == 2
+        assert child2.state("metric")["n"] == 2
+        assert len(cstore2.since(0)) == 2  # unchanged
+        cstore2.close()
+
+    def test_replay_forwarding_appends_nothing(self, tmp_path):
+        """Replay forwarding to a storeless child is fold-only: no fact or
+        tick is appended anywhere during replay, and a boundary-carrying
+        child never mints mid-replay."""
+        parent, pstore = (VertexTestBuilder("parent")
+            .with_store(tmp_path, "parent.db")
+            .count_loop("metric")
+            .build())
+        child = (VertexTestBuilder("child")
+            .count_loop("metric", boundary_count=2, boundary_mode="every")
+            .build_vertex())
+        parent.add_child(child)
+        parent.receive(fact("metric", v=1))
+        parent.receive(fact("metric", v=2))  # live child boundary → tick-fact
+        stored = len(pstore.since(0))        # metric×2 + re-entered tick-fact
+        pstore.close()
+
+        parent2, pstore2 = (VertexTestBuilder("parent")
+            .with_store(tmp_path, "parent.db")
+            .count_loop("metric")
+            .build())
+        child2 = (VertexTestBuilder("child")
+            .count_loop("metric", boundary_count=2, boundary_mode="every")
+            .build_vertex())
+        parent2.add_child(child2)
+        parent2.replay()
+        assert child2._replaying is False  # flag restored
+        # Parent store byte-stable across the load — nothing appended
+        pstore2.close()
+        store3 = reopen_store(tmp_path / "parent.db")
+        assert len(store3.since(0)) == stored
+        store3.close()
 
 
 class TestReplayEmptyStore:

@@ -1,4 +1,5 @@
 Decisions (1):
-  Use SQLite [×3 Jan 15]: Atomic writes and query support. · Filesystem lacks t…
+  │ Jan 15  Use SQLite  ×3  Atomic writes and query support. · Filesystem lacks…
     _ts: 2025-01-15T10:00:00+00:00
     _n: 3
+rail  ◆ high  │ mid  · tail  ⊘ stale

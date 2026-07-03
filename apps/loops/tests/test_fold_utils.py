@@ -763,7 +763,7 @@ class TestPreviewRender:
         )
         t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 200))
         # First non-key payload field is "message"; today's behavior must survive.
-        assert ": JWT" in t
+        assert "  JWT" in t  # rail grammar: two-space gap, no colon
 
     def test_cascade_truncation(self):
         """Long first field claims most budget; second field truncates or drops."""

@@ -1,6 +1,6 @@
 Decisions (1):
   design/ (1)
-    evolved [×3 Jan 15]: v3 body
+    ◆ Jan 15  evolved  ×3  v3 body
       id:01EEEEEE
       ▸ Jan 15 v3 body
       ▸ Jan 14 v2 body
@@ -8,5 +8,6 @@ Decisions (1):
 
 Notes (1):
   note/ (1)
-    fresh [Jan 15]: single
+    · Jan 15  fresh  single
       id:01FFFFFF
+rail  ◆ high  │ mid  · tail  ⊘ stale

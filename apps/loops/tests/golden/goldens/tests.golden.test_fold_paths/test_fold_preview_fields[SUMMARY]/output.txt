@@ -1,2 +1,3 @@
 Decisions (1):
-  Use SQLite [×3 Jan 15]: Atomic writes and query support. [+30c]
+  │ Jan 15  Use SQLite  ×3  Atomic writes and query support. [+30c]
+rail  ◆ high  │ mid  · tail  ⊘ stale

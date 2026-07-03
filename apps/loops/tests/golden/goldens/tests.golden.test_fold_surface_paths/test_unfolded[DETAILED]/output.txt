@@ -1,5 +1,6 @@
 Decisions (1):
   design/ (1)
-    only [Jan 15]: declared
+    │ Jan 15  only  declared
 
 Unfolded: 5 log, 2 scratch
+rail  ◆ high  │ mid  · tail  ⊘ stale

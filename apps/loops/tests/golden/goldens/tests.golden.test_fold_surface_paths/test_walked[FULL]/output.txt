@@ -1,6 +1,6 @@
 Decisions (1):
   design/ (1)
-    root [×2 →1 Jan 15]: anchor
+    ◆ Jan 15  root  ×2 →1  anchor
       id:01RRRRRR
       → thread:walk-target
       _id: 01RRRRRRRRRRRRRRRRRRRRRRRR
@@ -9,7 +9,7 @@ Decisions (1):
 
 ## REFS (2)
   ┄ via → decision/design/root
-    walk-target [←1 →1 Jan 15]: open
+    ◆ Jan 15  walk-target  open
       id:01TTTTTT
       → observation:deep
       _id: 01TTTTTTTTTTTTTTTTTTTTTTTT
@@ -17,7 +17,8 @@ Decisions (1):
       _inbound_refs: 1
   ┄ via → thread/walk-target
     ↳ (d2)
-      deep [Jan 15]: two hops out
+      · Jan 15  deep  two hops out
         id:01DDDDDD
         _id: 01DDDDDDDDDDDDDDDDDDDDDDDD
         _ts: 2025-01-15T08:00:00+00:00
+rail  ◆ high  │ mid  · tail  ⊘ stale

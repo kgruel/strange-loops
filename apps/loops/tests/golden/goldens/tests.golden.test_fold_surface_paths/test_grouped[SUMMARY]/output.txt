@@ -1,16 +1,17 @@
 Decisions (3):
   grpA/ (2)
-    y [×3 Jan 13]: alpha y
-    x [×2 Jan 15]: alpha x
+    │ Jan 13  y  ×3  alpha y
+    │ Jan 15  x  ×2  alpha x
   grpB/ (1)
-    z [×5 Jan 14]: beta z
+    ◆ Jan 14  z  ×5  beta z
 
 Notes (7):
   big/ (7)
-    a [×4 Jan 15]: a
-    b [×2 Jan 15]: b
-    c [Jan 15]: c
-    d [Jan 15]: d
-    e [Jan 15]: e
-    f [Jan 15]: f
-    g [Jan 15]: g
+    ◆ Jan 15  a  ×4  a
+    │ Jan 15  b  ×2  b
+    · Jan 15  c      c
+    · Jan 15  d      d
+    · Jan 15  e      e
+    · Jan 15  f      f
+    · Jan 15  g      g
+rail  ◆ high  │ mid  · tail  ⊘ stale

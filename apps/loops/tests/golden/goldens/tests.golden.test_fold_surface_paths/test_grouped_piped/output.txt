@@ -1,16 +1,15 @@
 ## DECISION (3)
-  grpA/ (2)
-    y [×3 Jan 13]: alpha y
-    x [×2 Jan 15]: alpha x
-  grpB/ (1)
-    z [×5 Jan 14]: beta z
+KEY     TIER   N  IN  DATE        MESSAGE
+grpB/z  high   5   0  2025-01-14  beta z
+grpA/y  mid    3   0  2025-01-13  alpha y
+grpA/x  mid    2   0  2025-01-15  alpha x
 
 ## NOTE (7)
-  big/ (7)
-    a [×4 Jan 15]: a
-    b [×2 Jan 15]: b
-    c [Jan 15]: c
-    d [Jan 15]: d
-    e [Jan 15]: e
-    f [Jan 15]: f
-    g [Jan 15]: g
+KEY    TIER   N  IN  DATE        MESSAGE
+big/a  high   4   0  2025-01-15  a
+big/b  mid    2   0  2025-01-15  b
+big/c  tail   1   0  2025-01-15  c
+big/d  tail   1   0  2025-01-15  d
+big/e  tail   1   0  2025-01-15  e
+big/f  tail   1   0  2025-01-15  f
+big/g  tail   1   0  2025-01-15  g

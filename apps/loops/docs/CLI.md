@@ -9,20 +9,21 @@ Folded state — decisions, threads, tasks, changes.
 
 ```
 Decisions (2):
-  Use SQLite for persistence [Jan 15]: Chose SQLite over filesystem f… [+34c]
-  KDL for config format [Jan 14]: KDL is human-friendly and supports … [+16c]
+  │ Jan 15  Use SQLite for persistence  Chose SQLite over filesystem … [+35c]
+  │ Jan 14  KDL for config format       KDL is human-friendly and sup… [+22c]
 
 Threads (2):
-  vertex-routing [Jan 15]: active
-  tick-nesting [Jan 14]: exploring
+  │ Jan 15  vertex-routing  active
+  │ Jan 14  tick-nesting    exploring
 
 Tasks (2):
-  implement fold [Jan 15]: in-progress
-  add observer field [Jan 14]: done
+  │ Jan 15  implement fold      in-progress
+  │ Jan 14  add observer field  done
 
 Changes (2):
-  Added boundary detection to Spec [Jan 15]: libs/atoms/src/atoms/spe… [+3c]
-  Refactored tick emission [Jan 15]: libs/engine/src/engine/temporal.… [+1c]
+  │ Jan 15  Added boundary detection to Spec  libs/atoms/src/atoms/sp… [+4c]
+  │ Jan 15  Refactored tick emission          libs/engine/src/engine/… [+10c]
+rail  ◆ high  │ mid  · tail  ⊘ stale
 ```
 
 ## `stream`

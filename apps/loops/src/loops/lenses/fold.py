@@ -33,6 +33,7 @@ from painted.palette import current_palette
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
 from loops.surface import project  # runtime: FoldState → Surface (idempotent)
 
+from ._grammar import RAIL_LEGEND, date_key, rail_glyph
 from ._grammar import full_iso as _format_ts_full
 from ._grammar import recency as _recency_tag
 from ._grammar import short_date as _format_date
@@ -210,7 +211,7 @@ def fold_view(
             inbound_edges=inbound_edges,
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
-            lines=lines, chars=chars,
+            lines=lines, chars=chars, piped=is_piped,
         )
         blocks.append(section_block)
 
@@ -238,6 +239,10 @@ def fold_view(
         blocks.append(Block.text(
             "  ".join(footer_parts), fp.unfolded, width=width,
         ))
+
+    # Rail legend — TTY only; the piped ledger spells tiers as words.
+    if not is_piped:
+        blocks.append(Block.text(RAIL_LEGEND, fp.meta, width=width))
 
     return join_vertical(*blocks)
 
@@ -413,11 +418,25 @@ def _render_section(
     show_observer: bool,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
+    piped: bool = False,
 ) -> Block:
-    """Render a section's rows — grouped by namespace or flat."""
+    """Render a section's rows — TTY: rail rows, grouped by namespace or
+    flat; piped: the flat ledger (full keys, named columns)."""
     is_by = fold_type == "by"
 
-    if is_by and key_field and _should_group_by_namespace(rows, key_field):
+    if piped:
+        return _render_ledger(
+            rows, key_field, fold_type, zoom, fmt, width,
+            inbound_edges=inbound_edges, facts_by_key=facts_by_key,
+            fp=fp, show_observer=show_observer, visible=visible,
+            section_kind=kind, preview_fields=preview_fields,
+            lines=lines, chars=chars,
+        )
+
+    grouped = bool(is_by and key_field and _should_group_by_namespace(rows, key_field))
+    cols = _section_cols(rows, key_field, is_by, strip_namespace=grouped)
+
+    if grouped:
         return _render_grouped(
             rows, key_field, zoom, fmt, width,
             inbound_edges=inbound_edges,
@@ -425,7 +444,7 @@ def _render_section(
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=kind,
             preview_fields=preview_fields,
-            lines=lines, chars=chars,
+            lines=lines, chars=chars, cols=cols,
         )
     else:
         return _render_flat(
@@ -436,8 +455,125 @@ def _render_section(
             fp=fp, show_observer=show_observer, visible=visible,
             section_kind=kind,
             preview_fields=preview_fields,
-            lines=lines, chars=chars,
+            lines=lines, chars=chars, cols=cols,
         )
+
+
+# ---------------------------------------------------------------------------
+# Section column widths — computed ONCE across the whole section so rows
+# align across namespace groups (the ls cross-group column-drift lesson:
+# per-group widths silently misalign; see observation
+# rendering/piped-faithfulness-forces-width-none).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Cols:
+    key_w: int = 0
+    age_w: int = 0
+    cluster_w: int = 0  # the "×n ←n →n" cluster (TTY register)
+    n_w: int = 1  # ledger N column
+    in_w: int = 2  # ledger IN column
+
+
+def _row_label(item: "Row", key_field: str | None, is_by: bool,
+               strip_namespace: bool) -> str:
+    if is_by and key_field:
+        label = str(item.payload.get(key_field, ""))
+        if strip_namespace and "/" in label:
+            label = label.split("/", 1)[1]
+        return label
+    label, _ = _first_field(item.payload)
+    return label or ""
+
+
+def _cluster_text(item: "Row", is_by: bool) -> str:
+    parts = []
+    if is_by and item.n > 1:
+        parts.append(f"×{item.n}")
+    if item.inbound > 0:
+        parts.append(f"←{item.inbound}")
+    out = len(item.refs) + len(item.edges)
+    if out:
+        parts.append(f"→{out}")
+    return " ".join(parts)
+
+
+def _section_cols(rows: list["Row"], key_field: str | None, is_by: bool,
+                  *, strip_namespace: bool) -> _Cols:
+    if not rows:
+        return _Cols()
+    key_w = max(
+        (len(_row_label(r, key_field, is_by, strip_namespace)) for r in rows),
+        default=0,
+    )
+    age_w = max((len(_recency_tag(r.ts)) for r in rows), default=0)
+    cluster_w = max((len(_cluster_text(r, is_by)) for r in rows), default=0)
+    n_w = max(max((len(str(r.n)) for r in rows), default=1), 1)
+    in_w = max(max((len(str(r.inbound)) for r in rows), default=1), 2)
+    return _Cols(key_w=key_w, age_w=age_w, cluster_w=cluster_w,
+                 n_w=n_w, in_w=in_w)
+
+
+# ---------------------------------------------------------------------------
+# Piped register — the ledger (decision:design/static-grammar-hybrid-by-
+# register: 2a columns). Flat, full keys, salience-sorted; TIER carried as a
+# word (information-faithfulness — the tier function has vertex-population
+# context a pipe consumer can't reconstruct); DATE is the ISO column
+# (time-vocab option C).
+# ---------------------------------------------------------------------------
+
+
+def _render_ledger(
+    items: list["Row"],
+    key_field: str | None,
+    fold_type: str,
+    zoom: Zoom,
+    fmt,
+    width: int | None,
+    *,
+    inbound_edges: dict[str, list[str]],
+    facts_by_key: dict[str, list[dict]],
+    fp: FoldPalette,
+    show_observer: bool,
+    visible: frozenset[str] = frozenset(),
+    section_kind: str = "",
+    preview_fields: tuple[str, ...] = (),
+    lines: int = 0, chars: int = 0,
+) -> Block:
+    is_by = fold_type == "by"
+    sorted_items = (
+        sorted(items, key=lambda i: i.salience, reverse=True) if is_by else items
+    )
+
+    total = len(sorted_items)
+    if lines > 0 and total > lines:
+        sorted_items = list(sorted_items)[:lines]
+
+    cols = _section_cols(sorted_items, key_field, is_by, strip_namespace=False)
+    header = (
+        f"{'KEY':<{max(cols.key_w, 3)}}  {'TIER':<5}  {'N':>{cols.n_w}}  "
+        f"{'IN':>{cols.in_w}}  {'DATE':<10}  MESSAGE"
+    )
+    blocks: list[Block] = [Block.text(header, fp.meta, width=width)]
+
+    for item in sorted_items:
+        blocks.append(_render_item_line(
+            item, key_field, zoom, fmt, width,
+            inbound_edges=inbound_edges,
+            facts_by_key=facts_by_key,
+            fp=fp, show_observer=show_observer, visible=visible,
+            indent=0, strip_namespace=False, is_by=is_by,
+            section_kind=section_kind,
+            preview_fields=preview_fields,
+            chars=chars, piped=True, cols=cols,
+        ))
+
+    remaining = total - len(sorted_items)
+    if remaining > 0:
+        blocks.append(Block.text(f"({remaining} more)", fp.collapse, width=width))
+
+    return join_vertical(*blocks) if blocks else Block.empty(0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +596,7 @@ def _render_grouped(
     section_kind: str = "",
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
+    cols: "_Cols | None" = None,
 ) -> Block:
     """Render by-fold rows grouped by namespace prefix.
 
@@ -515,7 +652,7 @@ def _render_grouped(
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
                 preview_fields=preview_fields,
-                chars=chars,
+                chars=chars, cols=cols,
             ))
 
         remaining = len(sorted_items) - len(show_items)
@@ -548,6 +685,7 @@ def _render_flat(
     section_kind: str = "",
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
+    cols: "_Cols | None" = None,
 ) -> Block:
     """Render rows as a flat list — sorted by salience for by-folds.
 
@@ -581,7 +719,7 @@ def _render_flat(
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
             preview_fields=preview_fields,
-            chars=chars,
+            chars=chars, cols=cols,
         ))
 
     remaining = total - len(sorted_items)
@@ -616,10 +754,14 @@ def _render_item_line(
     section_kind: str = "",
     preview_fields: tuple[str, ...] = (),
     chars: int = 0,
+    piped: bool = False,
+    cols: "_Cols | None" = None,
 ) -> Block:
     """Render a single fold item as a composed Block with multi-style.
 
-    SUMMARY layout: key [×N ←N →N recency]: body… [+Nc]
+    TTY register:   ◆ 2h  key  ×N ←N →N  body… [+Nc]   (rail row; columns
+                    aligned section-wide via ``cols``)
+    piped register: key  tier  N  IN  DATE  body        (ledger row)
     DETAILED adds:  observer, remaining payload fields
     +refs:          per-item edge expansion (← inbound sources, → outbound targets)
     +facts:         source facts that built this fold item
@@ -627,28 +769,17 @@ def _render_item_line(
     """
     payload = item.payload
     pad = " " * indent
+    cols = cols or _Cols()
 
     # Key
     if is_by and key_field:
-        label = str(payload.get(key_field, ""))
-        if strip_namespace and "/" in label:
-            label = label.split("/", 1)[1]
         used_label_field = key_field
     else:
-        label, used_label_field = _first_field(payload)
+        _, used_label_field = _first_field(payload)
+    label = _row_label(item, key_field, is_by, strip_namespace)
 
-    # Indicators (before body, always visible)
-    n_text = f" ×{item.n}" if is_by and item.n > 1 else ""
-    ref_count = item.inbound  # materialized in project() (was _inbound_count)
-    ref_in_text = f" ←{ref_count}" if ref_count > 0 else ""
-    # Outbound = ref union edges + typed overlay edges (both point away).
-    out_count = len(item.refs) + len(item.edges)
-    ref_out_text = f" →{out_count}" if out_count else ""
-
-    # Recency tag
-    recency_text = ""
-    if item.ts:
-        recency_text = f" {_recency_tag(item.ts)}"
+    cluster = _cluster_text(item, is_by)
+    age = _recency_tag(item.ts) if item.ts else ""
 
     # Body — either preview-driven (explicit per-kind decl) or fallback
     # (first non-label payload field, the historical behavior). An empty
@@ -673,18 +804,20 @@ def _render_item_line(
         body_len = len(body)
 
     has_body = body_len > 0
-    separator = ": " if has_body else ""
 
-    # Calculate available width for body (reserve space for badge + truncation hint)
-    # Badge: " [" + indicators + "]" = 3 chars + content
-    badge_content_len = (
-        len(n_text.lstrip()) + len(ref_in_text.lstrip())
-        + len(ref_out_text.lstrip()) + len(recency_text.lstrip())
-    )
-    # Add spaces between badge parts
-    badge_part_count = sum(1 for x in [n_text, ref_in_text, ref_out_text, recency_text] if x)
-    badge_len = (3 + badge_content_len + max(0, badge_part_count - 1)) if badge_part_count else 0
-    fixed_len = len(pad) + len(label) + badge_len + len(separator)
+    # Fixed prefix length per register (for the width-budgeted body path).
+    key_w = max(cols.key_w, len(label))
+    if piped:
+        # "key  tier   N  IN  DATE  " ledger prefix
+        fixed_len = (
+            max(key_w, 3) + 2 + 5 + 2 + cols.n_w + 2 + cols.in_w + 2 + 10 + 2
+        )
+    else:
+        # "  ◆ 2h  key  ×N ←N  " rail prefix (glyph+space+age col+gaps)
+        fixed_len = (
+            len(pad) + 2 + cols.age_w + 2 + key_w
+            + ((2 + cols.cluster_w) if cols.cluster_w else 0) + 2
+        )
     truncation_hint = ""
 
     if has_body:
@@ -720,49 +853,59 @@ def _render_item_line(
             body_text = fit.text
             if fit.dropped > 0:
                 truncation_hint = f" [+{fit.dropped}c]"
-    elif item.ts and not n_text and not ref_in_text:
-        body_text = ""
     else:
         body_text = ""
 
-    # Build composed line with distinct styles per segment
-    # SUMMARY: key [×N ←N recency]: body… [+Nc]
-    parts: list[Block] = [Block.text(f"{pad}{label}", fp.key)]
+    if piped:
+        # Ledger row — plain text, one line, named columns (chrome-free; the
+        # writer strips styles anyway, but the ledger IS the piped grammar).
+        date = date_key(item.ts) if item.ts else "-"
+        line = (
+            f"{label:<{max(key_w, 3)}}  {item.tier:<5}  "
+            f"{item.n:>{cols.n_w}}  {item.inbound:>{cols.in_w}}  "
+            f"{date:<10}  {body_text}".rstrip()
+        )
+        main_line = Block.text(line, fp.body, width=width)
+    else:
+        # Rail row — ◆ 2h  key  ×N ←N →N  body
+        glyph = rail_glyph(item.tier)
+        glyph_style = {
+            "high": fp.n_indicator,
+            "stale": fp.ref_outbound,
+        }.get(item.tier, fp.collapse)
+        parts: list[Block] = [
+            Block.text(pad, fp.body),
+            Block.text(glyph, glyph_style),
+            Block.text(f" {age:<{cols.age_w}}", fp.collapse),
+            Block.text(f"  {label:<{key_w}}", fp.key),
+        ]
+        if cols.cluster_w:
+            cluster_parts: list[Block] = [Block.text("  ", fp.body)]
+            pos = 0
+            for token in cluster.split():
+                style = (
+                    fp.n_indicator if token.startswith("×")
+                    else fp.ref_indicator if token.startswith("←")
+                    else fp.ref_outbound
+                )
+                if pos:
+                    cluster_parts.append(Block.text(" ", fp.body))
+                cluster_parts.append(Block.text(token, style))
+                pos += len(token) + (1 if pos else 0)
+            if pos < cols.cluster_w:
+                cluster_parts.append(Block.text(" " * (cols.cluster_w - pos), fp.body))
+            parts.extend(cluster_parts)
+        if body_text:
+            parts.append(Block.text(f"  {body_text}", fp.body))
+        if truncation_hint:
+            parts.append(Block.text(truncation_hint, fp.collapse))
 
-    # Metadata badge: [×N ←N →N recency] — always present (at minimum recency)
-    badge_parts: list[Block] = []
-    if n_text:
-        badge_parts.append(Block.text(n_text.lstrip(), fp.n_indicator))
-    if ref_in_text:
-        if badge_parts:
-            badge_parts.append(Block.text(" ", fp.collapse))
-        badge_parts.append(Block.text(ref_in_text.lstrip(), fp.ref_indicator))
-    if ref_out_text:
-        if badge_parts:
-            badge_parts.append(Block.text(" ", fp.collapse))
-        badge_parts.append(Block.text(ref_out_text.lstrip(), fp.ref_outbound))
-    if recency_text:
-        if badge_parts:
-            badge_parts.append(Block.text(" ", fp.collapse))
-        badge_parts.append(Block.text(recency_text.lstrip(), fp.collapse))
+        main_line = join_horizontal(*parts)
 
-    if badge_parts:
-        parts.append(Block.text(" [", fp.collapse))
-        parts.extend(badge_parts)
-        parts.append(Block.text("]", fp.collapse))
-
-    if separator and body_text:
-        parts.append(Block.text(separator, fp.body))
-        parts.append(Block.text(body_text, fp.body))
-    if truncation_hint:
-        parts.append(Block.text(truncation_hint, fp.collapse))
-
-    main_line = join_horizontal(*parts)
-
-    # If width is set, ensure line fits
-    if width is not None:
-        from painted import truncate as block_truncate
-        main_line = block_truncate(main_line, width)
+        # If width is set, ensure line fits
+        if width is not None:
+            from painted import truncate as block_truncate
+            main_line = block_truncate(main_line, width)
 
     lines: list[Block] = [main_line]
 
@@ -795,7 +938,7 @@ def _render_item_line(
         if pred_summary:
             detail_pad = " " * (indent + 2)
             lines.append(Block.text(
-                f"{detail_pad}inbound: ←{ref_count}{pred_summary}",
+                f"{detail_pad}inbound: ←{item.inbound}{pred_summary}",
                 fp.ref_indicator, width=width,
             ))
 
@@ -878,8 +1021,8 @@ def _render_item_line(
             lines.append(Block.text(f"{meta_pad}_origin: {item.origin}", fp.meta, width=width))
         if item.n > 1:
             lines.append(Block.text(f"{meta_pad}_n: {item.n}", fp.meta, width=width))
-        if ref_count > 0:
-            lines.append(Block.text(f"{meta_pad}_inbound_refs: {ref_count}", fp.meta, width=width))
+        if item.inbound > 0:
+            lines.append(Block.text(f"{meta_pad}_inbound_refs: {item.inbound}", fp.meta, width=width))
 
     return join_vertical(*lines) if len(lines) > 1 else lines[0]
 

@@ -75,6 +75,12 @@ class Row:
     key_field: str | None = None  # the fold-key FIELD name (label hint; carries
     # walked-row kinds whose schema entry is absent under a --kind filter)
     axis: str = "entity"  # "entity" (folded) | "event" (raw fact)
+    level: str = "key"  # containment-tree node type: "key" (folded entity) |
+    # "fact" (raw event) | "tick" (tick-window tree-cut). ``axis`` carries the
+    # entity/event TIME semantics the transforms key on; ``level`` is the node
+    # type in the containment tree (a tick row is axis="event", level="tick").
+    # Possible future dissolution: axis folds into level once no transform needs
+    # the time-axis distinction independently — not now (residue note, §7A).
     id: str | None = None  # ULID
     ts: float | None = None
     observer: str = ""
@@ -664,6 +670,7 @@ def _event_row(fact: dict) -> Row:
         payload=dict(fact.get("payload", {})),
         key=None,
         axis="event",
+        level="fact",
         id=fid,
         ts=ts,
         observer=fact.get("observer", ""),
@@ -915,6 +922,7 @@ def _row_to_dict(row: Row) -> dict:
         "key_field": row.key_field,
         "payload": dict(row.payload),
         "axis": row.axis,
+        "level": row.level,
         "id": row.id,
         "ts": row.ts,
         "observer": row.observer,

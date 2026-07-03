@@ -591,6 +591,8 @@ def test_to_dict_is_json_safe():
     assert row_a["salience"] == 2  # n=2, no inbound
     assert row_a["refs"] == ["decision/design/b"]
     assert "window" in again and "schema" in again
+    # level discriminator (§7A) — folded entity rows are level "key".
+    assert {r["level"] for r in again["rows"]} == {"key"}
 
 
 def test_source_facts_carried_onto_surface():

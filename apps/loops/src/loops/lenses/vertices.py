@@ -42,20 +42,10 @@ def _rel_mtime(mtime: float | None) -> str:
     return recency(datetime.fromtimestamp(mtime, tz=timezone.utc))
 
 
-# Vertex-type glyphs — the fill encodes "owns its own facts": ◆ instance (own
-# store), ◇ aggregation (no store, only combines children), ◈ hybrid (both).
-# Exactly one glyph per row, so inter-row column alignment holds regardless of
-# the glyph's terminal cell width. TTY register only; piped keeps the word.
-_TYPE_ICON = {"instance": "◆", "aggregation": "◇", "hybrid": "◈"}
-
 # Cap the TTY name column so one pathologically long vertex name can't blow out
 # the listing's alignment (the kinds table caps the same way at 22). Long names
 # ellipsize; the piped register is left uncapped — it stays information-faithful.
 _NAME_CAP = 28
-
-
-def _icon_for(kind: str) -> str:
-    return _TYPE_ICON.get(kind, "◆")
 
 
 def _lead_kinds(v: dict[str, Any], limit: int = 3) -> str:
@@ -288,8 +278,12 @@ def _stat_rows(
             rows.append(_shadow_line(v, width, p))
 
         # DETAILED expands the ⊃ preview into the full per-kind census: every
-        # kind by count + its fold op, indented under the vertex.
+        # kind by count + its fold op, indented under the vertex. The vertex
+        # type — displaced from slot one — reappears here on its own ⊙ line
+        # (TTY only; the piped register keeps the type WORD column always).
         if zoom >= Zoom.DETAILED:
+            if not piped:
+                rows.append(_type_line(v, width, p))
             rows.extend(_detail_kind_rows(v, cols, width, p))
 
         if zoom >= Zoom.FULL:
@@ -315,6 +309,26 @@ def _shadow_line(v: dict[str, Any], width: int | None, p) -> Block:
         Span("      ", Style()),
         Span("⊳ ", Style(fg="yellow")),
         Span(f"shadows {target}", p.chrome),
+    ], width)
+
+
+def _type_line(v: dict[str, Any], width: int | None, p) -> Block:
+    """`⊙ own store` / `⊙ combine of a, b` — the vertex type on its own -v line
+    (decision:design/spine-options-ratified §6A; precedent :func:`_shadow_line`).
+    The type left slot one when the rail took the gutter; it lands here so it is
+    invisible at default TTY but recoverable under -v."""
+    kind = v.get("kind", "instance")
+    combine = v.get("combine") or []
+    if kind == "aggregation":
+        desc = f"combine of {', '.join(combine)}" if combine else "aggregation (no store)"
+    elif kind == "hybrid":
+        desc = f"own store + combine of {', '.join(combine)}" if combine else "own store + combine"
+    else:
+        desc = "own store"
+    return _spans_block([
+        Span("      ", Style()),
+        Span("⊙ ", p.chrome),
+        Span(desc, p.chrome),
     ], width)
 
 
@@ -362,9 +376,15 @@ def _tty_row(v: dict[str, Any], cols: _Cols, width: int | None, p) -> Block:
     name_pad = " " * max(0, ncol - len(name_disp))
     size = _size_str(v, cols.count_w).ljust(cols.size)
 
+    # Leading slot belongs to the rail (decision:design/rail-wins-gutter). A
+    # vertex's max-over-keys tier is trivially ◆ for any live vertex — no signal
+    # at vertex scope — so root rows stay UNTIERED (blank gutter). The type
+    # (◆/◇/◈ owns-own-store) is no longer here; it moves to a ⊙ detail line at
+    # -v (decision:design/spine-options-ratified §6A). Two-cell slot preserved so
+    # the columns don't shift.
     spans: list[Span] = [
         Span("  ", Style()),
-        Span(_icon_for(v.get("kind", "instance")) + " ", p.chrome),
+        Span("  ", Style()),
         Span(name_disp, p.kind_style(name)),  # hue keyed on the full name
         Span(name_pad + "  ", Style()),
         Span(size, p.metadata),

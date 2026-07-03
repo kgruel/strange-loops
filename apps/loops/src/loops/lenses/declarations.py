@@ -27,7 +27,7 @@ from ._statview import (
     stat_table,
     updated_text,
 )
-from ._grammar import card, card_width, recency
+from ._grammar import card, card_width, rail_glyph, recency
 from .store import _format_count
 
 
@@ -411,6 +411,17 @@ def _span_str(earliest: Any, latest: Any) -> str:
     return f"{lo:%b %d}–{hi:%b %d}"
 
 
+def _rail_style(tier: str, p: Any) -> Style:
+    """Gutter-glyph style per rail tier — the leading slot the rail owns
+    (decision:design/rail-wins-gutter). High pops, tail/untiered recede."""
+    return {
+        "high": Style(bold=True),
+        "mid": p.content,
+        "tail": p.metadata,
+        "stale": p.old,
+    }.get(tier, p.chrome)
+
+
 def _entry_style(key: str, leaf: bool, p: Any) -> Style:
     """Colour an entry like ``ls`` colours a tree: namespaces (drillable) pop,
     leaves are plain, the orphan bucket dims."""
@@ -461,9 +472,12 @@ def _entry_table(
     max_count = max((e["count"] for e in shown), default=0)
     has_time = any(e.get("latest") is not None for e in shown)
 
-    # ENTRY fills, capped at 40 (keys can be long); shrinks+ellipsizes when the
-    # terminal is narrow so the table honours width (FIT shrinks Fill columns).
+    # Leading slot is the rail gutter (decision:design/rail-wins-gutter): a tier
+    # glyph scoped to the kind's key population, MAX-propagated to namespace
+    # rows. ENTRY fills, capped at 40 (keys can be long); shrinks+ellipsizes
+    # when the terminal is narrow so the table honours width (FIT shrinks Fill).
     cols = [
+        Column(cell(""), width=1),
         Column(
             cell("OBSERVER" if by == "observer" else "ENTRY"),
             width=Fill(), min_width=10, max_width=40, ellipsis=True,
@@ -480,7 +494,9 @@ def _entry_table(
         key, cnt, leaf = e["key"], e["count"], e.get("leaf", True)
         has_ns = has_ns or not leaf
         pct = cnt / view_total * 100
+        tier = e.get("tier", "")
         row = [
+            cell(rail_glyph(tier), _rail_style(tier, p)),
             cell(key, _entry_style(key, leaf, p)),
             cell(_format_count(cnt)),
             meter_cell(cnt, max_count, f"{pct:>4.1f}%", p),
@@ -576,12 +592,15 @@ def _kind_stat_plain(data: dict[str, Any], width: int | None) -> Block:
     view_total = sum(e["count"] for e in entries) or 1
     shown = entries[:_ENTRY_CAP]
     name_w = max((len(str(e["key"])) for e in shown), default=8)
+    # TIER rides on the piped ledger too (decision:design/spine-options-ratified
+    # §5c): the tier function has vertex-population context a pipe consumer can't
+    # reconstruct from the rows it sees, so carry the word (glyph-free channel).
     for e in shown:
         pct = e["count"] / view_total * 100
         upd = updated_text(_kind_dt(e.get("latest")))
         lines.append(Block.text(
-            f"  {str(e['key']).ljust(name_w)}  {_format_count(e['count']):>6}  "
-            f"{pct:5.1f}%  {upd}",
+            f"  {e.get('tier', ''):<5}  {str(e['key']).ljust(name_w)}  "
+            f"{_format_count(e['count']):>6}  {pct:5.1f}%  {upd}",
             Style(), width=width,
         ))
     if len(entries) > len(shown):

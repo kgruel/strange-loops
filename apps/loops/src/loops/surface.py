@@ -515,6 +515,20 @@ def _tier_for(salience: int, thresholds: tuple[int, int] | None) -> str:
     return "tail"
 
 
+def tiers_for_scores(scores: list[int]) -> list[str]:
+    """Rail tiers for a flat list of salience-like scores (quantile buckets).
+
+    The same machinery ``_assign_tiers`` runs over ``Row.salience``, exposed for
+    non-Surface populations that still want the rail vocabulary — notably the
+    ls kind-descent, whose entries are a vertex's fold keys scored by fact count
+    (decision:design/tier-one-home-inheritance — one quantile home, reused not
+    forked). Returns a tier per score, order-preserving. A flat distribution
+    (no spread) tiers everything ``mid`` rather than rendering all-◆ noise.
+    """
+    thresholds = _tier_thresholds(scores)
+    return [_tier_for(s, thresholds) for s in scores]
+
+
 def _assign_tiers(rows: list[Row]) -> list[Row]:
     """Materialize Row.tier from salience quantiles over the population.
 

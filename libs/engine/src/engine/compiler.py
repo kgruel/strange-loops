@@ -996,10 +996,25 @@ def materialize_vertex(
             k: v for k, v in overrides.items()
             if k in child_compiled.specs
         }
-        child_vertex = materialize_vertex(
-            child_compiled,
-            fold_overrides=child_overrides if child_overrides else None,
-        )
+        # A child's store may live on another host (absolute path only valid
+        # there — e.g. a monitor vertex whose db sits on the VM that runs the
+        # poller). SqliteStore.__init__ mkdirs the store's parent, so an
+        # unreachable path raises OSError here. Skip such children: the
+        # combined read path already filters to existing stores, and the
+        # parent's own store must stay writable regardless.
+        try:
+            # Signers pass down: a root-level boundary fact (e.g. seal)
+            # cascades into children and mints ticks in THEIR stores — a
+            # child in the signed era refuses an unsigned mint, so the
+            # child must sign with the same key material as the parent.
+            child_vertex = materialize_vertex(
+                child_compiled,
+                fold_overrides=child_overrides if child_overrides else None,
+                tick_signer=tick_signer,
+                fact_signer=fact_signer,
+            )
+        except OSError:
+            continue
         vertex.add_child(child_vertex)
 
     return vertex

@@ -11,7 +11,8 @@ from ._grammar import coerce_dt as _parse_ts
 from ._grammar import duration as _format_duration
 
 
-def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
+def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
+               *, piped: bool | None = None) -> Block:
     """Render tick history at the given zoom level.
 
     Accepts {"ticks": [...], "vertex": str}.
@@ -23,6 +24,9 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     - DETAILED: + per-kind counts, window duration
     - FULL: + since/ts timestamps, origin, all payload keys
     """
+    if piped:
+        width = None  # piped register never clips (information-faithful)
+
     ticks = data.get("ticks", [])
 
     if not ticks:

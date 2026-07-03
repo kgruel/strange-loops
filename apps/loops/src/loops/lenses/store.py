@@ -259,8 +259,12 @@ def tick_chain_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
+    *,
+    piped: bool | None = None,
 ) -> Block:
     """Render a store's tick series, newest-first.
+
+    ``piped=True`` forces width=None — the agent channel never clips.
 
     Default projection (plain ``store ticks``) is density — items, facts,
     and per-window delta. ``--chain`` switches to the attestation
@@ -273,6 +277,9 @@ def tick_chain_view(
     ``data`` shape: ``{vertex, chain_mode: bool, chain: {ticks, chained,
     signed, legacy}, since: str | None, windows: [TickWindow-as-dict, ...]}``.
     """
+    if piped:
+        width = None  # piped register never clips (information-faithful)
+
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")
     windows = data.get("windows", [])

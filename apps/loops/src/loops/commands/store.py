@@ -642,7 +642,8 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
     def render(ctx, data):
         from ..lenses.store import tick_chain_view
 
-        return tick_chain_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return tick_chain_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     return run_cli(
         rest,

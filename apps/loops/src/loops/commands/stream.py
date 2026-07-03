@@ -85,6 +85,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
         return call_lens(
             resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
+            piped=not ctx.is_tty,
         )
 
     return run_cli(

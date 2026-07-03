@@ -13,7 +13,8 @@ from ._grammar import block as _block
 
 
 def stream_view(
-    data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None
+    data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None,
+    *, piped: bool | None = None,
 ) -> Block:
     """Render event stream at the given zoom level.
 
@@ -24,12 +25,22 @@ def stream_view(
     Uses fold_meta key_field for summary labels when available,
     falls back to heuristic scan. No per-kind if-elif branches.
 
+    ``piped`` keys the presentation register on the channel (not width) —
+    accepted now so callers key the register explicitly; the registers
+    diverge structurally in the Surface-staging slice (G4).
+
     Zoom levels:
     - MINIMAL: counts by kind
     - SUMMARY: time + kind + summary (key_field driven)
     - DETAILED: + secondary fields on next line
     - FULL: all payload fields
     """
+    # Piped register is information-faithful: force width=None so an
+    # inherited COLUMNS never clips the agent channel (observation
+    # rendering/piped-faithfulness-forces-width-none).
+    if piped or (piped is None and width is None):
+        width = None
+
     # Normalize input format
     if isinstance(data, dict):
         facts = data.get("facts", [])

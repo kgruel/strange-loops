@@ -125,6 +125,7 @@ def _run_ticks(
             body = call_lens(
                 resolved_render_fn, fold_state, ctx.zoom, w,
                 vertex_name=_vertex_name(vertex_path),
+                piped=not ctx.is_tty,
             )
 
             # Compose tick header + fold rendering
@@ -160,6 +161,7 @@ def _run_ticks(
         return call_lens(
             resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
+            piped=not ctx.is_tty,
         )
 
     return run_cli(

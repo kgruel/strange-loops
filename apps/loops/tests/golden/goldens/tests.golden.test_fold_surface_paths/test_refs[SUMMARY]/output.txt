@@ -3,8 +3,8 @@ Decisions (3):
     ◆ Jan 15  c  ×3 ←2  referenced twice
       ← decision/design/a
       ← decision/design/b
-    │ Jan 15  a  ×2 →1  refs c
+    │ Jan 15  a  ×2 →1
       → decision/design/c
-    · Jan 15  b  →1     also refs c
+    · Jan 15  b
       → decision/design/c
 rail  ◆ high  │ mid  · tail  ⊘ stale

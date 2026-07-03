@@ -184,6 +184,15 @@ def fold_view(
     # (decision:design/drop-truncation-from-human-reads — presentation half)
     is_piped = (width is None) if piped is None else piped
 
+    # Tier-allocated disclosure engages only when the population HAS a tier
+    # gradient (decision:design/tier-allocated-disclosure). A flat population
+    # (all one tier — the _tier_thresholds None case, e.g. a tiny vertex) has
+    # nothing to allocate ALONG, so it renders uniform bodies as before. TTY
+    # only; the piped ledger never allocates.
+    tier_allocate = (
+        not is_piped and len({r.tier for r in primary}) > 1
+    )
+
     for kind, rows in populated:
         kv = data.schema.get(kind)
         fold_type = kv.fold_type if kv is not None else "collect"
@@ -212,6 +221,7 @@ def fold_view(
             facts_by_key=facts_by_key,
             fp=fp, show_observer=show_observer, visible=visible,
             lines=lines, chars=chars, piped=is_piped,
+            tier_allocate=tier_allocate,
         )
         blocks.append(section_block)
 
@@ -419,6 +429,7 @@ def _render_section(
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
     piped: bool = False,
+    tier_allocate: bool = False,
 ) -> Block:
     """Render a section's rows — TTY: rail rows, grouped by namespace or
     flat; piped: the flat ledger (full keys, named columns)."""
@@ -445,6 +456,7 @@ def _render_section(
             section_kind=kind,
             preview_fields=preview_fields,
             lines=lines, chars=chars, cols=cols,
+            tier_allocate=tier_allocate,
         )
     else:
         return _render_flat(
@@ -456,6 +468,7 @@ def _render_section(
             section_kind=kind,
             preview_fields=preview_fields,
             lines=lines, chars=chars, cols=cols,
+            tier_allocate=tier_allocate,
         )
 
 
@@ -597,6 +610,7 @@ def _render_grouped(
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
     cols: "_Cols | None" = None,
+    tier_allocate: bool = False,
 ) -> Block:
     """Render by-fold rows grouped by namespace prefix.
 
@@ -652,7 +666,7 @@ def _render_grouped(
                 fp=fp, show_observer=show_observer, visible=visible,
                 indent=4, strip_namespace=True, section_kind=section_kind,
                 preview_fields=preview_fields,
-                chars=chars, cols=cols,
+                chars=chars, cols=cols, tier_allocate=tier_allocate,
             ))
 
         remaining = len(sorted_items) - len(show_items)
@@ -686,6 +700,7 @@ def _render_flat(
     preview_fields: tuple[str, ...] = (),
     lines: int = 0, chars: int = 0,
     cols: "_Cols | None" = None,
+    tier_allocate: bool = False,
 ) -> Block:
     """Render rows as a flat list — sorted by salience for by-folds.
 
@@ -719,7 +734,7 @@ def _render_flat(
             fp=fp, show_observer=show_observer, visible=visible,
             indent=2, strip_namespace=False, is_by=is_by, section_kind=section_kind,
             preview_fields=preview_fields,
-            chars=chars, cols=cols,
+            chars=chars, cols=cols, tier_allocate=tier_allocate,
         ))
 
     remaining = total - len(sorted_items)
@@ -756,6 +771,7 @@ def _render_item_line(
     chars: int = 0,
     piped: bool = False,
     cols: "_Cols | None" = None,
+    tier_allocate: bool = False,
 ) -> Block:
     """Render a single fold item as a composed Block with multi-style.
 
@@ -770,6 +786,26 @@ def _render_item_line(
     payload = item.payload
     pad = " " * indent
     cols = cols or _Cols()
+
+    # Tier-allocated disclosure (decision:design/tier-allocated-disclosure):
+    # the TTY default-zoom ORIENTATION view breathes by tier — high rows get
+    # bodies, mid get headlines (key + cluster, no body), tail/untiered get
+    # bare lines (key only). This is the fix for rail-drowns-under-full-bodies:
+    # bodies become scarce, so the rail's spacing survives by construction.
+    #
+    # Flip-invariance is preserved on every RETRIEVAL path: an exact key address
+    # (granularity=="whole") always forces the body; --full/-v/-vv (DETAILED+ or
+    # whole) stay uniform and tier-blind; the piped ledger never allocates. Only
+    # the SUMMARY-zoom TTY orientation view is exempt (tiers are quantile-
+    # relative, so a row may flip body/headline as the population moves — honest
+    # for orientation: attention moved).
+    allocate = (
+        tier_allocate
+        and zoom == Zoom.SUMMARY
+        and item.granularity != "whole"
+    )
+    show_body = (not allocate) or item.tier == "high"
+    show_cluster = (not allocate) or item.tier in ("high", "mid")
 
     # Key
     if is_by and key_field:
@@ -879,7 +915,7 @@ def _render_item_line(
             Block.text(f" {age:<{cols.age_w}}", fp.collapse),
             Block.text(f"  {label:<{key_w}}", fp.key),
         ]
-        if cols.cluster_w:
+        if cols.cluster_w and show_cluster:
             cluster_parts: list[Block] = [Block.text("  ", fp.body)]
             pos = 0
             for token in cluster.split():
@@ -895,9 +931,9 @@ def _render_item_line(
             if pos < cols.cluster_w:
                 cluster_parts.append(Block.text(" " * (cols.cluster_w - pos), fp.body))
             parts.extend(cluster_parts)
-        if body_text:
+        if body_text and show_body:
             parts.append(Block.text(f"  {body_text}", fp.body))
-        if truncation_hint:
+        if truncation_hint and show_body:
             parts.append(Block.text(truncation_hint, fp.collapse))
 
         main_line = join_horizontal(*parts)

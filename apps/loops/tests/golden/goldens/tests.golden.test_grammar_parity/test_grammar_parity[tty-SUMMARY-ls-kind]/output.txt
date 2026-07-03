@@ -1,0 +1,11 @@
+╭─ decision · by topic ───────────────────────╮
+│ 4 facts · 44.4% of grammar                  │
+│ 2 topics · span Jan 01–Jan 02 · updated 3d  │
+╰─────────────────────────────────────────────╯
+
+   ENTRY          COUNT  SHARE          UPDATED
+───────────────────────────────────────────────
+◆  design/            3  ███████ 75.0%       3d
+·  architecture/      1  ██░░░░░ 25.0%       4d
+
+  --key <ns>/ to drill · read grammar --kind decision for content

@@ -1,0 +1,11 @@
+╭─ grammar · ticks ────────────────────────────────────────────────────────────╮
+│ 2 ticks                                                                      │
+│ 2 chained · 0 signed · 0 legacy                                              │
+│ Jan 1 → Jan 2 · latest 3d                                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  2025-01-02 13:08 #0 grammar · linked · unsigned
+        cursor → session: "s2"
+        window: 2025-01-02 13:00 → 2025-01-02 13:08 · s2
+  2025-01-01 12:08 #1 grammar · linked · unsigned
+        cursor → session: "s1"
+        window: 2025-01-01 12:00 → 2025-01-01 12:08 · s1

@@ -1,0 +1,4 @@
+decision (4)
+  44.4% of grammar · 2 topics · span Jan 01–Jan 02 · updated 3d
+  high   design/             3   75.0%  3d
+  tail   architecture/       1   25.0%  4d

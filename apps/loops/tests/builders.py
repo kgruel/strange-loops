@@ -496,6 +496,74 @@ def write_boundary_vertex(dir_path: Path, *, name: str = "project") -> Path:
     return vpath
 
 
+# ---------------------------------------------------------------------------
+# Grammar fixture — one deterministic store spanning every read surface
+# ---------------------------------------------------------------------------
+#
+# The shared cross-command fixture (closes
+# friction:cli-smoke-needs-shared-boundary-vertex-fixture at full breadth): a
+# real vertex + store carrying keyed folds (decision by topic, thread by name,
+# session by name), a collect fold (log), an outbound ref, and TWO tick
+# boundaries so read / stream / store-ticks / ls all have content to render.
+# Timestamps are pinned constants so goldens over it are stable — no wall clock
+# enters the STORED data (only recency() reads the clock at render time, which
+# the golden pins separately).
+
+# 2025-01-01 12:00:00 UTC — the fixture epoch. Facts hang off it at fixed
+# offsets; the two sessions close a day apart so tick windows span two dates.
+GRAMMAR_T0 = 1735732800.0
+
+
+def write_grammar_fixture(dir_path: Path, *, name: str = "grammar") -> Path:
+    """Build the shared cross-command grammar fixture and return its .vertex.
+
+    Populates through the real vertex program (``program.receive``) so the
+    session boundaries fire real ticks; every fact carries an explicit ``ts``
+    so the store is byte-deterministic. Reusable by any test that wants a
+    populated store with keyed + collect folds, a ref, and ticks.
+    """
+    from atoms import Fact
+    from engine import load_vertex_program
+
+    vpath = dir_path / f"{name}.vertex"
+    vpath.write_text(
+        f'name "{name}"\n'
+        f'store "./{name}.db"\n'
+        "\n"
+        "loops {\n"
+        '  decision { fold { items "by" "topic" } }\n'
+        '  thread   { fold { items "by" "name" } }\n'
+        '  log      { fold { items "collect" 20 } }\n'
+        '  session  { fold { items "by" "name" } }\n'
+        "\n"
+        '  boundary when="session" status="closed"\n'
+        "}\n",
+    )
+    prog = load_vertex_program(vpath)
+    t = GRAMMAR_T0
+    facts = [
+        Fact.of("decision", "kyle", ts=t + 0,
+                topic="design/rail", message="the rail wins the gutter"),
+        Fact.of("decision", "kyle", ts=t + 100,
+                topic="design/rail", message="rail confirmed", ref="thread:spine"),
+        Fact.of("decision", "kyle", ts=t + 200,
+                topic="architecture/tiers", message="quantile buckets, vertex-scoped"),
+        Fact.of("thread", "kyle", ts=t + 300,
+                name="spine", status="open", message="the static-honest spine"),
+        Fact.of("log", "kyle", ts=t + 400, message="rtk rewrote the grep"),
+        Fact.of("session", "kyle", ts=t + 500, name="s1", status="closed"),
+        # A second session a day later — two tick windows, two dates.
+        Fact.of("decision", "loops-claude", ts=t + 90000,
+                topic="design/rail", message="post-tick refinement"),
+        Fact.of("thread", "kyle", ts=t + 90100,
+                name="digest", status="open", message="the digest arc"),
+        Fact.of("session", "kyle", ts=t + 90500, name="s2", status="closed"),
+    ]
+    for f in facts:
+        prog.receive(f)
+    return vpath
+
+
 def emit_fact(vpath: Path, kind: str, *, observer: str = "kyle", **parts) -> None:
     """Emit one fact into a vertex's store via the real CLI emit path.
 

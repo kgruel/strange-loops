@@ -1,0 +1,37 @@
+╭─ grammar · fold ─────────────────────────────────────────────────────────────╮
+│ 7 keys · 4 kinds · 9 facts                                                   │
+│ updated 3d                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Decisions (2):
+  design/ (1)
+    ◆ 3d  rail   ×3 →1  post-tick refinement
+      observer: loops-claude
+      id: <ID>
+  architecture/ (1)
+    │ 4d  tiers         quantile buckets, vertex-scoped
+      observer: kyle
+      id: <ID>
+
+Threads (2):
+  ◆ 4d  spine   ←1  open
+    observer: kyle
+    id: <ID>
+    message: the static-honest spine
+  │ 3d  digest      open
+    observer: kyle
+    id: <ID>
+    message: the digest arc
+
+Logs (1):
+  │ 4d  rtk rewrote the grep
+    observer: kyle
+    id: <ID>
+
+Sessions (2):
+  │ 4d  s1  closed
+    observer: kyle
+    id: <ID>
+  │ 3d  s2  closed
+    observer: kyle
+    id: <ID>
+rail  ◆ high  │ mid  · tail  ⊘ stale

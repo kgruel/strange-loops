@@ -1,0 +1,32 @@
+╭─ grammar · stream ───────────────────────────────────────────────────────────╮
+│ 9 facts                                                                      │
+│ 2025-01-01 → 2025-01-02 · updated 3d                                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+2025-01-02:
+│ 13:08 [session] s2
+    id: <ID>
+│ 13:01 [thread] digest: the digest arc
+    message: the digest arc
+    id: <ID>
+◆ 13:00 [decision] design/rail: post-tick refinement
+    message: post-tick refinement
+    id: <ID>
+
+2025-01-01:
+│ 12:08 [session] s1
+    id: <ID>
+  12:06 [log] rtk rewrote the grep
+    message: rtk rewrote the grep
+    id: <ID>
+◆ 12:05 [thread] spine: the static-honest spine
+    message: the static-honest spine
+    id: <ID>
+│ 12:03 [decision] architecture/tiers: quantile buckets, vertex-scoped
+    message: quantile buckets, vertex-scoped
+    id: <ID>
+◆ 12:01 [decision] design/rail: rail confirmed
+    message: rail confirmed
+    id: <ID>
+◆ 12:00 [decision] design/rail: the rail wins the gutter
+    message: the rail wins the gutter
+    id: <ID>

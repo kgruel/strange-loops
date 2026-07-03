@@ -1,0 +1,2 @@
+config — ~/.config/loops
+    grammar  9 facts  4 kinds  3d  ⊃ decision · session · thread

@@ -89,6 +89,11 @@ class Row:
     depth: int = 0  # >0 for ref-walk rows
     via_anchor: str | None = None  # the anchor whose ref pulled a walked row in
     granularity: str = "headline"  # "whole" | "headline"
+    tier: str = "mid"  # rail tier: "high" | "mid" | "tail" — quantile bucket of
+    # salience within the projected population (decision:design/
+    # salience-tier-scope-vertex; "stale" overlay arrives with the lifecycle
+    # declaration). Assigned once in project(); transforms preserve it, so the
+    # glyph a row got is the glyph every view shows.
 
 
 @dataclass(frozen=True)
@@ -469,6 +474,54 @@ def _address(kind: str, key: str | None, item_id: str | None) -> str:
     return f"{kind}/"
 
 
+def _tier_thresholds(saliences: list[int]) -> tuple[int, int] | None:
+    """Quantile thresholds (q90, q50) for rail-tier assignment.
+
+    The default dial (decision:design/spine-options-ratified §5a): ``high``
+    = top decile of salience within the population, ``mid`` = above median,
+    ``tail`` = the rest. Quantiles stay informative across a 9-key and a
+    516-key vertex alike, which is the point of vertex scope.
+
+    Returns None when the distribution has no spread — a flat population
+    has no "hot" rows, so callers tier everything ``mid`` rather than
+    rendering all-◆ noise.
+    """
+    if not saliences:
+        return None
+    lo, hi = min(saliences), max(saliences)
+    if lo == hi:
+        return None
+    s = sorted(saliences)
+    n = len(s)
+    q90 = s[int(0.9 * (n - 1) + 0.5)]
+    q50 = s[int(0.5 * (n - 1) + 0.5)]
+    return q90, q50
+
+
+def _tier_for(salience: int, thresholds: tuple[int, int] | None) -> str:
+    if thresholds is None:
+        return "mid"
+    q90, q50 = thresholds
+    if salience >= q90:
+        return "high"
+    if salience >= q50:
+        return "mid"
+    return "tail"
+
+
+def _assign_tiers(rows: list[Row]) -> list[Row]:
+    """Materialize Row.tier from salience quantiles over the population.
+
+    Scope caveat (named residue, not silent): tiers are vertex-scoped only
+    when the fetch was unfiltered — the default read. A fetch-level
+    ``--kind``/``--key`` cut yields a state whose population IS the cut, so
+    tiers degrade to cut-scope there until thresholds are hoisted to a
+    full-vertex query (thread:static-honest-060-spine).
+    """
+    thresholds = _tier_thresholds([r.salience for r in rows])
+    return [replace(r, tier=_tier_for(r.salience, thresholds)) for r in rows]
+
+
 def project(
     state: FoldState,
     *,
@@ -566,7 +619,7 @@ def project(
             )
         )
 
-    row_tuple = tuple(rows)
+    row_tuple = tuple(_assign_tiers(rows))
     window = Window(
         total=len(row_tuple),
         shown=len(row_tuple),
@@ -874,6 +927,7 @@ def _row_to_dict(row: Row) -> dict:
             {"predicate": p, "count": c} for p, c in row.inbound_predicates
         ],
         "salience": row.salience,
+        "tier": row.tier,
         "depth": row.depth,
         "via_anchor": row.via_anchor,
         "granularity": row.granularity,

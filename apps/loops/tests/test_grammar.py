@@ -150,3 +150,14 @@ class TestTickEnvelope:
     def test_rows_are_styled_tuples(self):
         rows = tick_drill_rows({"index": 0, "total": 1})
         assert all(isinstance(s, Style) for _, s in rows)
+
+
+class TestRail:
+    def test_glyphs(self):
+        from loops.lenses._grammar import rail_glyph
+
+        assert rail_glyph("high") == "◆"
+        assert rail_glyph("mid") == "│"
+        assert rail_glyph("tail") == "·"
+        assert rail_glyph("stale") == "⊘"
+        assert rail_glyph("unknown") == "│"

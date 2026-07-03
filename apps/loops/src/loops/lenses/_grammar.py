@@ -139,6 +139,30 @@ def duration(start: datetime, end: datetime) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The rail (salience gutter)
+# ---------------------------------------------------------------------------
+
+# Tier → gutter glyph. The leftmost column means the same thing from ls down
+# to a single fact (decision:design/rail-wins-gutter). Tier values are
+# materialized on Surface rows (surface._assign_tiers — quantile buckets,
+# vertex-scoped, view-invariant); "stale" is the ⊘ status overlay, stampable
+# over any tier once the lifecycle declaration lands.
+TIER_GLYPHS: dict[str, str] = {
+    "high": "◆",
+    "mid": "│",
+    "tail": "·",
+    "stale": "⊘",
+}
+
+RAIL_LEGEND = "rail  ◆ high  │ mid  · tail  ⊘ stale"
+
+
+def rail_glyph(tier: str) -> str:
+    """Gutter glyph for a tier — unknown tiers render the mid rail."""
+    return TIER_GLYPHS.get(tier, TIER_GLYPHS["mid"])
+
+
+# ---------------------------------------------------------------------------
 # Layout helpers
 # ---------------------------------------------------------------------------
 

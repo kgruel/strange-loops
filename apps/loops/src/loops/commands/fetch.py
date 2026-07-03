@@ -456,6 +456,20 @@ def fetch_ticks(
     ticks = vertex_ticks(vertex_path, since_ts, now.timestamp())
 
     ast = parse_vertex_file(vertex_path)
+    fold_meta = _get_fold_meta(vertex_path)
+
+    # Tier inheritance for tick windows (decision:design/tier-one-home-
+    # inheritance + salience-max-propagation): a tick is a tree-cut container
+    # whose tier is the MAX over the tiers of the keys it touched. Same tier_map
+    # as stream — folded once, never re-computed. Best-effort: a fold failure
+    # leaves ticks untiered rather than breaking the history read.
+    tmap: dict = {}
+    try:
+        from loops.surface import project, tier_map
+
+        tmap = tier_map(project(fetch_fold(vertex_path)))
+    except Exception:
+        tmap = {}
 
     # Convert Tick objects to dicts with summary info derived from payload
     tick_dicts = []
@@ -479,9 +493,42 @@ def fetch_ticks(
             "origin": tick.origin,
             "boundary": boundary,
             "kind_counts": kind_counts,
+            "tier": _window_tier(vertex_path, tick, tmap, fold_meta) if tmap else "",
         })
 
     return {"ticks": tick_dicts, "vertex": ast.name}
+
+
+def _window_tier(
+    vertex_path: Path, tick, tmap: dict, fold_meta: dict[str, dict]
+) -> str:
+    """MAX tier over the keys a tick's window touched (tree-cut propagation).
+
+    Queries the facts between ``tick.since``..``tick.ts`` (the window the tick
+    sealed), extracts each fact's ``(kind, key)`` via the fold key_field, looks
+    the tier up in the shared ``tmap``, and returns the MAX. A window whose keys
+    are all untiered (or that touched no keyed facts) is itself untiered "".
+    """
+    from engine import vertex_facts
+
+    from loops.surface import tier_max
+
+    start = tick.since.timestamp() if tick.since else 0.0
+    end = tick.ts.timestamp()
+    try:
+        facts = vertex_facts(vertex_path, start, end)
+    except Exception:
+        return ""
+    tiers: list[str] = []
+    for f in facts:
+        kind = f.get("kind", "")
+        key_field = fold_meta.get(kind, {}).get("key_field")
+        if not key_field:
+            continue
+        key = str(f.get("payload", {}).get(key_field, ""))
+        if key:
+            tiers.append(tmap.get((kind, key), ""))
+    return tier_max(tiers)
 
 
 def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:

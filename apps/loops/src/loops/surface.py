@@ -667,6 +667,28 @@ def tier_map(surface: Surface) -> dict[tuple[str, str], str]:
     }
 
 
+# Container tiers propagate the MAX of what they hold
+# (decision:design/salience-max-propagation): a tick window is as hot as its
+# hottest key. Ordering high > mid > tail > untiered("").
+_TIER_RANK: dict[str, int] = {"high": 3, "mid": 2, "tail": 1, "": 0}
+
+
+def tier_max(tiers: "list[str]") -> str:
+    """MAX tier over a set of member tiers (container propagation).
+
+    A window/container inherits its hottest member's tier; an empty set — or
+    one holding only untiered members — is itself untiered "". Unknown tier
+    strings rank as untiered (defensive; the map only ever feeds known tiers).
+    """
+    best = ""
+    best_rank = 0
+    for t in tiers:
+        rank = _TIER_RANK.get(t, 0)
+        if rank > best_rank:
+            best, best_rank = t, rank
+    return best
+
+
 def _event_row(fact: dict, tier: str = "") -> Row:
     """Build an event-axis Row from a ``vertex_search`` / ``vertex_facts`` dict.
 

@@ -748,6 +748,31 @@ class TestTierAssignment:
         assert tiers["t9"] == "high"
         assert set(tiers.values()) <= {"high", "mid", "tail"}
 
+    def test_tier_map_and_max(self):
+        """tier_map projects (kind,key)→tier from entity rows; tier_max is the
+        container propagation (high > mid > tail > untiered)."""
+        from atoms import FoldItem, FoldSection, FoldState
+
+        from loops.surface import project, tier_map, tier_max
+
+        items = tuple(
+            FoldItem(payload={"topic": f"t{i}", "message": "m"}, ts=None,
+                     observer="o", id=None, n=n)
+            for i, n in enumerate([1, 1, 1, 2, 9])
+        )
+        state = FoldState(
+            vertex="v",
+            sections=(FoldSection(kind="decision", items=items,
+                                  fold_type="by", key_field="topic"),),
+        )
+        tmap = tier_map(project(state))
+        assert tmap[("decision", "t4")] == "high"  # n=9
+        # MAX propagation + untiered handling
+        assert tier_max(["tail", "high", "mid"]) == "high"
+        assert tier_max(["tail", "mid"]) == "mid"
+        assert tier_max(["", ""]) == ""
+        assert tier_max([]) == ""
+
     def test_transforms_preserve_tier(self):
         from atoms import FoldItem, FoldSection, FoldState
 

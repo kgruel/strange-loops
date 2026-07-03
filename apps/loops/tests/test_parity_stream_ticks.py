@@ -51,6 +51,7 @@ TICKS_DATA = {
             "origin": "session",
             "boundary": {"name": "session", "status": "end"},
             "kind_counts": {"decision": 3, "task": 2},
+            "tier": "high",
         },
         {
             "name": "demo",
@@ -112,6 +113,18 @@ class TestTicksParity:
             ticks_view, TICKS_DATA,
             load_bearing=["2025-01-15", "2025-01-14", "session end", "#0", "#1"],
         )
+
+    def test_tier_carried_on_both_channels(self):
+        """A tick's MAX-propagated tier (G4c) reaches both registers —
+        ◆ glyph on TTY, ``high`` word piped; the untiered second tick never
+        invents a mid glyph."""
+        from .parity import information_text, raw_text
+
+        tty = ticks_view(TICKS_DATA, Zoom.SUMMARY, 100, piped=False)
+        piped = ticks_view(TICKS_DATA, Zoom.SUMMARY, 40, piped=True)
+        assert "◆" in raw_text(tty)
+        assert "high" in information_text(piped)
+        assert "untiered" in information_text(piped)
 
 
 class TestTickChainParity:

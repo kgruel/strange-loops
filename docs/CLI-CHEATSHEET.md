@@ -78,6 +78,28 @@ loops read <vertex> --count --by kind         # one count row per group (--by ro
 | `--live` | Poll and re-render on change |
 | `-i` | Interactive TUI mode (autoresearch lens) |
 
+### Static grammar (0.6.0) — rail, card, registers
+
+One grammar, two presentation registers keyed on the CHANNEL (TTY vs piped),
+never on width. Shared vocabulary lives in `lenses/_grammar.py`.
+
+```
+rail   ◆ high   │ mid   · tail   ⊘ stale      # salience tier per fold KEY, quantile-
+                                              # bucketed within the vertex (view-invariant;
+                                              # facts inherit their key's tier, containers
+                                              # aggregate by MAX)
+```
+
+- **TTY register**: header **card** (vertex · view, counts, span) at default
+  zoom and up — `-q` stays a genuine one-liner. Rail glyph owns the leading
+  slot; default zoom allocates disclosure by tier (◆ full body / mid headline /
+  tail bare line) when the population has a tier gradient.
+- **Piped register**: no chrome, information-faithful — flat ledger columns
+  incl. a literal `TIER` word column (high/mid/tail), full keys, ISO dates,
+  no truncation (width is never inherited from `$COLUMNS`).
+- One time vocabulary everywhere: compact relative (`2h`, `3d`, calendar
+  cutover to `Feb 27`) on rows, clock-under-date-group on streams/ticks.
+
 ---
 
 ## Emit
@@ -208,6 +230,13 @@ by default (vertices are few); `-1` opts out. On a TTY the human register adds a
 header card, a share meter, a per-kind activity sparkline, and freshness colour;
 piped/agent output stays terse plain text. `ls` owns the structural levels
 (vertex / kind / key); `read` owns the content level (facts).
+
+Rail alignment (0.6.0): kind-descent entries (`--kind NAME`) carry the salience
+rail — tier glyph gutter on TTY, `TIER` word column piped; namespace rollup rows
+inherit MAX over their leaves. Root vertex rows are untiered (max-over-keys is
+no signal at vertex scope). The vertex-type glyph ◆/◇/◈ left slot one: type
+shows as a `⊙ own store` / `⊙ combine of …` detail line at `-v` on TTY, and as
+the TYPE word column piped (as before).
 
 ---
 

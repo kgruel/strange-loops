@@ -1,3 +1,7 @@
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 8 keys · 4 kinds · 8 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (2):
   │ Jan 15  Use SQLite for persistence  Chose SQLite over filesystem … [+35c]
   │ Jan 14  KDL for config format       KDL is human-friendly and sup… [+22c]

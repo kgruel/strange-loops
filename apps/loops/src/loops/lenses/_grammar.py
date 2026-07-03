@@ -25,8 +25,12 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-from painted import Block, Style
+from painted import Block, ROUNDED, Style, Wrap, border, join_vertical
+
+if TYPE_CHECKING:
+    from ..palette import LoopsPalette
 
 # ---------------------------------------------------------------------------
 # Timestamp coercion
@@ -263,3 +267,44 @@ def tick_drill_rows(tick_meta: dict) -> list[tuple[str, Style]]:
     if attest:
         rows.append((attest, Style(dim=True)))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# The header card — the shared TTY letterhead (spine G5).
+#
+# One card helper from ls down to a single read: a rounded box whose top edge
+# carries the title (vertex · view) and whose interior carries a few factual
+# stat sublines. Lifted here from _statview so read/stream/ticks and ls all
+# draw the SAME card (decision:design/static-grammar-hybrid-by-register — TTY
+# is the rail body under a card header). The card is TTY-only chrome: piped
+# callers never build it (the information rides the plain header lines instead).
+# ---------------------------------------------------------------------------
+
+
+def card(
+    title: str, sublines: list[str], width: int, *, p: "LoopsPalette"
+) -> Block:
+    """Rounded header card — ``title`` in the top edge, stat ``sublines`` inside.
+
+    Body lines carry a one-space interior margin so they don't kiss the border.
+    """
+    inner_w = max(1, width - 2)
+    # Ellipsize (not hard-clip) so a stat line that won't fit a narrow card
+    # signals the loss with a marker instead of silently dropping a number.
+    body = [
+        Block.text(f" {s}", p.metadata, width=inner_w, wrap=Wrap.ELLIPSIS)
+        for s in sublines if s
+    ]
+    inner = join_vertical(*body) if body else Block.empty(inner_w, 1)
+    return border(inner, ROUNDED, p.chrome, title=title, title_style=p.header)
+
+
+def card_width(
+    body: Block, title: str, sublines: list[str], width: int | None
+) -> int:
+    """Width for a header card that fits both its sublines and the body below
+    it — so a short body never clips a longer stat line. Capped at ``width``."""
+    needed = max(
+        [body.width or 0, len(title) + 4, *(len(s) + 3 for s in sublines)]
+    )
+    return min(needed, width) if width else needed

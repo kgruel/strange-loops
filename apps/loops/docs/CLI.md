@@ -8,6 +8,10 @@
 Folded state — decisions, threads, tasks, changes.
 
 ```
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 8 keys · 4 kinds · 8 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (2):
   │ Jan 15  Use SQLite for persistence  Chose SQLite over filesystem … [+35c]
   │ Jan 14  KDL for config format       KDL is human-friendly and sup… [+22c]
@@ -31,6 +35,10 @@ rail  ◆ high  │ mid  · tail  ⊘ stale
 Event stream — chronological facts.
 
 ```
+╭─ session · stream ───────────────────────────────────────────────────────────╮
+│ 4 facts                                                                      │
+│ 2025-01-14 → 2025-01-15 · updated Jan 15                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
 2025-01-15:
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for…
   09:30 [task] implement fold: Wire up Spec.apply.

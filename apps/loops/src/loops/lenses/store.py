@@ -15,7 +15,15 @@ from painted import Block, Style, Zoom, border, join_vertical, ROUNDED
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
 from ._grammar import block as _line
-from ._grammar import ensure_utc, recency, stamp
+from ._grammar import (
+    card,
+    card_width,
+    coerce_dt,
+    ensure_utc,
+    recency,
+    short_date,
+    stamp,
+)
 from .gist import content_gist
 
 
@@ -308,7 +316,7 @@ def tick_chain_view(
         return _line(rollup, p.metadata, width)
 
     dim = Style(dim=True)
-    rows: list[Block] = [_line(rollup, p.header, width)]
+    rows: list[Block] = []
     for w in windows:
         time_str = stamp(w["ts"])
         idx = f"#{w.get('index', 0)}"
@@ -341,7 +349,30 @@ def tick_chain_view(
                 dim, width,
             ))
 
-    return join_vertical(*rows)
+    body = join_vertical(*rows)
+
+    # Piped keeps the plain rollup header (vertex + counts, chrome-free); TTY
+    # wears the header card (spine G5, fidelity policy B). The card's sublines
+    # carry the same info the rollup line does — tick count and (chain mode)
+    # the chained/signed/legacy tally — so both channels stay faithful.
+    if piped:
+        return join_vertical(_line(rollup, p.header, None), body)
+
+    sublines = [f"{len(windows)} ticks"]
+    if attest:
+        sublines.append(
+            f"{chain.get('chained', 0)} chained · "
+            f"{chain.get('signed', 0)} signed · "
+            f"{chain.get('legacy', 0)} legacy"
+        )
+    stamps = [dt for w in windows if (dt := coerce_dt(w.get("ts"))) is not None]
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        span = short_date(lo) if lo == hi else f"{short_date(lo)} → {short_date(hi)}"
+        sublines.append(f"{span} · latest {recency(hi)}")
+    title = f"{vertex} · ticks"
+    card_w = card_width(body, title, sublines, width)
+    return join_vertical(card(title, sublines, card_w, p=p), body)
 
 
 # ---------------------------------------------------------------------------

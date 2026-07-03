@@ -1,3 +1,7 @@
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 1 keys · 1 kinds · 3 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (1):
   │ Jan 15  Use SQLite  ×3  Atomic writes and query support. [+30c]
 rail  ◆ high  │ mid  · tail  ⊘ stale

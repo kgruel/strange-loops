@@ -33,10 +33,11 @@ from painted.palette import current_palette
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
 from loops.surface import project  # runtime: FoldState → Surface (idempotent)
 
-from ._grammar import RAIL_LEGEND, date_key, rail_glyph
+from ._grammar import RAIL_LEGEND, card, card_width, coerce_dt, date_key, rail_glyph
 from ._grammar import full_iso as _format_ts_full
 from ._grammar import recency as _recency_tag
 from ._grammar import short_date as _format_date
+from ._statview import palette_of
 
 if TYPE_CHECKING:
     from atoms import FoldItem  # grouping-helper hints (duck-typed on .payload)
@@ -109,6 +110,42 @@ def _default_fold_palette() -> FoldPalette:
         unfolded=p.muted,
         stale_indicator=Style(fg=208),    # orange — stale-open work (peer to ✦/◦, not escalation)
     )
+
+
+# ---------------------------------------------------------------------------
+# The TTY header card (spine G5) — the shared letterhead over the rail body.
+# ---------------------------------------------------------------------------
+
+
+def _fold_card(
+    surface: "Surface",
+    populated: list[tuple[str, list["Row"]]],
+    primary: list["Row"],
+    body: Block,
+    width: int | None,
+    vertex_name: str | None,
+) -> Block | None:
+    """The TTY header card for a fold read — vertex letterhead + stat sublines.
+
+    Title = ``<vertex> · fold``; the sublines are aggregates the piped ledger
+    already carries per-kind (key/kind/fact counts via the ``## KIND (N)``
+    headers) plus the freshness of the newest key, so the card states nothing
+    the agent channel lacks — no piped parity addition is owed. Returns None
+    when there's no vertex to title (legacy list-shaped callers)."""
+    name = vertex_name or surface.vertex
+    if not name:
+        return None
+    keys = len(primary)
+    kinds = len(populated)
+    facts = sum(r.n for r in primary)
+    sublines = [f"{keys} keys · {kinds} kinds · {facts} facts"]
+    stamps = [dt for r in primary if (dt := coerce_dt(r.ts)) is not None]
+    if stamps:
+        sublines.append(f"updated {_recency_tag(max(stamps))}")
+    title = f"{name} · fold"
+    p = palette_of(None)
+    card_w = card_width(body, title, sublines, width)
+    return card(title, sublines, card_w, p=p)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +291,18 @@ def fold_view(
     if not is_piped:
         blocks.append(Block.text(RAIL_LEGEND, fp.meta, width=width))
 
-    return join_vertical(*blocks)
+    body = join_vertical(*blocks)
+
+    # Header card — TTY letterhead over the rail body (decision:design/static-
+    # grammar-hybrid-by-register; fidelity policy B). SUMMARY and above only;
+    # -q (MINIMAL) already returned its bare one-liner above, and the piped
+    # ledger never wears chrome.
+    if not is_piped and zoom >= Zoom.SUMMARY:
+        head = _fold_card(data, populated, primary, body, width, vertex_name)
+        if head is not None:
+            return join_vertical(head, body)
+
+    return body
 
 
 def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:

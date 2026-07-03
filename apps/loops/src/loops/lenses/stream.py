@@ -8,13 +8,23 @@ from typing import Any
 from painted import Block, Style, Zoom, join_horizontal, join_vertical
 from painted.views import record_line
 
-from ._grammar import DateGrouper, coerce_dt, rail_glyph, tick_drill_rows
+from ._grammar import (
+    DateGrouper,
+    card,
+    card_width,
+    coerce_dt,
+    date_key,
+    rail_glyph,
+    recency,
+    tick_drill_rows,
+)
 from ._grammar import block as _block
+from ._statview import palette_of
 
 
 def stream_view(
     data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None,
-    *, piped: bool | None = None,
+    *, piped: bool | None = None, vertex_name: str | None = None,
 ) -> Block:
     """Render event stream at the given zoom level.
 
@@ -150,7 +160,44 @@ def stream_view(
         for line in graft:
             blocks.append(_block(f"    {line}", dim_style, width))
 
-    return join_vertical(*blocks)
+    body = join_vertical(*blocks)
+
+    # Header card — TTY letterhead (spine G5, fidelity policy B). SUMMARY+
+    # only; the tick drill-down carries its own header, and the piped ledger
+    # never wears chrome. Card sublines are the fact count + the span, which
+    # the piped channel already carries as per-row date-group headers, so no
+    # piped parity addition is owed.
+    if (
+        not is_piped
+        and zoom >= Zoom.SUMMARY
+        and tick_meta is None
+        and not is_id_lookup
+        and isinstance(data, dict)
+        and facts
+    ):
+        name = vertex_name or data.get("vertex", "")
+        if name:
+            head = _stream_card(name, facts, body, width)
+            return join_vertical(head, body)
+
+    return body
+
+
+def _stream_card(
+    name: str, facts: list[dict[str, Any]], body: Block, width: int | None
+) -> Block:
+    """The TTY header card for a stream read — ``<vertex> · stream`` + span."""
+    stamps = [dt for f in facts if (dt := coerce_dt(f.get("ts"))) is not None]
+    n = len(facts)
+    sublines = [f"{n} fact{'s' if n != 1 else ''}"]
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        span = date_key(lo) if lo == hi else f"{date_key(lo)} → {date_key(hi)}"
+        sublines.append(f"{span} · updated {recency(hi)}")
+    title = f"{name} · stream"
+    p = palette_of(None)
+    card_w = card_width(body, title, sublines, width)
+    return card(title, sublines, card_w, p=p)
 
 
 def _stream_payload_lens(fold_meta: dict):

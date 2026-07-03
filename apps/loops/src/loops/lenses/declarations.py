@@ -19,8 +19,6 @@ from painted import Align, Block, Line, Style, Wrap, Zoom, join_vertical, vslice
 from painted.views import Column, Fill
 
 from ._statview import (
-    card,
-    card_width,
     cell,
     freshness_style,
     meter_cell,
@@ -29,7 +27,7 @@ from ._statview import (
     stat_table,
     updated_text,
 )
-from ._grammar import recency
+from ._grammar import card, card_width, recency
 from .store import _format_count
 
 

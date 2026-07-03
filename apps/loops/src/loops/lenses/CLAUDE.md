@@ -87,10 +87,13 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 **Utilities** (imported by other lenses):
 - `_grammar` — the shared static-grammar vocabulary: ONE time vocabulary
   (`recency`/`clock`/`date_key`/`short_date`/`stamp`/`full_iso`/`duration`),
-  the width-honoring `block` helper, `DateGrouper`, and the tick envelope
-  rows (`attest_line`, `tick_drill_rows`). Never hand-roll a timestamp
-  format or a `width=None` guard in a lens — import it from here.
-- `_statview` — rich-TTY stat toolkit (card, stat_table, spark, meters)
+  the width-honoring `block` helper, `DateGrouper`, the tick envelope
+  rows (`attest_line`, `tick_drill_rows`), and the header `card`/`card_width`
+  (the shared TTY letterhead — read/stream/ticks and ls all draw it). Never
+  hand-roll a timestamp format, a `width=None` guard, or a header card in a
+  lens — import it from here.
+- `_statview` — rich-TTY stat toolkit (stat_table, spark, meters, freshness;
+  re-exports `card`/`card_width` from `_grammar` for the ls lenses)
 - `gist` — content extraction from payloads (`content_gist(kind, payload)`)
 
 ## Writing a Lens

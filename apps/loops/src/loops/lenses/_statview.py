@@ -22,17 +22,21 @@ from painted import (
     Block,
     BorderChars,
     Line,
-    ROUNDED,
     Span,
     Style,
-    Wrap,
-    border,
-    join_vertical,
 )
 from painted.views import Column, Overflow, TableState, table
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
-from ._grammar import ensure_utc, recency
+from ._grammar import card, card_width, ensure_utc, recency
+
+# card / card_width now live in ._grammar (the shared static-grammar home) so
+# read/stream/ticks and ls draw the same header card. Re-exported here for the
+# ls lenses (declarations.py) that reach for the stat toolkit as one surface.
+__all__ = [
+    "card", "card_width", "cell", "freshness_style", "meter_cell",
+    "palette_of", "spark", "share_bar", "stat_table", "updated_text",
+]
 
 # Column gap is two spaces; the header rule fills the gap with ─ so it reads as
 # one continuous line. Corners are unused by table() (it only consumes
@@ -158,33 +162,6 @@ def stat_table(
         selected_style=Style(),
         borders=_CLEAN_BORDERS,
     )
-
-
-def card(title: str, sublines: list[str], width: int, *, p: LoopsPalette) -> Block:
-    """Rounded header card — ``title`` in the top edge, stat ``sublines`` inside.
-
-    Body lines carry a one-space interior margin so they don't kiss the border.
-    """
-    inner_w = max(1, width - 2)
-    # Ellipsize (not hard-clip) so a stat line that won't fit a narrow card
-    # signals the loss with a marker instead of silently dropping a number.
-    body = [
-        Block.text(f" {s}", p.metadata, width=inner_w, wrap=Wrap.ELLIPSIS)
-        for s in sublines if s
-    ]
-    inner = join_vertical(*body) if body else Block.empty(inner_w, 1)
-    return border(inner, ROUNDED, p.chrome, title=title, title_style=p.header)
-
-
-def card_width(
-    body: Block, title: str, sublines: list[str], width: int | None
-) -> int:
-    """Width for a header card that fits both its sublines and the table below
-    it — so a short table never clips a longer stat line. Capped at ``width``."""
-    needed = max(
-        [body.width or 0, len(title) + 4, *(len(s) + 3 for s in sublines)]
-    )
-    return min(needed, width) if width else needed
 
 
 def palette_of(palette: LoopsPalette | None) -> LoopsPalette:

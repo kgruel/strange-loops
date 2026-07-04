@@ -166,6 +166,116 @@ class TestRegisters:
         assert "vertex" in text  # scope word
 
 
+def _multi_strata(dir_path, name="ms"):
+    """A vertex spanning all three proximity strata, declared out of sort order.
+
+    * ``decision`` every=5, 9 facts  → sealed, window 4, ratio .8 (approaching)
+    * ``thread``   every=4, 5 facts  → sealed, window 1, ratio .25
+    * ``note``     when=ping          → kind-based, sealed, window 1
+    * ``task``     every=10, 4 facts  → never sealed
+    * ``observation``                 → no boundary, omitted
+
+    Expected proximity order: decision, thread (count sealed, ratio desc), note
+    (kind sealed), task (never sealed last).
+    """
+    vp = dir_path / f"{name}.vertex"
+    vp.write_text(
+        f'name "{name}"\nstore "./{name}.db"\n\nloops {{\n'
+        '  task { fold { items "by" "name" }\n    boundary every="10" }\n'
+        '  note { fold { items "by" "topic" }\n    boundary when="ping" }\n'
+        '  thread { fold { items "by" "name" }\n    boundary every="4" }\n'
+        '  decision { fold { items "by" "topic" }\n    boundary every="5" }\n'
+        '  ping { fold { items "by" "topic" } }\n'
+        '  observation { fold { items "by" "topic" } }\n'
+        "}\n"
+    )
+    prog = load_vertex_program(vp)
+    for i in range(9):
+        prog.receive(Fact.of("decision", "kyle", ts=_T0 + i, topic=f"d{i}", message="m"))
+    for i in range(5):
+        prog.receive(Fact.of("thread", "kyle", ts=_T0 + 100 + i, name=f"t{i}"))
+    for i in range(4):
+        prog.receive(Fact.of("task", "kyle", ts=_T0 + 200 + i, name=f"k{i}"))
+    prog.receive(Fact.of("note", "kyle", ts=_T0 + 300, topic="n0", message="m"))
+    prog.receive(Fact.of("ping", "kyle", ts=_T0 + 301, topic="p"))  # seals note
+    prog.receive(Fact.of("note", "kyle", ts=_T0 + 302, topic="n1", message="m"))
+    return vp
+
+
+class TestProximitySort:
+    def test_three_strata_order(self, tmp_path):
+        data = fetch_horizon(_multi_strata(tmp_path))
+        names = [r["name"] for r in data["loops"]]
+        assert names == ["decision", "thread", "note", "task"]
+        # never-sealed truly last, whatever its window size
+        assert data["loops"][-1]["never_sealed"] is True
+
+    def test_count_stratum_sorts_by_ratio_desc(self, tmp_path):
+        data = fetch_horizon(_multi_strata(tmp_path))
+        # decision ratio .8 outranks thread ratio .25
+        dec = next(r for r in data["loops"] if r["name"] == "decision")
+        thr = next(r for r in data["loops"] if r["name"] == "thread")
+        assert data["loops"].index(dec) < data["loops"].index(thr)
+        assert dec["window_facts"] / dec["count"] == 0.8
+        assert thr["window_facts"] / thr["count"] == 0.25
+
+    def test_rerun_is_byte_identical_both_registers(self, tmp_path):
+        vp = _multi_strata(tmp_path)
+        for piped in (False, True):
+            a = _render(fetch_horizon(vp), piped=piped)
+            b = _render(fetch_horizon(vp), piped=piped)
+            assert a == b  # unchanged store → identical bytes
+
+
+def _tie(dir_path, name="tie"):
+    """Two count loops at the same ratio, declared name-descending.
+
+    ``zeta`` and ``alpha`` both every=2 with 3 facts → window 1, ratio .5.
+    Declaration order (zeta, alpha) must win over name order (alpha, zeta).
+    """
+    vp = dir_path / f"{name}.vertex"
+    vp.write_text(
+        f'name "{name}"\nstore "./{name}.db"\n\nloops {{\n'
+        '  zeta { fold { items "by" "topic" }\n    boundary every="2" }\n'
+        '  alpha { fold { items "by" "topic" }\n    boundary every="2" }\n'
+        "}\n"
+    )
+    prog = load_vertex_program(vp)
+    for i in range(3):
+        prog.receive(Fact.of("zeta", "kyle", ts=_T0 + i, topic=f"z{i}", message="m"))
+    for i in range(3):
+        prog.receive(Fact.of("alpha", "kyle", ts=_T0 + 10 + i, topic=f"a{i}", message="m"))
+    return vp
+
+
+class TestTieBreak:
+    def test_declaration_order_beats_name(self, tmp_path):
+        data = fetch_horizon(_tie(tmp_path))
+        names = [r["name"] for r in data["loops"]]
+        # both ratio .5 → decl order (zeta first), NOT name order (alpha first)
+        assert names == ["zeta", "alpha"]
+
+
+class TestApproachingGlyph:
+    def test_glyph_on_both_registers_at_threshold(self, tmp_path):
+        data = fetch_horizon(_multi_strata(tmp_path))
+        tty = _render(data)
+        piped = _render(data, piped=True)
+        assert "▲" in tty  # decision at ratio .8 approaches
+        assert "▲" in piped  # the glyph carries on the faithful channel too
+
+    def test_no_glyph_below_threshold(self, tmp_path):
+        # every=10, 4 facts → ratio .4, never approaches; also never-sealed
+        data = fetch_horizon(_count_vertex(tmp_path, count=10, n_facts=4))
+        assert "▲" not in _render(data)
+        assert "▲" not in _render(data, piped=True)
+
+    def test_kind_based_never_approaches(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        assert "▲" not in _render(data)
+        assert "▲" not in _render(data, piped=True)
+
+
 class TestParity:
     def test_register_parity_count(self, tmp_path):
         data = fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5))

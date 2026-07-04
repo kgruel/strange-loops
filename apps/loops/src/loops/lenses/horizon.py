@@ -17,9 +17,14 @@ Two boundary shapes render two honestly-different rows:
 
 The rows carry NO rail tier glyph: a loop is a declaration, not a folded
 entity, so it has no salience tier — the gutter stays blank rather than fake
-one (the same honest-absence stance the rail legend documents). Deferred per
-the 060 view sequence: ``-v`` ETA extrapolation (needs inter-tick interval
-stats) and the ⊘ staleness overlay (Horizon reads recency strings only).
+one (the same honest-absence stance the rail legend documents). The one thing
+the gutter DOES carry is a status overlay: ``▲`` when a count loop sits within
+.8 of its seal (decision:design/horizon-proximity-sort) — a glyph, not a tier,
+so it renders on both registers. Rows themselves sort by proximity (count-based
+by ratio, kind-based by window facts, never-sealed last — the sort lives in
+``fetch_horizon`` so ``--json`` carries the order too). Deferred per the 060
+view sequence: ``-v`` ETA extrapolation (needs inter-tick interval stats) and
+the ⊘ staleness overlay (Horizon reads recency strings only).
 
 Wired as a composition lens: ``sl read <vertex> --lens horizon``. The
 module-level ``fetch`` overrides the default fold fetch; ``fold_view``
@@ -42,6 +47,26 @@ from ._grammar import block as _line
 
 _BAR_FULL = "▓"
 _BAR_EMPTY = "░"
+
+# Status overlay in the (otherwise blank) gutter — a loop within .8 of its
+# count boundary is APPROACHING its seal. A glyph, not a salience tier, so it
+# carries on BOTH registers (the meter colour ramp is TTY-only chrome on top);
+# the blank-gutter stance of decision:design/horizon-build1-scope stays intact.
+_APPROACHING = "▲"
+_APPROACH_RATIO = 0.8
+
+
+def _approaching(row: dict) -> bool:
+    """Is this count-based loop within ``_APPROACH_RATIO`` of its seal?
+
+    Mirrors the meter's ratio exactly (window_facts/count). Kind-based
+    boundaries have no numerator, so they never approach — the gutter stays
+    blank for them, honestly.
+    """
+    if row["mode"] == "when":
+        return False
+    count = row.get("count") or 0
+    return count > 0 and row["window_facts"] / count >= _APPROACH_RATIO
 
 
 def fetch(vertex_path, kind=None, observer=None):
@@ -169,8 +194,9 @@ def horizon_view(
             else:
                 shape = f"{r['mode']} {r['count']}"
                 prox = f"{r['window_facts']}/{r['count']}"
+            g = _APPROACHING if _approaching(r) else " "
             line = (
-                f"{r['name']:<{name_w}}  {r['scope']:<6}  {shape}  "
+                f"{g} {r['name']:<{name_w}}  {r['scope']:<6}  {shape}  "
                 f"{prox}  sealed {seal}"
             )
             cond = _conditions_text(r)
@@ -194,9 +220,13 @@ def horizon_view(
     # --- TTY register ------------------------------------------------------
     for r in loops:
         desc = _descriptor(r, zoom)
-        # Blank gutter: a loop carries no salience tier (honest absence), so the
-        # rail column is a two-space indent, not an invented glyph.
-        text = f"    {r['name']:<{name_w}}  {desc}"
+        # Gutter: no salience tier (honest absence) so it stays blank — EXCEPT
+        # the ▲ status overlay when a count loop approaches its seal. Two-space
+        # indent + glyph + space keeps the name column fixed whether or not the
+        # overlay fires (a non-approaching row is identical to the old 4-space
+        # indent, so style-stable goldens don't drift).
+        g = _APPROACHING if _approaching(r) else " "
+        text = f"  {g} {r['name']:<{name_w}}  {desc}"
         row = _line(text, Style(), width)
         if r["mode"] != "when":
             # Count-based: append a TTY-only proximity meter under the row body.

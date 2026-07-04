@@ -1067,8 +1067,19 @@ def fetch_horizon(
         })
         loops.append(row)
 
-    # Order: vertex-level first, then per-loop by name — stable and readable.
-    loops.sort(key=lambda r: (r["scope"] != "vertex", r["name"]))
+    # Proximity sort (decision:design/horizon-proximity-sort). The loop nearest
+    # its boundary rises. Three strata, honest about comparability:
+    #   (0) count-based & sealed — by window_facts/count ratio DESC
+    #   (1) kind-based & sealed  — by raw window_facts DESC (no ratio exists)
+    #   (2) never-sealed         — last (no meaningful proximity yet)
+    # Deterministic tie-break: ratio/facts -> declaration order -> name, so two
+    # reads of an unchanged store are byte-identical on BOTH registers. Order is
+    # information and is applied here (the fetch) so --json carries it too.
+    for i, r in enumerate(loops):
+        r["_decl"] = i
+    loops.sort(key=_horizon_sort_key)
+    for r in loops:
+        del r["_decl"]
 
     return {
         "vertex": ast.name,
@@ -1078,6 +1089,24 @@ def fetch_horizon(
         "last_sealed": max(seals) if seals else None,
         "loops": loops,
     }
+
+
+def _horizon_sort_key(r: dict) -> tuple:
+    """Proximity sort key — three strata, then ratio/facts, decl order, name.
+
+    See decision:design/horizon-proximity-sort. Never-sealed loops have no
+    meaningful proximity and fall to the last stratum; count-based sealed loops
+    rank by their unsealed/count ratio, kind-based sealed loops by raw window
+    fact count (no numerator to form a ratio). Negated metrics give DESC within
+    a stratum; ``_decl`` (declaration order) then ``name`` break ties.
+    """
+    if r["never_sealed"]:
+        return (2, 0.0, r["_decl"], r["name"])
+    if r["mode"] == "when":
+        return (1, -float(r["window_facts"]), r["_decl"], r["name"])
+    count = r.get("count") or 0
+    ratio = r["window_facts"] / count if count > 0 else 0.0
+    return (0, -ratio, r["_decl"], r["name"])
 
 
 def _fact_epoch(ts: object) -> float:

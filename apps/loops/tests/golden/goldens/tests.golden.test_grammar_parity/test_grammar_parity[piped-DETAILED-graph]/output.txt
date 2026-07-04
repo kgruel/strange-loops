@@ -4,6 +4,10 @@ nodes:
 chains:
   decision/design/rail → thread/spine
 orphans:
-  decision/architecture/tiers · thread/digest · log/<ULID> · session/s1 · session/s2
+  decision/architecture/tiers
+  thread/digest
+  log/<ULID>
+  session/s1
+  session/s2
 edges:
   ref  1  ref

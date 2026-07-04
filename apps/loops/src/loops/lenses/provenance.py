@@ -16,7 +16,14 @@ from painted import Block, Style, Zoom, join_vertical
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
 from ._grammar import block as _line
-from ._grammar import card, card_width, full_iso, recency, rollup_line
+from ._grammar import (
+    card,
+    card_width,
+    full_iso,
+    recency,
+    rollup_line,
+    wrap_hanging,
+)
 
 if TYPE_CHECKING:
     from ..provenance import FactRef, Provenance
@@ -127,20 +134,21 @@ def _render_upsert(data, address, zoom, width, p, *, piped):
     show_history = zoom >= Zoom.DETAILED
     for attr in data.fields:
         stamp = _stamp(attr.setter, piped=piped)
-        rows.append(_line(
-            f"{attr.field} = {_fmt_value(attr.value)}  "
+        prefix = f"{attr.field} = "
+        rows.append(wrap_hanging(
+            f"{prefix}{_fmt_value(attr.value)}  "
             f"← {stamp} {attr.setter.observer or '?'} "
             f"(fact {attr.setter.index}/{attr.setter.total})",
-            p.content, width,
+            p.content, width, hang=len(prefix),
         ))
         if show_history:
             for prior in attr.priors:
                 pstamp = _stamp(prior.fact, piped=piped)
-                rows.append(_line(
+                rows.append(wrap_hanging(
                     f"    was {_fmt_value(prior.value)}  "
                     f"← {pstamp} {prior.fact.observer or '?'} "
                     f"(fact {prior.fact.index}/{prior.fact.total})",
-                    p.metadata, width,
+                    p.metadata, width, hang=len("    was "),
                 ))
     return join_vertical(*rows)
 
@@ -162,7 +170,8 @@ def _render_collect(data, address, width, p, *, piped):
         stamp = full_iso(fact.get("_ts")) if piped else recency(fact.get("_ts"))
         obs = str(fact.get("_observer", "") or "?")
         body = _fact_body(fact, data.key_field)
-        rows.append(_line(
-            f"  {i}/{data.total_facts}  {stamp} {obs}  {body}", p.content, width,
+        prefix = f"  {i}/{data.total_facts}  {stamp} {obs}  "
+        rows.append(wrap_hanging(
+            f"{prefix}{body}", p.content, width, hang=len(prefix),
         ))
     return join_vertical(*rows)

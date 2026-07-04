@@ -23,6 +23,7 @@ string, datetime, epoch int/float); naive datetimes are assumed UTC.
 
 from __future__ import annotations
 
+import textwrap
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -179,6 +180,31 @@ def block(text: str, style: Style, width: int | None) -> Block:
     if width is None:
         return Block.text(text, style)
     return Block.text(text, style, width=width)
+
+
+def wrap_hanging(text: str, style: Style, width: int | None, *, hang: int) -> Block:
+    """Width-honoring block that wraps overflow onto hanging-indented lines.
+
+    Piped (``width=None``) → a single natural-width line: the agent channel is
+    information-faithful and never wraps. On a TTY, text wider than ``width``
+    wraps via ``textwrap`` with a ``hang``-column subsequent indent, so
+    continuation lines sit under the value column (the fold-body renderer's
+    hanging-indent pattern, generalized). ``break_long_words`` guarantees a
+    single over-long token still splits — no tail is ever dropped.
+    """
+    if width is None:
+        return Block.text(text, style)
+    if len(text) <= width:
+        return Block.text(text, style, width=width)
+    hang_pad = " " * min(hang, max(0, width - 8))
+    lines = textwrap.wrap(
+        text,
+        width,
+        subsequent_indent=hang_pad,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [text]
+    return join_vertical(*(Block.text(ln, style, width=width) for ln in lines))
 
 
 def rollup_line(

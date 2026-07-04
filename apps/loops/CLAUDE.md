@@ -25,6 +25,10 @@ loops read project                              # current folded state
 loops read project --kind decision              # just decisions
 loops read project --kind decision --match auth --last 5  # content search + recency window
 loops read meta --facts --since 7d --kind thread  # filtered event history
+loops read project --lens confluence            # observer cut: who's active, kind mix, tier
+loops read project --lens graph                 # ref/edge cut: hubs, chains, orphans
+loops read project --lens horizon               # boundary cut: armed loops vs their next seal
+loops read project decision/design/foo --why    # per-field provenance drill
 
 # Emit a fact
 loops emit project decision topic="auth" "JWT over sessions"

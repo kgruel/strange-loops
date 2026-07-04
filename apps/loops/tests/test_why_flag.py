@@ -170,6 +170,58 @@ def _prov_fixture():
     )
 
 
+def test_narrow_tty_wraps_long_value_no_dropped_tail():
+    # Review finding 1: a long field value must WRAP into a hanging block on a
+    # narrow TTY, never hard-clip mid-token. The whole value survives across
+    # lines and no rendered line exceeds the width.
+    from atoms.fold import Upsert
+
+    from .helpers import block_to_text
+
+    long_msg = (
+        "this is a deliberately long decision body that exceeds a narrow "
+        "terminal width so it must wrap across multiple hanging-indented lines "
+        "instead of clipping its tail off the right edge unicorn-sentinel-tail"
+    )
+    facts = [{"_ts": 1736850000.0, "_observer": "alice", "topic": "design/a",
+              "message": long_msg}]
+    prov = replay_attribution(
+        Upsert(target="s", key="topic"), facts,
+        kind="decision", key="design/a", key_field="topic",
+    )
+    width = 48
+    text = block_to_text(why_view(prov, Zoom.SUMMARY, width, piped=False),
+                         use_ansi=False)
+    lines = text.splitlines()
+    assert all(len(ln) <= width for ln in lines), "a line overflowed the width"
+    # Every word of the value survives (the tail sentinel especially).
+    collapsed = " ".join(text.split())
+    for word in long_msg.split():
+        assert word in collapsed, f"dropped word: {word}"
+    assert "unicorn-sentinel-tail" in collapsed
+
+
+def test_piped_why_keeps_long_value_on_one_line():
+    # The agent channel is information-faithful and never wraps — width=None.
+    from atoms.fold import Upsert
+
+    from .helpers import block_to_text
+
+    long_msg = "x" * 200 + " endtail"
+    facts = [{"_ts": 1736850000.0, "_observer": "alice", "topic": "design/a",
+              "message": long_msg}]
+    prov = replay_attribution(
+        Upsert(target="s", key="topic"), facts,
+        kind="decision", key="design/a", key_field="topic",
+    )
+    text = block_to_text(why_view(prov, Zoom.SUMMARY, None, piped=True),
+                         use_ansi=False)
+    # The value line is not wrapped: message value + attribution on one line.
+    msg_line = next(ln for ln in text.splitlines() if "message =" in ln)
+    assert "endtail" in msg_line
+    assert "fact 1/1" in msg_line
+
+
 def test_why_register_parity():
     prov = _prov_fixture()
     # load-bearing: address, counts, both observers, the current field values.

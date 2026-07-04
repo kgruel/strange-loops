@@ -9,9 +9,10 @@ same projection:
   mix (``ref`` vs a declared typed-edge field name) is where typed edges
   become VISIBLE — the graph is the view that pays off the typed-edge overlay
   (decision:architecture/typed-edges-overlay-default).
-* **CHAINS** — the longest directed ref paths (net-new traversal: memoized DFS
-  with a per-path cycle guard + depth cap 32; refs point temporally backward so
-  the graph is a near-DAG, back-edges are skipped, never crash).
+* **CHAINS** — the longest directed ref paths (net-new traversal: taint-aware
+  memoized DFS with a per-path cycle guard + depth cap 128; refs point temporally
+  backward so the graph is a near-DAG, back-edges are skipped, never crash). A
+  chain cut by the depth cap renders with a trailing ``⋯`` (``truncated`` piped).
 * **ORPHANS** — isolated nodes (no inbound, no outbound refs/edges).
 
 Deferred (decision:design/graph-build1-scope): connected components,
@@ -66,12 +67,18 @@ def _predicate_mix(predicates: list, top_n: int | None) -> str:
     return mix
 
 
-def _chain_line(path: list[str], width: int | None) -> str:
-    """``a → b → c`` — shed middle segments to ``a → … → c`` before clipping."""
-    full = " → ".join(path)
+def _chain_line(chain: dict, width: int | None) -> str:
+    """``a → b → c`` — shed middle segments to ``a → … → c`` before clipping.
+
+    A depth-cap-truncated chain gains a trailing ``⋯`` so the cut is disclosed,
+    never silent.
+    """
+    path = chain["path"]
+    tail = " ⋯" if chain.get("truncated") else ""
+    full = " → ".join(path) + tail
     if width is None or len(full) <= width or len(path) <= 2:
         return full
-    return f"{path[0]} → … → {path[-1]}"
+    return f"{path[0]} → … → {path[-1]}{tail}"
 
 
 def graph_view(
@@ -100,6 +107,8 @@ def graph_view(
     orphan_list = data.get("orphan_list", [])
     census = data.get("census", [])
     dangling = data.get("dangling", 0)
+    unsourced = data.get("unsourced_inbound", 0)
+    approximate = data.get("chains_approximate", False)
 
     if not nodes:
         return _line("No facts — no graph.", p.metadata, width)
@@ -126,8 +135,10 @@ def graph_view(
 
     if piped:
         # Flat sectioned ledger — full addresses, absolute stamps, whole mix.
+        # The agent channel is information-faithful: ALL hubs and ALL computed
+        # chains at every zoom (the zoom caps are TTY-only chrome).
         rows.append(_line("nodes:", p.header, None))
-        for h in hubs[:hub_n]:
+        for h in hubs:
             mix = _predicate_mix(h.get("predicates", []), None)
             line = (
                 f"  {h['address']}  ←{h['inbound']}  "
@@ -140,13 +151,15 @@ def graph_view(
             rows.append(_line(line.rstrip(), Style(), None))
         if chains:
             rows.append(_line("chains:", p.header, None))
-            for c in chains[:chain_n]:
-                rows.append(_line(f"  {' → '.join(c)}", Style(), None))
+            for c in chains:
+                token = "  truncated" if c.get("truncated") else ""
+                rows.append(
+                    _line(f"  {' → '.join(c['path'])}{token}", Style(), None)
+                )
         if orphan_list:
             rows.append(_line("orphans:", p.header, None))
-            rows.append(
-                _line("  " + " · ".join(orphan_list), Style(), None)
-            )
+            for addr in orphan_list:
+                rows.append(_line(f"  {addr}", Style(), None))
         if census:
             rows.append(_line("edges:", p.header, None))
             for pred, count, typed in census:
@@ -155,7 +168,12 @@ def graph_view(
                     _line(f"  {pred}  {count}  {kind}", Style(), None)
                 )
         body = join_vertical(*rows)
-        header = rollup_line(vertex, [counts, f"{dangling} dangling"])
+        header_parts = [counts, f"{dangling} dangling"]
+        if unsourced:
+            header_parts.append(f"unsourced_inbound: {unsourced}")
+        if approximate:
+            header_parts.append("chains approximate — traversal budget hit")
+        header = rollup_line(vertex, header_parts)
         return join_vertical(_line(header, p.header, None), body)
 
     # --- TTY register ------------------------------------------------------
@@ -222,8 +240,17 @@ def graph_view(
     body = join_vertical(*rows)
 
     sublines = [counts]
-    if dangling:
-        sublines.append(f"{dangling} dangling refs")
+    if dangling or unsourced:
+        parts = []
+        if dangling:
+            parts.append(f"{dangling} dangling refs")
+        if unsourced:
+            parts.append(f"{unsourced} inbound from unkeyed facts")
+        sublines.append(" · ".join(parts))
+    if approximate:
+        sublines.append("chains approximate — traversal budget hit")
+    if any(c.get("truncated") for c in chains):
+        sublines.append("⋯ chain cut at depth cap 128")
     title = f"{vertex} · graph"
     card_w = card_width(body, title, sublines, width)
     return join_vertical(

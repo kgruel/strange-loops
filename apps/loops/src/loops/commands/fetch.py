@@ -683,84 +683,135 @@ def fetch_confluence(
 
 
 # Recursion-depth safety valve. Termination is guaranteed by the per-path cycle
-# guard (a back-edge to an ancestor is skipped), so this only protects Python's
-# call stack against a pathologically long SIMPLE path. It is deliberately well
-# above realistic chain lengths (the live project vertex tops out near 60) so it
-# never truncates a real chain — a lower bound would make results order-dependent
-# (a node first reached past the cap would memoize a truncated path and poison
-# every later reuse), which is exactly what "longest chain" must not do. The
-# design entry's provisional "32" was a pre-implementation guess that predated
-# seeing real chain depths (judgment call, flagged in the build report).
+# guard (a back-edge to an ancestor is skipped), so this only bounds the length
+# of a single SIMPLE path against Python's call stack. It is deliberately well
+# above realistic chain lengths (the live project vertex tops out near 60). When
+# the cap DOES halt expansion the resulting chain is marked ``truncated`` and the
+# result is not cached (a cap hit taints, same rule as a skipped back-edge) so no
+# later reuse inherits the shortened path. The design entry's provisional "32"
+# was a pre-implementation guess that predated seeing real chain depths.
 _CHAIN_DEPTH_CAP = 128
+
+# Total node-visit budget across the whole traversal — a blowup guard for a
+# pathological fan-out where taint (see below) forces heavy recomputation. If
+# exhausted the traversal stops expanding and the payload is flagged
+# ``chains_approximate`` so both registers disclose that the walk was cut short.
+_CHAIN_VISIT_BUDGET = 200_000
 
 
 def _longest_chains(
-    adjacency: dict[str, list[tuple[str, str]]], *, cap: int = _CHAIN_DEPTH_CAP
-) -> dict[str, list[str]]:
-    """Longest downstream chain starting at each node — memoized DFS.
+    adjacency: dict[str, list[tuple[str, str]]],
+    *,
+    cap: int = _CHAIN_DEPTH_CAP,
+    budget: int = _CHAIN_VISIT_BUDGET,
+) -> tuple[dict[str, list[str]], set[str], bool]:
+    """Longest downstream chain starting at each node — taint-aware memoized DFS.
 
     ``adjacency`` maps source address → [(target address, predicate), ...] over
     the RESOLVED graph (targets that exist as nodes). Refs point temporally
     backward so the graph is a near-DAG; a per-path ``stack`` guard skips
     back-edges (a target already on the current path — a cycle) so a cyclic
-    fixture never recurses forever. ``cap`` bounds live recursion depth as a
-    safety valve (see the module constant) — set high enough that realistic
-    chains are never truncated, so the result is a true longest path.
+    fixture never recurses forever.
 
-    Returns node → the address path (including the node) of its longest chain.
-    Neighbours are walked in sorted order and ties break lexicographically, so
-    the result is deterministic. Memoization is DAG-safe: a skipped edge only
-    ever points at an ancestor (a cycle), so a node's longest downstream path is
-    independent of the path that reached it.
+    Memoization invariant — a node's result is cached ONLY when its entire
+    downstream exploration was *clean*: no on-stack back-edge was skipped and no
+    depth-cap truncation occurred anywhere beneath it. A back-edge skip makes the
+    result path-dependent (the same node reached along a different path may not
+    close that cycle and can extend further), so a *tainted* result is returned
+    but never cached — it is recomputed per reaching path. Caching a tainted
+    result is exactly the poisoning bug this guards against.
+
+    Returns ``(chains, truncated, exhausted)`` — ``chains`` maps node → its
+    longest chain (including the node); ``truncated`` is the set of start nodes
+    whose winning chain was cut by the depth cap; ``exhausted`` is True if the
+    visit budget ran out (results then approximate). Neighbours are walked in
+    sorted order and ties break lexicographically, so the result is
+    deterministic.
     """
-    memo: dict[str, list[str]] = {}
+    memo: dict[str, tuple[list[str], bool]] = {}
+    visits = 0
+    exhausted = False
 
-    def dfs(node: str, stack: set[str]) -> list[str]:
+    def dfs(node: str, stack: set[str]) -> tuple[list[str], bool, bool]:
+        """Return (best_path, truncated, clean) for ``node``.
+
+        ``truncated`` marks the winning path as cut by the depth cap; ``clean``
+        marks the whole subtree as free of back-edge skips AND truncation (i.e.
+        cacheable).
+        """
+        nonlocal visits, exhausted
         if node in memo:
-            return memo[node]
+            path, trunc = memo[node]
+            return path, trunc, True
+        visits += 1
+        if visits > budget:
+            exhausted = True
+            return [node], False, False  # tainted — not cached
         best: list[str] = [node]
+        best_trunc = False
+        clean = True
+        hit_cap = False
         stack.add(node)
         if len(stack) < cap:
             targets = sorted({t for t, _ in adjacency.get(node, ())})
             for tgt in targets:
                 if tgt in stack:
-                    continue  # back-edge — would close a cycle
-                sub = dfs(tgt, stack)
+                    clean = False  # back-edge skipped — result is path-dependent
+                    continue
+                sub, sub_trunc, sub_clean = dfs(tgt, stack)
+                clean = clean and sub_clean
                 cand = [node, *sub]
                 if len(cand) > len(best) or (
                     len(cand) == len(best) and cand < best
                 ):
                     best = cand
+                    best_trunc = sub_trunc
+        elif adjacency.get(node):
+            hit_cap = True  # cap halted expansion at a node that HAS targets
         stack.discard(node)
-        memo[node] = best
-        return best
+        node_trunc = best_trunc or hit_cap
+        if clean and not node_trunc:
+            memo[node] = (best, node_trunc)
+        return best, node_trunc, clean
 
+    chains: dict[str, list[str]] = {}
+    truncated: set[str] = set()
     for n in adjacency:
-        dfs(n, set())
-    return memo
+        path, trunc, _ = dfs(n, set())
+        chains[n] = path
+        if trunc:
+            truncated.add(n)
+    return chains, truncated, exhausted
 
 
-def _top_chains(memo: dict[str, list[str]], *, limit: int = 10) -> list[list[str]]:
+def _top_chains(
+    chains: dict[str, list[str]],
+    truncated: set[str],
+    *,
+    limit: int = 10,
+) -> list[dict]:
     """Distinct longest chains, longest-first, dropping sub-chains of picks.
 
     A chain needs at least one edge (length ≥ 2). Candidates sort by
     ``(-len, path)``; a candidate that is a contiguous sub-path of an
-    already-selected chain is dropped (it adds no new membership).
+    already-selected chain is dropped (it adds no new membership). Each pick is
+    returned as ``{"path": [...], "truncated": bool}`` — ``truncated`` is set
+    when the depth cap cut this start node's chain.
     """
     cands = sorted(
-        (p for p in memo.values() if len(p) >= 2),
-        key=lambda p: (-len(p), p),
+        ((node, p) for node, p in chains.items() if len(p) >= 2),
+        key=lambda np: (-len(np[1]), np[1]),
     )
 
     def _is_subpath(short: list[str], long: list[str]) -> bool:
         n = len(short)
         return any(long[i : i + n] == short for i in range(len(long) - n + 1))
 
-    picked: list[list[str]] = []
-    for c in cands:
-        if any(_is_subpath(c, p) for p in picked):
+    picked: list[dict] = []
+    for node, c in cands:
+        if any(_is_subpath(c, sel["path"]) for sel in picked):
             continue
-        picked.append(c)
+        picked.append({"path": c, "truncated": node in truncated})
         if len(picked) >= limit:
             break
     return picked
@@ -782,19 +833,24 @@ def fetch_graph(
     * **hubs** — nodes by inbound count desc; the ``←N`` sinks. Predicate mix
       (``ref`` vs declared typed-edge field names) is where typed edges become
       VISIBLE, per decision:design/graph-build1-scope.
-    * **chains** — longest directed ref paths (net-new traversal; memoized DFS
-      with a per-path cycle guard + depth cap 32).
+    * **chains** — longest directed ref paths (net-new traversal; taint-aware
+      memoized DFS with a per-path cycle guard + depth cap 128 + visit budget).
     * **orphans** — nodes with no inbound AND no outbound refs/edges (isolated).
+
+    ``edges`` counts node→node RESOLVED edges only; ``unsourced_inbound``
+    discloses how much of the hubs' summed ``←N`` arrives from keyless/sourceless
+    facts (refs with no node address to resolve a source edge from).
 
     Returns a JSON-clean dict (all counts/paths serializable; ``last`` is a
     float epoch like the confluence cut)::
 
         {"vertex", "nodes", "edges", "typed_edges", "orphans", "dangling",
+         "unsourced_inbound", "chains_approximate",
          "hubs": [{address, kind, key, tier, inbound, predicates:[[p,n]..],
                    last, observer}, ...],
          "orphan_list": [address, ...],
          "census": [[predicate, count, typed], ...],
-         "chains": [[address, ...], ...]}
+         "chains": [{"path": [address, ...], "truncated": bool}, ...]}
     """
     from loops.surface import project
 
@@ -852,7 +908,16 @@ def fetch_graph(
         key=lambda c: (-c[1], c[0]),
     )
 
-    chains = _top_chains(_longest_chains(outbound))
+    raw_chains, truncated_nodes, exhausted = _longest_chains(outbound)
+    chains = _top_chains(raw_chains, truncated_nodes)
+
+    # ``edges`` counts only node→node RESOLVED edges; a hub's ``←N`` sums
+    # Surface Row.inbound, which also counts refs arriving from keyless/sourceless
+    # facts (no node address to resolve a source edge from). The gap is disclosed,
+    # not redefined — ``←N`` stays the true attention count.
+    total_inbound = sum(r.inbound for r in rows)
+    sourced_inbound = sum(len(surface.inbound_edges.get(r.address, [])) for r in rows)
+    unsourced_inbound = max(0, total_inbound - sourced_inbound)
 
     return {
         "vertex": surface.vertex,
@@ -861,10 +926,12 @@ def fetch_graph(
         "typed_edges": typed_edges,
         "orphans": len(orphan_list),
         "dangling": dangling,
+        "unsourced_inbound": unsourced_inbound,
         "hubs": hubs,
         "orphan_list": orphan_list,
         "census": census_rows,
         "chains": chains,
+        "chains_approximate": exhausted,
     }
 
 

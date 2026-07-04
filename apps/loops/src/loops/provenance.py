@@ -51,6 +51,24 @@ class FieldAttribution:
 
 
 @dataclass(frozen=True)
+class ApplyDelta:
+    """One step of the fold replay — the fact applied and its resulting state.
+
+    Captured during the ``Spec.apply`` walk (upsert mode only): the chronology
+    the trace render draws, oldest-first. ``changed`` names the fields this fact
+    moved (added or overwrote); ``state_fields`` is the field count of the
+    resulting folded entry — the "state ×n" the trace row summarizes to.
+    """
+
+    index: int  # 1-based position in fold (chronological) order
+    total: int
+    ts: float | str | None
+    observer: str
+    changed: tuple[str, ...]
+    state_fields: int
+
+
+@dataclass(frozen=True)
 class Provenance:
     """The per-field attribution ledger for one folded ``(kind, key)`` entry.
 
@@ -70,6 +88,7 @@ class Provenance:
     first_ts: float | str | None = None
     last_ts: float | str | None = None
     observers: tuple[str, ...] = ()
+    applies: tuple[ApplyDelta, ...] = ()  # per-apply state deltas (upsert trace)
 
     @property
     def total_facts(self) -> int:
@@ -137,6 +156,7 @@ def replay_attribution(
     # after each step and diff against the prior snapshot.
     changes: dict[str, list[tuple[Any, FactRef]]] = {}
     field_order: list[str] = []
+    applies: list[ApplyDelta] = []
     prev_entry: dict[str, Any] = {}
     state: dict[str, Any] = {target: {}}
 
@@ -147,14 +167,24 @@ def replay_attribution(
             prev_entry = {}
             continue
         fref = _fact_ref(payload, i, total)
+        changed_here: list[str] = []
         for fld, val in entry.items():
             if fld.startswith(_META_PREFIX) or fld in skip:
                 continue
             if fld not in prev_entry or prev_entry[fld] != val:
+                changed_here.append(fld)
                 if fld not in changes:
                     changes[fld] = []
                     field_order.append(fld)
                 changes[fld].append((val, fref))
+        state_fields = sum(
+            1 for f in entry if not f.startswith(_META_PREFIX) and f not in skip
+        )
+        applies.append(ApplyDelta(
+            index=i, total=total, ts=payload.get("_ts"),
+            observer=str(payload.get("_observer", "") or ""),
+            changed=tuple(changed_here), state_fields=state_fields,
+        ))
         prev_entry = dict(entry)
 
     attributions: list[FieldAttribution] = []
@@ -172,6 +202,7 @@ def replay_attribution(
         kind=kind, key=key, key_field=key_field, mode="upsert",
         fields=tuple(attributions), facts=tuple(facts),
         first_ts=first_ts, last_ts=last_ts, observers=observers,
+        applies=tuple(applies),
     )
 
 
@@ -202,4 +233,15 @@ def to_dict(prov: Provenance) -> dict:
             for a in prov.fields
         ],
         "facts": [dict(f) for f in prov.facts] if prov.mode != "upsert" else [],
+        "applies": [
+            {
+                "index": a.index,
+                "total": a.total,
+                "ts": a.ts,
+                "observer": a.observer,
+                "changed": list(a.changed),
+                "state_fields": a.state_fields,
+            }
+            for a in prov.applies
+        ],
     }

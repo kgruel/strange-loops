@@ -62,6 +62,16 @@ def test_why_verbose_piped(golden):
     golden.assert_match(block_to_text(block), "output")
 
 
+def test_why_full_tty(golden):
+    block = why_view(WHY_UPSERT, Zoom.FULL, width=80, piped=False)
+    golden.assert_match(block_to_text(block), "output")
+
+
+def test_why_full_piped(golden):
+    block = why_view(WHY_UPSERT, Zoom.FULL, width=None, piped=True)
+    golden.assert_match(block_to_text(block), "output")
+
+
 def test_why_collect_piped(golden):
     block = why_view(WHY_COLLECT, Zoom.SUMMARY, width=None, piped=True)
     golden.assert_match(block_to_text(block), "output")

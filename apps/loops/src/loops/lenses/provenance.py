@@ -129,9 +129,59 @@ def _header(data: "Provenance", address: str, width: int | None, p, *, piped: bo
     return card(title, sublines, card_w, p=p)
 
 
+def _connector(index: int, total: int) -> str:
+    """Trace gutter connector — ``┌`` opens, ``│`` continues, ``└`` closes."""
+    if total <= 1:
+        return "└"
+    if index == 1:
+        return "┌"
+    if index == total:
+        return "└"
+    return "│"
+
+
+def _trace_rows(data: "Provenance", width, p, *, piped) -> list[Block]:
+    """The chronological fold trace — oldest first, one row per ``Spec.apply``.
+
+    ``┌│└ <date> <observer> <what changed> → state ×n``. The row above ↑ the
+    ledger IS the last apply: this teaches fold-not-stored in situ. The trace
+    CONTENT (dates, observers, changed fields, state size) is on both registers;
+    the connector glyphs + terminator are TTY-legible chrome the piped channel
+    also carries but which parity strips as decorative.
+    """
+    rows: list[Block] = []
+    for a in data.applies:
+        stamp = full_iso(a.ts) if piped else recency(a.ts)
+        conn = _connector(a.index, a.total)
+        changed = ", ".join(a.changed) if a.changed else "(no field change)"
+        obs = a.observer or "?"
+        text = f"{conn} {stamp} {obs}  {changed} → state ×{a.state_fields}"
+        rows.append(wrap_hanging(text, p.content, width, hang=2))
+    rows.append(_line("══ the row above ↑ is the fold, not a stored record",
+                      p.chrome, width))
+    return rows
+
+
+def _mechanism_rows(data: "Provenance", width, p) -> list[Block]:
+    """The ``-vv`` mechanism block — render-only, no re-verification.
+
+    States the reduction identity and the fact chain it ran over. The linkage
+    line reuses the ordered fact chain already replayed (same fact sequence
+    ``store verify``/``ticks --chain`` attest over) — a read, not a re-verify.
+    """
+    span = _window(data)
+    return [
+        _line("── mechanism ──", p.section, width),
+        _line("state = facts.reduce(Spec.apply, ∅)", p.metadata, width),
+        _line(f"chain: {data.total_facts} facts linked · {span}", p.metadata, width),
+    ]
+
+
 def _render_upsert(data, address, zoom, width, p, *, piped):
     rows: list[Block] = [_header(data, address, width, p, piped=piped)]
     show_history = zoom >= Zoom.DETAILED
+    if show_history and data.applies:
+        rows.extend(_trace_rows(data, width, p, piped=piped))
     for attr in data.fields:
         stamp = _stamp(attr.setter, piped=piped)
         prefix = f"{attr.field} = "
@@ -150,6 +200,8 @@ def _render_upsert(data, address, zoom, width, p, *, piped):
                     f"(fact {prior.fact.index}/{prior.fact.total})",
                     p.metadata, width, hang=len("    was "),
                 ))
+    if zoom >= Zoom.FULL:
+        rows.extend(_mechanism_rows(data, width, p))
     return join_vertical(*rows)
 
 

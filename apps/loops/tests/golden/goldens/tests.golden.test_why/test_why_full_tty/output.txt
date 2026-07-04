@@ -12,3 +12,6 @@ status = open  ← Jan 15 alice (fact 3/3)
     was open  ← Jan 14 alice (fact 1/3)
 label = ∅  ← Jan 15 alice (fact 3/3)
     was draft  ← Jan 14 alice (fact 1/3)
+── mechanism ──
+state = facts.reduce(Spec.apply, ∅)
+chain: 3 facts linked · Jan 14 → Jan 15

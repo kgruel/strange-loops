@@ -682,6 +682,192 @@ def fetch_confluence(
     }
 
 
+# Recursion-depth safety valve. Termination is guaranteed by the per-path cycle
+# guard (a back-edge to an ancestor is skipped), so this only protects Python's
+# call stack against a pathologically long SIMPLE path. It is deliberately well
+# above realistic chain lengths (the live project vertex tops out near 60) so it
+# never truncates a real chain — a lower bound would make results order-dependent
+# (a node first reached past the cap would memoize a truncated path and poison
+# every later reuse), which is exactly what "longest chain" must not do. The
+# design entry's provisional "32" was a pre-implementation guess that predated
+# seeing real chain depths (judgment call, flagged in the build report).
+_CHAIN_DEPTH_CAP = 128
+
+
+def _longest_chains(
+    adjacency: dict[str, list[tuple[str, str]]], *, cap: int = _CHAIN_DEPTH_CAP
+) -> dict[str, list[str]]:
+    """Longest downstream chain starting at each node — memoized DFS.
+
+    ``adjacency`` maps source address → [(target address, predicate), ...] over
+    the RESOLVED graph (targets that exist as nodes). Refs point temporally
+    backward so the graph is a near-DAG; a per-path ``stack`` guard skips
+    back-edges (a target already on the current path — a cycle) so a cyclic
+    fixture never recurses forever. ``cap`` bounds live recursion depth as a
+    safety valve (see the module constant) — set high enough that realistic
+    chains are never truncated, so the result is a true longest path.
+
+    Returns node → the address path (including the node) of its longest chain.
+    Neighbours are walked in sorted order and ties break lexicographically, so
+    the result is deterministic. Memoization is DAG-safe: a skipped edge only
+    ever points at an ancestor (a cycle), so a node's longest downstream path is
+    independent of the path that reached it.
+    """
+    memo: dict[str, list[str]] = {}
+
+    def dfs(node: str, stack: set[str]) -> list[str]:
+        if node in memo:
+            return memo[node]
+        best: list[str] = [node]
+        stack.add(node)
+        if len(stack) < cap:
+            targets = sorted({t for t, _ in adjacency.get(node, ())})
+            for tgt in targets:
+                if tgt in stack:
+                    continue  # back-edge — would close a cycle
+                sub = dfs(tgt, stack)
+                cand = [node, *sub]
+                if len(cand) > len(best) or (
+                    len(cand) == len(best) and cand < best
+                ):
+                    best = cand
+        stack.discard(node)
+        memo[node] = best
+        return best
+
+    for n in adjacency:
+        dfs(n, set())
+    return memo
+
+
+def _top_chains(memo: dict[str, list[str]], *, limit: int = 10) -> list[list[str]]:
+    """Distinct longest chains, longest-first, dropping sub-chains of picks.
+
+    A chain needs at least one edge (length ≥ 2). Candidates sort by
+    ``(-len, path)``; a candidate that is a contiguous sub-path of an
+    already-selected chain is dropped (it adds no new membership).
+    """
+    cands = sorted(
+        (p for p in memo.values() if len(p) >= 2),
+        key=lambda p: (-len(p), p),
+    )
+
+    def _is_subpath(short: list[str], long: list[str]) -> bool:
+        n = len(short)
+        return any(long[i : i + n] == short for i in range(len(long) - n + 1))
+
+    picked: list[list[str]] = []
+    for c in cands:
+        if any(_is_subpath(c, p) for p in picked):
+            continue
+        picked.append(c)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+def fetch_graph(
+    vertex_path: Path,
+    *,
+    kind: str | None = None,
+    observer: str | None = None,
+) -> dict:
+    """Ref/edge-graph projection — the store as a directed graph (Graph view).
+
+    A pure projection over the entity ``Surface`` (``project(fetch_fold())``);
+    zero engine SQL beyond the fold fetch. Nodes are folded entities, edges are
+    their outbound refs + typed edges RESOLVED to another node (dangling refs —
+    pointing at no node — are counted, not walked). Three cuts:
+
+    * **hubs** — nodes by inbound count desc; the ``←N`` sinks. Predicate mix
+      (``ref`` vs declared typed-edge field names) is where typed edges become
+      VISIBLE, per decision:design/graph-build1-scope.
+    * **chains** — longest directed ref paths (net-new traversal; memoized DFS
+      with a per-path cycle guard + depth cap 32).
+    * **orphans** — nodes with no inbound AND no outbound refs/edges (isolated).
+
+    Returns a JSON-clean dict (all counts/paths serializable; ``last`` is a
+    float epoch like the confluence cut)::
+
+        {"vertex", "nodes", "edges", "typed_edges", "orphans", "dangling",
+         "hubs": [{address, kind, key, tier, inbound, predicates:[[p,n]..],
+                   last, observer}, ...],
+         "orphan_list": [address, ...],
+         "census": [[predicate, count, typed], ...],
+         "chains": [[address, ...], ...]}
+    """
+    from loops.surface import project
+
+    surface = project(fetch_fold(vertex_path, kind=kind, observer=observer))
+    rows = surface.rows
+    node_addrs = {r.address for r in rows}
+
+    # Reverse the materialized inbound adjacency into RESOLVED outbound edges:
+    # target ← (source, predicate) becomes source → (target, predicate). Both
+    # endpoints are "kind/key" node addresses, so no re-matching is needed.
+    outbound: dict[str, list[tuple[str, str]]] = {}
+    resolved_edges = 0
+    typed_edges = 0
+    census: dict[str, int] = {}
+    for target, sources in surface.inbound_edges.items():
+        if target not in node_addrs:
+            continue
+        for source, pred in sources:
+            if source not in node_addrs:
+                continue
+            outbound.setdefault(source, []).append((target, pred))
+            resolved_edges += 1
+            census[pred] = census.get(pred, 0) + 1
+            if pred != "ref":
+                typed_edges += 1
+
+    # Total outbound refs+edges across nodes; the shortfall vs resolved is the
+    # dangling count (refs pointing at no node in this vertex).
+    total_outbound = sum(len(r.refs) + len(r.edges) for r in rows)
+    dangling = max(0, total_outbound - resolved_edges)
+
+    hubs = [
+        {
+            "address": r.address,
+            "kind": r.kind,
+            "key": r.key,
+            "tier": r.tier,
+            "inbound": r.inbound,
+            "predicates": [[p, n] for p, n in r.inbound_predicates],
+            "last": r.ts,
+            "observer": r.observer,
+        }
+        for r in sorted(rows, key=lambda r: (-r.inbound, r.address))
+        if r.inbound > 0
+    ]
+
+    orphan_list = [
+        r.address
+        for r in rows
+        if r.inbound == 0 and not r.refs and not r.edges
+    ]
+
+    census_rows = sorted(
+        ([p, n, p != "ref"] for p, n in census.items()),
+        key=lambda c: (-c[1], c[0]),
+    )
+
+    chains = _top_chains(_longest_chains(outbound))
+
+    return {
+        "vertex": surface.vertex,
+        "nodes": len(rows),
+        "edges": resolved_edges,
+        "typed_edges": typed_edges,
+        "orphans": len(orphan_list),
+        "dangling": dangling,
+        "hubs": hubs,
+        "orphan_list": orphan_list,
+        "census": census_rows,
+        "chains": chains,
+    }
+
+
 def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
     """Extract fold key_field metadata from a vertex's loop declarations."""
     from lang import parse_vertex_file

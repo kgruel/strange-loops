@@ -1,0 +1,7 @@
+decision/design/a · 3 facts · Jan 14 → Jan 15 · observers: alice, bob
+message = the body  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)
+status = open  ← 2025-01-15T12:00:00+00:00 alice (fact 3/3)
+    was review  ← 2025-01-14T11:20:00+00:00 bob (fact 2/3)
+    was open  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)
+label = ∅  ← 2025-01-15T12:00:00+00:00 alice (fact 3/3)
+    was draft  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)

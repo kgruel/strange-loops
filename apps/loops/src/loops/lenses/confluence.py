@@ -22,7 +22,7 @@ The module-level ``fetch`` overrides the default fold fetch.
 
 from __future__ import annotations
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Style, Zoom, join_horizontal, join_vertical
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
 from ._grammar import (
@@ -202,12 +202,24 @@ def confluence_view(
                     rows.append(_line(f"  touched: {touched}", Style(), width))
             else:
                 indent = "  " if is_child else ""
-                row_style = Style(bold=True) if tier == "high" else Style()
-                rows.append(_line(
-                    f"  {rail_glyph(tier)} {disp:<{name_w}}"
-                    f"  {o['count']:>{count_w}}  {desc}",
-                    row_style, width,
-                ))
+                # Span-split so the rail carries its tier hue and the observer
+                # name carries its stable identity hue (TTY-only chrome; the
+                # glyph, name, count, and mix text are identical on both
+                # registers). The shed logic above guarantees the composed row
+                # already fits ``width``, so the horizontal join needs no bound.
+                spans = [
+                    Block.text(f"  {rail_glyph(tier)} ", p.rail_style(tier)),
+                    Block.text(f"{disp:<{name_w}}", p.observer_style(o["name"])),
+                    Block.text(f"  {o['count']:>{count_w}}  {desc}", p.content),
+                ]
+                # Preserve the row's block width so the header card measures the
+                # same span it did when the row was one width-padded line (the
+                # spacer is rstripped at print — the visible text is unchanged).
+                if width is not None:
+                    pad_n = width - (prefix_w + len(desc))
+                    if pad_n > 0:
+                        spans.append(Block.text(" " * pad_n, p.content))
+                rows.append(join_horizontal(*spans))
                 if zoom >= Zoom.DETAILED and o.get("touched"):
                     for tk, tkey, tn in o["touched"][:5]:
                         times = f" ×{tn}" if tn > 1 else ""

@@ -9,6 +9,7 @@ from ._grammar import DateGrouper, clock, rail_glyph
 from ._grammar import block as _block
 from ._grammar import coerce_dt as _parse_ts
 from ._grammar import duration as _format_duration
+from ._statview import palette_of
 
 
 def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
@@ -38,6 +39,7 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
 
     rows: list[tuple[str, Style]] = []
     dim = Style(dim=True)
+    p = palette_of(None)
     grouper = DateGrouper()
 
     for i, tick in enumerate(ticks):
@@ -81,7 +83,7 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
             row_style = Style()
         else:
             gutter = f"{rail_glyph(tier)} "
-            row_style = Style(bold=True) if tier == "high" else Style()
+            row_style = p.rail_style(tier)
 
         body = f"{time_str} {idx_label} {trigger}" if trigger \
             else f"{time_str} {idx_label} {tick['name']}"

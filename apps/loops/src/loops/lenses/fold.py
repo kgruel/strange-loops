@@ -41,6 +41,7 @@ from ._grammar import (
     coerce_dt,
     date_key,
     rail_glyph,
+    recency_style,
     rollup_line,
 )
 from ._grammar import full_iso as _format_ts_full
@@ -263,7 +264,14 @@ def fold_view(
             blocks.append(Block.text("", Style(), width=width))
 
         header = _section_header(kind, display_count, piped=is_piped)
-        blocks.append(Block.text(header, fp.section_header, width=width))
+        # Section header carries the kind's stable hue on the TTY register (the
+        # header text is identical on both channels). Keep it bold — the kind
+        # colour rides the fold-palette's section emphasis.
+        header_style = (
+            fp.section_header if is_piped
+            else Style(bold=True, fg=palette_of(None).kind_style(kind).fg)
+        )
+        blocks.append(Block.text(header, header_style, width=width))
 
         observers = {r.observer for r in rows if r.observer}
         show_observer = len(observers) > 1
@@ -959,7 +967,11 @@ def _render_item_line(
         parts: list[Block] = [
             Block.text(pad, fp.body),
             Block.text(glyph, glyph_style),
-            Block.text(f" {age:<{cols.age_w}}", fp.collapse),
+            # Recency badge carries the freshness gradient (TTY-only chrome; the
+            # tag text is identical to the piped ledger's DATE column).
+            Block.text(
+                f" {age:<{cols.age_w}}", recency_style(item.ts, palette_of(None))
+            ),
             Block.text(f"  {label:<{key_w}}", fp.key),
         ]
         if cols.cluster_w and show_cluster:

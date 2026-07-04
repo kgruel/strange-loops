@@ -171,6 +171,25 @@ def rail_glyph(tier: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Recency styling — the freshness gradient over a rendered ``recency`` tag.
+# ---------------------------------------------------------------------------
+
+
+def recency_style(ts: object, p: "LoopsPalette") -> Style:
+    """Freshness-graded style for a ``recency(ts)`` tag (TTY-only chrome).
+
+    Coerces the timestamp, computes its age, and grades it through the
+    palette's freshness gradient (fresh/recent/stale/old). Unparseable
+    timestamps recede to ``metadata``. The text is authored by ``recency``;
+    this only colours it — never carrying information the tag itself lacks.
+    """
+    dt = coerce_dt(ts)
+    if dt is None:
+        return p.metadata
+    return p.freshness_style(time.time() - dt.timestamp())
+
+
+# ---------------------------------------------------------------------------
 # Layout helpers
 # ---------------------------------------------------------------------------
 

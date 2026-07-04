@@ -25,6 +25,15 @@ _STALE = 86400     # < 1 day
 
 
 # ---------------------------------------------------------------------------
+# Horizon proximity thresholds — where a meter ramps warn/critical. Live on
+# the palette (not the lens) so the ramp is a palette policy, not a hardcode.
+# ---------------------------------------------------------------------------
+
+_HORIZON_WARN = 0.6      # ≥ .6 → approaching the boundary
+_HORIZON_CRITICAL = 0.85  # ≥ .85 → about to seal
+
+
+# ---------------------------------------------------------------------------
 # Default kind color pool — deterministic rotation for unmapped kinds
 # ---------------------------------------------------------------------------
 
@@ -38,6 +47,25 @@ _DEFAULT_KIND_POOL: tuple[Style, ...] = (
     Style(fg=114),      # soft green
     Style(fg=179),      # gold
 )
+
+
+# ---------------------------------------------------------------------------
+# Default kind styles for the core vocabulary — so the common kinds carry a
+# stable, legible hue instead of depending on md5-hash luck. Hues track the
+# palette's existing fg roles (accent/warn/critical + the pool's colours).
+# ---------------------------------------------------------------------------
+
+_DEFAULT_KIND_STYLES: dict[str, Style] = {
+    "decision": Style(fg="cyan"),       # the primary settled-choice kind
+    "thread": Style(fg="yellow"),       # open arcs — attention-warm
+    "task": Style(fg="green"),          # tracked work
+    "friction": Style(fg=208),          # orange — process pain
+    "hypothesis": Style(fg="magenta"),  # falsifiable prediction
+    "observation": Style(fg="blue"),    # noticed-true, no prescription
+    "session": Style(fg=245),           # session chrome — recedes
+    "change": Style(fg=179),            # gold — mechanical deltas
+    "log": Style(fg=240),               # reflex reroutes — dimmest
+}
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +105,11 @@ class LoopsPalette:
     stale: Style = field(default_factory=lambda: Style(dim=True))
     old: Style = field(default_factory=lambda: Style(dim=True, fg=240))
 
+    # Proximity ramp (horizon meter, potential warnings)
+    accent: Style = field(default_factory=lambda: Style(fg="cyan"))
+    warn: Style = field(default_factory=lambda: Style(fg="yellow"))
+    critical: Style = field(default_factory=lambda: Style(fg="red"))
+
     # Kind color system
     kind_styles: dict[str, Style] = field(default_factory=dict)
     kind_pool: tuple[Style, ...] = field(default=_DEFAULT_KIND_POOL)
@@ -91,6 +124,34 @@ class LoopsPalette:
         idx = int.from_bytes(md5(kind.encode()).digest()[:4]) % len(self.kind_pool)
         return self.kind_pool[idx]
 
+    def observer_style(self, observer: str) -> Style:
+        """Stable identity colour for an observer.
+
+        Aliased over the kind hash pool for now — a distinct method so kind and
+        observer hues can diverge later (once declared Peers give observers a
+        typed face). Empty/unattributed observers recede to metadata.
+        """
+        if not observer:
+            return self.metadata
+        if not self.kind_pool:
+            return Style()
+        idx = int.from_bytes(md5(observer.encode()).digest()[:4]) % len(self.kind_pool)
+        return self.kind_pool[idx]
+
+    def rail_style(self, tier: str) -> Style:
+        """Gutter-glyph style per rail tier (decision:design/rail-wins-gutter).
+
+        The text authority is ``_grammar.TIER_GLYPHS``; this is the parallel
+        colour map. ``high`` pops (bold content), ``mid`` is default content,
+        ``tail``/untiered recede to chrome, ``stale`` warns via the old-age hue.
+        """
+        return {
+            "high": self.header,
+            "mid": self.content,
+            "tail": self.metadata,
+            "stale": self.old,
+        }.get(tier, self.chrome)
+
     def freshness_style(self, seconds_ago: float) -> Style:
         """Style based on how long ago something happened."""
         if seconds_ago < _FRESH:
@@ -101,9 +162,22 @@ class LoopsPalette:
             return self.stale
         return self.old
 
+    def horizon_meter_style(self, ratio: float) -> Style:
+        """Proximity-meter colour by closeness to the boundary.
+
+        ``ratio`` = unsealed facts / declared count. ``< .6`` accent (calm),
+        ``.6–.85`` warn (approaching), ``≥ .85`` critical (about to seal).
+        Thresholds live here, not in the lens.
+        """
+        if ratio >= _HORIZON_CRITICAL:
+            return self.critical
+        if ratio >= _HORIZON_WARN:
+            return self.warn
+        return self.accent
+
 
 # ---------------------------------------------------------------------------
 # Default palette
 # ---------------------------------------------------------------------------
 
-DEFAULT_PALETTE = LoopsPalette()
+DEFAULT_PALETTE = LoopsPalette(kind_styles=dict(_DEFAULT_KIND_STYLES))

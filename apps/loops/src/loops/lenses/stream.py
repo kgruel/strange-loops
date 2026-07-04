@@ -53,6 +53,8 @@ def stream_view(
     if is_piped:
         width = None
 
+    p = palette_of(None)
+
     # Normalize input format
     if isinstance(data, dict):
         facts = data.get("facts", [])
@@ -144,8 +146,9 @@ def stream_view(
             ))
         else:
             glyph = rail_glyph(tier)
-            gstyle = Style(bold=True) if tier == "high" else Style(dim=True)
-            blocks.append(join_horizontal(Block.text(f"{glyph} ", gstyle), rec))
+            blocks.append(join_horizontal(
+                Block.text(f"{glyph} ", p.rail_style(tier)), rec
+            ))
 
         # Fact-envelope graft: id (DETAILED+), observer/origin (FULL/--id).
         # These are not payload fields, so record_line never renders them.

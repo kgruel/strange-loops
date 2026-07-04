@@ -411,17 +411,6 @@ def _span_str(earliest: Any, latest: Any) -> str:
     return f"{lo:%b %d}–{hi:%b %d}"
 
 
-def _rail_style(tier: str, p: Any) -> Style:
-    """Gutter-glyph style per rail tier — the leading slot the rail owns
-    (decision:design/rail-wins-gutter). High pops, tail/untiered recede."""
-    return {
-        "high": Style(bold=True),
-        "mid": p.content,
-        "tail": p.metadata,
-        "stale": p.old,
-    }.get(tier, p.chrome)
-
-
 def _entry_style(key: str, leaf: bool, p: Any) -> Style:
     """Colour an entry like ``ls`` colours a tree: namespaces (drillable) pop,
     leaves are plain, the orphan bucket dims."""
@@ -496,7 +485,7 @@ def _entry_table(
         pct = cnt / view_total * 100
         tier = e.get("tier", "")
         row = [
-            cell(rail_glyph(tier), _rail_style(tier, p)),
+            cell(rail_glyph(tier), p.rail_style(tier)),
             cell(key, _entry_style(key, leaf, p)),
             cell(_format_count(cnt)),
             meter_cell(cnt, max_count, f"{pct:>4.1f}%", p),

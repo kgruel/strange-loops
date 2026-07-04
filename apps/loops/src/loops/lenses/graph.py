@@ -208,8 +208,7 @@ def graph_view(
                     text = _row(mix_n)
                     if len(text) <= width:
                         break
-            style = Style(bold=True) if h.get("tier") == "high" else Style()
-            rows.append(_line(text, style, width))
+            rows.append(_line(text, p.rail_style(h.get("tier", "")), width))
 
     if chains:
         rows.append(_line("", Style(), width))

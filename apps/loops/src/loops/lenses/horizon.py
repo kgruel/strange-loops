@@ -202,9 +202,17 @@ def horizon_view(
             # Count-based: append a TTY-only proximity meter under the row body.
             meter = _meter(r["window_facts"], r["count"])
             if meter:
+                # Colour ramps with closeness to the boundary — the palette owns
+                # the thresholds (accent → warn → critical). TTY-only chrome: the
+                # ratio is already stated by ``window_facts/count`` in the row.
+                count = r["count"] or 0
+                ratio = r["window_facts"] / count if count > 0 else 0.0
                 row = join_vertical(
                     row,
-                    _line(f"    {'':<{name_w}}  {meter}", Style(fg="cyan"), width),
+                    _line(
+                        f"    {'':<{name_w}}  {meter}",
+                        p.horizon_meter_style(ratio), width,
+                    ),
                 )
         rows.append(row)
 

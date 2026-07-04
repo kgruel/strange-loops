@@ -61,9 +61,12 @@ def _approaching(row: dict) -> bool:
 
     Mirrors the meter's ratio exactly (window_facts/count). Kind-based
     boundaries have no numerator, so they never approach — the gutter stays
-    blank for them, honestly.
+    blank for them, honestly. Never-sealed loops also never approach: they sit
+    in the lowest proximity stratum in ``_horizon_sort_key`` (no meaningful
+    proximity yet), so firing the ▲ here would contradict the sort order —
+    a glyph on the row the sort buries last (decision:design/horizon-proximity-sort).
     """
-    if row["mode"] == "when":
+    if row["mode"] == "when" or row["never_sealed"]:
         return False
     count = row.get("count") or 0
     return count > 0 and row["window_facts"] / count >= _APPROACH_RATIO

@@ -39,8 +39,11 @@ loops read <vertex> --facts --since 7d        # time window (7d, 24h, 1h)
 loops read <vertex> --facts --kind thread --since 7d
 loops read <vertex> --lens prompt             # custom lens
 loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
+loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
+loops read <vertex> --lens horizon            # boundary cut: each armed loop's open window vs its next seal
 loops read <vertex> --facts --id <ulid>       # single fact lookup by ID/prefix
 loops read <vertex> --observer all            # peel identity scope (--observer NAME/all)
+loops read <vertex> decision/design/foo --why # per-field provenance drill (exact kind/key address, sibling of --facts)
 loops <vertex>                                # shorthand for: loops read <vertex>
 ```
 
@@ -69,6 +72,10 @@ loops read <vertex> --count --by kind         # one count row per group (--by ro
 | (none) | SUMMARY | Default orientation view |
 | `-v` | DETAILED | Bodies, descriptions |
 | `-vv` | FULL | Timestamps, all metadata |
+
+`-q` renders through one shared helper (`rollup_line()`) everywhere — read,
+fold, stream, `store ticks`/`stats`, confluence, graph, horizon all produce the
+same `vertex · stat · stat` one-liner grammar, vertex-led.
 
 ### Format flags
 

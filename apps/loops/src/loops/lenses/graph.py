@@ -37,6 +37,7 @@ from ._grammar import (
     recency,
     rollup_line,
     stamp,
+    wrap_hanging,
 )
 from ._grammar import block as _line
 
@@ -130,13 +131,16 @@ def graph_view(
         f"{orphans} orphans",
     ]
     if hubs:
-        # Top hub (already inbound-sorted) as the rightmost segment — sheds
-        # first on narrow widths via shed_from, load-bearing counts survive.
+        # Top hub (already inbound-sorted) as the rightmost segment. It is
+        # content, not chrome — the piped register always carries it, so the
+        # TTY must too. Never shed it for width; a narrow terminal wraps the
+        # tail onto a hanging-indented continuation line (below), keeping both
+        # registers information-faithful.
         top = hubs[0]
         rollup_parts.append(f"hubs {top['address']} ←{top['inbound']}")
-    rollup = rollup_line(vertex, rollup_parts, width=width, shed_from=1)
+    rollup = rollup_line(vertex, rollup_parts)
     if zoom == Zoom.MINIMAL:
-        return _line(rollup, p.metadata, width)
+        return wrap_hanging(rollup, p.metadata, width, hang=2)
 
     dim = Style(dim=True)
     hub_n = len(hubs) if zoom >= Zoom.DETAILED else 10

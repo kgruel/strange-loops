@@ -278,11 +278,23 @@ class TestZooms:
         assert "\n" not in text
         assert "4 nodes" in text and "1 orphans" in text
 
-    def test_minimal_sheds_before_clip(self):
+    def test_minimal_wraps_hub_never_sheds(self):
+        # The top-hub segment is content, not chrome — it must survive on the
+        # narrow TTY (faithful with piped, which never sheds). Overflow wraps
+        # onto a hanging-indented continuation line instead of being dropped.
         data = _data(hubs=[_hub("k/very-long-address-here", 3)], nodes=99)
         text = _render(data, zoom=Zoom.MINIMAL, width=30).rstrip("\n")
-        assert len(text) <= 30
         assert "99 nodes" in text  # the load-bearing count survives
+        assert "k/very-long-address-here ←3" in text  # hub not shed
+        assert "\n" in text  # wrapped, not clipped
+
+    def test_minimal_hub_faithful_across_registers(self):
+        data = _data(hubs=[_hub("k/very-long-address-here", 3)], nodes=99)
+        tty = _render(data, zoom=Zoom.MINIMAL, width=30)
+        piped = _render(data, zoom=Zoom.MINIMAL, piped=True)
+        # The hub segment appears on both registers regardless of TTY width.
+        assert "k/very-long-address-here ←3" in tty
+        assert "k/very-long-address-here ←3" in piped
 
     def test_summary_shows_hubs_and_chains(self):
         data = _data(

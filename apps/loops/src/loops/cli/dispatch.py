@@ -325,14 +325,20 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         extra.setdefault("vertex_path", str(op.vertex_path))
 
     try:
-        # Human reads show everything: the truncation budget is dropped on the
-        # read render (decision:design/drop-truncation-from-human-reads). A TTY
-        # read now renders full bodies + all fields like the pipe (width=None =
-        # no-truncation, per normalize_width's contract), just with color. A
-        # width-fit/truncate render can return later as an opt-in, not the
-        # default. (Live keeps its width — the alt-screen needs it.)
+        # Register split on the render width: a TTY read gets the terminal
+        # width so long bodies WRAP into hanging blocks under their key
+        # (never clipped to a line — this amends design/drop-truncation-from-
+        # human-reads: content survives, layout is width-aware). A pipe keeps
+        # width=None (no-truncation ledger, per normalize_width's contract).
+        import shutil
+        import sys as _sys
+
+        width = (
+            shutil.get_terminal_size().columns
+            if _sys.stdout.isatty() else None
+        )
         block = call_lens(
-            lens_fn, render_data, _zoom_of(op.fidelity), None, **extra
+            lens_fn, render_data, _zoom_of(op.fidelity), width, **extra
         )
     except Exception as exc:
         reporter.err(f"Render error: {exc}")

@@ -22,6 +22,7 @@ Palette maps information roles to styles:
 """
 from __future__ import annotations
 
+import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -56,6 +57,13 @@ PREVIEW_SEPARATOR = " · "
 # truncated to an unreadable nub. The dropped tail is reflected in the
 # `[+Nc]` truncation hint.
 MIN_FIELD_BUDGET = 12
+
+# TTY rail rows: a body that doesn't fit inline drops to a hanging block
+# wrapped under the key column. At the SUMMARY orientation view the block is
+# height-capped so one long decision can't sever the rail; -v/-vv and exact
+# key addresses render the block uncapped (flip-invariance keeps its
+# retrieval-path promise). See decision:design/tier-allocated-disclosure.
+BODY_WRAP_MAX_LINES = 4
 
 
 # ---------------------------------------------------------------------------
@@ -902,43 +910,25 @@ def _render_item_line(
             len(pad) + 2 + cols.age_w + 2 + key_w
             + ((2 + cols.cluster_w) if cols.cluster_w else 0) + 2
         )
-    truncation_hint = ""
+    hang_body = ""  # TTY body too long for its row — wraps under the key
 
-    if has_body:
-        # Determine body budget (cap for both preview and fallback paths).
-        # At DETAILED+: preview renders untruncated (no width cap). The fallback
-        # path retains the existing width-budget behavior; preview is the
-        # higher-fidelity path so it overrides.
-        if zoom >= Zoom.DETAILED and preview_fields:
-            body_budget = body_len  # untruncated
-        elif width is not None:
-            # Reserve space for potential truncation hint " [+NNNc]"
-            hint_reserve = 10
-            body_budget = max(10, width - fixed_len - hint_reserve)
-            if chars > 0:
-                body_budget = min(body_budget, chars)
-        else:
-            body_budget = chars if chars > 0 else body_len
-
-        # Field budgeting dissolves into painted.budget_fields — the
-        # shrink-then-drop allocator (wcwidth-measured, fixing the latent
-        # len()/CJK bug; min_field gates *truncation* not presence, so short
-        # whole values are kept where the old guard dropped them —
-        # decision:design/budget-fields-truncation-gate-contract).
-        if preview_fields and zoom >= Zoom.DETAILED:
-            # DETAILED+: untruncated — join every non-empty field, no budget.
-            body_text = PREVIEW_SEPARATOR.join(v for v in candidate_vals if v)
-        else:
-            fields = candidate_vals if preview_fields else [body]
-            fit = budget_fields(
-                fields, body_budget,
-                min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
-            )
-            body_text = fit.text
-            if fit.dropped > 0:
-                truncation_hint = f" [+{fit.dropped}c]"
-    else:
+    # Body text for the piped ledger — the full untruncated render (piped is
+    # information-faithful; that channel forces width=None). A chars fidelity
+    # dial still budgets via painted.budget_fields (shrink-then-drop,
+    # decision:design/budget-fields-truncation-gate-contract). The TTY
+    # register composes its own body below (inline vs hanging block).
+    if not has_body:
         body_text = ""
+    elif chars > 0 and body_len > chars:
+        fields = candidate_vals if preview_fields else [body]
+        body_text = budget_fields(
+            fields, chars, min_field=MIN_FIELD_BUDGET, sep=PREVIEW_SEPARATOR,
+        ).text
+    else:
+        body_text = (
+            PREVIEW_SEPARATOR.join(v for v in candidate_vals if v)
+            if preview_fields else body
+        )
 
     if piped:
         # Ledger row — plain text, one line, named columns (chrome-free; the
@@ -979,10 +969,17 @@ def _render_item_line(
             if pos < cols.cluster_w:
                 cluster_parts.append(Block.text(" " * (cols.cluster_w - pos), fp.body))
             parts.extend(cluster_parts)
+        # Body placement: inline when it fits the row, otherwise a hanging
+        # block wrapped under the key column (rendered after main_line below).
+        # The single-line budget_fields truncation above is the piped-with-
+        # width legacy path; the TTY register never drops body content to fit
+        # a line — it wraps (decision:design/tier-allocated-disclosure amends
+        # drop-truncation-from-human-reads: wrap + explicit cap, not clip).
         if body_text and show_body:
-            parts.append(Block.text(f"  {body_text}", fp.body))
-        if truncation_hint and show_body:
-            parts.append(Block.text(truncation_hint, fp.collapse))
+            if width is None or fixed_len + len(body_text) <= width:
+                parts.append(Block.text(f"  {body_text}", fp.body))
+            else:
+                hang_body = body_text
 
         main_line = join_horizontal(*parts)
 
@@ -992,6 +989,28 @@ def _render_item_line(
             main_line = block_truncate(main_line, width)
 
     lines: list[Block] = [main_line]
+
+    # Hanging body block — wrapped under the key column, rail column left
+    # clean so the glyph rail stays continuous. Height-capped only at the
+    # SUMMARY orientation view for non-exact addresses; -v/-vv and exact key
+    # addresses get the whole body (wrapped, never clipped).
+    if hang_body and width is not None:
+        hang_pad = " " * (len(pad) + 4 + cols.age_w)
+        wrap_w = max(20, width - len(hang_pad))
+        wrapped = textwrap.wrap(hang_body, wrap_w)
+        capped = (
+            zoom == Zoom.SUMMARY
+            and item.granularity != "whole"
+            and len(wrapped) > BODY_WRAP_MAX_LINES
+        )
+        shown = wrapped[:BODY_WRAP_MAX_LINES] if capped else wrapped
+        for wline in shown:
+            lines.append(Block.text(hang_pad + wline, fp.body, width=width))
+        if capped:
+            hidden = len(hang_body) - sum(len(w) for w in shown)
+            lines.append(Block.text(
+                f"{hang_pad}… [+{hidden}c · -v]", fp.collapse, width=width,
+            ))
 
     # DETAILED: observer + remaining payload fields + outbound refs
     if zoom >= Zoom.DETAILED:

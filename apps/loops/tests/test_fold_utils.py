@@ -765,20 +765,26 @@ class TestPreviewRender:
         # First non-key payload field is "message"; today's behavior must survive.
         assert "  JWT" in t  # rail grammar: two-space gap, no colon
 
-    def test_cascade_truncation(self):
-        """Long first field claims most budget; second field truncates or drops."""
+    def test_long_body_hangs_wrapped(self):
+        """A body too long for its row drops to a hanging wrapped block under
+        the key (never clipped to one line); past BODY_WRAP_MAX_LINES at the
+        orientation view it height-caps with an explicit `… [+Nc · -v]` tail.
+        """
         long_status = "open-with-a-lot-of-context-and-additional-detail"
-        long_msg = "x" * 200
+        long_msg = "word " * 200
         s = self._section(
             {"name": "f", "status": long_status, "message": long_msg},
             preview_fields=("status", "message"),
         )
-        # narrow width forces truncation
         t = self._text(fold_view(FoldState(sections=(s,), vertex="v"), Zoom.SUMMARY, 100))
-        # The trailing slot starts with status (first-field-wins). The message
-        # field is either truncated (… visible) or dropped entirely (cascade).
-        # Either way the [+Nc] hint surfaces.
-        assert "[+" in t and "c]" in t
+        lines = t.splitlines()
+        # The row line carries no body (it didn't fit) …
+        row = next(ln for ln in lines if " f" in ln and "·" in ln or ln.strip().startswith("· "))
+        assert "word" not in row
+        # … the body wraps below, capped, with the explicit tail hint.
+        body_lines = [ln for ln in lines if "word" in ln]
+        assert 0 < len(body_lines) <= 4
+        assert "… [+" in t and "· -v]" in t
 
     def test_short_whole_trailing_field_kept(self):
         """budget_fields contract divergence: min_field gates *truncation*,

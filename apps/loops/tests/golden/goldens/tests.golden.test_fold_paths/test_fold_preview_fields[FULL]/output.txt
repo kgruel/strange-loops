@@ -3,7 +3,8 @@
 │ updated Jan 15                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (1):
-  │ Jan 15  Use SQLite  ×3  Atomic writes and query support. · Filesystem lacks…
+  │ Jan 15  Use SQLite  ×3
+            Atomic writes and query support. · Filesystem lacks transactions.
     _ts: 2025-01-15T10:00:00+00:00
     _n: 3
 rail  ◆ high  │ mid  · tail  ⊘ stale

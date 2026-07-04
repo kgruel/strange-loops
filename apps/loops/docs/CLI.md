@@ -13,8 +13,10 @@ Folded state — decisions, threads, tasks, changes.
 │ updated Jan 15                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (2):
-  │ Jan 15  Use SQLite for persistence  Chose SQLite over filesystem … [+35c]
-  │ Jan 14  KDL for config format       KDL is human-friendly and sup… [+22c]
+  │ Jan 15  Use SQLite for persistence
+            Chose SQLite over filesystem for atomic writes and query support.
+  │ Jan 14  KDL for config format
+            KDL is human-friendly and supports nested structure.
 
 Threads (2):
   │ Jan 15  vertex-routing  active
@@ -25,8 +27,8 @@ Tasks (2):
   │ Jan 14  add observer field  done
 
 Changes (2):
-  │ Jan 15  Added boundary detection to Spec  libs/atoms/src/atoms/sp… [+4c]
-  │ Jan 15  Refactored tick emission          libs/engine/src/engine/… [+10c]
+  │ Jan 15  Added boundary detection to Spec  libs/atoms/src/atoms/spec.py
+  │ Jan 15  Refactored tick emission          libs/engine/src/engine/temporal.py
 rail  ◆ high  │ mid  · tail  ⊘ stale
 ```
 

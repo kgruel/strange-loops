@@ -34,7 +34,10 @@ FIXED_NOW = GRAMMAR_T0 + 90500 + 3 * 86400
 
 _TTY_WIDTH = 80
 
-COMMANDS = ["read", "stream", "ticks", "ticks-chain", "ls-root", "ls-kind"]
+COMMANDS = [
+    "read", "stream", "ticks", "ticks-chain", "ls-root", "ls-kind",
+    "confluence",
+]
 CHANNELS = ["tty", "piped"]
 
 
@@ -106,6 +109,12 @@ def _render(command: str, vp, zoom: Zoom, *, piped: bool):
         from loops.lenses.vertices import vertices_view
 
         return vertices_view(_root_data(vp), zoom, width, piped=piped)
+
+    if command == "confluence":
+        from loops.commands.fetch import fetch_confluence
+        from loops.lenses.confluence import confluence_view
+
+        return confluence_view(fetch_confluence(vp), zoom, width, piped=piped)
 
     if command == "ls-kind":
         from loops.commands.ls import fetch_kind_stat

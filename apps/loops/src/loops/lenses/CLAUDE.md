@@ -74,9 +74,11 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 
 ## Built-in Lenses (this directory)
 
-**Core rendering** (the temporal modes):
-- `fold` — default fold rendering, driven by section metadata
-- `stream` — time-ordered event history
+**Core rendering** (the store's three axes):
+- `fold` — default fold rendering, driven by section metadata (the kind cut)
+- `stream` — time-ordered event history (the time cut)
+- `confluence` — per-observer census with inherited tiers (the observer cut;
+  composition lens with its own `fetch`, invoked via `--lens confluence`)
 
 **User-global lenses** (at `~/.config/loops/lenses/`):
 - `prompt` — system prompt rendering (structured schema, domain-aware kind filtering)

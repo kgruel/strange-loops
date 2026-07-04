@@ -38,6 +38,7 @@ loops read <vertex> --kind decision observer=NAME  # row filter: who emitted the
 loops read <vertex> --facts --since 7d        # time window (7d, 24h, 1h)
 loops read <vertex> --facts --kind thread --since 7d
 loops read <vertex> --lens prompt             # custom lens
+loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
 loops read <vertex> --facts --id <ulid>       # single fact lookup by ID/prefix
 loops read <vertex> --observer all            # peel identity scope (--observer NAME/all)
 loops <vertex>                                # shorthand for: loops read <vertex>

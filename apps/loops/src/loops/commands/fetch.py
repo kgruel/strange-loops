@@ -591,6 +591,97 @@ def window_stats(
     }
 
 
+def fetch_confluence(
+    vertex_path: Path,
+    *,
+    kind: str | None = None,
+    observer: str | None = None,
+) -> dict:
+    """Observer-cut projection — the store as a social object (Confluence).
+
+    The third axis: fold cuts by kind, stream/ticks cut by time; Confluence
+    cuts by observer. One ``vertex_facts`` scan yields the whole projection —
+    per observer: fact count, kind census, distinct keys touched, the touched
+    ``(kind, key, n)`` list (the -v drill), first/last activity, and a tier
+    inherited from the one tier home (an observer is a container cut — MAX
+    over the tiers of the keys it touched, decision:design/
+    salience-max-propagation; an observer who touched no folded key is
+    untiered "").
+
+    Observer names stay BARE strings (decision:design/
+    observer-typing-dissolves-to-declared-peer) — grouping of ``a/b``
+    delegation-path compounds is a render concern, not encoded here.
+
+    Returns a JSON-clean dict::
+
+        {"vertex": str, "total_facts": int,
+         "observers": [{"name", "count", "kinds", "keys", "touched",
+                        "first", "last", "tier"}, ...]}  # count-desc
+    """
+    from collections import Counter
+
+    from engine import vertex_facts
+    from lang import parse_vertex_file
+
+    from loops.surface import tier_max
+
+    ast = parse_vertex_file(vertex_path)
+    fold_meta = _get_fold_meta(vertex_path)
+    now = datetime.now(timezone.utc).timestamp()
+    facts = vertex_facts(vertex_path, 0.0, now, kind=kind, observer=observer)
+
+    # Tier decoration is best-effort — a fold failure leaves observers
+    # untiered rather than breaking the read (same stance as stream/ticks).
+    tmap: dict = {}
+    try:
+        from loops.surface import project, tier_map
+
+        tmap = tier_map(project(fetch_fold(vertex_path)))
+    except Exception:
+        tmap = {}
+
+    per: dict[str, dict] = {}
+    for f in facts:
+        obs = f.get("observer") or ""
+        entry = per.setdefault(
+            obs,
+            {"kinds": Counter(), "touched": Counter(), "first": None, "last": None},
+        )
+        k = f.get("kind", "")
+        entry["kinds"][k] += 1
+        ts = f.get("ts")
+        if isinstance(ts, datetime):
+            if entry["first"] is None or ts < entry["first"]:
+                entry["first"] = ts
+            if entry["last"] is None or ts > entry["last"]:
+                entry["last"] = ts
+        key_field = fold_meta.get(k, {}).get("key_field")
+        if key_field:
+            key = str(f.get("payload", {}).get(key_field, ""))
+            if key:
+                entry["touched"][(k, key)] += 1
+
+    observers = []
+    for name, e in per.items():
+        observers.append({
+            "name": name,
+            "count": sum(e["kinds"].values()),
+            "kinds": dict(e["kinds"].most_common()),
+            "keys": len(e["touched"]),
+            "touched": [[k, key, n] for (k, key), n in e["touched"].most_common()],
+            "first": e["first"].isoformat() if e["first"] else None,
+            "last": e["last"].isoformat() if e["last"] else None,
+            "tier": tier_max([tmap.get(kk, "") for kk in e["touched"]]),
+        })
+    observers.sort(key=lambda o: (-o["count"], o["name"]))
+
+    return {
+        "vertex": ast.name,
+        "total_facts": len(facts),
+        "observers": observers,
+    }
+
+
 def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
     """Extract fold key_field metadata from a vertex's loop declarations."""
     from lang import parse_vertex_file

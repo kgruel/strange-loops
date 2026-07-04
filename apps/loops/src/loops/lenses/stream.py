@@ -164,7 +164,14 @@ def stream_view(
             if f.get("origin"):
                 graft.append(f"origin: {f['origin']}")
         for line in graft:
-            blocks.append(_block(f"    {line}", dim_style, width))
+            # Observer identity hue (TTY-only chrome) — the same stable
+            # hash-pool colour confluence rows carry, so `stream -v` and the
+            # observer cut agree on an observer's face. Piped is byte-identical
+            # (style never reaches the agent channel); text is unchanged.
+            gstyle = dim_style
+            if not is_piped and line.startswith("observer: ") and f.get("observer"):
+                gstyle = p.observer_style(f["observer"])
+            blocks.append(_block(f"    {line}", gstyle, width))
 
     body = join_vertical(*blocks)
 

@@ -559,8 +559,32 @@ class TestTickChainView:
         data = _chain_data(chain_mode=False, windows=[_tick_window_dict()])
         text = block_to_text(tick_chain_view(data, Zoom.DETAILED, 80))
         assert "linked" not in text
-        assert "items" in text          # density fold line
         assert "kyle closed" in text    # boundary trigger label
+        # Unstamped window (no win_facts) makes no count claim — absence of
+        # window stats must not render as a false "0 facts".
+        assert "facts" not in text
+
+    def test_density_window_projection(self):
+        """A stamped window renders as attention: count · kind mix · span,
+        rail glyph from the MAX tier, touched keys at DETAILED."""
+        w = _tick_window_dict()
+        w.update(
+            win_facts=47,
+            win_kinds={"decision": 12, "thread": 9, "log": 8, "cite": 2},
+            tier="high",
+            touched=[("decision", "design/foo", 3), ("thread", "bar", 1)],
+        )
+        data = _chain_data(chain_mode=False, windows=[w])
+        text = block_to_text(tick_chain_view(data, Zoom.SUMMARY, 100))
+        assert "47 facts" in text
+        assert "decision 12" in text and "thread 9" in text
+        assert "+1" in text            # 4th kind rolled up, not dropped silently
+        assert "◆" in text             # rail glyph from window MAX tier
+        assert "window" in text        # span trailer
+        assert "design/foo" not in text  # keys are the -v rung
+        detailed = block_to_text(tick_chain_view(data, Zoom.DETAILED, 100))
+        assert "decision:design/foo ×3" in detailed
+        assert "thread:bar" in detailed
 
     def test_minimal_is_rollup_only(self):
         data = _chain_data(

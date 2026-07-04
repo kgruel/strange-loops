@@ -46,7 +46,7 @@ def _pin_recency(monkeypatch):
 
 def _ticks_data(vp, *, chain: bool) -> dict:
     """Reassemble the ``store ticks`` fetch dict (mirrors commands/store.py)."""
-    from loops.commands.fetch import fetch_tick_windows
+    from loops.commands.fetch import fetch_tick_windows, stamp_window_stats
 
     ast = parse_vertex_file(vp)
     windows = fetch_tick_windows(vp, since=None, all_names=chain)
@@ -56,12 +56,15 @@ def _ticks_data(vp, *, chain: bool) -> dict:
         "signed": sum(1 for w in windows if w.signed),
         "legacy": sum(1 for w in windows if not w.chained),
     }
+    window_dicts = [dataclasses.asdict(w) for w in windows]
+    if not chain:
+        stamp_window_stats(vp, window_dicts)
     return {
         "vertex": ast.name,
         "chain_mode": chain,
         "chain": chain_d,
         "since": None,
-        "windows": [dataclasses.asdict(w) for w in windows],
+        "windows": window_dicts,
     }
 
 

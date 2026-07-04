@@ -2,5 +2,9 @@
 │ 2 ticks                                                                      │
 │ Jan 1 → Jan 2 · latest 3d                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-  2025-01-02 13:08 #0 s2 closed
-  2025-01-01 12:08 #1 s1 closed
+2025-01-02:
+  ◆ 13:08  #0   s2 closed · 3 facts · decision 1 · thread 1 · +1   8m window
+
+2025-01-01:
+  ◆ 12:08  #1   s1 closed · 6 facts · decision 3 · thread 1 · +2   8m window
+rail  ◆ high  │ mid  · tail  ⊘ stale

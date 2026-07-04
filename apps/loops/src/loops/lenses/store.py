@@ -16,10 +16,15 @@ from painted import Block, Style, Zoom, border, join_vertical, ROUNDED
 from ..palette import DEFAULT_PALETTE, LoopsPalette
 from ._grammar import block as _line
 from ._grammar import (
+    RAIL_LEGEND,
+    DateGrouper,
     card,
     card_width,
+    clock,
     coerce_dt,
+    duration,
     ensure_utc,
+    rail_glyph,
     recency,
     short_date,
     stamp,
@@ -317,6 +322,7 @@ def tick_chain_view(
 
     dim = Style(dim=True)
     rows: list[Block] = []
+    grouper = DateGrouper()
     for w in windows:
         time_str = stamp(w["ts"])
         idx = f"#{w.get('index', 0)}"
@@ -331,17 +337,73 @@ def tick_chain_view(
                 cursor = f'{ckind}: "{preview}"' if preview else ckind
                 rows.append(_line(f"        cursor → {cursor}", dim, width))
         else:
-            trigger = w.get("boundary_trigger") or name
-            rows.append(_line(f"  {time_str} {idx} {trigger}", Style(), width))
-            if zoom >= Zoom.DETAILED:
-                delta = ""
-                if w.get("delta_added") or w.get("delta_updated"):
-                    delta = f" · +{w.get('delta_added', 0)} ~{w.get('delta_updated', 0)}"
+            # Density row = the tick as a sealed window of attention: what
+            # this session touched (window-scoped facts + kind mix), how hot
+            # (MAX tier over touched keys — rail glyph), how long (window
+            # span). Kind mix at default zoom, touched KEYS at -v — the
+            # specificity rung (decision:design/tier-allocated-disclosure).
+            facts_n = w.get("win_facts")  # None = unstamped (fold failed),
+            kinds: dict = w.get("win_kinds") or {}  # not a claim of zero
+            tier = w.get("tier", "")
+            trigger = w.get("boundary_trigger") or ""
+            span = ""
+            since_dt = coerce_dt(w.get("since"))
+            ts_dt = coerce_dt(w["ts"])
+            if since_dt is not None and ts_dt is not None:
+                span = duration(since_dt, ts_dt)
+
+            mix_items = list(kinds.items())
+
+            def _desc(mix_n: int) -> str:
+                mix = " · ".join(f"{k} {n}" for k, n in mix_items[:mix_n])
+                if len(mix_items) > mix_n:
+                    mix += (" · " if mix else "") + f"+{len(mix_items) - mix_n}"
+                segs = [s for s in (trigger,) if s]
+                if facts_n is not None:
+                    segs.append(f"{facts_n} facts" if facts_n != 1 else "1 fact")
+                    if mix:
+                        segs.append(mix)
+                out = " · ".join(segs) or name
+                if span:
+                    out += f"   {span} window"
+                return out
+
+            # Shed kind-mix entries (3 → 0, rolled into the +N tail) before
+            # letting a row clip — the span trailer survives, never "8m wi".
+            desc = _desc(3)
+            if width is not None:
+                for mix_n in (3, 2, 1, 0):
+                    desc = _desc(mix_n)
+                    if 16 + len(desc) <= width:  # 16 = "  ◆ HH:MM  #N   " prefix
+                        break
+
+            if piped:
+                # Flat ledger: stamp, index, tier word, count, span, then the
+                # trigger + whole (untruncated) kind mix.
+                facts_col = "-" if facts_n is None else str(facts_n)
+                full_mix = " ".join(f"{k}={n}" for k, n in mix_items)
+                tail = " · ".join(s for s in (trigger or name, full_mix) if s)
                 rows.append(_line(
-                    f"        fold: {w.get('total_items', 0)} items · "
-                    f"{w.get('total_facts', 0)} facts{delta}",
-                    dim, width,
+                    f"{time_str}  {idx:<4} {w.get('tier') or 'untiered':<8} "
+                    f"{facts_col:>4} facts  {span or '-':<8} {tail}".rstrip(),
+                    Style(), width,
                 ))
+            else:
+                for htext, hstyle in grouper.header_rows(w["ts"]):
+                    rows.append(_line(htext, hstyle, width))
+                row_style = dim if facts_n == 0 else (
+                    Style(bold=True) if tier == "high" else Style()
+                )
+                rows.append(_line(
+                    f"  {rail_glyph(tier)} {clock(w['ts'])}  {idx:<4} {desc}",
+                    row_style, width,
+                ))
+            if zoom >= Zoom.DETAILED:
+                for tkind, tkey, tn in w.get("touched", [])[:5]:
+                    times = f" ×{tn}" if tn > 1 else ""
+                    rows.append(_line(
+                        f"             {tkind}:{tkey}{times}", dim, width,
+                    ))
         if zoom >= Zoom.FULL and w.get("since") is not None:
             observer = f" · {w['observer']}" if w.get("observer") else ""
             rows.append(_line(
@@ -372,7 +434,10 @@ def tick_chain_view(
         sublines.append(f"{span} · latest {recency(hi)}")
     title = f"{vertex} · ticks"
     card_w = card_width(body, title, sublines, width)
-    return join_vertical(card(title, sublines, card_w, p=p), body)
+    pieces = [card(title, sublines, card_w, p=p), body]
+    if not attest:
+        pieces.append(_line(RAIL_LEGEND, Style(dim=True), width))
+    return join_vertical(*pieces)
 
 
 # ---------------------------------------------------------------------------

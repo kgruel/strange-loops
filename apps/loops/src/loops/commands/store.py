@@ -631,12 +631,24 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
             "signed": sum(1 for w in windows if w.signed),
             "legacy": sum(1 for w in windows if not w.chained),
         }
+        window_dicts = [dataclasses.asdict(w) for w in windows]
+
+        # Density default projects each tick as a sealed window of attention:
+        # window-scoped fact count + kind mix + MAX tier over touched keys
+        # (the TickWindow fields are cumulative fold state; these are the
+        # per-window complements). Skipped under --chain — the attestation
+        # projection reads the stored envelope only.
+        if not known.chain:
+            from .fetch import stamp_window_stats
+
+            stamp_window_stats(target_path, window_dicts)
+
         return {
             "vertex": ast.name,
             "chain_mode": known.chain,
             "chain": chain,
             "since": known.since,
-            "windows": [dataclasses.asdict(w) for w in windows],
+            "windows": window_dicts,
         }
 
     def render(ctx, data):
@@ -652,9 +664,11 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
         default_mode=OutputMode.STATIC,
         prog="loops store ticks",
         description=(
-            "Read a store's tick series. --chain projects the attestation "
-            "envelope (chain linkage, signature, window cursor) per tick; "
-            "the default projects density (items/facts/delta)."
+            "Read a store's tick series. The default projects each tick as "
+            "a sealed window of attention — window fact count, kind mix, "
+            "span, rail tier (-v adds the touched keys); --chain projects "
+            "the attestation envelope (chain linkage, signature, window "
+            "cursor) per tick."
         ),
         help_args=help_args,
     )

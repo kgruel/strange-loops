@@ -259,7 +259,7 @@ loops store <vertex>                          # by vertex name
 loops store <path.db>                         # by database path
 loops store <vertex> -i                       # interactive TUI explorer
 loops store <vertex> --live                   # poll for changes
-loops store ticks <vertex>                    # tick series (density: items/facts/delta)
+loops store ticks <vertex>                    # tick series as attention windows (facts + kind mix + span, rail-tiered, day-grouped; -v adds touched keys)
 loops store ticks <vertex> --chain            # per-tick attestation envelope (linkage/signature/cursor); requires .vertex, refused on combine aggregates
 loops store stats <vertex>                    # topline store totals (.db or .vertex)
 loops store stats <vertex> --by-kind          # count-descending per-kind tally

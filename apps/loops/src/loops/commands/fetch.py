@@ -502,33 +502,93 @@ def fetch_ticks(
 def _window_tier(
     vertex_path: Path, tick, tmap: dict, fold_meta: dict[str, dict]
 ) -> str:
-    """MAX tier over the keys a tick's window touched (tree-cut propagation).
+    """MAX tier over the keys a tick's window touched (tree-cut propagation)."""
+    start = tick.since.timestamp() if tick.since else 0.0
+    return window_stats(vertex_path, start, tick.ts.timestamp(), tmap, fold_meta)["tier"]
 
-    Queries the facts between ``tick.since``..``tick.ts`` (the window the tick
-    sealed), extracts each fact's ``(kind, key)`` via the fold key_field, looks
-    the tier up in the shared ``tmap``, and returns the MAX. A window whose keys
-    are all untiered (or that touched no keyed facts) is itself untiered "".
+
+def stamp_window_stats(vertex_path: Path, window_dicts: list[dict]) -> None:
+    """Stamp window-scoped attention stats onto TickWindow dicts, in place.
+
+    Adds ``win_facts`` / ``win_kinds`` / ``tier`` / ``touched`` per window
+    (see :func:`window_stats`). Best-effort: a fold failure leaves the dicts
+    unstamped — the lens renders unstamped windows without a count claim
+    rather than a false zero.
     """
+    from loops.surface import project, tier_map
+
+    try:
+        tmap = tier_map(project(fetch_fold(vertex_path)))
+        fold_meta = _get_fold_meta(vertex_path)
+    except Exception:
+        return
+    if not (tmap or fold_meta):
+        return
+    for wd in window_dicts:
+        stats = window_stats(
+            vertex_path, wd.get("since") or 0.0, wd["ts"], tmap, fold_meta
+        )
+        wd["win_facts"] = stats["facts"]
+        wd["win_kinds"] = stats["kinds"]
+        wd["tier"] = stats["tier"]
+        wd["touched"] = stats["touched"]
+
+
+def window_stats(
+    vertex_path: Path,
+    start: float,
+    end: float,
+    tmap: dict,
+    fold_meta: dict[str, dict],
+) -> dict:
+    """Window-scoped attention summary for one tick's ``since..ts`` interval.
+
+    One fact query yields the whole projection — a tick row answers "what did
+    this session touch", so every stat here is scoped to the WINDOW, not the
+    cumulative fold snapshot the tick payload carries (TickWindow.kind_summary
+    / total_facts are cumulative; these are the per-window complements):
+
+    - ``facts``: fact count inside the window
+    - ``kinds``: per-kind window counts, descending
+    - ``tier``: MAX tier over touched keys (decision:design/
+      salience-max-propagation — a container is as hot as its hottest member;
+      all-untiered or keyless windows are untiered "")
+    - ``touched``: [(kind, key, n), ...] keyed facts by touch count,
+      descending — the -v drill toward the promised hot key
+
+    Best-effort: a query failure returns the empty projection rather than
+    breaking the history read.
+    """
+    from collections import Counter
+
     from engine import vertex_facts
 
     from loops.surface import tier_max
 
-    start = tick.since.timestamp() if tick.since else 0.0
-    end = tick.ts.timestamp()
+    empty = {"facts": 0, "kinds": {}, "tier": "", "touched": []}
     try:
         facts = vertex_facts(vertex_path, start, end)
     except Exception:
-        return ""
+        return empty
+    kinds: Counter = Counter()
+    touched: Counter = Counter()
     tiers: list[str] = []
     for f in facts:
         kind = f.get("kind", "")
+        kinds[kind] += 1
         key_field = fold_meta.get(kind, {}).get("key_field")
         if not key_field:
             continue
         key = str(f.get("payload", {}).get(key_field, ""))
         if key:
+            touched[(kind, key)] += 1
             tiers.append(tmap.get((kind, key), ""))
-    return tier_max(tiers)
+    return {
+        "facts": sum(kinds.values()),
+        "kinds": dict(kinds.most_common()),
+        "tier": tier_max(tiers),
+        "touched": [(k, key, n) for (k, key), n in touched.most_common()],
+    }
 
 
 def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:

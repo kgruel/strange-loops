@@ -24,14 +24,27 @@ def _adj(pairs: dict) -> dict:
     return {src: [(t, "ref") for t in tgts] for src, tgts in pairs.items()}
 
 
-def _hub(address, inbound, *, tier="mid", predicates=None, last=_LAST):
+def _hub(
+    address,
+    inbound,
+    *,
+    tier="mid",
+    predicates=None,
+    last=_LAST,
+    outbound=0,
+    in_addrs=(),
+    out_addrs=(),
+):
     return {
         "address": address,
         "kind": address.split("/", 1)[0],
         "key": address.split("/", 1)[1],
         "tier": tier,
         "inbound": inbound,
+        "outbound": outbound,
         "predicates": predicates or [["ref", inbound]],
+        "in_addrs": list(in_addrs),
+        "out_addrs": list(out_addrs),
         "last": last,
         "observer": "kyle",
     }
@@ -240,6 +253,23 @@ class TestFetch:
         data = fetch_graph(write_grammar_fixture(tmp_path), kind="thread")
         assert all(h["kind"] == "thread" for h in data["hubs"])
 
+    def test_outbound_resolved_only_dangling_not_counted(self, tmp_path):
+        # a→b→c resolves; c→ghost dangles. Each hub's →M counts RESOLVED
+        # outbound only — c's dangling ref does NOT bump its →M.
+        data = fetch_graph(self._dangling_fixture(tmp_path))
+        hubs = {h["address"]: h for h in data["hubs"]}
+        # b → c (one resolved outbound); its ref lands on a node.
+        assert hubs["decision/b"]["outbound"] == 1
+        assert hubs["decision/b"]["out_addrs"] == ["decision/c"]
+        # c → ghost is dangling — not a resolved edge, so →M stays 0.
+        assert hubs["decision/c"]["outbound"] == 0
+        assert hubs["decision/c"]["out_addrs"] == []
+        # The dangling ref stays in the top-line counter, not in any →M.
+        assert data["dangling"] == 1
+        # Inbound neighbor addresses are resolved node sources.
+        assert hubs["decision/c"]["in_addrs"] == ["decision/b"]
+        assert hubs["decision/b"]["in_addrs"] == ["decision/a"]
+
 
 class TestZooms:
     def test_minimal_is_one_line(self):
@@ -297,6 +327,90 @@ class TestZooms:
         data = _data(hubs=[_hub("thread/spine", 30, predicates=preds)])
         text = _render(data, width=44)
         assert all(len(ln) <= 44 for ln in text.splitlines())
+
+    def test_hub_row_shows_outbound_degree_both_registers(self):
+        # ←N →M appears on the hub row on the TTY AND the piped column.
+        data = _data(hubs=[_hub("thread/spine", 3, outbound=2)])
+        tty = _render(data)
+        assert "←3 →2" in tty
+        piped = _render(data, piped=True)
+        assert "←3 →2" in piped
+
+    def test_minimal_gains_top_hub_segment(self):
+        data = _data(hubs=[_hub("decision/foo", 31), _hub("thread/bar", 4)])
+        text = _render(data, zoom=Zoom.MINIMAL).rstrip("\n")
+        # Top hub (inbound-sorted) rides the rollup as the rightmost segment.
+        assert "hubs decision/foo ←31" in text
+
+    def test_minimal_omits_hub_segment_when_no_hubs(self):
+        data = _data(hubs=[], nodes=3, orphan_list=["a/x"])
+        text = _render(data, zoom=Zoom.MINIMAL)
+        assert "hubs " not in text
+
+    def test_detailed_neighbor_lists_tty_capped(self):
+        # -v renders ← / → neighbor lines under the hub; the TTY caps at ~5.
+        ins = [f"decision/n{i}" for i in range(7)]
+        data = _data(hubs=[
+            _hub("thread/spine", 7, outbound=1,
+                 in_addrs=ins, out_addrs=["thread/x"]),
+        ])
+        text = _render(data, zoom=Zoom.DETAILED)
+        assert "← decision/n0, decision/n1" in text
+        assert "+2" in text  # 7 inbound, capped at 5 → "+2" overflow
+        assert "→ thread/x" in text
+
+    def test_detailed_neighbor_lists_piped_uncapped(self):
+        ins = [f"decision/n{i}" for i in range(7)]
+        data = _data(hubs=[
+            _hub("thread/spine", 7, in_addrs=ins, out_addrs=["thread/x"]),
+        ])
+        text = _render(data, zoom=Zoom.DETAILED, piped=True)
+        for i in range(7):
+            assert f"decision/n{i}" in text  # all 7, uncapped on the agent channel
+        assert "+2" not in text
+
+    def test_neighbor_line_omitted_when_side_empty(self):
+        # A hub with no outbound neighbors emits no empty "→ " stub.
+        data = _data(hubs=[
+            _hub("thread/spine", 2, in_addrs=["decision/a"], out_addrs=[]),
+        ])
+        for piped in (False, True):
+            text = _render(data, zoom=Zoom.DETAILED, piped=piped)
+            assert "← decision/a" in text
+            lines = [ln.strip() for ln in text.splitlines()]
+            assert not any(ln == "→" or ln.startswith("→ ") and ln[2:].strip() == ""
+                           for ln in lines)
+
+    def test_neighbor_lists_absent_at_summary(self):
+        # The neighbor lists are a -v disclosure — SUMMARY stays terse.
+        data = _data(hubs=[
+            _hub("thread/spine", 1, in_addrs=["decision/a"]),
+        ])
+        assert "← decision/a" not in _render(data, zoom=Zoom.SUMMARY)
+
+    def test_chain_leaf_vs_truncated_at_detailed(self):
+        # A chain that ENDS gets (leaf); a truncated one keeps ⋯ — never both.
+        data = _data(
+            hubs=[_hub("k/a", 1)],
+            chains=[
+                {"path": ["k/a", "k/b"], "truncated": False},
+                {"path": ["k/x", "k/y"], "truncated": True},
+            ],
+        )
+        tty = _render(data, zoom=Zoom.DETAILED)
+        assert "k/a → k/b (leaf)" in tty
+        assert "k/x → k/y ⋯" in tty
+        assert "(leaf)" not in tty.split("k/x")[1]  # truncated line has no leaf
+        piped = _render(data, zoom=Zoom.DETAILED, piped=True)
+        assert "k/a → k/b  leaf" in piped
+        assert "k/x → k/y  truncated" in piped
+
+    def test_chain_leaf_absent_at_summary(self):
+        data = _data(
+            hubs=[_hub("k/a", 1)],
+            chains=[{"path": ["k/a", "k/b"], "truncated": False}],
+        )
+        assert "(leaf)" not in _render(data, zoom=Zoom.SUMMARY)
 
 
 class TestRegisters:

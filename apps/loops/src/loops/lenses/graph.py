@@ -5,9 +5,12 @@ by CONNECTION. One row is one node (a folded entity); the edges are its
 outbound refs and typed edges resolved to another node. Three reads over the
 same projection:
 
-* **HUBS** — nodes by inbound count (the ``←N`` sinks). The per-hub predicate
-  mix (``ref`` vs a declared typed-edge field name) is where typed edges
-  become VISIBLE — the graph is the view that pays off the typed-edge overlay
+* **HUBS** — nodes by inbound count (the ``←N`` sinks), each also showing its
+  RESOLVED outbound degree ``→M`` (node→node only — dangling refs stay in the
+  top-line counter; ranking stays inbound-only, ``→M`` is context). ``-v`` lists
+  the per-hub inbound/outbound neighbor addresses. The per-hub predicate mix
+  (``ref`` vs a declared typed-edge field name) is where typed edges become
+  VISIBLE — the graph is the view that pays off the typed-edge overlay
   (decision:architecture/typed-edges-overlay-default).
 * **CHAINS** — the longest directed ref paths (net-new traversal: taint-aware
   memoized DFS with a per-path cycle guard + depth cap 128; refs point temporally
@@ -67,14 +70,21 @@ def _predicate_mix(predicates: list, top_n: int | None) -> str:
     return mix
 
 
-def _chain_line(chain: dict, width: int | None) -> str:
+def _chain_line(chain: dict, width: int | None, *, leaf: bool = False) -> str:
     """``a → b → c`` — shed middle segments to ``a → … → c`` before clipping.
 
     A depth-cap-truncated chain gains a trailing ``⋯`` so the cut is disclosed,
-    never silent.
+    never silent. A chain that ENDS naturally (not truncated) gains a trailing
+    ``(leaf)`` terminator when ``leaf`` is set (the -v disclosure) — the two are
+    mutually exclusive (a truncated path did not reach its leaf).
     """
     path = chain["path"]
-    tail = " ⋯" if chain.get("truncated") else ""
+    if chain.get("truncated"):
+        tail = " ⋯"
+    elif leaf:
+        tail = " (leaf)"
+    else:
+        tail = ""
     full = " → ".join(path) + tail
     if width is None or len(full) <= width or len(path) <= 2:
         return full
@@ -92,8 +102,8 @@ def graph_view(
     """Render the ref/edge-graph projection on both registers.
 
     ``piped=True`` forces width=None — the agent channel never clips, and every
-    count (nodes/edges/typed/orphans/dangling), hub inbound, and full chain path
-    is carried whole.
+    count (nodes/edges/typed/orphans/dangling), hub inbound/outbound (``←N →M``),
+    -v neighbor lists (uncapped), and full chain path is carried whole.
     """
     if piped:
         width = None
@@ -114,16 +124,17 @@ def graph_view(
         return _line("No facts — no graph.", p.metadata, width)
 
     counts = _counts_line(data)
-    rollup = rollup_line(
-        vertex,
-        [
-            f"{nodes} nodes",
-            f"{data.get('edges', 0)} edges ({data.get('typed_edges', 0)} typed)",
-            f"{orphans} orphans",
-        ],
-        width=width,
-        shed_from=1,
-    )
+    rollup_parts = [
+        f"{nodes} nodes",
+        f"{data.get('edges', 0)} edges ({data.get('typed_edges', 0)} typed)",
+        f"{orphans} orphans",
+    ]
+    if hubs:
+        # Top hub (already inbound-sorted) as the rightmost segment — sheds
+        # first on narrow widths via shed_from, load-bearing counts survive.
+        top = hubs[0]
+        rollup_parts.append(f"hubs {top['address']} ←{top['inbound']}")
+    rollup = rollup_line(vertex, rollup_parts, width=width, shed_from=1)
     if zoom == Zoom.MINIMAL:
         return _line(rollup, p.metadata, width)
 
@@ -141,7 +152,7 @@ def graph_view(
         for h in hubs:
             mix = _predicate_mix(h.get("predicates", []), None)
             line = (
-                f"  {h['address']}  ←{h['inbound']}  "
+                f"  {h['address']}  ←{h['inbound']} →{h.get('outbound', 0)}  "
                 f"{h.get('tier') or 'untiered':<8}"
             )
             if mix:
@@ -149,10 +160,26 @@ def graph_view(
             if h.get("last") is not None:
                 line += f"  {stamp(h['last'])}"
             rows.append(_line(line.rstrip(), Style(), None))
+            # -v neighbor lists — uncapped on the agent channel, honest absence
+            # (omit a side with no resolved neighbors, no empty stub).
+            if zoom >= Zoom.DETAILED:
+                for arrow, addrs in (
+                    ("←", h.get("in_addrs", [])),
+                    ("→", h.get("out_addrs", [])),
+                ):
+                    if addrs:
+                        rows.append(
+                            _line(f"    {arrow} {', '.join(addrs)}", dim, None)
+                        )
         if chains:
             rows.append(_line("chains:", p.header, None))
             for c in chains:
-                token = "  truncated" if c.get("truncated") else ""
+                if c.get("truncated"):
+                    token = "  truncated"
+                elif zoom >= Zoom.DETAILED:
+                    token = "  leaf"
+                else:
+                    token = ""
                 rows.append(
                     _line(f"  {' → '.join(c['path'])}{token}", Style(), None)
                 )
@@ -184,6 +211,7 @@ def graph_view(
         # ragged past the cap rather than dragging the whole column right.
         name_w = min(44, max(len(h["address"]) for h in hubs[:hub_n]))
         in_w = max(len(str(h["inbound"])) for h in hubs[:hub_n])
+        out_w = max(len(str(h.get("outbound", 0))) for h in hubs[:hub_n])
         for h in hubs[:hub_n]:
             rec = recency(h.get("last"))
             preds = h.get("predicates", [])
@@ -191,8 +219,11 @@ def graph_view(
             gutter = f"  {rail_glyph(tier)} "
 
             def _row(mix_n: int | None) -> str:
+                out = (
+                    f"{h['address']:<{name_w}}  "
+                    f"←{h['inbound']:<{in_w}} →{h.get('outbound', 0):<{out_w}}"
+                )
                 mix = _predicate_mix(preds, mix_n)
-                out = f"{h['address']:<{name_w}}  ←{h['inbound']:<{in_w}}"
                 if mix:
                     out += f"  {mix}"
                 if rec:
@@ -221,11 +252,30 @@ def graph_view(
                     spans.append(Block.text(" " * pad_n, p.content))
             rows.append(join_horizontal(*spans))
 
+            # -v neighbor lists — capped at ~5 on the TTY (piped is uncapped
+            # above). Omit a side with no resolved neighbors (honest absence,
+            # no empty "← " stub).
+            if zoom >= Zoom.DETAILED:
+                for arrow, addrs in (
+                    ("←", h.get("in_addrs", [])),
+                    ("→", h.get("out_addrs", [])),
+                ):
+                    if not addrs:
+                        continue
+                    shown = addrs[:5]
+                    line = f"    {arrow} {', '.join(shown)}"
+                    if len(addrs) > 5:
+                        line += f", +{len(addrs) - 5}"
+                    rows.append(_line(line, dim, width))
+
     if chains:
         rows.append(_line("", Style(), width))
         rows.append(_line("CHAINS", p.header, width))
+        leaf = zoom >= Zoom.DETAILED
         for c in chains[:chain_n]:
-            rows.append(_line(f"  {_chain_line(c, width)}", Style(), width))
+            rows.append(
+                _line(f"  {_chain_line(c, width, leaf=leaf)}", Style(), width)
+            )
 
     if orphans:
         rows.append(_line("", Style(), width))

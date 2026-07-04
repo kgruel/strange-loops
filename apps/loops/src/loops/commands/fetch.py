@@ -830,9 +830,13 @@ def fetch_graph(
     their outbound refs + typed edges RESOLVED to another node (dangling refs —
     pointing at no node — are counted, not walked). Three cuts:
 
-    * **hubs** — nodes by inbound count desc; the ``←N`` sinks. Predicate mix
-      (``ref`` vs declared typed-edge field names) is where typed edges become
-      VISIBLE, per decision:design/graph-build1-scope.
+    * **hubs** — nodes by inbound count desc; the ``←N`` sinks. Each hub also
+      carries its RESOLVED outbound degree ``→M`` + neighbor addresses on both
+      arms (``in_addrs``/``out_addrs``, node→node only — dangling refs excluded,
+      symmetric with ``edges``); ranking stays inbound-only, ``→M`` is context
+      (decision:design/graph-outbound-resolved-only). Predicate mix (``ref`` vs
+      declared typed-edge field names) is where typed edges become VISIBLE, per
+      decision:design/graph-build1-scope.
     * **chains** — longest directed ref paths (net-new traversal; taint-aware
       memoized DFS with a per-path cycle guard + depth cap 128 + visit budget).
     * **orphans** — nodes with no inbound AND no outbound refs/edges (isolated).
@@ -846,7 +850,8 @@ def fetch_graph(
 
         {"vertex", "nodes", "edges", "typed_edges", "orphans", "dangling",
          "unsourced_inbound", "chains_approximate",
-         "hubs": [{address, kind, key, tier, inbound, predicates:[[p,n]..],
+         "hubs": [{address, kind, key, tier, inbound, outbound,
+                   predicates:[[p,n]..], in_addrs:[addr..], out_addrs:[addr..],
                    last, observer}, ...],
          "orphan_list": [address, ...],
          "census": [[predicate, count, typed], ...],
@@ -882,6 +887,20 @@ def fetch_graph(
     total_outbound = sum(len(r.refs) + len(r.edges) for r in rows)
     dangling = max(0, total_outbound - resolved_edges)
 
+    # Per-node RESOLVED neighbor addresses (node→node only, dangling excluded —
+    # symmetric with ``edges``/chains/orphans). Outbound reuses the reversed
+    # adjacency; inbound reuses the materialized ``inbound_edges``. Sorted +
+    # deduped so the -v neighbor lists are deterministic; the lens caps for TTY,
+    # piped carries them whole.
+    out_neighbors = {
+        src: sorted({t for t, _ in tgts}) for src, tgts in outbound.items()
+    }
+    in_neighbors = {
+        target: sorted({s for s, _ in sources if s in node_addrs})
+        for target, sources in surface.inbound_edges.items()
+        if target in node_addrs
+    }
+
     hubs = [
         {
             "address": r.address,
@@ -889,7 +908,10 @@ def fetch_graph(
             "key": r.key,
             "tier": r.tier,
             "inbound": r.inbound,
+            "outbound": len(outbound.get(r.address, [])),
             "predicates": [[p, n] for p, n in r.inbound_predicates],
+            "in_addrs": in_neighbors.get(r.address, []),
+            "out_addrs": out_neighbors.get(r.address, []),
             "last": r.ts,
             "observer": r.observer,
         }

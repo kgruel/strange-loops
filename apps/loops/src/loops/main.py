@@ -9,6 +9,7 @@ symbols that tests and internal callers address via ``loops.main``.
 """
 from __future__ import annotations
 
+import os
 import sys
 
 from loops.errors import LoopsError  # noqa: F401
@@ -54,7 +55,18 @@ _VERTEX_OPS = frozenset({"read", "emit", "close", "sync", "store", "cite", "ls",
 def main(argv: list[str] | None = None) -> int:
     """Entry point — delegates to ``cli.app.main``."""
     from loops.cli.app import main as _cli_main
-    return _cli_main(argv if argv is not None else sys.argv[1:])
+    try:
+        return _cli_main(argv if argv is not None else sys.argv[1:])
+    except BrokenPipeError:
+        # Downstream pipe reader (head, grep -m) closed early — normal, not an
+        # error. Point stdout at devnull so the interpreter's exit-time flush
+        # doesn't raise again, and exit with the conventional SIGPIPE status.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass  # stdout isn't a real fd (tests, embedding) — nothing to flush
+
+        return 128 + 13
 
 
 if __name__ == "__main__":

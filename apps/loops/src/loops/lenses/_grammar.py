@@ -19,6 +19,13 @@ Vocabulary contract (decision:design/spine-options-ratified):
 
 All accept the timestamp shapes that circulate in fetch dicts (ISO
 string, datetime, epoch int/float); naive datetimes are assumed UTC.
+
+Register idiom for symbols (the G4 stance, generalized): FLAGS are words
+on the pipe; EDGE NOTATION is arrows. A status flag encodes a judgment a
+pipe consumer can't reconstruct (tier ``◆`` → ``high``, horizon ``▲`` →
+``approaching``) — it degrades to its word. ``←``/``→`` are the edge
+notation itself — direction has no better word, and the pipe already
+speaks ``→`` in every chain path — so arrows survive on both registers.
 """
 
 from __future__ import annotations
@@ -238,13 +245,21 @@ def rollup_line(
     Joins a leading ``vertex`` segment (omitted gracefully when empty/None)
     with ``parts`` on `` · ``. This is the spine's ``-q`` grammar: every view's
     Zoom.MINIMAL renders through here so the one-liner reads the same from fold
-    to ticks to confluence.
+    to ticks to confluence. "One-liner" means one LOGICAL line — a narrow TTY
+    may wrap it (see below), never silently drop content the pipe carries.
 
     Optional shedding: when ``width`` is set and the line overflows, parts from
     index ``shed_from`` onward are dropped (rightmost first) until it fits —
     appending nothing (the confluence 3→2→1→0 top-name shed generalized). Parts
     before ``shed_from`` are load-bearing counts and never shed. ``shed_from``
     left as None means no shedding (piped/width=None always takes this path).
+
+    Shed vs wrap (decision:design/rollup-shed-only-what-degrades): shed ONLY a
+    part that degrades gracefully — confluence's top names shed because the
+    observer COUNT survives in an earlier part (+N form). A part with no
+    degraded form (graph's top hub — shedding it loses the fact entirely while
+    the pipe carries it) must NOT be listed after ``shed_from``; the caller
+    wraps the whole line via ``wrap_hanging`` instead.
     """
     def _join(kept: list[str]) -> str:
         segs = ([vertex] if vertex else []) + kept

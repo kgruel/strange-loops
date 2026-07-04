@@ -55,11 +55,14 @@ def test_rail_style_tiers():
     assert p.rail_style("tail") == p.metadata
     assert p.rail_style("stale") == p.old
 
-def test_rail_style_unknown_recedes_to_chrome():
+def test_rail_style_fallbacks_mirror_rail_glyph():
+    # Untiered ("") recedes to chrome (blank gutter); an UNKNOWN tier falls
+    # back to the mid style — mirroring rail_glyph's unknown→mid glyph, so an
+    # unrecognized tier never renders a mid glyph in tail clothing.
     from loops.palette import LoopsPalette
     p = LoopsPalette()
     assert p.rail_style("") == p.chrome
-    assert p.rail_style("nonsense") == p.chrome
+    assert p.rail_style("nonsense") == p.content
 
 
 # --- observer_style: stable hash-pool identity hue ---
@@ -91,6 +94,21 @@ def test_horizon_meter_ramp():
     assert p.horizon_meter_style(0.84) == p.warn
     assert p.horizon_meter_style(0.85) == p.critical  # ≥ .85 about to seal
     assert p.horizon_meter_style(1.0) == p.critical
+
+
+def test_horizon_approaching_is_critical():
+    # ▲ ≡ critical: the approaching predicate flips exactly where the meter
+    # ramp turns critical — one threshold, one story (decision amended).
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert not p.horizon_approaching(0.84)
+    assert p.horizon_approaching(0.85)
+    assert p.horizon_approaching(1.2)
+    # Coherence pin: approaching ⟺ the meter is critical, at any ratio.
+    for ratio in (0.0, 0.6, 0.849, 0.85, 0.9, 2.0):
+        assert p.horizon_approaching(ratio) == (
+            p.horizon_meter_style(ratio) == p.critical
+        )
 
 
 # --- _grammar.recency_style: freshness gradient over a recency tag ---

@@ -23,7 +23,7 @@ fetch; ``fold_view`` re-export routes ``--lens graph`` here.
 
 from __future__ import annotations
 
-from painted import Block, Style, Zoom, join_vertical
+from painted import Block, Style, Zoom, join_horizontal, join_vertical
 
 from ..palette import DEFAULT_PALETTE, LoopsPalette
 from ._grammar import (
@@ -187,13 +187,12 @@ def graph_view(
         for h in hubs[:hub_n]:
             rec = recency(h.get("last"))
             preds = h.get("predicates", [])
+            tier = h.get("tier", "")
+            gutter = f"  {rail_glyph(tier)} "
 
             def _row(mix_n: int | None) -> str:
                 mix = _predicate_mix(preds, mix_n)
-                out = (
-                    f"  {rail_glyph(h.get('tier', ''))} "
-                    f"{h['address']:<{name_w}}  ←{h['inbound']:<{in_w}}"
-                )
+                out = f"{h['address']:<{name_w}}  ←{h['inbound']:<{in_w}}"
                 if mix:
                     out += f"  {mix}"
                 if rec:
@@ -206,9 +205,21 @@ def graph_view(
             if width is not None:
                 for mix_n in steps:
                     text = _row(mix_n)
-                    if len(text) <= width:
+                    if len(gutter) + len(text) <= width:
                         break
-            rows.append(_line(text, p.rail_style(h.get("tier", "")), width))
+            # Span-split (matches confluence): the GLYPH carries the tier hue,
+            # the address/body stays content — a tail hub's address never goes
+            # fully dim. Pad the tail span so the row block still measures
+            # ``width`` for the header card (spacer rstrips at print).
+            spans = [
+                Block.text(gutter, p.rail_style(tier)),
+                Block.text(text, p.content),
+            ]
+            if width is not None:
+                pad_n = width - (len(gutter) + len(text))
+                if pad_n > 0:
+                    spans.append(Block.text(" " * pad_n, p.content))
+            rows.append(join_horizontal(*spans))
 
     if chains:
         rows.append(_line("", Style(), width))

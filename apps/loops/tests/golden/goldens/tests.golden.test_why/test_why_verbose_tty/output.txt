@@ -2,10 +2,10 @@
 │ 3 facts · Jan 14 → Jan 15│
 │ observers: alice, bob    │
 ╰──────────────────────────╯
-┌ Jan 14 alice  message, status, label → state ×3
-│ Jan 14 bob  status → state ×3
-└ Jan 15 alice  status, label → state ×3
-══ the row above ↑ is the fold, not a stored record
+┌ Jan 14 alice  message, status→open, label · ×1
+│ Jan 14 bob  status→review · ×2
+└ Jan 15 alice  status→open, label · ×3
+══ the ledger below ↓ is the fold, not a stored record
 message = the body  ← Jan 14 alice (fact 1/3)
 status = open  ← Jan 15 alice (fact 3/3)
     was review  ← Jan 14 bob (fact 2/3)

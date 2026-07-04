@@ -143,21 +143,30 @@ def _connector(index: int, total: int) -> str:
 def _trace_rows(data: "Provenance", width, p, *, piped) -> list[Block]:
     """The chronological fold trace — oldest first, one row per ``Spec.apply``.
 
-    ``┌│└ <date> <observer> <what changed> → state ×n``. The row above ↑ the
-    ledger IS the last apply: this teaches fold-not-stored in situ. The trace
-    CONTENT (dates, observers, changed fields, state size) is on both registers;
-    the connector glyphs + terminator are TTY-legible chrome the piped channel
-    also carries but which parity strips as decorative.
+    ``┌│└ <date> <observer> <what changed> · ×n``. ``×n`` is facts folded so
+    far — the SAME thing ``×n`` means everywhere else in the spine (never a
+    field count), so the trace reads as progression: ``status→proposed · ×1``,
+    ``status→review · ×2``. A status transition names its landing value inline;
+    other changed fields list bare. The trace CONTENT (dates, observers,
+    changed fields, fold depth) is on both registers; the connector glyphs +
+    terminator are TTY-legible chrome the piped channel also carries but which
+    parity strips as decorative.
     """
     rows: list[Block] = []
     for a in data.applies:
         stamp = full_iso(a.ts) if piped else recency(a.ts)
         conn = _connector(a.index, a.total)
-        changed = ", ".join(a.changed) if a.changed else "(no field change)"
+        parts = [
+            f"{f}→{a.status_to}" if f == "status" and a.status_to else f
+            for f in a.changed
+        ]
+        changed = ", ".join(parts) if parts else "(no field change)"
         obs = a.observer or "?"
-        text = f"{conn} {stamp} {obs}  {changed} → state ×{a.state_fields}"
+        text = f"{conn} {stamp} {obs}  {changed} · ×{a.index}"
         rows.append(wrap_hanging(text, p.content, width, hang=2))
-    rows.append(_line("══ the row above ↑ is the fold, not a stored record",
+    # Pointer aims DOWN: the trace is the history; the ledger below it is the
+    # current folded state — computed by the reduce, never stored as a row.
+    rows.append(_line("══ the ledger below ↓ is the fold, not a stored record",
                       p.chrome, width))
     return rows
 
@@ -182,6 +191,11 @@ def _render_upsert(data, address, zoom, width, p, *, piped):
     show_history = zoom >= Zoom.DETAILED
     if show_history and data.applies:
         rows.extend(_trace_rows(data, width, p, piped=piped))
+    # TODO(design-pull P1 remainder): the ledger's observer names should carry
+    # palette.observer_style like confluence/stream -v do, but each ledger row
+    # renders through a single-style wrap_hanging — colouring one token needs a
+    # span-aware wrap. Deferred until _grammar grows one; don't fake it by
+    # styling the whole row.
     for attr in data.fields:
         stamp = _stamp(attr.setter, piped=piped)
         prefix = f"{attr.field} = "

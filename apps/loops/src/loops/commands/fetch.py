@@ -1099,6 +1099,11 @@ def _horizon_sort_key(r: dict) -> tuple:
     rank by their unsealed/count ratio, kind-based sealed loops by raw window
     fact count (no numerator to form a ratio). Negated metrics give DESC within
     a stratum; ``_decl`` (declaration order) then ``name`` break ties.
+
+    Strata consequence, deliberate: a 1/10 count loop outranks a kind loop
+    with 50 window facts — ratio and raw count share no numerator, so the
+    strata never interleave on incomparable metrics (comparability over
+    global "urgency").
     """
     if r["never_sealed"]:
         return (2, 0.0, r["_decl"], r["name"])

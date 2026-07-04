@@ -56,8 +56,10 @@ class ApplyDelta:
 
     Captured during the ``Spec.apply`` walk (upsert mode only): the chronology
     the trace render draws, oldest-first. ``changed`` names the fields this fact
-    moved (added or overwrote); ``state_fields`` is the field count of the
-    resulting folded entry — the "state ×n" the trace row summarizes to.
+    moved (added or overwrote); ``status_to`` carries the resulting ``status``
+    value when this apply moved it — the one transition the trace narrates
+    inline (``status→review``). The trace's ``×n`` is facts-folded-so-far
+    (``index``), matching what ``×n`` means everywhere else in the spine.
     """
 
     index: int  # 1-based position in fold (chronological) order
@@ -65,7 +67,7 @@ class ApplyDelta:
     ts: float | str | None
     observer: str
     changed: tuple[str, ...]
-    state_fields: int
+    status_to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -177,13 +179,13 @@ def replay_attribution(
                     changes[fld] = []
                     field_order.append(fld)
                 changes[fld].append((val, fref))
-        state_fields = sum(
-            1 for f in entry if not f.startswith(_META_PREFIX) and f not in skip
+        status_to = (
+            str(entry["status"]) if "status" in changed_here else None
         )
         applies.append(ApplyDelta(
             index=i, total=total, ts=payload.get("_ts"),
             observer=str(payload.get("_observer", "") or ""),
-            changed=tuple(changed_here), state_fields=state_fields,
+            changed=tuple(changed_here), status_to=status_to,
         ))
         prev_entry = dict(entry)
 
@@ -240,7 +242,7 @@ def to_dict(prov: Provenance) -> dict:
                 "ts": a.ts,
                 "observer": a.observer,
                 "changed": list(a.changed),
-                "state_fields": a.state_fields,
+                "status_to": a.status_to,
             }
             for a in prov.applies
         ],

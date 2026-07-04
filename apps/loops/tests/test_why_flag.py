@@ -234,12 +234,13 @@ def test_why_register_parity():
 
 
 def test_why_trace_register_parity():
-    # P2: the -v chronological trace content — changed fields + resulting state
-    # size — must land on BOTH registers (connector chrome may differ, the trace
-    # information may not). "state" tags the fold-size summary on each apply row.
+    # P2: the -v chronological trace content — changed fields, the status
+    # transition value, and the fold-depth counter (×n = facts folded so far,
+    # the spine-wide meaning) — must land on BOTH registers (connector chrome
+    # may differ, the trace information may not).
     prov = _prov_fixture()
     assert_register_parity(
         why_view, prov,
-        load_bearing=["alice", "bob", "message", "status", "state"],
+        load_bearing=["alice", "bob", "message", "status→review", "×2"],
         zoom=Zoom.DETAILED,
     )

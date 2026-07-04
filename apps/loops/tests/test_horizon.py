@@ -169,7 +169,8 @@ class TestRegisters:
 def _multi_strata(dir_path, name="ms"):
     """A vertex spanning all three proximity strata, declared out of sort order.
 
-    * ``decision`` every=5, 9 facts  → sealed, window 4, ratio .8 (approaching)
+    * ``decision`` every=10, 19 facts → sealed, window 9, ratio .9 (approaching:
+      ≥ the palette's critical threshold .85, ▲ ≡ critical)
     * ``thread``   every=4, 5 facts  → sealed, window 1, ratio .25
     * ``note``     when=ping          → kind-based, sealed, window 1
     * ``task``     every=10, 4 facts  → never sealed
@@ -184,13 +185,13 @@ def _multi_strata(dir_path, name="ms"):
         '  task { fold { items "by" "name" }\n    boundary every="10" }\n'
         '  note { fold { items "by" "topic" }\n    boundary when="ping" }\n'
         '  thread { fold { items "by" "name" }\n    boundary every="4" }\n'
-        '  decision { fold { items "by" "topic" }\n    boundary every="5" }\n'
+        '  decision { fold { items "by" "topic" }\n    boundary every="10" }\n'
         '  ping { fold { items "by" "topic" } }\n'
         '  observation { fold { items "by" "topic" } }\n'
         "}\n"
     )
     prog = load_vertex_program(vp)
-    for i in range(9):
+    for i in range(19):
         prog.receive(Fact.of("decision", "kyle", ts=_T0 + i, topic=f"d{i}", message="m"))
     for i in range(5):
         prog.receive(Fact.of("thread", "kyle", ts=_T0 + 100 + i, name=f"t{i}"))
@@ -212,11 +213,11 @@ class TestProximitySort:
 
     def test_count_stratum_sorts_by_ratio_desc(self, tmp_path):
         data = fetch_horizon(_multi_strata(tmp_path))
-        # decision ratio .8 outranks thread ratio .25
+        # decision ratio .9 outranks thread ratio .25
         dec = next(r for r in data["loops"] if r["name"] == "decision")
         thr = next(r for r in data["loops"] if r["name"] == "thread")
         assert data["loops"].index(dec) < data["loops"].index(thr)
-        assert dec["window_facts"] / dec["count"] == 0.8
+        assert dec["window_facts"] / dec["count"] == 0.9
         assert thr["window_facts"] / thr["count"] == 0.25
 
     def test_rerun_is_byte_identical_both_registers(self, tmp_path):
@@ -256,24 +257,49 @@ class TestTieBreak:
         assert names == ["zeta", "alpha"]
 
 
-class TestApproachingGlyph:
-    def test_glyph_on_both_registers_at_threshold(self, tmp_path):
+class TestApproachingSignal:
+    def test_glyph_tty_word_piped(self, tmp_path):
+        # ▲ ≡ critical: fires at the palette's .85 ramp threshold. The TTY
+        # gutter carries the glyph; the pipe carries the WORD (G4: pipes carry
+        # words, not glyphs) — same signal, register-idiomatic form.
         data = fetch_horizon(_multi_strata(tmp_path))
         tty = _render(data)
         piped = _render(data, piped=True)
-        assert "▲" in tty  # decision at ratio .8 approaches
-        assert "▲" in piped  # the glyph carries on the faithful channel too
+        assert "▲" in tty  # decision at ratio .9 approaches
+        assert "▲" not in piped
+        assert "approaching" in piped
 
-    def test_no_glyph_below_threshold(self, tmp_path):
-        # every=10, 4 facts → ratio .4, never approaches; also never-sealed
+    def test_threshold_matches_meter_critical(self, tmp_path):
+        # every=20, 37 facts → seal at 20, window 17 → ratio .85 exactly: the
+        # inclusive boundary — glyph and critical ramp flip together.
+        data = fetch_horizon(
+            _count_vertex(tmp_path, count=20, n_facts=37)
+        )
+        assert data["loops"][0]["window_facts"] / data["loops"][0]["count"] == 0.85
+        assert "▲" in _render(data)
+        assert "approaching" in _render(data, piped=True)
+
+    def test_no_signal_below_threshold(self, tmp_path):
+        # every=5, 9 facts → sealed, window 4 → ratio .8: warn ramp, NOT
+        # approaching (the old lens-local .8 threshold is gone — palette owns
+        # the one threshold at critical).
+        data = fetch_horizon(_count_vertex(tmp_path, count=5, n_facts=9))
+        row = data["loops"][0]
+        assert row["never_sealed"] is False
+        assert row["window_facts"] / row["count"] == 0.8
+        assert "▲" not in _render(data)
+        assert "approaching" not in _render(data, piped=True)
+
+    def test_never_sealed_never_approaches(self, tmp_path):
+        # every=10, 4 facts → ratio .4, never-sealed
         data = fetch_horizon(_count_vertex(tmp_path, count=10, n_facts=4))
         assert "▲" not in _render(data)
-        assert "▲" not in _render(data, piped=True)
+        assert "approaching" not in _render(data, piped=True)
 
     def test_kind_based_never_approaches(self, tmp_path):
         data = fetch_horizon(_vertex_boundary(tmp_path))
         assert "▲" not in _render(data)
-        assert "▲" not in _render(data, piped=True)
+        assert "approaching" not in _render(data, piped=True)
 
 
 class TestParity:

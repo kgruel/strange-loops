@@ -143,14 +143,19 @@ class LoopsPalette:
 
         The text authority is ``_grammar.TIER_GLYPHS``; this is the parallel
         colour map. ``high`` pops (bold content), ``mid`` is default content,
-        ``tail``/untiered recede to chrome, ``stale`` warns via the old-age hue.
+        ``tail`` recedes to metadata, ``stale`` warns via the old-age hue,
+        untiered ("") recedes to chrome. An UNKNOWN tier falls back to the mid
+        style — mirroring ``rail_glyph``'s unknown→mid glyph fallback, so an
+        unrecognized tier never renders a mid glyph in tail clothing.
         """
+        if tier == "":
+            return self.chrome
         return {
             "high": self.header,
             "mid": self.content,
             "tail": self.metadata,
             "stale": self.old,
-        }.get(tier, self.chrome)
+        }.get(tier, self.content)
 
     def freshness_style(self, seconds_ago: float) -> Style:
         """Style based on how long ago something happened."""
@@ -174,6 +179,16 @@ class LoopsPalette:
         if ratio >= _HORIZON_WARN:
             return self.warn
         return self.accent
+
+    def horizon_approaching(self, ratio: float) -> bool:
+        """Is this proximity ratio APPROACHING its boundary? ▲ ≡ critical.
+
+        One threshold telling one story: the ▲ status overlay fires exactly
+        where the meter ramp turns critical (≥ .85), so glyph and colour never
+        disagree (decision:design/horizon-proximity-sort, amended). The
+        threshold lives here — the lens carries no proximity constant.
+        """
+        return ratio >= _HORIZON_CRITICAL
 
 
 # ---------------------------------------------------------------------------

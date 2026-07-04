@@ -18,9 +18,11 @@ Two boundary shapes render two honestly-different rows:
 The rows carry NO rail tier glyph: a loop is a declaration, not a folded
 entity, so it has no salience tier — the gutter stays blank rather than fake
 one (the same honest-absence stance the rail legend documents). The one thing
-the gutter DOES carry is a status overlay: ``▲`` when a count loop sits within
-.8 of its seal (decision:design/horizon-proximity-sort) — a glyph, not a tier,
-so it renders on both registers. Rows themselves sort by proximity (count-based
+the TTY gutter DOES carry is a status overlay: ``▲`` when a count loop crosses
+the palette's critical threshold (▲ ≡ critical — the glyph fires exactly where
+the meter ramp turns red, decision:design/horizon-proximity-sort as amended).
+The piped register carries the same signal as the WORD ``approaching`` (the
+G4 stance: pipes carry words, not glyphs). Rows themselves sort by proximity (count-based
 by ratio, kind-based by window facts, never-sealed last — the sort lives in
 ``fetch_horizon`` so ``--json`` carries the order too). Deferred per the 060
 view sequence: ``-v`` ETA extrapolation (needs inter-tick interval stats) and
@@ -48,16 +50,17 @@ from ._grammar import block as _line
 _BAR_FULL = "▓"
 _BAR_EMPTY = "░"
 
-# Status overlay in the (otherwise blank) gutter — a loop within .8 of its
-# count boundary is APPROACHING its seal. A glyph, not a salience tier, so it
-# carries on BOTH registers (the meter colour ramp is TTY-only chrome on top);
-# the blank-gutter stance of decision:design/horizon-build1-scope stays intact.
+# Status overlay for a count loop about to seal. ▲ ≡ critical: the palette
+# owns the one threshold (the same ratio where the meter ramp turns red), so
+# glyph and ramp always tell one story. The TTY gutter carries the glyph; the
+# piped register carries the word (G4: pipes carry words, not glyphs); the
+# blank-gutter stance of decision:design/horizon-build1-scope stays intact.
 _APPROACHING = "▲"
-_APPROACH_RATIO = 0.8
+_APPROACHING_WORD = "approaching"
 
 
-def _approaching(row: dict) -> bool:
-    """Is this count-based loop within ``_APPROACH_RATIO`` of its seal?
+def _approaching(row: dict, p: LoopsPalette) -> bool:
+    """Has this count-based loop crossed the palette's critical threshold?
 
     Mirrors the meter's ratio exactly (window_facts/count). Kind-based
     boundaries have no numerator, so they never approach — the gutter stays
@@ -69,7 +72,7 @@ def _approaching(row: dict) -> bool:
     if row["mode"] == "when" or row["never_sealed"]:
         return False
     count = row.get("count") or 0
-    return count > 0 and row["window_facts"] / count >= _APPROACH_RATIO
+    return count > 0 and p.horizon_approaching(row["window_facts"] / count)
 
 
 def fetch(vertex_path, kind=None, observer=None):
@@ -188,7 +191,9 @@ def horizon_view(
 
     if piped:
         # Flat ledger — full names, bare shape, unsealed count, ISO seal stamp,
-        # whole condition + kind mix. One greppable line per armed loop.
+        # whole condition + kind mix. One greppable line per armed loop. The
+        # approaching signal rides as a trailing WORD, not the ▲ glyph — the
+        # G4 stance: a pipe consumer greps words, it doesn't decode glyphs.
         for r in loops:
             seal = "never" if r["never_sealed"] else stamp(r["last_sealed"])
             if r["mode"] == "when":
@@ -197,9 +202,8 @@ def horizon_view(
             else:
                 shape = f"{r['mode']} {r['count']}"
                 prox = f"{r['window_facts']}/{r['count']}"
-            g = _APPROACHING if _approaching(r) else " "
             line = (
-                f"{g} {r['name']:<{name_w}}  {r['scope']:<6}  {shape}  "
+                f"{r['name']:<{name_w}}  {r['scope']:<6}  {shape}  "
                 f"{prox}  sealed {seal}"
             )
             cond = _conditions_text(r)
@@ -208,6 +212,8 @@ def horizon_view(
             mix = _mix_text(r, joiner=" ", sep="=")
             if mix:
                 line += f"  {mix}"
+            if _approaching(r, p):
+                line += f"  {_APPROACHING_WORD}"
             rows.append(_line(line.rstrip(), Style(), None))
         body = join_vertical(*rows)
         header = rollup_line(
@@ -228,7 +234,7 @@ def horizon_view(
         # indent + glyph + space keeps the name column fixed whether or not the
         # overlay fires (a non-approaching row is identical to the old 4-space
         # indent, so style-stable goldens don't drift).
-        g = _APPROACHING if _approaching(r) else " "
+        g = _APPROACHING if _approaching(r, p) else " "
         text = f"  {g} {r['name']:<{name_w}}  {desc}"
         row = _line(text, Style(), width)
         if r["mode"] != "when":

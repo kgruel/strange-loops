@@ -26,6 +26,7 @@ from ._grammar import (
     ensure_utc,
     rail_glyph,
     recency,
+    rollup_line,
     short_date,
     stamp,
 )
@@ -74,7 +75,7 @@ def _render_minimal(data: dict, width: int, p: LoopsPalette) -> Block:
     if freshness is not None:
         parts.append(f"fresh {recency(freshness)}")
 
-    text = " · ".join(parts)
+    text = rollup_line(data.get("vertex", ""), parts)
     return Block.text(text, p.metadata, width=width)
 
 
@@ -310,13 +311,14 @@ def tick_chain_view(
         )
         return _line(msg, p.metadata, width)
 
-    rollup = f"{vertex} · {len(windows)} ticks"
+    rollup_parts = [f"{len(windows)} ticks"]
     if attest:
-        rollup += (
-            f" · {chain.get('chained', 0)} chained"
-            f" · {chain.get('signed', 0)} signed"
-            f" · {chain.get('legacy', 0)} legacy"
-        )
+        rollup_parts += [
+            f"{chain.get('chained', 0)} chained",
+            f"{chain.get('signed', 0)} signed",
+            f"{chain.get('legacy', 0)} legacy",
+        ]
+    rollup = rollup_line(vertex, rollup_parts)
     if zoom == Zoom.MINIMAL:
         return _line(rollup, p.metadata, width)
 
@@ -467,10 +469,11 @@ def stats_view(
     kinds = data.get("kinds", [])
     by_kind = bool(data.get("by_kind"))
 
-    rollup = (
-        f"{vertex} · {_format_count(total_facts)} facts · "
-        f"{kind_count} kinds · {_format_count(total_ticks)} ticks"
-    )
+    rollup = rollup_line(vertex, [
+        f"{_format_count(total_facts)} facts",
+        f"{kind_count} kinds",
+        f"{_format_count(total_ticks)} ticks",
+    ])
     if zoom == Zoom.MINIMAL or not by_kind:
         return _line(rollup, p.metadata, width)
 

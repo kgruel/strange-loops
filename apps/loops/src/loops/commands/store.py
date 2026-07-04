@@ -777,7 +777,12 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         path = _resolve_store_target().resolve()
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
-        return make_fetcher(path, zoom=3)()
+        data = make_fetcher(path, zoom=3)()
+        # Lead the MINIMAL one-liner with the store name (spine dot-grammar),
+        # matching the store ticks/stats surfaces — the vertex name is the
+        # store stem, known here at the call site.
+        data.setdefault("vertex", path.stem)
+        return data
 
     def render(ctx, data):
         from ..lenses.store import store_view

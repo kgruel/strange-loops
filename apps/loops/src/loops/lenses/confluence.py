@@ -33,6 +33,7 @@ from ._grammar import (
     full_iso,
     rail_glyph,
     recency,
+    rollup_line,
     short_date,
     stamp,
 )
@@ -111,7 +112,12 @@ def confluence_view(
         )
         if len(observers) > top_n:
             top += (" · " if top else "") + f"+{len(observers) - top_n}"
-        return f"{vertex} · {len(observers)} observers · {total} facts · {top}"
+        # The top-name shed happens here (varying top_n), so the join is a
+        # plain rollup_line over already-composed parts — the helper owns the
+        # vertex-lead + `` · `` grammar, this closure owns the +N semantics.
+        return rollup_line(
+            vertex, [f"{len(observers)} observers", f"{total} facts", top]
+        )
 
     rollup = _rollup(3)
     if zoom == Zoom.MINIMAL:

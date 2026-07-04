@@ -181,6 +181,39 @@ def block(text: str, style: Style, width: int | None) -> Block:
     return Block.text(text, style, width=width)
 
 
+def rollup_line(
+    vertex: str,
+    parts: list[str],
+    *,
+    width: int | None = None,
+    shed_from: int | None = None,
+) -> str:
+    """The canonical MINIMAL one-liner — ``vertex · stat · stat · …``.
+
+    Joins a leading ``vertex`` segment (omitted gracefully when empty/None)
+    with ``parts`` on `` · ``. This is the spine's ``-q`` grammar: every view's
+    Zoom.MINIMAL renders through here so the one-liner reads the same from fold
+    to ticks to confluence.
+
+    Optional shedding: when ``width`` is set and the line overflows, parts from
+    index ``shed_from`` onward are dropped (rightmost first) until it fits —
+    appending nothing (the confluence 3→2→1→0 top-name shed generalized). Parts
+    before ``shed_from`` are load-bearing counts and never shed. ``shed_from``
+    left as None means no shedding (piped/width=None always takes this path).
+    """
+    def _join(kept: list[str]) -> str:
+        segs = ([vertex] if vertex else []) + kept
+        return " · ".join(segs)
+
+    if width is None or shed_from is None:
+        return _join(parts)
+
+    kept = list(parts)
+    while len(kept) > shed_from and len(_join(kept)) > width:
+        kept.pop()
+    return _join(kept)
+
+
 class DateGrouper:
     """The date-group header pattern shared by stream and ticks.
 

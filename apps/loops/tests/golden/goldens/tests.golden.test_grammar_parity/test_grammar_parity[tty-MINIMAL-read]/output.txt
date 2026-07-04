@@ -1,1 +1,1 @@
-2 decisions, 2 threads, 1 logs, 2 sessions
+grammar · 2 decisions · 2 threads · 1 logs · 2 sessions

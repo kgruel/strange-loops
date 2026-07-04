@@ -34,7 +34,15 @@ from painted.palette import current_palette
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
 from loops.surface import project  # runtime: FoldState → Surface (idempotent)
 
-from ._grammar import RAIL_LEGEND, card, card_width, coerce_dt, date_key, rail_glyph
+from ._grammar import (
+    RAIL_LEGEND,
+    card,
+    card_width,
+    coerce_dt,
+    date_key,
+    rail_glyph,
+    rollup_line,
+)
 from ._grammar import full_iso as _format_ts_full
 from ._grammar import recency as _recency_tag
 from ._grammar import short_date as _format_date
@@ -206,13 +214,14 @@ def fold_view(
     if not populated:
         return Block.text("No data yet.", Style(dim=True), width=width)
 
-    # MINIMAL: one-liner
+    # MINIMAL: one-liner on the spine grammar (vertex · N kinds · …).
     if zoom == Zoom.MINIMAL:
+        name = vertex_name or data.vertex
         parts = [f"{len(rows)} {kind}s" for kind, rows in populated]
         if data.unfolded:
             loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
             parts.append(f"unfolded: {loose}")
-        return Block.text(", ".join(parts), Style(), width=width)
+        return Block.text(rollup_line(name, parts), Style(), width=width)
 
     # Edge adjacency + source facts come materialized off the Surface.
     inbound_edges = data.inbound_edges if "refs" in visible else {}
@@ -329,10 +338,10 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
     n = len(rows)
 
     if zoom == Zoom.MINIMAL:
-        line = f"{n} match{'es' if n != 1 else ''} for {q!r}"
+        parts = [f"{n} match{'es' if n != 1 else ''} for {q!r}"]
         if data.window.unindexed:
-            line += f" ({len(data.window.unindexed)} not indexed)"
-        return Block.text(line, Style(), width=width)
+            parts.append(f"{len(data.window.unindexed)} not indexed")
+        return Block.text(rollup_line(data.vertex, parts), Style(), width=width)
 
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
     blocks: list[Block] = [

@@ -16,6 +16,7 @@ from ._grammar import (
     date_key,
     rail_glyph,
     recency,
+    rollup_line,
     tick_drill_rows,
 )
 from ._grammar import block as _block
@@ -70,16 +71,18 @@ def stream_view(
     if not facts and tick_meta is None:
         return _block("No facts in the given time range.", Style(dim=True), width)
 
-    # MINIMAL: just counts
+    # MINIMAL: counts on the spine grammar (vertex · N kind · …). A tick
+    # drill has no vertex to lead with — its ``tick #N`` label takes the slot.
     if zoom == Zoom.MINIMAL:
         counts: dict[str, int] = {}
         for f in facts:
             counts[f["kind"]] = counts.get(f["kind"], 0) + 1
-        parts = [f"{count} {kind}" for kind, count in counts.items()]
-        summary = ", ".join(parts) if parts else "0 facts"
+        parts = [f"{count} {kind}" for kind, count in counts.items()] or ["0 facts"]
         if tick_meta:
-            summary = f"tick #{tick_meta['index']}: {summary}"
-        return _block(summary, Style(), width)
+            lead = f"tick #{tick_meta['index']}"
+        else:
+            lead = vertex_name or (data.get("vertex", "") if isinstance(data, dict) else "")
+        return _block(rollup_line(lead, parts), Style(), width)
 
     blocks: list[Block] = []
     dim_style = Style(dim=True)

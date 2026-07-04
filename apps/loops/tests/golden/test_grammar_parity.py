@@ -36,7 +36,7 @@ _TTY_WIDTH = 80
 
 COMMANDS = [
     "read", "stream", "ticks", "ticks-chain", "ls-root", "ls-kind",
-    "confluence", "graph",
+    "confluence", "graph", "horizon",
 ]
 CHANNELS = ["tty", "piped"]
 
@@ -121,6 +121,12 @@ def _render(command: str, vp, zoom: Zoom, *, piped: bool):
         from loops.lenses.graph import graph_view
 
         return graph_view(fetch_graph(vp), zoom, width, piped=piped)
+
+    if command == "horizon":
+        from loops.commands.fetch import fetch_horizon
+        from loops.lenses.horizon import horizon_view
+
+        return horizon_view(fetch_horizon(vp), zoom, width, piped=piped)
 
     if command == "ls-kind":
         from loops.commands.ls import fetch_kind_stat

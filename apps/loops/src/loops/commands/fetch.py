@@ -868,6 +868,170 @@ def fetch_graph(
     }
 
 
+def _boundary_shape(boundary) -> dict:
+    """Describe an AST boundary (BoundaryWhen/After/Every) as a JSON-clean dict.
+
+    The three shapes fold to a common ``mode`` key: ``when`` (kind-triggered)
+    carries the trigger kind, payload ``match`` pairs, and fold-state
+    ``conditions``; ``after``/``every`` carry a numeric ``count``. This is the
+    honest projection of what the declaration says — no runtime state.
+    """
+    from lang.ast import BoundaryAfter, BoundaryEvery, BoundaryWhen
+
+    if isinstance(boundary, BoundaryWhen):
+        return {
+            "mode": "when",
+            "trigger_kind": boundary.kind,
+            "match": [[k, v] for k, v in boundary.match],
+            "conditions": [
+                [c.target, c.op, c.value] for c in boundary.conditions
+            ],
+            "count": None,
+        }
+    if isinstance(boundary, (BoundaryAfter, BoundaryEvery)):
+        return {
+            "mode": "every" if isinstance(boundary, BoundaryEvery) else "after",
+            "trigger_kind": None,
+            "match": [],
+            "conditions": [],
+            "count": boundary.count,
+        }
+    raise TypeError(f"unknown boundary shape: {type(boundary).__name__}")
+
+
+def _newest_tick_ts(vertex_path: Path, name: str, now_ts: float) -> float | None:
+    """Newest sealed tick timestamp for a series ``name`` — None if never sealed.
+
+    Ticks carry the loop name (per-loop boundary) or the vertex name
+    (vertex-level boundary) — see ``Loop.fire`` / ``Vertex._fire_vertex_boundary``.
+    Spans the full history (from epoch) so a long-dormant series still reports
+    its last seal honestly.
+    """
+    from engine import vertex_ticks
+
+    ticks = vertex_ticks(vertex_path, 0.0, now_ts, name=name)
+    if not ticks:
+        return None
+    return max(t.ts.timestamp() for t in ticks)
+
+
+def fetch_horizon(
+    vertex_path: Path,
+    *,
+    kind: str | None = None,
+    observer: str | None = None,
+) -> dict:
+    """Horizon — each armed loop's OPEN (unsealed) window against its boundary.
+
+    Fold cuts by kind, stream/ticks by time, confluence by observer, graph by
+    connection; Horizon cuts by CYCLE PROXIMITY — how close each boundaried loop
+    is to its next seal. One row per loop that DECLARES a boundary (a vertex-level
+    boundary is one row over the whole vertex); loops with no boundary never
+    seal and are OMITTED (honest absence, decision:design/horizon-build1-scope).
+
+    The net-new piece is read-side reconstruction of the open window: TickWindow
+    models sealed ticks only and ``_vertex_period_start`` is runtime-only, so the
+    unsealed window is rebuilt here — newest tick ts for the series (or epoch if
+    never sealed), then the facts strictly after it aggregated by kind. No
+    invented signal: count-based boundaries get numeric proximity (n/N),
+    kind-based boundaries get a fact-count + trigger-kind + last-seal recency and
+    NEVER a fake progress meter (hlab is 100% kind-based).
+
+    ``kind``/``observer`` are accepted for signature parity with the other
+    composition-lens fetches; they do not filter the boundary roster (a loop's
+    armed-ness is a declaration property, not a fact-window one).
+
+    Returns a JSON-clean dict (``last_sealed`` is a float epoch or None)::
+
+        {"vertex", "now", "armed": int, "total_unsealed": int,
+         "last_sealed": float | None,
+         "loops": [{name, scope, mode, trigger_kind, match, conditions, count,
+                    last_sealed, never_sealed, window_facts, window_kinds}, ...]}
+    """
+    from collections import Counter
+
+    from engine import vertex_facts
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(vertex_path)
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    # Roster of armed loops: the vertex-level boundary (one row over every kind)
+    # plus each per-loop boundary. A vertex declaring both is unusual but honest
+    # — both rows render, each against its own tick series.
+    armed: list[tuple[str, str, object, str | None]] = []
+    if ast.boundary is not None:
+        # Vertex-level: tick series is named for the vertex; window spans all
+        # kinds (the seal snapshots every loop).
+        armed.append((ast.name, "vertex", ast.boundary, None))
+    for kname, loop_def in ast.loops.items():
+        if loop_def.boundary is not None:
+            armed.append((kname, "loop", loop_def.boundary, kname))
+
+    loops: list[dict] = []
+    total_unsealed = 0
+    seals: list[float] = []
+    for name, scope, boundary, window_kind in armed:
+        last_sealed = _newest_tick_ts(vertex_path, name, now_ts)
+        never = last_sealed is None
+        since = last_sealed if last_sealed is not None else 0.0
+        facts = vertex_facts(vertex_path, since, now_ts, kind=window_kind)
+        # facts_between is inclusive on the lower bound, so the fact that
+        # triggered the last seal (ts == tick.ts) would re-appear — drop
+        # anything at or before the seal to keep the window strictly open.
+        window = Counter(
+            f["kind"]
+            for f in facts
+            if never or _fact_epoch(f.get("ts")) > since
+        )
+        window_facts = sum(window.values())
+        total_unsealed += window_facts
+        if last_sealed is not None:
+            seals.append(last_sealed)
+
+        row = _boundary_shape(boundary)
+        row.update({
+            "name": name,
+            "scope": scope,
+            "last_sealed": last_sealed,
+            "never_sealed": never,
+            "window_facts": window_facts,
+            "window_kinds": dict(window.most_common()),
+        })
+        loops.append(row)
+
+    # Order: vertex-level first, then per-loop by name — stable and readable.
+    loops.sort(key=lambda r: (r["scope"] != "vertex", r["name"]))
+
+    return {
+        "vertex": ast.name,
+        "now": now_ts,
+        "armed": len(loops),
+        "total_unsealed": total_unsealed,
+        "last_sealed": max(seals) if seals else None,
+        "loops": loops,
+    }
+
+
+def _fact_epoch(ts: object) -> float:
+    """Coerce a fact ts (datetime / epoch / ISO) to epoch seconds; -inf if none.
+
+    ``vertex_facts`` yields datetimes, but combined/aggregate reads and JSON
+    round-trips can carry ISO strings or floats — coerce uniformly so the
+    strictly-open-window filter never crashes on a shape it did not expect.
+    """
+    if isinstance(ts, datetime):
+        return ts.timestamp()
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts).timestamp()
+        except ValueError:
+            return float("-inf")
+    return float("-inf")
+
+
 def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
     """Extract fold key_field metadata from a vertex's loop declarations."""
     from lang import parse_vertex_file

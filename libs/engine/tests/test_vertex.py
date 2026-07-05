@@ -845,6 +845,72 @@ class TestVertexLevelBoundary:
         store.close()
 
 
+class TestMultipleVertexBoundaries:
+    """A vertex may declare several vertex-level boundaries; each fires the
+    whole vertex independently. Previously only the last-declared survived
+    (friction:vertex-boundary-last-declaration-wins)."""
+
+    def test_both_boundaries_fire_independently(self):
+        v = Vertex("session")
+        v.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        # Two distinct vertex-level triggers.
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+        v.register_vertex_boundary("seal")
+
+        v.receive(fact("decision", topic="auth", position="JWT"))
+        # The EARLIER-declared boundary must still fire — not dropped.
+        t1 = v.receive(fact("session", name="s1", status="closed"))
+        assert t1 is not None
+        assert t1.name == "session"
+        assert t1.payload["_boundary"]["status"] == "closed"
+
+        # The later-declared boundary fires too, on its own trigger.
+        v.receive(fact("decision", topic="db", position="sqlite"))
+        t2 = v.receive(fact("seal"))
+        assert t2 is not None
+        assert t2.name == "session"
+        assert "seal" not in t2.payload.get("_boundary", {}).get("status", "")
+
+    def test_both_kinds_accepted(self):
+        v = Vertex("session")
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary("session", match=(("status", "closed"),))
+        v.register_vertex_boundary("seal")
+        assert v.accepts("session")
+        assert v.accepts("seal")
+
+    def test_declaration_order_first_match_fires_run(self):
+        """When two boundaries share a trigger kind, the first-declared match
+        fires (one fact -> one tick), carrying its own run clause."""
+        v = Vertex("session")
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary(
+            "session", match=(("status", "closed"),), run="first.sh",
+        )
+        v.register_vertex_boundary("session", run="second.sh")
+
+        tick = v.receive(fact("session", name="s1", status="closed"))
+        assert tick is not None
+        # First-declared (the more specific match) wins.
+        assert tick.run == "first.sh"
+
+    def test_second_boundary_fires_when_first_does_not_match(self):
+        """A fact that fails the first boundary's match still fires a later
+        boundary whose (looser) match it satisfies."""
+        v = Vertex("session")
+        v.register("session", {}, lambda s, p: {**s, p["name"]: p})
+        v.register_vertex_boundary(
+            "session", match=(("status", "closed"),), run="first.sh",
+        )
+        v.register_vertex_boundary("session", run="second.sh")
+
+        # status=open fails the first match, satisfies the unconditioned second.
+        tick = v.receive(fact("session", name="s1", status="open"))
+        assert tick is not None
+        assert tick.run == "second.sh"
+
+
 class TestPredicateBoundary:
     """Predicate boundaries: fire when fold state meets conditions."""
 

@@ -731,7 +731,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     sources_blocks: list[SourcesBlock] = []
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
-    vertex_boundary: Boundary | None = None
+    vertex_boundaries: list[Boundary] = []
     observer_scoped: bool = False
     strict: bool = False
 
@@ -773,8 +773,12 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         elif key == "loops":
             for child in node.children:
                 if child.name == "boundary":
-                    # Vertex-level boundary — sibling of loop definitions
-                    vertex_boundary = _load_boundary(child, path)
+                    # Vertex-level boundary — sibling of loop definitions.
+                    # Multiple boundaries ACCUMULATE (a vertex may declare more
+                    # than one trigger, e.g. `session closed` and `seal`); each
+                    # fires the vertex independently. Historically only the last
+                    # survived (friction:vertex-boundary-last-declaration-wins).
+                    vertex_boundaries.append(_load_boundary(child, path))
                 else:
                     loops[child.name] = _load_loop_def(child, path)
         elif key == "routes":
@@ -837,7 +841,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         sources_blocks=tuple(sources_blocks) if sources_blocks else None,
         observers=observers,
         lens=lens,
-        boundary=vertex_boundary,
+        boundary=tuple(vertex_boundaries),
         observer_scoped=observer_scoped,
         strict=strict,
         path=path,

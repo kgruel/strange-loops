@@ -1049,10 +1049,12 @@ def fetch_horizon(
     # plus each per-loop boundary. A vertex declaring both is unusual but honest
     # — both rows render, each against its own tick series.
     armed: list[tuple[str, str, object, str | None]] = []
-    if ast.boundary is not None:
+    for vboundary in ast.boundary:
         # Vertex-level: tick series is named for the vertex; window spans all
-        # kinds (the seal snapshots every loop).
-        armed.append((ast.name, "vertex", ast.boundary, None))
+        # kinds (the seal snapshots every loop). A vertex may declare more than
+        # one (e.g. `session closed` and `seal`) — each is its own honest row
+        # over the same shared tick series, distinguished by its trigger.
+        armed.append((ast.name, "vertex", vboundary, None))
     for kname, loop_def in ast.loops.items():
         if loop_def.boundary is not None:
             armed.append((kname, "loop", loop_def.boundary, kname))

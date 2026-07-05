@@ -694,7 +694,7 @@ class VertexFile:
     sources_blocks: tuple[SourcesBlock, ...] | None = None
     observers: tuple[ObserverDecl, ...] | None = None
     lens: LensDecl | None = None
-    boundary: Boundary | None = None  # vertex-level boundary (fires all loops)
+    boundary: tuple[Boundary, ...] = ()  # vertex-level boundaries (each fires all loops)
     observer_scoped: bool = False  # fold defaults to current observer when True
     strict: bool = False  # when True, emit refuses on validation failures (no override)
 

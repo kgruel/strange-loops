@@ -332,6 +332,101 @@ class TestApproachingSignal:
         assert "approaching" not in _render(data, piped=True)
 
 
+class TestUnarmedRollup:
+    def test_fetch_collects_unarmed(self, tmp_path):
+        # The vertex-level boundary is the ONE armed row; each per-loop loop
+        # under it has no cycle of its own and rolls up as unarmed.
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        assert data["armed"] == 1
+        assert {u["name"] for u in data["unarmed"]} == {"decision", "session"}
+        assert data["unarmed_facts"] == 3
+        # Window mirrors the armed reconstruction: no per-loop tick series →
+        # all history scoped to the loop's own kind.
+        dec = next(u for u in data["unarmed"] if u["name"] == "decision")
+        assert dec["window_facts"] == 2
+        assert dec["window_kinds"] == {"decision": 2}
+
+    def test_unarmed_sorted_by_accumulation_desc(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        facts = [u["window_facts"] for u in data["unarmed"]]
+        assert facts == sorted(facts, reverse=True)  # decision(2) before session(1)
+
+    def test_zero_unarmed_segment_absent(self, tmp_path):
+        # Every loop is armed (both have `every=2`) → no unarmed loops → the
+        # segment is ABSENT entirely on every register/zoom (no "0 unarmed").
+        data = fetch_horizon(_tie(tmp_path))
+        assert data["unarmed"] == []
+        for piped in (False, True):
+            for z in (Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED):
+                text = _render(data, zoom=z, piped=piped)
+                assert "unarmed" not in text.lower()
+                assert "accumulating" not in text
+
+    def test_segment_present_default_and_minimal(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        for z in (Zoom.MINIMAL, Zoom.SUMMARY):
+            for piped in (False, True):
+                text = _render(data, zoom=z, piped=piped)
+                assert "2 unarmed" in text
+                assert "accumulating" in text
+
+    def test_v_expands_to_per_loop_rows(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        for piped in (False, True):
+            text = _render(data, zoom=Zoom.DETAILED, piped=piped)
+            assert "decision" in text and "session" in text
+            assert "2 accumulating" in text  # decision row
+            assert "1 accumulating" in text  # session row
+
+    def test_glyph_tty_words_piped(self, tmp_path):
+        # ◦ is TTY-only chrome; the pipe carries the words (flags-words-edges).
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        assert "◦" in _render(data, zoom=Zoom.DETAILED)
+        piped = _render(data, zoom=Zoom.DETAILED, piped=True)
+        assert "◦" not in piped
+        assert "accumulating" in piped
+
+    def test_no_armed_but_unarmed_surfaces(self, tmp_path):
+        # armed=0 but accumulation exists — surface it, don't hide it behind
+        # "nothing seals".
+        data = fetch_horizon(_no_boundary(tmp_path))
+        assert data["armed"] == 0
+        assert len(data["unarmed"]) == 1
+        text = _render(data)
+        assert "No armed loops" in text
+        assert "1 unarmed" in text
+        assert "accumulating" in text
+
+
+class TestNeverSealedWording:
+    def test_armed_never_sealed_both_registers(self, tmp_path):
+        # An armed loop with a boundary but no tick yet carries the SAME
+        # "never sealed" phrase on both registers (piped was "sealed never").
+        data = fetch_horizon(_count_vertex(tmp_path, count=10, n_facts=4))
+        assert data["loops"][0]["never_sealed"] is True
+        for piped in (False, True):
+            text = _render(data, piped=piped)
+            assert "never sealed" in text
+            assert "4" in text  # the window count is carried on both
+
+
+class TestUnarmedParity:
+    def test_register_parity_summary_segment(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        assert_register_parity(
+            horizon_view, data,
+            load_bearing=["2 unarmed", "3 facts accumulating", "session", "1 armed"],
+        )
+
+    def test_register_parity_detailed_rows(self, tmp_path):
+        data = fetch_horizon(_vertex_boundary(tmp_path))
+        assert_register_parity(
+            horizon_view, data,
+            load_bearing=["decision", "session", "2 accumulating", "1 accumulating"],
+            zoom=Zoom.DETAILED,
+        )
+
+
 class TestParity:
     def test_register_parity_count(self, tmp_path):
         data = fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5))

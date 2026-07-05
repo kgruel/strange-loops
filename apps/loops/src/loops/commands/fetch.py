@@ -1030,12 +1030,20 @@ def fetch_horizon(
     composition-lens fetches; they do not filter the boundary roster (a loop's
     armed-ness is a declaration property, not a fact-window one).
 
+    Loops that declare NO boundary of their own never seal on a cycle; their
+    facts just accumulate. They are no longer omitted — they roll up into an
+    ``unarmed`` list (decision:design/horizon-unarmed-rollup), each carrying the
+    SAME open-window reconstruction the armed rows use: an unarmed loop has no
+    per-loop tick series, so its window is all history scoped to its own kind
+    (honest — a loop with no boundary has never sealed on its own cycle).
+
     Returns a JSON-clean dict (``last_sealed`` is a float epoch or None)::
 
         {"vertex", "now", "armed": int, "total_unsealed": int,
-         "last_sealed": float | None,
+         "last_sealed": float | None, "unarmed_facts": int,
          "loops": [{name, scope, mode, trigger_kind, match, conditions, count,
-                    last_sealed, never_sealed, window_facts, window_kinds}, ...]}
+                    last_sealed, never_sealed, window_facts, window_kinds}, ...],
+         "unarmed": [{name, window_facts, window_kinds}, ...]}
     """
     from collections import Counter
 
@@ -1105,13 +1113,47 @@ def fetch_horizon(
     for r in loops:
         del r["_decl"]
 
+    # Unarmed roster — loops declared with no boundary of their own. Rolled up
+    # (not omitted) so the horizon is honest that the vertex carries open,
+    # uncycled accumulation (decision:design/horizon-unarmed-rollup). The window
+    # mirrors the armed reconstruction EXACTLY: an unarmed loop owns no per-loop
+    # tick series, so ``_newest_tick_ts`` is None → the window is all history
+    # scoped to the loop's kind. A vertex-level boundary seals the WHOLE vertex
+    # on one cycle, but an individual loop under it still has no cycle of its
+    # own, so it belongs here — the vertex row already carries the vertex cycle.
+    unarmed: list[dict] = []
+    unarmed_facts = 0
+    for kname, loop_def in ast.loops.items():
+        if loop_def.boundary is not None:
+            continue
+        last_tick = _newest_tick_ts(vertex_path, kname, now_ts)
+        never = last_tick is None
+        since = last_tick if last_tick is not None else 0.0
+        facts = vertex_facts(vertex_path, since, now_ts, kind=kname)
+        window = Counter(
+            f["kind"]
+            for f in facts
+            if never or _fact_epoch(f.get("ts")) > since
+        )
+        wf = sum(window.values())
+        unarmed_facts += wf
+        unarmed.append({
+            "name": kname,
+            "window_facts": wf,
+            "window_kinds": dict(window.most_common()),
+        })
+    # Accumulation-desc, then name — deterministic so --json/both registers agree.
+    unarmed.sort(key=lambda r: (-r["window_facts"], r["name"]))
+
     return {
         "vertex": ast.name,
         "now": now_ts,
         "armed": len(loops),
         "total_unsealed": total_unsealed,
         "last_sealed": max(seals) if seals else None,
+        "unarmed_facts": unarmed_facts,
         "loops": loops,
+        "unarmed": unarmed,
     }
 
 

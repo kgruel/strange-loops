@@ -3,9 +3,12 @@
 Fold cuts by kind, stream/ticks by time, confluence by observer, graph by
 connection; Horizon cuts by CYCLE PROXIMITY — how close each boundaried loop
 sits to its next seal. One row per loop that DECLARES a boundary (a vertex-level
-boundary is one row over the whole vertex); loops with no boundary never seal
-and are OMITTED — honest absence over an invented glyph
-(decision:design/horizon-build1-scope).
+boundary is one row over the whole vertex); loops with no boundary of their own
+never seal on a cycle — they no longer vanish but roll up into a trailing
+``◦ N unarmed · M facts accumulating`` segment (default/-q), expanding to
+per-loop ◦ rows at -v (decision:design/horizon-unarmed-rollup, amending
+decision:design/horizon-build1-scope). Zero unarmed loops → the segment is
+absent entirely (no ``◦ 0 unarmed`` noise).
 
 Two boundary shapes render two honestly-different rows:
 
@@ -44,8 +47,15 @@ from ._grammar import (
     recency,
     rollup_line,
     stamp,
+    wrap_hanging,
 )
 from ._grammar import block as _line
+
+# Gutter glyph for an unarmed loop (no boundary of its own — accumulates, never
+# seals on a cycle). TTY-only chrome; the pipe carries the bare words
+# (decision:rendering/flags-words-edges-arrows — a status glyph degrades to its
+# word on the pipe).
+_UNARMED = "◦"
 
 _BAR_FULL = "▓"
 _BAR_EMPTY = "░"
@@ -123,6 +133,42 @@ def _mix_text(row: dict, *, joiner: str = " · ", sep: str = " ") -> str:
     return joiner.join(f"{k}{sep}{n}" for k, n in row.get("window_kinds", {}).items())
 
 
+def _unarmed_segment(unarmed: list[dict], unarmed_facts: int, *, piped: bool) -> str:
+    """The one-line unarmed rollup — ``◦ N unarmed · M facts accumulating``.
+
+    TTY carries the ``◦`` glyph; the pipe carries the bare words (G4). Caller
+    guards ``unarmed`` non-empty (zero unarmed loops → the segment is absent
+    entirely, no ``◦ 0 unarmed`` noise, decision:design/horizon-unarmed-rollup).
+    """
+    glyph = "" if piped else f"{_UNARMED} "
+    facts_word = "fact" if unarmed_facts == 1 else "facts"
+    return (
+        f"{glyph}{len(unarmed)} unarmed · "
+        f"{unarmed_facts} {facts_word} accumulating"
+    )
+
+
+def _unarmed_row_text(row: dict, name_w: int, *, piped: bool) -> str:
+    """One per-loop unarmed row (-v) — name, kind mix, accumulating count.
+
+    The kind mix (``decision 4``) IS the loop's window scoped to its own kind;
+    a zero-fact loop carries no mix (honest absence). TTY prefixes the ``◦``
+    glyph; the pipe drops it.
+    """
+    mix = _mix_text(row, joiner=" ", sep=" ")
+    acc = f"{row['window_facts']} accumulating"
+    if piped:
+        segs = [f"{row['name']:<{name_w}}"]
+        if mix:
+            segs.append(mix)
+        segs.append(acc)
+        return "  ".join(segs).rstrip()
+    body = f"{_UNARMED} {row['name']:<{name_w}}"
+    if mix:
+        body += f"  {mix}"
+    return f"  {body}  {acc}"
+
+
 def _descriptor(row: dict, zoom: Zoom) -> str:
     """The TTY row body after the name column (meter appended separately)."""
     if row["mode"] == "when":
@@ -166,27 +212,34 @@ def horizon_view(
     armed = data.get("armed", 0)
     total_unsealed = data.get("total_unsealed", 0)
     last_sealed = data.get("last_sealed")
+    unarmed = data.get("unarmed", [])
+    unarmed_facts = data.get("unarmed_facts", 0)
 
-    if not loops:
-        # Honest absence: a vertex whose loops declare no boundary never seals.
-        # One true line, never an empty fake table.
+    if not loops and not unarmed:
+        # Honest absence: a vertex with neither armed nor unarmed loops. One
+        # true line, never an empty fake table.
         return _line("No armed loops — nothing seals.", p.metadata, width)
 
     seal_tag = recency(last_sealed) if last_sealed is not None else "never"
-    rollup = rollup_line(
-        vertex,
-        [
-            f"{armed} armed loop{'s' if armed != 1 else ''}",
-            f"{total_unsealed} unsealed fact{'s' if total_unsealed != 1 else ''}",
-            f"last sealed {seal_tag}",
-        ],
-        width=width,
-        shed_from=1,
-    )
-    if zoom == Zoom.MINIMAL:
-        return _line(rollup, p.metadata, width)
 
-    name_w = max(len(r["name"]) for r in loops)
+    # -q: the shared rollup, plus the unarmed segment appended as a trailing,
+    # non-sheddable part. Its counts have no degraded form on the line, so —
+    # like graph's hub segment — the whole line WRAPS rather than sheds
+    # (decision:design/rollup-shed-only-what-degrades). ◦ is TTY-only; the pipe
+    # carries the bare words.
+    rollup_parts = [
+        f"{armed} armed loop{'s' if armed != 1 else ''}",
+        f"{total_unsealed} unsealed fact{'s' if total_unsealed != 1 else ''}",
+        f"last sealed {seal_tag}",
+    ]
+    if unarmed:
+        rollup_parts.append(_unarmed_segment(unarmed, unarmed_facts, piped=piped))
+    rollup = rollup_line(vertex, rollup_parts)
+    if zoom == Zoom.MINIMAL:
+        return wrap_hanging(rollup, p.metadata, width, hang=2)
+
+    name_w = max((len(r["name"]) for r in loops), default=0)
+    unarmed_name_w = max((len(r["name"]) for r in unarmed), default=0)
     rows: list[Block] = []
 
     if piped:
@@ -195,16 +248,22 @@ def horizon_view(
         # approaching signal rides as a trailing WORD, not the ▲ glyph — the
         # G4 stance: a pipe consumer greps words, it doesn't decode glyphs.
         for r in loops:
-            seal = "never" if r["never_sealed"] else stamp(r["last_sealed"])
             if r["mode"] == "when":
                 shape = f"when {r['trigger_kind']}"
                 prox = f"{r['window_facts']} unsealed"
             else:
                 shape = f"{r['mode']} {r['count']}"
                 prox = f"{r['window_facts']}/{r['count']}"
+            # Never-sealed rides the same "never sealed" phrase as the TTY (both
+            # registers carry the wording — parity over word order); a sealed
+            # row carries its absolute ISO stamp.
+            seal_part = (
+                "never sealed" if r["never_sealed"]
+                else f"sealed {stamp(r['last_sealed'])}"
+            )
             line = (
                 f"{r['name']:<{name_w}}  {r['scope']:<6}  {shape}  "
-                f"{prox}  sealed {seal}"
+                f"{prox}  {seal_part}"
             )
             cond = _conditions_text(r)
             if cond:
@@ -215,16 +274,26 @@ def horizon_view(
             if _approaching(r, p):
                 line += f"  {_APPROACHING_WORD}"
             rows.append(_line(line.rstrip(), Style(), None))
-        body = join_vertical(*rows)
-        header = rollup_line(
-            vertex,
-            [
-                f"{armed} armed",
-                f"{total_unsealed} unsealed",
-                f"last sealed {seal_tag}",
-            ],
-        )
-        return join_vertical(_line(header, p.header, None), body)
+        # Unarmed per-loop rows enumerate uncapped at -v (the agent channel is
+        # information-faithful); the header always carries the rollup counts.
+        if unarmed and zoom >= Zoom.DETAILED:
+            rows.append(_line("unarmed:", p.header, None))
+            for r in unarmed:
+                rows.append(
+                    _line(_unarmed_row_text(r, unarmed_name_w, piped=True),
+                          Style(), None)
+                )
+        header_parts = [
+            f"{armed} armed",
+            f"{total_unsealed} unsealed",
+            f"last sealed {seal_tag}",
+        ]
+        if unarmed:
+            header_parts.append(
+                _unarmed_segment(unarmed, unarmed_facts, piped=True)
+            )
+        header = rollup_line(vertex, header_parts)
+        return join_vertical(_line(header, p.header, None), *rows)
 
     # --- TTY register ------------------------------------------------------
     for r in loops:
@@ -255,17 +324,45 @@ def horizon_view(
                 )
         rows.append(row)
 
-    body = join_vertical(*rows)
-    sublines = [
-        f"{armed} armed · {total_unsealed} unsealed",
-    ]
-    if last_sealed is not None:
-        sublines.append(f"last sealed {recency(last_sealed)}")
+    # Unarmed rollup: a trailing one-line segment at default zoom, expanding to
+    # per-loop ◦ rows at -v (decision:design/horizon-unarmed-rollup).
+    unarmed_rows: list[Block] = []
+    if unarmed:
+        if loops:
+            unarmed_rows.append(_line("", Style(), width))  # separator
+        if zoom >= Zoom.DETAILED:
+            unarmed_rows.append(_line("UNARMED", p.header, width))
+            for r in unarmed:
+                unarmed_rows.append(
+                    _line(_unarmed_row_text(r, unarmed_name_w, piped=False),
+                          p.metadata, width)
+                )
+        else:
+            unarmed_rows.append(
+                _line(f"  {_unarmed_segment(unarmed, unarmed_facts, piped=False)}",
+                      p.metadata, width)
+            )
+
+    blocks: list[Block] = []
+    if loops:
+        body = join_vertical(*rows)
+        sublines = [
+            f"{armed} armed · {total_unsealed} unsealed",
+        ]
+        if last_sealed is not None:
+            sublines.append(f"last sealed {recency(last_sealed)}")
+        else:
+            sublines.append("never sealed")
+        title = f"{vertex} · horizon"
+        card_w = card_width(body, title, sublines, width)
+        blocks.append(card(title, sublines, card_w, p=p))
+        blocks.append(body)
     else:
-        sublines.append("never sealed")
-    title = f"{vertex} · horizon"
-    card_w = card_width(body, title, sublines, width)
-    return join_vertical(card(title, sublines, card_w, p=p), body)
+        # No armed loops, but unarmed accumulation exists — surface it honestly
+        # rather than hiding it behind "nothing seals".
+        blocks.append(_line("No armed loops.", p.metadata, width))
+    blocks.extend(unarmed_rows)
+    return join_vertical(*blocks)
 
 
 # ``--lens horizon`` on the read/fold path resolves ``fold_view`` in this module

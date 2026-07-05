@@ -1,2 +1,7 @@
-grammar · 1 armed · 0 unsealed · last sealed 3d
+grammar · 1 armed · 0 unsealed · last sealed 3d · 4 unarmed · 9 facts accumulating
 grammar  vertex  when session  0 unsealed  sealed 2025-01-02 13:08  [status=closed]
+unarmed:
+decision  decision 4  4 accumulating
+session   session 2  2 accumulating
+thread    thread 2  2 accumulating
+log       log 1  1 accumulating

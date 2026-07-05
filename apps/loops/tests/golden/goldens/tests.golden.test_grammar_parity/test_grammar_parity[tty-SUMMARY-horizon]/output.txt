@@ -3,3 +3,5 @@
 │ last sealed 3d                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
     grammar  waiting on session · 0 facts in window · last sealed 3d
+
+  ◦ 4 unarmed · 9 facts accumulating

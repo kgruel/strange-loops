@@ -169,7 +169,8 @@ def _run_sync_aggregate(
 
     def render(ctx, data):
         from loops.lenses.sync import sync_view
-        return sync_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return sync_view(data, ctx.zoom, w)
 
     return run_cli(
         rest,
@@ -320,7 +321,8 @@ def _run_sync(
     def render(ctx, data):
         from loops.lenses.sync import sync_view
 
-        return sync_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return sync_view(data, ctx.zoom, w)
 
     return run_cli(
         rest,

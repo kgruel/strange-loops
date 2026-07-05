@@ -123,7 +123,9 @@ def _header(data: "Provenance", address: str, width: int | None, p, *, piped: bo
     # A card needs a concrete width even when piped-narrow; fall back to the
     # sublines' natural width when there's no terminal width to fill.
     body = Block.empty(1, 1)
-    card_w = card_width(body, title, sublines, width) if width else max(
+    # Only None means unbounded — a concrete width (even 0) caps; card()
+    # clamps its own interior minimum.
+    card_w = card_width(body, title, sublines, width) if width is not None else max(
         len(title) + 4, *(len(s) + 3 for s in sublines)
     )
     return card(title, sublines, card_w, p=p)

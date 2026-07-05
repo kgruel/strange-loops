@@ -220,6 +220,9 @@ def wrap_hanging(text: str, style: Style, width: int | None, *, hang: int) -> Bl
     """
     if width is None:
         return Block.text(text, style)
+    # Only None means unbounded; a degenerate concrete width (0, negative)
+    # clamps to 1 — textwrap.wrap raises ValueError below that.
+    width = max(1, width)
     if len(text) <= width:
         return Block.text(text, style, width=width)
     hang_pad = " " * min(hang, max(0, width - 8))

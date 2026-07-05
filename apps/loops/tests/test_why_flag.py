@@ -260,3 +260,19 @@ class TestCaseVariantKey:
         fields = {f["field"]: f for f in d["fields"]}
         assert fields["message"]["value"] == "cased body"
         assert fields["status"]["value"] == "open"
+
+
+def test_why_view_degenerate_width_does_not_crash(why_vertex, capsys):
+    """Regression: why_view(width=0) crashed in wrap_hanging via
+    textwrap.wrap(text, 0). Only None is unbounded; degenerate concrete
+    widths clamp instead of raising."""
+    from loops.provenance import replay_attribution
+    from atoms.fold import Upsert
+
+    facts = [{"topic": "design/w", "message": "m", "ts": 0, "observer": "o"}]
+    prov = replay_attribution(
+        Upsert(target="s", key="topic"), facts, kind="decision", key="design/w",
+        key_field="topic",
+    )
+    for w in (0, 1, 5):
+        assert why_view(prov, Zoom.SUMMARY, w, piped=False) is not None

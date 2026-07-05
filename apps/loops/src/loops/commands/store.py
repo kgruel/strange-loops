@@ -723,7 +723,8 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     def render(ctx, data):
         from ..lenses.store import stats_view
 
-        return stats_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return stats_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     return run_cli(
         rest,
@@ -787,7 +788,8 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
     def render(ctx, data):
         from ..lenses.store import store_view
 
-        return store_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return store_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     async def fetch_stream():
         import asyncio

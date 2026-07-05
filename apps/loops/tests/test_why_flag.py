@@ -244,3 +244,19 @@ def test_why_trace_register_parity():
         load_bearing=["alice", "bob", "message", "status→review", "×2"],
         zoom=Zoom.DETAILED,
     )
+
+
+class TestCaseVariantKey:
+    def test_case_variant_key_still_attributes_fields(self, why_vertex, capsys):
+        """Regression: the case-folded source-facts fallback found the facts,
+        but replay ran under the user's variant key and attributed ZERO
+        fields. The canonical key must drive the replay too."""
+        assert _emit(why_vertex, "decision", topic="Design/Mixed",
+                     message="cased body", status="open") == 0
+        rc, d = _why_json(capsys, why_vertex, "decision/design/mixed")
+        assert rc == 0
+        assert d["key"] == "Design/Mixed"  # canonicalized
+        assert d["total_facts"] == 1
+        fields = {f["field"]: f for f in d["fields"]}
+        assert fields["message"]["value"] == "cased body"
+        assert fields["status"]["value"] == "open"

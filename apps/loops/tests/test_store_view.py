@@ -660,3 +660,26 @@ class TestStatsView:
         kinds = [{"kind": "decision", "count": 10}]
         block = stats_view(_stats_data(by_kind=True, kinds=kinds), Zoom.FULL, None)
         assert block.height >= 1
+
+
+class TestStoreViewPipedRegister:
+    """Regression: store_view crashed on width=None and had no piped register."""
+
+    @pytest.mark.parametrize("zoom", [Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL])
+    def test_width_none_renders_all_zooms(self, zoom):
+        block = store_view(_make_summary(), zoom, None)
+        assert block is not None
+        assert block_to_text(block).strip()
+
+    @pytest.mark.parametrize("zoom", [Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL])
+    def test_piped_ignores_concrete_width(self, zoom):
+        # piped=True forces width=None — a pipe that inherited COLUMNS=20
+        # must render identically to the width-free agent channel.
+        clipped = store_view(_make_summary(), zoom, 20, piped=True)
+        free = store_view(_make_summary(), zoom, None, piped=True)
+        assert block_to_text(clipped) == block_to_text(free)
+
+    def test_full_piped_drops_border_keeps_title(self):
+        text = block_to_text(store_view(_make_summary(), Zoom.FULL, None))
+        assert "╭" not in text and "│" not in text
+        assert "3 kinds" in text and "6.5k facts" in text

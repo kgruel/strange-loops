@@ -404,3 +404,16 @@ def test_spec_has_dropped_transforms_field_set():
     assert _spec_has_dropped_transforms(SurfaceSpec(last=5)) is True
     assert _spec_has_dropped_transforms(SurfaceSpec(full=True)) is True
     assert _spec_has_dropped_transforms(SurfaceSpec(do_count=True)) is True  # --count
+
+
+class TestMatchRowGrammar:
+    def test_substring_fallback_rows_are_fact_level(self, grammar_vertex, capsys):
+        """Regression: the substring fallback set axis="event" but left
+        level="key" — an event row wearing key-level grammar. Event-axis
+        match rows are level="fact", same as the FTS path's _event_row."""
+        _, vpath = grammar_vertex
+        _seed(vpath)
+        rc, s = _json_read(capsys, str(vpath), "--match", "alpha")
+        assert rc == 0
+        assert s["rows"], "match should find the seeded body"
+        assert all(r["level"] == "fact" for r in s["rows"])

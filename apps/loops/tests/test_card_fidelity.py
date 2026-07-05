@@ -106,3 +106,16 @@ class TestTickChainCardFidelity:
         # The rollup header still carries vertex + tick count on the pipe.
         info = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, 80, piped=True))
         assert "demo" in info and "1 ticks" in info
+
+
+def test_card_width_zero_caps_not_unbounded():
+    """Regression: card_width treated width=0 as None (truthiness) — a
+    zero-column width must cap, only None means unbounded."""
+    from painted import Block, Style
+
+    from loops.lenses._grammar import card_width
+
+    body = Block.text("some body content", Style())
+    assert card_width(body, "title", ["a longer stat subline"], None) > 0
+    assert card_width(body, "title", ["a longer stat subline"], 0) == 0
+    assert card_width(body, "title", ["a longer stat subline"], 5) == 5

@@ -202,6 +202,15 @@ def fold_view(
     if isinstance(data, FoldState):
         data = project(data)
 
+    # Presentation register is the CHANNEL, not the width. An explicit
+    # piped=True forces width=None at the lens boundary — the agent channel
+    # never clips, even if a caller hands a concrete width alongside it.
+    # This must precede the search/MINIMAL early returns, which otherwise
+    # thread the concrete width through untouched.
+    is_piped = (width is None) if piped is None else piped
+    if is_piped:
+        width = None
+
     # Content-search (--match) switches the lens to the event axis: a flat
     # ts-desc list of matching facts, with the (K not indexed) coverage footer.
     if data.window.query is not None:
@@ -232,12 +241,8 @@ def fold_view(
 
     blocks: list[Block] = []
 
-    # Presentation register is the CHANNEL, not the width. Truncation is now
-    # dropped on human reads (width=None there too), so width can no longer tell
-    # a human TTY read from a piped one — the explicit `piped` flag does. Default
-    # to the old width-is-None proxy for direct/legacy callers (goldens, tests).
-    # (decision:design/drop-truncation-from-human-reads — presentation half)
-    is_piped = (width is None) if piped is None else piped
+    # is_piped was resolved at the top of the lens (channel, not width;
+    # decision:design/drop-truncation-from-human-reads — presentation half).
 
     # Tier-allocated disclosure engages only when the population HAS a tier
     # gradient (decision:design/tier-allocated-disclosure). A flat population

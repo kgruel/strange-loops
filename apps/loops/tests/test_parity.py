@@ -16,7 +16,7 @@ import time
 
 
 from loops.lenses.declarations import declarations_view, kind_stat_view
-from loops.lenses.store import stats_view
+from loops.lenses.store import stats_view, store_view
 from loops.lenses.vertices import vertices_view
 
 from .parity import (
@@ -229,3 +229,90 @@ class TestStoreStatsJsonParity:
             "decision", "800", "thread", "500", "observation", "223",
         ]
         assert_render_carries(stats_view, data, load_bearing=load_bearing)
+
+
+# ---------------------------------------------------------------------------
+# sl store / sl store stats — register parity (piped forces width=None)
+# ---------------------------------------------------------------------------
+# Regression: both callsites passed ctx.width (always an int) into the lens
+# with no register split, so a pipe inheriting COLUMNS clipped the agent
+# channel — the class assert_register_parity exists for.
+
+
+def _store_summary_data():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    long_title = "a substrate-defining announcement headline that overflows"
+    return {
+        "vertex": "project",
+        "facts": {
+            "total": 642,
+            "kinds": {
+                "decision": {
+                    "count": 420,
+                    "earliest": now - timedelta(days=30),
+                    "latest": now - timedelta(hours=1),
+                    "sample_payload": {"message": long_title},
+                },
+                "thread": {
+                    "count": 222,
+                    "earliest": now - timedelta(days=20),
+                    "latest": now - timedelta(minutes=30),
+                },
+            },
+        },
+        "ticks": {"total": 15, "names": {}},
+    }
+
+
+class TestStoreViewRegisterParity:
+    def test_summary_parity(self):
+        assert_register_parity(
+            store_view,
+            _store_summary_data(),
+            load_bearing=[
+                "decision", "420", "thread", "222",
+                # the long gist is what a COLUMNS-clipped pipe used to drop
+                "a substrate-defining announcement headline that overflows",
+            ],
+        )
+
+    def test_full_parity(self):
+        from painted import Zoom
+
+        assert_register_parity(
+            store_view,
+            _store_summary_data(),
+            zoom=Zoom.FULL,
+            load_bearing=[
+                "decision", "420", "thread", "222",
+                "2 kinds", "642 facts",  # border-title topline must survive piped
+                "a substrate-defining announcement headline that overflows",
+            ],
+        )
+
+
+class TestStatsViewRegisterParity:
+    def test_by_kind_parity(self):
+        data = {
+            "vertex": "project",
+            "by_kind": True,
+            "total_facts": 1523,
+            "total_ticks": 42,
+            "kind_count": 3,
+            "kinds": [
+                {"kind": "decision", "count": 800},
+                {"kind": "a-very-long-kind-name-that-would-clip", "count": 500},
+                {"kind": "observation", "count": 223},
+            ],
+        }
+        assert_register_parity(
+            stats_view,
+            data,
+            load_bearing=[
+                "project", "1.5k facts", "3 kinds", "42 ticks",
+                "decision", "800",
+                "a-very-long-kind-name-that-would-clip", "500",
+            ],
+        )

@@ -804,7 +804,9 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
     # from the FTS set).
     q = query.lower()
     rows.extend(
-        replace(r, axis="event")
+        # Match _event_row's grammar: event-axis rows are level="fact", even
+        # when sourced from a projected key row (the substring fallback).
+        replace(r, axis="event", level="fact")
         for r in surface.rows
         if r.kind in unindexed and q in _payload_text(r.payload).lower()
     )

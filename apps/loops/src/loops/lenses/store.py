@@ -36,11 +36,18 @@ from .gist import content_gist
 def store_view(
     data: dict,
     zoom: Zoom,
-    width: int,
+    width: int | None,
     palette: LoopsPalette | None = None,
+    *,
+    piped: bool = False,
 ) -> Block:
-    """Render store summary at the given fidelity level."""
+    """Render store summary at the given fidelity level.
+
+    ``piped=True`` forces width=None — the agent channel never clips.
+    """
     p = palette or DEFAULT_PALETTE
+    if piped:
+        width = None  # piped register never clips (information-faithful)
     if zoom == Zoom.MINIMAL:
         return _render_minimal(data, width, p)
     if zoom == Zoom.SUMMARY:
@@ -55,7 +62,7 @@ def store_view(
 # ---------------------------------------------------------------------------
 
 
-def _render_minimal(data: dict, width: int, p: LoopsPalette) -> Block:
+def _render_minimal(data: dict, width: int | None, p: LoopsPalette) -> Block:
     """One-line: '5 kinds · 69 facts · Feb 28 – Mar 1 · fresh 6h ago'."""
     facts_total = data["facts"]["total"]
     fact_kinds = data["facts"].get("kinds", {})
@@ -84,7 +91,7 @@ def _render_minimal(data: dict, width: int, p: LoopsPalette) -> Block:
 # ---------------------------------------------------------------------------
 
 
-def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
+def _render_summary(data: dict, width: int | None, p: LoopsPalette) -> Block:
     """Kind table: name + sparkline + count + freshness + latest content gist."""
     fact_kinds = data["facts"].get("kinds", {})
 
@@ -93,9 +100,9 @@ def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
 
     rows: list[Block] = []
 
-    # Compute column widths
+    # Compute column widths; width=None (piped) never narrows the name column
     max_name = max(len(str(k)) for k in fact_kinds) if fact_kinds else 10
-    name_col = min(max_name + 2, width // 3)
+    name_col = min(max_name + 2, width // 3) if width is not None else max_name + 2
 
     # Sparkline data lives in ticks, but we render facts-first
     # Get sparklines from ticks if available, keyed by name
@@ -120,17 +127,21 @@ def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
         gist = ""
         sample = info.get("sample_payload")
         if isinstance(sample, dict):
-            used = len(name_text) + len(stats) + 2
-            remaining = width - used
-            if remaining > 15:
-                gist = content_gist(kind, sample, remaining)
+            if width is None:
+                gist = content_gist(kind, sample, None)
+            else:
+                used = len(name_text) + len(stats) + 2
+                remaining = width - used
+                if remaining > 15:
+                    gist = content_gist(kind, sample, remaining)
 
         # Build composite line with styled segments
         # For now: kind name in kind color, rest in metadata
         line = name_text + stats
         if gist:
             line += "  " + gist
-        line = line[:width]
+        if width is not None:
+            line = line[:width]
 
         # Apply kind color to the name portion only via a full-line block
         # (Block.text is single-style; for multi-style we'd need Span/Line)
@@ -145,7 +156,7 @@ def _render_summary(data: dict, width: int, p: LoopsPalette) -> Block:
 # ---------------------------------------------------------------------------
 
 
-def _render_detailed(data: dict, width: int, p: LoopsPalette) -> Block:
+def _render_detailed(data: dict, width: int | None, p: LoopsPalette) -> Block:
     """Per-kind sections with last 3 items, counts as header metadata."""
     fact_kinds = data["facts"].get("kinds", {})
 
@@ -165,18 +176,19 @@ def _render_detailed(data: dict, width: int, p: LoopsPalette) -> Block:
         kind_style = p.kind_style(kind)
         rows.append(Block.text(header, Style(bold=True, fg=kind_style.fg), width=width))
 
-        # Recent items as content gists
+        # Recent items as content gists; width=None (piped) never clips them
+        gist_w = width - 4 if width is not None else None
         recent = info.get("recent", [])
         if recent:
             for payload in recent[:3]:
                 if isinstance(payload, dict):
-                    gist = content_gist(kind, payload, width - 4)
+                    gist = content_gist(kind, payload, gist_w)
                     rows.append(Block.text(f"  {gist}", p.content, width=width))
         elif info.get("sample_payload"):
-            gist = content_gist(kind, info["sample_payload"], width - 4)
+            gist = content_gist(kind, info["sample_payload"], gist_w)
             rows.append(Block.text(f"  {gist}", p.content, width=width))
 
-        rows.append(Block.empty(width, 1))
+        rows.append(Block.text("", Style()) if width is None else Block.empty(width, 1))
 
     # Remove trailing empty
     _strip_trailing_empty(rows)
@@ -189,15 +201,19 @@ def _render_detailed(data: dict, width: int, p: LoopsPalette) -> Block:
 # ---------------------------------------------------------------------------
 
 
-def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
-    """Bordered card: topline summary, kind sections sorted by recency."""
+def _render_full(data: dict, width: int | None, p: LoopsPalette) -> Block:
+    """Bordered card: topline summary, kind sections sorted by recency.
+
+    width=None (piped) drops the border/dot-fill chrome and never clips —
+    the same information renders as plain unclipped lines.
+    """
     fact_kinds = data["facts"].get("kinds", {})
 
     if not fact_kinds:
         return Block.text("(empty store)", p.metadata, width=width)
 
-    # Inner width (border takes 2 chars)
-    inner_w = width - 2
+    # Inner width (border takes 2 chars); None stays None (piped, no chrome)
+    inner_w = width - 2 if width is not None else None
 
     rows: list[Block] = []
 
@@ -219,10 +235,10 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
         # Kind header: name left, count + freshness right
         right = f"{count_str} · {fresh_str}"
         left = kind
-        # Fill with dots between left and right
-        fill_len = inner_w - len(left) - len(right) - 2
-        if fill_len > 2:
-            fill = " " + "·" * fill_len + " "
+        # Fill with dots between left and right (TTY only; piped stays plain)
+        if inner_w is not None:
+            fill_len = inner_w - len(left) - len(right) - 2
+            fill = " " + "·" * fill_len + " " if fill_len > 2 else "  "
         else:
             fill = "  "
         header_line = left + fill + right
@@ -232,22 +248,26 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
             width=inner_w,
         ))
 
-        # Content: latest items
+        # Content: latest items; width=None (piped) never clips gists
+        gist_w = inner_w - 2 if inner_w is not None else None
         recent = info.get("recent", [])
         if recent:
             for payload in recent[:3]:
                 if isinstance(payload, dict):
-                    gist = content_gist(kind, payload, inner_w - 2)
+                    gist = content_gist(kind, payload, gist_w)
                     rows.append(Block.text(f"  {gist}", p.content, width=inner_w))
         elif info.get("sample_payload"):
-            gist = content_gist(kind, info["sample_payload"], inner_w - 2)
+            gist = content_gist(kind, info["sample_payload"], gist_w)
             rows.append(Block.text(f"  {gist}", p.content, width=inner_w))
         else:
             rows.append(Block.text("  (no data yet)", p.metadata, width=inner_w))
 
         # Separator between kinds (not after last)
         if i < len(sorted_kinds) - 1:
-            rows.append(Block.empty(inner_w, 1))
+            rows.append(
+                Block.text("", Style()) if inner_w is None
+                else Block.empty(inner_w, 1)
+            )
 
     inner = join_vertical(*rows)
 
@@ -260,6 +280,10 @@ def _render_full(data: dict, width: int, p: LoopsPalette) -> Block:
         title_parts.append(f"fresh {recency(freshness)}")
     title = " · ".join(title_parts)
 
+    if width is None:
+        # Piped: the border title is load-bearing (kinds/facts/freshness) —
+        # carry it as a plain header line instead of chrome.
+        return join_vertical(Block.text(title, p.header), inner)
     return border(inner, ROUNDED, p.chrome, title=title, title_style=p.header)
 
 
@@ -452,6 +476,8 @@ def stats_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
+    *,
+    piped: bool = False,
 ) -> Block:
     """Render store statistics — topline totals, and (``--by-kind``) a
     count-descending per-kind tally.
@@ -460,8 +486,12 @@ def stats_view(
     kind_count, kinds: [{kind, count}, ...] sorted count-desc}``. The
     per-kind table is gated on ``--by-kind`` (honesty rule: the flag is
     what adds the table).
+
+    ``piped=True`` forces width=None — the agent channel never clips.
     """
     p = palette or DEFAULT_PALETTE
+    if piped:
+        width = None  # piped register never clips (information-faithful)
     vertex = data.get("vertex", "")
     total_facts = data.get("total_facts", 0)
     total_ticks = data.get("total_ticks", 0)

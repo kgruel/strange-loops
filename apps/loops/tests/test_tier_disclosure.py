@@ -90,3 +90,14 @@ def test_flat_population_shows_all_bodies():
     )
     t = _text(fold_view(project(state), Zoom.SUMMARY, 100, piped=False))
     assert "only-body" in t
+
+
+def test_piped_flag_forces_width_none():
+    """Regression: fold_view(piped=True, width=N) clipped the piped ledger —
+    the explicit channel flag must force width=None at the lens boundary,
+    including on the search/MINIMAL early-return paths."""
+    surface = project(_spread_state())
+    for zoom in (Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL):
+        clipped = _text(fold_view(surface, zoom, 20, piped=True))
+        free = _text(fold_view(surface, zoom, None, piped=True))
+        assert clipped == free

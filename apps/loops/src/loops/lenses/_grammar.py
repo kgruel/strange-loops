@@ -400,4 +400,5 @@ def card_width(
     needed = max(
         [body.width or 0, len(title) + 4, *(len(s) + 3 for s in sublines)]
     )
-    return min(needed, width) if width else needed
+    # None means unbounded (piped); a concrete width — even 0 — caps.
+    return min(needed, width) if width is not None else needed

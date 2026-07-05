@@ -625,7 +625,7 @@ def _run_why(
         state = fetch_fold(
             vertex_path, kind=kind, key=key, observer=obs, retain_facts=True,
         )
-        source = _lookup_source_facts(state, kind, key)
+        key, source = _lookup_source_facts(state, kind, key)
         prov = replay_attribution(
             fold_op, source, kind=kind, key=key, key_field=fold_op.key,
         )
@@ -673,17 +673,24 @@ def _resolve_fold_op(vertex_path: Path, kind: str) -> Any:
     return spec.folds[0]
 
 
-def _lookup_source_facts(state: Any, kind: str, key: str) -> list[dict]:
-    """Source facts for an exact ``kind/key`` — exact, then case-folded fallback."""
+def _lookup_source_facts(state: Any, kind: str, key: str) -> tuple[str, list[dict]]:
+    """Source facts for an exact ``kind/key`` — exact, then case-folded fallback.
+
+    Returns ``(canonical_key, facts)``: the fallback resolves a case-variant
+    user key to the key the fold state actually holds, and the replay must
+    use that canonical key too — ``replay_attribution`` looks the entry up
+    exactly, so replaying under the user's variant would find the source
+    facts yet attribute zero fields.
+    """
     src = state.source_facts
     exact = src.get(f"{kind}/{key}")
     if exact is not None:
-        return list(exact)
+        return key, list(exact)
     want = f"{kind}/{key}".lower()
     for addr, facts in src.items():
         if addr.lower() == want:
-            return list(facts)
-    return []
+            return addr.split("/", 1)[1], list(facts)
+    return key, []
 
 
 def _collect_section_facts(state: Any, kind: str) -> list[dict]:

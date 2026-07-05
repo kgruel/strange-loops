@@ -59,6 +59,25 @@ def _vertex_boundary(dir_path, name: str = "v"):
     return vp
 
 
+def _two_vertex_boundaries(dir_path, name: str = "tv"):
+    """A vertex declaring TWO vertex-level boundaries (``session closed`` and
+    ``seal``). Both must render as their own honest row — earlier declarations
+    were previously dropped (friction:vertex-boundary-last-declaration-wins).
+    """
+    vp = dir_path / f"{name}.vertex"
+    vp.write_text(
+        f'name "{name}"\nstore "./{name}.db"\n\nloops {{\n'
+        '  decision { fold { items "by" "topic" } }\n'
+        '  session { fold { items "by" "name" } }\n\n'
+        '  boundary when="session" status="closed"\n'
+        '  boundary when="seal"\n'
+        "}\n"
+    )
+    prog = load_vertex_program(vp)
+    prog.receive(Fact.of("decision", "kyle", ts=_T0, topic="a", message="m"))
+    return vp
+
+
 def _no_boundary(dir_path, name: str = "nb"):
     vp = dir_path / f"{name}.vertex"
     vp.write_text(
@@ -106,6 +125,17 @@ class TestOpenWindow:
         # The vertex-level window spans ALL kinds after the seal — one decision.
         assert row["window_facts"] == 1
         assert row["window_kinds"] == {"decision": 1}
+
+    def test_multiple_vertex_boundaries_each_render_a_row(self, tmp_path):
+        data = fetch_horizon(_two_vertex_boundaries(tmp_path))
+        # Both vertex-level boundaries are armed rows — neither is dropped.
+        assert data["armed"] == 2
+        vrows = [r for r in data["loops"] if r["scope"] == "vertex"]
+        assert len(vrows) == 2
+        triggers = {r["trigger_kind"] for r in vrows}
+        assert triggers == {"session", "seal"}
+        # Both share the vertex-named tick series but differ by trigger.
+        assert all(r["name"] == "tv" for r in vrows)
 
     def test_no_boundary_vertex_has_empty_roster(self, tmp_path):
         data = fetch_horizon(_no_boundary(tmp_path))

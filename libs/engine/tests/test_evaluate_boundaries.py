@@ -66,6 +66,40 @@ class TestEvaluateBoundaries:
         assert ticks[0].payload["task"]["job2"]["status"] == "open"
         store2.close()
 
+    def test_multiple_vertex_boundaries_both_fire_on_replay(self, tmp_path):
+        """Two vertex-level boundaries — the EARLIER-declared one still fires
+        via the replay/evaluate path. Previously the loader dropped it and only
+        the last-declared survived (friction:vertex-boundary-last-declaration-wins).
+        """
+        def _make_vertex(store):
+            v = Vertex("session", store=store)
+            v.register("decision", {}, lambda s, p: {**s, p["topic"]: p})
+            v.register_vertex_boundary("session", match=(("status", "closed"),))
+            v.register_vertex_boundary("seal")
+            return v
+
+        # Case 1: an externally-emitted `session closed` fires the FIRST boundary.
+        s1 = SqliteStore(path=tmp_path / "a.db", serialize=Fact.to_dict,
+                         deserialize=Fact.from_dict)
+        s1.append(Fact.of("session", "kyle", name="s1", status="closed"))
+        v1 = _make_vertex(s1)
+        v1.replay()
+        ticks1 = v1.evaluate_boundaries()
+        assert len(ticks1) == 1
+        assert ticks1[0].payload["_boundary"]["status"] == "closed"
+        s1.close()
+
+        # Case 2: an externally-emitted `seal` fires the SECOND boundary.
+        s2 = SqliteStore(path=tmp_path / "b.db", serialize=Fact.to_dict,
+                         deserialize=Fact.from_dict)
+        s2.append(Fact.of("seal", "kyle"))
+        v2 = _make_vertex(s2)
+        v2.replay()
+        ticks2 = v2.evaluate_boundaries()
+        assert len(ticks2) == 1
+        assert ticks2[0].name == "session"
+        s2.close()
+
     def test_no_fire_when_no_matching_facts(self, tmp_path):
         """evaluate_boundaries returns empty when no facts match triggers."""
         store = SqliteStore(

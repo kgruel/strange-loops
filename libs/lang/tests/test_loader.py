@@ -275,11 +275,11 @@ loops {
         vertex = parse_vertex(text)
         # Session loop has NO boundary
         assert vertex.loops["session"].boundary is None
-        # Vertex has boundary
-        assert vertex.boundary is not None
-        assert isinstance(vertex.boundary, BoundaryWhen)
-        assert vertex.boundary.kind == "session"
-        assert vertex.boundary.match == (("status", "closed"),)
+        # Vertex has boundary (accumulated into a tuple)
+        assert len(vertex.boundary) == 1
+        assert isinstance(vertex.boundary[0], BoundaryWhen)
+        assert vertex.boundary[0].kind == "session"
+        assert vertex.boundary[0].match == (("status", "closed"),)
 
     def test_vertex_level_boundary_no_match(self):
         """Vertex boundary without match conditions."""
@@ -292,9 +292,9 @@ loops {
 }
 """
         vertex = parse_vertex(text)
-        assert vertex.boundary is not None
-        assert vertex.boundary.kind == "flush"
-        assert vertex.boundary.match == ()
+        assert len(vertex.boundary) == 1
+        assert vertex.boundary[0].kind == "flush"
+        assert vertex.boundary[0].match == ()
 
     def test_boundary_with_conditions(self):
         """Boundary with fold-state condition children."""
@@ -381,10 +381,10 @@ loops {
 }
 """
         vertex = parse_vertex(text)
-        assert vertex.boundary is not None
-        assert len(vertex.boundary.conditions) == 1
-        assert vertex.boundary.conditions[0].target == "high"
-        assert vertex.boundary.conditions[0].op == ">="
+        assert len(vertex.boundary) == 1
+        assert len(vertex.boundary[0].conditions) == 1
+        assert vertex.boundary[0].conditions[0].target == "high"
+        assert vertex.boundary[0].conditions[0].op == ">="
 
     def test_boundary_unknown_child_rejected(self):
         """Unknown children in boundary block are rejected."""
@@ -475,7 +475,27 @@ loops {
 }
 """
         vertex = parse_vertex(text)
-        assert vertex.boundary.run == "scripts/session-close.sh"
+        assert vertex.boundary[0].run == "scripts/session-close.sh"
+
+    def test_vertex_level_boundaries_accumulate(self):
+        """Multiple vertex-level boundaries accumulate — earlier declarations
+        are NOT dropped (friction:vertex-boundary-last-declaration-wins)."""
+        text = """\
+name "session"
+store "./data/session.db"
+loops {
+  decision { fold { items "by" "topic" } }
+  boundary when="session" status="closed"
+  boundary when="seal"
+}
+"""
+        vertex = parse_vertex(text)
+        assert len(vertex.boundary) == 2
+        # Declaration order preserved.
+        assert vertex.boundary[0].kind == "session"
+        assert vertex.boundary[0].match == (("status", "closed"),)
+        assert vertex.boundary[1].kind == "seal"
+        assert vertex.boundary[1].match == ()
 
     def test_boundary_no_run_clause(self):
         """Boundary without run clause has run=None."""

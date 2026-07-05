@@ -157,8 +157,15 @@ def run(argv: list[str], ctx: Invocation) -> int:
     except Exception as e:
         ctx.reporter.err(f"seal: cannot parse vertex '{writable}': {e}")
         return 1
-    boundary = ast.boundary
-    if not (isinstance(boundary, BoundaryWhen) and boundary.kind == "seal"):
+    # A vertex may declare several vertex-level boundaries; a seal is legitimate
+    # as long as one of them is `boundary when="seal"`. Keep that boundary — its
+    # match props are folded into the emitted fact below so it actually fires.
+    boundary = next(
+        (b for b in ast.boundary
+         if isinstance(b, BoundaryWhen) and b.kind == "seal"),
+        None,
+    )
+    if boundary is None:
         ctx.reporter.err(
             f"seal: vertex '{ast.name}' declares no seal boundary\n"
             "  hint: add `boundary when=\"seal\"` to its loops block — "

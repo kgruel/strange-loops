@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from engine.builder import vertex, fold_by, fold_count
-from loops.commands.emit import cmd_emit
+from loops.commands.emit import cmd_emit, _run_emit
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +528,69 @@ class TestInboundDelta:
         assert rc == 0
         err = capsys.readouterr().err
         assert "WARN" in err and "did not resolve" in err
+
+
+class TestInboundDeltaCliPath:
+    """Drive the inbound-delta through the FULL argparse grammar (`_run_emit`),
+    not a hand-built Namespace.
+
+    Every ``TestInboundDelta`` case above calls ``cmd_emit`` with a
+    ``_ns(...)`` Namespace, so the ``-v`` count flag is set by hand and the
+    real ``_build_emit_parser`` / ``parse_intermixed_args`` wiring is never
+    exercised. That is exactly the seam the original say/do bug lived in
+    (friction:emit-verbose-receipt-silent): the receipt code printed the line
+    whenever ``verbose and resolved_refs``, yet the live ``sl emit … -v ref=…``
+    path came up silent — a divergence a Namespace test cannot see (cf. the
+    2026-05-17 uuid4-vs-ULID divergence that hid for months behind
+    workspace-runner smoke-tests). These cases pass raw argv so a break in the
+    ``-v`` flag wiring OR emit-time colon-ref resolution fails here. They fail
+    against the pre-fix (colon refs unresolved at emit time) tree.
+    """
+
+    def _run(self, vpath, argv):
+        """Run _run_emit with the vertex path as the first positional (the
+        legacy `loops emit <vpath> …` form) and return (rc, stderr)."""
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = _run_emit([str(vpath), *argv])
+        return rc, err.getvalue()
+
+    def test_cli_verbose_inbound_delta_colon_ref(self, basic_vertex):
+        """`… -v ref=decision:design/seed` prints the inbound-edge line and the
+        refs-resolved count through the real parser (the canonical colon form)."""
+        assert self._run(basic_vertex,
+                         ["decision", "topic=design/seed", "message=seed"])[0] == 0
+        rc, err = self._run(basic_vertex,
+                            ["thread", "name=fu", "status=open",
+                             "ref=decision:design/seed", "-v"])
+        assert rc == 0
+        assert "inbound edge via ref: decision:design/seed" in err
+        assert "refs: 1 resolved" in err
+
+    def test_cli_no_delta_without_verbose(self, basic_vertex):
+        """Without `-v` the resolved ref still counts (refs: 1 resolved) but the
+        per-address inbound-delta line is suppressed."""
+        assert self._run(basic_vertex,
+                         ["decision", "topic=design/seed2", "message=seed"])[0] == 0
+        rc, err = self._run(basic_vertex,
+                            ["thread", "name=fu2", "status=open",
+                             "ref=decision:design/seed2"])
+        assert rc == 0
+        assert "refs: 1 resolved" in err
+        assert "inbound edge via" not in err
+
+    def test_cli_verbose_unresolved_ref_no_delta(self, basic_vertex):
+        """An unresolved ref (declared kind, no matching entity) WARNs and emits
+        no inbound-delta line even under `-v` — no resolved target, no inbound
+        edge (the current contract)."""
+        rc, err = self._run(basic_vertex,
+                            ["thread", "name=miss", "status=open",
+                             "ref=decision:design/does-not-exist", "-v"])
+        assert rc == 0
+        assert "WARN" in err and "did not resolve" in err
+        assert "inbound edge via" not in err
 
 
 class TestAddressSplit:

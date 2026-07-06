@@ -365,7 +365,14 @@ def main(argv: list[str] | None = None) -> int:
         return _print_version()
 
     commands = _build_commands()
-    known = {c.name for c in commands}
+    # painted's run_app injects a ``completion`` command into every roster
+    # (painted.cli.app_runner._with_completion). Mirror the name here so
+    # ``loops completion …`` routes into painted instead of falling through to
+    # the tier-3 vertex pre-router below. Dissolution pending: painted 0.7.0's
+    # run_app(default=) now models "unmatched arg0 ⇒ default handler" — the
+    # feature this whole pre-router compensates for (thread:dispatch-default-
+    # subsumes-vertex-pre-router).
+    known = {c.name for c in commands} | {"completion"}
 
     # Tiers 1+2 and top-level help → painted run_app.
     if not argv or argv[0] in ("-h", "--help") or argv[0] in known:

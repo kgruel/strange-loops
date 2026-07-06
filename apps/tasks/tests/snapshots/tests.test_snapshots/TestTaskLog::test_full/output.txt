@@ -16,8 +16,7 @@
       pid=99999
   2025-01-15T10:03:20Z [worker.output] (shell)
       task=alpha
-      output=running tests...
-all 42 tests passed
+      output=running tests... all 42 tests passed
   2025-01-15T10:04:00Z [worker.output.complete] (shell)
       task=alpha
       status=ok

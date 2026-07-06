@@ -3,10 +3,14 @@
 Fold cuts by kind, stream/ticks by time, confluence by observer, graph by
 connection; Horizon cuts by CYCLE PROXIMITY — how close each boundaried loop
 sits to its next seal. One row per loop that DECLARES a boundary (a vertex-level
-boundary is one row over the whole vertex); loops with no boundary of their own
-never seal on a cycle — they no longer vanish but roll up into a trailing
-``◦ N unarmed · M facts accumulating`` segment (default/-q), expanding to
-per-loop ◦ rows at -v (decision:design/horizon-unarmed-rollup, amending
+boundary is one row over the whole vertex). UNARMED = uncovered by ANY declared
+trigger: a loop counts as unarmed only when it has no boundary of its own AND
+the vertex declares no vertex-level boundary — a vertex boundary's tick sweeps
+the whole window (all kinds), so every loop under it is covered by the armed
+vertex row, and listing it as unarmed would double-report that row's unsealed
+window. Unarmed loops no longer vanish but roll up into a trailing ``◦ N
+unarmed · M facts accumulating`` segment (default/-q), expanding to per-loop ◦
+rows at -v (decision:design/horizon-unarmed-rollup, amending
 decision:design/horizon-build1-scope). Zero unarmed loops → the segment is
 absent entirely (no ``◦ 0 unarmed`` noise).
 
@@ -51,8 +55,9 @@ from ._grammar import (
 )
 from ._grammar import block as _line
 
-# Gutter glyph for an unarmed loop (no boundary of its own — accumulates, never
-# seals on a cycle). TTY-only chrome; the pipe carries the bare words
+# Gutter glyph for an unarmed loop (covered by NO declared trigger — neither
+# its own boundary nor a vertex-level one; accumulates, nothing ever seals it).
+# TTY-only chrome; the pipe carries the bare words
 # (decision:rendering/flags-words-edges-arrows — a status glyph degrades to its
 # word on the pipe).
 _UNARMED = "◦"
@@ -203,6 +208,7 @@ def horizon_view(
     ``piped=True`` forces width=None — the agent channel never clips; every
     count, boundary shape, condition, and absolute seal stamp is carried whole.
     """
+    piped = bool(piped)  # normalize None → False (the type says bool | None)
     if piped:
         width = None
 

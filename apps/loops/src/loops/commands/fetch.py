@@ -1015,8 +1015,9 @@ def fetch_horizon(
     Fold cuts by kind, stream/ticks by time, confluence by observer, graph by
     connection; Horizon cuts by CYCLE PROXIMITY — how close each boundaried loop
     is to its next seal. One row per loop that DECLARES a boundary (a vertex-level
-    boundary is one row over the whole vertex); loops with no boundary never
-    seal and are OMITTED (honest absence, decision:design/horizon-build1-scope).
+    boundary is one row over the whole vertex); loops covered by no trigger at
+    all roll up as ``unarmed`` (see below — amending the omission stance of
+    decision:design/horizon-build1-scope).
 
     The net-new piece is read-side reconstruction of the open window: TickWindow
     models sealed ticks only and ``_vertex_period_start`` is runtime-only, so the
@@ -1030,12 +1031,16 @@ def fetch_horizon(
     composition-lens fetches; they do not filter the boundary roster (a loop's
     armed-ness is a declaration property, not a fact-window one).
 
-    Loops that declare NO boundary of their own never seal on a cycle; their
-    facts just accumulate. They are no longer omitted — they roll up into an
-    ``unarmed`` list (decision:design/horizon-unarmed-rollup), each carrying the
-    SAME open-window reconstruction the armed rows use: an unarmed loop has no
-    per-loop tick series, so its window is all history scoped to its own kind
-    (honest — a loop with no boundary has never sealed on its own cycle).
+    UNARMED = uncovered by ANY declared trigger (decision:design/
+    horizon-unarmed-rollup, as ratified): a loop is unarmed only when it has no
+    boundary of its own AND the vertex declares no vertex-level boundary. A
+    vertex-level boundary's tick sweeps the entire window (all kinds), so every
+    loop under it is COVERED — its accumulation is bounded by the armed vertex
+    row, not silent; listing it as unarmed would double-report that row's
+    unsealed window. Unarmed loops roll up into an ``unarmed`` list, each
+    carrying the SAME open-window reconstruction the armed rows use: an unarmed
+    loop has no tick series, so its window is all history scoped to its own
+    kind (honest — nothing has ever sealed it).
 
     Returns a JSON-clean dict (``last_sealed`` is a float epoch or None)::
 
@@ -1113,37 +1118,40 @@ def fetch_horizon(
     for r in loops:
         del r["_decl"]
 
-    # Unarmed roster — loops declared with no boundary of their own. Rolled up
-    # (not omitted) so the horizon is honest that the vertex carries open,
-    # uncycled accumulation (decision:design/horizon-unarmed-rollup). The window
-    # mirrors the armed reconstruction EXACTLY: an unarmed loop owns no per-loop
-    # tick series, so ``_newest_tick_ts`` is None → the window is all history
-    # scoped to the loop's kind. A vertex-level boundary seals the WHOLE vertex
-    # on one cycle, but an individual loop under it still has no cycle of its
-    # own, so it belongs here — the vertex row already carries the vertex cycle.
+    # Unarmed roster — loops uncovered by ANY declared trigger: no boundary of
+    # their own AND no vertex-level boundary over them (decision:design/
+    # horizon-unarmed-rollup, ratified coverage rule). A vertex-level boundary's
+    # tick sweeps the entire window, so every loop under it is covered — its
+    # accumulation is already the armed vertex row's unsealed window, and
+    # listing it here would double-report that. The window mirrors the armed
+    # reconstruction EXACTLY: an unarmed loop owns no tick series, so
+    # ``_newest_tick_ts`` is None → the window is all history scoped to the
+    # loop's kind.
     unarmed: list[dict] = []
     unarmed_facts = 0
-    for kname, loop_def in ast.loops.items():
-        if loop_def.boundary is not None:
-            continue
-        last_tick = _newest_tick_ts(vertex_path, kname, now_ts)
-        never = last_tick is None
-        since = last_tick if last_tick is not None else 0.0
-        facts = vertex_facts(vertex_path, since, now_ts, kind=kname)
-        window = Counter(
-            f["kind"]
-            for f in facts
-            if never or _fact_epoch(f.get("ts")) > since
-        )
-        wf = sum(window.values())
-        unarmed_facts += wf
-        unarmed.append({
-            "name": kname,
-            "window_facts": wf,
-            "window_kinds": dict(window.most_common()),
-        })
-    # Accumulation-desc, then name — deterministic so --json/both registers agree.
-    unarmed.sort(key=lambda r: (-r["window_facts"], r["name"]))
+    if not ast.boundary:
+        for kname, loop_def in ast.loops.items():
+            if loop_def.boundary is not None:
+                continue
+            last_tick = _newest_tick_ts(vertex_path, kname, now_ts)
+            never = last_tick is None
+            since = last_tick if last_tick is not None else 0.0
+            facts = vertex_facts(vertex_path, since, now_ts, kind=kname)
+            window = Counter(
+                f["kind"]
+                for f in facts
+                if never or _fact_epoch(f.get("ts")) > since
+            )
+            wf = sum(window.values())
+            unarmed_facts += wf
+            unarmed.append({
+                "name": kname,
+                "window_facts": wf,
+                "window_kinds": dict(window.most_common()),
+            })
+        # Accumulation-desc, then name — deterministic so --json/both registers
+        # agree.
+        unarmed.sort(key=lambda r: (-r["window_facts"], r["name"]))
 
     return {
         "vertex": ast.name,

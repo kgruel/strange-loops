@@ -3,9 +3,3 @@
 │ last sealed 3d                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
     grammar  waiting on session · 0 facts in window · last sealed 3d   [status=c
-
-UNARMED
-  ◦ decision  decision 4  4 accumulating
-  ◦ session   session 2  2 accumulating
-  ◦ thread    thread 2  2 accumulating
-  ◦ log       log 1  1 accumulating

@@ -69,8 +69,13 @@ def _build_receipt_lines(
         ))
 
     for u in unresolved:
+        pin_action = (
+            "would be stored as typed unresolved pin"
+            if dry_run else
+            "stored as typed unresolved pin"
+        )
         warn_lines.append((
-            f"WARN: ref '{getattr(u, 'addr', u)}' did not resolve — dropped",
+            f"WARN: ref '{getattr(u, 'addr', u)}' did not resolve — {pin_action}",
             "warn",
         ))
 
@@ -673,7 +678,7 @@ def cmd_emit(
     if args.dry_run:
         import json
         # Dry-run orphan guard: surface the same WARN diagnostics the real path
-        # would (kind-not-declared, fold-key-missing, dropped refs) to STDERR so a
+        # would (kind-not-declared, fold-key-missing, unresolved refs) to STDERR so a
         # preview shows what would orphan. stdout stays the fact JSON — do not
         # change (~8 tests parse fact.to_dict()).
         if emit_status is not None:

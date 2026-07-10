@@ -391,6 +391,167 @@ def _topology_kind_keys_and_stores(
     return merged_kind_keys, store_paths
 
 
+def _is_topology_vertex(vertex_path: Path) -> bool:
+    """Whether a vertex can widen reads through combine/discover topology."""
+    try:
+        ast = _parse_vertex(vertex_path)
+    except LoopsError:
+        return False
+    return ast.combine is not None or ast.discover is not None
+
+
+def _topology_mentions_vertex(root_vertex_path: Path, target_vertex_path: Path) -> bool:
+    """Return True when ``root_vertex_path`` directly includes ``target``."""
+    from lang.population import resolve_vertex
+
+    try:
+        ast = _parse_vertex(root_vertex_path)
+    except LoopsError:
+        return False
+
+    target = target_vertex_path.resolve()
+    base_dir = root_vertex_path.parent
+
+    if ast.discover is not None:
+        for match in sorted(base_dir.glob(ast.discover)):
+            if match.suffix != ".vertex":
+                continue
+            try:
+                if match.resolve() == target:
+                    return True
+            except OSError:
+                continue
+        return False
+
+    if ast.combine is not None:
+        home = loops_home()
+        for entry in ast.combine:
+            vpath = resolve_vertex(entry.name, home)
+            if not vpath.is_absolute():
+                vpath = (base_dir / vpath).resolve()
+            try:
+                if vpath.exists() and vpath.resolve() == target:
+                    return True
+            except OSError:
+                continue
+
+    return False
+
+
+def _candidate_topology_vertices() -> list[Path]:
+    """Likely aggregation vertices that could describe the current emit topology."""
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(path: Path | None) -> None:
+        if path is None:
+            return
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if resolved in seen or not resolved.exists():
+            return
+        seen.add(resolved)
+        candidates.append(resolved)
+
+    add(_find_local_vertex())
+
+    local_loops = Path.cwd() / ".loops"
+    add(local_loops / ".vertex")
+    if local_loops.is_dir():
+        for path in sorted(local_loops.glob("*.vertex")):
+            add(path)
+    for path in sorted(Path.cwd().glob("*.vertex")):
+        add(path)
+
+    home = loops_home()
+    add(home / ".vertex")
+    if home.is_dir():
+        for path in sorted(home.glob("*.vertex")):
+            add(path)
+        for path in sorted(home.glob("*/*.vertex")):
+            add(path)
+
+    return candidates
+
+
+def _topology_roots_for_emit(
+    source_vertex_path: Path,
+    writable_vertex_path: Path,
+) -> tuple[list[Path], list[Path]]:
+    """Scoped topology roots for emit-time ref resolution.
+
+    The read path starts from an explicit aggregation vertex. Emit often starts
+    from a writable child vertex, so this selects a single aggregation context
+    when one is explicit or ambient. If several config aggregators directly
+    include the writable child, resolution is ambiguous: return no resolution
+    roots but keep declaration roots so known cross-store refs become typed
+    unresolved pins instead of guessed edges.
+
+    Returns ``(resolution_roots, declaration_roots)``. Stores are searched only
+    through ``resolution_roots``; kind declarations may also come from
+    ``declaration_roots``.
+    """
+    resolution_roots: list[Path] = []
+    declaration_roots: list[Path] = []
+    seen: set[Path] = set()
+
+    def normalize(path: Path) -> Path | None:
+        try:
+            return path.resolve()
+        except OSError:
+            return None
+
+    def add(path: Path, roots: list[Path]) -> None:
+        resolved = normalize(path)
+        if resolved is None:
+            return
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        roots.append(resolved)
+
+    if _is_topology_vertex(source_vertex_path):
+        add(source_vertex_path, resolution_roots)
+        return resolution_roots, list(resolution_roots)
+
+    target = normalize(writable_vertex_path)
+    if target is None:
+        return [], []
+
+    local_root = _find_local_vertex()
+    if (
+        local_root is not None
+        and normalize(local_root) != target
+        and _is_topology_vertex(local_root)
+        and _topology_mentions_vertex(local_root, writable_vertex_path)
+    ):
+        add(local_root, resolution_roots)
+        return resolution_roots, list(resolution_roots)
+
+    candidate_roots: list[Path] = []
+    candidate_seen: set[Path] = set()
+    for candidate in _candidate_topology_vertices():
+        resolved = normalize(candidate)
+        if resolved is None:
+            continue
+        if resolved == target:
+            continue
+        if _topology_mentions_vertex(candidate, target):
+            if resolved not in candidate_seen:
+                candidate_seen.add(resolved)
+                candidate_roots.append(resolved)
+
+    if len(candidate_roots) == 1:
+        add(candidate_roots[0], resolution_roots)
+        return resolution_roots, list(resolution_roots)
+    if len(candidate_roots) > 1:
+        return [], candidate_roots
+
+    return [], []
+
+
 # --- Entity reference resolution ---
 
 
@@ -442,11 +603,14 @@ def _resolve_entity_refs(
     Scans payload values for entity addresses. Canonical form is ``kind:key``
     (colon); the legacy ``kind/key`` (slash) form is also accepted (_split_addr).
     When a value matches a declared kind, looks up the most recent fact ULID
-    for that entity — first in the local store, then across the full topology
-    if the local store misses.
+    for that entity — first in the local store, then across the scoped combine
+    topology if the local store misses.
 
     The original field is preserved (navigable address). A sibling field
-    {name}_ref is added with the pinned ULID (provenance anchor).
+    {name}_ref is added with the pinned ULID (provenance anchor). If the
+    address is typed by a known topology kind but the target store/entity is not
+    mounted at emit time, the address is preserved in ``_unresolved_refs`` as a
+    typed deferred pin instead of being discarded.
 
     The emitted kind's own fold-key field (when ``kind`` is supplied) is
     skipped by the scan: that value names THIS fact's slot in its own kind's
@@ -461,8 +625,10 @@ def _resolve_entity_refs(
         whose addresses resolved to a ULID
       * ``unresolved_refs`` — refs where the value LOOKED like an address
         (addr_kind is a declared kind in this vertex or its topology) but no
-        matching entity was found. Values whose addr_kind isn't declared
-        anywhere are not surfaced — those weren't intended as refs.
+        matching entity was found. Those refs are also stored in
+        ``_unresolved_refs`` on the payload as typed deferred pins. Values whose
+        addr_kind isn't declared anywhere are not surfaced — those weren't
+        intended as refs.
       * ``resolved_refs`` — refs that DID resolve, one ``ResolvedRef`` per
         pinned ULID. The receipt path reads these to report the inbound-edge
         delta (each is one new inbound edge on its target entity).
@@ -473,7 +639,9 @@ def _resolve_entity_refs(
     """
     from engine import StoreReader
 
-    # Build kind → key_field map from local vertex declaration
+    source_vertex_path = vertex_path
+
+    # Build kind → key_field map from local writable vertex declaration.
     try:
         writable = _resolve_writable_vertex(vertex_path)
     except LoopsError:
@@ -497,13 +665,34 @@ def _resolve_entity_refs(
         nonlocal _topo
         if _topo is not None:
             return _topo["kind_keys"], _topo["stores"]
-        root = _find_local_vertex()
-        if root is None or root.resolve() == vertex_path.resolve():
-            _topo = {"kind_keys": {}, "stores": []}
-            return _topo["kind_keys"], _topo["stores"]
-        topo_kind_keys, topo_stores = _topology_kind_keys_and_stores(root)
-        _topo = {"kind_keys": topo_kind_keys, "stores": topo_stores}
-        return topo_kind_keys, topo_stores
+        resolution_roots, declaration_roots = _topology_roots_for_emit(
+            source_vertex_path, vertex_path
+        )
+
+        merged_kind_keys: dict[str, str] = {}
+        merged_stores: list[Path] = []
+        seen_stores: set[Path] = set()
+        root_topologies: dict[Path, tuple[dict[str, str], list[Path]]] = {}
+        for root in [*declaration_roots, *resolution_roots]:
+            if root in root_topologies:
+                continue
+            topo_kind_keys, topo_stores = _topology_kind_keys_and_stores(root)
+            root_topologies[root] = (topo_kind_keys, topo_stores)
+            merged_kind_keys.update(topo_kind_keys)
+        for root in resolution_roots:
+            _topo_kind_keys, topo_stores = root_topologies[root]
+            for sp in topo_stores:
+                try:
+                    resolved_store = sp.resolve()
+                except OSError:
+                    continue
+                if resolved_store in seen_stores:
+                    continue
+                seen_stores.add(resolved_store)
+                merged_stores.append(sp)
+
+        _topo = {"kind_keys": merged_kind_keys, "stores": merged_stores}
+        return merged_kind_keys, merged_stores
 
     def _try_resolve(sp: Path, kind: str, key_field: str, value: str) -> str | None:
         try:
@@ -559,6 +748,7 @@ def _resolve_entity_refs(
     # independently and concatenate the resolved IDs. All other fields are
     # scanned as single addresses — preserves single-ref-on-any-field semantics.
     refs: dict[str, str] = {}
+    unresolved_pins: list[dict[str, str]] = []
     unresolved: list[UnresolvedRef] = []
     resolved: list[ResolvedRef] = []
     for field_name, value in payload.items():
@@ -584,11 +774,25 @@ def _resolve_entity_refs(
                 resolved.append(ResolvedRef(field=field_name, addr=addr, ref_id=rid))
             elif declared:
                 unresolved.append(UnresolvedRef(field=field_name, addr=addr))
+                parts = _split_addr(addr)
+                if parts is not None:
+                    addr_kind, addr_key = parts
+                    unresolved_pins.append({
+                        "field": field_name,
+                        "addr": addr,
+                        "kind": addr_kind,
+                        "key": addr_key,
+                    })
         if resolved_ids:
             refs[f"{field_name}_ref"] = ",".join(resolved_ids)
 
-    if refs:
+    if refs or unresolved_pins:
         payload = {**payload, **refs}
+        if unresolved_pins:
+            existing = payload.get("_unresolved_refs")
+            if isinstance(existing, list):
+                unresolved_pins = [*existing, *unresolved_pins]
+            payload["_unresolved_refs"] = unresolved_pins
 
     return payload, unresolved, resolved
 

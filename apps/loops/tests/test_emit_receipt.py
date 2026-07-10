@@ -4,7 +4,7 @@ Covers the six diagnostic paths the receipt is responsible for:
   1. clean success — stored line with ULID + refs-resolved-count
   2. kind-not-declared — WARN line + stored line with <no-fold>
   3. fold-key-missing — WARN line + stored line with <no-fold>
-  4. unresolved ref — WARN line per dropped ref
+  4. unresolved ref — WARN line per typed unresolved pin
   5. --strict / env / vertex-strict refuses on each failure
   6. --quiet suppresses success line only
 

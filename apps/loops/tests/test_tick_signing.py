@@ -164,6 +164,159 @@ class TestAddObserverKey:
         assert rc == 1
         assert "invalid --key" in capsys.readouterr().err
 
+    def test_keygen_bootstraps_flat_self_observer_key(self, tmp_path, monkeypatch):
+        """friction:bootstrap-tick-key-not-minted — bootstrapping a fresh store
+        the documented way (`loops add <v> observer <human>/<agent> --keygen`)
+        must leave the FIRST seal signed AND verifiable.
+
+        Before the fix, --keygen for a <human>/<agent> observer minted only that
+        per-observer FACT key, while tick_signer_for loads the flat
+        self-observer key (keys/ed25519.key). So the first seal appended
+        silently unsigned until someone separately ran --keygen for the stem.
+        """
+        from loops.commands.add import _add_observer
+        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from loops.commands.store import _run_verify
+
+        vpath = _make_vertex(tmp_path)   # hand-written vertex, NO keys yet
+        monkeypatch.chdir(tmp_path)      # local-first resolution finds x.vertex
+
+        assert tick_signer_for(vpath) is None  # fresh store: pre-signature era
+
+        rc = _add_observer("x", ["kyle/claude", "--keygen"])
+        assert rc == 0
+
+        # Both the per-observer fact key AND the flat self-observer tick key
+        # are now registered — the store is fully signing-capable.
+        keys = declared_observer_keys(vpath)
+        assert set(keys) == {"x", "kyle/claude"}
+        assert tick_signer_for(vpath) is not None
+
+        # First seal signs (boundary_every=1 → each emit mints a tick).
+        _emit(vpath, "ping", service="api")
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        sigs = [r[0] for r in conn.execute("SELECT signature FROM ticks")]
+        conn.close()
+        assert sigs and all(s for s in sigs)
+
+        # …and verifies against the registry.
+        rc = _run_verify([str(vpath)])
+        assert rc == 0
+
+    def test_keygen_for_self_observer_does_not_double_register(
+        self, tmp_path, monkeypatch
+    ):
+        """The self-observer --keygen path already mints+registers the flat key;
+        the self-observer bootstrap must not fire a second, colliding splice."""
+        from loops.commands.add import _add_observer
+        from loops.commands.signing import declared_observer_keys, tick_signer_for
+
+        vpath = _make_vertex(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        rc = _add_observer("x", ["x", "--keygen"])
+        assert rc == 0
+        assert list(declared_observer_keys(vpath)) == ["x"]
+        assert tick_signer_for(vpath) is not None
+
+    def test_keygen_backfills_key_into_keyless_self_observer(
+        self, tmp_path, monkeypatch
+    ):
+        """FINDING 1: a pre-existing KEYLESS self-observer declaration
+        (`observers { x { } }`) must get the flat pubkey BACKFILLED. Otherwise
+        the flat key mints, ticks sign with it, but the registry — which skips
+        keyless observers — cannot verify them. Keying off node presence (not
+        the declared key) left this broken; keying off declared_observer_keys
+        fixes it.
+        """
+        from loops.commands.add import _add_observer
+        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from loops.commands.store import _run_verify
+
+        vpath = _make_vertex(tmp_path)
+        # Hand-written keyless self-observer declaration.
+        vpath.write_text(vpath.read_text() + "\nobservers {\n  x {\n  }\n}\n")
+        assert declared_observer_keys(vpath) == {}  # keyless: registry empty
+        monkeypatch.chdir(tmp_path)
+
+        rc = _add_observer("x", ["kyle/claude", "--keygen"])
+        assert rc == 0
+
+        # The stem 'x' now carries the flat pubkey (backfilled into the
+        # existing node), alongside the new per-observer key.
+        keys = declared_observer_keys(vpath)
+        assert "x" in keys and "kyle/claude" in keys
+        assert tick_signer_for(vpath) is not None
+
+        # Signed AND verifiable — the backfilled stem key matches the flat
+        # key the tick signer uses.
+        _emit(vpath, "ping", service="api")
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        sigs = [r[0] for r in conn.execute("SELECT signature FROM ticks")]
+        conn.close()
+        assert sigs and all(s for s in sigs)
+        assert _run_verify([str(vpath)]) == 0
+
+    def test_failed_keygen_add_does_not_enable_tick_signing(
+        self, tmp_path, monkeypatch
+    ):
+        """FINDING 2 / fail-atomic: a --keygen add that FAILS (the requested
+        observer is already declared) must not have enabled tick signing as a
+        side effect. The self-observer bootstrap is deferred until AFTER the
+        requested splice succeeds, so a failed add leaves seal behavior
+        unchanged.
+        """
+        from loops.commands.add import _add_observer
+        from loops.commands.signing import declared_observer_keys, tick_signer_for
+
+        vpath = _make_vertex(tmp_path)
+        # Pre-declare a bare observer so the requested add collides (bare names
+        # are what the splice's duplicate-check reliably detects).
+        vpath.write_text(vpath.read_text() + "\nobservers {\n  bob {\n  }\n}\n")
+        monkeypatch.chdir(tmp_path)
+        assert tick_signer_for(vpath) is None  # pre-signature era
+
+        rc = _add_observer("x", ["bob", "--keygen"])
+        assert rc == 1  # duplicate observer → add fails
+
+        # No flat self-observer key registered; tick signing NOT enabled.
+        assert "x" not in declared_observer_keys(vpath)
+        assert tick_signer_for(vpath) is None
+
+    def test_slashed_name_bootstrap_registers_stem_not_full_name(self, tmp_path):
+        """FINDING 3 (REBUTTED): the old init._bootstrap_signing spliced the
+        vertex's full `name` as a bare KDL node. For a slashed name that node
+        does NOT parse, so the old path silently NEVER registered the full name
+        — it registered nothing. The new code registers the vertex STEM, which
+        is exactly what tick_signer_for (observer = vertex stem) verifies
+        against. Evidence, not argument.
+        """
+        from lang import parse_vertex
+        from loops.commands.add import ensure_self_observer_signing
+        from loops.commands.signing import declared_observer_keys, tick_signer_for
+
+        base = (
+            'name "proj"\nstore "./x.db"\n'
+            'loops {\n  ping {\n    fold {\n      n "count"\n    }\n  }\n}\n'
+        )
+        # Old behavior: bare slashed node name is unparseable → the parse-gate
+        # would have refused the write → nothing registered.
+        import pytest
+        with pytest.raises(Exception):
+            parse_vertex(
+                base + 'observers {\n  team/proj {\n    key "AAAA"\n  }\n}\n'
+            )
+
+        # New behavior: stem registration, and it verifies. Mirror init's
+        # slashed layout (.loops/team/proj.vertex → stem "proj").
+        vdir = tmp_path / "team"
+        vdir.mkdir()
+        vpath = vdir / "proj.vertex"
+        vpath.write_text(base)
+        assert ensure_self_observer_signing(vpath) is True
+        assert list(declared_observer_keys(vpath)) == ["proj"]
+        assert tick_signer_for(vpath) is not None
+
 
 def _seed_config_vertex(loops_home: Path, name: str = "proj") -> Path:
     """Config-level source vertex so init takes the stamp path (the

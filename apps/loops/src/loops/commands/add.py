@@ -269,6 +269,23 @@ def _add_observer(target: str, argv: list[str]) -> int:
             **({"key": args.key} if args.key else {}),
         },
     )
+
+    # friction:bootstrap-tick-key-not-minted. The per-observer key minted above
+    # signs this observer's FACTS, but tick signing loads only the flat
+    # self-observer key. Bootstrapping a store via `observer <human>/<agent>
+    # --keygen` would otherwise seal SILENTLY unsigned — so mint + register the
+    # flat self-observer key too. Deferred until AFTER the requested splice
+    # succeeds (Finding 2 / fail-atomic): a FAILED add must not silently enable
+    # tick signing and change future seal behavior. The self case is skipped —
+    # it already registered the stem above, and re-registering would collide.
+    if (
+        rc == 0
+        and args.keygen
+        and args.name != vertex_path.stem
+        and ensure_self_observer_signing(vertex_path)
+    ):
+        keys_note += " (+ bootstrapped self-observer tick key)"
+
     if rc == 0:
         bits = [args.name]
         if args.identity:
@@ -279,6 +296,85 @@ def _add_observer(target: str, argv: list[str]) -> int:
             bits.append(f"key={args.key[:8]}…")
         _ok(f"added observer {' '.join(bits)} to {_display_path(vertex_path)}{keys_note}")
     return rc
+
+
+def ensure_self_observer_signing(vertex_path: Path) -> bool:
+    """Ensure the vertex can both SIGN and VERIFY its own ticks.
+
+    friction:bootstrap-tick-key-not-minted. Tick signing is asymmetric with
+    fact signing: ``tick_signer_for`` loads ONLY the flat self-observer key
+    (``keys/ed25519.key``, observer = vertex stem), while ``--keygen`` for a
+    ``<human>/<agent>`` observer mints only that per-observer FACT key. So a
+    store bootstrapped by ``loops add <v> observer <human>/<agent> --keygen``
+    alone has no flat key and seals SILENTLY unsigned until someone separately
+    runs ``--keygen`` for the vertex stem.
+
+    A signed, verifiable seal needs BOTH the flat key on disk (so
+    tick_signer_for fires) AND the self-observer's public key in the registry
+    (so tick_verifier_for — any-declared-key — accepts it). This mints/loads
+    the flat key (idempotent) and registers the flat pubkey under the stem if
+    the vertex parses and the stem does not ALREADY DECLARE A KEY. Returns True
+    when this call newly registered the key (the store crossed into
+    tick-signing), False when it was already keyed or the vertex doesn't yet
+    parse.
+
+    The guard keys off the declared KEY, not mere presence of a stem node: a
+    keyless hand-written ``observers { <stem> { } }`` would otherwise let ticks
+    sign with the flat key while the registry can't verify them
+    (declared_observer_keys skips keyless observers). So an existing keyless
+    stem node gets the key BACKFILLED into it rather than left broken.
+
+    Shared entry point: ``loops init`` (whole-store bootstrap) and
+    ``loops add <v> observer <name> --keygen`` both ride it.
+    """
+    from loops.commands.signing import declared_observer_keys, ensure_signing_key
+
+    stem = vertex_path.stem
+    keypair = ensure_signing_key(vertex_path)  # flat (self-observer) layout
+
+    # The minimal init stub (empty loops block) does not parse until filled in;
+    # defer registration rather than emit a misleading "would not parse". The
+    # key + gitignore are already in place — a later re-run registers the
+    # observer once the vertex parses (this is idempotent).
+    try:
+        from lang import parse_vertex_file
+
+        parse_vertex_file(vertex_path)
+    except Exception:  # noqa: BLE001 — any parse failure defers registration
+        return False
+
+    # Idempotence + correctness: the invariant is a DECLARED KEY for the stem,
+    # not just a stem node. Already keyed → nothing to do.
+    if stem in declared_observer_keys(vertex_path):
+        return False
+
+    if _child_exists(vertex_path.read_text(), ["observers"], stem):
+        # Keyless stem node exists — backfill the key INTO it. (The stem is a
+        # Path.stem, so always a bare KDL identifier — no quoting needed.)
+        parent = ["observers", stem]
+        child_text = f'key "{keypair.public_b64}"'
+        ensure_parent_kdl = None
+        # A key line is not a block, so this duplicate-check is inert (it would
+        # only fire on a `key "<stem>" { }` block, which cannot exist).
+        duplicate_check = ("key", stem)
+    else:
+        parent = ["observers"]
+        child_text = f'{stem} {{\n  key "{keypair.public_b64}"\n}}'
+        ensure_parent_kdl = "observers {\n}\n"
+        duplicate_check = ("observer", stem)
+
+    rc = _splice_into(
+        vertex_path=vertex_path,
+        parent=parent,
+        ensure_parent_kdl=ensure_parent_kdl,
+        child_text=child_text,
+        duplicate_check=duplicate_check,
+        change_payload={
+            "op": "add", "target": "observer",
+            "name": stem, "key": keypair.public_b64,
+        },
+    )
+    return rc == 0
 
 
 # ---------------------------------------------------------------------------

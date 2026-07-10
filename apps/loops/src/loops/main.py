@@ -47,7 +47,7 @@ from loops.cli.lens import (  # noqa: F401
 )
 _VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
-_SETUP_COMMANDS = frozenset({"init", "whoami", "ls", "add", "rm", "export"})
+_SETUP_COMMANDS = frozenset({"init", "orient", "whoami", "ls", "add", "rm", "export"})
 _COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
 _VERTEX_OPS = frozenset({"read", "emit", "close", "sync", "store", "cite", "ls", "add", "rm", "export"})
 

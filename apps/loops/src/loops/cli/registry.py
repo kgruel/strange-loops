@@ -133,6 +133,7 @@ COMMANDS: dict[str, View] = {
     "compile": _legacy_view_argv_only("_run_compile"),
     "validate": _legacy_view_argv_only("_run_validate"),
     "store": _view("loops.cli.views.store"),
+    "orient": _view("loops.cli.views.orient"),
     "init": _legacy_view_argv_only("_run_init"),
     "whoami": _legacy_view_argv_only("_run_whoami"),
     "ls": _view("loops.cli.views.population", "run_ls"),

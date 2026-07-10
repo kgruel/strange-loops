@@ -253,6 +253,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "test": "Run a .loop source and preview facts",
     "compile": "Compile a .loop / .vertex file",
     "validate": "Validate .loop / .vertex syntax",
+    "orient": "Print the session-start orient block",
     "init": "Scaffold a vertex from a template",
     "whoami": "Show the resolved observer identity",
     "ls": "List vertices (or template populations)",

@@ -431,10 +431,10 @@ def cmd_init(args: argparse.Namespace, *, reporter: "Reporter | None" = None) ->
         home = loops_home()
         root = home / ".vertex"
         if root.exists():
-            from painted import show, Block
+            from painted import paint, Block
             from painted.palette import current_palette
 
-            show(
+            paint(
                 Block.text(f"Already initialized: {root}", current_palette().muted),
                 file=sys.stdout,
             )

@@ -128,10 +128,10 @@ def _run_export(argv: list[str]) -> int:  # noqa: ARG001 — argv kept for back-
     """
     import sys
 
-    from painted import Block, show
+    from painted import Block, paint
     from painted.palette import current_palette
 
-    show(
+    paint(
         Block.text(
             "loops export was retired in Phase 3. "
             "The .list file is canonical now; use `loops add/rm <vertex> row` "

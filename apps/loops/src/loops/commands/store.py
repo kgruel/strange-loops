@@ -235,7 +235,7 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         print(_json.dumps({**report, "fact_signatures": fact_report}, indent=2))  # noqa: T201 — machine output path
         return 0 if report["ok"] and fact_report["ok"] else 1
 
-    from painted import Block, Style, join_vertical, show
+    from painted import Block, Style, join_vertical, paint
     from painted.views import Severity, callout
 
     ok = report["ok"] and fact_report["ok"]
@@ -347,7 +347,7 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
                 f"  {'✓' if t['ok'] else '✗'} {ts} {t['name']} · {sig} · "
                 f"{t['window_facts']} facts · cursor → {cursor}"
             )
-    show(join_vertical(*blocks))
+    paint(join_vertical(*blocks))
     return 0 if ok else 1
 
 
@@ -436,7 +436,7 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
         print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
         return 0 if verification.ok else 1
 
-    from painted import Block, Style, show
+    from painted import Block, Style, paint
 
     mark = "✓" if verification.ok else "✗"
     lines = []
@@ -468,7 +468,7 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # Compose real rows — Block.text("\n".join(...)) flattens to one line
     # under painted 0.4.0 (friction:block-text-multiline-passthrough-broke-on-040).
     from painted import join_vertical
-    show(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
     return 0 if verification.ok else 1
 
 
@@ -534,10 +534,10 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
         print(_json.dumps({**receipt, "verified": ok}, indent=2))  # noqa: T201 — machine output path
         return 0 if ok else 1
 
-    from painted import Block, Style, show
+    from painted import Block, Style, paint
 
     head = receipt["head"][:16] + "…" if receipt["head"] else "(no chain)"
-    show(Block.text(
+    paint(Block.text(
         f"{'✓' if ok else '✗'} {db_path.name}: re-anchored — "
         f"{receipt['facts_resigned']} facts re-signed, "
         f"{receipt['ticks_rechained']} ticks re-chained "

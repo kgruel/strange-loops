@@ -116,12 +116,12 @@ def _emit_lines(lines: list[tuple[str, str]]) -> None:
     """Render receipt lines to stderr via painted, mapping role→palette."""
     if not lines:
         return
-    from painted import show, Block
+    from painted import paint, Block
     from painted.palette import current_palette
     p = current_palette()
     role_map = {"error": p.error, "warn": p.error, "muted": p.muted}
     for text, role in lines:
-        show(Block.text(text, role_map.get(role, p.muted)), file=sys.stderr)
+        paint(Block.text(text, role_map.get(role, p.muted)), file=sys.stderr)
 
 
 def _resolve_strict(args: argparse.Namespace, vertex_path: Path | None) -> tuple[bool, bool]:
@@ -398,14 +398,14 @@ def _print_observer_declaration(
     entry. Goes to STDERR so machine-readable stdout (fact / Surface JSON) stays
     clean.
     """
-    from painted import show, Block, join_vertical
+    from painted import paint, Block, join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
     decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
     # join_vertical, NOT a raw "\n" in Block.text — painted 0.4.0 flattens an
     # embedded newline to a space (friction:block-text-multiline-passthrough-broke-on-040).
-    show(
+    paint(
         join_vertical(
             Block.text(f"declare: add to {vertex_path} —", p.muted),
             Block.text("observers {", p.muted),
@@ -425,7 +425,7 @@ def _emit_json_receipt(vertex_path: Path | None, kind: str) -> None:
     """
     import json as _json
 
-    from painted import show, Block
+    from painted import paint, Block
     from painted.palette import current_palette
 
     if vertex_path is None:
@@ -440,7 +440,7 @@ def _emit_json_receipt(vertex_path: Path | None, kind: str) -> None:
         state = fetch_fold(vertex_path, kind=kind, observer=None)
         surface = project(state)
         text = _json.dumps(to_dict(surface), sort_keys=True, default=str)
-        show(Block.text(text, current_palette().muted), file=sys.stdout)
+        paint(Block.text(text, current_palette().muted), file=sys.stdout)
     except Exception:
         return  # receipt is best-effort
 
@@ -460,7 +460,7 @@ def cmd_emit(
         _resolve_writable_vertex, _resolve_vertex_store_path,
         _resolve_entity_refs, _extract_edge_fields, classify_emit_status,
     )
-    from painted import show, Block
+    from painted import paint, Block
     from painted.palette import current_palette
     p = current_palette()
 
@@ -478,7 +478,7 @@ def cmd_emit(
     # "the following arguments are required: kind") instead of previewing a
     # kind:null fact (false success) or crashing inside program.receive.
     if kind is None:
-        show(
+        paint(
             Block.text(
                 "Error: emit requires a kind "
                 "(e.g. `loops emit <vertex> decision topic=…`)",
@@ -517,7 +517,7 @@ def cmd_emit(
                 else:
                     # Unresolvable explicit vertex — error. (A kind or message word
                     # never arrives here as args.vertex: classification is upstream.)
-                    show(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
+                    paint(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
                     return 1
 
         if vertex_ref is None:
@@ -526,7 +526,7 @@ def cmd_emit(
             if local is not None:
                 vertex_path = local.resolve()
             else:
-                show(
+                paint(
                     Block.text(
                         "No vertex found. Run 'loops init' first.", p.error
                     ),
@@ -543,7 +543,7 @@ def cmd_emit(
             list(getattr(args, "file", None) or []),
         )
     except LoopsError as e:
-        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
     emit_warnings: list[str] = []
@@ -576,11 +576,11 @@ def cmd_emit(
     if vertex_path is not None:
         obs_check = check_emit(vertex_path, observer, kind)
         if obs_check.status == "forbidden":
-            show(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+            paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
             return 1
         if obs_check.status == "undeclared":
             if strict_mode:
-                show(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+                paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
                 # The declaration hint is most useful exactly here — print it
                 # before refusing so the actor can fix the strict rejection.
                 if declare_observer:
@@ -599,7 +599,7 @@ def cmd_emit(
         writable_path = _resolve_writable_vertex(vertex_path)
         if writable_path is None:
             if not args.dry_run:
-                show(
+                paint(
                     Block.text("Error: vertex has no store configured", p.error),
                     file=sys.stderr,
                 )
@@ -612,7 +612,7 @@ def cmd_emit(
             store_path = _resolve_vertex_store_path(writable_path)
     except LoopsError as e:
         if not args.dry_run:
-            show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+            paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
             return 1
         store_path = None
 
@@ -694,7 +694,7 @@ def cmd_emit(
                 dry_run=True,
             )
             _emit_lines(warn_lines)
-        show(
+        paint(
             Block.text(
                 json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
             ),
@@ -740,7 +740,7 @@ def cmd_emit(
                 # STDERR: this is a receipt diagnostic. On stdout it would
                 # prepend a non-JSON line to the --json Surface dict and corrupt
                 # the machine-readable contract.
-                show(
+                paint(
                     Block.text(
                         f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
                         p.muted,
@@ -808,14 +808,14 @@ def cmd_emit(
         # Lazy import keeps engine off the CLI-startup import path.
         from engine.sqlite_store import UnsignedTickInSignedEra
         if isinstance(e, UnsignedTickInSignedEra):
-            show(Block.text(
+            paint(Block.text(
                 f"seal refused: {e}\n"
                 "  the window's facts are stored; run again once the signing "
                 "key is available to close the accumulated window.",
                 p.error,
             ), file=sys.stderr)
             return 1
-        show(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
         return 1
 
 
@@ -957,7 +957,7 @@ def _run_close(
 
     from atoms import Fact
     from engine import vertex_facts, vertex_fold
-    from painted import show, Block, Style
+    from painted import paint, Block, Style
     from painted.palette import current_palette
     from loops.commands.identity import resolve_local_vertex, resolve_observer, validate_emit
     from loops.commands.resolve import _resolve_vertex_for_dispatch, _resolve_writable_vertex
@@ -1088,17 +1088,17 @@ def _run_close(
         ]
 
     # Show what we found
-    show(Block.text(f"Closing {args.kind}: {args.name}", Style(bold=True)))
+    paint(Block.text(f"Closing {args.kind}: {args.name}", Style(bold=True)))
     if target_item.ts:
         opened = datetime.fromtimestamp(target_item.ts, tz=timezone.utc)
-        show(Block.text(f"  opened: {opened.strftime('%Y-%m-%d %H:%M')}", Style(dim=True)))
+        paint(Block.text(f"  opened: {opened.strftime('%Y-%m-%d %H:%M')}", Style(dim=True)))
 
     if produced:
-        show(Block.text(f"  produced ({len(produced)}, {produced_mode}):", Style()))
+        paint(Block.text(f"  produced ({len(produced)}, {produced_mode}):", Style()))
         for pr in produced:
-            show(Block.text(f"    {pr['kind']}: {pr['key']}", Style(dim=True)))
+            paint(Block.text(f"    {pr['kind']}: {pr['key']}", Style(dim=True)))
     else:
-        show(Block.text("  no associated artifacts found", Style(dim=True)))
+        paint(Block.text("  no associated artifacts found", Style(dim=True)))
 
     if args.dry_run:
         import json as _json
@@ -1106,7 +1106,7 @@ def _run_close(
         # flattens to a space under painted 0.4.0
         # (friction:block-text-multiline-passthrough-broke-on-040).
         from painted import join_vertical
-        show(join_vertical(
+        paint(join_vertical(
             Block.text("", Style()),
             Block.text(f"  dry-run payload: {_json.dumps(resolution_payload)}", Style(dim=True)),
         ))
@@ -1132,7 +1132,7 @@ def _run_close(
     )
     program.receive(fact)
 
-    show(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))
+    paint(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))
     return 0
 
 

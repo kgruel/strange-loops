@@ -431,14 +431,14 @@ def _resolve_population_list(target: str) -> Path | None:
 
 
 def _ok(msg: str) -> None:
-    from painted import Block, show
+    from painted import Block, paint
     from painted.palette import current_palette
 
-    show(Block.text(msg, current_palette().success), file=sys.stdout)
+    paint(Block.text(msg, current_palette().success), file=sys.stdout)
 
 
 def _err(msg: str) -> None:
-    from painted import Block, show
+    from painted import Block, paint
     from painted.palette import current_palette
 
-    show(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)
+    paint(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)

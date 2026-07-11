@@ -700,7 +700,7 @@ def _summarize_sources(
 
 
 def _err(msg: str) -> None:
-    from painted import Block, show
+    from painted import Block, paint
     from painted.palette import current_palette
 
-    show(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)
+    paint(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)

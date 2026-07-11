@@ -108,10 +108,10 @@ def _parse_vertex(vertex_path: Path):
 
 def _err(msg: str, file: TextIO | None = None) -> None:
     """Show an error message through painted."""
-    from painted import show, Block
+    from painted import paint, Block
     from painted.palette import current_palette
 
-    show(Block.text(msg, current_palette().error), file=file or sys.stderr)
+    paint(Block.text(msg, current_palette().error), file=file or sys.stderr)
 
 
 # --- Warning / best-effort functions (catch LoopsError, never raise) ---

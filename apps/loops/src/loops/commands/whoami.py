@@ -42,7 +42,7 @@ def _run_whoami(argv: list[str]) -> int:
         p.print_help(_sys.stdout)
         return 0
 
-    from painted import show, Block, Style
+    from painted import paint, Block, Style
     from .identity import resolve_observer
 
     observer = resolve_observer()
@@ -50,7 +50,7 @@ def _run_whoami(argv: list[str]) -> int:
         # Fall back to identity store — handles multi-observer .vertex
         observer = _whoami_from_identity_store()
     if not observer:
-        show(Block.text("No observer identity resolved.", Style(dim=True)))
+        paint(Block.text("No observer identity resolved.", Style(dim=True)))
         return 1
-    show(Block.text(observer, Style()))
+    paint(Block.text(observer, Style()))
     return 0

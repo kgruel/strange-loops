@@ -85,13 +85,13 @@ def _run_sync_aggregate(
     reporter: "Reporter | None" = None,
 ) -> int:
     """Sync each combine child independently and aggregate results."""
-    from painted import run_cli, show, Block
+    from painted import run_cli, paint, Block
     from painted.palette import current_palette
     from engine import load_vertex_program
 
     rep = _reporter(reporter)
     label = "force" if force else "cadence-gated"
-    show(
+    paint(
         Block.text(
             f"Syncing {parent_name}: {len(child_paths)} children ({label})",
             current_palette().muted,
@@ -194,7 +194,7 @@ def _run_sync(
     Default: evaluate cadence predicates, run stale sources.
     --force: run all sources unconditionally.
     """
-    from painted import run_cli, show, Block
+    from painted import run_cli, paint, Block
     from painted.palette import current_palette
     from engine import load_vertex_program
     from loops.commands.resolve import _resolve_named_vertex
@@ -279,7 +279,7 @@ def _run_sync(
         rep.err(f"[ERROR] {fact.observer}: {payload}")
 
     label = "force" if force else "cadence-gated"
-    show(
+    paint(
         Block.text(
             f"Syncing {program.name}: {len(program.sources)} sources ({label})",
             current_palette().muted,

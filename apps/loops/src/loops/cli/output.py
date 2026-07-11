@@ -12,7 +12,7 @@ the eventual painted framework/renderer split painless on the loops side
 — we change one file.
 
 Reporter has two implementations:
-  - PaintedReporter: production. Delegates to painted.show / print_block.
+  - PaintedReporter: production. Delegates to painted.paint / print_block.
   - BufferReporter: tests. Captures err/out/blocks into lists for
     assertion. Demonstrates that every CLI invocation is testable
     end-to-end via ``cli.app.main(argv, reporter=BufferReporter())``
@@ -38,7 +38,7 @@ from painted.core.cell import Style
 from painted.core.fidelity import Fidelity
 from painted.core.writer import print_block
 from painted.core.zoom import Zoom
-from painted.display import show
+from painted.display import paint
 from painted.palette import current_palette
 
 
@@ -80,7 +80,7 @@ class Reporter(Protocol):
 
     def show(self, value: Any) -> None:
         """Show an action result — a string, a Block, or any value
-        accepted by painted.show. Used for emit/cite receipts and other
+        accepted by painted.paint. Used for emit/cite receipts and other
         action-shape outputs."""
         ...
 
@@ -140,17 +140,17 @@ class PaintedReporter:
     def err(self, message: str) -> None:
         # Use painted's palette for consistent error color across CLI.
         palette = current_palette()
-        show(Block.text(message, palette.error), file=sys.stderr)
+        paint(Block.text(message, palette.error), file=sys.stderr)
 
     def msg(self, message: str) -> None:
         # Match the original loops.main._msg styling — non-error messages
         # render in the success palette (green checkmark vibe) so init/emit
         # confirmation lines remain visually distinct from plain output.
         palette = current_palette()
-        show(Block.text(message, palette.success))
+        paint(Block.text(message, palette.success))
 
     def show(self, value: Any) -> None:
-        show(value)
+        paint(value)
 
     def print_block(self, block: Block) -> None:
         print_block(block, use_ansi=self.use_ansi)

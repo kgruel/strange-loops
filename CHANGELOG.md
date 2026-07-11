@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — static-honest wave (0.6.0)
+## 0.6.0 — 2026-07-11
 
 The **static-honest wave** (`feat/static-honest-spine`): a unified TTY/piped
 rendering grammar (spine G0–G6) plus four new read-side views built on it —
@@ -27,6 +27,19 @@ Confluence, Graph, Provenance, and Horizon.
   declared trigger roll up into a single unarmed segment (silent accumulation
   named, not census noise) — a vertex-level boundary covers every loop under
   it, so the unarmed segment appears only where no vertex boundary exists.
+- **Declared typed edges** (`feat/typed-edges`) — any payload field declared
+  `edge "<field>" targets="<kind>"` on its kind becomes an overlay graph edge
+  at read time (last-set wins, `field=` clears, `field=a,b` is a multi-valued
+  set). The declaration is late-bound and retroactive: it lights up historical
+  facts with no re-emit. Undeclared address-shaped fields stay inert
+  provenance pins; `--lens reconcile` surfaces them as declaration candidates.
+- **`sl orient <vertex>`** — a real orientation command (the session-open
+  hook's grep-scrape of read output dissolved, with a versioned fallback):
+  honest counts plus seal warnings for undeclared observers.
+- **`loops add <vertex> observer --keygen` backfills keyless nodes** — mints
+  the flat self-observer tick key with fail-atomic ordering and slashed-name
+  stem registration, so a pre-signing-era vertex can enter the signed era
+  without hand-built key directories.
 
 ### Changed
 - **`-q` (MINIMAL) rollup unified**: `rollup_line()` in `_grammar.py` is now
@@ -52,12 +65,24 @@ Confluence, Graph, Provenance, and Horizon.
   `Line.to_block(width)` calls (the piped register strips styling at the sink,
   so bytes are unchanged; goldens byte-stable).
 
+- **Cross-store `ref=` resolution is explicit**: an emit-time ref that
+  resolves in another store of the selected topology binds there, and one that
+  resolves nowhere persists as a *typed unresolved pin* — no silent drop, and
+  never ambiguity guessing between candidate stores.
+
 ### Fixed
 - **`sl completion <shell>` now dispatches.** The command was advertised in
   `sl --help` (painted injects it into every `run_app` roster) but the loops
   pre-router's `known` set was built only from loops' own commands, so
   `completion` fell through to the vertex shorthand and errored. The injected
   name is now mirrored into `known`.
+- **Multi-boundary vertices arm every declared trigger** — the KDL loader's
+  last-declaration-wins silently dropped all but the final vertex-level
+  `boundary`; declarations now accumulate.
+- **`emit -v` prints its receipt again** (the inbound-delta line had gone
+  silent); guarded by a CLI-path regression test.
+- **Clean exit 141 on downstream pipe close** (`sl … | head`, `grep -m`) —
+  no more `BrokenPipeError` traceback.
 
 ## 0.5.0 — 2026-06-28
 

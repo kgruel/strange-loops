@@ -30,7 +30,7 @@ from __future__ import annotations
 import fnmatch
 import re
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 from .loop import Loop
 
@@ -98,6 +98,22 @@ def _eval_conditions(state: Any, conditions: tuple) -> bool:
     return all(_eval_condition(state, c) for c in conditions)
 
 
+class _VertexBoundarySpec(NamedTuple):
+    """One vertex-level boundary declaration.
+
+    A vertex may declare several (e.g. `session closed` and `seal`); each fires
+    the whole vertex independently. Specs are evaluated in declaration order —
+    the first one a fact satisfies fires the tick, preserving single-boundary
+    firing semantics per fact (one fact mints one tick, never several). See
+    friction:vertex-boundary-last-declaration-wins.
+    """
+
+    kind: str
+    match: tuple[tuple[str, str], ...] = ()
+    conditions: tuple = ()
+    run: str | None = None
+
+
 class Vertex:
     """Where loops meet.
 
@@ -123,11 +139,10 @@ class Vertex:
         self._has_loop_boundaries = False
         self._boundary_match: dict[str, tuple[tuple[str, str], ...]] = {}  # boundary_kind → match
         self._boundary_conditions: dict[str, tuple] = {}  # boundary_kind → conditions
-        self._vertex_boundary: str | None = None  # vertex-level boundary kind
-        self._has_vertex_boundary = False
-        self._vertex_boundary_match: tuple[tuple[str, str], ...] = ()
-        self._vertex_boundary_conditions: tuple = ()
-        self._vertex_boundary_run: str | None = None  # boundary run clause
+        # Vertex-level boundaries — a vertex may declare several, each firing
+        # the whole vertex. Evaluated in declaration order (first match fires).
+        self._vertex_boundaries: list[_VertexBoundarySpec] = []
+        self._vertex_boundary_kinds: set[str] = set()  # fast accepts() membership
         self._vertex_period_start: datetime | None = None
         self._store = store
         self._replaying = False  # suppress boundaries during replay
@@ -143,6 +158,36 @@ class Vertex:
     def name(self) -> str:
         """Vertex name — stamped as origin on produced Ticks."""
         return self._name
+
+    @property
+    def _has_vertex_boundary(self) -> bool:
+        """True when the vertex declares at least one vertex-level boundary."""
+        return bool(self._vertex_boundaries)
+
+    def _match_vertex_boundary(
+        self, kind: str, payload: Any,
+    ) -> _VertexBoundarySpec | None:
+        """First vertex-level boundary spec this fact satisfies, or None.
+
+        Declaration order is authoritative: a fact that satisfies more than one
+        boundary fires the first-declared match only (one fact → one tick).
+        Payload match and fold-state conditions are both checked.
+        """
+        for spec in self._vertex_boundaries:
+            if spec.kind != kind:
+                continue
+            if spec.match and not all(
+                payload.get(k) == v for k, v in spec.match
+            ):
+                continue
+            if spec.conditions:
+                cond_loop = self._loops.get(self._routed_kind(kind))
+                if cond_loop is None or not _eval_conditions(
+                    cond_loop.state, spec.conditions
+                ):
+                    continue
+            return spec
+        return None
 
     @property
     def children(self) -> list[Vertex]:
@@ -229,7 +274,7 @@ class Vertex:
         accepted = (
             kind in self._loops
             or kind in self._boundary_map
-            or kind == self._vertex_boundary
+            or kind in self._vertex_boundary_kinds
             or (self._has_routes and self._resolve_route(kind) is not None)
             or (self._has_children and any(child.accepts(kind) for child in self._children))
         )
@@ -321,6 +366,12 @@ class Vertex:
         Vertex-level boundaries take precedence over loop-level boundaries
         for the same kind.
 
+        Called once per declared boundary — a vertex may register several,
+        which ACCUMULATE (each fires the whole vertex independently). They are
+        evaluated in registration/declaration order; the first a fact satisfies
+        fires (see _match_vertex_boundary). Previously the loader dropped all
+        but the last declaration (friction:vertex-boundary-last-declaration-wins).
+
         Optional run clause: shell command carried on the Tick for app-layer
         execution when the boundary fires.
         """
@@ -328,11 +379,12 @@ class Vertex:
             raise ValueError(
                 f"Boundary kind '{kind}' already registered at loop level"
             )
-        self._vertex_boundary = kind
-        self._has_vertex_boundary = True
-        self._vertex_boundary_match = match
-        self._vertex_boundary_conditions = conditions
-        self._vertex_boundary_run = run
+        self._vertex_boundaries.append(
+            _VertexBoundarySpec(
+                kind=kind, match=match, conditions=conditions, run=run,
+            )
+        )
+        self._vertex_boundary_kinds.add(kind)
         self._accepts_cache.clear()
 
     def receive(
@@ -476,18 +528,17 @@ class Vertex:
         if not self._has_vertex_boundary and not self._has_loop_boundaries:
             return None
 
-        # Vertex-level boundary (fires all loops)
-        if self._has_vertex_boundary and self._vertex_boundary == kind:
-            if not self._vertex_boundary_match or all(
-                payload.get(k) == v for k, v in self._vertex_boundary_match
-            ):
-                if self._vertex_boundary_conditions:
-                    cond_loop = self._loops.get(routed_kind)
-                    if cond_loop is None or not _eval_conditions(
-                        cond_loop.state, self._vertex_boundary_conditions
-                    ):
-                        return None
-                tick = self._fire_vertex_boundary(fact_ts, payload)
+        # Vertex-level boundary (fires all loops). A vertex may declare several;
+        # they are evaluated in declaration order and the first a fact satisfies
+        # fires. A vertex-boundary kind can never also be a loop-boundary kind
+        # (register_vertex_boundary rejects the collision), so a non-match here
+        # falls through to the loop-level check with no effect.
+        if kind in self._vertex_boundary_kinds:
+            spec = self._match_vertex_boundary(kind, payload)
+            if spec is not None:
+                tick = self._fire_vertex_boundary(
+                    fact_ts, payload, run=spec.run,
+                )
                 self._store_tick(tick)
                 return tick
 
@@ -513,13 +564,17 @@ class Vertex:
         return tick
 
     def _fire_vertex_boundary(
-        self, ts: datetime, boundary_payload: dict,
+        self, ts: datetime, boundary_payload: dict, run: str | None = None,
     ) -> Tick[dict[str, Any]]:
         """Fire a vertex-level boundary — snapshot ALL loop states.
 
         Unlike loop.fire() which snapshots one loop, this captures the
         full vertex state. Used for observer lifecycle boundaries like
         session close, where the tick should carry everything.
+
+        ``run`` is the shell command of the firing boundary's run clause
+        (carried on the Tick for app-layer execution) — passed per-fire since
+        different declared boundaries may carry different run clauses.
         """
         import json
 
@@ -533,7 +588,7 @@ class Vertex:
             payload=state,
             origin=self._name,
             since=self._vertex_period_start,
-            run=self._vertex_boundary_run,
+            run=run,
         )
         self._vertex_period_start = None  # reset for next period
         return tick
@@ -768,19 +823,13 @@ class Vertex:
             if self._has_vertex_boundary and self._vertex_period_start is None:
                 self._vertex_period_start = fact_ts
 
-            # --- Vertex-level boundary ---
-            if self._has_vertex_boundary and self._vertex_boundary == kind:
-                if not self._vertex_boundary_match or all(
-                    payload.get(k) == v for k, v in self._vertex_boundary_match
-                ):
-                    if self._vertex_boundary_conditions:
-                        routed_kind = self._routed_kind(kind)
-                        cond_loop = self._loops.get(routed_kind)
-                        if cond_loop is None or not _eval_conditions(
-                            cond_loop.state, self._vertex_boundary_conditions
-                        ):
-                            continue
-                    tick = self._fire_vertex_boundary(fact_ts, payload)
+            # --- Vertex-level boundary (declaration order, first match fires) ---
+            if kind in self._vertex_boundary_kinds:
+                spec = self._match_vertex_boundary(kind, payload)
+                if spec is not None:
+                    tick = self._fire_vertex_boundary(
+                        fact_ts, payload, run=spec.run,
+                    )
                     self._store_tick(tick)
                     ticks.append(tick)
                     break  # Vertex-level fire ends the period
@@ -816,64 +865,33 @@ class Vertex:
     def _evaluate_vertex_only_boundaries(
         self, period_facts: list, since_ts: float,
     ) -> list[Tick]:
-        """Evaluate boundaries when only a vertex-level boundary exists.
+        """Evaluate boundaries when only vertex-level boundaries exist.
 
-        Fast path with no loop-level boundary scanning. Further specializes
-        for the common case where the vertex boundary has no fold-state
-        conditions — the majority of real vertices (project stores, identity
-        stores, session lifecycle).
+        Fast path with no loop-level boundary scanning. A vertex may declare
+        several vertex-level boundaries; each candidate fact is checked against
+        them in declaration order (``_match_vertex_boundary`` — first match
+        fires). The first fact that fires ends the scan: a vertex-level fire
+        snapshots the whole vertex and resets the period.
         """
         ticks: list[Tick] = []
-        vertex_boundary = self._vertex_boundary
-        vertex_boundary_match = self._vertex_boundary_match
-        vertex_boundary_conditions = self._vertex_boundary_conditions
-
-        if not vertex_boundary_conditions:
-            # Add 1μs tolerance for float→datetime→float round-trip precision loss
-            adjusted_since = since_ts + 1e-6 if since_ts > 0 else 0
-            for fact in period_facts:
-                if adjusted_since > 0 and fact.ts <= adjusted_since:
-                    continue
-                kind = fact.kind
-                payload = fact.payload
-                if kind != vertex_boundary:
-                    continue
-                fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
-                if self._vertex_period_start is None:
-                    self._vertex_period_start = fact_ts
-                if vertex_boundary_match and not all(
-                    payload.get(k) == v for k, v in vertex_boundary_match
-                ):
-                    continue
-                tick = self._fire_vertex_boundary(fact_ts, payload)
-                self._store_tick(tick)
-                ticks.append(tick)
-                return ticks
-            return ticks
-
-        loops = self._loops
-        routed_kind = self._routed_kind
-        adjusted_since_cond = since_ts + 1e-6 if since_ts > 0 else 0
+        boundary_kinds = self._vertex_boundary_kinds
+        # Add 1μs tolerance for float→datetime→float round-trip precision loss
+        adjusted_since = since_ts + 1e-6 if since_ts > 0 else 0
         for fact in period_facts:
-            if adjusted_since_cond > 0 and fact.ts <= adjusted_since_cond:
+            if adjusted_since > 0 and fact.ts <= adjusted_since:
                 continue
             kind = fact.kind
-            payload = fact.payload
-            if kind != vertex_boundary:
+            if kind not in boundary_kinds:
                 continue
             fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
             if self._vertex_period_start is None:
                 self._vertex_period_start = fact_ts
-            if vertex_boundary_match and not all(
-                payload.get(k) == v for k, v in vertex_boundary_match
-            ):
+            spec = self._match_vertex_boundary(kind, fact.payload)
+            if spec is None:
                 continue
-            cond_loop = loops.get(routed_kind(kind))
-            if cond_loop is None or not _eval_conditions(
-                cond_loop.state, vertex_boundary_conditions
-            ):
-                continue
-            tick = self._fire_vertex_boundary(fact_ts, payload)
+            tick = self._fire_vertex_boundary(
+                fact_ts, fact.payload, run=spec.run,
+            )
             self._store_tick(tick)
             ticks.append(tick)
             return ticks

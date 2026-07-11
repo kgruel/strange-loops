@@ -5,42 +5,27 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from painted import Block, Style, Zoom, join_vertical, pad
+from painted import Block, Style, Zoom, join_horizontal, join_vertical
 from painted.views import record_line
 
-
-def _block(text: str, style: Style, width: int | None) -> Block:
-    """Create a Block, respecting width=None (no truncation)."""
-    if width is not None:
-        return Block.text(text, style, width=width)
-    return Block.text(text, style)
-
-
-def attest_line(envelope: dict | None) -> str:
-    """Render a tick's witness-era envelope as one header line.
-
-    The envelope is the attestation metadata added at append time
-    (chain link, signature, fact cursor) — see StoreReader.ticks_between.
-    Absent envelope (not read, or range mode) renders nothing. An
-    unchained envelope renders explicitly — pre-chain tick or aggregate
-    read, neither of which attests.
-    """
-    if envelope is None:
-        return ""
-    if not envelope.get("chained"):
-        return "  attest: none (no chain envelope)"
-    parts = ["chained", "signed" if envelope.get("signed") else "unsigned"]
-    line = f"  attest: {' · '.join(parts)}"
-    kind = envelope.get("cursor_kind", "")
-    if kind:
-        preview = envelope.get("cursor_preview", "")
-        target = f'{kind}: "{preview}"' if preview else kind
-        line += f" · cursor → {target}"
-    return line
+from ._grammar import (
+    DateGrouper,
+    card,
+    card_width,
+    coerce_dt,
+    date_key,
+    rail_glyph,
+    recency,
+    rollup_line,
+    tick_drill_rows,
+)
+from ._grammar import block as _block
+from ._statview import palette_of
 
 
 def stream_view(
-    data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None
+    data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None,
+    *, piped: bool | None = None, vertex_name: str | None = None,
 ) -> Block:
     """Render event stream at the given zoom level.
 
@@ -51,12 +36,25 @@ def stream_view(
     Uses fold_meta key_field for summary labels when available,
     falls back to heuristic scan. No per-kind if-elif branches.
 
+    ``piped`` keys the presentation register on the channel (not width) —
+    accepted now so callers key the register explicitly; the registers
+    diverge structurally in the Surface-staging slice (G4).
+
     Zoom levels:
     - MINIMAL: counts by kind
     - SUMMARY: time + kind + summary (key_field driven)
     - DETAILED: + secondary fields on next line
     - FULL: all payload fields
     """
+    # Piped register is information-faithful: force width=None so an
+    # inherited COLUMNS never clips the agent channel (observation
+    # rendering/piped-faithfulness-forces-width-none).
+    is_piped = bool(piped or (piped is None and width is None))
+    if is_piped:
+        width = None
+
+    p = palette_of(None)
+
     # Normalize input format
     if isinstance(data, dict):
         facts = data.get("facts", [])
@@ -75,47 +73,27 @@ def stream_view(
     if not facts and tick_meta is None:
         return _block("No facts in the given time range.", Style(dim=True), width)
 
-    # MINIMAL: just counts
+    # MINIMAL: counts on the spine grammar (vertex · N kind · …). A tick
+    # drill has no vertex to lead with — its ``tick #N`` label takes the slot.
     if zoom == Zoom.MINIMAL:
         counts: dict[str, int] = {}
         for f in facts:
             counts[f["kind"]] = counts.get(f["kind"], 0) + 1
-        parts = [f"{count} {kind}" for kind, count in counts.items()]
-        summary = ", ".join(parts) if parts else "0 facts"
+        parts = [f"{count} {kind}" for kind, count in counts.items()] or ["0 facts"]
         if tick_meta:
-            summary = f"tick #{tick_meta['index']}: {summary}"
-        return _block(summary, Style(), width)
+            lead = f"tick #{tick_meta['index']}"
+        else:
+            lead = vertex_name or (data.get("vertex", "") if isinstance(data, dict) else "")
+        return _block(rollup_line(lead, parts), Style(), width)
 
     blocks: list[Block] = []
     dim_style = Style(dim=True)
-    current_date = None
+    grouper = DateGrouper()
 
-    # Tick drill-down header
+    # Tick drill-down header — shared grammar rows + this view's fact count.
     if tick_meta is not None:
-        boundary = tick_meta.get("boundary", {})
-        trigger = ""
-        if boundary:
-            bname = boundary.get("name", "")
-            bstatus = boundary.get("status", "")
-            trigger = f" — {bname} {bstatus}" if bname else ""
-
-        range_end = tick_meta.get("range_end")
-        if range_end is not None:
-            title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}"
-        else:
-            title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
-        blocks.append(_block(title, Style(bold=True), width))
-        if tick_meta.get("since") and tick_meta.get("ts"):
-            blocks.append(
-                _block(
-                    f"  window: {tick_meta['since']} → {tick_meta['ts']}",
-                    dim_style,
-                    width,
-                )
-            )
-        attest = attest_line(tick_meta.get("envelope"))
-        if attest:
-            blocks.append(_block(attest, dim_style, width))
+        for text, style in tick_drill_rows(tick_meta):
+            blocks.append(_block(text, style, width))
         blocks.append(_block(f"  {len(facts)} facts", dim_style, width))
         blocks.append(_block("", Style(), width))
 
@@ -135,23 +113,16 @@ def stream_view(
     # (fact id, observer, origin) is grafted as continuation lines below —
     # record_line owns the record, loops owns the fact-envelope context.
     plens = _stream_payload_lens(fold_meta)
+    # Leading slot = the rail gutter (TTY: glyph+space) or the TIER column
+    # (piped: tier word). Either way it costs the same 2 (TTY) / column (piped)
+    # the record is inset by, so the record body budget stays aligned.
     rec_width = None if width is None else max(width - 2, 1)
 
     for f in facts:
-        ts = f["ts"]
-        if isinstance(ts, str):
-            dt = datetime.fromisoformat(ts)
-        elif isinstance(ts, datetime):
-            dt = ts
-        else:
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = coerce_dt(f["ts"]) or datetime.fromtimestamp(0, tz=timezone.utc)
 
-        date_str = dt.strftime("%Y-%m-%d")
-        if date_str != current_date:
-            if current_date is not None:
-                blocks.append(_block("", Style(), width))
-            blocks.append(_block(f"{date_str}:", Style(bold=True), width))
-            current_date = date_str
+        for text, style in grouper.header_rows(dt):
+            blocks.append(_block(text, style, width))
 
         kind_str = f["kind"]
         payload = f["payload"]
@@ -163,7 +134,21 @@ def stream_view(
         rec = record_line(
             dt, kind_str, payload, rec_zoom, rec_width, payload_lens=plens
         )
-        blocks.append(pad(rec, left=2))
+        # Rail inheritance (G4): the fact's tier came from the entity Surface
+        # (fetch_stream → tier_map). TTY renders the rail glyph in the gutter;
+        # the piped ledger carries the tier as a WORD (a pipe consumer can't
+        # reconstruct the vertex-population quantile a glyph encodes).
+        tier = f.get("tier", "")
+        if is_piped:
+            label = tier or "untiered"
+            blocks.append(join_horizontal(
+                _block(f"{label:<8}  ", Style(), None), rec,
+            ))
+        else:
+            glyph = rail_glyph(tier)
+            blocks.append(join_horizontal(
+                Block.text(f"{glyph} ", p.rail_style(tier)), rec
+            ))
 
         # Fact-envelope graft: id (DETAILED+), observer/origin (FULL/--id).
         # These are not payload fields, so record_line never renders them.
@@ -179,9 +164,53 @@ def stream_view(
             if f.get("origin"):
                 graft.append(f"origin: {f['origin']}")
         for line in graft:
-            blocks.append(_block(f"    {line}", dim_style, width))
+            # Observer identity hue (TTY-only chrome) — the same stable
+            # hash-pool colour confluence rows carry, so `stream -v` and the
+            # observer cut agree on an observer's face. Piped is byte-identical
+            # (style never reaches the agent channel); text is unchanged.
+            gstyle = dim_style
+            if not is_piped and line.startswith("observer: ") and f.get("observer"):
+                gstyle = p.observer_style(f["observer"])
+            blocks.append(_block(f"    {line}", gstyle, width))
 
-    return join_vertical(*blocks)
+    body = join_vertical(*blocks)
+
+    # Header card — TTY letterhead (spine G5, fidelity policy B). SUMMARY+
+    # only; the tick drill-down carries its own header, and the piped ledger
+    # never wears chrome. Card sublines are the fact count + the span, which
+    # the piped channel already carries as per-row date-group headers, so no
+    # piped parity addition is owed.
+    if (
+        not is_piped
+        and zoom >= Zoom.SUMMARY
+        and tick_meta is None
+        and not is_id_lookup
+        and isinstance(data, dict)
+        and facts
+    ):
+        name = vertex_name or data.get("vertex", "")
+        if name:
+            head = _stream_card(name, facts, body, width)
+            return join_vertical(head, body)
+
+    return body
+
+
+def _stream_card(
+    name: str, facts: list[dict[str, Any]], body: Block, width: int | None
+) -> Block:
+    """The TTY header card for a stream read — ``<vertex> · stream`` + span."""
+    stamps = [dt for f in facts if (dt := coerce_dt(f.get("ts"))) is not None]
+    n = len(facts)
+    sublines = [f"{n} fact{'s' if n != 1 else ''}"]
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        span = date_key(lo) if lo == hi else f"{date_key(lo)} → {date_key(hi)}"
+        sublines.append(f"{span} · updated {recency(hi)}")
+    title = f"{name} · stream"
+    p = palette_of(None)
+    card_w = card_width(body, title, sublines, width)
+    return card(title, sublines, card_w, p=p)
 
 
 def _stream_payload_lens(fold_meta: dict):

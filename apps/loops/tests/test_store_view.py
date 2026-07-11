@@ -8,7 +8,8 @@ import pytest
 from painted import Zoom
 from painted.views import ListState
 from loops.commands.store import _bucket_timestamps, _sparkline_str
-from loops.lenses.store import store_view, stats_view, tick_chain_view, _relative_time
+from loops.lenses.store import store_view, stats_view, tick_chain_view
+from loops.lenses._grammar import recency
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
 
 from .helpers import block_to_text
@@ -76,7 +77,7 @@ class TestStoreViewRendering:
     @pytest.mark.parametrize(
         ("zoom", "present", "min_height"),
         [
-            (Zoom.SUMMARY, ["hn.story", "rss.item", "3.2k", "2.8k", "ago"], 3),
+            (Zoom.SUMMARY, ["hn.story", "rss.item", "3.2k", "2.8k", "1h"], 3),
             (Zoom.DETAILED, ["hn.story", "rss.item", "3.2k"], 5),
             (Zoom.FULL, ["3 kinds", "facts"], 5),
         ],
@@ -93,7 +94,6 @@ class TestStoreViewRendering:
         assert "3 kinds" in text
         assert "6.5k facts" in text or "6462" in text or "6.4k" in text
         assert "fresh" in text
-        assert "ago" in text
         assert text.index("kinds") < text.index("facts")
         assert block.height >= 1
 
@@ -103,24 +103,24 @@ class TestStoreViewRendering:
 
 
 class TestRelativeTime:
-    def test_seconds(self):
+    def test_seconds_is_now(self):
         now = datetime.now(timezone.utc)
-        assert "s ago" in _relative_time(now - timedelta(seconds=30))
+        assert recency(now - timedelta(seconds=30)) == "now"
 
     def test_minutes(self):
         now = datetime.now(timezone.utc)
-        assert "m ago" in _relative_time(now - timedelta(minutes=5))
+        assert recency(now - timedelta(minutes=5)) == "5m"
 
     def test_hours(self):
         now = datetime.now(timezone.utc)
-        assert "h ago" in _relative_time(now - timedelta(hours=3))
+        assert recency(now - timedelta(hours=3)) == "3h"
 
     def test_days(self):
         now = datetime.now(timezone.utc)
-        assert "d ago" in _relative_time(now - timedelta(days=2))
+        assert recency(now - timedelta(days=2)) == "2d"
 
-    def test_non_datetime_returns_question(self):
-        assert _relative_time("not a datetime") == "?"
+    def test_non_datetime_returns_empty(self):
+        assert recency("not a datetime") == ""
 
 
 # ── Sparkline tests ─────────────────────────────────────────
@@ -426,16 +426,16 @@ class TestStoreViewEdges:
         assert _format_count(10000) == "10k"
 
     def test_ensure_utc_naive(self):
-        """_ensure_utc with naive datetime (L267)."""
-        from loops.lenses.store import _ensure_utc
+        """ensure_utc with naive datetime."""
+        from loops.lenses._grammar import ensure_utc
         naive = datetime(2024, 1, 1, 12, 0, 0)  # no tzinfo
-        result = _ensure_utc(naive)
+        result = ensure_utc(naive)
         assert result.tzinfo is not None
 
     def test_relative_time_future(self):
-        """_relative_time with future date → 'just now' (L280)."""
+        """recency with future date → 'now'."""
         future = datetime.now(timezone.utc) + timedelta(seconds=5)
-        assert _relative_time(future) == "just now"
+        assert recency(future) == "now"
 
     def test_time_range_empty(self):
         """_time_range with no timestamps → '' (L310)."""
@@ -559,8 +559,32 @@ class TestTickChainView:
         data = _chain_data(chain_mode=False, windows=[_tick_window_dict()])
         text = block_to_text(tick_chain_view(data, Zoom.DETAILED, 80))
         assert "linked" not in text
-        assert "items" in text          # density fold line
         assert "kyle closed" in text    # boundary trigger label
+        # Unstamped window (no win_facts) makes no count claim — absence of
+        # window stats must not render as a false "0 facts".
+        assert "facts" not in text
+
+    def test_density_window_projection(self):
+        """A stamped window renders as attention: count · kind mix · span,
+        rail glyph from the MAX tier, touched keys at DETAILED."""
+        w = _tick_window_dict()
+        w.update(
+            win_facts=47,
+            win_kinds={"decision": 12, "thread": 9, "log": 8, "cite": 2},
+            tier="high",
+            touched=[("decision", "design/foo", 3), ("thread", "bar", 1)],
+        )
+        data = _chain_data(chain_mode=False, windows=[w])
+        text = block_to_text(tick_chain_view(data, Zoom.SUMMARY, 100))
+        assert "47 facts" in text
+        assert "decision 12" in text and "thread 9" in text
+        assert "+1" in text            # 4th kind rolled up, not dropped silently
+        assert "◆" in text             # rail glyph from window MAX tier
+        assert "window" in text        # span trailer
+        assert "design/foo" not in text  # keys are the -v rung
+        detailed = block_to_text(tick_chain_view(data, Zoom.DETAILED, 100))
+        assert "decision:design/foo ×3" in detailed
+        assert "thread:bar" in detailed
 
     def test_minimal_is_rollup_only(self):
         data = _chain_data(
@@ -636,3 +660,26 @@ class TestStatsView:
         kinds = [{"kind": "decision", "count": 10}]
         block = stats_view(_stats_data(by_kind=True, kinds=kinds), Zoom.FULL, None)
         assert block.height >= 1
+
+
+class TestStoreViewPipedRegister:
+    """Regression: store_view crashed on width=None and had no piped register."""
+
+    @pytest.mark.parametrize("zoom", [Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL])
+    def test_width_none_renders_all_zooms(self, zoom):
+        block = store_view(_make_summary(), zoom, None)
+        assert block is not None
+        assert block_to_text(block).strip()
+
+    @pytest.mark.parametrize("zoom", [Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL])
+    def test_piped_ignores_concrete_width(self, zoom):
+        # piped=True forces width=None — a pipe that inherited COLUMNS=20
+        # must render identically to the width-free agent channel.
+        clipped = store_view(_make_summary(), zoom, 20, piped=True)
+        free = store_view(_make_summary(), zoom, None, piped=True)
+        assert block_to_text(clipped) == block_to_text(free)
+
+    def test_full_piped_drops_border_keeps_title(self):
+        text = block_to_text(store_view(_make_summary(), Zoom.FULL, None))
+        assert "╭" not in text and "│" not in text
+        assert "3 kinds" in text and "6.5k facts" in text

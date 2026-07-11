@@ -1,0 +1,3 @@
+cite/any · collect-fold — chronology is the provenance
+  1/2  2025-01-14T10:20:00+00:00 alice  first note
+  2/2  2025-01-14T11:20:00+00:00 bob  second note

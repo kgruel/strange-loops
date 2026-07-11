@@ -1,0 +1,7 @@
+╭─ grammar · confluence ───────────────────────────────────────────────────────╮
+│ 2 observers · 9 facts                                                        │
+│ Jan 1 → Jan 2 · latest 3d                                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ◆ kyle          8  decision 3 · thread 2 · session 2 · +1   3d
+  ◆ loops-claude  1  decision 1   3d
+rail  ◆ high  │ mid  · tail  ⊘ stale

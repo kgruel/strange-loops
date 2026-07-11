@@ -1,0 +1,12 @@
+grammar · 2 ticks
+2025-01-02 13:08  #0   high        3 facts  8m       s2 closed · decision=1 thread=1 session=1
+             decision:design/rail
+             thread:digest
+             session:s2
+        window: 2025-01-02 13:00 → 2025-01-02 13:08 · s2
+2025-01-01 12:08  #1   high        6 facts  8m       s1 closed · decision=3 thread=1 log=1 session=1
+             decision:design/rail ×2
+             decision:architecture/tiers
+             thread:spine
+             session:s1
+        window: 2025-01-01 12:00 → 2025-01-01 12:08 · s1

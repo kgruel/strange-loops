@@ -19,8 +19,6 @@ from painted import Align, Block, Line, Style, Wrap, Zoom, join_vertical, vslice
 from painted.views import Column, Fill
 
 from ._statview import (
-    card,
-    card_width,
     cell,
     freshness_style,
     meter_cell,
@@ -29,7 +27,8 @@ from ._statview import (
     stat_table,
     updated_text,
 )
-from .store import _format_count, _relative_time
+from ._grammar import card, card_width, rail_glyph, recency
+from .store import _format_count
 
 
 _SECTION_TITLES = {
@@ -110,7 +109,7 @@ def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
         cols.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
     if mtime is not None:
         dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-        cols.append(f"updated {_relative_time(dt)}")
+        cols.append(f"updated {recency(dt)}")
     head = Block.text("   ".join(cols), Style(bold=True), width=width)
 
     nobs = len(data.get("observers") or [])
@@ -186,7 +185,7 @@ def _vertex_card_sublines(data: dict[str, Any]) -> list[str]:
         bits.append(f"signed {_format_count(signed[0])}/{_format_count(signed[1])}")
     if mtime is not None:
         dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-        bits.append(f"updated {_relative_time(dt)}")
+        bits.append(f"updated {recency(dt)}")
 
     sub = [" · ".join(bits)] if bits else []
     decl = _decl_tally(data)
@@ -440,7 +439,7 @@ def _kind_card_sublines(data: dict[str, Any]) -> list[str]:
         line2.append(f"span {span}")
     latest_dt = _kind_dt(data.get("latest"))
     if latest_dt is not None:
-        line2.append(f"updated {_relative_time(latest_dt)}")
+        line2.append(f"updated {recency(latest_dt)}")
     sub.append(" · ".join(line2))
     return sub
 
@@ -462,9 +461,12 @@ def _entry_table(
     max_count = max((e["count"] for e in shown), default=0)
     has_time = any(e.get("latest") is not None for e in shown)
 
-    # ENTRY fills, capped at 40 (keys can be long); shrinks+ellipsizes when the
-    # terminal is narrow so the table honours width (FIT shrinks Fill columns).
+    # Leading slot is the rail gutter (decision:design/rail-wins-gutter): a tier
+    # glyph scoped to the kind's key population, MAX-propagated to namespace
+    # rows. ENTRY fills, capped at 40 (keys can be long); shrinks+ellipsizes
+    # when the terminal is narrow so the table honours width (FIT shrinks Fill).
     cols = [
+        Column(cell(""), width=1),
         Column(
             cell("OBSERVER" if by == "observer" else "ENTRY"),
             width=Fill(), min_width=10, max_width=40, ellipsis=True,
@@ -481,7 +483,9 @@ def _entry_table(
         key, cnt, leaf = e["key"], e["count"], e.get("leaf", True)
         has_ns = has_ns or not leaf
         pct = cnt / view_total * 100
+        tier = e.get("tier", "")
         row = [
+            cell(rail_glyph(tier), p.rail_style(tier)),
             cell(key, _entry_style(key, leaf, p)),
             cell(_format_count(cnt)),
             meter_cell(cnt, max_count, f"{pct:>4.1f}%", p),
@@ -567,7 +571,7 @@ def _kind_stat_plain(data: dict[str, Any], width: int | None) -> Block:
         meta.append(f"span {span}")
     ldt = _kind_dt(data.get("latest"))
     if ldt is not None:
-        meta.append(f"updated {_relative_time(ldt)}")
+        meta.append(f"updated {recency(ldt)}")
     lines.append(Block.text("  " + " · ".join(meta), Style(dim=True), width=width))
 
     if not entries:
@@ -577,12 +581,15 @@ def _kind_stat_plain(data: dict[str, Any], width: int | None) -> Block:
     view_total = sum(e["count"] for e in entries) or 1
     shown = entries[:_ENTRY_CAP]
     name_w = max((len(str(e["key"])) for e in shown), default=8)
+    # TIER rides on the piped ledger too (decision:design/spine-options-ratified
+    # §5c): the tier function has vertex-population context a pipe consumer can't
+    # reconstruct from the rows it sees, so carry the word (glyph-free channel).
     for e in shown:
         pct = e["count"] / view_total * 100
         upd = updated_text(_kind_dt(e.get("latest")))
         lines.append(Block.text(
-            f"  {str(e['key']).ljust(name_w)}  {_format_count(e['count']):>6}  "
-            f"{pct:5.1f}%  {upd}",
+            f"  {e.get('tier', ''):<5}  {str(e['key']).ljust(name_w)}  "
+            f"{_format_count(e['count']):>6}  {pct:5.1f}%  {upd}",
             Style(), width=width,
         ))
     if len(entries) > len(shown):
@@ -643,7 +650,7 @@ def _render_kind_stat(
         dt = latest if isinstance(latest, datetime) else datetime.fromtimestamp(
             float(latest), tz=timezone.utc
         )
-        cols.append(f"updated {_relative_time(dt)}")
+        cols.append(f"updated {recency(dt)}")
     return Block.text("  " + "   ".join(cols), Style(), width=width)
 
 

@@ -1,0 +1,11 @@
+╭─ grammar · graph ────────────────────────────────────────────────────────────╮
+│ 7 nodes · 1 edges (0 typed) · 5 orphans                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+HUBS
+  ◆ thread/spine  ←1 →0  ref 1   4d
+
+CHAINS
+  decision/design/rail → thread/spine
+
+orphans: 5
+rail  ◆ high  │ mid  · tail  ⊘ stale

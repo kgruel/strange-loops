@@ -43,3 +43,88 @@ def test_freshness_old():
     p = LoopsPalette()
     s = p.freshness_style(172800)  # > 86400s = old
     assert s == p.old
+
+
+# --- rail_style: tier → Style map (parallel to _grammar.TIER_GLYPHS) ---
+
+def test_rail_style_tiers():
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert p.rail_style("high") == p.header
+    assert p.rail_style("mid") == p.content
+    assert p.rail_style("tail") == p.metadata
+    assert p.rail_style("stale") == p.old
+
+def test_rail_style_fallbacks_mirror_rail_glyph():
+    # Untiered ("") recedes to chrome (blank gutter); an UNKNOWN tier falls
+    # back to the mid style — mirroring rail_glyph's unknown→mid glyph, so an
+    # unrecognized tier never renders a mid glyph in tail clothing.
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert p.rail_style("") == p.chrome
+    assert p.rail_style("nonsense") == p.content
+
+
+# --- observer_style: stable hash-pool identity hue ---
+
+def test_observer_style_stable():
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert p.observer_style("alice") == p.observer_style("alice")
+    assert isinstance(p.observer_style("alice"), Style)
+
+def test_observer_style_empty_recedes():
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert p.observer_style("") == p.metadata
+
+def test_observer_style_empty_pool():
+    from loops.palette import LoopsPalette
+    p = LoopsPalette(kind_pool=())
+    assert isinstance(p.observer_style("alice"), Style)
+
+
+# --- horizon_meter_style: proximity ramp, thresholds owned by the palette ---
+
+def test_horizon_meter_ramp():
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert p.horizon_meter_style(0.3) == p.accent    # < .6 calm
+    assert p.horizon_meter_style(0.6) == p.warn      # .6–.85 approaching
+    assert p.horizon_meter_style(0.84) == p.warn
+    assert p.horizon_meter_style(0.85) == p.critical  # ≥ .85 about to seal
+    assert p.horizon_meter_style(1.0) == p.critical
+
+
+def test_horizon_approaching_is_critical():
+    # ▲ ≡ critical: the approaching predicate flips exactly where the meter
+    # ramp turns critical — one threshold, one story (decision amended).
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert not p.horizon_approaching(0.84)
+    assert p.horizon_approaching(0.85)
+    assert p.horizon_approaching(1.2)
+    # Coherence pin: approaching ⟺ the meter is critical, at any ratio.
+    for ratio in (0.0, 0.6, 0.849, 0.85, 0.9, 2.0):
+        assert p.horizon_approaching(ratio) == (
+            p.horizon_meter_style(ratio) == p.critical
+        )
+
+
+# --- _grammar.recency_style: freshness gradient over a recency tag ---
+
+def test_recency_style_grades_by_age():
+    import time
+
+    from loops.lenses._grammar import recency_style
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    now = time.time()
+    assert recency_style(now, p) == p.fresh
+    assert recency_style(now - 172800, p) == p.old
+
+def test_recency_style_unparseable_recedes():
+    from loops.lenses._grammar import recency_style
+    from loops.palette import LoopsPalette
+    p = LoopsPalette()
+    assert recency_style("not-a-timestamp", p) == p.metadata

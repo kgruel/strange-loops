@@ -1,9 +1,14 @@
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 3 keys · 1 kinds · 6 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (3):
   design/ (3)
-    c [×3 ←2 Jan 15]: referenced twice
+    ◆ Jan 15  c  ×3 ←2  referenced twice
       ← decision/design/a
       ← decision/design/b
-    a [×2 →1 Jan 15]: refs c
+    │ Jan 15  a  ×2 →1
       → decision/design/c
-    b [→1 Jan 15]: also refs c
+    · Jan 15  b
       → decision/design/c
+rail  ◆ high  │ mid  · tail  ⊘ stale

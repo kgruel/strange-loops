@@ -38,8 +38,12 @@ loops read <vertex> --kind decision observer=NAME  # row filter: who emitted the
 loops read <vertex> --facts --since 7d        # time window (7d, 24h, 1h)
 loops read <vertex> --facts --kind thread --since 7d
 loops read <vertex> --lens prompt             # custom lens
+loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
+loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
+loops read <vertex> --lens horizon            # boundary cut: each armed loop's open window vs its next seal
 loops read <vertex> --facts --id <ulid>       # single fact lookup by ID/prefix
 loops read <vertex> --observer all            # peel identity scope (--observer NAME/all)
+loops read <vertex> decision/design/foo --why # per-field provenance drill (exact kind/key address, sibling of --facts)
 loops <vertex>                                # shorthand for: loops read <vertex>
 ```
 
@@ -69,6 +73,10 @@ loops read <vertex> --count --by kind         # one count row per group (--by ro
 | `-v` | DETAILED | Bodies, descriptions |
 | `-vv` | FULL | Timestamps, all metadata |
 
+`-q` renders through one shared helper (`rollup_line()`) everywhere — read,
+fold, stream, `store ticks`/`stats`, confluence, graph, horizon all produce the
+same `vertex · stat · stat` one-liner grammar, vertex-led.
+
 ### Format flags
 
 | Flag | Effect |
@@ -77,6 +85,28 @@ loops read <vertex> --count --by kind         # one count row per group (--by ro
 | `--json` | Structured Surface encoding — `to_dict(surface)` with addressed rows (implies `--static`) |
 | `--live` | Poll and re-render on change |
 | `-i` | Interactive TUI mode (autoresearch lens) |
+
+### Static grammar (0.6.0) — rail, card, registers
+
+One grammar, two presentation registers keyed on the CHANNEL (TTY vs piped),
+never on width. Shared vocabulary lives in `lenses/_grammar.py`.
+
+```
+rail   ◆ high   │ mid   · tail   ⊘ stale      # salience tier per fold KEY, quantile-
+                                              # bucketed within the vertex (view-invariant;
+                                              # facts inherit their key's tier, containers
+                                              # aggregate by MAX)
+```
+
+- **TTY register**: header **card** (vertex · view, counts, span) at default
+  zoom and up — `-q` stays a genuine one-liner. Rail glyph owns the leading
+  slot; default zoom allocates disclosure by tier (◆ full body / mid headline /
+  tail bare line) when the population has a tier gradient.
+- **Piped register**: no chrome, information-faithful — flat ledger columns
+  incl. a literal `TIER` word column (high/mid/tail), full keys, ISO dates,
+  no truncation (width is never inherited from `$COLUMNS`).
+- One time vocabulary everywhere: compact relative (`2h`, `3d`, calendar
+  cutover to `Feb 27`) on rows, clock-under-date-group on streams/ticks.
 
 ---
 
@@ -209,6 +239,13 @@ header card, a share meter, a per-kind activity sparkline, and freshness colour;
 piped/agent output stays terse plain text. `ls` owns the structural levels
 (vertex / kind / key); `read` owns the content level (facts).
 
+Rail alignment (0.6.0): kind-descent entries (`--kind NAME`) carry the salience
+rail — tier glyph gutter on TTY, `TIER` word column piped; namespace rollup rows
+inherit MAX over their leaves. Root vertex rows are untiered (max-over-keys is
+no signal at vertex scope). The vertex-type glyph ◆/◇/◈ left slot one: type
+shows as a `⊙ own store` / `⊙ combine of …` detail line at `-v` on TTY, and as
+the TYPE word column piped (as before).
+
 ---
 
 ## Init
@@ -230,7 +267,7 @@ loops store <vertex>                          # by vertex name
 loops store <path.db>                         # by database path
 loops store <vertex> -i                       # interactive TUI explorer
 loops store <vertex> --live                   # poll for changes
-loops store ticks <vertex>                    # tick series (density: items/facts/delta)
+loops store ticks <vertex>                    # tick series as attention windows (facts + kind mix + span, rail-tiered, day-grouped; -v adds touched keys)
 loops store ticks <vertex> --chain            # per-tick attestation envelope (linkage/signature/cursor); requires .vertex, refused on combine aggregates
 loops store stats <vertex>                    # topline store totals (.db or .vertex)
 loops store stats <vertex> --by-kind          # count-descending per-kind tally

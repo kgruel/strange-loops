@@ -312,7 +312,8 @@ def fetch_declarations(
 
 
 def _rollup_entries(
-    raw: dict, key_prefix: str | None, field_label: str
+    raw: dict, key_prefix: str | None, field_label: str,
+    key_tiers: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Roll fold-key stats up to the *next containment level* below the prefix.
 
@@ -322,7 +323,15 @@ def _rollup_entries(
     (``design/`` → drill again with ``--key design/``); a key with no further
     segment is a leaf. The ``None`` key (facts missing the fold field) collects
     under ``(no <field>)`` — the orphan diagnostic. Count-descending.
+
+    ``key_tiers`` (raw-key → rail tier) rides through so each rollup row carries
+    a tier: a leaf inherits its key's tier, a namespace MAX-propagates over the
+    keys it collapses (decision:design/salience-max-propagation). Absent when a
+    caller doesn't tier (the JSON contract stays tier-optional).
     """
+    from loops.surface import tier_max
+
+    kt = key_tiers or {}
     out: dict[str, dict[str, Any]] = {}
     for key, st in raw.items():
         if key is None:
@@ -341,13 +350,23 @@ def _rollup_entries(
             else:
                 head = (key_prefix or "") + rest
                 is_leaf = True
-        e = out.setdefault(head, {"count": 0, "latest": None, "leaf": is_leaf})
+        e = out.setdefault(
+            head, {"count": 0, "latest": None, "leaf": is_leaf, "_tiers": []}
+        )
         e["count"] += st["count"]
         if e["latest"] is None or st["latest"] > e["latest"]:
             e["latest"] = st["latest"]
         if not is_leaf:
             e["leaf"] = False
-    entries = [{"key": k, **v} for k, v in out.items()]
+        if key in kt:
+            e["_tiers"].append(kt[key])
+    entries: list[dict[str, Any]] = []
+    for k, v in out.items():
+        tiers = v.pop("_tiers")
+        entry = {"key": k, **v}
+        if key_tiers is not None:
+            entry["tier"] = tier_max(tiers)
+        entries.append(entry)
     entries.sort(key=lambda r: r["count"], reverse=True)
     return entries
 
@@ -442,17 +461,25 @@ def fetch_kind_stat(
     latest = max((v["latest"] for v in scoped.values()), default=None)
     distinct = len([k for k in scoped if k is not None])
 
+    # Rail tiers (decision:design/tier-one-home-inheritance): score each entry
+    # by fact count and bucket by quantile — the same machinery `_assign_tiers`
+    # runs over Surface salience, reused not forked. Scope is the kind's key
+    # population (a degradation from vertex-scope, honest for a --kind cut — the
+    # same caveat surface._assign_tiers names for a filtered fetch).
+    from loops.surface import tiers_for_scores
+
     if key_field:
-        entries = _rollup_entries(raw, key_prefix, key_field)
+        scored = list(raw.keys())
+        key_tiers = dict(zip(scored, tiers_for_scores([raw[k]["count"] for k in scored])))
+        entries = _rollup_entries(raw, key_prefix, key_field, key_tiers)
     else:
-        entries = sorted(
-            (
-                {"key": (k or "(none)"), "count": v["count"],
-                 "latest": v["latest"], "leaf": True}
-                for k, v in raw.items()
-            ),
-            key=lambda r: r["count"], reverse=True,
-        )
+        obs = sorted(raw.items(), key=lambda kv: kv[1]["count"], reverse=True)
+        tiers = tiers_for_scores([v["count"] for _, v in obs])
+        entries = [
+            {"key": (k or "(none)"), "count": v["count"],
+             "latest": v["latest"], "leaf": True, "tier": t}
+            for (k, v), t in zip(obs, tiers)
+        ]
 
     # Coerce timestamps to epoch floats — the same JSON contract as the listing
     # path (_store_stats) and `read --json`, so `latest` is a number, not a

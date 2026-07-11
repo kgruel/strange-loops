@@ -8,21 +8,28 @@
 Folded state — decisions, threads, tasks, changes.
 
 ```
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 8 keys · 4 kinds · 8 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (2):
-  Use SQLite for persistence [Jan 15]: Chose SQLite over filesystem f… [+34c]
-  KDL for config format [Jan 14]: KDL is human-friendly and supports … [+16c]
+  │ Jan 15  Use SQLite for persistence
+            Chose SQLite over filesystem for atomic writes and query support.
+  │ Jan 14  KDL for config format
+            KDL is human-friendly and supports nested structure.
 
 Threads (2):
-  vertex-routing [Jan 15]: active
-  tick-nesting [Jan 14]: exploring
+  │ Jan 15  vertex-routing  active
+  │ Jan 14  tick-nesting    exploring
 
 Tasks (2):
-  implement fold [Jan 15]: in-progress
-  add observer field [Jan 14]: done
+  │ Jan 15  implement fold      in-progress
+  │ Jan 14  add observer field  done
 
 Changes (2):
-  Added boundary detection to Spec [Jan 15]: libs/atoms/src/atoms/spe… [+3c]
-  Refactored tick emission [Jan 15]: libs/engine/src/engine/temporal.… [+1c]
+  │ Jan 15  Added boundary detection to Spec  libs/atoms/src/atoms/spec.py
+  │ Jan 15  Refactored tick emission          libs/engine/src/engine/temporal.py
+rail  ◆ high  │ mid  · tail  ⊘ stale
 ```
 
 ## `stream`
@@ -30,6 +37,10 @@ Changes (2):
 Event stream — chronological facts.
 
 ```
+╭─ session · stream ───────────────────────────────────────────────────────────╮
+│ 4 facts                                                                      │
+│ 2025-01-14 → 2025-01-15 · updated Jan 15                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
 2025-01-15:
   10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for…
   09:30 [task] implement fold: Wire up Spec.apply.
@@ -44,8 +55,8 @@ Event stream — chronological facts.
 Store inspection — ticks, facts, freshness.
 
 ```
-disk     ▁▂▃▅▇█▅▃     20    5m ago  /dev/sda1
-memory   ▁▃▅▇     22    5m ago  {'used_mb': 4096, 'total_mb': 16384}
+disk     ▁▂▃▅▇█▅▃     20        5m  /dev/sda1
+memory   ▁▃▅▇     22        5m  {'used_mb': 4096, 'total_mb': 16384}
 ```
 
 ## `compile (loop)`

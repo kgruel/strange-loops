@@ -160,9 +160,28 @@ review speed — never the reverse.
 | Note something true, no prescription | `observation` | `topic=` |
 | Bump prior that informed this turn (no new claim) | `cite` | (refs only) |
 | Implementation strategy | `plan` | `name=` |
+| Design deliberation that revises in place (options weighed, position evolves across sessions) | `design` | `topic=` + `status=` |
 
 Forgetting the fold key (`name=` on a decision, `topic=` on a thread) silently
 orphans the fact. Check this table before emit.
+
+**`decision` vs `design`**: corpus-forensics on this store's 662 `decision`
+facts (2026-07-11) found only ~10% of topics ever get revised — the rest are
+correctly one-shot. `decision` keeps that narrower role: a settled choice,
+stated once. `design` is for the visible minority that iterates — start
+`status=proposed`, re-emit the same `topic=` as it refines (message carries
+what changed and why, same convention as `hypothesis-with-status`), land on
+`ratified`/`rejected`/`parked`, mark `superseded` (+ `superseded_by=`) if a
+later design replaces it. `alternatives=` is a first-class field (the ADR
+"considered options" convention) — capture what else was weighed and why not,
+not just the verdict. See `design/practice/design-kind-adr-elements`.
+
+Note the namespace overlap is intentional and harmless: `design/` below is a
+**topic prefix** (used under `decision`/`observation` for meta-level choices
+about how design work happens), while `design` above is a **kind name** — two
+different axes that happen to share a word. A `design`-kind fact's `topic=`
+should use the domain prefix directly (`rendering/foo`, `architecture/foo`),
+not `design/foo` — the kind already says "this is a design."
 
 ### Topic-prefix discipline
 
@@ -195,6 +214,10 @@ attribution — they answer different questions.
 | Architectural choice settled | `decision` with `topic=` + rationale |
 | Hypothesis tested | re-emit with `status=confirmed/rejected/refined` + ref to evidence |
 | Thread no longer relevant | re-emit with `status=resolved` (don't delete) |
+| Design deliberation opens (options to weigh, not yet settled) | `design` with `topic=` + `status=proposed` + `alternatives=` |
+| Design position evolves | re-emit same `topic=`, `status=refined`, message explains what changed |
+| Design settles or dies | re-emit `status=ratified`/`rejected`/`parked` |
+| A design replaces an earlier one | re-emit the OLD `topic=` with `status=superseded superseded_by=design:topic/new-slug` |
 | Discovery worth noting, no prescription | `observation` |
 | Tooling/process pain identified | `friction` with `status=open` |
 
@@ -240,6 +263,7 @@ sl emit project decision topic=design/foo message="..."
 sl emit project thread name=arc-name status=open message="..."
 sl emit project friction name=tool-pain status=open ops=loops-cli message="..."
 sl emit project hypothesis name=prediction-x status=proposed message="..."
+sl emit project design topic=rendering/foo status=proposed message="..." alternatives="option A: rejected because ...; option B: kept as the decomposed sibling, not folded in, because ..."
 sl cite REF1 REF2 -m "what prior informed this turn"
 ```
 

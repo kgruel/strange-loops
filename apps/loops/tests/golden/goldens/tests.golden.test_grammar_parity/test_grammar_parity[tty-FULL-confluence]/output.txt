@@ -1,0 +1,15 @@
+╭─ grammar · confluence ───────────────────────────────────────────────────────╮
+│ 2 observers · 9 facts                                                        │
+│ Jan 1 → Jan 2 · latest 3d                                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ◆ kyle          8  decision 3 · thread 2 · session 2 · log 1   3d
+    decision:design/rail ×2
+    decision:architecture/tiers
+    thread:spine
+    session:s1
+    thread:digest
+    window: 2025-01-01 12:00 → 2025-01-02 13:08
+  ◆ loops-claude  1  decision 1   3d
+    decision:design/rail
+    window: 2025-01-02 13:00 → 2025-01-02 13:00
+rail  ◆ high  │ mid  · tail  ⊘ stale

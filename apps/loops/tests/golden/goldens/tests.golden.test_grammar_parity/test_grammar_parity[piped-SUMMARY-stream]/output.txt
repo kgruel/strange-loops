@@ -1,0 +1,12 @@
+2025-01-02:
+mid       13:08 [session] s2
+mid       13:01 [thread] digest: the digest arc
+high      13:00 [decision] design/rail: post-tick refinement
+
+2025-01-01:
+mid       12:08 [session] s1
+untiered  12:06 [log] rtk rewrote the grep
+high      12:05 [thread] spine: the static-honest spine
+mid       12:03 [decision] architecture/tiers: quantile buckets, vertex-scoped
+high      12:01 [decision] design/rail: rail confirmed
+high      12:00 [decision] design/rail: the rail wins the gutter

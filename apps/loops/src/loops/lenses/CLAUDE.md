@@ -74,9 +74,11 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 
 ## Built-in Lenses (this directory)
 
-**Core rendering** (the temporal modes):
-- `fold` — default fold rendering, driven by section metadata
-- `stream` — time-ordered event history
+**Core rendering** (the store's three axes):
+- `fold` — default fold rendering, driven by section metadata (the kind cut)
+- `stream` — time-ordered event history (the time cut)
+- `confluence` — per-observer census with inherited tiers (the observer cut;
+  composition lens with its own `fetch`, invoked via `--lens confluence`)
 
 **User-global lenses** (at `~/.config/loops/lenses/`):
 - `prompt` — system prompt rendering (structured schema, domain-aware kind filtering)
@@ -85,6 +87,15 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 - `compile`, `run`, `store`, `test`, `validate`, `vertices`, `pop`
 
 **Utilities** (imported by other lenses):
+- `_grammar` — the shared static-grammar vocabulary: ONE time vocabulary
+  (`recency`/`clock`/`date_key`/`short_date`/`stamp`/`full_iso`/`duration`),
+  the width-honoring `block` helper, `DateGrouper`, the tick envelope
+  rows (`attest_line`, `tick_drill_rows`), and the header `card`/`card_width`
+  (the shared TTY letterhead — read/stream/ticks and ls all draw it). Never
+  hand-roll a timestamp format, a `width=None` guard, or a header card in a
+  lens — import it from here.
+- `_statview` — rich-TTY stat toolkit (stat_table, spark, meters, freshness;
+  re-exports `card`/`card_width` from `_grammar` for the ls lenses)
 - `gist` — content extraction from payloads (`content_gist(kind, payload)`)
 
 ## Writing a Lens

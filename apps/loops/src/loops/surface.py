@@ -75,6 +75,12 @@ class Row:
     key_field: str | None = None  # the fold-key FIELD name (label hint; carries
     # walked-row kinds whose schema entry is absent under a --kind filter)
     axis: str = "entity"  # "entity" (folded) | "event" (raw fact)
+    level: str = "key"  # containment-tree node type: "key" (folded entity) |
+    # "fact" (raw event) | "tick" (tick-window tree-cut). ``axis`` carries the
+    # entity/event TIME semantics the transforms key on; ``level`` is the node
+    # type in the containment tree (a tick row is axis="event", level="tick").
+    # Possible future dissolution: axis folds into level once no transform needs
+    # the time-axis distinction independently — not now (residue note, §7A).
     id: str | None = None  # ULID
     ts: float | None = None
     observer: str = ""
@@ -89,6 +95,11 @@ class Row:
     depth: int = 0  # >0 for ref-walk rows
     via_anchor: str | None = None  # the anchor whose ref pulled a walked row in
     granularity: str = "headline"  # "whole" | "headline"
+    tier: str = "mid"  # rail tier: "high" | "mid" | "tail" — quantile bucket of
+    # salience within the projected population (decision:design/
+    # salience-tier-scope-vertex; "stale" overlay arrives with the lifecycle
+    # declaration). Assigned once in project(); transforms preserve it, so the
+    # glyph a row got is the glyph every view shows.
 
 
 @dataclass(frozen=True)
@@ -469,6 +480,68 @@ def _address(kind: str, key: str | None, item_id: str | None) -> str:
     return f"{kind}/"
 
 
+def _tier_thresholds(saliences: list[int]) -> tuple[int, int] | None:
+    """Quantile thresholds (q90, q50) for rail-tier assignment.
+
+    The default dial (decision:design/spine-options-ratified §5a): ``high``
+    = top decile of salience within the population, ``mid`` = above median,
+    ``tail`` = the rest. Quantiles stay informative across a 9-key and a
+    516-key vertex alike, which is the point of vertex scope.
+
+    Returns None when the distribution has no spread — a flat population
+    has no "hot" rows, so callers tier everything ``mid`` rather than
+    rendering all-◆ noise.
+    """
+    if not saliences:
+        return None
+    lo, hi = min(saliences), max(saliences)
+    if lo == hi:
+        return None
+    s = sorted(saliences)
+    n = len(s)
+    q90 = s[int(0.9 * (n - 1) + 0.5)]
+    q50 = s[int(0.5 * (n - 1) + 0.5)]
+    return q90, q50
+
+
+def _tier_for(salience: int, thresholds: tuple[int, int] | None) -> str:
+    if thresholds is None:
+        return "mid"
+    q90, q50 = thresholds
+    if salience >= q90:
+        return "high"
+    if salience >= q50:
+        return "mid"
+    return "tail"
+
+
+def tiers_for_scores(scores: list[int]) -> list[str]:
+    """Rail tiers for a flat list of salience-like scores (quantile buckets).
+
+    The same machinery ``_assign_tiers`` runs over ``Row.salience``, exposed for
+    non-Surface populations that still want the rail vocabulary — notably the
+    ls kind-descent, whose entries are a vertex's fold keys scored by fact count
+    (decision:design/tier-one-home-inheritance — one quantile home, reused not
+    forked). Returns a tier per score, order-preserving. A flat distribution
+    (no spread) tiers everything ``mid`` rather than rendering all-◆ noise.
+    """
+    thresholds = _tier_thresholds(scores)
+    return [_tier_for(s, thresholds) for s in scores]
+
+
+def _assign_tiers(rows: list[Row]) -> list[Row]:
+    """Materialize Row.tier from salience quantiles over the population.
+
+    Scope caveat (named residue, not silent): tiers are vertex-scoped only
+    when the fetch was unfiltered — the default read. A fetch-level
+    ``--kind``/``--key`` cut yields a state whose population IS the cut, so
+    tiers degrade to cut-scope there until thresholds are hoisted to a
+    full-vertex query (thread:static-honest-060-spine).
+    """
+    thresholds = _tier_thresholds([r.salience for r in rows])
+    return [replace(r, tier=_tier_for(r.salience, thresholds)) for r in rows]
+
+
 def project(
     state: FoldState,
     *,
@@ -566,7 +639,7 @@ def project(
             )
         )
 
-    row_tuple = tuple(rows)
+    row_tuple = tuple(_assign_tiers(rows))
     window = Window(
         total=len(row_tuple),
         shown=len(row_tuple),
@@ -591,12 +664,55 @@ def project(
 # ---------------------------------------------------------------------------
 
 
-def _event_row(fact: dict) -> Row:
+def tier_map(surface: Surface) -> dict[tuple[str, str], str]:
+    """Map ``(kind, key)`` → tier from a projected surface's ENTITY rows.
+
+    The single inheritance handle (decision:design/tier-one-home-inheritance):
+    tier is assigned exactly once, in ``project()`` via ``_assign_tiers`` over
+    the entity projection. Every other axis — stream events, tick windows —
+    INHERITS through this map, never re-computing. Keyless (collect) rows carry
+    no ``(kind, key)`` handle, so they are absent here and their events render
+    UNTIERED (honest absence, not an invented "mid").
+    """
+    return {
+        (r.kind, r.key): r.tier
+        for r in surface.rows
+        if r.level == "key" and r.key is not None
+    }
+
+
+# Container tiers propagate the MAX of what they hold
+# (decision:design/salience-max-propagation): a tick window is as hot as its
+# hottest key. Ordering high > mid > tail > untiered("").
+_TIER_RANK: dict[str, int] = {"high": 3, "mid": 2, "tail": 1, "": 0}
+
+
+def tier_max(tiers: "list[str]") -> str:
+    """MAX tier over a set of member tiers (container propagation).
+
+    A window/container inherits its hottest member's tier; an empty set — or
+    one holding only untiered members — is itself untiered "". Unknown tier
+    strings rank as untiered (defensive; the map only ever feeds known tiers).
+    """
+    best = ""
+    best_rank = 0
+    for t in tiers:
+        rank = _TIER_RANK.get(t, 0)
+        if rank > best_rank:
+            best, best_rank = t, rank
+    return best
+
+
+def _event_row(fact: dict, tier: str = "") -> Row:
     """Build an event-axis Row from a ``vertex_search`` / ``vertex_facts`` dict.
 
     These are RAW facts (one per write, the event axis) — ``{kind, ts, observer,
     origin, id, payload}`` — with ``ts`` a ``datetime`` and no top-level
     ``refs``. The address is ``kind/<id>`` (no fold key on the event axis).
+
+    ``tier`` is INHERITED from the entity projection via ``tier_map`` (the
+    default ``""`` is UNTIERED — no matching folded entity; the JSON must not
+    claim "mid" and the TTY renders the blank gutter, not a rail glyph).
     """
     from datetime import datetime
 
@@ -611,6 +727,7 @@ def _event_row(fact: dict) -> Row:
         payload=dict(fact.get("payload", {})),
         key=None,
         axis="event",
+        level="fact",
         id=fid,
         ts=ts,
         observer=fact.get("observer", ""),
@@ -619,6 +736,7 @@ def _event_row(fact: dict) -> Row:
         refs=(),
         inbound=0,
         salience=1,
+        tier=tier,
         granularity="headline",
     )
 
@@ -686,7 +804,9 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
     # from the FTS set).
     q = query.lower()
     rows.extend(
-        replace(r, axis="event")
+        # Match _event_row's grammar: event-axis rows are level="fact", even
+        # when sourced from a projected key row (the substring fallback).
+        replace(r, axis="event", level="fact")
         for r in surface.rows
         if r.kind in unindexed and q in _payload_text(r.payload).lower()
     )
@@ -862,6 +982,7 @@ def _row_to_dict(row: Row) -> dict:
         "key_field": row.key_field,
         "payload": dict(row.payload),
         "axis": row.axis,
+        "level": row.level,
         "id": row.id,
         "ts": row.ts,
         "observer": row.observer,
@@ -874,6 +995,7 @@ def _row_to_dict(row: Row) -> dict:
             {"predicate": p, "count": c} for p, c in row.inbound_predicates
         ],
         "salience": row.salience,
+        "tier": row.tier,
         "depth": row.depth,
         "via_anchor": row.via_anchor,
         "granularity": row.granularity,

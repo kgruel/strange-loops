@@ -631,18 +631,31 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
             "signed": sum(1 for w in windows if w.signed),
             "legacy": sum(1 for w in windows if not w.chained),
         }
+        window_dicts = [dataclasses.asdict(w) for w in windows]
+
+        # Density default projects each tick as a sealed window of attention:
+        # window-scoped fact count + kind mix + MAX tier over touched keys
+        # (the TickWindow fields are cumulative fold state; these are the
+        # per-window complements). Skipped under --chain — the attestation
+        # projection reads the stored envelope only.
+        if not known.chain:
+            from .fetch import stamp_window_stats
+
+            stamp_window_stats(target_path, window_dicts)
+
         return {
             "vertex": ast.name,
             "chain_mode": known.chain,
             "chain": chain,
             "since": known.since,
-            "windows": [dataclasses.asdict(w) for w in windows],
+            "windows": window_dicts,
         }
 
     def render(ctx, data):
         from ..lenses.store import tick_chain_view
 
-        return tick_chain_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return tick_chain_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     return run_cli(
         rest,
@@ -651,9 +664,11 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
         default_mode=OutputMode.STATIC,
         prog="loops store ticks",
         description=(
-            "Read a store's tick series. --chain projects the attestation "
-            "envelope (chain linkage, signature, window cursor) per tick; "
-            "the default projects density (items/facts/delta)."
+            "Read a store's tick series. The default projects each tick as "
+            "a sealed window of attention — window fact count, kind mix, "
+            "span, rail tier (-v adds the touched keys); --chain projects "
+            "the attestation envelope (chain linkage, signature, window "
+            "cursor) per tick."
         ),
         help_args=help_args,
     )
@@ -708,7 +723,8 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     def render(ctx, data):
         from ..lenses.store import stats_view
 
-        return stats_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return stats_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     return run_cli(
         rest,
@@ -762,12 +778,18 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         path = _resolve_store_target().resolve()
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
-        return make_fetcher(path, zoom=3)()
+        data = make_fetcher(path, zoom=3)()
+        # Lead the MINIMAL one-liner with the store name (spine dot-grammar),
+        # matching the store ticks/stats surfaces — the vertex name is the
+        # store stem, known here at the call site.
+        data.setdefault("vertex", path.stem)
+        return data
 
     def render(ctx, data):
         from ..lenses.store import store_view
 
-        return store_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return store_view(data, ctx.zoom, w, piped=not ctx.is_tty)
 
     async def fetch_stream():
         import asyncio

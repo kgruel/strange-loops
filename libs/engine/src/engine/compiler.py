@@ -605,7 +605,7 @@ class CompiledVertex:
                  store: Path | None = None, path: Path | None = None,
                  sources: list | None = None,
                  template_specs: dict | None = None,
-                 boundary=None,
+                 boundary=(),
                  parse_pipelines=None):
         self.name = name
         self.specs = specs
@@ -738,10 +738,10 @@ def compile_vertex_recursive(
         )
         children[child_compiled.name] = child_compiled
 
-    # Compile vertex-level boundary if present
-    vertex_boundary = None
-    if vertex.boundary is not None:
-        vertex_boundary = map_boundary(vertex.boundary)
+    # Compile vertex-level boundaries (a vertex may declare more than one —
+    # each fires the whole vertex independently; see friction:
+    # vertex-boundary-last-declaration-wins).
+    vertex_boundaries = tuple(map_boundary(b) for b in vertex.boundary)
 
     # Compile per-kind parse pipelines
     parse_pipes = compile_parse_pipelines(vertex)
@@ -755,7 +755,7 @@ def compile_vertex_recursive(
         path=vertex.path,
         sources=own_sources or None,
         template_specs=own_template_specs or None,
-        boundary=vertex_boundary,
+        boundary=vertex_boundaries,
         parse_pipelines=parse_pipes,
     )
 
@@ -979,9 +979,10 @@ def materialize_vertex(
     if compiled.parse_pipelines:
         vertex.set_parse_pipelines(compiled.parse_pipelines)
 
-    # Register vertex-level boundary (fires all loops)
-    if compiled.boundary is not None:
-        b = compiled.boundary
+    # Register vertex-level boundaries (each fires all loops). Declaration
+    # order is preserved — on a fact that satisfies more than one, the first
+    # match in declaration order fires (see Vertex._match_vertex_boundary).
+    for b in compiled.boundary:
         vertex.register_vertex_boundary(
             kind=b.kind,
             match=b.match,

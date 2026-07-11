@@ -1,4 +1,10 @@
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 1 keys · 1 kinds · 3 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 Decisions (1):
-  Use SQLite [×3 Jan 15]: Atomic writes and query support. · Filesystem lacks t…
+  │ Jan 15  Use SQLite  ×3
+            Atomic writes and query support. · Filesystem lacks transactions.
     _ts: 2025-01-15T10:00:00+00:00
     _n: 3
+rail  ◆ high  │ mid  · tail  ⊘ stale

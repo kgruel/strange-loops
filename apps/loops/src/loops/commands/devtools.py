@@ -343,7 +343,8 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
             raise ValueError(f"Unknown file type: {path.suffix}")
 
     def render(ctx, data):
-        return compile_view(data, ctx.zoom, ctx.width)
+        w = ctx.width if ctx.is_tty else None
+        return compile_view(data, ctx.zoom, w)
 
     return run_cli(
         rest,

@@ -1,1 +1,1 @@
-2 decisions, 2 threads, 2 tasks, 2 changes
+session · 2 decisions · 2 threads · 2 tasks · 2 changes

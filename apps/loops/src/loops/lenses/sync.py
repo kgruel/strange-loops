@@ -48,7 +48,7 @@ def _fact_label(count: int) -> str:
     return "1 fact" if count == 1 else f"{count} facts"
 
 
-def sync_view(data: dict, zoom: Zoom, width: int) -> Block:
+def sync_view(data: dict, zoom: Zoom, width: int | None) -> Block:
     """Render sync results.
 
     data keys: ticks, ran, skipped, errors, fact_counts, children (aggregation only)

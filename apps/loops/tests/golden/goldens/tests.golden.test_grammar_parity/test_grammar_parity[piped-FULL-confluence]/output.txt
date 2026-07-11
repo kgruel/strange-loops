@@ -1,0 +1,5 @@
+grammar · 2 observers · 9 facts · kyle 8 · loops-claude 1
+kyle          high     8 facts     6 keys  2025-01-02 13:08  decision=3 thread=2 session=2 log=1  window 2025-01-01T12:00:00+00:00 → 2025-01-02T13:08:20+00:00
+  touched: decision:design/rail ×2 · decision:architecture/tiers · thread:spine · session:s1 · thread:digest
+loops-claude  high     1 facts     1 keys  2025-01-02 13:00  decision=1  window 2025-01-02T13:00:00+00:00 → 2025-01-02T13:00:00+00:00
+  touched: decision:design/rail

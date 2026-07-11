@@ -8,6 +8,11 @@ source "$HOOK_DIR/lib.sh"
 [ -f "$V" ] || exit 0   # not a loops-dogfooding repo → no orient block
 command -v "$SL" >/dev/null 2>&1 || exit 0   # no sl → skip silently (don't print a degenerate all-zeros block)
 
+if "$SL" orient --help >/dev/null 2>&1; then
+  "$SL" orient "$V" 2>/dev/null
+  exit 0
+fi
+
 seal=$("$SL" read "$V" --kind seal --plain 2>/dev/null | grep '^  ' | grep -v '^ *$' | tail -1 | sed 's/^ *//' | cut -c1-180)
 open_t=$("$SL" read "$V" --kind thread --plain 2>/dev/null | grep -c ': open ·')
 open_f=$("$SL" read "$V" --kind friction --plain 2>/dev/null | grep -c ': open ·')

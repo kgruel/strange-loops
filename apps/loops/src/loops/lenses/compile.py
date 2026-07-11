@@ -6,7 +6,7 @@ from typing import Any
 from painted import Block, Style, Zoom, join_vertical
 
 
-def compile_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
+def compile_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     """Render compiled AST at the given zoom level.
 
     data keys depend on file type:
@@ -29,7 +29,7 @@ def compile_view(data: dict[str, Any], zoom: Zoom, width: int) -> Block:
         return Block.text(f"Unknown type: {file_type}", Style(dim=True), width=width)
 
 
-def _render_loop(data: dict, zoom: Zoom, width: int) -> Block:
+def _render_loop(data: dict, zoom: Zoom, width: int | None) -> Block:
     """Render compiled .loop source."""
     name = data.get("name", "?")
     parse_ops = data.get("parse", [])
@@ -72,7 +72,7 @@ def _render_loop(data: dict, zoom: Zoom, width: int) -> Block:
     return join_vertical(*rows)
 
 
-def _render_vertex(data: dict, zoom: Zoom, width: int) -> Block:
+def _render_vertex(data: dict, zoom: Zoom, width: int | None) -> Block:
     """Render compiled .vertex specs."""
     name = data.get("name", "?")
     specs = data.get("specs", {})

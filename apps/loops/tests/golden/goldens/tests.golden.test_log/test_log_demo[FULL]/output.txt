@@ -1,3 +1,7 @@
+╭─ session · stream ───────────────────────────────────────────────────────────╮
+│ 4 facts                                                                      │
+│ 2025-01-14 → 2025-01-15 · updated Jan 15                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
 2025-01-15:
   2025-01-15T10:00:00Z [decision] Use SQLite for persistence: Chose SQLite over…
   topic: Use SQLite for persistence

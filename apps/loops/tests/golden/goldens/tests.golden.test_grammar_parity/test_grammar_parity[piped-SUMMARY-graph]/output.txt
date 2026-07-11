@@ -1,0 +1,13 @@
+grammar · 7 nodes · 1 edges (0 typed) · 5 orphans · 0 dangling
+nodes:
+  thread/spine  ←1 →0  high      ref 1  2025-01-01 12:05
+chains:
+  decision/design/rail → thread/spine
+orphans:
+  decision/architecture/tiers
+  thread/digest
+  log/<ULID>
+  session/s1
+  session/s2
+edges:
+  ref  1  ref

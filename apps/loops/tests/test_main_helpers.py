@@ -803,3 +803,15 @@ class TestAsyncPaths:
         async def fake_run(self): pass
         monkeypatch.setattr(AutoresearchApp, "run", fake_run)
         assert main(["read", "--lens", "autoresearch", "--interactive"]) in (0, 1)
+
+
+class TestBrokenPipe:
+    def test_broken_pipe_exits_sigpipe_status(self, monkeypatch, capsys):
+        """A downstream reader closing early exits 141, no traceback."""
+        import loops.main as main_mod
+
+        def boom(argv):
+            raise BrokenPipeError
+
+        monkeypatch.setattr("loops.cli.app.main", boom)
+        assert main_mod.main(["read", "project"]) == 141

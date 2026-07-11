@@ -1,0 +1,21 @@
+╭─ grammar · fold ─────────────────────────────────────────────────────────────╮
+│ 7 keys · 4 kinds · 9 facts                                                   │
+│ updated 3d                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Decisions (2):
+  design/ (1)
+    ◆ 3d  rail   ×3 →1  post-tick refinement
+  architecture/ (1)
+    │ 4d  tiers
+
+Threads (2):
+  ◆ 4d  spine   ←1  open
+  │ 3d  digest
+
+Logs (1):
+  │ 4d  rtk rewrote the grep
+
+Sessions (2):
+  │ 4d  s1
+  │ 3d  s2
+rail  ◆ high  │ mid  · tail  ⊘ stale

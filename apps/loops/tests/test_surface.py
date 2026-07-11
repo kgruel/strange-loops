@@ -591,6 +591,8 @@ def test_to_dict_is_json_safe():
     assert row_a["salience"] == 2  # n=2, no inbound
     assert row_a["refs"] == ["decision/design/b"]
     assert "window" in again and "schema" in again
+    # level discriminator (§7A) — folded entity rows are level "key".
+    assert {r["level"] for r in again["rows"]} == {"key"}
 
 
 def test_source_facts_carried_onto_surface():
@@ -693,3 +695,103 @@ def test_dataclasses_are_frozen():
     import pytest
     with pytest.raises(dataclasses.FrozenInstanceError):
         row.salience = 99  # type: ignore
+
+
+class TestTierAssignment:
+    """Rail tiers — quantile buckets over the projected population
+    (decision:design/salience-tier-scope-vertex, default dial 5a=A)."""
+
+    def test_flat_population_is_all_mid(self):
+        from loops.surface import _tier_thresholds
+
+        assert _tier_thresholds([3, 3, 3]) is None
+        assert _tier_thresholds([]) is None
+        assert _tier_thresholds([7]) is None
+
+    def test_quantile_buckets(self):
+        from loops.surface import _tier_for, _tier_thresholds
+
+        # 10 keys, salience 1..10: q90=9, q50=6 (nearest-rank on 0..9)
+        th = _tier_thresholds(list(range(1, 11)))
+        tiers = [_tier_for(s, th) for s in range(1, 11)]
+        assert tiers.count("high") == 2  # 9, 10
+        assert "mid" in tiers and "tail" in tiers
+        assert tiers[0] == "tail"
+        assert tiers[-1] == "high"
+
+    def test_two_value_split(self):
+        from loops.surface import _tier_for, _tier_thresholds
+
+        th = _tier_thresholds([5, 1])
+        assert _tier_for(5, th) == "high"
+        assert _tier_for(1, th) != "high"
+
+    def test_project_materializes_tiers(self, monkeypatch=None):
+        # Reuse whatever fixture style the module uses lightly: build via
+        # project() on a minimal FoldState through the public path.
+        from atoms import FoldItem, FoldSection, FoldState
+
+        from loops.surface import project
+
+        items = tuple(
+            FoldItem(payload={"topic": f"t{i}", "message": "m"}, ts=None,
+                     observer="o", id=None, n=i)
+            for i in (1, 1, 1, 1, 1, 1, 1, 1, 2, 9)
+        )
+        state = FoldState(
+            vertex="v",
+            sections=(FoldSection(kind="decision", items=items,
+                                  fold_type="by", key_field="topic"),),
+        )
+        surface = project(state)
+        tiers = {r.key: r.tier for r in surface.rows}
+        assert tiers["t9"] == "high"
+        assert set(tiers.values()) <= {"high", "mid", "tail"}
+
+    def test_tier_map_and_max(self):
+        """tier_map projects (kind,key)→tier from entity rows; tier_max is the
+        container propagation (high > mid > tail > untiered)."""
+        from atoms import FoldItem, FoldSection, FoldState
+
+        from loops.surface import project, tier_map, tier_max
+
+        items = tuple(
+            FoldItem(payload={"topic": f"t{i}", "message": "m"}, ts=None,
+                     observer="o", id=None, n=n)
+            for i, n in enumerate([1, 1, 1, 2, 9])
+        )
+        state = FoldState(
+            vertex="v",
+            sections=(FoldSection(kind="decision", items=items,
+                                  fold_type="by", key_field="topic"),),
+        )
+        tmap = tier_map(project(state))
+        assert tmap[("decision", "t4")] == "high"  # n=9
+        # MAX propagation + untiered handling
+        assert tier_max(["tail", "high", "mid"]) == "high"
+        assert tier_max(["tail", "mid"]) == "mid"
+        assert tier_max(["", ""]) == ""
+        assert tier_max([]) == ""
+
+    def test_transforms_preserve_tier(self):
+        from atoms import FoldItem, FoldSection, FoldState
+
+        from loops.surface import filter as sfilter
+        from loops.surface import project
+
+        items = tuple(
+            FoldItem(payload={"topic": f"t{i}", "message": "m"}, ts=None,
+                     observer="o", id=None, n=n)
+            for i, n in enumerate([1, 1, 1, 2, 9])
+        )
+        state = FoldState(
+            vertex="v",
+            sections=(FoldSection(kind="decision", items=items,
+                                  fold_type="by", key_field="topic"),),
+        )
+        surface = project(state)
+        before = {r.key: r.tier for r in surface.rows}
+        narrowed = sfilter(surface, key="t")
+        after = {r.key: r.tier for r in narrowed.rows}
+        for k, t in after.items():
+            assert t == before[k]

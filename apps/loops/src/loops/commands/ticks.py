@@ -6,45 +6,16 @@ from pathlib import Path
 
 
 def _tick_drill_header(tick_meta: dict, width: int | None) -> "Block":
-    """Render a compact header for tick drill-down.
-
-    Shows tick index, boundary trigger, and time window. Returns a
-    Block that can be composed above the fold/lens output.
-    """
+    """Compact header for tick drill-down, composed above the fold/lens
+    output. Row content (title, window, attest) is the shared grammar's."""
     from painted import Block, Style
+
+    from loops.lenses._grammar import tick_drill_rows
 
     if not tick_meta:
         return Block.text("", Style())
 
-    boundary = tick_meta.get("boundary", {})
-    bname = boundary.get("name", "")
-    bstatus = boundary.get("status", "")
-    trigger = f" — {bname} {bstatus}" if bname else ""
-
-    range_end = tick_meta.get("range_end")
-    if range_end is not None:
-        # Range mode: "Ticks #0:3 of 120"
-        range_boundaries = tick_meta.get("range_boundaries", [])
-        observers = list(dict.fromkeys(
-            b.get("name", "") for b in range_boundaries if b.get("name")
-        ))
-        if observers:
-            trigger = f" — {', '.join(observers)}"
-        title = f"Ticks #{tick_meta['index']}:{range_end} of {tick_meta['total']}{trigger}"
-    else:
-        title = f"Tick #{tick_meta['index']} of {tick_meta['total']}{trigger}"
-
-    rows: list[tuple[str, Style]] = [(title, Style(bold=True))]
-
-    if tick_meta.get("since") and tick_meta.get("ts"):
-        rows.append((f"  window: {tick_meta['since']} → {tick_meta['ts']}", Style(dim=True)))
-
-    from loops.lenses.stream import attest_line
-
-    attest = attest_line(tick_meta.get("envelope"))
-    if attest:
-        rows.append((attest, Style(dim=True)))
-
+    rows = tick_drill_rows(tick_meta)
     rows.append(("", Style()))
     return Block.column(rows, width=width)
 
@@ -154,6 +125,7 @@ def _run_ticks(
             body = call_lens(
                 resolved_render_fn, fold_state, ctx.zoom, w,
                 vertex_name=_vertex_name(vertex_path),
+                piped=not ctx.is_tty,
             )
 
             # Compose tick header + fold rendering
@@ -189,6 +161,7 @@ def _run_ticks(
         return call_lens(
             resolved_render_fn, data, ctx.zoom, w,
             vertex_name=_vertex_name(vertex_path),
+            piped=not ctx.is_tty,
         )
 
     return run_cli(

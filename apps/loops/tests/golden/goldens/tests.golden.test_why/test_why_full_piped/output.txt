@@ -1,0 +1,14 @@
+decision/design/a · 3 facts · Jan 14 → Jan 15 · observers: alice, bob
+┌ 2025-01-14T10:20:00+00:00 alice  message, status→open, label · ×1
+│ 2025-01-14T11:20:00+00:00 bob  status→review · ×2
+└ 2025-01-15T12:00:00+00:00 alice  status→open, label · ×3
+══ the ledger below ↓ is the fold, not a stored record
+message = the body  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)
+status = open  ← 2025-01-15T12:00:00+00:00 alice (fact 3/3)
+    was review  ← 2025-01-14T11:20:00+00:00 bob (fact 2/3)
+    was open  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)
+label = ∅  ← 2025-01-15T12:00:00+00:00 alice (fact 3/3)
+    was draft  ← 2025-01-14T10:20:00+00:00 alice (fact 1/3)
+── mechanism ──
+state = facts.reduce(Spec.apply, ∅)
+chain: 3 facts linked · Jan 14 → Jan 15

@@ -1,42 +1,19 @@
 """Ticks lens — zoom-aware rendering of tick history and drill-down."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from painted import Block, Style, Zoom
 
-
-def _block(text: str, style: Style, width: int | None) -> Block:
-    if width is not None:
-        return Block.text(text, style, width=width)
-    return Block.text(text, style)
-
-
-def _format_duration(start: datetime, end: datetime) -> str:
-    """Human-readable duration between two datetimes."""
-    delta = end - start
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return f"{secs}s"
-    if secs < 3600:
-        return f"{secs // 60}m"
-    if secs < 86400:
-        hours = secs // 3600
-        mins = (secs % 3600) // 60
-        return f"{hours}h{mins}m" if mins else f"{hours}h"
-    days = secs // 86400
-    hours = (secs % 86400) // 3600
-    return f"{days}d{hours}h" if hours else f"{days}d"
+from ._grammar import DateGrouper, clock, rail_glyph
+from ._grammar import block as _block
+from ._grammar import coerce_dt as _parse_ts
+from ._grammar import duration as _format_duration
+from ._statview import palette_of
 
 
-def _parse_ts(ts: str | datetime) -> datetime:
-    if isinstance(ts, datetime):
-        return ts
-    return datetime.fromisoformat(ts)
-
-
-def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
+def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
+               *, piped: bool | None = None) -> Block:
     """Render tick history at the given zoom level.
 
     Accepts {"ticks": [...], "vertex": str}.
@@ -48,6 +25,10 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     - DETAILED: + per-kind counts, window duration
     - FULL: + since/ts timestamps, origin, all payload keys
     """
+    is_piped = bool(piped or (piped is None and width is None))
+    if is_piped:
+        width = None  # piped register never clips (information-faithful)
+
     ticks = data.get("ticks", [])
 
     if not ticks:
@@ -58,20 +39,18 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
 
     rows: list[tuple[str, Style]] = []
     dim = Style(dim=True)
-    current_date = None
+    p = palette_of(None)
+    grouper = DateGrouper()
 
     for i, tick in enumerate(ticks):
         ts = _parse_ts(tick["ts"])
+        if ts is None:
+            continue
         since = _parse_ts(tick["since"]) if tick.get("since") else None
 
-        date_str = ts.strftime("%Y-%m-%d")
-        if date_str != current_date:
-            if current_date is not None:
-                rows.append(("", Style()))
-            rows.append((f"{date_str}:", Style(bold=True)))
-            current_date = date_str
+        rows.extend(grouper.header_rows(ts))
 
-        time_str = ts.strftime("%H:%M")
+        time_str = clock(ts)
         boundary = tick.get("boundary", {})
         kind_counts = tick.get("kind_counts", {})
 
@@ -85,8 +64,6 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
             elif bname:
                 trigger = bname
 
-        # Total items across all kinds
-        total_items = sum(kind_counts.values())
         kinds_summary = ", ".join(f"{c} {k}" for k, c in kind_counts.items() if c > 0)
 
         # Duration
@@ -97,15 +74,23 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
         # Index for drill-down reference
         idx_label = f"#{i}"
 
-        if trigger:
-            summary = f"  {time_str} {idx_label} {trigger}"
+        # Rail gutter (G4): a tick is a tree-cut container — its tier is the MAX
+        # over the keys its window touched (fetch_ticks → tier_max). TTY renders
+        # the glyph gutter; the piped ledger carries the tier as a WORD.
+        tier = tick.get("tier", "")
+        if is_piped:
+            gutter = f"{tier or 'untiered':<8}  "
+            row_style = Style()
         else:
-            summary = f"  {time_str} {idx_label} {tick['name']}"
+            gutter = f"{rail_glyph(tier)} "
+            row_style = p.rail_style(tier)
 
+        body = f"{time_str} {idx_label} {trigger}" if trigger \
+            else f"{time_str} {idx_label} {tick['name']}"
         if duration:
-            summary += f" ({duration})"
+            body += f" ({duration})"
 
-        rows.append((summary, Style()))
+        rows.append((f"{gutter}{body}", row_style))
 
         if zoom >= Zoom.DETAILED and kinds_summary:
             rows.append((f"           fold: {kinds_summary}", dim))

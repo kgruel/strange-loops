@@ -1,0 +1,8 @@
+config — ~/.config/loops
+    grammar  9 facts  4 kinds  3d  ⊃ decision · session · thread
+      ⊙ own store
+      decision  4  items by topic
+      session   2  items by name
+      thread    2  items by name
+      log       1  collect 20
+      store: <STORE>

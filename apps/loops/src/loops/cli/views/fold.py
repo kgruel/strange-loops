@@ -124,6 +124,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show raw fact stream instead of folded state",
     )
     parser.add_argument(
+        "--why", action="store_true", default=False,
+        help="Per-field provenance drill for one exact kind/key address",
+    )
+    parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",
     )
@@ -479,6 +483,16 @@ def run(argv: list[str], ctx: Invocation) -> int:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
+    # --why is an address-scoped provenance drill: it renders ONE folded
+    # (kind, key) entry field by field, so it short-circuits the multi-section
+    # fold path entirely (own fetch, own lens, own --json shape).
+    if args.why:
+        return _run_why(
+            ctx, vertex_path, kind, queried_key, key_or,
+            json=(parse_format(args) is Format.JSON),
+            zoom=parse_zoom(args),
+        )
+
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
         kind=kind, key=fetch_key,
@@ -559,6 +573,141 @@ def run(argv: list[str], ctx: Invocation) -> int:
         interactive_handler=interactive_handler,
     )
     return dispatch(op, reporter=ctx.reporter)
+
+
+# --- Provenance drill (--why) ---------------------------------------------
+
+
+def _run_why(
+    ctx: Invocation,
+    vertex_path: Path,
+    kind: str | None,
+    key: str | None,
+    key_or: tuple[str, ...],
+    *,
+    json: bool,
+    zoom: Any,
+) -> int:
+    """Render the per-field provenance drill for one exact (kind, key) address.
+
+    Requires an EXACT address — a single, complete fold key (not a prefix, not
+    a comma-OR set). Rejects anything else with guidance, mirroring the
+    --key-on-keyless-kind error shape. Own fetch (forces retain_facts so the
+    source facts are present), own lens, own --json encoding — it never touches
+    the multi-section fold dispatch.
+    """
+    if kind is None or key is None or key_or:
+        ctx.reporter.err(
+            "--why needs an exact kind/key address (e.g. "
+            "`read <vertex> decision/design/foo --why`) — it drills one folded "
+            "entry, so a bare kind, a comma-OR set, or no address doesn't apply."
+        )
+        return 2
+    if key.endswith("/"):
+        ctx.reporter.err(
+            f"--why needs an EXACT fold key, not the prefix '{key}' — "
+            "name the single entry to drill (drop the trailing '/')."
+        )
+        return 2
+
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import _apply_vertex_scope
+    from loops.provenance import replay_attribution
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    _validate_kind_or_exit(kind, vertex_path)
+
+    fold_op = _resolve_fold_op(vertex_path, kind)
+
+    from atoms.fold import Upsert
+
+    if isinstance(fold_op, Upsert):
+        state = fetch_fold(
+            vertex_path, kind=kind, key=key, observer=obs, retain_facts=True,
+        )
+        key, source = _lookup_source_facts(state, kind, key)
+        prov = replay_attribution(
+            fold_op, source, kind=kind, key=key, key_field=fold_op.key,
+        )
+    else:
+        # Collect-fold (or unknown) — keyless, so chronology IS the provenance.
+        # Fetch the kind unfiltered and hand the folded items over as the
+        # chronological ledger; replay degrades to mode="collect".
+        state = fetch_fold(vertex_path, kind=kind, observer=obs, retain_facts=True)
+        facts = _collect_section_facts(state, kind)
+        prov = replay_attribution(
+            fold_op, facts, kind=kind, key=key, key_field=None,
+        )
+
+    if json:
+        import json as _json
+
+        from loops.provenance import to_dict as _prov_to_dict
+
+        ctx.reporter.msg(_json.dumps(_prov_to_dict(prov)))
+        return 0
+
+    import shutil
+
+    from loops.lenses.provenance import why_view
+
+    width = shutil.get_terminal_size().columns if ctx.isatty else None
+    block = why_view(prov, zoom, width, piped=not ctx.isatty)
+    ctx.reporter.print_block(block)
+    return 0
+
+
+def _resolve_fold_op(vertex_path: Path, kind: str) -> Any:
+    """The kind's real fold op (``spec.folds[0]``), or None when undeclared."""
+    from engine.vertex_reader import _resolve_full_specs
+    from lang import parse_vertex_file
+
+    try:
+        ast = parse_vertex_file(vertex_path)
+        specs = _resolve_full_specs(ast, vertex_path)
+    except Exception:
+        return None
+    spec = specs.get(kind)
+    if spec is None or not spec.folds:
+        return None
+    return spec.folds[0]
+
+
+def _lookup_source_facts(state: Any, kind: str, key: str) -> tuple[str, list[dict]]:
+    """Source facts for an exact ``kind/key`` — exact, then case-folded fallback.
+
+    Returns ``(canonical_key, facts)``: the fallback resolves a case-variant
+    user key to the key the fold state actually holds, and the replay must
+    use that canonical key too — ``replay_attribution`` looks the entry up
+    exactly, so replaying under the user's variant would find the source
+    facts yet attribute zero fields.
+    """
+    src = state.source_facts
+    exact = src.get(f"{kind}/{key}")
+    if exact is not None:
+        return key, list(exact)
+    want = f"{kind}/{key}".lower()
+    for addr, facts in src.items():
+        if addr.lower() == want:
+            return addr.split("/", 1)[1], list(facts)
+    return key, []
+
+
+def _collect_section_facts(state: Any, kind: str) -> list[dict]:
+    """Folded items of a collect kind as chronological fact dicts (ts/observer)."""
+    facts: list[dict] = []
+    for section in state.sections:
+        if section.kind != kind:
+            continue
+        for item in section.items:
+            pd = dict(item.payload)
+            if item.ts is not None:
+                pd.setdefault("_ts", item.ts)
+            if item.observer:
+                pd.setdefault("_observer", item.observer)
+            facts.append(pd)
+    facts.sort(key=lambda f: f.get("_ts") or 0)
+    return facts
 
 
 # --- Interactive handler (autoresearch TUI) -------------------------------

@@ -1,0 +1,7 @@
+╭─ why · decision/design/a ╮
+│ 3 facts · Jan 14 → Jan 15│
+│ observers: alice, bob    │
+╰──────────────────────────╯
+message = the body  ← Jan 14 alice (fact 1/3)
+status = open  ← Jan 15 alice (fact 3/3)
+label = ∅  ← Jan 15 alice (fact 3/3)

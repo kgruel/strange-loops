@@ -1,0 +1,57 @@
+## DECISION (2)
+KEY                 TIER   N  IN  DATE        MESSAGE
+design/rail         high   3   0  2025-01-02  post-tick refinement
+  observer: loops-claude
+  id: <ID>
+  _id: <ULID>
+  _ts: 2025-01-02T13:00:00+00:00
+  _observer: loops-claude
+  _n: 3
+architecture/tiers  mid    1   0  2025-01-01  quantile buckets, vertex-scoped
+  observer: kyle
+  id: <ID>
+  _id: <ULID>
+  _ts: 2025-01-01T12:03:20+00:00
+  _observer: kyle
+
+## THREAD (2)
+KEY     TIER   N  IN  DATE        MESSAGE
+spine   high   1   1  2025-01-01  open
+  observer: kyle
+  id: <ID>
+  message: the static-honest spine
+  _id: <ULID>
+  _ts: 2025-01-01T12:05:00+00:00
+  _observer: kyle
+  _inbound_refs: 1
+digest  mid    1   0  2025-01-02  open
+  observer: kyle
+  id: <ID>
+  message: the digest arc
+  _id: <ULID>
+  _ts: 2025-01-02T13:01:40+00:00
+  _observer: kyle
+
+## LOG (1)
+KEY                   TIER   N  IN  DATE        MESSAGE
+rtk rewrote the grep  mid    1   0  2025-01-01
+  observer: kyle
+  id: <ID>
+  _id: <ULID>
+  _ts: 2025-01-01T12:06:40+00:00
+  _observer: kyle
+
+## SESSION (2)
+KEY  TIER   N  IN  DATE        MESSAGE
+s1   mid    1   0  2025-01-01  closed
+  observer: kyle
+  id: <ID>
+  _id: <ULID>
+  _ts: 2025-01-01T12:08:20+00:00
+  _observer: kyle
+s2   mid    1   0  2025-01-02  closed
+  observer: kyle
+  id: <ID>
+  _id: <ULID>
+  _ts: 2025-01-02T13:08:20+00:00
+  _observer: kyle

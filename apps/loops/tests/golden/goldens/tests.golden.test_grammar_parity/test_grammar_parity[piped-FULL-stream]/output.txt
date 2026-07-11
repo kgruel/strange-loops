@@ -1,0 +1,50 @@
+2025-01-02:
+mid       2025-01-02T13:08:20Z [session] s2
+            name: s2
+            status: closed
+    id: <ULID>
+    observer: kyle
+mid       2025-01-02T13:01:40Z [thread] digest: the digest arc
+            name: digest
+            status: open
+            message: the digest arc
+    id: <ULID>
+    observer: kyle
+high      2025-01-02T13:00:00Z [decision] design/rail: post-tick refinement
+            topic: design/rail
+            message: post-tick refinement
+    id: <ULID>
+    observer: loops-claude
+
+2025-01-01:
+mid       2025-01-01T12:08:20Z [session] s1
+            name: s1
+            status: closed
+    id: <ULID>
+    observer: kyle
+untiered  2025-01-01T12:06:40Z [log] rtk rewrote the grep
+            message: rtk rewrote the grep
+    id: <ULID>
+    observer: kyle
+high      2025-01-01T12:05:00Z [thread] spine: the static-honest spine
+            name: spine
+            status: open
+            message: the static-honest spine
+    id: <ULID>
+    observer: kyle
+mid       2025-01-01T12:03:20Z [decision] architecture/tiers: quantile buckets, vertex-scoped
+            topic: architecture/tiers
+            message: quantile buckets, vertex-scoped
+    id: <ULID>
+    observer: kyle
+high      2025-01-01T12:01:40Z [decision] design/rail: rail confirmed
+            topic: design/rail
+            message: rail confirmed
+            ref: thread:spine
+    id: <ULID>
+    observer: kyle
+high      2025-01-01T12:00:00Z [decision] design/rail: the rail wins the gutter
+            topic: design/rail
+            message: the rail wins the gutter
+    id: <ULID>
+    observer: kyle

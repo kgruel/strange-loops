@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased — static-honest wave (0.6.0)
+
+The **static-honest wave** (`feat/static-honest-spine`): a unified TTY/piped
+rendering grammar (spine G0–G6) plus four new read-side views built on it —
+Confluence, Graph, Provenance, and Horizon.
+
+### Added
+- **Static grammar spine** — rail salience tiers, card headers, and the two
+  presentation registers (TTY vs piped, keyed on channel not width) unified
+  across the fold/stream/ticks render paths.
+- **`sl read <vertex> --lens confluence`** — the observer cut: who's active,
+  kind mix, tier, composable with `--kind`/`--observer`.
+- **`sl read <vertex> --lens graph`** — the ref/edge cut: HUBS (inbound-count
+  sinks with per-predicate mix, surfacing typed edges), CHAINS (longest
+  directed ref paths, cycle-guarded), and ORPHANS (isolated nodes). Pure
+  projection over `Surface` edges — zero new engine SQL.
+- **`sl read <vertex> <kind>/<key> --why`** — per-field provenance drill:
+  replays the kind's fold fn over its source facts and attributes each field
+  to the fact that last set it. Sibling of `--facts`, exact-address only;
+  collect kinds degrade to labeled chronology; `-v` carries superseded history.
+- **`sl read <vertex> --lens horizon`** — the boundary cut: each armed loop's
+  open window against its next seal. Count-based boundaries render `n/N` with
+  a meter; kind-based boundaries render "waiting on `<kind>`" with no fake
+  meter; never-ticked loops render "never sealed". Loops uncovered by *any*
+  declared trigger roll up into a single unarmed segment (silent accumulation
+  named, not census noise) — a vertex-level boundary covers every loop under
+  it, so the unarmed segment appears only where no vertex boundary exists.
+
+### Changed
+- **`-q` (MINIMAL) rollup unified**: `rollup_line()` in `_grammar.py` is now
+  the one authority for the `vertex · stat · stat` one-liner. fold, stream,
+  `store ticks`/`stats`, and `--match` migrated off their legacy comma-list
+  renders and gained the vertex lead; confluence refit onto the same helper
+  (keeping its local top-name shedding).
+- **painted dependency bumped to `>=0.7.0,<0.8`** (from `0.4.1`), picking up
+  declared vocabularies + `Theme(roles=)` (0.6.0), ref deliveries (0.7.0), and
+  shell completion (0.5.0). No API breaks — painted's `id=`→`ref=` rename stays
+  behind deprecation aliases and loops uses none of the deprecated spellings.
+
+### Fixed
+- **`sl completion <shell>` now dispatches.** The command was advertised in
+  `sl --help` (painted injects it into every `run_app` roster) but the loops
+  pre-router's `known` set was built only from loops' own commands, so
+  `completion` fell through to the vertex shorthand and errored. The injected
+  name is now mirrored into `known`.
+
 ## 0.5.0 — 2026-06-28
 
 The **structured-surface read/emit wave** (`feat/surface-build1`): a typed,

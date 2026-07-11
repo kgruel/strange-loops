@@ -90,6 +90,20 @@ sl <vertex> cite kind:key kind:key -m "what prior work informed this turn"
 Trailing non-`key=value` tokens join as `message=`. Refs accumulate: `ref=A ref=B`
 or `ref=A,B` both produce one comma-separated value.
 
+**Default to `--stdin FIELD` for any prose or code-bearing message**, not inline
+`message="..."`. Emit bodies naturally quote code identifiers, and apostrophes in
+prose force double-quoting — exactly where a stray backtick triggers live shell
+command substitution and silently corrupts the stored fact (a real incident: a
+backtick pair in a double-quoted `message=` ran as a subshell and stored the
+mangled output instead of the intended text). A quoted heredoc delimiter (`<<'EOF'`)
+disables all shell expansion inside the body:
+
+```bash
+sl emit <vertex> <kind> name=... status=... --strict --stdin message <<'EOF'
+Body text with `backticks`, apostrophes, and code — none of it is live shell here.
+EOF
+```
+
 **`cite` takes the vertex FIRST** (`sl <vertex> cite …`), unlike `emit` where it follows
 the verb (`sl emit <vertex> …`). `cite` has no vertex positional — all positionals are
 refs — so `sl cite <vertex> …` would wrongly treat the vertex name as a ref. From inside a
@@ -111,6 +125,13 @@ Status vocab: hypothesis `proposed→confirmed/rejected/refined`; thread
 `open/resolved/parked`; task `in_progress/completed`; friction `open/resolved`.
 To update, re-emit the same `name=`/`topic=` with new status — the fold upserts in
 place and the fact history preserves the lineage. **Don't delete; resolve.**
+
+Different kinds fold by different keys (table above) — using the wrong one
+(`thread topic=` instead of `name=`, `decision name=` instead of `topic=`) doesn't
+error, it silently stores a stray unfolded fact. Nothing surfaces the mismatch
+until a post-store WARN. When unsure, check the KEY column of
+`sl read <vertex> --kind <kind>` before emitting, and pass `--strict` in
+orchestrated/agent sessions so a wrong fold key refuses instead of storing.
 
 ## Topic-prefix discipline
 

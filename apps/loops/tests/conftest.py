@@ -106,6 +106,18 @@ def boundary_vertex(tmp_path):
     return write_boundary_vertex(tmp_path)
 
 
+@pytest.fixture(scope="session")
+def grammar_store(tmp_path_factory):
+    """The shared cross-command fixture — one deterministic store spanning every
+    read surface (keyed + collect folds, a ref, two tick boundaries). Built once
+    per session; returns the vertex path. See ``builders.write_grammar_fixture``.
+    """
+    from .builders import write_grammar_fixture
+
+    d = tmp_path_factory.mktemp("grammar")
+    return write_grammar_fixture(d)
+
+
 @pytest.fixture
 def populated_store(project_vertex):
     """Project vertex with a few pre-populated facts. Returns (vertex_path, db_path)."""

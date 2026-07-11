@@ -1,0 +1,17 @@
+╭─ grammar · ticks ────────────────────────────────────────────────────────────╮
+│ 2 ticks                                                                      │
+│ Jan 1 → Jan 2 · latest 3d                                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+2025-01-02:
+  ◆ 13:08  #0   s2 closed · 3 facts · decision 1 · thread 1 · +1   8m window
+             decision:design/rail
+             thread:digest
+             session:s2
+
+2025-01-01:
+  ◆ 12:08  #1   s1 closed · 6 facts · decision 3 · thread 1 · +2   8m window
+             decision:design/rail ×2
+             decision:architecture/tiers
+             thread:spine
+             session:s1
+rail  ◆ high  │ mid  · tail  ⊘ stale

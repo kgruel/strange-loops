@@ -1,0 +1,18 @@
+## DECISION (2)
+KEY                 TIER   N  IN  DATE        MESSAGE
+design/rail         high   3   0  2025-01-02  post-tick refinement
+architecture/tiers  mid    1   0  2025-01-01  quantile buckets, vertex-scoped
+
+## THREAD (2)
+KEY     TIER   N  IN  DATE        MESSAGE
+spine   high   1   1  2025-01-01  open
+digest  mid    1   0  2025-01-02  open
+
+## LOG (1)
+KEY                   TIER   N  IN  DATE        MESSAGE
+rtk rewrote the grep  mid    1   0  2025-01-01
+
+## SESSION (2)
+KEY  TIER   N  IN  DATE        MESSAGE
+s1   mid    1   0  2025-01-01  closed
+s2   mid    1   0  2025-01-02  closed

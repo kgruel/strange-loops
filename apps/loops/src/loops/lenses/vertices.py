@@ -169,15 +169,6 @@ def _preview_spans(preview: str, p) -> list[Span]:
     return spans
 
 
-def _spans_block(spans: list[Span], width: int | None) -> Block:
-    """Styled block from spans on a TTY (``width`` is the terminal int); plain
-    natural-width text when piped (``width is None``) — ``Line.to_block`` needs
-    an int and the piped register strips colour anyway, so the bytes match."""
-    if width is None:
-        return Block.text("".join(s.text for s in spans), Style(), width=None)
-    return Line(tuple(spans)).to_block(width)
-
-
 def _size_str(v: dict[str, Any], count_w: int) -> str:
     """The size cell — fact count right-aligned + unit for instances/hybrids,
     ``combines N`` for aggregations, ``—`` for an unmaterialized store."""
@@ -305,11 +296,11 @@ def _shadow_line(v: dict[str, Any], width: int | None, p) -> Block:
         target = raw.replace(home, "~") if raw.startswith(home) else raw
     else:
         target = "the config vertex of the same name"
-    return _spans_block([
+    return Line((
         Span("      ", Style()),
         Span("⊳ ", Style(fg="yellow")),
         Span(f"shadows {target}", p.chrome),
-    ], width)
+    )).to_block(width)
 
 
 def _type_line(v: dict[str, Any], width: int | None, p) -> Block:
@@ -325,11 +316,11 @@ def _type_line(v: dict[str, Any], width: int | None, p) -> Block:
         desc = f"own store + combine of {', '.join(combine)}" if combine else "own store + combine"
     else:
         desc = "own store"
-    return _spans_block([
+    return Line((
         Span("      ", Style()),
         Span("⊙ ", p.chrome),
         Span(desc, p.chrome),
-    ], width)
+    )).to_block(width)
 
 
 def _detail_kind_rows(
@@ -363,7 +354,7 @@ def _detail_kind_rows(
         fold = fold_map.get(name)
         if fold:
             spans.append(Span(f"  {fold}", p.chrome))
-        out.append(_spans_block(spans, width))
+        out.append(Line(tuple(spans)).to_block(width))
     return out
 
 

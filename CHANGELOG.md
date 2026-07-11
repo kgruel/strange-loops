@@ -34,10 +34,23 @@ Confluence, Graph, Provenance, and Horizon.
   `store ticks`/`stats`, and `--match` migrated off their legacy comma-list
   renders and gained the vertex lead; confluence refit onto the same helper
   (keeping its local top-name shedding).
-- **painted dependency bumped to `>=0.7.0,<0.8`** (from `0.4.1`), picking up
-  declared vocabularies + `Theme(roles=)` (0.6.0), ref deliveries (0.7.0), and
-  shell completion (0.5.0). No API breaks — painted's `id=`→`ref=` rename stays
-  behind deprecation aliases and loops uses none of the deprecated spellings.
+- **painted dependency bumped to `>=0.10.0,<0.11`** (from `0.4.1`, via the
+  interim `0.7.0` target), picking up declared vocabularies + `Theme(roles=)`
+  (0.6.0), ref deliveries (0.7.0), `paint()` (0.8.0), inline prompts (0.9.0),
+  and the semantic doc tree — `painted.publish`, the exported doc vocabulary,
+  `Span.ref`, section anchors, and the uniform width contract (0.10.0/0.10.1).
+  Full suite + goldens green against the 0.10.1 wheel; no API breaks.
+- **`show()` → `paint()`** across every command render site (~45 calls in
+  `cli/output.py` + `commands/`): painted 0.8 deprecated `show()` (removed at
+  1.0), and `paint()`'s Block passthrough is a drop-in for loops' usage. The
+  suite's 1164 `DeprecationWarning`s drop to zero.
+- **width-None spacer workarounds dissolved** (painted 0.10.1 applies the
+  width contract uniformly): the store lens's conditional
+  `Block.text("", Style())`-vs-`Block.empty(width, 1)` spacers collapse to
+  `Block.empty(width, 1)`, and `vertices.py`'s `_spans_block` helper — a dodge
+  around `Line.to_block` refusing `width=None` — deletes in favor of direct
+  `Line.to_block(width)` calls (the piped register strips styling at the sink,
+  so bytes are unchanged; goldens byte-stable).
 
 ### Fixed
 - **`sl completion <shell>` now dispatches.** The command was advertised in

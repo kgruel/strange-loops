@@ -188,7 +188,7 @@ def _render_detailed(data: dict, width: int | None, p: LoopsPalette) -> Block:
             gist = content_gist(kind, info["sample_payload"], gist_w)
             rows.append(Block.text(f"  {gist}", p.content, width=width))
 
-        rows.append(Block.text("", Style()) if width is None else Block.empty(width, 1))
+        rows.append(Block.empty(width, 1))
 
     # Remove trailing empty
     _strip_trailing_empty(rows)
@@ -264,10 +264,7 @@ def _render_full(data: dict, width: int | None, p: LoopsPalette) -> Block:
 
         # Separator between kinds (not after last)
         if i < len(sorted_kinds) - 1:
-            rows.append(
-                Block.text("", Style()) if inner_w is None
-                else Block.empty(inner_w, 1)
-            )
+            rows.append(Block.empty(inner_w, 1))
 
     inner = join_vertical(*rows)
 

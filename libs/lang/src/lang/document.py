@@ -26,10 +26,55 @@ source variants — not sampled.
 Forward compatibility is normative: :func:`documents_to_vertex` tolerates
 unknown fields inside a document and unknown ``_decl.*`` kinds (skips them),
 so a newer protocol's documents project safely under an older reader.
+
+Protocol rules this module enforces (subject identity, ordering, safety):
+
+- **Subject uniqueness.** ``(kind, subject)`` must be unique — the internal
+  table's runtime state is a ``Latest`` fold keyed by it (SPEC §9.2), so a
+  collision silently drops a subject. Subjects are the human-meaningful base
+  (kind name / observer name / member name / source path or command); when two
+  documents of one kind would share a base, later occurrences get a
+  deterministic ``base#2``, ``base#3`` suffix in encounter order. The suffix is
+  identity only — projection reconstructs every value from the *payload*, never
+  by parsing the subject — so a reorder of distinct subjects stays stable while
+  identical duplicates disambiguate deterministically.
+
+- **Order is meaning.** Declaration order is load-bearing in this AST
+  (sequential source blocks, boundary match "first match fires", kind order
+  driving fold/salience rendering) but per-subject ``Latest`` folding erases
+  encounter order. So every multi-instance document (kind/observer/member/
+  source/lens) carries an integer ``order`` = its encounter position at
+  absorption; :func:`documents_to_vertex` restores structure by sorting on
+  ``(order, subject)``. A reorder edit re-emits the affected subjects — honest,
+  since order *is* meaning where declared. (The vertex-level boundary tuple
+  rides ordered inside the vertex-defined singleton and needs no per-doc order.)
+
+- **Source block structure** is recorded on the vertex-defined singleton as a
+  ``source_blocks`` list of ``{"index", "mode"}`` (present iff
+  ``sources_blocks`` is not None). Inline source documents keep a ``block`` tag;
+  projection rebuilds blocks from the singleton list and drops each inline
+  source into its block, so block mode and identity are authoritative rather
+  than inferred from surviving members.
+
+- **Round-trip guarantee is over loader-reachable ASTs.** The parser structurally
+  cannot produce an empty-but-present ``observers=()`` or ``combine=()`` (the
+  loader rejects empty ``observers {}`` / ``combine {}`` blocks) or an empty
+  ``SourcesBlock`` (empty ``sources sequential {}`` is rejected). These
+  empty-present tuples are therefore normalized to ``None`` on projection.
+  ``VertexFile.sources`` *is* reachable as an empty tuple (empty ``sources {}``),
+  and that distinction is preserved via ``sources_present`` on the singleton.
+
+- **JSON safety is enforced, not assumed.** Every payload is walked at
+  serialization (:func:`_ensure_json_safe`): dict keys must be ``str``, values
+  must be JSON scalars/lists/dicts, and every float must be finite. A ``NaN`` or
+  ``Infinity`` (AST-constructible even though the parser rejects it) or a
+  copied-through non-JSON value raises ``ValueError`` with the field path here —
+  never later, when JCS canonicalization would be the first to notice.
 """
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -129,6 +174,34 @@ class Document(NamedTuple):
     def as_json(self) -> dict[str, Any]:
         """Flat JSON-safe form: ``{"kind", "subject", "payload"}``."""
         return {"kind": self.kind, "subject": self.subject, "payload": self.payload}
+
+
+def _ensure_json_safe(obj: Any, path: str) -> None:
+    """Assert ``obj`` is strictly JSON-safe, or raise ``ValueError`` with path.
+
+    Enforced at serialization so a bad value (a non-finite float, a non-str
+    dict key, a copied-through tuple/set/Path) is caught here — with a field
+    path pointing at it — rather than surfacing later at JCS canonicalization.
+    ``bool`` is allowed (a JSON scalar); every ``float`` must be finite.
+    """
+    # bool is an int subclass, so (str, int) already covers True/False.
+    if obj is None or isinstance(obj, (str, int)):
+        return
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            raise ValueError(f"non-finite float at {path}: {obj!r}")
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if not isinstance(k, str):
+                raise ValueError(f"non-str dict key at {path}: {k!r}")
+            _ensure_json_safe(v, f"{path}.{k}")
+        return
+    if isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _ensure_json_safe(v, f"{path}[{i}]")
+        return
+    raise ValueError(f"non-JSON type {type(obj).__name__} at {path}")
 
 
 # ===========================================================================
@@ -558,12 +631,30 @@ def vertex_to_documents(ast: VertexFile) -> list[Document]:
     per source (bare/template entries first, then inline sources per block),
     and ``_decl.lens-defined`` if a lens is declared.
 
-    Residence (``store`` locator, ``path``) is excluded — supplied at
-    projection time, not carried in documents.
+    Each multi-instance document carries an ``order`` field (encounter
+    position) and a subject deduplicated per kind (see module docstring:
+    "Order is meaning", "Subject uniqueness"). Residence (``store`` locator,
+    ``path``) is excluded. Every payload is validated JSON-safe before return.
     """
     docs: list[Document] = []
+    order = 0  # global encounter position across all multi-instance documents
 
-    # vertex-defined singleton — subject is the vertex name (self).
+    # Per-kind subject deduplication: first occurrence keeps its base, later
+    # collisions get a deterministic base#2, base#3 suffix (identity only).
+    subject_counts: dict[tuple[str, str], int] = {}
+
+    def _subject(kind: str, base: str) -> str:
+        key = (kind, base)
+        n = subject_counts[key] = subject_counts.get(key, 0) + 1
+        return base if n == 1 else f"{base}#{n}"
+
+    def _emit(kind: str, base: str, payload: dict[str, Any]) -> None:
+        nonlocal order
+        payload["order"] = order
+        order += 1
+        docs.append(Document(kind=kind, subject=_subject(kind, base), payload=payload))
+
+    # vertex-defined singleton — subject is the vertex name (self); no order.
     docs.append(
         Document(
             kind=DECL_VERTEX_DEFINED,
@@ -582,39 +673,29 @@ def vertex_to_documents(ast: VertexFile) -> list[Document]:
                 # sources live in their own documents; this flag preserves the
                 # None-vs-empty-tuple distinction of VertexFile.sources.
                 "sources_present": ast.sources is not None,
+                # authoritative block structure (index + mode); None when there
+                # are no sources_blocks. Members are the inline source docs.
+                "source_blocks": [
+                    {"index": i, "mode": b.mode}
+                    for i, b in enumerate(ast.sources_blocks)
+                ]
+                if ast.sources_blocks is not None
+                else None,
             },
         )
     )
 
     # kind-defined per loop (dict preserves insertion order).
     for kind_name, loop in ast.loops.items():
-        docs.append(
-            Document(
-                kind=DECL_KIND_DEFINED,
-                subject=kind_name,
-                payload=_loop_def_to_payload(loop),
-            )
-        )
+        _emit(DECL_KIND_DEFINED, kind_name, _loop_def_to_payload(loop))
 
     # observer-defined per observer.
     for obs in ast.observers or ():
-        docs.append(
-            Document(
-                kind=DECL_OBSERVER_DEFINED,
-                subject=obs.name,
-                payload=_observer_to_payload(obs),
-            )
-        )
+        _emit(DECL_OBSERVER_DEFINED, obs.name, _observer_to_payload(obs))
 
     # member-defined per combine entry.
     for entry in ast.combine or ():
-        docs.append(
-            Document(
-                kind=DECL_MEMBER_DEFINED,
-                subject=entry.name,
-                payload=_combine_to_payload(entry),
-            )
-        )
+        _emit(DECL_MEMBER_DEFINED, entry.name, _combine_to_payload(entry))
 
     # source-defined — bare/template entries from VertexFile.sources ...
     for entry in ast.sources or ():
@@ -622,37 +703,27 @@ def vertex_to_documents(ast: VertexFile) -> list[Document]:
             payload = _template_source_to_payload(entry)
         else:
             payload = {"form": "path", "path": str(entry)}
-        docs.append(
-            Document(
-                kind=DECL_SOURCE_DEFINED,
-                subject=_source_subject(entry),
-                payload=payload,
-            )
-        )
+        _emit(DECL_SOURCE_DEFINED, _source_subject(entry), payload)
 
     # ... then inline sources from VertexFile.sources_blocks, tagged with
-    # their block index + mode so grouping reconstructs exactly.
+    # their block index so projection can rebuild block grouping.
     for block_idx, block in enumerate(ast.sources_blocks or ()):
-        for src in block.sources:
-            docs.append(
-                Document(
-                    kind=DECL_SOURCE_DEFINED,
-                    subject=_source_subject(src),
-                    payload=_inline_source_to_payload(
-                        src, block=block_idx, mode=block.mode
-                    ),
-                )
+        # ast.py's custom frozen decorator rebuilds classes dynamically, so
+        # Pyright can't resolve SourcesBlock.sources' type (infers Never).
+        for src in block.sources:  # pyright: ignore[reportGeneralTypeIssues]
+            _emit(
+                DECL_SOURCE_DEFINED,
+                _source_subject(src),
+                _inline_source_to_payload(src, block=block_idx, mode=block.mode),
             )
 
     # lens-defined singleton (whole-vertex fold/stream selection).
     if ast.lens is not None:
-        docs.append(
-            Document(
-                kind=DECL_LENS_DEFINED,
-                subject=ast.name,
-                payload=_lens_to_payload(ast.lens),
-            )
-        )
+        _emit(DECL_LENS_DEFINED, ast.name, _lens_to_payload(ast.lens))
+
+    # Enforce JSON safety (finite floats, str keys, JSON scalars) at the source.
+    for d in docs:
+        _ensure_json_safe(d.payload, f"{d.kind}:{d.subject}")
 
     return docs
 
@@ -680,6 +751,53 @@ def _as_triple(item: Any) -> tuple[str, str, dict[str, Any]]:
     return item["kind"], item["subject"], item.get("payload", {})
 
 
+def _rebuild_sources_blocks(
+    source_blocks_decl: list[dict[str, Any]] | None,
+    inline_items: list[tuple[int, int, str, InlineSource]],
+) -> tuple[SourcesBlock, ...] | None:
+    """Reassemble ``sources_blocks`` from the singleton's block structure.
+
+    ``source_blocks_decl`` is the authoritative ``[{"index", "mode"}, ...]``
+    recorded on the vertex-defined singleton; ``inline_items`` are the inline
+    source docs as ``(order, block_index, mode, InlineSource)``. Each inline
+    source drops into its block by index (block members ordered by ``order``);
+    an empty block survives as a member-less entry.
+
+    Falls back to inferring blocks from inline tags (mode carried on each
+    inline doc) when the singleton has no ``source_blocks`` — tolerating
+    documents from an emitter predating the structural record (forward compat).
+    """
+    ordered = sorted(inline_items, key=lambda t: t[0])
+    by_block: dict[int, list[InlineSource]] = {}
+    for _order, block_idx, _mode, src in ordered:
+        by_block.setdefault(block_idx, []).append(src)
+
+    if source_blocks_decl is not None:
+        return tuple(
+            SourcesBlock(
+                mode=entry["mode"],
+                sources=tuple(by_block.get(entry["index"], ())),
+            )
+            for entry in source_blocks_decl
+        )
+
+    if not inline_items:
+        return None
+
+    # Fallback: no structural record — group by block index in first-seen
+    # order, taking each block's mode from its first inline source's doc.
+    mode_by_block: dict[int, str] = {}
+    order_seen: list[int] = []
+    for _order, block_idx, mode, _src in ordered:
+        if block_idx not in mode_by_block:
+            order_seen.append(block_idx)
+            mode_by_block[block_idx] = mode
+    return tuple(
+        SourcesBlock(mode=mode_by_block[i], sources=tuple(by_block[i]))
+        for i in order_seen
+    )
+
+
 def documents_to_vertex(
     documents: Any,
     *,
@@ -705,17 +823,21 @@ def documents_to_vertex(
     vertices: tuple[Path, ...] | None = None
     boundary: tuple[Any, ...] = ()
     sources_present = False
+    # authoritative block structure from the vertex-defined singleton.
+    source_blocks_decl: list[dict[str, Any]] | None = None
 
-    loops: dict[str, LoopDef] = {}
-    observers: list[ObserverDecl] = []
-    combine: list[CombineEntry] = []
-    lens: LensDecl | None = None
+    # Collect multi-instance docs as (order, subject, value) so structure is
+    # restored by sorting on (order, subject) — encounter order is meaning.
+    kind_items: list[tuple[int, str, LoopDef]] = []
+    observer_items: list[tuple[int, str, ObserverDecl]] = []
+    member_items: list[tuple[int, str, CombineEntry]] = []
+    lens_items: list[tuple[int, str, LensDecl]] = []
+    bare_items: list[tuple[int, str, Any]] = []  # path / template entries
+    # (order, block_index, mode, InlineSource)
+    inline_items: list[tuple[int, int, str, InlineSource]] = []
 
-    # Source reassembly: bare/template entries in encountered order; inline
-    # sources grouped by block index (first-seen order) with per-block mode.
-    source_entries: list[Any] = []
-    blocks: dict[int, dict[str, Any]] = {}
-    block_order: list[int] = []
+    def _order(p: dict[str, Any]) -> int:
+        return p.get("order", 0)
 
     for item in documents:
         kind, subject, payload = _as_triple(item)
@@ -732,32 +854,36 @@ def documents_to_vertex(
             vertices = tuple(Path(p) for p in v) if v is not None else None
             boundary = tuple(_boundary_from_json(b) for b in payload.get("boundary", ()))
             sources_present = payload.get("sources_present", False)
+            source_blocks_decl = payload.get("source_blocks")
 
         elif kind == DECL_KIND_DEFINED:
-            loops[subject] = _loop_def_from_payload(payload)
+            kind_items.append((_order(payload), subject, _loop_def_from_payload(payload)))
 
         elif kind == DECL_OBSERVER_DEFINED:
-            observers.append(_observer_from_payload(payload))
+            observer_items.append((_order(payload), subject, _observer_from_payload(payload)))
 
         elif kind == DECL_MEMBER_DEFINED:
-            combine.append(_combine_from_payload(payload))
+            member_items.append((_order(payload), subject, _combine_from_payload(payload)))
 
         elif kind == DECL_LENS_DEFINED:
-            lens = _lens_from_payload(payload)
+            lens_items.append((_order(payload), subject, _lens_from_payload(payload)))
 
         elif kind == DECL_SOURCE_DEFINED:
             form = payload.get("form")
             if form == "path":
-                source_entries.append(Path(payload["path"]))
+                bare_items.append((_order(payload), subject, Path(payload["path"])))
             elif form == "template":
-                source_entries.append(_template_source_from_payload(payload))
+                bare_items.append(
+                    (_order(payload), subject, _template_source_from_payload(payload))
+                )
             elif form == "inline":
-                block_idx = payload["block"]
-                if block_idx not in blocks:
-                    blocks[block_idx] = {"mode": payload["mode"], "sources": []}
-                    block_order.append(block_idx)
-                blocks[block_idx]["sources"].append(
-                    _inline_source_from_payload(payload)
+                inline_items.append(
+                    (
+                        _order(payload),
+                        payload["block"],
+                        payload.get("mode", "sequential"),
+                        _inline_source_from_payload(payload),
+                    )
                 )
             # unknown form → skip (forward compat)
 
@@ -766,26 +892,28 @@ def documents_to_vertex(
     if name is None:
         raise ValueError("documents missing a _decl.vertex-defined singleton")
 
-    # Reassemble VertexFile.sources: None unless entries present or the
-    # singleton recorded an (empty) sources block.
+    # kind-defined: dict rebuilt in (order, subject) order.
+    loops: dict[str, LoopDef] = {}
+    for _o, subject, loop in sorted(kind_items, key=lambda t: (t[0], t[1])):
+        loops[subject] = loop
+
+    observers = [o for _o, _s, o in sorted(observer_items, key=lambda t: (t[0], t[1]))]
+    combine = [c for _o, _s, c in sorted(member_items, key=lambda t: (t[0], t[1]))]
+    lens = (
+        sorted(lens_items, key=lambda t: (t[0], t[1]))[0][2] if lens_items else None
+    )
+
+    # Reassemble VertexFile.sources (bare/template entries) in (order, subject).
+    bare_sorted = [e for _o, _s, e in sorted(bare_items, key=lambda t: (t[0], t[1]))]
     sources: tuple[Any, ...] | None
-    if source_entries:
-        sources = tuple(source_entries)
+    if bare_sorted:
+        sources = tuple(bare_sorted)
     elif sources_present:
-        sources = ()
+        sources = ()  # empty `sources {}` block — the one reachable empty tuple
     else:
         sources = None
 
-    sources_blocks: tuple[SourcesBlock, ...] | None = (
-        tuple(
-            SourcesBlock(
-                mode=blocks[i]["mode"], sources=tuple(blocks[i]["sources"])
-            )
-            for i in block_order
-        )
-        if block_order
-        else None
-    )
+    sources_blocks = _rebuild_sources_blocks(source_blocks_decl, inline_items)
 
     return VertexFile(
         name=name,

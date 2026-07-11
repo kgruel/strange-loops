@@ -86,6 +86,14 @@ __all__ = [
     "validate",
     "validate_loop",
     "validate_vertex",
+    # Declaration document form (SPEC §9.2)
+    "Document",
+    "vertex_to_documents",
+    "documents_to_vertex",
+    "genesis_payload",
+    "is_internal_kind",
+    "DECL_PREFIX",
+    "DECLARATION_PROTOCOL_VERSION",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
@@ -116,6 +124,13 @@ for _n in ["PopulationInfo", "PopulationRow", "read_population", "resolve_templa
 # Validator
 for _n in ["validate", "validate_loop", "validate_vertex"]:
     _LAZY_IMPORTS[_n] = ("lang.validator", _n)
+
+# Declaration document form
+for _n in [
+    "Document", "vertex_to_documents", "documents_to_vertex", "genesis_payload",
+    "is_internal_kind", "DECL_PREFIX", "DECLARATION_PROTOCOL_VERSION",
+]:
+    _LAZY_IMPORTS[_n] = ("lang.document", _n)
 
 
 def __getattr__(name: str):

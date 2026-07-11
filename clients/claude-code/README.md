@@ -9,6 +9,7 @@ across **the author's own repos and machines** (personal scope — see *Identity
 | `SessionEnd` hook | Mark the session closed and `seal` (boundary → tick). |
 | `Stop` hook | The reroute-capture backstop — nudges once per working turn to log reroutes/frictions before stopping. |
 | Skill | The `loops` practice doc, auto-invoked when you mention loops, vertices, folds, observers, signing, reconcile, or the store. |
+| Skill (`release`) | The strange-loops release ceremony — CHANGELOG sweep, version stamp, wheel pre-flight, tag, GitHub release → PyPI trusted publishing, deploy verification. Scoped to this monorepo; no-ops as a trigger elsewhere. |
 | `/loops:sweep` | Session-wrap: triage this session's reroutes, promote frictions, update threads, emit the session-arc. |
 | `/loops:reconcile` | The slower structural review: staleness lens, friction backlog, stale threads, hypothesis staleness. |
 

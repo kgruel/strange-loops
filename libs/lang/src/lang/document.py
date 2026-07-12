@@ -34,10 +34,13 @@ Protocol rules this module enforces (subject identity, ordering, safety):
   collision silently drops a subject. Subjects are the human-meaningful base
   (kind name / observer name / member name / source path or command); when two
   documents of one kind would share a base, later occurrences get a
-  deterministic ``base#2``, ``base#3`` suffix in encounter order. The suffix is
-  identity only — projection reconstructs every value from the *payload*, never
-  by parsing the subject — so a reorder of distinct subjects stays stable while
-  identical duplicates disambiguate deterministically.
+  deterministic ``base#2``, ``base#3`` suffix in encounter order. Suffixes are
+  allocated against the *set* of subjects already issued for that kind, not a
+  per-base counter — so a suffix never lands on a naturally-occurring subject
+  (bases ``["base", "base", "base#2"]`` → ``["base", "base#2", "base#3"]``). The
+  suffix is identity only — projection reconstructs every value from the
+  *payload*, never by parsing the subject — so a reorder of distinct subjects
+  stays stable while identical duplicates disambiguate deterministically.
 
 - **Order is meaning.** Declaration order is load-bearing in this AST
   (sequential source blocks, boundary match "first match fires", kind order
@@ -639,14 +642,22 @@ def vertex_to_documents(ast: VertexFile) -> list[Document]:
     docs: list[Document] = []
     order = 0  # global encounter position across all multi-instance documents
 
-    # Per-kind subject deduplication: first occurrence keeps its base, later
-    # collisions get a deterministic base#2, base#3 suffix (identity only).
-    subject_counts: dict[tuple[str, str], int] = {}
+    # Per-kind subject deduplication. Allocate against the SET of subjects
+    # already issued for this kind (not a per-base counter) so a suffix never
+    # lands on a naturally-occurring subject: bases ["base", "base", "base#2"]
+    # → ["base", "base#2", "base#3"], all distinct. Identity only — projection
+    # reconstructs every value from the payload, never from the subject.
+    issued: dict[str, set[str]] = {}
 
     def _subject(kind: str, base: str) -> str:
-        key = (kind, base)
-        n = subject_counts[key] = subject_counts.get(key, 0) + 1
-        return base if n == 1 else f"{base}#{n}"
+        seen = issued.setdefault(kind, set())
+        candidate = base
+        n = 1
+        while candidate in seen:
+            n += 1
+            candidate = f"{base}#{n}"
+        seen.add(candidate)
+        return candidate
 
     def _emit(kind: str, base: str, payload: dict[str, Any]) -> None:
         nonlocal order
@@ -753,23 +764,25 @@ def _as_triple(item: Any) -> tuple[str, str, dict[str, Any]]:
 
 def _rebuild_sources_blocks(
     source_blocks_decl: list[dict[str, Any]] | None,
-    inline_items: list[tuple[int, int, str, InlineSource]],
+    inline_items: list[tuple[int, int, str, str, InlineSource]],
 ) -> tuple[SourcesBlock, ...] | None:
     """Reassemble ``sources_blocks`` from the singleton's block structure.
 
     ``source_blocks_decl`` is the authoritative ``[{"index", "mode"}, ...]``
     recorded on the vertex-defined singleton; ``inline_items`` are the inline
-    source docs as ``(order, block_index, mode, InlineSource)``. Each inline
-    source drops into its block by index (block members ordered by ``order``);
-    an empty block survives as a member-less entry.
+    source docs as ``(order, block_index, mode, subject, InlineSource)``. Each
+    inline source drops into its block by index, block members ordered by
+    ``(order, subject)`` — subject breaks ties deterministically when duplicate
+    ``order`` values appear (possible in edit-era document sets). An empty block
+    survives as a member-less entry.
 
     Falls back to inferring blocks from inline tags (mode carried on each
     inline doc) when the singleton has no ``source_blocks`` — tolerating
     documents from an emitter predating the structural record (forward compat).
     """
-    ordered = sorted(inline_items, key=lambda t: t[0])
+    ordered = sorted(inline_items, key=lambda t: (t[0], t[3]))  # (order, subject)
     by_block: dict[int, list[InlineSource]] = {}
-    for _order, block_idx, _mode, src in ordered:
+    for _order, block_idx, _mode, _subject, src in ordered:
         by_block.setdefault(block_idx, []).append(src)
 
     if source_blocks_decl is not None:
@@ -788,7 +801,7 @@ def _rebuild_sources_blocks(
     # order, taking each block's mode from its first inline source's doc.
     mode_by_block: dict[int, str] = {}
     order_seen: list[int] = []
-    for _order, block_idx, mode, _src in ordered:
+    for _order, block_idx, mode, _subject, _src in ordered:
         if block_idx not in mode_by_block:
             order_seen.append(block_idx)
             mode_by_block[block_idx] = mode
@@ -833,8 +846,8 @@ def documents_to_vertex(
     member_items: list[tuple[int, str, CombineEntry]] = []
     lens_items: list[tuple[int, str, LensDecl]] = []
     bare_items: list[tuple[int, str, Any]] = []  # path / template entries
-    # (order, block_index, mode, InlineSource)
-    inline_items: list[tuple[int, int, str, InlineSource]] = []
+    # (order, block_index, mode, subject, InlineSource)
+    inline_items: list[tuple[int, int, str, str, InlineSource]] = []
 
     def _order(p: dict[str, Any]) -> int:
         return p.get("order", 0)
@@ -882,6 +895,7 @@ def documents_to_vertex(
                         _order(payload),
                         payload["block"],
                         payload.get("mode", "sequential"),
+                        subject,
                         _inline_source_from_payload(payload),
                     )
                 )

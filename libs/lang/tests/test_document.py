@@ -23,7 +23,9 @@ from lang.ast import (
     CombineEntry,
     FoldCount,
     FoldDecl,
+    InlineSource,
     LoopDef,
+    SourcesBlock,
     VertexFile,
 )
 from lang.document import (
@@ -518,6 +520,63 @@ def test_source_subject_collision_suffix() -> None:
     # And both colliding sources survive the round-trip.
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
     assert projected == ast
+
+
+def test_suffix_allocation_avoids_natural_subject() -> None:
+    """Bases ["base", "base", "base#2"] must not re-collide — the allocator
+    bumps past a naturally-occurring 'base#2' rather than re-issuing it."""
+    ast = VertexFile(
+        name="x",
+        loops={},
+        sources_blocks=(
+            SourcesBlock(
+                mode="sequential",
+                sources=(
+                    InlineSource(command="base", kind="a"),
+                    InlineSource(command="base", kind="b"),
+                    InlineSource(command="base#2", kind="c"),
+                ),
+            ),
+        ),
+    )
+    docs = vertex_to_documents(ast)
+    subjects = [d.subject for d in docs if d.kind == DECL_SOURCE_DEFINED]
+    # The literal 'base#2' third source can't reuse the issued 'base#2'; the
+    # allocator bumps it to a distinct, deterministic subject.
+    assert subjects == ["base", "base#2", "base#2#2"]
+    assert len(subjects) == len(set(subjects))  # all distinct — nothing dropped
+    projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
+    assert projected == ast  # all three sources survive
+
+
+def test_inline_projection_tie_break_is_stable() -> None:
+    """Two inline docs with equal `order` project in a stable order (by
+    subject), independent of input list order."""
+    ast = VertexFile(
+        name="x",
+        loops={},
+        sources_blocks=(
+            SourcesBlock(
+                mode="sequential",
+                sources=(
+                    InlineSource(command="aaa", kind="k"),
+                    InlineSource(command="bbb", kind="k"),
+                ),
+            ),
+        ),
+    )
+    docs = vertex_to_documents(ast)
+    # Force the two inline docs to collide on `order` (edit-era scenario).
+    for d in docs:
+        if d.payload.get("form") == "inline":
+            d.payload["order"] = 5
+    proj_forward = documents_to_vertex(docs, path=ast.path, store=ast.store)
+    proj_reversed = documents_to_vertex(
+        list(reversed(docs)), path=ast.path, store=ast.store
+    )
+    assert proj_forward == proj_reversed
+    commands = [s.command for s in proj_forward.sources_blocks[0].sources]
+    assert commands == ["aaa", "bbb"]  # subject tie-break, deterministic
 
 
 def test_combine_subject_collision_suffix() -> None:

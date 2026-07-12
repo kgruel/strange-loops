@@ -140,8 +140,8 @@ def _resolve_strict(args: argparse.Namespace, vertex_path: Path | None) -> tuple
     vertex_declared = False
     if vertex_path is not None:
         try:
-            from lang import parse_vertex_file
-            ast = parse_vertex_file(vertex_path)
+            from engine import load_declaration
+            ast = load_declaration(vertex_path)
             vertex_declared = bool(getattr(ast, "strict", False))
         except Exception:
             vertex_declared = False

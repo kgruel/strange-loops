@@ -61,11 +61,15 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
 
 
 def _read_observers(vertex_path: Path) -> tuple:
-    """Parse a .vertex file and return its observers tuple (or empty)."""
-    from lang import parse_vertex_file
+    """Resolve a vertex's declaration and return its observers tuple (or empty).
+
+    Routes through the store-backed resolver (SPEC §9.5) so observers come from
+    the store's canonical declaration once a lineage is opened, not the file.
+    """
+    from engine import load_declaration
 
     try:
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
         return ast.observers or ()
     except Exception:
         return ()
@@ -123,10 +127,12 @@ def _collect_combine_observers(vertex_path: Path) -> list:
     auto-inherit for fold specs — the aggregation vertex accepts the
     same observers as its sources.
     """
-    from lang import parse_vertex_file, resolve_vertex
+    from lang import resolve_vertex
+
+    from engine import load_declaration
 
     try:
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
     except Exception:
         return []
 

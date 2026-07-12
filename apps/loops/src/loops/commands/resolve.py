@@ -106,6 +106,31 @@ def _parse_vertex(vertex_path: Path):
         raise VertexParseError(vertex_path, e) from e
 
 
+def _resolve_declaration(vertex_path: Path):
+    """Resolve a vertex's declaration (store-canonical), translating errors.
+
+    The declaration-consulting sibling of :func:`_parse_vertex`: routes through
+    the store-backed resolver (SPEC §9.5) so declared kinds / fold keys come
+    from the store once a lineage is opened. ``_parse_vertex`` stays the plain
+    parse for locator/store-path resolution (WHERE the store lives lives in the
+    file). Same exception translation.
+
+    Raises:
+        VertexNotFound: file doesn't exist or can't be read
+        VertexParseError: file exists but has invalid syntax
+    """
+    from engine import load_declaration
+
+    try:
+        return load_declaration(vertex_path)
+    except FileNotFoundError:
+        raise VertexNotFound(vertex_path) from None
+    except OSError as e:
+        raise VertexNotFound(vertex_path, context=str(e)) from e
+    except Exception as e:
+        raise VertexParseError(vertex_path, e) from e
+
+
 def _err(msg: str, file: TextIO | None = None) -> None:
     """Show an error message through painted."""
     from painted import paint, Block
@@ -155,7 +180,7 @@ def classify_emit_status(
         vertex_path = writable
 
     try:
-        ast = _parse_vertex(vertex_path)
+        ast = _resolve_declaration(vertex_path)
     except LoopsError:
         return EmitStatus(
             kind_declared=False,
@@ -1114,11 +1139,11 @@ def _declared_kinds(vertex_path: Path) -> set[str]:
     declares nothing").
     """
     try:
-        from lang import parse_vertex_file
+        from engine import load_declaration
         from engine.compiler import compile_vertex
         from engine.vertex_reader import _collect_source_specs
 
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
         specs = compile_vertex(ast)
         if (ast.combine is not None or ast.discover is not None) and not specs:
             source_specs = _collect_source_specs(

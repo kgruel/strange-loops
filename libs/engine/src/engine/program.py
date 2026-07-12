@@ -10,7 +10,7 @@ from __future__ import annotations
 TYPE_CHECKING = False
 
 from .compiler import FoldOverride, collect_all_sources, compile_vertex_recursive, materialize_vertex, substitute_vars
-from lang import parse_vertex_file
+from .declaration import load_declaration
 from lang.ast import SourceParams, TemplateSource, VertexFile
 
 if TYPE_CHECKING:
@@ -212,7 +212,7 @@ def load_vertex_program(
         VertexProgram with materialized Vertex, compiled Sources, and
         expected tick names (sorted compiled spec keys).
     """
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     if vars:
         ast = _substitute_vertex_vars(ast, vars)
     if validate_ast:

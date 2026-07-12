@@ -89,6 +89,9 @@ __all__ = [
     "vertex_search",
     "vertex_ticks",
     "vertex_summary",
+    # Declaration resolver (store-backed declaration seam)
+    "load_declaration",
+    "resolve_declaration_documents",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -164,6 +167,12 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "vertex_search": ("engine.vertex_reader", "vertex_search"),
     "vertex_summary": ("engine.vertex_reader", "vertex_summary"),
     "vertex_ticks": ("engine.vertex_reader", "vertex_ticks"),
+    # Declaration resolver
+    "load_declaration": ("engine.declaration", "load_declaration"),
+    "resolve_declaration_documents": (
+        "engine.declaration",
+        "resolve_declaration_documents",
+    ),
 }
 
 

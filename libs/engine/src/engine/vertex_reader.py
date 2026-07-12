@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .declaration import load_declaration
 from .observer import observer_matches
 
 
@@ -142,7 +143,7 @@ def _collect_topology_info(ast: Any, vertex_path: Path) -> list[dict]:
 
     Returns a list of dicts with keys: name, path, store, kind_keys.
     """
-    from lang import parse_vertex_file, resolve_vertex
+    from lang import resolve_vertex
 
     children: list[dict] = []
     base_dir = vertex_path.parent
@@ -152,7 +153,7 @@ def _collect_topology_info(ast: Any, vertex_path: Path) -> list[dict]:
             if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
                 continue
             try:
-                ref_ast = parse_vertex_file(match)
+                ref_ast = load_declaration(match)
             except Exception:
                 continue
             children.append(_child_topology_entry(ref_ast, match, base_dir))
@@ -166,7 +167,7 @@ def _collect_topology_info(ast: Any, vertex_path: Path) -> list[dict]:
             if not vpath.exists():
                 continue
             try:
-                ref_ast = parse_vertex_file(vpath)
+                ref_ast = load_declaration(vpath)
             except Exception:
                 continue
             children.append(_child_topology_entry(ref_ast, vpath, base_dir))
@@ -182,9 +183,7 @@ def emit_topology(vertex_path: Path) -> None:
 
     Requires the vertex to have a store declaration.
     """
-    from lang import parse_vertex_file
-
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     if ast.store is None:
         return
 
@@ -262,7 +261,7 @@ def _collect_source_specs(
     Kinds in *override_kinds* are skipped during conflict detection —
     the aggregation vertex's own declaration will take precedence.
     """
-    from lang import parse_vertex_file, resolve_vertex
+    from lang import resolve_vertex
 
     from .compiler import compile_vertex
 
@@ -294,7 +293,7 @@ def _collect_source_specs(
             if not vpath.exists():
                 continue
             try:
-                ref_ast = parse_vertex_file(vpath)
+                ref_ast = load_declaration(vpath)
             except Exception:
                 continue
             _merge_from(ref_ast, entry.name)
@@ -305,7 +304,7 @@ def _collect_source_specs(
             if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
                 continue
             try:
-                ref_ast = parse_vertex_file(match)
+                ref_ast = load_declaration(match)
             except Exception:
                 continue
             _merge_from(ref_ast, match.stem)
@@ -681,12 +680,10 @@ def vertex_read(
     Combinatorial vertices (with a ``combine`` block) virtualize reads
     across multiple stores using SQLite ATTACH DATABASE.
     """
-    from lang import parse_vertex_file
-
     from .compiler import compile_vertex
     from .store_reader import StoreReader
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     specs = compile_vertex(ast)
 
     # Combinatorial or aggregation vertex: read across multiple stores.
@@ -887,11 +884,9 @@ def vertex_fold(
     When *observer* is provided, only that observer's facts are folded.
     When *kind* is provided, only that kind is included.
     """
-    from lang import parse_vertex_file
-
     from .compiler import compile_vertex
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     specs = compile_vertex(ast)
 
     # Resolve full specs (merge source specs for combine/discover).
@@ -1015,9 +1010,7 @@ def vertex_tick_fold(
     Items won't have ``_ts``/``_observer``/``_id`` metadata (not stored
     in fold snapshots). Content fields are preserved.
     """
-    from lang import parse_vertex_file
-
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     payload = tick.payload if isinstance(tick.payload, dict) else {}
 
     # Filter out tick-internal keys (e.g. _boundary)
@@ -1145,11 +1138,9 @@ def vertex_facts(
     For queries that need raw facts (e.g. log), not fold state.
     Still goes through the vertex — the vertex knows where its store is.
     """
-    from lang import parse_vertex_file
-
     from .store_reader import StoreReader
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
         facts = _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
@@ -1189,11 +1180,9 @@ def vertex_ticks(
     blank cursor fields): attestation is a per-store property — an
     aggregate combines ticks from many stores and does not itself attest.
     """
-    from lang import parse_vertex_file
-
     from .store_reader import StoreReader
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
         ticks = _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
@@ -1227,11 +1216,9 @@ def vertex_summary(vertex_path: Path) -> dict:
 
     Returns zeroed summary if the vertex has no store or store doesn't exist.
     """
-    from lang import parse_vertex_file
-
     from .store_reader import StoreReader
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
         return _combined_summary(ast, vertex_path)
@@ -1251,10 +1238,13 @@ def vertex_summary(vertex_path: Path) -> dict:
 
 
 def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:
-    """Parse vertex and resolve store path. Returns (ast, store_path)."""
-    from lang import parse_vertex_file
+    """Resolve declaration and store path. Returns (ast, store_path).
 
-    ast = parse_vertex_file(vertex_path)
+    Routes through :func:`load_declaration` (not a plain parse) because callers
+    consult the returned ast's declaration attributes (``combine``/``discover``)
+    to branch, not only the ``store`` locator.
+    """
+    ast = load_declaration(vertex_path)
     if ast.store is None:
         return ast, None
 
@@ -1401,12 +1391,10 @@ def vertex_search(
     if not query or not query.strip():
         return []
 
-    from lang import parse_vertex_file
-
     from .compiler import collect_search_fields
     from .store_reader import StoreReader
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
         return _combined_search(

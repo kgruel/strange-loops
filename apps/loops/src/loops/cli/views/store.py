@@ -31,7 +31,11 @@ def run(argv: list[str], ctx: Invocation) -> int:
     from loops.commands.store import _run_store
 
     try:
-        return _run_store(argv, vertex_path=ctx.vertex_path)
+        # ``store absorb`` records a signed genesis under a recording observer;
+        # the global ``--observer`` peel lands it on ``ctx.observer`` (the store
+        # view is otherwise observer-agnostic), so thread it through for that
+        # one subcommand. ``_run_store`` ignores it for every other verb.
+        return _run_store(argv, vertex_path=ctx.vertex_path, observer=ctx.observer)
     except (ValueError, FileNotFoundError) as exc:
         ctx.reporter.err(str(exc))
         return 1

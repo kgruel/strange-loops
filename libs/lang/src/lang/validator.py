@@ -292,6 +292,30 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
     """
     ctx = ValidationContext(path=str(vertex.path) if vertex.path else None)
 
+    # Reserved declaration namespace (SPEC §9.2 / build-plan write-time
+    # reservation): the ``_decl.*`` prefix is the internal-table vocabulary,
+    # recorded only through the genesis/absorb ceremony — never user-declared.
+    # Reject at the grammar layer so a ``.vertex`` cannot mint a kind (a loop
+    # definition or a source's emit kind) that collides with the protocol's
+    # own rows. The single ``is_internal_kind`` predicate is the one place the
+    # prefix is spelled (build-plan "SQL wildcard trap").
+    from .document import DECL_PREFIX, is_internal_kind
+
+    for loop_name in vertex.loops:
+        if is_internal_kind(loop_name):
+            ctx.error(
+                f"loop '{loop_name}' uses the reserved declaration namespace "
+                f"('{DECL_PREFIX}*') — recorded via `sl store absorb`, "
+                f"never declared",
+            )
+    for block in vertex.sources_blocks or []:
+        for src in block.sources:
+            if is_internal_kind(src.kind):
+                ctx.error(
+                    f"source emits kind '{src.kind}' in the reserved "
+                    f"declaration namespace ('{DECL_PREFIX}*') — not permitted",
+                )
+
     # Check routes reference defined loops (skip for combine vertices —
     # routes only make sense with local loops, not cross-store reads)
     if vertex.routes and vertex.combine is None:

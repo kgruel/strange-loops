@@ -4,6 +4,7 @@ Pure data fetch, no rendering knowledge.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 _SPARK_CHARS = " ▁▂▃▄▅▆▇█"
@@ -548,6 +549,250 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if ok else 1
 
 
+def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]:
+    """Read (has_genesis, chain_head, fact_cursor) for the era-opening pins.
+
+    SPEC §9.2 era rule: a genesis pins "everything before me predates
+    historization" — a verifiable claim, not an inference from row order.
+
+    - ``has_genesis`` — a ``_decl.genesis`` fact already exists (this store
+      has opened its lineage; re-absorb / edit is S4, so absorb refuses).
+    - ``chain_head`` — the row-identity hash of the latest *chained* tick
+      (what a successor tick's ``prev_hash`` commits to), or None when the
+      store has no chained tick. A pre-chain-only store pins on the cursor.
+    - ``fact_cursor`` — the id of the newest fact by WITNESS order (rowid),
+      matching ``append_tick``'s cursor authority — or None on empty.
+
+    A not-yet-materialized store (no ``.db``, or a schemaless file) returns
+    ``(False, None, None)``: genesis becomes its first fact.
+    """
+    import sqlite3
+
+    if not db_path.exists():
+        return False, None, None
+
+    from engine.sqlite_store import (
+        _TICK_ROW_SQL,
+        _TICK_ROW_SQL_V1,
+        tick_row_hash,
+    )
+    from lang.document import DECL_GENESIS
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA query_only=ON")
+    try:
+        try:
+            has_genesis = (
+                conn.execute(
+                    "SELECT 1 FROM facts WHERE kind = ? LIMIT 1", (DECL_GENESIS,)
+                ).fetchone()
+                is not None
+            )
+            frow = conn.execute(
+                "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            fact_cursor = frow[0] if frow else None
+        except sqlite3.OperationalError:
+            # Schemaless / non-store file — nothing absorbed, nothing to pin.
+            return False, None, None
+
+        chain_head: str | None = None
+        try:
+            tcols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+            if "window_hash" in tcols:
+                row_sql = _TICK_ROW_SQL if "signature" in tcols else _TICK_ROW_SQL_V1
+                row = conn.execute(
+                    f"SELECT {row_sql} FROM ticks "
+                    "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()
+                if row is not None:
+                    # tick_row_hash reads an 11-field row (signature at [10]);
+                    # a delta-1 schema yields 10, pad the signature slot NULL.
+                    chain_head = tick_row_hash(row if len(row) > 10 else (*row, None))
+        except sqlite3.OperationalError:
+            pass
+
+        return has_genesis, chain_head, fact_cursor
+    finally:
+        conn.close()
+
+
+def _run_absorb(
+    argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
+) -> int:
+    """Absorb a store's declaration whole as a signed genesis event.
+
+    The lineage-opening ceremony (SPEC §9.2): parse the ``.vertex`` once,
+    decompose it into subject-scoped declaration documents (``genesis_payload``),
+    and append ONE ``_decl.genesis`` fact carrying the whole document set, the
+    declaration-protocol version, and the era pins (chain head + fact cursor at
+    absorption time). The genesis fact's own id IS the lineage id.
+
+    Genesis is identity, not fold state: an absorb refuses (exit 2) if the store
+    already holds any ``_decl.genesis`` — re-absorb / edit lands in S4, so there
+    is no ``--force``. And a genesis MUST be signed — it is the attestation
+    root; if the vertex has no signing key for the recording observer, absorb
+    refuses (exit 2) and tells the user to set up signing first.
+
+    ``-n/--dry-run`` shows what would be absorbed without writing; ``--json``
+    emits the receipt as a machine-readable dict.
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="loops store absorb",
+        description="Open a store's declaration lineage: absorb the current "
+                    ".vertex declaration whole as a signed genesis event "
+                    "(SPEC §9.2 era opening).",
+    )
+    if vertex_path is None:
+        p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
+    p.add_argument(
+        "--observer", default=None,
+        help="Observer recording the genesis (default: the resolved "
+             "self-observer, same resolution emit uses)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON receipt")
+    p.add_argument(
+        "-n", "--dry-run", action="store_true",
+        help="Show what would be absorbed without writing",
+    )
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
+    args = p.parse_args(argv)
+
+    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+    if target_path.suffix != ".vertex":
+        raise ValueError(
+            "absorb requires a .vertex target — genesis records the "
+            "declaration and signs it with the vertex's co-located key"
+        )
+    # resolve_store_path raises ValueError('No store configured') for a pure
+    # aggregate (combine/discover) vertex — those own no store, so there is
+    # nothing to open a lineage over (build-plan aggregation wrinkle, deferred).
+    db_path = resolve_store_path(target_path)
+
+    # Parse the declaration ONCE; decompose into the genesis document set.
+    from lang import parse_vertex_file
+    from lang.document import (
+        DECL_GENESIS,
+        DECLARATION_PROTOCOL_VERSION,
+        genesis_payload,
+    )
+
+    ast = parse_vertex_file(target_path)
+    payload = genesis_payload(ast)
+    doc_count = len(payload["documents"])
+
+    # Genesis is identity: refuse re-absorption (edit flow is S4).
+    has_genesis, chain_head, fact_cursor = _read_absorption_state(db_path)
+    if has_genesis:
+        from painted import Block, Style, paint
+        paint(Block.text(
+            f"✗ {target_path.stem}: already absorbed — a genesis event exists. "
+            "Editing an absorbed declaration lands later (S4); there is no --force.",
+            Style(),
+        ), file=sys.stderr)
+        return 2
+
+    # Era pins (§9.2): make "everything before me predates historization" a
+    # verifiable claim rather than an inference from row order.
+    payload["chain_head"] = chain_head
+    payload["fact_cursor"] = fact_cursor
+
+    # Observer + signability. Genesis MUST be signed (it is the lineage root).
+    from loops.commands.identity import resolve_observer
+    from loops.commands.signing import fact_signer_for
+
+    # Precedence: an explicit ``--observer`` on the absorb parser (direct/test
+    # calls) wins; otherwise the invocation-level observer threaded from the
+    # global peel; otherwise resolve_observer's env/declared chain — the same
+    # resolution emit uses.
+    explicit = args.observer if args.observer is not None else observer
+    observer = resolve_observer(explicit)
+    signer = fact_signer_for(target_path)
+    # A signer that returns non-None for this observer proves a usable key
+    # (the callable selects by observer and returns None when there is none).
+    # Probe with a throwaway digest — signability is key-presence, not content.
+    signable = observer and signer is not None and signer(observer, "0" * 64) is not None
+    if not signable:
+        from painted import Block, Style, paint
+        why = (
+            "no observer resolved to sign as"
+            if not observer
+            else f"no signing key for observer '{observer}'"
+        )
+        paint(Block.text(
+            f"✗ {target_path.stem}: cannot absorb — {why}. Genesis is the "
+            "lineage's attestation root and must be signed; set up signing "
+            "first (loops add <vertex> observer --keygen).",
+            Style(),
+        ), file=sys.stderr)
+        return 2
+
+    receipt = {
+        "vertex": target_path.stem,
+        "lineage": None,
+        "protocol": DECLARATION_PROTOCOL_VERSION,
+        "documents": doc_count,
+        "chain_head": chain_head,
+        "fact_cursor": fact_cursor,
+        "observer": observer,
+        "signed": True,
+    }
+
+    if not args.dry_run:
+        from datetime import datetime, timezone
+
+        from atoms import Fact
+        from engine import gen_id
+        from engine.sqlite_store import SqliteStore
+
+        ts = datetime.now(timezone.utc).timestamp()
+        lineage_id = gen_id()
+        fact = Fact(
+            kind=DECL_GENESIS, ts=ts, payload=payload, observer=observer, origin=""
+        )
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            fact_signer=fact_signer_for(target_path),
+        )
+        try:
+            # The genesis fact's own id IS the lineage id (§9.2 Lineage). The
+            # store signs the content commitment under ``observer`` on append.
+            store.append(fact, id_override=lineage_id)
+        finally:
+            store.close()
+        receipt["lineage"] = lineage_id
+
+    if args.json:
+        import json as _json
+        print(_json.dumps({**receipt, "dry_run": args.dry_run}, indent=2))  # noqa: T201 — machine output path
+        return 0
+
+    from painted import Block, Style, join_vertical, paint
+
+    verb = "would absorb" if args.dry_run else "genesis absorbed"
+    lineage_line = (
+        "  lineage: (dry-run — no genesis minted)"
+        if args.dry_run
+        else f"  lineage: {receipt['lineage']}"
+    )
+    head_disp = (chain_head[:16] + "…") if chain_head else "(no chained tick)"
+    cursor_disp = fact_cursor if fact_cursor else "(empty store)"
+    lines = [
+        f"✓ {target_path.stem}: {verb} — protocol v{DECLARATION_PROTOCOL_VERSION}",
+        lineage_line,
+        f"  documents: {doc_count} subject{'s' if doc_count != 1 else ''}",
+        f"  pins: chain_head {head_disp} · fact_cursor {cursor_disp}",
+        f"  observer: {observer} · signed",
+    ]
+    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+    return 0
+
+
 def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Read a store's tick series — the attestation chain surface.
 
@@ -739,8 +984,15 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     )
 
 
-def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
-    """Run store command via painted CLI harness."""
+def _run_store(
+    argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
+) -> int:
+    """Run store command via painted CLI harness.
+
+    ``observer`` is the invocation-level identity (the global ``--observer``
+    peel) — threaded only into ``absorb``, which signs a genesis under a
+    recording observer; every other subcommand is observer-agnostic.
+    """
     import argparse
     from painted import run_cli, OutputMode
     from painted.cli import HelpArg
@@ -751,6 +1003,8 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "absorb":
+        return _run_absorb(argv[1:], vertex_path=vertex_path, observer=observer)
     if argv and argv[0] == "ticks":
         return _run_store_ticks(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "stats":
@@ -823,7 +1077,9 @@ def _run_store(argv: list[str], *, vertex_path: Path | None = None) -> int:
             "'loops store verify [target]' checks the tick hash chain; "
             "'loops store rebirth <source> <target>' replays a store "
             "through a transform with a verifiable receipt; "
-            "'loops store reanchor <vertex>' recomputes chain hashes."
+            "'loops store reanchor <vertex>' recomputes chain hashes; "
+            "'loops store absorb <vertex>' opens the declaration lineage "
+            "with a signed genesis event."
         ),
         help_args=help_args,
     )

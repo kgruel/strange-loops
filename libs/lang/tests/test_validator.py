@@ -368,6 +368,35 @@ loops {
         with pytest.raises(ValidationError, match="duplicate fold target 'count'"):
             validate_vertex(vertex)
 
+    def test_reserved_decl_kind_rejected(self):
+        """A loop/kind in the reserved ``_decl.*`` namespace is rejected."""
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  "_decl.genesis" {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
+        with pytest.raises(ValidationError, match="reserved declaration namespace"):
+            validate_vertex(vertex)
+
+    def test_ordinary_kind_with_leading_underscore_allowed(self):
+        """Only the ``_decl.`` prefix is reserved — other names pass."""
+        vertex = parse_vertex("""\
+name "test"
+loops {
+  "_topology" {
+    fold {
+      count "inc"
+    }
+  }
+}
+""")
+        validate_vertex(vertex)  # Should not raise
+
 
 class TestValidateGeneric:
     """Test the generic validate() function."""

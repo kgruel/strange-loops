@@ -488,6 +488,25 @@ def cmd_emit(
         )
         return 2
 
+    # Reserved declaration namespace (SPEC §9.2 / build-plan write-time
+    # reservation): the ``_decl.*`` prefix is the internal-table protocol's
+    # own vocabulary, recorded only through `sl store absorb`. Refuse a
+    # user-supplied ``_decl.*`` kind here, at the single emit chokepoint,
+    # regardless of strict mode — read-side filtering is not reservation.
+    from lang.document import is_internal_kind
+
+    if is_internal_kind(kind):
+        paint(
+            Block.text(
+                f"Error: kind '{kind}' is in the reserved declaration "
+                f"namespace ('_decl.*') — declarations are recorded via "
+                f"`sl store absorb`, not emitted",
+                p.error,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
     if vertex_path is not None:
         # Vertex-first dispatch: vertex already resolved, no ambiguity
         pass

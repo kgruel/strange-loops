@@ -1013,6 +1013,20 @@ def _run_close(
         else:
             vertex_path = resolve_local_vertex()
 
+    # Reserved declaration namespace (SPEC §9.2): close emits a fact of
+    # ``args.kind`` — refuse the ``_decl.*` namespace here too (after the
+    # vertex/kind positional shift above resolves the final kind), the same
+    # reservation cmd_emit enforces. Read-side filtering is not reservation.
+    from lang.document import is_internal_kind
+
+    if is_internal_kind(args.kind):
+        rep.err(
+            f"kind '{args.kind}' is in the reserved declaration namespace "
+            f"('_decl.*') — declarations are recorded via `sl store absorb`, "
+            f"not closed"
+        )
+        return 2
+
     # Resolve observer
     obs = resolve_observer(observer or None)
 

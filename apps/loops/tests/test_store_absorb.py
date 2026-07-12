@@ -86,14 +86,15 @@ class TestAbsorbFreshStore:
         assert "_decl.vertex-defined" in kinds
         assert "_decl.kind-defined" in kinds
 
-    def test_lineage_id_equals_genesis_fact_id(self, tmp_path):
+    def test_lineage_id_equals_genesis_fact_id(self, tmp_path, capsys):
         vpath = _make_signed_vertex(tmp_path)
         rc = _run_absorb(["--observer", "x", "--json"], vertex_path=vpath)
         assert rc == 0
+        receipt = json.loads(capsys.readouterr().out)
         gid, *_ = _genesis_row(tmp_path / "x.db")
-        # The genesis fact's own ULID IS the lineage id — verify by re-reading
-        # the store: the receipt's lineage was the id assigned to the row.
-        # (The JSON receipt printed the lineage; the row id is authoritative.)
+        # The genesis fact's own ULID IS the lineage id (§9.2): the receipt's
+        # lineage must equal the id assigned to the stored row.
+        assert receipt["lineage"] == gid
         assert len(gid) == 26  # ULID
 
     def test_json_receipt_shape(self, tmp_path, capsys):
@@ -125,14 +126,26 @@ class TestAbsorbPins:
         ).fetchone()[0]
         conn.close()
 
+        # The actual latest-chained-tick row hash — what a successor's
+        # prev_hash would commit to. absorb writes no tick, so this is
+        # unchanged by the absorb and must equal the pinned chain_head.
+        from atoms import Fact
+        from engine.sqlite_store import SqliteStore
+        s = SqliteStore(
+            path=db, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        expected_head = s.current_chain_head()
+        s.close()
+        assert expected_head is not None
+
         rc = _run_absorb(["--observer", "x"], vertex_path=vpath)
         assert rc == 0
 
         payload = json.loads(_genesis_row(db)[3])
         # fact_cursor pins the newest PRE-genesis fact (witness order).
         assert payload["fact_cursor"] == newest_fact
-        # chained ticks exist → chain_head is a real hash.
-        assert payload["chain_head"] is not None
+        # chain_head EQUALS the store's actual latest-tick chain hash.
+        assert payload["chain_head"] == expected_head
         assert len(payload["chain_head"]) == 64  # sha256 hexdigest
 
 

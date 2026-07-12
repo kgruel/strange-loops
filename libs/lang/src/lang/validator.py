@@ -238,6 +238,18 @@ def validate_loop_file(loop: LoopFile) -> tuple[Shape | None, list[ValidationErr
     """
     ctx = ValidationContext(path=str(loop.path) if loop.path else None)
 
+    # Reserved declaration namespace (SPEC §9.2): a standalone .loop / template
+    # source cannot declare an emit kind in the ``_decl.*`` namespace — that is
+    # the internal-table protocol's own vocabulary, recorded via `sl store
+    # absorb`, never produced by ingress.
+    from .document import DECL_PREFIX, is_internal_kind
+
+    if loop.kind and is_internal_kind(loop.kind):
+        ctx.error(
+            f"source emits kind '{loop.kind}' in the reserved declaration "
+            f"namespace ('{DECL_PREFIX}*') — not permitted",
+        )
+
     # Validate on/every mutual exclusivity
     if loop.on is not None and loop.every is not None:
         ctx.error(
@@ -315,6 +327,12 @@ def validate_vertex_file(vertex: VertexFile) -> list[ValidationError]:
                     f"source emits kind '{src.kind}' in the reserved "
                     f"declaration namespace ('{DECL_PREFIX}*') — not permitted",
                 )
+    for route_kind in vertex.routes or {}:
+        if is_internal_kind(route_kind):
+            ctx.error(
+                f"route key '{route_kind}' is in the reserved declaration "
+                f"namespace ('{DECL_PREFIX}*') — not permitted",
+            )
 
     # Check routes reference defined loops (skip for combine vertices —
     # routes only make sense with local loops, not cross-store reads)

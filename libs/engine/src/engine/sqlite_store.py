@@ -315,6 +315,33 @@ class UnsignedTickInSignedEra(Exception):
     """
 
 
+class GenesisExists(Exception):
+    """``absorb_genesis`` found a ``_decl.genesis`` row already in the store.
+
+    Genesis is identity, not fold state (SPEC §9.2): a store's lineage is
+    opened exactly once, so re-absorption is refused rather than last-write-
+    wins. The edit/re-absorb flow (S4) lands later.
+
+    DELIBERATELY CONSERVATIVE: the check is *any* genesis row, not
+    ``lineage == self``. Pre-S6, a merged foreign genesis is indistinguishable
+    from a self-genesis (no ``_decl.merged`` receipts yet); once merge records
+    provenance receipts, this rule is revisited to scope by self-lineage so a
+    store carrying foreign genesis rows can still open its own.
+    """
+
+
+class UnsignableGenesis(Exception):
+    """``absorb_genesis`` could not sign the genesis event.
+
+    A genesis is the lineage's attestation root — an unsigned one is a hole
+    in the store's attestation story (SPEC §9.2 / §9.4), so absorb refuses
+    (rollback, no write) rather than append an unsigned root. Raised when the
+    injected ``fact_signer`` is absent or returns no signature for the
+    recording observer. The signature that matters is over the ACTUAL final
+    payload, verified before commit — never a throwaway probe digest.
+    """
+
+
 class SqliteStore(Generic[T]):
     """Append-only SQLite event store.
 
@@ -441,6 +468,155 @@ class SqliteStore(Generic[T]):
         )
         self._conn.commit()
         return fact_id
+
+    def current_chain_head(self) -> str | None:
+        """The row-identity hash of the latest *chained* tick, or None.
+
+        What a successor tick's ``prev_hash`` commits to (era-aware
+        ``_tick_row_hash``) — the "chain head" a genesis pins. None when the
+        store has no chained tick (a pre-chain-only or empty store pins on
+        the fact cursor instead). Read-only; never migrates schema.
+        """
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        if "window_hash" not in cols:
+            return None
+        row_sql = _TICK_ROW_SQL if "signature" in cols else _TICK_ROW_SQL_V1
+        row = self._conn.execute(
+            f"SELECT {row_sql} FROM ticks "
+            "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        # _tick_row_hash reads an 11-field row (signature at [10]); a delta-1
+        # schema yields 10 — pad the signature slot NULL.
+        return _tick_row_hash(row if len(row) > 10 else (*row, None))
+
+    def absorb_genesis(
+        self,
+        documents: list,
+        *,
+        observer: str,
+        origin: str = "",
+        fact_signer: Callable[[str, str], str | None] | None,
+        protocol: int | None = None,
+    ) -> dict[str, Any]:
+        """Open the store's declaration lineage — the atomic genesis primitive.
+
+        The lineage-opening ceremony's write half (SPEC §9.2 era rule),
+        performed as ONE ``BEGIN IMMEDIATE`` transaction so the identity check,
+        the era pins, and the append are indivisible: a concurrent emit cannot
+        falsify a pin between read and write, and two concurrent absorbs cannot
+        both mint a genesis (the second blocks on the write lock, then sees the
+        first's row and refuses).
+
+        Steps, all inside the transaction:
+
+        1. Refuse (``GenesisExists``) if ANY ``_decl.genesis`` row exists. No
+           unique index — merge legitimately carries foreign genesis rows as
+           inert citizens (§9.2 Lineage); the transaction-scoped check, not a
+           schema constraint, is the correctness mechanism.
+        2. Read the era pins — chain head (latest chained tick's row hash) and
+           fact cursor (newest fact by WITNESS order / rowid) — so
+           "everything before me predates historization" is verifiable.
+        3. Build the whole payload (``documents`` + ``protocol`` + pins), sign
+           its CONTENT commitment under ``observer`` via ``fact_signer``, and
+           refuse (``UnsignableGenesis``, rollback) if no signature is
+           produced. The signed commitment is over the ACTUAL final payload,
+           never a throwaway probe — genesis is the attestation root.
+        4. Append the ``_decl.genesis`` row and commit. Its own id IS the
+           lineage id (§9.2), returned in the receipt.
+
+        This is protocol surface the Go conformance oracle mirrors: the payload
+        shape (``protocol``, ``documents``, ``chain_head``, ``fact_cursor``),
+        the witness-order cursor, and the sign-final-payload rule are the
+        contract. ``documents`` are the subject-scoped declaration documents
+        (from ``lang.document.vertex_to_documents``); this method stamps the
+        protocol and pins around them.
+
+        Returns a receipt dict: ``{lineage, protocol, documents, chain_head,
+        fact_cursor, observer, signed}``.
+        """
+        from lang.document import DECL_GENESIS, DECLARATION_PROTOCOL_VERSION
+
+        if protocol is None:
+            protocol = DECLARATION_PROTOCOL_VERSION
+
+        # Prepare schema OUTSIDE the transaction (these commit): the genesis
+        # write and the chain-head read need the signature and chain columns
+        # present. Safe pre-work — they mutate no facts.
+        self._ensure_sync()
+        self._ensure_fact_signature_column()
+        self._ensure_chain_columns()
+
+        conn = self._conn
+        prev_iso = conn.isolation_level
+        conn.isolation_level = None  # autocommit — explicit transaction control
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if conn.execute(
+                    "SELECT 1 FROM facts WHERE kind = ? LIMIT 1", (DECL_GENESIS,)
+                ).fetchone() is not None:
+                    raise GenesisExists(
+                        "a _decl.genesis event already exists — the store's "
+                        "lineage is already open; re-absorb/edit is a later "
+                        "ceremony (no --force)"
+                    )
+
+                chain_head = self.current_chain_head()
+                frow = conn.execute(
+                    "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()
+                fact_cursor = frow[0] if frow else None
+
+                payload = {
+                    "protocol": protocol,
+                    "documents": list(documents),
+                    "chain_head": chain_head,
+                    "fact_cursor": fact_cursor,
+                }
+                ts = datetime.now(_UTC).timestamp()
+                lineage_id = gen_id()
+                payload_text = json.dumps(payload)
+                signature = (
+                    fact_signer(
+                        observer,
+                        _fact_commitment_hash(
+                            DECL_GENESIS, ts, observer, origin, payload_text
+                        ),
+                    )
+                    if fact_signer is not None
+                    else None
+                )
+                if signature is None:
+                    raise UnsignableGenesis(
+                        f"no signature produced for observer {observer!r} — a "
+                        "genesis must be signed (it is the lineage's "
+                        "attestation root); set up signing first"
+                    )
+
+                conn.execute(
+                    "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (lineage_id, DECL_GENESIS, ts, observer, origin, payload_text, signature),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        finally:
+            conn.isolation_level = prev_iso
+
+        return {
+            "lineage": lineage_id,
+            "protocol": protocol,
+            "documents": len(payload["documents"]),
+            "chain_head": chain_head,
+            "fact_cursor": fact_cursor,
+            "observer": observer,
+            "signed": True,
+        }
 
     async def consume(self, event: T, *, id_override: str | None = None) -> None:
         """Consumer protocol: append event to store."""

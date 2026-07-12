@@ -32,6 +32,8 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
+from lang.document import is_internal_kind
+
 from .loop import Loop
 
 from .store import Store
@@ -44,6 +46,19 @@ if TYPE_CHECKING:
 
 # Observer-state kind pattern: kind.{observer_name}
 _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
+
+
+class ReservedKindError(Exception):
+    """A fact whose kind is in the reserved declaration namespace (``_decl.*``)
+    was routed into a persisting vertex from ordinary ingress.
+
+    The ``_decl.*`` prefix is the internal-table protocol's own vocabulary
+    (SPEC §9.2), written only through the genesis/absorb ceremony — never
+    ordinary ingress (emit, sources, the tasks harness). Guarding at the
+    engine ingest tier makes the reservation structural rather than a
+    per-caller courtesy. Replay re-ingest (storeless) and the ceremony's own
+    direct write (which bypasses ``receive``) are unaffected.
+    """
 
 
 def _json_default(obj: object) -> object:
@@ -434,6 +449,19 @@ class Vertex:
             _, _, owner_name = kind.partition(".")
             if owner_name and owner_name != observer:
                 return None
+
+        # Reserved-namespace ingest guard (SPEC §9.2 write-time reservation).
+        # A ``_decl.*`` kind is the declaration protocol's own vocabulary,
+        # written only by the absorb ceremony (which appends directly, not
+        # through receive). Refuse ordinary ingress that would PERSIST one —
+        # gating on an attached store, so replay re-ingest (storeless vertex)
+        # and the production ``Vertex.replay`` (sets store=None, bypasses
+        # receive) fold historical declaration rows without tripping this.
+        if self._store is not None and is_internal_kind(kind):
+            raise ReservedKindError(
+                f"kind '{kind}' is in the reserved declaration namespace "
+                f"('_decl.*') — recorded via the absorb ceremony, not ingest"
+            )
 
         # Store the full fact (not just kind/payload) for replay.
         # id_override (when provided by callers like cmd_emit) lets the

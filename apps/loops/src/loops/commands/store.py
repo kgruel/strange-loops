@@ -672,124 +672,124 @@ def _run_absorb(
     # nothing to open a lineage over (build-plan aggregation wrinkle, deferred).
     db_path = resolve_store_path(target_path)
 
-    # Parse the declaration ONCE; decompose into the genesis document set.
+    # Parse the declaration ONCE; decompose into the subject-scoped documents.
     from lang import parse_vertex_file
-    from lang.document import (
-        DECL_GENESIS,
-        DECLARATION_PROTOCOL_VERSION,
-        genesis_payload,
-    )
+    from lang.document import DECLARATION_PROTOCOL_VERSION, genesis_payload
 
     ast = parse_vertex_file(target_path)
-    payload = genesis_payload(ast)
-    doc_count = len(payload["documents"])
+    documents = genesis_payload(ast)["documents"]
+    doc_count = len(documents)
 
-    # Genesis is identity: refuse re-absorption (edit flow is S4).
-    has_genesis, chain_head, fact_cursor = _read_absorption_state(db_path)
-    if has_genesis:
-        from painted import Block, Style, paint
-        paint(Block.text(
-            f"✗ {target_path.stem}: already absorbed — a genesis event exists. "
-            "Editing an absorbed declaration lands later (S4); there is no --force.",
-            Style(),
-        ), file=sys.stderr)
-        return 2
-
-    # Era pins (§9.2): make "everything before me predates historization" a
-    # verifiable claim rather than an inference from row order.
-    payload["chain_head"] = chain_head
-    payload["fact_cursor"] = fact_cursor
-
-    # Observer + signability. Genesis MUST be signed (it is the lineage root).
+    # Observer resolution. Precedence: explicit ``--observer`` on the absorb
+    # parser (direct/test calls) > invocation observer from the global peel >
+    # resolve_observer's env/declared chain — the same resolution emit uses.
     from loops.commands.identity import resolve_observer
     from loops.commands.signing import fact_signer_for
 
-    # Precedence: an explicit ``--observer`` on the absorb parser (direct/test
-    # calls) wins; otherwise the invocation-level observer threaded from the
-    # global peel; otherwise resolve_observer's env/declared chain — the same
-    # resolution emit uses.
     explicit = args.observer if args.observer is not None else observer
     observer = resolve_observer(explicit)
-    signer = fact_signer_for(target_path)
-    # A signer that returns non-None for this observer proves a usable key
-    # (the callable selects by observer and returns None when there is none).
-    # Probe with a throwaway digest — signability is key-presence, not content.
-    signable = observer and signer is not None and signer(observer, "0" * 64) is not None
-    if not signable:
-        from painted import Block, Style, paint
-        why = (
-            "no observer resolved to sign as"
-            if not observer
-            else f"no signing key for observer '{observer}'"
+
+    def _render(receipt: dict, *, dry_run: bool) -> None:
+        chain_head, fact_cursor = receipt["chain_head"], receipt["fact_cursor"]
+        if args.json:
+            import json as _json
+            print(_json.dumps({**receipt, "dry_run": dry_run}, indent=2))  # noqa: T201 — machine output path
+            return
+        from painted import Block, Style, join_vertical, paint
+        verb = "would absorb" if dry_run else "genesis absorbed"
+        lineage_line = (
+            "  lineage: (dry-run — no genesis minted)"
+            if dry_run else f"  lineage: {receipt['lineage']}"
         )
-        paint(Block.text(
-            f"✗ {target_path.stem}: cannot absorb — {why}. Genesis is the "
-            "lineage's attestation root and must be signed; set up signing "
-            "first (loops add <vertex> observer --keygen).",
-            Style(),
-        ), file=sys.stderr)
+        head_disp = (chain_head[:16] + "…") if chain_head else "(no chained tick)"
+        cursor_disp = fact_cursor if fact_cursor else "(empty store)"
+        lines = [
+            f"✓ {target_path.stem}: {verb} — protocol v{DECLARATION_PROTOCOL_VERSION}",
+            lineage_line,
+            f"  documents: {doc_count} subject{'s' if doc_count != 1 else ''}",
+            f"  pins: chain_head {head_disp} · fact_cursor {cursor_disp}",
+            f"  observer: {observer} · signed",
+        ]
+        paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+
+    def _refuse(msg: str) -> int:
+        from painted import Block, Style, paint
+        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
         return 2
 
-    receipt = {
-        "vertex": target_path.stem,
-        "lineage": None,
-        "protocol": DECLARATION_PROTOCOL_VERSION,
-        "documents": doc_count,
-        "chain_head": chain_head,
-        "fact_cursor": fact_cursor,
-        "observer": observer,
-        "signed": True,
-    }
-
-    if not args.dry_run:
-        from datetime import datetime, timezone
-
-        from atoms import Fact
-        from engine import gen_id
-        from engine.sqlite_store import SqliteStore
-
-        ts = datetime.now(timezone.utc).timestamp()
-        lineage_id = gen_id()
-        fact = Fact(
-            kind=DECL_GENESIS, ts=ts, payload=payload, observer=observer, origin=""
+    if args.dry_run:
+        # Preview only — a read-only projection of what the real (atomic) path
+        # would do. Inherently racy (no write lock held); the atomicity
+        # guarantees belong to the real path's single transaction.
+        has_genesis, chain_head, fact_cursor = _read_absorption_state(db_path)
+        if has_genesis:
+            return _refuse(
+                "already absorbed — a genesis event exists. Editing an absorbed "
+                "declaration lands later (S4); there is no --force."
+            )
+        signer = fact_signer_for(target_path)
+        signable = observer and signer is not None and signer(observer, "0" * 64) is not None
+        if not signable:
+            why = ("no observer resolved to sign as" if not observer
+                   else f"no signing key for observer '{observer}'")
+            return _refuse(
+                f"cannot absorb — {why}. Genesis is the lineage's attestation "
+                "root and must be signed; set up signing first "
+                "(loops add <vertex> observer --keygen)."
+            )
+        _render(
+            {
+                "vertex": target_path.stem, "lineage": None,
+                "protocol": DECLARATION_PROTOCOL_VERSION, "documents": doc_count,
+                "chain_head": chain_head, "fact_cursor": fact_cursor,
+                "observer": observer, "signed": True,
+            },
+            dry_run=True,
         )
-        store = SqliteStore(
-            path=db_path,
-            serialize=lambda f: f.to_dict(),
-            deserialize=Fact.from_dict,
-            fact_signer=fact_signer_for(target_path),
-        )
-        try:
-            # The genesis fact's own id IS the lineage id (§9.2 Lineage). The
-            # store signs the content commitment under ``observer`` on append.
-            store.append(fact, id_override=lineage_id)
-        finally:
-            store.close()
-        receipt["lineage"] = lineage_id
-
-    if args.json:
-        import json as _json
-        print(_json.dumps({**receipt, "dry_run": args.dry_run}, indent=2))  # noqa: T201 — machine output path
         return 0
 
-    from painted import Block, Style, join_vertical, paint
+    # Real path — the atomic engine primitive holds the identity check, era
+    # pins, sign-final-payload, and append in ONE transaction (no TOCTOU).
+    if not observer:
+        return _refuse(
+            "cannot absorb — no observer resolved to sign as. Genesis is the "
+            "lineage's attestation root and must be signed; set up signing "
+            "first (loops add <vertex> observer --keygen)."
+        )
 
-    verb = "would absorb" if args.dry_run else "genesis absorbed"
-    lineage_line = (
-        "  lineage: (dry-run — no genesis minted)"
-        if args.dry_run
-        else f"  lineage: {receipt['lineage']}"
+    from atoms import Fact
+    from engine.sqlite_store import (
+        GenesisExists,
+        SqliteStore,
+        UnsignableGenesis,
     )
-    head_disp = (chain_head[:16] + "…") if chain_head else "(no chained tick)"
-    cursor_disp = fact_cursor if fact_cursor else "(empty store)"
-    lines = [
-        f"✓ {target_path.stem}: {verb} — protocol v{DECLARATION_PROTOCOL_VERSION}",
-        lineage_line,
-        f"  documents: {doc_count} subject{'s' if doc_count != 1 else ''}",
-        f"  pins: chain_head {head_disp} · fact_cursor {cursor_disp}",
-        f"  observer: {observer} · signed",
-    ]
-    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+
+    store = SqliteStore(
+        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    try:
+        receipt = store.absorb_genesis(
+            documents,
+            observer=observer,
+            origin="",
+            fact_signer=fact_signer_for(target_path),
+        )
+    except GenesisExists:
+        return _refuse(
+            "already absorbed — a genesis event exists. Editing an absorbed "
+            "declaration lands later (S4); there is no --force."
+        )
+    except UnsignableGenesis:
+        return _refuse(
+            f"cannot absorb — no signing key for observer '{observer}'. Genesis "
+            "is the lineage's attestation root and must be signed; set up "
+            "signing first (loops add <vertex> observer --keygen)."
+        )
+    finally:
+        store.close()
+
+    receipt["vertex"] = target_path.stem
+    _render(receipt, dry_run=False)
     return 0
 
 

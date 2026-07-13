@@ -165,8 +165,12 @@ class StoreReader:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
         if "signature" not in cols:
             return None
+        # Reserved _decl.* rows excluded (SPEC §9.4): they are always signed
+        # ceremony events, and counting them made an otherwise-empty absorbed
+        # store report "facts 0 · signed 1/1" (closing review #8).
         row = self._conn.execute(
-            "SELECT COUNT(signature), COUNT(*) FROM facts"
+            "SELECT COUNT(signature), COUNT(*) FROM facts "
+            "WHERE kind NOT GLOB '_decl.*'"
         ).fetchone()
         return (row[0], row[1])
 
@@ -295,21 +299,37 @@ class StoreReader:
 
     @property
     def freshness(self) -> datetime | None:
-        """Timestamp of the most recent fact, or None if store is empty."""
-        row = self._conn.execute("SELECT MAX(ts) FROM facts").fetchone()
+        """Timestamp of the most recent DOMAIN fact, or None if none exist.
+
+        Reserved ``_decl.*`` rows excluded (SPEC §9.4): a declaration edit is
+        ontology maintenance, not domain activity — it must not refresh the
+        store's apparent last-activity (closing review #8).
+        """
+        row = self._conn.execute(
+            "SELECT MAX(ts) FROM facts WHERE kind NOT GLOB '_decl.*'"
+        ).fetchone()
         if row[0] is None:
             return None
         return datetime.fromtimestamp(row[0], tz=timezone.utc)
 
-    def fact_by_id(self, id_prefix: str) -> dict | None:
+    def fact_by_id(
+        self, id_prefix: str, *, include_internal: bool = False
+    ) -> dict | None:
         """Look up a single fact by ID or ID prefix.
 
         Exact match first, then prefix match. Returns None if no match.
         Raises ValueError if prefix matches multiple facts.
+
+        Reserved ``_decl.*`` rows are excluded by default (SPEC §9.4 — every
+        read surface excludes the namespace; a known genesis id is not an
+        escape hatch). ``include_internal=True`` is the explicit defeat,
+        reserved for surfaces that already carved one out (``--kind _decl.*``).
         """
+        internal = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
         # Exact match
         row = self._conn.execute(
-            "SELECT id, kind, ts, observer, origin, payload FROM facts WHERE id = ?",
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            f"WHERE id = ?{internal}",
             (id_prefix,),
         ).fetchone()
         if row:
@@ -318,7 +338,7 @@ class StoreReader:
         # Prefix match
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            "WHERE id >= ? AND id < ? ORDER BY id LIMIT 2",
+            f"WHERE id >= ? AND id < ?{internal} ORDER BY id LIMIT 2",
             (id_prefix, id_prefix + "~"),
         ).fetchall()
         if not rows:
@@ -437,10 +457,15 @@ class StoreReader:
         Requires facts_fts virtual table to exist (see vertex_reader._ensure_fts).
         Returns newest-first, same dict shape as facts_between.
         """
-        clauses = ["facts_fts MATCH ?"]
+        # Query-time internal exclusion (SPEC §9.4, defense in depth): internal
+        # kinds get no search fields so they never ENTER the index, but a
+        # mis-registered declaration must still not LEAVE it via search —
+        # unless the caller explicitly targets a _decl.* kind.
+        clauses = ["facts_fts MATCH ?", "fts.kind NOT GLOB '_decl.*'"]
         params: list = [query]
 
         if kind is not None:
+            clauses.remove("fts.kind NOT GLOB '_decl.*'")
             clauses.append("fts.kind = ?")
             params.append(kind)
         if since is not None:

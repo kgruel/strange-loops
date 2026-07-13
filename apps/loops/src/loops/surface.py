@@ -750,9 +750,9 @@ def _indexed_kinds(vertex_path) -> set[str]:
     if vertex_path is None:
         return set()
     try:
-        from lang import parse_vertex_file
+        from engine.declaration import load_declaration
 
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
     except Exception:
         return set()
     return {kind for kind, ld in ast.loops.items() if getattr(ld, "search", ())}

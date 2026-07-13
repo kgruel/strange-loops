@@ -675,7 +675,7 @@ def compile_vertex_recursive(
     from glob import glob as globfn
     from pathlib import Path
 
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
 
     # Initialize tracking on first call
     if _visited is None:
@@ -730,7 +730,7 @@ def compile_vertex_recursive(
     children: dict[str, CompiledVertex] = {}
     for child_path in child_paths:
         # Parse and compile child
-        child_ast = parse_vertex_file(child_path)
+        child_ast = load_declaration(child_path)
         child_compiled = compile_vertex_recursive(
             child_ast,
             _visited=_visited,

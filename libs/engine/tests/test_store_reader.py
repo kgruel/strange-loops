@@ -466,3 +466,37 @@ class TestInternalKindExclusion:
             )
         assert len(facts) == 1
         assert facts[0]["kind"] == "_decl.genesis"
+
+    def test_fact_by_id_excludes_internal_by_default(self, decl_db: Path):
+        """A known genesis id is NOT an escape hatch (closing review #8)."""
+        with StoreReader(decl_db) as reader:
+            assert reader.fact_by_id("01FACT_GEN1") is None
+            found = reader.fact_by_id("01FACT_GEN1", include_internal=True)
+        assert found is not None and found["kind"] == "_decl.genesis"
+
+    def test_signed_counts_exclude_internal(self, decl_db: Path):
+        """Signed ceremony rows must not inflate the domain signed ratio
+        (an otherwise-empty absorbed store reported 'facts 0 · signed 1/1')."""
+        conn = sqlite3.connect(str(decl_db))
+        conn.execute("ALTER TABLE facts ADD COLUMN signature TEXT")
+        conn.execute("UPDATE facts SET signature = 'sig' WHERE kind GLOB '_decl.*'")
+        conn.commit()
+        conn.close()
+        with StoreReader(decl_db) as reader:
+            counts = reader.signed_counts()
+        assert counts == (0, 2)  # 2 unsigned decisions; _decl.* rows excluded
+
+    def test_freshness_ignores_internal_rows(self, decl_db: Path):
+        """A declaration edit is ontology maintenance, not domain activity —
+        a re-absorb must not refresh the store's apparent last activity."""
+        conn = sqlite3.connect(str(decl_db))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, payload) "
+            "VALUES ('01FACT_KDEF2', '_decl.kind-defined', 900.0, 'kyle', '{}')"
+        )
+        conn.commit()
+        conn.close()
+        with StoreReader(decl_db) as reader:
+            fresh = reader.freshness
+        assert fresh is not None
+        assert fresh.timestamp() == 200.0  # newest DOMAIN fact, not the edit

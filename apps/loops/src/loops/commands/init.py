@@ -466,6 +466,22 @@ def cmd_init(args: argparse.Namespace, *, reporter: "Reporter | None" = None) ->
         _seed_config_facts(vertex_path, seed_config, reporter=rep)
         _scaffold_artifacts(seed_config, vertex_name=target or "", reporter=rep)
 
+    # Open the store's lineage at birth (SPEC §9.2): init minted the key, so
+    # the genesis ceremony can run immediately — the store carries its own
+    # declaration (and store_meta.own_lineage identity marker) from day one
+    # instead of waiting for a later manual absorb. Best-effort: a failure
+    # (no signing available for exotic setups) leaves the pre-genesis file
+    # authoritative and prints guidance rather than failing init.
+    from loops.commands.store import _run_absorb
+
+    try:
+        rc = _run_absorb([], vertex_path=vertex_path)
+    except Exception as exc:  # noqa: BLE001 — init must not die on absorb
+        rep.msg(f"lineage not opened ({exc}); run `loops store absorb` when ready")
+    else:
+        if rc != 0:
+            rep.msg("lineage not opened; run `loops store absorb` when ready")
+
     return 0
 
 

@@ -47,11 +47,19 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
         return stream_view.run(stream_rest, ctx)
 
-    # --ticks → ticks (dedicated drill-down + lens).
+    # --ticks → ticks (dedicated drill-down + lens). Re-inject the temporal
+    # flags the pre-parser consumed — the ticks command owns --since/--as-of
+    # semantics (window bound + ontology cursor); dropping them here silently
+    # ignored the user's cursor (closing review #7).
     if known.ticks:
+        ticks_rest = list(rest)
+        if known.since:
+            ticks_rest += ["--since", known.since]
+        if known.as_of:
+            ticks_rest += ["--as-of", known.as_of]
         from . import ticks as ticks_view
 
-        return ticks_view.run(rest, ctx)
+        return ticks_view.run(ticks_rest, ctx)
 
     # Default → fold. Re-inject --facts so fold's parser sees it
     # (it's a visibility layer, not a routing flag).

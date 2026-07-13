@@ -1126,9 +1126,9 @@ def fetch_horizon(
     from collections import Counter
 
     from engine import vertex_facts
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     now_ts = datetime.now(timezone.utc).timestamp()
 
     # Roster of armed loops: the vertex-level boundary (one row over every kind)

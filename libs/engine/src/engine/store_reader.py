@@ -313,7 +313,11 @@ class StoreReader:
         return datetime.fromtimestamp(row[0], tz=timezone.utc)
 
     def fact_by_id(
-        self, id_prefix: str, *, include_internal: bool = False
+        self,
+        id_prefix: str,
+        *,
+        include_internal: bool = False,
+        kind: str | None = None,
     ) -> dict | None:
         """Look up a single fact by ID or ID prefix.
 
@@ -326,11 +330,16 @@ class StoreReader:
         reserved for surfaces that already carved one out (``--kind _decl.*``).
         """
         internal = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
+        # An explicit kind SCOPES the whole lookup — including prefix
+        # ambiguity: two facts sharing a prefix across kinds are NOT
+        # ambiguous when only one has the requested kind.
+        kind_clause = " AND kind = ?" if kind is not None else ""
+        kind_params: tuple = (kind,) if kind is not None else ()
         # Exact match
         row = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE id = ?{internal}",
-            (id_prefix,),
+            f"WHERE id = ?{internal}{kind_clause}",
+            (id_prefix, *kind_params),
         ).fetchone()
         if row:
             return self._fact_row_to_dict(row)
@@ -338,8 +347,9 @@ class StoreReader:
         # Prefix match
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE id >= ? AND id < ?{internal} ORDER BY id LIMIT 2",
-            (id_prefix, id_prefix + "~"),
+            f"WHERE id >= ? AND id < ?{internal}{kind_clause} "
+            "ORDER BY id LIMIT 2",
+            (id_prefix, id_prefix + "~", *kind_params),
         ).fetchall()
         if not rows:
             return None

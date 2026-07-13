@@ -1167,11 +1167,9 @@ def vertex_fact_by_id(
             try:
                 with StoreReader(sp) as reader:
                     result = reader.fact_by_id(
-                        id_prefix, include_internal=include_internal
+                        id_prefix, include_internal=include_internal, kind=kind
                     )
-                    if result is not None and (
-                        kind is None or result.get("kind") == kind
-                    ):
+                    if result is not None:
                         matches.append(result)
             except (FileNotFoundError, ValueError):
                 continue
@@ -1187,13 +1185,11 @@ def vertex_fact_by_id(
         return None
 
     with StoreReader(store_path) as reader:
-        found = reader.fact_by_id(id_prefix, include_internal=include_internal)
-    # An explicit --kind SCOPES the lookup, not just unlocks it: asking for
-    # --kind _decl.genesis must not return some other row that happens to
-    # match the id (branch-review #3).
-    if found is not None and kind is not None and found.get("kind") != kind:
-        return None
-    return found
+        # An explicit --kind SCOPES the lookup in SQL — including prefix
+        # ambiguity resolution (branch-review round 2 #2).
+        return reader.fact_by_id(
+            id_prefix, include_internal=include_internal, kind=kind
+        )
 
 
 def vertex_facts(

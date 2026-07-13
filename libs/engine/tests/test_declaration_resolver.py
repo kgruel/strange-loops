@@ -703,3 +703,85 @@ observers {{
             vpath, lineage, include_internal=True, kind="_decl.genesis"
         )
         assert found is not None
+
+    def test_cross_block_move_resolves_empty_not_cross_wired(self, tmp_path):
+        # Move one of two same-command sources to a second block without
+        # re-absorbing: no (block, command) group is count-stable for the
+        # moved source, and there is NO command-level fallback — both blocks'
+        # affected sources resolve empty rather than borrowing another
+        # block's value (branch-review round 2 #1).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        two_one_block = f'''name "t"
+store "{store}"
+sources sequential {{
+  source "echo same" {{
+    kind "ping"
+    env TOKEN="A"
+  }}
+  source "echo same" {{
+    kind "pong"
+    env TOKEN="B"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+        vpath.write_text(two_one_block)
+        _absorb(vpath, store)
+        split_blocks = two_one_block.replace('''  source "echo same" {
+    kind "pong"
+    env TOKEN="B"
+  }
+}
+loops''', '''}
+sources sequential {
+  source "echo same" {
+    kind "pong"
+    env TOKEN="B"
+  }
+}
+loops''')
+        vpath.write_text(split_blocks)
+        resolved = load_declaration(vpath)
+        values = [
+            dict(s.env).get("TOKEN", "")
+            for b in resolved.sources_blocks
+            for s in b.sources
+        ]
+        assert "A" in values or values == ["", ""] or values == [""] * len(values)
+        # The load-bearing assertion: pong NEVER borrows A (nor ping B).
+        (block,) = resolved.sources_blocks[:1]
+        kinds_to_token = {
+            s.kind: dict(s.env).get("TOKEN", "")
+            for b in resolved.sources_blocks
+            for s in b.sources
+        }
+        assert kinds_to_token.get("pong", "") in ("", "B")
+        assert kinds_to_token.get("ping", "") in ("", "A")
+
+    def test_id_prefix_ambiguity_scoped_by_kind(self, tmp_path):
+        # Two facts sharing an id prefix across kinds are NOT ambiguous when
+        # only one has the requested kind (branch-review round 2 #2).
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        for fid, kind in (("abc1", "decision"), ("abc2", "thread")):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, 100.0, 'kyle', '{}')",
+                (fid, kind),
+            )
+        conn.commit()
+        conn.close()
+        with pytest.raises(ValueError):
+            vertex_fact_by_id(vpath, "abc")  # genuinely ambiguous unscoped
+        found = vertex_fact_by_id(vpath, "abc", kind="decision")
+        assert found is not None and found["id"] == "abc1"

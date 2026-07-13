@@ -27,10 +27,9 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   copies facts, never meta — so foreign genesis rows arrive as inert citizens
   and can never hijack identity. Resolution selects the genesis row whose id
   equals the marker; a marker whose row is missing is corruption
-  (:class:`DeclarationResolutionError`). Compat for stores absorbed before the
-  marker existed: no marker + exactly one genesis row → that row is self (the
-  next write ceremony backfills the marker); no marker + several rows →
-  :class:`AmbiguousLineage` (refuse rather than guess).
+  (:class:`DeclarationResolutionError`). An UNMARKED store holding any genesis
+  rows refuses (:class:`UnadoptedLineage`) — identity is claimed only by the
+  explicit adopt ceremony (``loops store adopt``), never inferred from facts.
 
 - **Self-lineage scoping from day one.** Merge already carries arbitrary fact
   rows across stores today, so a foreign store's declaration events can be
@@ -61,15 +60,11 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   grounds fact-residence on; it is deferred (Q1) until a fact-cursor read surface
   exists — until then ``ts`` with this inclusive tie-break is the single axis.
 
-NOTE (provisional, pre-S4): no edit ceremony exists yet, so today only
-genesis-only stores occur in practice. The overlay/tombstone fold is
-nonetheless built and tested against hand-constructed rows, because it is
-protocol and because self-lineage scoping must be correct on arrival. The
-overlay-row *payload shape* this reader consumes —
+The overlay-row *payload shape* this reader consumes —
 ``{"lineage": <genesis id>, "subject": <str>, "payload": <document payload>}``
 for a ``*-defined`` row and ``{"lineage": <genesis id>, "subject": <str>}`` for
-a tombstone — is the provisional contract S4's edit ceremony must emit; S4 may
-refine it, in which case this reader moves with it.
+a tombstone — is the contract the S4 edit ceremony (``SqliteStore.absorb_edit``)
+emits; the Go conformance oracle mirrors both halves.
 """
 
 from __future__ import annotations
@@ -520,27 +515,18 @@ def _reattach_ingress(resolved, file_ast):
     # `absorb -n` surfaces the divergence to reconcile. Within a count-stable
     # group, position IS the identity ("order is meaning").
     by_block: dict[tuple[int, str, int], dict[str, str]] = {}
-    by_cmd: dict[tuple[str, int], dict[str, str]] = {}
     file_seen: dict[tuple[int, str], int] = {}
-    file_cmd_seen: dict[str, int] = {}
     for bi, block in enumerate(file_ast.sources_blocks):
         for src in block.sources:
             nth = file_seen.get((bi, src.command), 0)
             file_seen[(bi, src.command)] = nth + 1
-            file_cmd_seen[src.command] = file_cmd_seen.get(src.command, 0) + 1
-            env_map = dict(src.env)
-            by_block[(bi, src.command, nth)] = env_map
-            by_cmd.setdefault((src.command, nth), env_map)
+            by_block[(bi, src.command, nth)] = dict(src.env)
 
     resolved_counts: dict[tuple[int, str], int] = {}
-    resolved_cmd_counts: dict[str, int] = {}
     for bi, block in enumerate(resolved.sources_blocks):
         for src in block.sources:
             resolved_counts[(bi, src.command)] = (
                 resolved_counts.get((bi, src.command), 0) + 1
-            )
-            resolved_cmd_counts[src.command] = (
-                resolved_cmd_counts.get(src.command, 0) + 1
             )
 
     from lang.ast import InlineSource, SourcesBlock
@@ -554,22 +540,20 @@ def _reattach_ingress(resolved, file_ast):
             nth = resolved_seen.get((bi, src.command), 0)
             resolved_seen[(bi, src.command)] = nth + 1
             if src.env and any(v == "" for _, v in src.env):
+                # Re-attach ONLY within a count-stable (block, command)
+                # group — the sole scope where ordinal identity is provable.
+                # No cross-block fallback: a moved source resolves empty
+                # until re-absorbed (a fallback with block-local ordinals
+                # cross-wired secrets across blocks — branch-review round 2).
                 block_stable = (
                     resolved_counts.get((bi, src.command))
                     == file_seen.get((bi, src.command))
                 )
-                cmd_stable = (
-                    resolved_cmd_counts.get(src.command)
-                    == file_cmd_seen.get(src.command)
+                env_map = (
+                    by_block.get((bi, src.command, nth), {})
+                    if block_stable
+                    else {}
                 )
-                if block_stable:
-                    env_map = by_block.get((bi, src.command, nth), {})
-                elif cmd_stable:
-                    env_map = by_cmd.get((src.command, nth), {})
-                else:
-                    # Occurrence count diverged (unabsorbed structural edit):
-                    # ordinal identity is unsound — skip, never cross-wire.
-                    env_map = {}
                 env = tuple(
                     (k, v or env_map.get(k, ""))
                     for k, v in src.env

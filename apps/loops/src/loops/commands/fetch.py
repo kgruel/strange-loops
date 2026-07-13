@@ -483,6 +483,8 @@ def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:
 def fetch_fact_by_id(
     vertex_path: Path,
     fact_id: str,
+    *,
+    include_internal: bool = False,
 ) -> dict | None:
     """Fetch a single fact by ID or ID prefix.
 
@@ -491,7 +493,7 @@ def fetch_fact_by_id(
     """
     from engine import vertex_fact_by_id
 
-    return vertex_fact_by_id(vertex_path, fact_id)
+    return vertex_fact_by_id(vertex_path, fact_id, include_internal=include_internal)
 
 
 def fetch_ticks(
@@ -1776,12 +1778,12 @@ def fetch_tick_windows(
     """
     from atoms import TickWindow
     from engine import vertex_ticks
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
 
     if all_names:
         name = None  # no filter — span the full chain across every series
     elif not name:
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
         name = ast.name
 
     now = datetime.now(timezone.utc)

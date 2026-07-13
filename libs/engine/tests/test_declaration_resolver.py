@@ -505,3 +505,82 @@ class TestEnvIngress:
         assert set(dict(resolved.sources_blocks[0].sources[0].env)) == {
             "TOKEN", "MODE",
         }  # EXTRA not resolved until absorb
+
+    def test_colliding_commands_do_not_cross_wire_values(self, tmp_path):
+        # Two sources sharing a command must each get their OWN env value —
+        # occurrence identity, not command identity (re-review #4).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(f'''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+  source "curl -s https://x.example" {{
+    kind "pong"
+    env TOKEN="second"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+''')
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        values = [dict(s.env)["TOKEN"] for s in block.sources]
+        assert values == ["first", "second"]
+
+
+class TestSourcePins:
+    """No-auto-enact at the execution tier: pinned sources refuse drift."""
+
+    def _scaffold_loop(self, tmp_path):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        loop = tmp_path / "feed.loop"
+        loop.write_text(
+            'kind "ping"\nobserver "t"\nsource "echo hi"\nevery "30s"\n'
+        )
+        vpath.write_text(f'''name "t"
+store "{store}"
+sources {{
+  path "./feed.loop"
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+''')
+        return vpath, store, loop
+
+    def test_pinned_source_unchanged_passes(self, tmp_path):
+        from engine.declaration import verify_source_pins
+
+        vpath, store, _loop = self._scaffold_loop(tmp_path)
+        _absorb(vpath, store)
+        verify_source_pins(vpath)  # no raise
+
+    def test_drifted_source_refuses(self, tmp_path):
+        from engine.declaration import SourceDrift, verify_source_pins
+
+        vpath, store, loop = self._scaffold_loop(tmp_path)
+        _absorb(vpath, store)
+        loop.write_text(loop.read_text().replace("echo hi", "curl evil"))
+        with pytest.raises(SourceDrift):
+            verify_source_pins(vpath)
+
+    def test_pre_genesis_is_a_noop(self, tmp_path):
+        from engine.declaration import verify_source_pins
+
+        vpath, _store, loop = self._scaffold_loop(tmp_path)  # never absorbed
+        loop.write_text("anything")
+        verify_source_pins(vpath)  # no pins, no raise

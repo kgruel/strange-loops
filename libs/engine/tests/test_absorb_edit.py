@@ -349,3 +349,24 @@ class TestEditRoundTrip:
         head = resolve_declaration_documents(db)
         assert documents_to_vertex(head, path=c.path, store=c.store) == c
         s.close()
+
+
+class TestSingletonEdits:
+    def test_vertex_and_lens_defined_are_editable(self, tmp_path):
+        # Flipping strict / editing a lens produces _decl.vertex-defined /
+        # _decl.lens-defined changes — the allowlist must admit the two
+        # singletons or legitimate edits fail (re-review #5).
+        from lang.document import DECL_LENS_DEFINED, DECL_VERTEX_DEFINED
+
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        changes = [
+            Change(kind=DECL_VERTEX_DEFINED, subject="x",
+                   payload={"name": "x", "strict": True}, annotation="modified"),
+            Change(kind=DECL_LENS_DEFINED, subject="x",
+                   payload={"order": 9}, annotation="modified"),
+        ]
+        receipt = s.absorb_edit(changes, observer="obs", fact_signer=_signer("k"))
+        assert receipt["defined"] == 2
+        s.close()

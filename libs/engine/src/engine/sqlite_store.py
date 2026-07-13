@@ -733,10 +733,21 @@ class SqliteStore(Generic[T]):
         consumes (``engine.declaration``); the Go conformance oracle mirrors it.
         Returns a receipt: ``{lineage, defined, retired, observer, signed}``.
         """
-        from lang.document import DECL_GENESIS, DEFINED_TO_TOMBSTONE
+        from lang.document import (
+            DECL_GENESIS,
+            DECL_LENS_DEFINED,
+            DECL_VERTEX_DEFINED,
+            DEFINED_TO_TOMBSTONE,
+        )
 
+        # The frozen edit vocabulary: every tombstonable *-defined/-retired
+        # pair PLUS the two singletons (vertex, lens) that are replaced by
+        # re-definition and have no tombstone. Omitting the singletons broke
+        # legitimate edits (flipping strict, editing a lens) — re-review #5.
         allowed_kinds = (
-            set(DEFINED_TO_TOMBSTONE) | set(DEFINED_TO_TOMBSTONE.values())
+            set(DEFINED_TO_TOMBSTONE)
+            | set(DEFINED_TO_TOMBSTONE.values())
+            | {DECL_VERTEX_DEFINED, DECL_LENS_DEFINED}
         )
 
         self._ensure_sync()

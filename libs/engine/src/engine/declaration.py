@@ -374,6 +374,79 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     return file_ast
 
 
+class SourceDrift(DeclarationResolutionError):
+    """A pinned source file's content no longer matches its declaration pin.
+
+    The ``source-defined`` event hash-pinned the referenced ``.loop`` (or
+    template params file) at absorb time. Running with drifted content would
+    ENACT undeclared behavior — the ontology would say one thing and the
+    runtime do another (the §9.1 lie at the execution tier). Surfaced, never
+    auto-enacted: re-absorb to accept the drift into the lineage.
+    """
+
+
+def verify_source_pins(vertex_path: Path) -> None:
+    """Refuse to run over drifted pinned sources (SPEC §9.2, no-auto-enact).
+
+    For every ``source-defined`` document carrying a ``content_sha256`` (or a
+    ``from.params_sha256``), hash the referenced file's current bytes and
+    raise :class:`SourceDrift` on mismatch. Pre-genesis stores (no documents)
+    and unpinned rows (legacy genesis, missing files at absorb) are no-ops —
+    the pin gate only guards claims the declaration actually makes.
+    """
+    import hashlib
+
+    from lang import parse_vertex_file
+    from lang.document import DECL_SOURCE_DEFINED
+
+    file_ast = parse_vertex_file(vertex_path)
+    store_field = file_ast.store
+    if store_field is None:
+        return
+    store_path = store_field
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+    if not store_path.exists():
+        return
+    docs = resolve_declaration_documents(store_path)
+    if not isinstance(docs, list):
+        return
+
+    base = vertex_path.parent
+
+    def _check(ref: str, pinned: str, what: str) -> None:
+        path = Path(ref)
+        candidate = path if path.is_absolute() else (base / path)
+        try:
+            current = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        except OSError:
+            raise SourceDrift(
+                f"{what} {ref} is pinned in the declaration but unreadable — "
+                "restore it or re-absorb"
+            ) from None
+        if current != pinned:
+            raise SourceDrift(
+                f"{what} {ref} has drifted from its declaration pin — the "
+                "store's ontology no longer describes this file; run "
+                "`loops store absorb` to declare the change (never "
+                "auto-enacted)"
+            )
+
+    for d in docs:
+        if d.get("kind") != DECL_SOURCE_DEFINED:
+            continue
+        payload = d.get("payload", {})
+        pinned = payload.get("content_sha256")
+        if pinned:
+            ref = payload.get("template") or payload.get("path")
+            if ref:
+                _check(ref, pinned, "source")
+        from_d = payload.get("from") or {}
+        params_pin = from_d.get("params_sha256")
+        if params_pin and from_d.get("path"):
+            _check(from_d["path"], params_pin, "params file")
+
+
 def _reattach_ingress(resolved, file_ast):
     """Re-attach ingress-class values from the file onto the resolved AST.
 
@@ -389,30 +462,39 @@ def _reattach_ingress(resolved, file_ast):
     if not resolved.sources_blocks or not file_ast.sources_blocks:
         return resolved
 
-    # File-side value lookup: (block index, command, key) → value, falling
-    # back to (command, key) so a block reshuffle doesn't orphan values.
-    by_block: dict[tuple[int, str, str], str] = {}
-    by_cmd: dict[tuple[str, str], str] = {}
+    # File-side value lookup keyed by OCCURRENCE identity — (block index,
+    # command, occurrence-ordinal) — the same identity the document layer's
+    # collision-suffixed subjects encode. Keying by command alone cross-wired
+    # values between two sources sharing a command (re-review #4: a real
+    # secret cross-wire). Fallback to (command, ordinal) so a block reshuffle
+    # doesn't orphan values.
+    by_block: dict[tuple[int, str, int], dict[str, str]] = {}
+    by_cmd: dict[tuple[str, int], dict[str, str]] = {}
+    file_seen: dict[tuple[int, str], int] = {}
     for bi, block in enumerate(file_ast.sources_blocks):
         for src in block.sources:
-            for k, v in src.env:
-                by_block[(bi, src.command, k)] = v
-                by_cmd.setdefault((src.command, k), v)
+            nth = file_seen.get((bi, src.command), 0)
+            file_seen[(bi, src.command)] = nth + 1
+            env_map = dict(src.env)
+            by_block[(bi, src.command, nth)] = env_map
+            by_cmd.setdefault((src.command, nth), env_map)
 
     from lang.ast import InlineSource, SourcesBlock
 
     changed = False
     new_blocks = []
+    resolved_seen: dict[tuple[int, str], int] = {}
     for bi, block in enumerate(resolved.sources_blocks):
         new_sources = []
         for src in block.sources:
+            nth = resolved_seen.get((bi, src.command), 0)
+            resolved_seen[(bi, src.command)] = nth + 1
             if src.env and any(v == "" for _, v in src.env):
+                env_map = by_block.get(
+                    (bi, src.command, nth), by_cmd.get((src.command, nth), {})
+                )
                 env = tuple(
-                    (
-                        k,
-                        v or by_block.get((bi, src.command, k),
-                                          by_cmd.get((src.command, k), "")),
-                    )
+                    (k, v or env_map.get(k, ""))
                     for k, v in src.env
                 )
                 if env != src.env:

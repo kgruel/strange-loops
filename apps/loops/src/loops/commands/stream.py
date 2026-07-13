@@ -60,11 +60,18 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
         # measurement misalignment loudly instead of silent empty results.
         _validate_kind_or_exit(known.kind, vertex_path)
 
-        # --id: single fact lookup by ID or prefix
+        # --id: single fact lookup by ID or prefix. An explicit
+        # --kind _decl.* is the SPEC §9.4 escape hatch for internal rows —
+        # the id alone is not (closing re-review #6).
         if known.fact_id is not None:
+            from lang.document import is_internal_kind
+
             from .fetch import fetch_fact_by_id
+            internal_ok = known.kind is not None and is_internal_kind(known.kind)
             try:
-                fact = fetch_fact_by_id(vertex_path, known.fact_id)
+                fact = fetch_fact_by_id(
+                    vertex_path, known.fact_id, include_internal=internal_ok
+                )
             except ValueError as e:
                 _err(str(e))
                 return {"facts": [], "fold_meta": {}, "vertex": "", "_id_lookup": known.fact_id}

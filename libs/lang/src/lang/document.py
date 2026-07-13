@@ -591,7 +591,14 @@ def _template_source_to_payload(
         "template": str(t.template),
         "content_sha256": _content_sha256(t.template, base),
         "params": [_source_params_to_json(sp) for sp in t.params],
-        "from": {"strategy": "file", "path": str(t.from_.path)}
+        "from": {
+            "strategy": "file",
+            "path": str(t.from_.path),
+            # Pin the params file too — its rows parameterize the template,
+            # so silent drift is the same auto-enactment hazard as the
+            # template itself (closing re-review #3).
+            "params_sha256": _content_sha256(Path(t.from_.path), base),
+        }
         if t.from_ is not None
         else None,
         "loop": _loop_def_to_payload(t.loop) if t.loop is not None else None,

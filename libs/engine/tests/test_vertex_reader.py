@@ -654,6 +654,42 @@ class TestVertexSearch:
         assert len(results) == 1
         assert results[0]["payload"]["text"] == "second message"
 
+    def test_fts_watermark_advances_past_trailing_nonsearchable(self, tmp_path):
+        """The FTS catch-up watermark advances over EVERY scanned row, including
+        kinds with no search declaration (e.g. the reserved `_decl.*` events an
+        S4 re-absorb appends). Otherwise trailing non-searchable rows sit above
+        `last_rowid` and are rescanned on every search."""
+        from engine import vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        # A searchable note, then TRAILING non-searchable declaration rows —
+        # the shape an absorbed store takes once S4 edits land.
+        _seed_facts(db_path, [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+            {"kind": "_decl.kind-defined", "ts": 1100.0, "payload": {"subject": "note"}},
+            {"kind": "_decl.kind-defined", "ts": 1200.0, "payload": {"subject": "counter"}},
+        ])
+
+        results = vertex_search(vpath, "hello")
+        assert len(results) == 1  # the note is indexed
+
+        # The watermark must have advanced to the LAST (trailing) rowid, not
+        # stopped at the note — else the two _decl rows rescan on every search.
+        conn = sqlite3.connect(str(db_path))
+        try:
+            last_rowid = int(
+                conn.execute(
+                    "SELECT value FROM fts_state WHERE key='last_rowid'"
+                ).fetchone()[0]
+            )
+            max_rowid = conn.execute("SELECT MAX(rowid) FROM facts").fetchone()[0]
+        finally:
+            conn.close()
+        assert last_rowid == max_rowid  # consumed the trailing non-searchable rows
+
     def test_phrase_search(self, tmp_path):
         """FTS5 phrase search with double quotes."""
         from engine import vertex_search

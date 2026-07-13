@@ -1394,9 +1394,15 @@ def _ensure_fts(
 
         max_rowid = last_rowid
         for rowid, kind, observer, payload_json in rows:
+            # Advance the watermark for EVERY scanned row (rows are ORDER BY
+            # rowid). A kind with no search declaration is still consumed — else
+            # trailing non-searchable rows (e.g. the reserved `_decl.*`
+            # declaration events an S4 re-absorb appends) sit above last_rowid
+            # and get rescanned on every single search.
+            max_rowid = rowid
             fields = search_fields.get(kind)
             if not fields:
-                continue  # Kind has no search declaration — skip
+                continue  # No search declaration — nothing to index for this kind.
             payload = json.loads(payload_json)
             text = " ".join(_extract_field(payload, f) for f in fields)
             if text.strip():
@@ -1405,7 +1411,6 @@ def _ensure_fts(
                     "VALUES (?, ?, ?, ?)",
                     (text, rowid, kind, observer),
                 )
-            max_rowid = rowid
 
         if max_rowid > last_rowid:
             conn.execute(

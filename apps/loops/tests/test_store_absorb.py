@@ -150,18 +150,27 @@ class TestAbsorbPins:
 
 
 class TestAbsorbRefusals:
-    def test_double_absorb_refuses(self, tmp_path):
+    def test_reabsorb_unchanged_is_noop(self, tmp_path):
+        """S4: a second absorb on an UNCHANGED file switches to edit mode and
+        finds no divergence — a no-op (exit 0), NOT a refusal. Genesis is never
+        re-emitted; nothing new is written (idempotence)."""
         vpath = _make_signed_vertex(tmp_path)
         assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
-        # Second absorb: a genesis already exists → refuse (exit 2), no --force.
-        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 2
-        # Still exactly one genesis.
-        conn = sqlite3.connect(str(tmp_path / "x.db"))
-        n = conn.execute(
+        db = tmp_path / "x.db"
+        conn = sqlite3.connect(str(db))
+        total_before = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        conn.close()
+
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        conn = sqlite3.connect(str(db))
+        n_genesis = conn.execute(
             "SELECT COUNT(*) FROM facts WHERE kind = ?", (DECL_GENESIS,)
         ).fetchone()[0]
+        total_after = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
         conn.close()
-        assert n == 1
+        assert n_genesis == 1  # exactly one genesis, never re-emitted
+        assert total_after == total_before  # nothing written on the no-op
 
     def test_absorb_without_signing_key_refuses(self, tmp_path):
         vpath = _make_vertex(tmp_path)  # no keys, no observer key declaration
@@ -217,3 +226,209 @@ class TestAbsorbRoundTrip:
         reconstructed = documents_to_vertex(payload["documents"])
         assert reconstructed.name == "x"
         assert "ping" in reconstructed.loops
+
+
+# ===========================================================================
+# S4 — edit ceremony (re-absorb diffs at subject granularity)
+# ===========================================================================
+
+
+def _signed_vertex_text(key_b64: str, loops: list[str]) -> str:
+    body = 'name "x"\nstore "./x.db"\nloops {\n'
+    for name in loops:
+        body += f'  {name} {{ fold {{ n "inc" }} }}\n'
+    body += "}\n"
+    body += f'observers {{\n  x {{\n    key "{key_b64}"\n  }}\n}}\n'
+    return body
+
+
+def _make_editable_vertex(tmp_path: Path, loops: list[str]) -> tuple[Path, str]:
+    """A signed vertex whose text we can rewrite to simulate a file edit."""
+    vpath = tmp_path / "x.vertex"
+    kp = ed25519.load_or_generate(tmp_path / "keys")
+    vpath.write_text(_signed_vertex_text(kp.public_b64, loops))
+    return vpath, kp.public_b64
+
+
+def _decl_rows(db_path: Path, kind: str) -> list[dict]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            "SELECT payload FROM facts WHERE kind = ? ORDER BY rowid", (kind,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [json.loads(r[0]) for r in rows]
+
+
+class TestEditModeReconcile:
+    def test_edit_adds_kind_and_resolver_reflects_it(self, tmp_path):
+        from engine.declaration import load_declaration
+
+        vpath, key = _make_editable_vertex(tmp_path, ["a", "b"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        # Edit the file: add kind c. Store head is still authoritative until absorb.
+        vpath.write_text(_signed_vertex_text(key, ["a", "b", "c"]))
+        assert "c" not in load_declaration(vpath).loops  # not yet reconciled
+
+        # Re-absorb → edit mode; exit 0, a kind-defined for c appended.
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        defined = _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+        assert any(d["subject"] == "c" and d["change"] == "added" for d in defined)
+        # Resolver now reflects the edit.
+        assert "c" in load_declaration(vpath).loops
+
+    def test_edit_removes_kind_emits_tombstone(self, tmp_path):
+        from engine.declaration import load_declaration
+
+        vpath, key = _make_editable_vertex(tmp_path, ["a", "b"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        vpath.write_text(_signed_vertex_text(key, ["a"]))  # drop b
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        retired = _decl_rows(tmp_path / "x.db", "_decl.kind-retired")
+        assert any(d["subject"] == "b" and d["change"] == "removed" for d in retired)
+        assert "b" not in load_declaration(vpath).loops
+
+    def test_edit_rows_are_signed_and_lineage_scoped(self, tmp_path):
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        lineage = _genesis_row(tmp_path / "x.db")[0]
+
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        payload_text, signature = conn.execute(
+            "SELECT payload, signature FROM facts WHERE kind = ? ORDER BY rowid DESC LIMIT 1",
+            ("_decl.kind-defined",),
+        ).fetchone()
+        conn.close()
+        assert signature  # edit rows are signed (attestation tier)
+        assert json.loads(payload_text)["lineage"] == lineage  # self-lineage stamped
+
+    def test_edit_json_receipt(self, tmp_path, capsys):
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        capsys.readouterr()
+
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        assert _run_absorb(["--observer", "x", "--json"], vertex_path=vpath) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["mode"] == "edit"
+        assert out["applied"] is True
+        assert out["defined"] >= 1
+        assert any(c["subject"] == "b" for c in out["changes"])
+
+
+class TestEditModeDivergenceSurface:
+    def test_dry_run_surfaces_divergence_without_writing(self, tmp_path):
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        before = _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        # -n is the sole divergence surface: exit 0, nothing written.
+        assert _run_absorb(["--observer", "x", "-n"], vertex_path=vpath) == 0
+        after = _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+        assert after == before  # no edit rows written
+
+    def test_dry_run_json_reports_diverged(self, tmp_path, capsys):
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        capsys.readouterr()
+
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        assert _run_absorb(["--observer", "x", "-n", "--json"], vertex_path=vpath) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["mode"] == "edit"
+        assert out["diverged"] is True
+        assert out["applied"] is False
+
+    def test_unchanged_file_reports_up_to_date(self, tmp_path, capsys):
+        vpath, _key = _make_editable_vertex(tmp_path, ["a", "b"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        capsys.readouterr()
+        assert _run_absorb(["--observer", "x", "-n", "--json"], vertex_path=vpath) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["diverged"] is False
+        assert out["changes"] == []
+
+
+class TestEditModeRefusals:
+    def test_vertex_rename_refused(self, tmp_path):
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        # Rename the vertex identity in the file → refuse (exit 2).
+        renamed = _signed_vertex_text(key, ["a"]).replace('name "x"', 'name "renamed"', 1)
+        vpath.write_text(renamed)
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 2
+
+    def test_edit_without_signing_key_refuses(self, tmp_path):
+        # Genesis with a key, then the on-disk key custody is gone → the edit
+        # cannot be signed (attestation tier) → refuse, nothing written.
+        import shutil
+
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        before = _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+        # Remove the private-key custody so fact_signer_for yields no signer.
+        shutil.rmtree(tmp_path / "keys")
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 2
+        after = _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+        assert after == before  # atomic refusal — nothing written
+
+
+class TestEditModeReadSurfaceNoLeak:
+    def test_edit_rows_excluded_from_read_and_store_view(self, tmp_path):
+        """S3 net still holds after edits: _decl.* change rows are excluded from
+        the default read/store surfaces (only reachable via explicit --kind)."""
+        from loops.commands.store import _run_store
+
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+        vpath.write_text(_signed_vertex_text(key, ["a", "b"]))
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        # There ARE _decl.kind-defined rows in the store now …
+        assert _decl_rows(tmp_path / "x.db", "_decl.kind-defined")
+        # … but the default store view must not surface the reserved namespace.
+        import contextlib
+        import io as _io
+
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _run_store([str(tmp_path / "x.db"), "--json"], vertex_path=None)
+        out = buf.getvalue()
+        assert "_decl.kind-defined" not in out
+        assert "_decl.genesis" not in out
+
+    def test_reabsorb_leaves_default_visible_total_unchanged(self, tmp_path):
+        """S4 regression: re-absorbing an edit grows the `_decl.*` row count, but
+        the DEFAULT visible fact total (SPEC §9.4 exclusion) must not move — only
+        the include_internal total grows. Guards store/stats and ls share math."""
+        from engine.store_reader import StoreReader
+
+        vpath, key = _make_editable_vertex(tmp_path, ["a"])
+        # Emit a couple of ordinary facts so the visible total is non-zero.
+        _emit(vpath, "ping", service="api")
+        _emit(vpath, "ping", service="web")
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        db = tmp_path / "x.db"
+        with StoreReader(db) as reader:
+            visible_before = reader.fact_total
+            internal_before = reader.fact_total_all()
+        assert visible_before == 2  # the two ping facts; genesis excluded
+
+        # Edit + re-absorb → appends _decl.kind-defined rows.
+        vpath.write_text(_signed_vertex_text(key, ["a", "b", "c"]))
+        assert _run_absorb(["--observer", "x"], vertex_path=vpath) == 0
+
+        with StoreReader(db) as reader:
+            visible_after = reader.fact_total
+            internal_after = reader.fact_total_all()
+        assert visible_after == visible_before  # default total UNCHANGED by the edit
+        assert internal_after > internal_before  # the escape hatch sees the growth

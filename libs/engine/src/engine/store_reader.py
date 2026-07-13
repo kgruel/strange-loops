@@ -28,7 +28,31 @@ class StoreReader:
 
     @property
     def fact_total(self) -> int:
-        """Total number of facts in the store."""
+        """Visible total facts — the reserved ``_decl.*`` namespace excluded.
+
+        A ``@property`` (not a method) so ``reader.fact_total`` reads as a count,
+        not a bound method: a method here silently mis-renders (a truthy bound
+        method that format-prints as a repr) at any un-called call site. Excludes
+        ``_decl.*`` by default (SPEC §9.4 — every read surface excludes it),
+        using the same ``GLOB`` (not ``LIKE``) predicate as :meth:`fact_kind_stats`
+        so the visible total stays consistent with the visible per-kind breakdown.
+        Before S4 the delta was a single ``genesis`` row and an honest total could
+        ignore it; the edit ceremony (S4) grows the ``_decl.*`` row count on every
+        re-absorb, so an unfiltered total would drift from the kinds it sums to.
+        For the raw all-rows count use :meth:`fact_total_all`.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM facts WHERE kind NOT GLOB '_decl.*'"
+        ).fetchone()
+        return row[0]
+
+    def fact_total_all(self) -> int:
+        """Raw total facts, INCLUDING the reserved ``_decl.*`` namespace.
+
+        The explicit escape hatch defeating the default exclusion of
+        :attr:`fact_total` — the ``--kind`` defeat the other read surfaces use,
+        named so the intent is legible at the call site.
+        """
         row = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()
         return row[0]
 
@@ -163,13 +187,14 @@ class StoreReader:
     def summary(self, *, include_internal: bool = False) -> dict:
         """Aggregate store contents into a summary dict.
 
-        ``include_internal`` threads to :meth:`fact_kind_stats` — the
-        ``_decl.*`` reserved namespace is excluded from ``facts.kinds`` by
-        default (SPEC §9.4).
+        ``include_internal`` threads to both :meth:`fact_total` and
+        :meth:`fact_kind_stats` — the ``_decl.*`` reserved namespace is excluded
+        from ``facts.total`` and ``facts.kinds`` together by default (SPEC §9.4),
+        so the total always sums to the visible kinds.
         """
         return {
             "facts": {
-                "total": self.fact_total,
+                "total": self.fact_total_all() if include_internal else self.fact_total,
                 "kinds": self.fact_kind_stats(include_internal=include_internal),
             },
             "ticks": {

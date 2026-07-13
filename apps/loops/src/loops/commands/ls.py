@@ -441,6 +441,10 @@ def fetch_kind_stat(
     from engine.store_reader import StoreReader
 
     with StoreReader(store) as reader:
+        # The default `fact_total` excludes the reserved _decl.* namespace
+        # (SPEC §9.4) so the share denominator stays honest as S4 re-absorbs
+        # grow the internal row count — otherwise every declaration edit would
+        # silently shrink every kind's rendered share.
         vertex_total = reader.fact_total
         if key_field:
             raw = reader.fact_key_stats(kind, key_field)

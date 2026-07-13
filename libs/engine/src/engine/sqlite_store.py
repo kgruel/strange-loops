@@ -342,6 +342,35 @@ class UnsignableGenesis(Exception):
     """
 
 
+class NoGenesis(Exception):
+    """``absorb_edit`` found no ``_decl.genesis`` row — the store is unabsorbed.
+
+    The edit ceremony (SPEC §9.2, S4) re-emits changed subjects over an
+    already-opened lineage; there is nothing to diff against before genesis.
+    Opening the lineage is the genesis path (``absorb_genesis``), not an edit.
+    """
+
+
+class AmbiguousGenesis(Exception):
+    """``absorb_edit`` found more than one ``_decl.genesis`` row.
+
+    Pre-S6 a store cannot tell its own genesis from a merged-foreign one (no
+    ``_decl.merged`` receipts yet), so the self-lineage id an edit must stamp
+    is indeterminate. Conservative refusal, mirroring the resolver's
+    ``AmbiguousLineage`` (SPEC §9.2 Lineage). Revisited when merge receipts land.
+    """
+
+
+class UnsignableEdit(Exception):
+    """``absorb_edit`` could not sign a change event.
+
+    Declaration events must be attestable (SPEC §9.4); an edit rides the same
+    signing posture as genesis (an absorbed store already had a key at genesis),
+    so an unsignable change refuses the WHOLE batch (rollback, no partial write)
+    rather than append an unsigned declaration row.
+    """
+
+
 class SqliteStore(Generic[T]):
     """Append-only SQLite event store.
 
@@ -614,6 +643,146 @@ class SqliteStore(Generic[T]):
             "documents": len(payload["documents"]),
             "chain_head": chain_head,
             "fact_cursor": fact_cursor,
+            "observer": observer,
+            "signed": True,
+        }
+
+    def absorb_edit(
+        self,
+        changes: list,
+        *,
+        observer: str,
+        origin: str = "",
+        fact_signer: Callable[[str, str], str | None] | None,
+    ) -> dict[str, Any]:
+        """Re-emit changed declaration subjects over an open lineage (S4).
+
+        The edit ceremony's write half (SPEC §9.2). Each ``change`` is a
+        subject-granular whole-document delta (from
+        ``lang.document.diff_documents``), duck-typed by four attributes:
+        ``kind`` (the final ``_decl.*-defined`` or ``*-retired`` event kind),
+        ``subject``, ``payload`` (the whole document payload for a definition,
+        ``None`` for a removal), and ``annotation`` (``added``/``modified``/
+        ``removed`` — rides the row as ``change=``).
+
+        Performed as ONE ``BEGIN IMMEDIATE`` transaction so the batch is
+        all-or-nothing (a half-applied ontology change is the §9.1 lie
+        mid-flight) and the lineage id is read consistently:
+
+        1. Read the store's genesis rows. Zero → :class:`NoGenesis` (the store
+           is unabsorbed — that's the genesis path). More than one →
+           :class:`AmbiguousGenesis` (self vs merged-foreign is indeterminate
+           pre-S6). Exactly one → its id is the self-lineage id every change
+           stamps.
+        2. For each change, build the resolver's overlay/tombstone contract
+           payload — ``{lineage, subject, payload, change}`` for a definition,
+           ``{lineage, subject, change}`` for a tombstone — sign its CONTENT
+           commitment under ``observer``, and refuse (:class:`UnsignableEdit`,
+           rollback) if any is unsigned.
+        3. Append every row and commit.
+
+        An empty ``changes`` list is a no-op (no transaction, empty receipt) —
+        the idempotence guarantee: re-absorbing an unchanged file writes nothing.
+
+        The row shape is the provisional contract the S2 resolver already
+        consumes (``engine.declaration``); the Go conformance oracle mirrors it.
+        Returns a receipt: ``{lineage, defined, retired, observer, signed}``.
+        """
+        from lang.document import DECL_GENESIS
+
+        self._ensure_sync()
+        self._ensure_fact_signature_column()
+
+        if not changes:
+            return {
+                "lineage": None,
+                "defined": 0,
+                "retired": 0,
+                "observer": observer,
+                "signed": True,
+            }
+
+        conn = self._conn
+        prev_iso = conn.isolation_level
+        conn.isolation_level = None  # autocommit — explicit transaction control
+        defined = retired = 0
+        lineage_id: str | None = None
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                genesis_rows = conn.execute(
+                    "SELECT id FROM facts WHERE kind = ? ORDER BY rowid",
+                    (DECL_GENESIS,),
+                ).fetchall()
+                if not genesis_rows:
+                    raise NoGenesis(
+                        "no _decl.genesis event — the store's lineage is not "
+                        "open; run absorb to open it (there is nothing to edit "
+                        "against before genesis)"
+                    )
+                if len(genesis_rows) > 1:
+                    raise AmbiguousGenesis(
+                        f"{len(genesis_rows)} _decl.genesis rows — the store's "
+                        "own lineage is indeterminate (pre-S6: self vs "
+                        "merged-foreign genesis cannot be told apart)"
+                    )
+                lineage_id = genesis_rows[0][0]
+
+                for ch in changes:
+                    kind = ch.kind
+                    subject = ch.subject
+                    payload_doc = ch.payload
+                    annotation = ch.annotation
+                    row_payload: dict[str, Any] = {
+                        "lineage": lineage_id,
+                        "subject": subject,
+                        "change": annotation,
+                    }
+                    if payload_doc is not None:
+                        # A tombstone carries no document payload; a definition
+                        # carries the whole subject document.
+                        row_payload["payload"] = payload_doc
+                        defined += 1
+                    else:
+                        retired += 1
+
+                    ts = datetime.now(_UTC).timestamp()
+                    fact_id = gen_id()
+                    payload_text = json.dumps(row_payload)
+                    signature = (
+                        fact_signer(
+                            observer,
+                            _fact_commitment_hash(
+                                kind, ts, observer, origin, payload_text
+                            ),
+                        )
+                        if fact_signer is not None
+                        else None
+                    )
+                    if signature is None:
+                        raise UnsignableEdit(
+                            f"no signature produced for observer {observer!r} — "
+                            "a declaration edit must be signed (it enters the "
+                            "attestation tier); set up signing first"
+                        )
+                    conn.execute(
+                        "INSERT INTO facts "
+                        "(id, kind, ts, observer, origin, payload, signature) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (fact_id, kind, ts, observer, origin, payload_text, signature),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        finally:
+            conn.isolation_level = prev_iso
+
+        return {
+            "lineage": lineage_id,
+            "defined": defined,
+            "retired": retired,
             "observer": observer,
             "signed": True,
         }

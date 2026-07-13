@@ -150,6 +150,22 @@ DECL_MERGED = "_decl.merged"
 #: (never partially interpreted) — see SPEC §9.2 / build plan.
 DECLARATION_PROTOCOL_VERSION = 1
 
+#: The frozen tombstone vocabulary (SPEC §9.2): which ``*-defined`` kind each
+#: subject removal is expressed as. A ``*-defined`` kind ABSENT from this map
+#: is a **singleton with no tombstone** — ``_decl.lens-defined`` (spec:
+#: "replaced by re-definition") and ``_decl.vertex-defined`` (it IS identity).
+#: Removing such a subject is inexpressible in the code-frozen vocabulary; the
+#: edit ceremony (S4) refuses it rather than mint a new kind unilaterally
+#: (thread:decl-lens-tombstone-vocab-gap — a later coordinated vocab change
+#: with the loops-go oracle). This is the single home for the mapping; the
+#: engine resolver imports its inverse.
+DEFINED_TO_TOMBSTONE: dict[str, str] = {
+    DECL_KIND_DEFINED: DECL_KIND_RETIRED,
+    DECL_OBSERVER_DEFINED: DECL_OBSERVER_RETIRED,
+    DECL_MEMBER_DEFINED: DECL_MEMBER_REMOVED,
+    DECL_SOURCE_DEFINED: DECL_SOURCE_RETIRED,
+}
+
 
 def is_internal_kind(kind: str) -> bool:
     """True if ``kind`` is in the reserved declaration namespace (``_decl.*``).
@@ -947,3 +963,165 @@ def documents_to_vertex(
         strict=strict,
         path=path,
     )
+
+
+# ===========================================================================
+# Subject-granular diff — the edit ceremony's grammar half (SPEC §9.2, S4)
+# ===========================================================================
+#
+# Re-absorbing an edited ``.vertex`` diffs its freshly-parsed document set
+# against the store's fold head (Latest per (kind, subject), self-lineage) and
+# re-emits ONLY the changed subjects as whole documents. This module supplies
+# the pure-grammar half: comparing two document sets. The store half (stamping
+# lineage, signing, appending atomically) lives in ``engine.sqlite_store``.
+#
+# Whole-document only (SPEC §9.2): a subject is "changed" iff its complete
+# payload — INCLUDING the ``order`` field — differs by value. There are no
+# facet deltas. This makes the round-trip exact (the resolver's overlay fold,
+# applied over the head, reproduces the edited file's document set) and
+# idempotence exact (an unchanged file re-parses to identical payloads, so the
+# diff is empty). ``order`` is a dense global counter, so a structural insert
+# shifts downstream subjects' ``order`` and honestly re-emits them — "order is
+# meaning" (see module docstring).
+
+
+#: Inverse of :data:`DEFINED_TO_TOMBSTONE`: which ``*-defined`` subject a
+#: tombstone kind removes. Used by :func:`apply_changes` to fold a removal.
+_TOMBSTONE_TO_DEFINED: dict[str, str] = {v: k for k, v in DEFINED_TO_TOMBSTONE.items()}
+
+
+class EditRefused(ValueError):
+    """A re-absorb edit is inexpressible in the frozen declaration vocabulary.
+
+    Two cases, both structural refusals rather than silent lies:
+
+    - **Singleton removal.** Dropping a ``_decl.lens-defined`` has no tombstone
+      in the code-frozen vocabulary (SPEC §9.2 — a lens is "replaced by
+      re-definition"), so removal cannot be recorded. Rather than mint a new
+      kind unilaterally (thread:decl-lens-tombstone-vocab-gap, a later
+      coordinated change with the loops-go oracle), the ceremony refuses.
+
+    - **Identity change.** The ``_decl.vertex-defined`` singleton's subject is
+      the vertex name; a rename would surface as remove-old + add-new. The name
+      is meaning-critical self-description, so a post-genesis rename is a
+      deliberate identity ceremony, never a routine edit — refused.
+    """
+
+
+class Change(NamedTuple):
+    """One subject-granular declaration change (SPEC §9.2, S4).
+
+    ``kind`` is the FINAL event kind: a ``_decl.*-defined`` kind for an
+    add/modify, or the paired ``_decl.*-retired``/``-removed`` tombstone for a
+    removal. ``payload`` is the whole document payload for a definition, or
+    ``None`` for a removal. ``annotation`` is the ``change=`` legibility label —
+    ``"added"``, ``"modified"``, or ``"removed"`` (SPEC §9.2: "MAY carry a
+    ``change`` annotation"). Emitters ride ``annotation`` on the row as
+    ``change=``; the resolver ignores it.
+    """
+
+    kind: str
+    subject: str
+    payload: dict[str, Any] | None
+    annotation: str
+
+
+def diff_documents(head: Any, new: Any) -> list[Change]:
+    """Diff a fold head against a freshly-parsed document set → changes.
+
+    ``head`` and ``new`` are each an iterable of documents — :class:`Document`
+    namedtuples or plain ``{"kind", "subject", "payload"}`` mappings (the
+    resolver returns the latter). Both are keyed by ``(kind, subject)``.
+
+    Yields (in a deterministic order — additions/modifications in ``new``'s
+    iteration order, then removals in ``head``'s iteration order):
+
+    - ``"added"`` — a ``(kind, subject)`` in ``new`` but not ``head``.
+    - ``"modified"`` — present in both, payloads differ by value.
+    - ``"removed"`` — in ``head`` but not ``new``; emitted as the paired
+      tombstone kind.
+
+    Raises :class:`EditRefused` if a removal targets a singleton with no
+    tombstone (``_decl.lens-defined`` → vocabulary gap; ``_decl.vertex-defined``
+    → identity/rename). Unchanged subjects yield nothing.
+    """
+    head_map: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in head:
+        k, s, p = _as_triple(item)
+        head_map[(k, s)] = p
+
+    new_map: dict[tuple[str, str], dict[str, Any]] = {}
+    changes: list[Change] = []
+    for item in new:
+        k, s, p = _as_triple(item)
+        new_map[(k, s)] = p
+        prev = head_map.get((k, s))
+        if prev is None:
+            changes.append(Change(kind=k, subject=s, payload=p, annotation="added"))
+        elif prev != p:
+            changes.append(Change(kind=k, subject=s, payload=p, annotation="modified"))
+        # else unchanged → nothing
+
+    for (k, s), _p in head_map.items():
+        if (k, s) in new_map:
+            continue
+        tombstone = DEFINED_TO_TOMBSTONE.get(k)
+        if tombstone is None:
+            if k == DECL_VERTEX_DEFINED:
+                raise EditRefused(
+                    f"vertex identity change: the vertex-defined subject "
+                    f"{s!r} was removed (a rename). The vertex name is "
+                    "meaning-critical identity — a post-genesis rename is a "
+                    "deliberate ceremony, not an edit; not supported by "
+                    "re-absorb."
+                )
+            raise EditRefused(
+                f"cannot remove singleton {k!r} (subject {s!r}): the frozen "
+                "declaration vocabulary has no tombstone for it "
+                "(SPEC §9.2 — a lens is replaced by re-definition, never "
+                "removed). Re-add the lens, or edit it in place; removal is a "
+                "pending coordinated vocabulary change "
+                "(thread:decl-lens-tombstone-vocab-gap)."
+            )
+        changes.append(Change(kind=tombstone, subject=s, payload=None, annotation="removed"))
+
+    return changes
+
+
+def apply_changes(head: Any, changes: Any) -> list[dict[str, Any]]:
+    """Fold ``changes`` over ``head`` → the resulting document set (pure).
+
+    Mirrors the store resolver's overlay/tombstone fold
+    (``engine.declaration.resolve_declaration_documents``) at the grammar tier,
+    with NO store: a ``*-defined`` change replaces its ``(kind, subject)``
+    document; a tombstone removes the paired ``*-defined`` subject. Returned
+    documents are ``{"kind", "subject", "payload"}`` dicts in insertion order
+    (definitions keep position across replacement).
+
+    This is the reconstruction oracle for the diff property test:
+    ``apply_changes(head, diff_documents(head, new))`` equals ``new`` as a
+    document set. It intentionally re-implements the fold independently of the
+    engine resolver so the two agree by construction, not by shared code.
+    """
+    docs: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in head:
+        k, s, p = _as_triple(item)
+        docs[(k, s)] = {"kind": k, "subject": s, "payload": p}
+
+    for ch in changes:
+        kind, subject, payload, _annotation = (
+            (ch.kind, ch.subject, ch.payload, ch.annotation)
+            if isinstance(ch, Change)
+            else (ch["kind"], ch["subject"], ch.get("payload"), ch.get("change"))
+        )
+        defined = _TOMBSTONE_TO_DEFINED.get(kind)
+        if defined is not None:
+            docs.pop((defined, subject), None)
+        else:
+            docs[(kind, subject)] = {
+                "kind": kind,
+                "subject": subject,
+                "payload": payload if payload is not None else {},
+            }
+
+    return list(docs.values())

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 _SPARK_CHARS = " ▁▂▃▄▅▆▇█"
 
@@ -631,30 +632,37 @@ def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]
 def _run_absorb(
     argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
 ) -> int:
-    """Absorb a store's declaration whole as a signed genesis event.
+    """Reconcile a store with its ``.vertex`` declaration (SPEC §9.2). Bimodal.
 
-    The lineage-opening ceremony (SPEC §9.2): parse the ``.vertex`` once,
-    decompose it into subject-scoped declaration documents (``genesis_payload``),
-    and append ONE ``_decl.genesis`` fact carrying the whole document set, the
-    declaration-protocol version, and the era pins (chain head + fact cursor at
-    absorption time). The genesis fact's own id IS the lineage id.
+    The verb detects whether the store's lineage is open and switches ceremony:
 
-    Genesis is identity, not fold state: an absorb refuses (exit 2) if the store
-    already holds any ``_decl.genesis`` — re-absorb / edit lands in S4, so there
-    is no ``--force``. And a genesis MUST be signed — it is the attestation
-    root; if the vertex has no signing key for the recording observer, absorb
-    refuses (exit 2) and tells the user to set up signing first.
+    - **No genesis → genesis mode** (S1, :func:`_absorb_genesis_mode`): parse the
+      ``.vertex`` once, decompose into subject-scoped documents, and append ONE
+      signed ``_decl.genesis`` fact carrying the whole document set, the protocol
+      version, and the era pins. The genesis fact's own id IS the lineage id.
 
-    ``-n/--dry-run`` shows what would be absorbed without writing; ``--json``
-    emits the receipt as a machine-readable dict.
+    - **Genesis present → edit mode** (S4, :func:`_absorb_edit`): diff the
+      freshly-parsed file against the fold head (Latest per (kind, subject),
+      self-lineage) and re-emit ONLY the changed subjects as whole documents,
+      tombstoning removed subjects. Unchanged file writes nothing (idempotence).
+
+    Both ceremonies MUST be signed — declaration events are the store's
+    attestation root/history; a missing signing key refuses (exit 2). ``-n`` is
+    read-only: genesis mode previews the absorb, edit mode surfaces which
+    subjects diverge from the store head (the sole divergence surface — nothing
+    auto-absorbs, and the store head stays authoritative until a real absorb).
+    ``--json`` emits a machine-readable receipt.
     """
     import argparse
 
     p = argparse.ArgumentParser(
         prog="loops store absorb",
-        description="Open a store's declaration lineage: absorb the current "
-                    ".vertex declaration whole as a signed genesis event "
-                    "(SPEC §9.2 era opening).",
+        description="Reconcile a store with its .vertex declaration (SPEC §9.2). "
+                    "No genesis yet → open the lineage (absorb the declaration "
+                    "whole as a signed genesis event). Genesis present → edit "
+                    "mode: diff the file against the store's fold head and "
+                    "re-emit only the changed subjects. -n surfaces divergence "
+                    "without writing.",
     )
     if vertex_path is None:
         p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
@@ -666,7 +674,8 @@ def _run_absorb(
     p.add_argument("--json", action="store_true", help="JSON receipt")
     p.add_argument(
         "-n", "--dry-run", action="store_true",
-        help="Show what would be absorbed without writing",
+        help="Show what would be absorbed (genesis) or which subjects diverge "
+             "from the store head (edit) without writing",
     )
     # -h/--help is owned by argparse (add_help=True): parse_args prints the
     # help built from this parser and exits 0 natively. No hand-rolled block.
@@ -683,26 +692,59 @@ def _run_absorb(
     # nothing to open a lineage over (build-plan aggregation wrinkle, deferred).
     db_path = resolve_store_path(target_path)
 
-    # Parse the declaration ONCE; decompose into the subject-scoped documents.
+    # Parse the declaration ONCE.
     from lang import parse_vertex_file
-    from lang.document import DECLARATION_PROTOCOL_VERSION, genesis_payload
 
     ast = parse_vertex_file(target_path)
-    documents = genesis_payload(ast)["documents"]
-    doc_count = len(documents)
 
     # Observer resolution. Precedence: explicit ``--observer`` on the absorb
     # parser (direct/test calls) > invocation observer from the global peel >
     # resolve_observer's env/declared chain — the same resolution emit uses.
     from loops.commands.identity import resolve_observer
-    from loops.commands.signing import fact_signer_for
 
     explicit = args.observer if args.observer is not None else observer
     observer = resolve_observer(explicit)
 
+    # Detect whether the store has already opened its lineage — this selects
+    # the ceremony (SPEC §9.2 / §9.5). No genesis → genesis mode (open the
+    # lineage, S1). Genesis present → edit mode (S4): diff the file against the
+    # fold head and re-emit ONLY the changed subjects. Same verb, two ceremonies.
+    has_genesis, _chain_head, _fact_cursor = _read_absorption_state(db_path)
+    if has_genesis:
+        return _absorb_edit(
+            target_path, db_path, ast, observer,
+            dry_run=args.dry_run, as_json=args.json,
+        )
+    return _absorb_genesis_mode(
+        target_path, db_path, ast, observer,
+        dry_run=args.dry_run, as_json=args.json,
+    )
+
+
+def _absorb_genesis_mode(
+    target_path: Path,
+    db_path: Path,
+    ast: Any,
+    observer: str,
+    *,
+    dry_run: bool,
+    as_json: bool,
+) -> int:
+    """Genesis mode — open the store's lineage (SPEC §9.2 era opening, S1).
+
+    Unchanged from the original ``absorb`` behavior; extracted so the bimodal
+    dispatcher can select it when the store has no genesis yet. Its output is
+    golden-locked, so the rendering is preserved verbatim.
+    """
+    from lang.document import DECLARATION_PROTOCOL_VERSION, genesis_payload
+    from loops.commands.signing import fact_signer_for
+
+    documents = genesis_payload(ast)["documents"]
+    doc_count = len(documents)
+
     def _render(receipt: dict, *, dry_run: bool) -> None:
         chain_head, fact_cursor = receipt["chain_head"], receipt["fact_cursor"]
-        if args.json:
+        if as_json:
             import json as _json
             print(_json.dumps({**receipt, "dry_run": dry_run}, indent=2))  # noqa: T201 — machine output path
             return
@@ -728,15 +770,17 @@ def _run_absorb(
         paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
         return 2
 
-    if args.dry_run:
+    if dry_run:
         # Preview only — a read-only projection of what the real (atomic) path
         # would do. Inherently racy (no write lock held); the atomicity
         # guarantees belong to the real path's single transaction.
         has_genesis, chain_head, fact_cursor = _read_absorption_state(db_path)
         if has_genesis:
+            # Defensive: a concurrent absorb opened the lineage between the
+            # dispatcher's mode check and here — fall back to the edit refusal.
             return _refuse(
-                "already absorbed — a genesis event exists. Editing an absorbed "
-                "declaration lands later (S4); there is no --force."
+                "already absorbed — a genesis event exists. Re-run absorb to "
+                "reconcile an edited declaration (edit mode)."
             )
         signer = fact_signer_for(target_path)
         signable = observer and signer is not None and signer(observer, "0" * 64) is not None
@@ -786,9 +830,11 @@ def _run_absorb(
             fact_signer=fact_signer_for(target_path),
         )
     except GenesisExists:
+        # TOCTOU: a concurrent absorb opened the lineage after the dispatcher's
+        # mode check. The atomic primitive caught it — point at edit mode.
         return _refuse(
-            "already absorbed — a genesis event exists. Editing an absorbed "
-            "declaration lands later (S4); there is no --force."
+            "already absorbed — a genesis event exists. Re-run absorb to "
+            "reconcile an edited declaration (edit mode)."
         )
     except UnsignableGenesis:
         return _refuse(
@@ -801,6 +847,178 @@ def _run_absorb(
 
     receipt["vertex"] = target_path.stem
     _render(receipt, dry_run=False)
+    return 0
+
+
+def _decl_short(kind: str) -> str:
+    """A ``_decl.kind-defined`` → ``kind`` short label for edit-mode display."""
+    label = kind[len("_decl."):] if kind.startswith("_decl.") else kind
+    for suffix in ("-defined", "-retired", "-removed"):
+        if label.endswith(suffix):
+            return label[: -len(suffix)]
+    return label
+
+
+def _absorb_edit(
+    target_path: Path,
+    db_path: Path,
+    ast: Any,
+    observer: str,
+    *,
+    dry_run: bool,
+    as_json: bool,
+) -> int:
+    """Edit mode — re-emit changed declaration subjects (SPEC §9.2, S4).
+
+    The store's lineage is already open, so this is the edit ceremony: diff the
+    freshly-parsed file against the fold head (Latest per (kind, subject),
+    self-lineage) and re-emit ONLY the changed subjects as whole documents, plus
+    a tombstone per removed subject. Unchanged file → nothing written
+    (idempotence). File divergence is SURFACED via ``-n`` (the sole divergence
+    surface — no auto-absorb, no silent side-picking); the store head stays
+    authoritative for resolution until this runs.
+    """
+    from lang.document import EditRefused, diff_documents, vertex_to_documents
+
+    from engine.declaration import (
+        AmbiguousLineage,
+        UnsupportedProtocol,
+        resolve_declaration_documents,
+    )
+
+    def _refuse(msg: str) -> int:
+        from painted import Block, Style, paint
+        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
+        return 2
+
+    # The edited file's document set.
+    new_docs = vertex_to_documents(ast)
+
+    # The fold head from the store. has_genesis was true at dispatch, so this is
+    # normally a list; a resolution failure (ambiguous lineage, unsupported
+    # protocol) or a non-list refuses cleanly rather than diffing against noise.
+    try:
+        head = resolve_declaration_documents(db_path)
+    except (AmbiguousLineage, UnsupportedProtocol) as exc:
+        return _refuse(str(exc))
+    if not isinstance(head, list):
+        return _refuse(
+            "store head unavailable — the lineage looks unopened or unhistorized; "
+            "cannot diff (nothing to reconcile against)"
+        )
+
+    # Diff. An inexpressible edit (singleton removal / identity rename) refuses.
+    try:
+        changes = diff_documents(head, new_docs)
+    except EditRefused as exc:
+        return _refuse(str(exc))
+
+    n_def = sum(1 for c in changes if c.payload is not None)
+    n_ret = len(changes) - n_def
+
+    def _emit_json(obj: dict) -> None:
+        import json as _json
+        print(_json.dumps(obj, indent=2))  # noqa: T201 — machine output path
+
+    # Idempotence: an unchanged file writes nothing.
+    if not changes:
+        if as_json:
+            _emit_json({
+                "vertex": target_path.stem, "mode": "edit",
+                "diverged": False, "defined": 0, "retired": 0, "changes": [],
+            })
+        else:
+            from painted import Block, Style, paint
+            paint(Block.text(
+                f"✓ {target_path.stem}: up to date — file matches store head",
+                Style(dim=False),
+            ))
+        return 0
+
+    change_rows = [
+        {"kind": c.kind, "subject": c.subject, "change": c.annotation}
+        for c in changes
+    ]
+
+    def _render_divergence(*, applied: bool) -> None:
+        if as_json:
+            _emit_json({
+                "vertex": target_path.stem, "mode": "edit",
+                "diverged": True, "applied": applied,
+                "defined": n_def, "retired": n_ret,
+                "observer": observer, "signed": applied,
+                "changes": change_rows,
+            })
+            return
+        from painted import Block, Style, join_vertical, paint
+        if applied:
+            head_line = (
+                f"✓ {target_path.stem}: reconciled — "
+                f"{n_def} re-emitted, {n_ret} retired"
+            )
+        else:
+            head_line = f"✎ {target_path.stem}: file diverges from store head"
+        lines = [head_line]
+        for c in changes:
+            mark = "−" if c.payload is None else ("+" if c.annotation == "added" else "~")
+            lines.append(f"  {mark} {_decl_short(c.kind)}:{c.subject} ({c.annotation})")
+        if applied:
+            lines.append(f"  observer: {observer} · signed")
+        else:
+            lines.append("  run `loops store absorb` to reconcile")
+        paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+
+    # -n / --dry-run: the divergence surface. Read-only, exit 0.
+    if dry_run:
+        _render_divergence(applied=False)
+        return 0
+
+    # Real path — atomic, signed re-emit of the changed subjects.
+    if not observer:
+        return _refuse(
+            "cannot absorb — no observer resolved to sign as. A declaration "
+            "edit must be signed (it enters the attestation tier); set up "
+            "signing first (loops add <vertex> observer --keygen)."
+        )
+
+    from loops.commands.signing import fact_signer_for
+
+    from atoms import Fact
+    from engine.sqlite_store import (
+        AmbiguousGenesis,
+        NoGenesis,
+        SqliteStore,
+        UnsignableEdit,
+    )
+
+    store = SqliteStore(
+        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    try:
+        store.absorb_edit(
+            changes,
+            observer=observer,
+            origin="",
+            fact_signer=fact_signer_for(target_path),
+        )
+    except UnsignableEdit:
+        return _refuse(
+            f"cannot absorb — no signing key for observer '{observer}'. A "
+            "declaration edit must be signed; set up signing first "
+            "(loops add <vertex> observer --keygen)."
+        )
+    except NoGenesis:
+        # TOCTOU: the lineage vanished between dispatch and here (not reachable
+        # in practice — stores are append-only).
+        return _refuse(
+            "no genesis — the store's lineage is not open; run absorb to open it"
+        )
+    except AmbiguousGenesis as exc:
+        return _refuse(str(exc))
+    finally:
+        store.close()
+
+    _render_divergence(applied=True)
     return 0
 
 

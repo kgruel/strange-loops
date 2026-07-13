@@ -63,33 +63,23 @@ from typing import Any
 
 from lang.document import (
     DECL_GENESIS,
-    DECL_KIND_DEFINED,
-    DECL_KIND_RETIRED,
     DECL_LENS_DEFINED,
-    DECL_MEMBER_DEFINED,
-    DECL_MEMBER_REMOVED,
-    DECL_OBSERVER_DEFINED,
-    DECL_OBSERVER_RETIRED,
-    DECL_SOURCE_DEFINED,
-    DECL_SOURCE_RETIRED,
     DECL_VERTEX_DEFINED,
     DECLARATION_PROTOCOL_VERSION,
+    DEFINED_TO_TOMBSTONE,
     documents_to_vertex,
     is_internal_kind,
 )
 
 # ---------------------------------------------------------------------------
 # Tombstone vocabulary: which "*-defined" subject a "*-retired/-removed" row
-# removes. Lens and the vertex singleton have no tombstone — a lens is replaced
-# by re-definition, and the vertex-defined singleton IS the identity.
+# removes. The forward mapping is the frozen vocabulary home in lang.document
+# (DEFINED_TO_TOMBSTONE); this is its inverse. Lens and the vertex singleton
+# have no tombstone — a lens is replaced by re-definition, and the
+# vertex-defined singleton IS the identity.
 # ---------------------------------------------------------------------------
 
-_TOMBSTONE_OF_DEFINED: dict[str, str] = {
-    DECL_KIND_RETIRED: DECL_KIND_DEFINED,
-    DECL_OBSERVER_RETIRED: DECL_OBSERVER_DEFINED,
-    DECL_MEMBER_REMOVED: DECL_MEMBER_DEFINED,
-    DECL_SOURCE_RETIRED: DECL_SOURCE_DEFINED,
-}
+_TOMBSTONE_OF_DEFINED: dict[str, str] = {v: k for k, v in DEFINED_TO_TOMBSTONE.items()}
 
 #: The "*-defined" declaration kinds an overlay row may (re)define — the
 #: tombstonable subjects plus the two singletons (lens, vertex) that are

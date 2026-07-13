@@ -23,21 +23,31 @@ from lang.ast import (
     CombineEntry,
     FoldCount,
     FoldDecl,
+    FoldLatest,
     InlineSource,
+    LensDecl,
     LoopDef,
     SourcesBlock,
     VertexFile,
 )
 from lang.document import (
     DECL_KIND_DEFINED,
+    DECL_KIND_RETIRED,
     DECL_LENS_DEFINED,
     DECL_MEMBER_DEFINED,
+    DECL_MEMBER_REMOVED,
     DECL_OBSERVER_DEFINED,
+    DECL_OBSERVER_RETIRED,
     DECL_PREFIX,
     DECL_SOURCE_DEFINED,
+    DECL_SOURCE_RETIRED,
     DECL_VERTEX_DEFINED,
     DECLARATION_PROTOCOL_VERSION,
+    Change,
     Document,
+    EditRefused,
+    apply_changes,
+    diff_documents,
     documents_to_vertex,
     genesis_payload,
     is_internal_kind,
@@ -758,3 +768,194 @@ def _vertex_kwargs(ast: VertexFile) -> dict:
         "strict": ast.strict,
         "path": ast.path,
     }
+
+
+def _edit(ast: VertexFile, **overrides: object) -> VertexFile:
+    """A copy of ``ast`` with the given fields replaced (an in-memory edit)."""
+    return VertexFile(**{**_vertex_kwargs(ast), **overrides})
+
+
+# ===========================================================================
+# Subject-granular diff — the edit ceremony's grammar half (SPEC §9.2, S4)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("name", sorted(ALL_CASES))
+def test_self_diff_is_empty(name: str) -> None:
+    """Idempotence: an unchanged file diffs to nothing (re-absorb is a no-op)."""
+    ast = parse_vertex(ALL_CASES[name])
+    docs = [d.as_json() for d in vertex_to_documents(ast)]
+    assert diff_documents(docs, vertex_to_documents(ast)) == []
+
+
+def _reproject(head_docs, changes) -> VertexFile:
+    """Apply changes over a head document set and project back to an AST.
+
+    Mirrors the store round-trip at the grammar tier: ``apply_changes`` folds
+    the changes (overlay/tombstone) like the resolver, then ``documents_to_vertex``
+    projects — so ``_reproject`` equals the edited file's AST (modulo residence).
+    """
+    return documents_to_vertex(apply_changes(head_docs, changes))
+
+
+@pytest.mark.parametrize("name", sorted(ALL_CASES))
+def test_diff_apply_roundtrip_add_kind(name: str) -> None:
+    """absorb(edit) then resolver ≡ parse(edited): adding a kind reconstructs B."""
+    a = parse_vertex(ALL_CASES[name])
+    b = _edit(a, loops={
+        **a.loops,
+        "s4_added": LoopDef(folds=(FoldDecl(target="n", op=FoldLatest()),)),
+    })
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    # The added kind is the only NEW subject; order-shift may re-emit others.
+    added = [c for c in changes if c.annotation == "added"]
+    assert [(c.kind, c.subject) for c in added] == [(DECL_KIND_DEFINED, "s4_added")]
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_modify_kind_reemits_one_subject() -> None:
+    """A content edit to one existing subject (no reorder) re-emits ONLY it."""
+    a = parse_vertex(KITCHEN_SINK)
+    first = next(iter(a.loops))
+    b = _edit(a, loops={
+        **a.loops,
+        first: LoopDef(folds=(FoldDecl(target="n", op=FoldLatest()),)),
+    })
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert [(c.kind, c.subject, c.annotation) for c in changes] == [
+        (DECL_KIND_DEFINED, first, "modified")
+    ]
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_remove_kind_emits_tombstone() -> None:
+    a = parse_vertex(SOURCES_BLOCKS)  # loops: alpha, beta
+    b = _edit(a, loops={k: v for k, v in a.loops.items() if k != "beta"})
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    removals = [c for c in changes if c.annotation == "removed"]
+    assert [(c.kind, c.subject, c.payload) for c in removals] == [
+        (DECL_KIND_RETIRED, "beta", None)
+    ]
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_remove_observer_emits_tombstone() -> None:
+    a = parse_vertex(KITCHEN_SINK)
+    assert a.observers  # KITCHEN_SINK declares an observer
+    b = _edit(a, observers=None)
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    kinds = {(c.kind, c.annotation) for c in changes}
+    assert (DECL_OBSERVER_RETIRED, "removed") in kinds
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_remove_source_emits_tombstone() -> None:
+    a = parse_vertex(TEMPLATE_SOURCES)
+    assert a.sources
+    b = _edit(a, sources=a.sources[:-1])  # drop the last source
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert any(c.kind == DECL_SOURCE_RETIRED and c.annotation == "removed"
+               for c in changes)
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_remove_member_emits_tombstone() -> None:
+    a = parse_vertex(COMBINE)
+    assert a.combine and len(a.combine) >= 2
+    b = _edit(a, combine=a.combine[:-1])
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert any(c.kind == DECL_MEMBER_REMOVED and c.annotation == "removed"
+               for c in changes)
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_modify_vertex_singleton() -> None:
+    """A meaning-critical facet of vertex-defined (strict) re-emits the singleton
+    — subject unchanged, no rename refusal."""
+    a = parse_vertex('name "x"\nstore "./x.db"\nloops { c { fold { n "inc" } } }')
+    b = _edit(a, strict=True)
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert [(c.kind, c.subject, c.annotation) for c in changes] == [
+        (DECL_VERTEX_DEFINED, "x", "modified")
+    ]
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_lens_removal_refused() -> None:
+    """Dropping a lens is inexpressible in the frozen vocabulary (no tombstone) —
+    the ceremony refuses rather than silently drop or mint a new kind."""
+    a = parse_vertex(KITCHEN_SINK)
+    assert a.lens is not None
+    b = _edit(a, lens=None)
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    with pytest.raises(EditRefused, match="lens"):
+        diff_documents(head, vertex_to_documents(b))
+
+
+def test_diff_lens_modify_is_expressible() -> None:
+    """A lens EDIT (not removal) re-emits the lens singleton normally."""
+    a = parse_vertex(KITCHEN_SINK)
+    b = _edit(a, lens=LensDecl(fold="other", stream=None))
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert any(c.kind == DECL_LENS_DEFINED and c.annotation == "modified"
+               for c in changes)
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_diff_vertex_rename_refused() -> None:
+    """A post-genesis vertex rename surfaces as vertex-defined removal → refuse."""
+    a = parse_vertex('name "old"\nstore "./x.db"\nloops { c { fold { n "inc" } } }')
+    b = _edit(a, name="new")
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    with pytest.raises(EditRefused, match="identity|rename"):
+        diff_documents(head, vertex_to_documents(b))
+
+
+def test_diff_annotations_are_the_minimal_vocabulary() -> None:
+    """Only added/modified/removed — the approved change= vocabulary."""
+    a = parse_vertex(SOURCES_BLOCKS)
+    b = _edit(
+        a,
+        loops={
+            **{k: v for k, v in a.loops.items() if k != "beta"},  # remove beta
+            "gamma": LoopDef(folds=(FoldDecl(target="n", op=FoldCount()),)),  # add
+            "alpha": LoopDef(folds=(FoldDecl(target="n", op=FoldLatest()),)),  # modify
+        },
+    )
+    head = [d.as_json() for d in vertex_to_documents(a)]
+    changes = diff_documents(head, vertex_to_documents(b))
+    assert {c.annotation for c in changes} <= {"added", "modified", "removed"}
+    assert _reproject(head, changes) == _edit(b, store=None)
+
+
+def test_change_is_namedtuple_shape() -> None:
+    c = Change(kind=DECL_KIND_DEFINED, subject="x", payload={"order": 0}, annotation="added")
+    assert (c.kind, c.subject, c.payload, c.annotation) == (
+        DECL_KIND_DEFINED, "x", {"order": 0}, "added",
+    )
+
+
+def test_apply_changes_accepts_mapping_form() -> None:
+    """apply_changes folds both Change tuples and plain row mappings (the store
+    persists rows as dicts, so the resolver-parity oracle must accept both)."""
+    head = [{"kind": DECL_KIND_DEFINED, "subject": "c", "payload": {"folds": [], "order": 0}}]
+    # dict-form changes: one modify, expressed as a row mapping.
+    modified = apply_changes(head, [
+        {"kind": DECL_KIND_DEFINED, "subject": "c",
+         "payload": {"folds": [{"target": "n", "op": {"op": "count"}}], "order": 0},
+         "change": "modified"},
+    ])
+    assert modified[0]["payload"]["folds"]  # the new definition replaced the old
+    # dict-form tombstone removes the subject.
+    removed = apply_changes(head, [
+        {"kind": DECL_KIND_RETIRED, "subject": "c", "change": "removed"},
+    ])
+    assert removed == []

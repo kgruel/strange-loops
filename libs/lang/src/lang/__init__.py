@@ -94,6 +94,11 @@ __all__ = [
     "is_internal_kind",
     "DECL_PREFIX",
     "DECLARATION_PROTOCOL_VERSION",
+    "DEFINED_TO_TOMBSTONE",
+    "Change",
+    "EditRefused",
+    "diff_documents",
+    "apply_changes",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
@@ -129,6 +134,7 @@ for _n in ["validate", "validate_loop", "validate_vertex"]:
 for _n in [
     "Document", "vertex_to_documents", "documents_to_vertex", "genesis_payload",
     "is_internal_kind", "DECL_PREFIX", "DECLARATION_PROTOCOL_VERSION",
+    "DEFINED_TO_TOMBSTONE", "Change", "EditRefused", "diff_documents", "apply_changes",
 ]:
     _LAZY_IMPORTS[_n] = ("lang.document", _n)
 

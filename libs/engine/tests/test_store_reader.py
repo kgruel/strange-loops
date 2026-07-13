@@ -421,14 +421,26 @@ class TestInternalKindExclusion:
         with StoreReader(decl_db) as reader:
             s = reader.summary()
         assert set(s["facts"]["kinds"].keys()) == {"decision"}
-        # total is the RAW fact count, not narrowed by the kinds exclusion —
-        # only the per-kind breakdown is filtered.
-        assert s["facts"]["total"] == 4
+        # total is narrowed by the SAME `_decl.*` exclusion as the per-kind
+        # breakdown, so it sums to the visible kinds (2 decision rows). Changed
+        # in S4: pre-S4 the total was the raw fact count (4 here) on the rationale
+        # that the only internal delta was a single genesis row; the edit ceremony
+        # grows `_decl.*` on every re-absorb, so an unfiltered total would drift
+        # from the kinds it claims to total.
+        assert s["facts"]["total"] == 2
+        assert s["facts"]["total"] == sum(k["count"] for k in s["facts"]["kinds"].values())
 
     def test_summary_include_internal_defeat(self, decl_db: Path):
         with StoreReader(decl_db) as reader:
             s = reader.summary(include_internal=True)
         assert "_decl.genesis" in s["facts"]["kinds"]
+        # The defeat lifts the exclusion on the total too — all 4 rows.
+        assert s["facts"]["total"] == 4
+
+    def test_fact_total_excludes_by_default(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            assert reader.fact_total == 2  # property; 2 decision, `_decl.*` excluded
+            assert reader.fact_total_all() == 4  # explicit escape hatch
 
     def test_facts_between_excludes_by_default(self, decl_db: Path):
         with StoreReader(decl_db) as reader:

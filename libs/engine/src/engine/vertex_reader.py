@@ -1171,8 +1171,11 @@ def vertex_fact_by_id(
                     )
                     if result is not None:
                         matches.append(result)
-            except (FileNotFoundError, ValueError):
-                continue
+            except FileNotFoundError:
+                continue  # absent member store — skip, not ambiguity
+            # A ValueError is WITHIN-STORE prefix ambiguity — propagate;
+            # swallowing it presented ambiguous data as absent
+            # (branch-review round 3).
         if not matches:
             return None
         if len(matches) > 1:

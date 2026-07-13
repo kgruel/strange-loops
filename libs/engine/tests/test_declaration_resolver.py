@@ -785,3 +785,24 @@ loops''')
             vertex_fact_by_id(vpath, "abc")  # genuinely ambiguous unscoped
         found = vertex_fact_by_id(vpath, "abc", kind="decision")
         assert found is not None and found["id"] == "abc1"
+
+    def test_combined_lookup_propagates_child_ambiguity(self, tmp_path):
+        # Within-store prefix ambiguity in an aggregation member must raise,
+        # not read as absent (branch-review round 3).
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        for fid in ("abc1", "abc2"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, 'decision', 100.0, 'kyle', '{}')",
+                (fid,),
+            )
+        conn.commit()
+        conn.close()
+        agg = tmp_path / "agg.vertex"
+        agg.write_text(f'name "agg"\ncombine {{\n  vertex "{vpath}"\n}}\n')
+        with pytest.raises(ValueError):
+            vertex_fact_by_id(agg, "abc", kind="decision")

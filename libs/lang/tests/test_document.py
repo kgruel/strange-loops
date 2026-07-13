@@ -290,7 +290,7 @@ def test_roundtrip_via_documents(name: str) -> None:
     docs = vertex_to_documents(ast)
     # Supply the original residence back at projection time.
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 @pytest.mark.parametrize("name", sorted(ALL_CASES))
@@ -302,7 +302,7 @@ def test_roundtrip_via_genesis(name: str) -> None:
     projected = documents_to_vertex(
         payload["documents"], path=ast.path, store=ast.store
     )
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 @pytest.mark.parametrize("name", sorted(ALL_CASES))
@@ -442,7 +442,7 @@ def test_empty_sources_block_roundtrips_as_empty_tuple() -> None:
         vertex_to_documents(ast), path=ast.path, store=ast.store
     )
     assert projected.sources == ()
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_absent_sources_roundtrips_as_none() -> None:
@@ -464,7 +464,7 @@ def test_unknown_decl_kind_is_skipped() -> None:
     docs = vertex_to_documents(ast)
     docs.append(Document(kind="_decl.future-thing", subject="whatever", payload={"x": 1}))
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_unknown_field_in_document_is_ignored() -> None:
@@ -478,14 +478,14 @@ def test_unknown_field_in_document_is_ignored() -> None:
         else:
             patched.append(d)
     projected = documents_to_vertex(patched, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_documents_to_vertex_accepts_mapping_form() -> None:
     ast = parse_vertex(KITCHEN_SINK)
     as_dicts = [d.as_json() for d in vertex_to_documents(ast)]
     projected = documents_to_vertex(as_dicts, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_missing_vertex_defined_raises() -> None:
@@ -511,7 +511,7 @@ def test_nested_unknown_field_ignored() -> None:
             p["future_source_field"] = "s"
         patched.append(Document(d.kind, d.subject, p))
     projected = documents_to_vertex(patched, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +529,7 @@ def test_source_subject_collision_suffix() -> None:
     assert len(pairs) == len(set(pairs))
     # And both colliding sources survive the round-trip.
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_suffix_allocation_avoids_natural_subject() -> None:
@@ -556,7 +556,7 @@ def test_suffix_allocation_avoids_natural_subject() -> None:
     assert subjects == ["base", "base#2", "base#2#2"]
     assert len(subjects) == len(set(subjects))  # all distinct — nothing dropped
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
-    assert projected == ast  # all three sources survive
+    assert projected == _ingress_stripped(ast)  # all three sources survive
 
 
 def test_inline_projection_tie_break_is_stable() -> None:
@@ -603,7 +603,7 @@ def test_combine_subject_collision_suffix() -> None:
     members = [d for d in docs if d.kind == DECL_MEMBER_DEFINED]
     assert [d.subject for d in members] == ["shared", "shared#2"]
     projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
-    assert projected == ast  # both entries, in order
+    assert projected == _ingress_stripped(ast)  # both entries, in order
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +618,7 @@ def test_order_preserved_after_shuffle(name: str) -> None:
     shuffled = list(docs)
     random.Random(1234).shuffle(shuffled)
     projected = documents_to_vertex(shuffled, path=ast.path, store=ast.store)
-    assert projected == ast
+    assert projected == _ingress_stripped(ast)
 
 
 def test_kind_order_survives_shuffle_specifically() -> None:
@@ -774,6 +774,35 @@ def _edit(ast: VertexFile, **overrides: object) -> VertexFile:
     """A copy of ``ast`` with the given fields replaced (an in-memory edit)."""
     return VertexFile(**{**_vertex_kwargs(ast), **overrides})
 
+def _ingress_stripped(ast: VertexFile) -> VertexFile:
+    """``ast`` with ingress-class values blanked (env values, SPEC §9.5).
+
+    Env VALUES are residence/ingress — excluded from declaration payloads and
+    re-attached from the file at resolution (load_declaration). Projection
+    therefore yields them as "": round-trip equality is asserted modulo this,
+    exactly as it already is for ``path``/``store`` residence.
+    """
+    from lang.ast import InlineSource, SourcesBlock
+
+    if not ast.sources_blocks:
+        return ast
+
+    def _strip(s: InlineSource) -> InlineSource:
+        # ast.py's custom frozen decorator defeats dataclasses.replace —
+        # rebuild through the constructor instead.
+        return InlineSource(
+            command=s.command, kind=s.kind, observer=s.observer, every=s.every,
+            on=s.on, format=s.format, timeout=s.timeout, origin=s.origin,
+            env=tuple((k, "") for k, _ in s.env), parse=s.parse, path=s.path,
+        )
+
+    blocks = tuple(
+        SourcesBlock(mode=b.mode, sources=tuple(_strip(s) for s in b.sources))
+        for b in ast.sources_blocks
+    )
+    return _edit(ast, sources_blocks=blocks)
+
+
 
 # ===========================================================================
 # Subject-granular diff — the edit ceremony's grammar half (SPEC §9.2, S4)
@@ -811,7 +840,7 @@ def test_diff_apply_roundtrip_add_kind(name: str) -> None:
     # The added kind is the only NEW subject; order-shift may re-emit others.
     added = [c for c in changes if c.annotation == "added"]
     assert [(c.kind, c.subject) for c in added] == [(DECL_KIND_DEFINED, "s4_added")]
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_modify_kind_reemits_one_subject() -> None:
@@ -827,7 +856,7 @@ def test_diff_modify_kind_reemits_one_subject() -> None:
     assert [(c.kind, c.subject, c.annotation) for c in changes] == [
         (DECL_KIND_DEFINED, first, "modified")
     ]
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_remove_kind_emits_tombstone() -> None:
@@ -839,7 +868,7 @@ def test_diff_remove_kind_emits_tombstone() -> None:
     assert [(c.kind, c.subject, c.payload) for c in removals] == [
         (DECL_KIND_RETIRED, "beta", None)
     ]
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_remove_observer_emits_tombstone() -> None:
@@ -850,7 +879,7 @@ def test_diff_remove_observer_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     kinds = {(c.kind, c.annotation) for c in changes}
     assert (DECL_OBSERVER_RETIRED, "removed") in kinds
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_remove_source_emits_tombstone() -> None:
@@ -861,7 +890,7 @@ def test_diff_remove_source_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_SOURCE_RETIRED and c.annotation == "removed"
                for c in changes)
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_remove_member_emits_tombstone() -> None:
@@ -872,7 +901,7 @@ def test_diff_remove_member_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_MEMBER_REMOVED and c.annotation == "removed"
                for c in changes)
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_modify_vertex_singleton() -> None:
@@ -885,7 +914,7 @@ def test_diff_modify_vertex_singleton() -> None:
     assert [(c.kind, c.subject, c.annotation) for c in changes] == [
         (DECL_VERTEX_DEFINED, "x", "modified")
     ]
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_lens_removal_refused() -> None:
@@ -907,7 +936,7 @@ def test_diff_lens_modify_is_expressible() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_LENS_DEFINED and c.annotation == "modified"
                for c in changes)
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_diff_vertex_rename_refused() -> None:
@@ -933,7 +962,7 @@ def test_diff_annotations_are_the_minimal_vocabulary() -> None:
     head = [d.as_json() for d in vertex_to_documents(a)]
     changes = diff_documents(head, vertex_to_documents(b))
     assert {c.annotation for c in changes} <= {"added", "modified", "removed"}
-    assert _reproject(head, changes) == _edit(b, store=None)
+    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
 
 
 def test_change_is_namedtuple_shape() -> None:

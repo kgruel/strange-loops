@@ -362,9 +362,91 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
 
     docs = resolve_declaration_documents(store_path, as_of=as_of)
     if isinstance(docs, list):
-        return documents_to_vertex(docs, path=vertex_path, store=store_field)
+        resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
+        return _reattach_ingress(resolved, file_ast)
     if isinstance(docs, Unhistorized):
         # Earliest known state — the genesis floor, never the drifted file.
-        return documents_to_vertex(docs.documents, path=vertex_path, store=store_field)
+        resolved = documents_to_vertex(
+            docs.documents, path=vertex_path, store=store_field
+        )
+        return _reattach_ingress(resolved, file_ast)
     # None (pre-genesis / unusable store) → the file is the record.
     return file_ast
+
+
+def _reattach_ingress(resolved, file_ast):
+    """Re-attach ingress-class values from the file onto the resolved AST.
+
+    Env VALUES are ingress (SPEC §9.5 secrets-indirection): declaration
+    payloads record only the key set, so projection yields values as "".
+    Like the ``store`` locator, the live values come from the file — the one
+    residence the declaration deliberately does not carry. The key SET stays
+    store-authoritative: a key present in the file but absent from the
+    resolved declaration is NOT added (that's an unabsorbed edit, surfaced at
+    ``absorb -n``); a resolved key missing from the file resolves to "" and
+    fails loudly at runtime, honestly reflecting the absent ingress.
+    """
+    if not resolved.sources_blocks or not file_ast.sources_blocks:
+        return resolved
+
+    # File-side value lookup: (block index, command, key) → value, falling
+    # back to (command, key) so a block reshuffle doesn't orphan values.
+    by_block: dict[tuple[int, str, str], str] = {}
+    by_cmd: dict[tuple[str, str], str] = {}
+    for bi, block in enumerate(file_ast.sources_blocks):
+        for src in block.sources:
+            for k, v in src.env:
+                by_block[(bi, src.command, k)] = v
+                by_cmd.setdefault((src.command, k), v)
+
+    from lang.ast import InlineSource, SourcesBlock
+
+    changed = False
+    new_blocks = []
+    for bi, block in enumerate(resolved.sources_blocks):
+        new_sources = []
+        for src in block.sources:
+            if src.env and any(v == "" for _, v in src.env):
+                env = tuple(
+                    (
+                        k,
+                        v or by_block.get((bi, src.command, k),
+                                          by_cmd.get((src.command, k), "")),
+                    )
+                    for k, v in src.env
+                )
+                if env != src.env:
+                    changed = True
+                    src = InlineSource(
+                        command=src.command, kind=src.kind, observer=src.observer,
+                        every=src.every, on=src.on, format=src.format,
+                        timeout=src.timeout, origin=src.origin, env=env,
+                        parse=src.parse, path=src.path,
+                    )
+            new_sources.append(src)
+        new_blocks.append(SourcesBlock(mode=block.mode, sources=tuple(new_sources)))
+
+    if not changed:
+        return resolved
+    from lang.ast import VertexFile
+
+    # ast.py's custom frozen decorator defeats dataclasses.replace — rebuild
+    # through the constructor with the full explicit field list.
+    return VertexFile(
+        name=resolved.name,
+        loops=resolved.loops,
+        store=resolved.store,
+        discover=resolved.discover,
+        sources=resolved.sources,
+        vertices=resolved.vertices,
+        routes=resolved.routes,
+        emit=resolved.emit,
+        combine=resolved.combine,
+        sources_blocks=tuple(new_blocks),
+        observers=resolved.observers,
+        lens=resolved.lens,
+        boundary=resolved.boundary,
+        observer_scoped=resolved.observer_scoped,
+        strict=resolved.strict,
+        path=resolved.path,
+    )

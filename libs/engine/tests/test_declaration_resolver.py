@@ -436,3 +436,72 @@ class TestAsOf:
         docs2 = resolve_declaration_documents(store, as_of=gts + 200)
         decision2 = next(d for d in docs2 if d["subject"] == "decision")
         assert decision2["payload"].get("preview") == ["late"]
+
+
+# ---------------------------------------------------------------------------
+# Env ingress (SPEC §9.5 secrets-indirection)
+# ---------------------------------------------------------------------------
+
+_ENV_VERTEX_KDL = '''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="hunter2" MODE="fast"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+
+
+class TestEnvIngress:
+    """Env VALUES are ingress: never absorbed, re-attached from the file."""
+
+    def _scaffold_env(self, tmp_path):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(_ENV_VERTEX_KDL.format(store=store))
+        return vpath, store
+
+    def test_secret_never_enters_store_payloads(self, tmp_path):
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        payloads = [r[0] for r in conn.execute("SELECT payload FROM facts")]
+        conn.close()
+        assert not any("hunter2" in p for p in payloads)
+
+    def test_resolution_reattaches_values_from_file(self, tmp_path):
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        (src,) = block.sources
+        assert dict(src.env) == {"TOKEN": "hunter2", "MODE": "fast"}
+
+    def test_env_value_edit_is_live_without_ceremony(self, tmp_path):
+        # Values are ingress — like the store locator, the file's edit takes
+        # effect immediately; no declaration event required.
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        vpath.write_text(vpath.read_text().replace("hunter2", "rotated"))
+        resolved = load_declaration(vpath)
+        assert dict(resolved.sources_blocks[0].sources[0].env)["TOKEN"] == "rotated"
+
+    def test_env_key_set_is_declaration_shape(self, tmp_path):
+        # ADDING a key is a shape change: inert until absorbed (the resolved
+        # key set is store-authoritative), surfaced by the edit ceremony.
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        vpath.write_text(
+            vpath.read_text().replace('MODE="fast"', 'MODE="fast" EXTRA="new"')
+        )
+        resolved = load_declaration(vpath)
+        assert set(dict(resolved.sources_blocks[0].sources[0].env)) == {
+            "TOKEN", "MODE",
+        }  # EXTRA not resolved until absorb

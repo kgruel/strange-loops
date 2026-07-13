@@ -566,10 +566,30 @@ def _source_params_from_json(d: dict[str, Any]) -> SourceParams:
     return SourceParams(values=dict(d["values"]))
 
 
-def _template_source_to_payload(t: TemplateSource) -> dict[str, Any]:
+def _content_sha256(path: Path, base: Path | None) -> str | None:
+    """SHA-256 of a referenced file's bytes, or None if unreadable.
+
+    Pins WHAT the referenced ``.loop``/template said at absorb time so later
+    drift is detectable (surfaced at ``absorb -n``, never auto-absorbed).
+    Content capture as a portable document form is deferred — embedding raw
+    text would re-leak env values the indirection rule just excluded.
+    """
+    import hashlib
+
+    candidate = path if path.is_absolute() else ((base / path) if base else path)
+    try:
+        return hashlib.sha256(candidate.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _template_source_to_payload(
+    t: TemplateSource, *, base: Path | None = None
+) -> dict[str, Any]:
     return {
         "form": "template",
         "template": str(t.template),
+        "content_sha256": _content_sha256(t.template, base),
         "params": [_source_params_to_json(sp) for sp in t.params],
         "from": {"strategy": "file", "path": str(t.from_.path)}
         if t.from_ is not None
@@ -579,6 +599,7 @@ def _template_source_to_payload(t: TemplateSource) -> dict[str, Any]:
 
 
 def _template_source_from_payload(p: dict[str, Any]) -> TemplateSource:
+    # "content_sha256" is provenance (drift pin), not AST state — ignored here.
     from_d = p.get("from")
     loop_d = p.get("loop")
     return TemplateSource(
@@ -604,7 +625,11 @@ def _inline_source_to_payload(
         "format": s.format,
         "timeout": s.timeout,
         "origin": s.origin,
-        "env": [[k, v] for (k, v) in s.env],
+        # Env VALUES are ingress (SPEC §9.5 secrets-indirection): the
+        # declaration records the key SET (shape — adding/removing a key is a
+        # real edit); values live in the file and are re-attached at
+        # resolution (load_declaration), never absorbed into payloads.
+        "env": [k for (k, _v) in s.env],
         "parse": _parse_steps_to_json(s.parse),
         "path": s.path,
     }
@@ -620,7 +645,13 @@ def _inline_source_from_payload(p: dict[str, Any]) -> InlineSource:
         format=p.get("format", "lines"),
         timeout=p.get("timeout", "60s"),
         origin=p.get("origin", ""),
-        env=tuple((k, v) for k, v in p.get("env", ())),
+        # Tolerant reader: new form is a key list (values are ingress,
+        # re-attached from the file at resolution); legacy pre-indirection
+        # rows carried [key, value] pairs — honor their recorded values.
+        env=tuple(
+            (e, "") if isinstance(e, str) else (e[0], e[1])
+            for e in p.get("env", ())
+        ),
         parse=_parse_steps_from_json(p.get("parse", [])),
         path=p.get("path", ""),
     )
@@ -725,11 +756,16 @@ def vertex_to_documents(ast: VertexFile) -> list[Document]:
         _emit(DECL_MEMBER_DEFINED, entry.name, _combine_to_payload(entry))
 
     # source-defined — bare/template entries from VertexFile.sources ...
+    base = ast.path.parent if ast.path is not None else None
     for entry in ast.sources or ():
         if isinstance(entry, TemplateSource):
-            payload = _template_source_to_payload(entry)
+            payload = _template_source_to_payload(entry, base=base)
         else:
-            payload = {"form": "path", "path": str(entry)}
+            payload = {
+                "form": "path",
+                "path": str(entry),
+                "content_sha256": _content_sha256(Path(entry), base),
+            }
         _emit(DECL_SOURCE_DEFINED, _source_subject(entry), payload)
 
     # ... then inline sources from VertexFile.sources_blocks, tagged with

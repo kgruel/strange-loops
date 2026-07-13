@@ -360,14 +360,28 @@ class TestTombstonesAndForwardCompat:
         with pytest.raises(DeclarationResolutionError):
             resolve_declaration_documents(store)
 
-    def test_single_unmarked_genesis_is_self_compat(self, tmp_path):
-        # A store absorbed before the marker existed still resolves.
+    def test_unmarked_genesis_refuses_until_adopted(self, tmp_path):
+        # Facts alone cannot prove which genesis is self — even a singleton.
+        # An unmarked store refuses with adopt guidance; the explicit adopt
+        # ceremony (human intent) claims identity and resolution resumes.
+        from atoms import Fact
+
+        from engine.declaration import UnadoptedLineage
+
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         conn = sqlite3.connect(str(store))
         conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
         conn.commit()
         conn.close()
+        with pytest.raises(UnadoptedLineage):
+            load_declaration(vpath)
+        s = SqliteStore(
+            path=store, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        receipt = s.adopt_lineage()
+        s.close()
+        assert receipt["genesis_count"] == 1
         resolved = load_declaration(vpath)
         assert set(resolved.loops) == {"decision", "thread"}
 
@@ -584,3 +598,50 @@ observers {{
         vpath, _store, loop = self._scaffold_loop(tmp_path)  # never absorbed
         loop.write_text("anything")
         verify_source_pins(vpath)  # no pins, no raise
+
+
+class TestDeclarationStatus:
+    """load_declaration_status — the honesty channel for rendering surfaces."""
+
+    def test_store_status_at_head_and_asof(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        _ast, status = load_declaration_status(vpath)
+        assert status == "store"
+        _ast, status = load_declaration_status(
+            vpath, as_of=_genesis_ts(store) + 1
+        )
+        assert status == "store"
+
+    def test_unhistorized_status_before_genesis(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        ast, status = load_declaration_status(
+            vpath, as_of=_genesis_ts(store) - 100
+        )
+        assert status == "unhistorized"
+        assert set(ast.loops) == {"decision", "thread"}  # genesis floor
+
+    def test_pre_genesis_is_file_status(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, _store = _scaffold(tmp_path)  # never absorbed
+        _ast, status = load_declaration_status(vpath)
+        assert status == "file-pre-genesis"
+
+    def test_storeless_aggregate_under_asof_is_flagged(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath = tmp_path / "agg.vertex"
+        vpath.write_text(
+            'name "agg"\ncombine {\n  vertex "/tmp/nonexistent.vertex"\n}\n'
+        )
+        _ast, status = load_declaration_status(vpath, as_of=123.0)
+        assert status == "aggregate-head"
+        # Without a cursor there is no historical claim to caveat.
+        _ast, status = load_declaration_status(vpath)
+        assert status == "file-pre-genesis"

@@ -29,6 +29,18 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
     if is_piped:
         width = None  # piped register never clips (information-faithful)
 
+    # Honesty callout (SPEC §9.2/§9.5): a rewound listing whose ontology
+    # could not resolve at the cursor says so above the rows.
+    if data.get("ontology_notice"):
+        from painted import join_vertical
+
+        notice = data["ontology_notice"]
+        rest = {k: v for k, v in data.items() if k != "ontology_notice"}
+        return join_vertical(
+            _block(f"⚠ ontology: {notice}", Style(dim=True), width),
+            ticks_view(rest, zoom, width, piped=piped),
+        )
+
     ticks = data.get("ticks", [])
 
     if not ticks:

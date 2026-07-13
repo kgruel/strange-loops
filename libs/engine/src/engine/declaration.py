@@ -113,13 +113,24 @@ class DeclarationResolutionError(Exception):
 
 
 class AmbiguousLineage(DeclarationResolutionError):
-    """No ``own_lineage`` marker and more than one ``_decl.genesis`` row.
+    """Retained alias tier — see :class:`UnadoptedLineage` (its subclass).
 
-    Without the store-local marker (stores absorbed before it existed) a store
-    cannot tell its own genesis from a merged-foreign one, so several genesis
-    rows make the store's own lineage indeterminate. Conservative refusal, not
-    last-write-wins — genesis is identity (SPEC §9.2). A marked store never
-    raises this: foreign genesis rows are simply inert.
+    Historically raised for "several genesis rows, no marker". The refusal is
+    now uniform for ANY unmarked store holding genesis rows (a singleton is
+    just as unprovable), raised as :class:`UnadoptedLineage`; existing
+    ``except AmbiguousLineage`` handlers keep working via subclassing.
+    """
+
+
+class UnadoptedLineage(AmbiguousLineage):
+    """Genesis rows exist but no ``own_lineage`` marker claims one as self.
+
+    Facts alone cannot prove which genesis is self — a pre-marker own genesis
+    and a merged-foreign one are physically identical, so ANY inference (even
+    a singleton heuristic) is the hijack vector it tries to close. Identity
+    is claimed only by the explicit adopt ceremony (``loops store adopt``),
+    which stamps the marker under human intent (SPEC §9.2: genesis is
+    identity; explicit over implicit).
     """
 
 
@@ -249,16 +260,18 @@ def resolve_declaration_documents(
                     "is corrupt (marker without its genesis)"
                 )
             genesis_id, genesis_ts, genesis_payload_text = selected[0]
-        elif len(genesis_rows) == 1:
-            # Pre-marker store (absorbed before store_meta existed): the single
-            # genesis is self. The next write ceremony backfills the marker.
-            genesis_id, genesis_ts, genesis_payload_text = genesis_rows[0]
         else:
-            raise AmbiguousLineage(
-                f"{len(genesis_rows)} _decl.genesis rows in {store_path} and no "
-                "own_lineage marker — the store's own lineage is indeterminate; "
-                "if this store predates the marker, re-run a write ceremony on "
-                "it before merging foreign stores"
+            # No marker + genesis rows present. Facts alone CANNOT distinguish
+            # a pre-marker own genesis from a merged-foreign one — a singleton
+            # heuristic here is exactly the hijack it exists to prevent
+            # (closing re-review #1). Identity is claimed only by the explicit
+            # adopt ceremony (`loops store adopt`), never inferred.
+            raise UnadoptedLineage(
+                f"{len(genesis_rows)} _decl.genesis row(s) in {store_path} and "
+                "no own_lineage marker — this store predates the identity "
+                "marker (or received a foreign genesis via merge). Run "
+                "`loops store adopt` to explicitly claim the store's own "
+                "lineage; facts alone cannot prove which genesis is self"
             )
 
         genesis_payload = json.loads(genesis_payload_text)
@@ -322,6 +335,55 @@ def resolve_declaration_documents(
         conn.close()
 
 
+#: Provenance statuses load_declaration_status reports alongside the AST.
+#: "store"            — folded store declaration (head or honest as-of)
+#: "file-pre-genesis" — no lineage opened; the file is authoritative
+#: "unhistorized"     — as_of predates genesis; AST is the GENESIS FLOOR
+#:                      (earliest known state), not a true as-of resolution
+#: "aggregate-head"   — storeless combine/discover: membership is CURRENT
+#:                      FILE state regardless of as_of (aggregation internal
+#:                      tables not yet built — honesty caveat, SPEC §9.5)
+DECLARATION_STATUSES = ("store", "file-pre-genesis", "unhistorized", "aggregate-head")
+
+
+def load_declaration_status(
+    vertex_path: Path, *, as_of: float | None = None
+) -> tuple[Any, str]:
+    """:func:`load_declaration` plus the provenance of what was resolved.
+
+    The bare seam erases the ``Unhistorized`` distinction (every caller gets
+    an AST); surfaces that RENDER a historical read need to say honestly which
+    era the ontology came from — this is that channel (closing re-review #2).
+    """
+    from lang import parse_vertex_file
+
+    file_ast = parse_vertex_file(vertex_path)
+    store_field = file_ast.store
+    if store_field is None:
+        if as_of is not None and (
+            file_ast.combine is not None or file_ast.discover is not None
+        ):
+            return file_ast, "aggregate-head"
+        return file_ast, "file-pre-genesis"
+
+    store_path = store_field
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+    if not store_path.exists():
+        return file_ast, "file-pre-genesis"
+
+    docs = resolve_declaration_documents(store_path, as_of=as_of)
+    if isinstance(docs, list):
+        resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
+        return _reattach_ingress(resolved, file_ast), "store"
+    if isinstance(docs, Unhistorized):
+        resolved = documents_to_vertex(
+            docs.documents, path=vertex_path, store=store_field
+        )
+        return _reattach_ingress(resolved, file_ast), "unhistorized"
+    return file_ast, "file-pre-genesis"
+
+
 def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     """Resolve a vertex's declaration — THE seam (SPEC §9.5).
 
@@ -345,33 +407,13 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     - Otherwise (no store, store absent, no genesis) → the file AST unchanged,
       pre-genesis behavior: before the lineage opened, the file is the only
       surviving record of that era and IS authoritative.
+
+    Rendering surfaces that must SAY which era the ontology came from use
+    :func:`load_declaration_status` instead — this bare seam returns the same
+    AST but erases the provenance.
     """
-    from lang import parse_vertex_file
-
-    file_ast = parse_vertex_file(vertex_path)
-
-    store_field = file_ast.store
-    if store_field is None:
-        return file_ast
-
-    store_path = store_field
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
-    if not store_path.exists():
-        return file_ast
-
-    docs = resolve_declaration_documents(store_path, as_of=as_of)
-    if isinstance(docs, list):
-        resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
-        return _reattach_ingress(resolved, file_ast)
-    if isinstance(docs, Unhistorized):
-        # Earliest known state — the genesis floor, never the drifted file.
-        resolved = documents_to_vertex(
-            docs.documents, path=vertex_path, store=store_field
-        )
-        return _reattach_ingress(resolved, file_ast)
-    # None (pre-genesis / unusable store) → the file is the record.
-    return file_ast
+    ast, _status = load_declaration_status(vertex_path, as_of=as_of)
+    return ast
 
 
 class SourceDrift(DeclarationResolutionError):

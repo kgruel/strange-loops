@@ -53,6 +53,18 @@ def stream_view(
     if is_piped:
         width = None
 
+    # Honesty callout (SPEC §9.2/§9.5): a rewound read whose ontology could
+    # not resolve at the cursor says so above the rows, in every register.
+    if isinstance(data, dict) and data.get("ontology_notice"):
+        notice = data["ontology_notice"]
+        rest = {k: v for k, v in data.items() if k != "ontology_notice"}
+        body = stream_view(
+            rest, zoom, width, piped=piped, vertex_name=vertex_name
+        )
+        return join_vertical(
+            _block(f"⚠ ontology: {notice}", Style(dim=True), width), body
+        )
+
     p = palette_of(None)
 
     # Normalize input format

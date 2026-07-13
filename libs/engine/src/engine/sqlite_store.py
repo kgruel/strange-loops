@@ -610,7 +610,7 @@ class SqliteStore(Generic[T]):
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                own = self._own_lineage_in_txn(conn, backfill=True)
+                own = self._own_lineage_in_txn(conn)
                 if own is not None:
                     raise GenesisExists(
                         "the store's own lineage is already open "
@@ -771,7 +771,7 @@ class SqliteStore(Generic[T]):
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                lineage_id = self._own_lineage_in_txn(conn, backfill=True)
+                lineage_id = self._own_lineage_in_txn(conn)
                 if lineage_id is None:
                     raise NoGenesis(
                         "no _decl.genesis event — the store's lineage is not "
@@ -979,16 +979,15 @@ class SqliteStore(Generic[T]):
         )
         self._conn.commit()
 
-    def _own_lineage_in_txn(
-        self, conn: Any, *, backfill: bool
-    ) -> str | None:
+    def _own_lineage_in_txn(self, conn: Any) -> str | None:
         """Resolve the store's own lineage id inside an open write transaction.
 
-        Marker present → its value. No marker + exactly one ``_decl.genesis``
-        row → that row is self (pre-marker compat); with ``backfill`` the
-        marker is stamped in the same transaction. No marker + several rows →
-        :class:`AmbiguousGenesis`. No marker + none → ``None`` (lineage not
-        open).
+        Marker present → its value. No marker + no genesis rows → ``None``
+        (lineage not open). No marker + ANY genesis rows →
+        :class:`AmbiguousGenesis`: facts alone cannot prove which genesis is
+        self (a singleton heuristic is the hijack vector — closing re-review
+        #1), so identity is claimed only by the explicit adopt ceremony
+        (:meth:`adopt_lineage`), never inferred.
         """
         row = conn.execute(
             "SELECT value FROM store_meta WHERE key = 'own_lineage'"
@@ -1003,20 +1002,89 @@ class SqliteStore(Generic[T]):
         ).fetchall()
         if not genesis_rows:
             return None
-        if len(genesis_rows) > 1:
-            raise AmbiguousGenesis(
-                f"{len(genesis_rows)} _decl.genesis rows and no own_lineage "
-                "marker — the store's own lineage is indeterminate (pre-marker "
-                "store merged with a foreign lineage?)"
-            )
-        own = genesis_rows[0][0]
-        if backfill:
-            conn.execute(
-                "INSERT OR REPLACE INTO store_meta (key, value) "
-                "VALUES ('own_lineage', ?)",
-                (own,),
-            )
-        return own
+        raise AmbiguousGenesis(
+            f"{len(genesis_rows)} _decl.genesis row(s) and no own_lineage "
+            "marker — identity cannot be inferred from facts; run "
+            "`loops store adopt` to explicitly claim the store's own lineage"
+        )
+
+    def adopt_lineage(self, lineage_id: str | None = None) -> dict[str, Any]:
+        """Explicitly claim a genesis row as the store's own lineage.
+
+        The one legitimate way an unmarked store (pre-marker era, or one that
+        received genesis rows via merge) gains identity: a human names which
+        genesis is self and the marker is stamped. With one genesis row,
+        ``lineage_id`` may be omitted; with several it is required (exact id
+        or unique prefix). Refuses if a marker already exists.
+
+        Returns a receipt: ``{lineage, observer, ts, genesis_count}`` — the
+        adopted row's observer and timestamp are surfaced so the adopter can
+        eyeball that the claimed genesis is plausibly their own.
+        """
+        from lang.document import DECL_GENESIS
+
+        self._ensure_meta_table()
+        conn = self._conn
+        prev_iso = conn.isolation_level
+        conn.isolation_level = None
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT value FROM store_meta WHERE key = 'own_lineage'"
+                ).fetchone()
+                if row is not None:
+                    raise GenesisExists(
+                        f"own_lineage already claimed ({row[0]}) — adopt is a "
+                        "one-time ceremony for unmarked stores"
+                    )
+                genesis_rows = conn.execute(
+                    "SELECT id, observer, ts FROM facts WHERE kind = ? "
+                    "ORDER BY rowid",
+                    (DECL_GENESIS,),
+                ).fetchall()
+                if not genesis_rows:
+                    raise NoGenesis(
+                        "no _decl.genesis rows — nothing to adopt; run "
+                        "absorb to open a fresh lineage"
+                    )
+                if lineage_id is None:
+                    if len(genesis_rows) > 1:
+                        ids = ", ".join(r[0] for r in genesis_rows)
+                        raise AmbiguousGenesis(
+                            f"{len(genesis_rows)} genesis rows ({ids}) — name "
+                            "the one that is self via the lineage id"
+                        )
+                    chosen = genesis_rows[0]
+                else:
+                    matches = [
+                        r for r in genesis_rows if r[0].startswith(lineage_id)
+                    ]
+                    if len(matches) != 1:
+                        raise AmbiguousGenesis(
+                            f"lineage {lineage_id!r} matches "
+                            f"{len(matches)} genesis rows — need a unique "
+                            "id/prefix"
+                        )
+                    chosen = matches[0]
+                conn.execute(
+                    "INSERT OR REPLACE INTO store_meta (key, value) "
+                    "VALUES ('own_lineage', ?)",
+                    (chosen[0],),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        finally:
+            conn.isolation_level = prev_iso
+        return {
+            "lineage": chosen[0],
+            "observer": chosen[1],
+            "ts": chosen[2],
+            "genesis_count": len(genesis_rows),
+        }
 
     def _declaration_head_in_txn(
         self, conn: Any, lineage_id: str
@@ -1058,7 +1126,7 @@ class SqliteStore(Generic[T]):
         self._ensure_meta_table()
         conn = self._conn
         try:
-            lineage = self._own_lineage_in_txn(conn, backfill=False)
+            lineage = self._own_lineage_in_txn(conn)
         except AmbiguousGenesis:
             return None
         if lineage is None:

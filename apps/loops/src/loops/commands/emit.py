@@ -140,8 +140,8 @@ def _resolve_strict(args: argparse.Namespace, vertex_path: Path | None) -> tuple
     vertex_declared = False
     if vertex_path is not None:
         try:
-            from lang import parse_vertex_file
-            ast = parse_vertex_file(vertex_path)
+            from engine import load_declaration
+            ast = load_declaration(vertex_path)
             vertex_declared = bool(getattr(ast, "strict", False))
         except Exception:
             vertex_declared = False
@@ -482,6 +482,25 @@ def cmd_emit(
             Block.text(
                 "Error: emit requires a kind "
                 "(e.g. `loops emit <vertex> decision topic=…`)",
+                p.error,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+    # Reserved declaration namespace (SPEC §9.2 / build-plan write-time
+    # reservation): the ``_decl.*`` prefix is the internal-table protocol's
+    # own vocabulary, recorded only through `sl store absorb`. Refuse a
+    # user-supplied ``_decl.*`` kind here, at the single emit chokepoint,
+    # regardless of strict mode — read-side filtering is not reservation.
+    from lang.document import is_internal_kind
+
+    if is_internal_kind(kind):
+        paint(
+            Block.text(
+                f"Error: kind '{kind}' is in the reserved declaration "
+                f"namespace ('_decl.*') — declarations are recorded via "
+                f"`sl store absorb`, not emitted",
                 p.error,
             ),
             file=sys.stderr,
@@ -993,6 +1012,20 @@ def _run_close(
                 vertex_path = resolve_local_vertex()
         else:
             vertex_path = resolve_local_vertex()
+
+    # Reserved declaration namespace (SPEC §9.2): close emits a fact of
+    # ``args.kind`` — refuse the ``_decl.*` namespace here too (after the
+    # vertex/kind positional shift above resolves the final kind), the same
+    # reservation cmd_emit enforces. Read-side filtering is not reservation.
+    from lang.document import is_internal_kind
+
+    if is_internal_kind(args.kind):
+        rep.err(
+            f"kind '{args.kind}' is in the reserved declaration namespace "
+            f"('_decl.*') — declarations are recorded via `sl store absorb`, "
+            f"not closed"
+        )
+        return 2
 
     # Resolve observer
     obs = resolve_observer(observer or None)

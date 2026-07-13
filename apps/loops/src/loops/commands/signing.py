@@ -192,7 +192,13 @@ def fact_verifier_for(
 
 
 def declared_observer_keys(vertex_path: Path) -> dict[str, str]:
-    """Read the observer-key registry from a .vertex file.
+    """Read the observer-key registry from a vertex's resolved declaration.
+
+    Routes through the store-backed resolver (SPEC §9.5): once a lineage is
+    opened, the current-head keys come from the store's declaration, not the
+    file. (Key-as-of-witness-position — verifying a historical tick under the
+    key that was current AT that tick — is S7, not here; this is the
+    current-head registry.)
 
     Returns {observer_name: base64_public_key} for observers declaring a
     key field. Empty dict when there is no observers block, no keys, or
@@ -201,9 +207,9 @@ def declared_observer_keys(vertex_path: Path) -> dict[str, str]:
     if vertex_path.suffix != ".vertex" or not vertex_path.exists():
         return {}
     try:
-        from lang import parse_vertex_file
+        from engine import load_declaration
 
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
     except Exception:  # noqa: BLE001 — no registry is an answer, not a crash
         return {}
     if not getattr(ast, "observers", None):

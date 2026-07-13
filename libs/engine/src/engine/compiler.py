@@ -397,6 +397,35 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
     return params
 
 
+def _resolve_param_indirection(values: dict[str, str]) -> dict[str, str]:
+    """Resolve environment-indirected param values (SPEC §9.5 secrets-indirection).
+
+    A whole-value ``$NAME`` param resolves from the process environment at
+    compile time. The declared ``$NAME`` form is what enters declaration
+    payloads (genesis/edit rows); the resolved value is ingress and never
+    absorbed. ``$$`` escapes a literal leading ``$``. Partial interpolation
+    is not supported — compose via separate template params instead.
+    """
+    import os
+    import re
+
+    resolved: dict[str, str] = {}
+    for key, value in values.items():
+        if value.startswith("$$"):
+            resolved[key] = value[1:]
+        elif re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", value):
+            name = value[1:]
+            if name not in os.environ:
+                raise ValueError(
+                    f"param {key}={value}: environment variable {name!r} is not set "
+                    f"(indirected params resolve from the environment at load time)"
+                )
+            resolved[key] = os.environ[name]
+        else:
+            resolved[key] = value
+    return resolved
+
+
 def compile_sources(
     vertex: VertexFile,
     base_dir: Path,
@@ -429,17 +458,20 @@ def compile_sources(
                 all_params.extend(_load_params_file(from_path))
             all_params.extend(source_entry.params)
 
-            # Instantiate for each param row
+            # Instantiate for each param row. Env-indirected values ($NAME)
+            # resolve here — declared form stays in declaration state, the
+            # resolved value is ingress.
             for param_row in all_params:
-                instantiated = instantiate_template(loop_ast, param_row.values)
+                row_values = _resolve_param_indirection(param_row.values)
+                instantiated = instantiate_template(loop_ast, row_values)
                 pairs.append(compile_source(instantiated))
 
                 # If template has a loop spec, create spec for this instance
                 if source_entry.loop:
-                    kind = param_row.values.get("kind")
+                    kind = row_values.get("kind")
                     if kind:
                         substituted_loop_def = substitute_loop_def(
-                            source_entry.loop, param_row.values
+                            source_entry.loop, row_values
                         )
                         specs[kind] = map_loop_def_to_spec(kind, substituted_loop_def)
         else:

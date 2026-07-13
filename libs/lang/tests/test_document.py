@@ -402,6 +402,32 @@ def test_source_defined_for_each_source() -> None:
     assert forms == ["path", "template", "template"]
 
 
+def test_template_params_absorb_declared_form_not_resolved() -> None:
+    """Indirected ($NAME) param values enter payloads verbatim.
+
+    Resolution happens only at compile time (engine); the declaration
+    records the declared indirection form, never the resolved value.
+    """
+    src = """
+name "t"
+store "./t.db"
+sources {
+  template "./feed.loop" {
+    with url="https://a.example" token="$FEED_TOKEN"
+  }
+}
+loops {
+  local {
+    fold { n "inc" }
+  }
+}
+"""
+    ast = parse_vertex(src)
+    docs = vertex_to_documents(ast)
+    tmpl = next(d for d in docs if d.payload.get("form") == "template")
+    assert tmpl.payload["params"][0]["values"]["token"] == "$FEED_TOKEN"
+
+
 def test_inline_sources_carry_block_and_mode() -> None:
     ast = parse_vertex(SOURCES_BLOCKS)
     docs = vertex_to_documents(ast)

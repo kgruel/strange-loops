@@ -117,6 +117,12 @@ pop = read_population(vertex_ast, template, base_dir)
 
 **Storage modes**: `"file"` (external `.list` file), `"inline"` (KDL `with` rows), `"both"`.
 
+**Secret params**: a whole-value `$NAME` param resolves from the process
+environment at compile time (engine, `_resolve_param_indirection`) — the
+declared `$NAME` form is what enters absorbed declaration payloads, never the
+resolved value. `$$` escapes a literal leading `$`. Partial interpolation is
+unsupported; compose via separate template params.
+
 Population management also includes KDL text manipulation — `kdl_insert_with_row()`, `kdl_remove_with_row()`, `export_to_file()`, `import_from_file()`. These edit the `.vertex` file text directly to add/remove parameter rows. The CLI (`loops ls/add/rm`) uses these.
 
 **Name resolution**: `resolve_vertex("dev/project", home)` → `home/dev/project/project.vertex`. Slashed names use the leaf for the filename.

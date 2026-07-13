@@ -1514,6 +1514,63 @@ loops {{
         assert pairs[1][0].command == 'ssh deploy@192.168.1.40 "cd /opt/media && docker compose ps"'
         assert specs == {}
 
+    def test_compile_sources_param_env_indirection(self, tmp_path, monkeypatch):
+        """Whole-value $NAME params resolve from the environment at compile time."""
+        monkeypatch.setenv("FEED_TOKEN", "s3cret")
+        template_path = tmp_path / "feed.loop"
+        template_path.write_text("""\
+source #"curl -H "Authorization: {{token}}" {{url}}"#
+kind "{{kind}}"
+observer "hlab"
+format "ndjson"
+""")
+        from lang import parse_vertex
+
+        vertex = parse_vertex(f"""\
+name "feeds"
+sources {{
+  template "{template_path}" {{
+    with kind="gh" url="https://api.github.com/feed" token="$FEED_TOKEN"
+  }}
+}}
+loops {{
+  gh {{
+    fold {{
+      count "inc"
+    }}
+  }}
+}}
+""")
+        pairs, _specs = compile_sources(vertex, tmp_path)
+        assert pairs[0][0].command == (
+            'curl -H "Authorization: s3cret" https://api.github.com/feed'
+        )
+
+    def test_param_indirection_missing_env_var_errors(self):
+        from engine.compiler import _resolve_param_indirection
+
+        with pytest.raises(ValueError, match="NO_SUCH_VAR_XYZ"):
+            _resolve_param_indirection({"token": "$NO_SUCH_VAR_XYZ"})
+
+    def test_param_indirection_literals_and_escape(self, monkeypatch):
+        from engine.compiler import _resolve_param_indirection
+
+        monkeypatch.setenv("HOME_DIR_TEST", "/home/x")
+        resolved = _resolve_param_indirection(
+            {
+                "plain": "hello",
+                "dollar_amount": "$5.00",  # not a valid var name — literal
+                "escaped": "$$HOME_DIR_TEST",  # $$ escapes a literal leading $
+                "partial": "prefix-$HOME_DIR_TEST",  # not whole-value — literal
+            }
+        )
+        assert resolved == {
+            "plain": "hello",
+            "dollar_amount": "$5.00",
+            "escaped": "$HOME_DIR_TEST",
+            "partial": "prefix-$HOME_DIR_TEST",
+        }
+
     def test_compile_sources_template_with_loop_spec(self, tmp_path):
         """compile_sources generates specs from template loop: block."""
         template_path = tmp_path / "status.loop"

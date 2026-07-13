@@ -692,10 +692,21 @@ def _run_absorb(
     # nothing to open a lineage over (build-plan aggregation wrinkle, deferred).
     db_path = resolve_store_path(target_path)
 
-    # Parse the declaration ONCE.
-    from lang import parse_vertex_file
+    # Parse the declaration ONCE — and VALIDATE it. Absorb mints immutable
+    # signed events (genesis/edit rows are never rewritten), so a declaration
+    # that ordinary validation rejects (e.g. a loop named into the _decl.*
+    # reserved namespace) must never enter the lineage (closing review #6).
+    from lang import parse_vertex_file, validate_vertex
 
     ast = parse_vertex_file(target_path)
+    try:
+        validate_vertex(ast)
+    except Exception as exc:
+        from painted import Block, Style, paint
+        paint(Block.text(
+            f"✗ {target_path.stem}: declaration invalid — {exc}", Style()
+        ), file=sys.stderr)
+        return 2
 
     # Observer resolution. Precedence: explicit ``--observer`` on the absorb
     # parser (direct/test calls) > invocation observer from the global peel >
@@ -894,6 +905,21 @@ def _absorb_edit(
     # The edited file's document set.
     new_docs = vertex_to_documents(ast)
 
+    # CAS token FIRST, then the head read: if a concurrent edit lands between
+    # the two, the token is older than the head we diffed — absorb_edit then
+    # refuses (StaleDeclarationHead) instead of interleaving, and re-running
+    # picks up the moved head. Capturing in this order fails conservative.
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    _cas_store = SqliteStore(
+        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    try:
+        expected_head = _cas_store.declaration_head()
+    finally:
+        _cas_store.close()
+
     # The fold head from the store. has_genesis was true at dispatch, so this is
     # normally a list; a resolution failure (ambiguous lineage, unsupported
     # protocol) or a non-list refuses cleanly rather than diffing against noise.
@@ -983,11 +1009,10 @@ def _absorb_edit(
 
     from loops.commands.signing import fact_signer_for
 
-    from atoms import Fact
     from engine.sqlite_store import (
         AmbiguousGenesis,
         NoGenesis,
-        SqliteStore,
+        StaleDeclarationHead,
         UnsignableEdit,
     )
 
@@ -1000,7 +1025,10 @@ def _absorb_edit(
             observer=observer,
             origin="",
             fact_signer=fact_signer_for(target_path),
+            expected_head=expected_head,
         )
+    except StaleDeclarationHead as exc:
+        return _refuse(f"{exc}")
     except UnsignableEdit:
         return _refuse(
             f"cannot absorb — no signing key for observer '{observer}'. A "

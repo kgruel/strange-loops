@@ -277,6 +277,151 @@ class TestVertexFacts:
         assert facts == []
 
 
+class TestInternalKindExclusion:
+    """SPEC §9.4 (S3, decision:architecture/internal-table-s3-read-exclusion):
+    every read surface excludes the reserved `_decl.*` namespace by default,
+    with an explicit `--kind`/`include_internal` escape hatch.
+    """
+
+    def test_unfolded_excludes_decl_kinds(self, tmp_path):
+        """The undeclared-kinds footer never surfaces _decl.* — this is the
+        direct fix for `sl read project` not being byte-identical pre/post
+        `sl store absorb` (a declaration-event kind falling into `unfolded`)."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc"}},
+            {"kind": "tick.other", "ts": 500.0, "payload": {}},
+        ])
+
+        result = vertex_fold(vpath)
+        assert "_decl.receipt" not in result.unfolded
+        # Ordinary undeclared kinds still surface — only the reserved
+        # namespace is excluded, not every undeclared kind.
+        assert "tick.other" in result.unfolded
+
+    def test_byte_identical_fold_pre_post_absorb_style_write(self, tmp_path):
+        """Simulates the exit criterion directly: folding a declared kind is
+        unaffected by _decl.* rows landing in the same store (as `sl store
+        absorb` would write them) — same sections, same unfolded (empty)."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+        ])
+        before = vertex_fold(vpath)
+
+        _seed_facts(tmp_path / "store.db", [
+            {"id": "TESTFACT_DECL0", "kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+        after = vertex_fold(vpath)
+
+        assert before.sections == after.sections
+        assert before.unfolded == after.unfolded == {}
+
+    def test_explicit_kind_defeats_exclusion_for_declared_kind_unaffected(self, tmp_path):
+        """Explicit --kind on an ordinary declared kind is unaffected by the
+        internal-namespace change (sanity check, not the interesting case)."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+        ])
+        result = vertex_fold(vpath, kind="decision")
+        assert result.sections[0].items[0].payload["topic"] == "auth"
+
+    def test_explicit_kind_surfaces_reserved_namespace(self, tmp_path):
+        """--kind _decl.receipt: the general undeclared-kind raw fallback
+        surfaces the reserved namespace on explicit ask — no vertex ever
+        declares a loop for `_decl.*`, so without the fallback this would
+        silently render empty (the pre-existing gap this fix generalizes)."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+            {"kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc123"}},
+        ])
+
+        result = vertex_fold(vpath, kind="_decl.receipt")
+        assert len(result.sections) == 1
+        section = result.sections[0]
+        assert section.kind == "_decl.receipt"
+        assert len(section.items) == 1
+        assert section.items[0].payload["lineage"] == "abc123"
+
+    def test_explicit_kind_general_undeclared_kind_no_longer_silently_empty(self, tmp_path):
+        """The fallback is general, not `_decl.*`-specific: an ordinary
+        undeclared/typo'd kind now also surfaces its raw facts instead of
+        silently rendering empty. Distinct behavior change from the _decl.*
+        case above — its own test, per review guidance (own blast radius)."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+            {"kind": "tick.orphan", "ts": 500.0, "payload": {"n": 42}},
+        ])
+
+        result = vertex_fold(vpath, kind="tick.orphan")
+        assert len(result.sections) == 1
+        section = result.sections[0]
+        assert section.kind == "tick.orphan"
+        assert len(section.items) == 1
+        assert section.items[0].payload["n"] == 42
+
+    def test_vertex_facts_excludes_decl_kinds_ambient(self, tmp_path):
+        """The raw `--facts` event-history surface excludes _decl.* ambiently
+        (no --kind given) — a genuinely additional leak site found beyond
+        the fold-state path (facts_between had no filter at all)."""
+        from engine import vertex_facts
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+            {"kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        facts = vertex_facts(vpath, 0.0, 9999.0)
+        assert {f["kind"] for f in facts} == {"decision"}
+
+    def test_vertex_facts_explicit_internal_kind_needs_include_internal(self, tmp_path):
+        """Requesting kind='_decl.receipt' without include_internal=True still
+        excludes it — apps/loops callers must derive include_internal from
+        is_internal_kind(kind), same rule as vertex_fold's kind param."""
+        from engine import vertex_facts
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        assert vertex_facts(vpath, 0.0, 9999.0, kind="_decl.receipt") == []
+        facts = vertex_facts(
+            vpath, 0.0, 9999.0, kind="_decl.receipt", include_internal=True
+        )
+        assert len(facts) == 1
+
+    def test_vertex_summary_excludes_decl_kinds(self, tmp_path):
+        from engine.vertex_reader import vertex_summary
+
+        vpath = _create_vertex_file(tmp_path, "test", '  decision { fold { items "by" "topic" } }')
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth"}},
+            {"kind": "_decl.receipt", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        summary = vertex_summary(vpath)
+        assert set(summary["facts"]["kinds"].keys()) == {"decision"}
+
+        summary_full = vertex_summary(vpath, include_internal=True)
+        assert "_decl.receipt" in summary_full["facts"]["kinds"]
+
+
 def _create_search_vertex(tmp_path: Path, name: str, loops_kdl: str) -> Path:
     """Write a .vertex file with search declarations."""
     content = f'name "{name}"\nstore "./store.db"\n\nloops {{\n{loops_kdl}\n}}\n'
@@ -997,6 +1142,47 @@ class TestCombinedVertexFacts:
         assert len(facts) == 1
         assert facts[0]["payload"]["topic"] == "mid"
 
+    def test_excludes_decl_kinds_by_default(self, tmp_path, monkeypatch):
+        """_combined_facts had its own raw UNION ALL SQL with no filter — a
+        leak site beyond the single-store StoreReader.facts_between path."""
+        from engine import vertex_facts
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "_decl.genesis", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        facts = vertex_facts(combine_vpath, 0.0, 9999.0)
+        assert {f["kind"] for f in facts} == {"decision"}
+
+        facts_full = vertex_facts(combine_vpath, 0.0, 9999.0, include_internal=True)
+        assert {f["kind"] for f in facts_full} == {"decision", "_decl.genesis"}
+
+    def test_explicit_kind_on_undeclared_kind_stays_silently_empty(self, tmp_path, monkeypatch):
+        """KNOWN GAP, not fixed by S3: unlike the single-store path,
+        combinatorial vertices have no per-kind raw-facts fallback for
+        vertex_fold's explicit --kind on an undeclared kind — _combined_read
+        only ever queries kinds present in full_specs (SPEC §9 build plan,
+        S3 PLAN.md decision 3 / open question 1). `--kind _decl.<x>` on an
+        aggregation vertex therefore still silently renders empty. Extending
+        the fallback here would need a raw per-store facts_by_kind query
+        merged across all combined stores — a materially bigger change than
+        the single-store case's ~10-line addition. Documented here so the
+        inconsistency is explicit, not silently left mismatched between the
+        two vertex shapes."""
+        from engine import vertex_fold
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "_decl.genesis", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        result = vertex_fold(combine_vpath, kind="_decl.genesis")
+        assert result.sections[0].items == ()  # still empty — the documented gap
+
     def test_empty_combine(self, tmp_path, monkeypatch):
         """No resolvable stores → empty facts."""
         from engine import vertex_facts
@@ -1076,6 +1262,25 @@ class TestCombinedVertexSummary:
         assert summary["facts"]["total"] == 3
         assert summary["facts"]["kinds"]["decision"]["count"] == 3
         assert summary["ticks"]["total"] == 1
+
+    def test_excludes_decl_kinds_by_default(self, tmp_path, monkeypatch):
+        """SPEC §9.4 applies to combinatorial vertices too — _combined_summary
+        had its own raw `GROUP BY kind` SQL with no filter (a leak site beyond
+        the single-store StoreReader path)."""
+        from engine import vertex_summary
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "_decl.genesis", "ts": 500.0, "payload": {"lineage": "abc"}},
+        ])
+
+        summary = vertex_summary(combine_vpath)
+        assert set(summary["facts"]["kinds"].keys()) == {"decision"}
+
+        summary_full = vertex_summary(combine_vpath, include_internal=True)
+        assert "_decl.genesis" in summary_full["facts"]["kinds"]
 
     def test_empty_combine_summary(self, tmp_path, monkeypatch):
         """No resolvable stores → zeroed summary."""

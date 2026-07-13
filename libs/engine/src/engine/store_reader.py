@@ -38,10 +38,17 @@ class StoreReader:
         row = self._conn.execute("SELECT COUNT(*) FROM ticks").fetchone()
         return row[0]
 
-    def fact_kind_stats(self) -> dict[str, dict]:
-        """Per-kind fact counts and time ranges."""
+    def fact_kind_stats(self, *, include_internal: bool = False) -> dict[str, dict]:
+        """Per-kind fact counts and time ranges.
+
+        Excludes the reserved ``_decl.*`` declaration-event namespace by
+        default (SPEC §9.4 — every read surface excludes it; ``GLOB`` not
+        ``LIKE``, since ``_`` is a LIKE single-char wildcard, not a GLOB one).
+        Pass ``include_internal=True`` for the explicit escape hatch.
+        """
+        where = "" if include_internal else "WHERE kind NOT GLOB '_decl.*'"
         rows = self._conn.execute(
-            "SELECT kind, COUNT(*), MIN(ts), MAX(ts) FROM facts GROUP BY kind"
+            f"SELECT kind, COUNT(*), MIN(ts), MAX(ts) FROM facts {where} GROUP BY kind"
         ).fetchall()
         return {
             r[0]: {
@@ -153,12 +160,17 @@ class StoreReader:
             for r in rows
         }
 
-    def summary(self) -> dict:
-        """Aggregate store contents into a summary dict."""
+    def summary(self, *, include_internal: bool = False) -> dict:
+        """Aggregate store contents into a summary dict.
+
+        ``include_internal`` threads to :meth:`fact_kind_stats` — the
+        ``_decl.*`` reserved namespace is excluded from ``facts.kinds`` by
+        default (SPEC §9.4).
+        """
         return {
             "facts": {
                 "total": self.fact_total,
-                "kinds": self.fact_kind_stats(),
+                "kinds": self.fact_kind_stats(include_internal=include_internal),
             },
             "ticks": {
                 "total": self.tick_total,
@@ -309,18 +321,30 @@ class StoreReader:
         since_ts: float,
         until_ts: float,
         kind: str | None = None,
+        *,
+        include_internal: bool = False,
     ) -> list[dict]:
-        """Facts within a time range, optionally filtered by kind."""
+        """Facts within a time range, optionally filtered by kind.
+
+        Excludes the reserved ``_decl.*`` namespace by default (SPEC §9.4),
+        same ``GLOB`` (not ``LIKE``) rule as :meth:`fact_kind_stats`. Pass
+        ``include_internal=True`` for the explicit escape hatch — callers
+        that resolve an explicit user-requested internal ``kind`` should set
+        this, since the ambient exclusion would otherwise filter out the very
+        kind being asked for.
+        """
+        internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
         if kind is not None:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?) ORDER BY ts",
+                "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?)"
+                f"{internal_clause} ORDER BY ts",
                 (since_ts, until_ts, kind, kind + ".%"),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                "WHERE ts >= ? AND ts <= ? ORDER BY ts",
+                f"WHERE ts >= ? AND ts <= ?{internal_clause} ORDER BY ts",
                 (since_ts, until_ts),
             ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]

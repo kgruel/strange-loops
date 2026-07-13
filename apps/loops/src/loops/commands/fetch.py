@@ -329,6 +329,7 @@ def fetch_stream(
     from engine import vertex_facts
     from lang import parse_vertex_file
     from lang.ast import FoldBy
+    from lang.document import is_internal_kind
 
     kind_filter, key_filter = _split_kind_key(kind)
 
@@ -338,9 +339,12 @@ def fetch_stream(
     now = datetime.now(timezone.utc)
     since_ts = (now - timedelta(seconds=since_secs)).timestamp()
 
+    # Explicit --kind _decl.<x> is the SPEC §9.4 escape hatch — it overrides
+    # the ambient exclusion of the reserved namespace everywhere else.
     facts = vertex_facts(
         vertex_path, since_ts, now.timestamp(), kind=kind_filter,
         observer=observer,
+        include_internal=bool(kind_filter and is_internal_kind(kind_filter)),
     )
 
     # Key drill-down: filter facts by payload key field value
@@ -622,13 +626,18 @@ def fetch_confluence(
 
     from engine import vertex_facts
     from lang import parse_vertex_file
+    from lang.document import is_internal_kind
 
     from loops.surface import tier_max
 
     ast = parse_vertex_file(vertex_path)
     fold_meta = _get_fold_meta(vertex_path)
     now = datetime.now(timezone.utc).timestamp()
-    facts = vertex_facts(vertex_path, 0.0, now, kind=kind, observer=observer)
+    # Explicit --kind _decl.<x> is the SPEC §9.4 escape hatch (see fetch_stream).
+    facts = vertex_facts(
+        vertex_path, 0.0, now, kind=kind, observer=observer,
+        include_internal=bool(kind and is_internal_kind(kind)),
+    )
 
     # Tier decoration is best-effort — a fold failure leaves observers
     # untiered rather than breaking the read (same stance as stream/ticks).

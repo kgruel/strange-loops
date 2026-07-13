@@ -438,20 +438,28 @@ def _combined_facts(
     since_ts: float,
     until_ts: float,
     kind: str | None = None,
+    *,
+    include_internal: bool = False,
 ) -> list[dict]:
-    """Raw facts across multiple stores (combinatorial vertex_facts)."""
+    """Raw facts across multiple stores (combinatorial vertex_facts).
+
+    Excludes the reserved ``_decl.*`` namespace by default (SPEC §9.4), same
+    ``GLOB`` rule as the single-store path.
+    """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return []
 
     conn, aliases = _open_combined(store_paths)
     try:
+        internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
         # See _combined_read for ts-tie ordering note.
         if kind is not None:
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
                 f"WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ? || '.%')"
+                f"{internal_clause}"
                 for a in aliases
             ]
             sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
@@ -462,7 +470,7 @@ def _combined_facts(
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
-                f"WHERE ts >= ? AND ts <= ?"
+                f"WHERE ts >= ? AND ts <= ?{internal_clause}"
                 for a in aliases
             ]
             sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
@@ -541,8 +549,15 @@ def _combined_ticks(
         conn.close()
 
 
-def _combined_summary(ast: Any, vertex_path: Path) -> dict:
-    """Merged summary across multiple stores (combinatorial vertex_summary)."""
+def _combined_summary(
+    ast: Any, vertex_path: Path, *, include_internal: bool = False
+) -> dict:
+    """Merged summary across multiple stores (combinatorial vertex_summary).
+
+    Excludes the reserved ``_decl.*`` namespace by default (SPEC §9.4),
+    same rule and same ``GLOB`` (not ``LIKE``) as the single-store path in
+    :meth:`StoreReader.fact_kind_stats`.
+    """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
@@ -550,9 +565,10 @@ def _combined_summary(ast: Any, vertex_path: Path) -> dict:
     conn, aliases = _open_combined(store_paths)
     try:
         # Aggregate fact counts per kind
+        kind_where = "" if include_internal else "WHERE kind NOT GLOB '_decl.*'"
         selects_facts = [
             f"SELECT kind, COUNT(*), MIN(ts), MAX(ts) "
-            f"FROM {'[' + a + '].' if a != 'main' else ''}facts GROUP BY kind"
+            f"FROM {'[' + a + '].' if a != 'main' else ''}facts {kind_where} GROUP BY kind"
             for a in aliases
         ]
         sql_facts = " UNION ALL ".join(selects_facts)
@@ -980,13 +996,38 @@ def vertex_fold(
 
                     raw[k] = spec.replay(payloads)
 
-                # Detect unfolded kinds — in store but not declared
+                # Detect unfolded kinds — in store but not declared. Excludes
+                # the reserved `_decl.*` namespace by default (SPEC §9.4 —
+                # every read surface excludes it ambiently); an explicit
+                # `--kind` request below is the escape hatch, not this footer.
                 store_kinds = reader.fact_kind_stats()
                 unfolded = {
                     k: v["count"]
                     for k, v in store_kinds.items()
                     if k not in full_specs
                 }
+
+                # Explicit --kind for a kind no vertex declares a loop for:
+                # fetch its raw facts directly rather than silently rendering
+                # an empty section. General fallback, not `_decl.*`-specific —
+                # mirrors `loops ls --kind NAME`'s existing declaration-bypass
+                # behavior (fetch_kind_stat queries the store directly for any
+                # kind string). This is how `--kind _decl.<x>` surfaces a
+                # reserved-namespace kind on demand: an explicit ask overrides
+                # the ambient default everywhere else in this module too.
+                if kind is not None and kind not in full_specs:
+                    facts = reader.facts_by_kind(kind)
+                    if observer:
+                        facts = [f for f in facts if observer_matches(f["observer"], observer)]
+                    payloads = []
+                    for fact in facts:
+                        p = dict(fact["payload"])
+                        p["_ts"] = fact["ts"]
+                        p["_observer"] = fact["observer"]
+                        p["_origin"] = fact.get("origin", "")
+                        p["_id"] = fact.get("id")
+                        payloads.append(p)
+                    raw[kind] = payloads
 
     return _raw_to_fold_state(
         raw, ast, full_specs, kind=kind, unfolded=unfolded,
@@ -1130,6 +1171,8 @@ def vertex_facts(
     until_ts: float,
     kind: str | None = None,
     observer: str | None = None,
+    *,
+    include_internal: bool = False,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
 
@@ -1137,13 +1180,22 @@ def vertex_facts(
 
     For queries that need raw facts (e.g. log), not fold state.
     Still goes through the vertex — the vertex knows where its store is.
+
+    Excludes the reserved ``_decl.*`` namespace by default (SPEC §9.4);
+    ``include_internal=True`` is the explicit escape hatch — callers
+    threading a user-requested ``kind`` that targets the reserved namespace
+    should set this, else the ambient exclusion filters out the very kind
+    being asked for.
     """
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
-        facts = _combined_facts(ast, vertex_path, since_ts, until_ts, kind)
+        facts = _combined_facts(
+            ast, vertex_path, since_ts, until_ts, kind,
+            include_internal=include_internal,
+        )
     elif ast.store is None:
         facts = []
     else:
@@ -1155,7 +1207,9 @@ def vertex_facts(
             facts = []
         else:
             with StoreReader(store_path) as reader:
-                facts = reader.facts_between(since_ts, until_ts, kind=kind)
+                facts = reader.facts_between(
+                    since_ts, until_ts, kind=kind, include_internal=include_internal
+                )
 
     if observer:
         facts = [f for f in facts if observer_matches(f["observer"], observer)]
@@ -1208,20 +1262,24 @@ def vertex_ticks(
         )
 
 
-def vertex_summary(vertex_path: Path) -> dict:
+def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict:
     """Read store summary from a vertex — fact/tick counts and per-kind stats.
 
     Returns the same shape as StoreReader.summary():
         {"facts": {"total": N, "kinds": {...}}, "ticks": {"total": N, "names": {...}}}
 
     Returns zeroed summary if the vertex has no store or store doesn't exist.
+
+    Excludes the reserved ``_decl.*`` namespace from ``facts.kinds`` by
+    default (SPEC §9.4); ``include_internal=True`` is the explicit escape
+    hatch.
     """
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
 
     if ast.combine is not None or ast.discover is not None:
-        return _combined_summary(ast, vertex_path)
+        return _combined_summary(ast, vertex_path, include_internal=include_internal)
 
     if ast.store is None:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
@@ -1234,7 +1292,7 @@ def vertex_summary(vertex_path: Path) -> dict:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 
     with StoreReader(store_path) as reader:
-        return reader.summary()
+        return reader.summary(include_internal=include_internal)
 
 
 def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:

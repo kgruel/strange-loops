@@ -42,7 +42,9 @@ def _describe_fold(fold_decl: Any) -> str:
     return cls.lower().removeprefix("fold")
 
 
-def _store_stats(store_path: Path) -> dict[str, Any] | None:
+def _store_stats(
+    store_path: Path, *, include_internal: bool = False
+) -> dict[str, Any] | None:
     """Cheap stat read over an instance store — the `ls -l` columns.
 
     Returns ``{facts, kind_count, mtime, kind_stats}`` where ``mtime`` is the
@@ -52,6 +54,11 @@ def _store_stats(store_path: Path) -> dict[str, Any] | None:
     ``StoreReader.fact_kind_stats()`` (per-kind MAX(ts) is already computed
     there — decision C, zero net-new query). Returns ``None`` when the store
     file does not yet exist (freshly declared vertex).
+
+    ``include_internal`` threads to ``StoreReader.summary()`` — the reserved
+    ``_decl.*`` namespace is excluded from ``kind_stats`` by default (SPEC
+    §9.4); callers pass ``True`` only for an explicit ``--kind _decl.<x>``
+    ask, never for the ambient KINDS listing.
     """
     if not store_path.exists():
         return None
@@ -59,7 +66,7 @@ def _store_stats(store_path: Path) -> dict[str, Any] | None:
 
     _TREND_WINDOW = 30 * 86400  # recent-momentum window for the trend sparkline
     with StoreReader(store_path) as reader:
-        summary = reader.summary()
+        summary = reader.summary(include_internal=include_internal)
         freshness = reader.freshness
         signed = reader.signed_counts()
         # Per-kind density over the recent window, on a shared time axis so the

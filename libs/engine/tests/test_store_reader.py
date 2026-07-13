@@ -377,3 +377,80 @@ class TestSignedCounts:
         """Pre-signature schemas (no signature column) return None, not raise."""
         with StoreReader(populated_db) as reader:
             assert reader.signed_counts() is None
+
+
+@pytest.fixture
+def decl_db(tmp_db: Path) -> Path:
+    """Database mixing ordinary kinds with the reserved `_decl.*` namespace.
+
+    S3 (SPEC §9.4): every read surface excludes `_decl.*` by default, with
+    an explicit escape hatch. This fixture exercises both.
+    """
+    conn = sqlite3.connect(str(tmp_db))
+    rows = [
+        ("01FACT_DEC1", "decision", 100.0, "kyle", '{"topic": "auth"}'),
+        ("01FACT_DEC2", "decision", 200.0, "kyle", '{"topic": "auth"}'),
+        ("01FACT_GEN1", "_decl.genesis", 50.0, "kyle", '{"lineage": "abc123secret"}'),
+        ("01FACT_KDEF1", "_decl.kind-defined", 60.0, "kyle", '{"subject": "decision"}'),
+    ]
+    for row_id, kind, ts, observer, payload in rows:
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+            (row_id, kind, ts, observer, payload),
+        )
+    conn.commit()
+    conn.close()
+    return tmp_db
+
+
+class TestInternalKindExclusion:
+    """SPEC §9.4 — `_decl.*` excluded by default, `include_internal=True` defeats it."""
+
+    def test_fact_kind_stats_excludes_by_default(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            stats = reader.fact_kind_stats()
+        assert set(stats.keys()) == {"decision"}
+
+    def test_fact_kind_stats_include_internal_defeat(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            stats = reader.fact_kind_stats(include_internal=True)
+        assert set(stats.keys()) == {"decision", "_decl.genesis", "_decl.kind-defined"}
+        assert stats["_decl.genesis"]["count"] == 1
+
+    def test_summary_excludes_by_default(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            s = reader.summary()
+        assert set(s["facts"]["kinds"].keys()) == {"decision"}
+        # total is the RAW fact count, not narrowed by the kinds exclusion —
+        # only the per-kind breakdown is filtered.
+        assert s["facts"]["total"] == 4
+
+    def test_summary_include_internal_defeat(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            s = reader.summary(include_internal=True)
+        assert "_decl.genesis" in s["facts"]["kinds"]
+
+    def test_facts_between_excludes_by_default(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            facts = reader.facts_between(0.0, 1000.0)
+        assert {f["kind"] for f in facts} == {"decision"}
+
+    def test_facts_between_include_internal_defeat(self, decl_db: Path):
+        with StoreReader(decl_db) as reader:
+            facts = reader.facts_between(0.0, 1000.0, include_internal=True)
+        assert {f["kind"] for f in facts} == {"decision", "_decl.genesis", "_decl.kind-defined"}
+
+    def test_facts_between_explicit_internal_kind_needs_defeat(self, decl_db: Path):
+        """Narrowing to an internal kind WITHOUT the defeat still returns empty —
+        the ambient exclusion applies to the kind filter too, not just the
+        no-kind ambient case. Callers must pass include_internal explicitly."""
+        with StoreReader(decl_db) as reader:
+            facts = reader.facts_between(0.0, 1000.0, kind="_decl.genesis")
+        assert facts == []
+
+        with StoreReader(decl_db) as reader:
+            facts = reader.facts_between(
+                0.0, 1000.0, kind="_decl.genesis", include_internal=True
+            )
+        assert len(facts) == 1
+        assert facts[0]["kind"] == "_decl.genesis"

@@ -81,7 +81,7 @@ def _require_materialized_store(target_path: Path) -> Path:
     return db_path
 
 
-def make_fetcher(path: Path, zoom: int):
+def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
     """Create a zero-arg fetcher for store data.
 
     zoom controls enrichment depth:
@@ -89,13 +89,24 @@ def make_fetcher(path: Path, zoom: int):
       1:   + sparkline + payload_keys per tick
       2:   + latest tick payloads
       3:   + recent fact payloads
+
+    ``kind``, when given, is the explicit ``--kind`` escape hatch (SPEC
+    §9.4): the reserved ``_decl.*`` namespace is excluded from
+    ``facts.kinds`` by default, but an explicit ``--kind`` ask narrows the
+    listing to that one kind and includes it regardless of namespace —
+    an explicit request overrides the ambient default, same rule as every
+    other read surface this task touches.
     """
     def fetch() -> dict:
         from engine.store_reader import StoreReader
 
         store_path = resolve_store_path(path)
         with StoreReader(store_path) as reader:
-            data = reader.summary()
+            data = reader.summary(include_internal=kind is not None)
+            if kind is not None:
+                data["facts"]["kinds"] = {
+                    k: v for k, v in data["facts"]["kinds"].items() if k == kind
+                }
             data["freshness"] = reader.freshness
             if zoom >= 1:
                 # Sparkline + payload keys per tick name
@@ -109,8 +120,8 @@ def make_fetcher(path: Path, zoom: int):
                         list(recent[0].payload.keys()) if recent else []
                     )
                 # Keep sample payload per fact kind for SUMMARY gist
-                for kind, info in data["facts"]["kinds"].items():
-                    recent = reader.recent_facts(kind, 1)
+                for fkind, info in data["facts"]["kinds"].items():
+                    recent = reader.recent_facts(fkind, 1)
                     if recent:
                         info["sample_payload"] = recent[0]["payload"]
             if zoom >= 2:
@@ -121,8 +132,8 @@ def make_fetcher(path: Path, zoom: int):
                         info["latest_since"] = recent[0].since.timestamp() if recent[0].since else None
                         info["latest_ts"] = recent[0].ts.timestamp()
             if zoom >= 3:
-                for kind, info in data["facts"]["kinds"].items():
-                    recent = reader.recent_facts(kind, 5)
+                for fkind, info in data["facts"]["kinds"].items():
+                    recent = reader.recent_facts(fkind, 5)
                     info["recent"] = [f["payload"] for f in recent]
             return data
     return fetch
@@ -931,6 +942,10 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     if vertex_path is None:
         pre.add_argument("file", nargs="?", default=None)
     pre.add_argument("--by-kind", dest="by_kind", action="store_true", default=False)
+    pre.add_argument(
+        "--kind", default=None,
+        help="Narrow to one kind (escape hatch for the reserved _decl.* namespace)",
+    )
     known, rest = pre.parse_known_args(argv)
     file_arg = getattr(known, "file", None)
 
@@ -947,7 +962,13 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
 
         store_path = _require_materialized_store(target_path)
         with StoreReader(store_path) as reader:
-            summary = reader.summary()
+            # Explicit --kind is the SPEC §9.4 escape hatch — it overrides
+            # the ambient _decl.* exclusion, same rule as `loops store` base.
+            summary = reader.summary(include_internal=known.kind is not None)
+        if known.kind is not None:
+            summary["facts"]["kinds"] = {
+                k: v for k, v in summary["facts"]["kinds"].items() if k == known.kind
+            }
         kinds = sorted(
             (
                 {"kind": k, "count": v["count"]}
@@ -1016,6 +1037,10 @@ def _run_store(
     pre = argparse.ArgumentParser(add_help=False)
     if vertex_path is None:
         pre.add_argument("file", nargs="?", default=None)
+    pre.add_argument(
+        "--kind", default=None,
+        help="Narrow to one kind (escape hatch for the reserved _decl.* namespace)",
+    )
     known, rest = pre.parse_known_args(argv)
     file_arg = getattr(known, "file", None)
 
@@ -1032,7 +1057,7 @@ def _run_store(
         path = _resolve_store_target().resolve()
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
-        data = make_fetcher(path, zoom=3)()
+        data = make_fetcher(path, zoom=3, kind=known.kind)()
         # Lead the MINIMAL one-liner with the store name (spine dot-grammar),
         # matching the store ticks/stats surfaces — the vertex name is the
         # store stem, known here at the call site.

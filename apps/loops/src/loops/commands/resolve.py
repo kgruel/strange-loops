@@ -1170,10 +1170,22 @@ def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
     Skips validation when ``kind`` is None (no filter requested) or the
     vertex's declared-kinds set is empty (couldn't determine — don't block).
     Path-style ``kind/key`` is split: only the kind half is validated.
+
+    Also skips validation for the reserved ``_decl.*`` namespace (SPEC
+    §9.4) — no vertex ever declares a loop for it, so without this carve-out
+    ``--kind _decl.<x>`` would always exit 2 here before ever reaching
+    ``vertex_fold``'s explicit-kind raw fallback (S3,
+    decision:architecture/internal-table-s3-read-exclusion). This is the
+    ONE bypass through an otherwise-strict gate — every other undeclared
+    kind still gets the typo/mismatch error above.
     """
     if kind is None or vertex_path is None:
         return
     kind_only = kind.split("/", 1)[0]
+    from lang.document import is_internal_kind
+
+    if is_internal_kind(kind_only):
+        return
     declared = _declared_kinds(vertex_path)
     if not declared:
         return

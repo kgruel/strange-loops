@@ -5,8 +5,12 @@ specialised display verbs:
 
   default (no special flag)  → fold (current state)
   --ticks                    → ticks (drill-down or list)
-  --facts + --since|--id     → stream (temporal query)
+  --facts + --since|--as-of|--id → stream (temporal query)
   (otherwise) --facts        → fold with the facts visibility layer
+
+``--as-of`` (SPEC §9.3, equal-cursors) rewinds both the fact window and the
+ontology to a historical anchor; it routes to stream exactly as ``--since``
+does.
 
 This router does the minimum disambiguation — pre-parses the routing
 flags, picks a delegate, and forwards the remaining argv. The heavy
@@ -26,14 +30,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--facts", action="store_true", default=False)
     pre.add_argument("--ticks", action="store_true", default=False)
     pre.add_argument("--since", default=None)
+    pre.add_argument("--as-of", default=None, dest="as_of")
     pre.add_argument("--id", default=None, dest="fact_id")
     known, rest = pre.parse_known_args(argv)
 
-    # Temporal facts query → stream (re-injects --since / --id into argv).
-    if known.facts and (known.since or known.fact_id):
+    # Temporal facts query → stream (re-injects --since / --as-of / --id).
+    if known.facts and (known.since or known.as_of or known.fact_id):
         stream_rest = list(rest)
         if known.since:
             stream_rest += ["--since", known.since]
+        if known.as_of:
+            stream_rest += ["--as-of", known.as_of]
         if known.fact_id:
             stream_rest += ["--id", known.fact_id]
         from . import stream as stream_view

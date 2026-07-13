@@ -43,6 +43,19 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   wins. ``_decl.*-retired``/``-removed`` rows are subject tombstones. Unknown
   ``_decl.*`` kinds (receipts, future protocol) are skipped safely.
 
+- **Same-``ts`` tie-break: an edit is in force at its own ``ts``, inclusive.**
+  The ``as_of`` cutoff is ``_ts <= as_of`` (a declaration edit at ``ts == as_of``
+  participates), matching ``StoreReader.facts_between``'s inclusive upper bound
+  (``ts <= until_ts``). With the equal-cursors default (``as_of = until_ts``,
+  SPEC §9.3), the consequence is deterministic and explicit: **when a fact and a
+  declaration edit share an exact float ``ts``, the fact folds under the NEW
+  ontology** — the edit wins its own instant, regardless of physical append
+  order. The tie-break is purely ``ts``-based (not witness/rowid order), so it is
+  reproducible across runs and across a ``rebuild(dump(S))`` that reassigns
+  rowids. Witness-order ("as of" the fact cursor) is the finer axis SPEC §9.4
+  grounds fact-residence on; it is deferred (Q1) until a fact-cursor read surface
+  exists — until then ``ts`` with this inclusive tie-break is the single axis.
+
 NOTE (provisional, pre-S4): no edit ceremony exists yet, so today only
 genesis-only stores occur in practice. The overlay/tombstone fold is
 nonetheless built and tested against hand-constructed rows, because it is
@@ -237,6 +250,10 @@ def resolve_declaration_documents(
         for _row_id, kind, _ts, payload_text in overlay_rows:
             if not is_internal_kind(kind):  # defensive; GLOB already scopes
                 continue
+            # Inclusive cutoff (`> as_of`, not `>= as_of`): an edit AT `as_of`
+            # is in force. With equal-cursors (`as_of == until_ts`) a fact and an
+            # edit sharing an exact `ts` fold the fact under the NEW ontology —
+            # the deterministic ts-axis tie-break (module docstring).
             if as_of is not None and _ts > as_of:
                 continue
             try:

@@ -38,6 +38,34 @@ def _parse_duration(s: str) -> float:
     return value * multipliers[unit]
 
 
+def _parse_as_of(s: str, now: datetime) -> float:
+    """Resolve an ``--as-of`` value to an anchor epoch ``ts`` (SPEC §9.3).
+
+    The anchor is the read's upper bound: facts replay up to it and — the
+    equal-cursors default — the ontology resolves at it. Accepts either a
+    duration ("ago" from ``now``, same grammar as ``--since``: ``7d``/``24h``)
+    or an absolute position (epoch seconds, or an ISO-8601 timestamp). Absolute
+    forms matter for a precise rewind — a cursor landing strictly between two
+    declaration edits — where a duration-from-now would be timing-fragile.
+    """
+    if re.match(r"^\d+[dhms]$", s):
+        return (now - timedelta(seconds=_parse_duration(s))).timestamp()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid --as-of {s!r} (expected a duration e.g. '7d', epoch "
+            "seconds, or an ISO-8601 timestamp)"
+        ) from e
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def _split_kind_key(kind: str | None) -> tuple[str | None, str | None]:
     """Split ``kind/key`` into (kind, key). Plain kind returns (kind, None)."""
     if kind is None:
@@ -48,12 +76,19 @@ def _split_kind_key(kind: str | None) -> tuple[str | None, str | None]:
     return kind, None
 
 
-def _get_key_field(vertex_path: Path, kind: str) -> str | None:
-    """Look up the key field for a kind from the vertex's fold declarations."""
-    from lang import parse_vertex_file
+def _get_key_field(
+    vertex_path: Path, kind: str, *, as_of: float | None = None
+) -> str | None:
+    """Look up the key field for a kind from the vertex's fold declarations.
+
+    Resolves through the store-backed declaration seam (SPEC §9.5), so an
+    ``as_of`` ``ts`` cursor picks the fold key in force at that historical
+    position (equal-cursors, §9.3). ``as_of=None`` = head.
+    """
+    from engine import load_declaration
     from lang.ast import FoldBy
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path, as_of=as_of)
     loop_def = ast.loops.get(kind)
     if loop_def and loop_def.folds:
         fold_decl = loop_def.folds[0]
@@ -312,6 +347,7 @@ def fetch_stream(
     kind: str | None = None,
     since: str | None = None,
     observer: str | None = None,
+    as_of: str | None = None,
 ) -> dict:
     """Fetch the temporal event stream (raw facts, reverse-chrono).
 
@@ -324,10 +360,17 @@ def fetch_stream(
     (case-insensitive). When drilling down, time window defaults to all
     history (not 7d).
 
+    ``as_of`` (SPEC §9.3, equal-cursors default) rewinds the read to a
+    historical anchor: facts replay up to it AND the ontology — the fold key
+    fields used to extract each row's key — resolves at the SAME anchor. Absent,
+    the anchor is ``now`` and the ontology cursor is ``None`` (head): the exact
+    pre-S5 path, so ``as_of``=head is byte-identical to current behavior. The
+    fact window's lower bound is ``anchor - since``. Tier decoration stays head
+    (Q3 — tier is lens/present-session state, SPEC §9.3).
+
     Returns ``{"facts": list[dict], "fold_meta": dict, "vertex": str}``.
     """
-    from engine import vertex_facts
-    from lang import parse_vertex_file
+    from engine import load_declaration, vertex_facts
     from lang.ast import FoldBy
     from lang.document import is_internal_kind
 
@@ -337,19 +380,29 @@ def fetch_stream(
     default_since = "7d" if key_filter is None else "3650d"
     since_secs = _parse_duration(since or default_since)
     now = datetime.now(timezone.utc)
-    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+
+    # Equal-cursors (SPEC §9.3): one anchor is BOTH the fact-window upper bound
+    # and the ontology-as-of cutoff. cursor=None (head) when --as-of is absent
+    # keeps the equivalence property exact.
+    anchor = _parse_as_of(as_of, now) if as_of else now.timestamp()
+    cursor = anchor if as_of else None
+    since_ts = anchor - since_secs
 
     # Explicit --kind _decl.<x> is the SPEC §9.4 escape hatch — it overrides
     # the ambient exclusion of the reserved namespace everywhere else.
     facts = vertex_facts(
-        vertex_path, since_ts, now.timestamp(), kind=kind_filter,
+        vertex_path, since_ts, anchor, kind=kind_filter,
         observer=observer,
         include_internal=bool(kind_filter and is_internal_kind(kind_filter)),
+        as_of=cursor,
     )
 
-    # Key drill-down: filter facts by payload key field value
+    # Key drill-down: filter facts by payload key field value (as-of fold key)
     if key_filter is not None:
-        key_field = _get_key_field(vertex_path, kind_filter) if kind_filter else None
+        key_field = (
+            _get_key_field(vertex_path, kind_filter, as_of=cursor)
+            if kind_filter else None
+        )
         facts = [
             f for f in facts
             if _fact_matches_key(f, key_field, key_filter)
@@ -362,8 +415,10 @@ def fetch_stream(
         if isinstance(f["ts"], datetime):
             f["ts"] = f["ts"].isoformat()
 
-    # Get fold declarations for rendering hints
-    ast = parse_vertex_file(vertex_path)
+    # Fold declarations for rendering hints — resolved through the store-backed
+    # seam at the ontology-as-of cursor so key_field extraction under rewind
+    # uses the as-of fold keys, not head's (SPEC §9.3 equal-cursors).
+    ast = load_declaration(vertex_path, as_of=cursor)
     fold_meta: dict[str, dict] = {}
     for k, loop_def in ast.loops.items():
         key_field = None
@@ -443,24 +498,33 @@ def fetch_ticks(
     vertex_path: Path,
     *,
     since: str | None = None,
+    as_of: str | None = None,
 ) -> dict:
     """Fetch tick history from a vertex's store.
 
     Returns ``{"ticks": list[dict], "vertex": str}``.
     Each tick dict has: name, ts, since, origin, payload, fact_count, kind_counts.
     Ticks are returned newest-first.
+
+    ``as_of`` (SPEC §9.3, equal-cursors) rewinds the tick-window read to a
+    historical anchor: the window upper bound and the ontology cursor are the
+    same value. Absent → anchor ``now`` / cursor ``None`` (head). Tier stays
+    head (Q3, lens state). A tick DRILL (``--ticks <idx>``) interprets its own
+    snapshot under ``as_of = tick.ts`` regardless — that lives in
+    ``engine.vertex_tick_fold``, not here.
     """
-    from engine import vertex_ticks
-    from lang import parse_vertex_file
+    from engine import load_declaration, vertex_ticks
 
     since_secs = _parse_duration(since or "30d")
     now = datetime.now(timezone.utc)
-    since_ts = (now - timedelta(seconds=since_secs)).timestamp()
+    anchor = _parse_as_of(as_of, now) if as_of else now.timestamp()
+    cursor = anchor if as_of else None
+    since_ts = anchor - since_secs
 
-    ticks = vertex_ticks(vertex_path, since_ts, now.timestamp())
+    ticks = vertex_ticks(vertex_path, since_ts, anchor, as_of=cursor)
 
-    ast = parse_vertex_file(vertex_path)
-    fold_meta = _get_fold_meta(vertex_path)
+    ast = load_declaration(vertex_path, as_of=cursor)
+    fold_meta = _get_fold_meta(vertex_path, as_of=cursor)
 
     # Tier inheritance for tick windows (decision:design/tier-one-home-
     # inheritance + salience-max-propagation): a tick is a tree-cut container
@@ -1216,12 +1280,20 @@ def _fact_epoch(ts: object) -> float:
     return float("-inf")
 
 
-def _get_fold_meta(vertex_path: Path) -> dict[str, dict]:
-    """Extract fold key_field metadata from a vertex's loop declarations."""
-    from lang import parse_vertex_file
+def _get_fold_meta(
+    vertex_path: Path, *, as_of: float | None = None
+) -> dict[str, dict]:
+    """Extract fold key_field metadata from a vertex's loop declarations.
+
+    Resolves through the store-backed seam (SPEC §9.5); an ``as_of`` ``ts``
+    cursor picks the fold keys in force at that historical position
+    (equal-cursors, §9.3), so a rewound tick listing derives tier/touched under
+    the cursor ontology rather than head. ``as_of=None`` = head.
+    """
+    from engine import load_declaration
     from lang.ast import FoldBy
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path, as_of=as_of)
     fold_meta: dict[str, dict] = {}
     for k, loop_def in ast.loops.items():
         key_field = None
@@ -1267,8 +1339,7 @@ def fetch_tick_facts(
     *tick_index* is 0-based from most recent. Returns the same shape as
     ``fetch_stream`` so the stream lens can render it, plus tick metadata.
     """
-    from engine import vertex_facts
-    from lang import parse_vertex_file
+    from engine import load_declaration, vertex_facts
 
     ticks_newest = _load_ticks_newest(vertex_path, since, with_envelope=True)
 
@@ -1280,13 +1351,17 @@ def fetch_tick_facts(
 
     tick, envelope = ticks_newest[tick_index]
 
-    # Retrieve facts in the tick's window.
+    # Retrieve facts in the tick's window, interpreted under the ontology in
+    # force at the tick's boundary (as_of=tick.ts, equal-cursors §9.3) — the
+    # raw-fact drill must render under the same ontology vertex_tick_fold uses.
     # Engine invariant: tick.since is always set to the period's first-fact
     # timestamp — the engine sets _vertex_period_start before firing a boundary.
+    tick_ts = tick.ts.timestamp()
     facts = vertex_facts(
         vertex_path,
         tick.since.timestamp(),  # type: ignore[union-attr]
-        tick.ts.timestamp(),
+        tick_ts,
+        as_of=tick_ts,
     )
 
     facts.sort(key=lambda f: f["ts"], reverse=True)
@@ -1295,11 +1370,11 @@ def fetch_tick_facts(
         if isinstance(f["ts"], datetime):
             f["ts"] = f["ts"].isoformat()
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path, as_of=tick_ts)
 
     return {
         "facts": facts,
-        "fold_meta": _get_fold_meta(vertex_path),
+        "fold_meta": _get_fold_meta(vertex_path, as_of=tick_ts),
         "vertex": ast.name,
         "_tick": _tick_metadata(
             tick, index=tick_index, total=len(ticks_newest), envelope=envelope,
@@ -1320,8 +1395,7 @@ def fetch_tick_range(
     same shape as ``fetch_tick_facts`` with ``_tick`` metadata covering
     the range.
     """
-    from engine import vertex_facts
-    from lang import parse_vertex_file
+    from engine import load_declaration, vertex_facts
 
     ticks_newest = _load_ticks_newest(vertex_path, since)
 
@@ -1341,7 +1415,14 @@ def fetch_tick_range(
 
     selected = ticks_newest[start:end]
 
-    # Union facts across all tick windows
+    # The whole range renders under ONE ontology — the range's upper boundary
+    # (selected[0], the newest tick, since ticks_newest is newest-first). This
+    # matches fetch_tick_range_fold, which folds selected[0]'s snapshot under
+    # as_of=selected[0].ts (§9.3 equal-cursors); a single fold_meta cannot
+    # honestly carry two ontologies, so the range upper is the coherent choice.
+    range_ts = selected[0].ts.timestamp()
+
+    # Union facts across all tick windows, all under the range-upper ontology.
     all_facts: list[dict] = []
     for tick in selected:
         if tick.since is not None:
@@ -1349,6 +1430,7 @@ def fetch_tick_range(
                 vertex_path,
                 tick.since.timestamp(),
                 tick.ts.timestamp(),
+                as_of=range_ts,
             )
             all_facts.extend(facts)
 
@@ -1359,7 +1441,7 @@ def fetch_tick_range(
         if isinstance(f["ts"], datetime):
             f["ts"] = f["ts"].isoformat()
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path, as_of=range_ts)
 
     # Collect boundary info from all ticks in range
     boundaries = []
@@ -1372,7 +1454,7 @@ def fetch_tick_range(
 
     return {
         "facts": all_facts,
-        "fold_meta": _get_fold_meta(vertex_path),
+        "fold_meta": _get_fold_meta(vertex_path, as_of=range_ts),
         "vertex": ast.name,
         "_tick": {
             "name": selected[0].name,

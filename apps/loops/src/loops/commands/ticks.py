@@ -44,6 +44,11 @@ def _run_ticks(
     else:
         pre.add_argument("index", nargs="?", default=None)
     pre.add_argument("--since", default=None)
+    # --as-of (SPEC §9.3, equal-cursors): rewind the tick-window listing to a
+    # historical anchor. A tick DRILL always interprets its own snapshot under
+    # as_of=tick.ts (engine.vertex_tick_fold) — the flag only shifts the LIST
+    # window, not the per-tick interpretation.
+    pre.add_argument("--as-of", default=None, dest="as_of")
     pre.add_argument("--lens", default=None)
     known, rest = pre.parse_known_args(argv)
 
@@ -146,7 +151,7 @@ def _run_ticks(
     resolved_render_fn = None
 
     def fetch_listing():
-        return fetch_ticks(vertex_path, since=known.since)
+        return fetch_ticks(vertex_path, since=known.since, as_of=known.as_of)
 
     def render_listing(ctx, data):
         nonlocal resolved_render_fn

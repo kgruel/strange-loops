@@ -37,6 +37,8 @@ loops read <vertex> --kind thread status=open,refined  # comma-OR within one val
 loops read <vertex> --kind decision observer=NAME  # row filter: who emitted the fact
 loops read <vertex> --facts --since 7d        # time window (7d, 24h, 1h)
 loops read <vertex> --facts --kind thread --since 7d
+loops read <vertex> --facts --as-of 30d       # rewind: facts AND ontology as of 30d ago (SPEC §9.3)
+loops read <vertex> --ticks --as-of 30d       # tick-window listing rewound to 30d ago
 loops read <vertex> --lens prompt             # custom lens
 loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
 loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
@@ -46,6 +48,29 @@ loops read <vertex> --observer all            # peel identity scope (--observer 
 loops read <vertex> decision/design/foo --why # per-field provenance drill (exact kind/key address, sibling of --facts)
 loops <vertex>                                # shorthand for: loops read <vertex>
 ```
+
+### Ontology-as-of — `--as-of` (SPEC §9.3)
+
+Once a store historizes its declarations (`sl store absorb`), a temporal read
+has two cursors: **facts-as-of** (which facts replay) and **ontology-as-of**
+(which kinds/folds interpret them). `--as-of <duration|epoch|ISO>` rewinds a
+`--facts` or `--ticks` read to a historical anchor with the **equal-cursors
+default**: facts replay up to the anchor AND the ontology resolves at the *same*
+anchor — reading last month's facts reads them under last month's fold keys.
+Absent, the anchor is *now* and the ontology is head (current behavior, exactly).
+
+- The window's lower bound is `anchor − since`, so `--since 7d --as-of 30d` is
+  "the 7-day window ending 30 days ago, under 30-days-ago's ontology."
+- A `--ticks <idx>` **drill** always interprets its own snapshot under the
+  ontology in force at that tick's boundary, regardless of `--as-of`.
+- **Head-only surfaces** (never rewound): the default folded read (`sl read`,
+  "current state"), `store summary`, and every **write/identity** path
+  (`emit`, `sign`, `whoami`, `resolve`) — you cannot write or sign into the past.
+- **Caveats**: tier glyphs are present-session lens state and stay head under a
+  rewind (§9.3 permits non-critical state to follow the reading session). FTS
+  content search (`--match`) is a head-built index; a historical result set is
+  window-filtered but queries the head kind set. `--ontology-as-of` (unequal
+  cursors — deliberate reinterpretation) is reserved for 0.7.0, not yet wired.
 
 ### Query & transform grammar
 

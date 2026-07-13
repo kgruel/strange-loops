@@ -1439,6 +1439,31 @@ class TestCombinedVertexSearch:
         topics = [r["payload"]["topic"] for r in results]
         assert topics == ["deploy", "auth"]
 
+    def test_search_forwards_as_of_to_children(self, tmp_path, monkeypatch):
+        """as_of is forwarded to each child; combined head-equivalence holds (Codex #4).
+
+        Each child is a single store that must honor the cursor for its own
+        ``search`` fields; the aggregate's own resolution stays head (a non-goal).
+        The children here are pre-genesis (file-authoritative), so ``as_of=None``
+        and a future cursor resolve identically — this locks that forwarding the
+        cursor does not perturb the combined path (the forwarding itself is the
+        fix; per-child rewind of search fields rides the Q2 FTS caveat).
+        """
+        from engine import vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "JWT"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "JWT"}},
+        ])
+
+        head = vertex_search(combine_vpath, "JWT")
+        at_future = vertex_search(combine_vpath, "JWT", as_of=9_999_999.0)
+        assert [r["id"] for r in head] == [r["id"] for r in at_future]
+        assert len(head) == 2
+
     def test_search_single_child_match(self, tmp_path, monkeypatch):
         """Search returns results only from the child that matches."""
         from engine import vertex_search

@@ -634,8 +634,16 @@ def _combined_search(
     until: float | None = None,
     limit: int = 100,
     observer: str | None = None,
+    as_of: float | None = None,
 ) -> list[dict]:
-    """Search across combined children by delegating vertex_search to each child."""
+    """Search across combined children by delegating vertex_search to each child.
+
+    ``as_of`` is forwarded to each child (SPEC §9.3). The AGGREGATE's own
+    declaration resolves head (its member-set history is not historized — a
+    build-plan non-goal), but each child is a single store and MUST honor the
+    cursor for its own ``search`` fields — ``as_of`` is a shared wall-clock
+    ``ts``, so "as of T" resolves each child's declaration at T.
+    """
     from lang import resolve_vertex
 
     home = _loops_home()
@@ -661,7 +669,7 @@ def _combined_search(
 
         child_results = vertex_search(
             vpath, query, kind=kind, since=since, until=until,
-            limit=limit, observer=observer,
+            limit=limit, observer=observer, as_of=as_of,
         )
         all_results.extend(child_results)
 
@@ -1050,8 +1058,16 @@ def vertex_tick_fold(
 
     Items won't have ``_ts``/``_observer``/``_id`` metadata (not stored
     in fold snapshots). Content fields are preserved.
+
+    SPEC §9.3 / Q5: the snapshot is authoritative and is NEVER re-folded — but
+    it is *interpreted* (specs, key fields, edge declarations used to type and
+    render it) under the ontology in force at the tick's own boundary,
+    ``as_of = tick.ts``, not at head. A tick that fired before a fold-key
+    rename renders under the old key. This is the one surface where "as of" is
+    a property of the datum, not of the query.
     """
-    ast = load_declaration(vertex_path)
+    tick_ts = tick.ts.timestamp() if hasattr(tick.ts, "timestamp") else float(tick.ts)
+    ast = load_declaration(vertex_path, as_of=tick_ts)
     payload = tick.payload if isinstance(tick.payload, dict) else {}
 
     # Filter out tick-internal keys (e.g. _boundary)
@@ -1173,6 +1189,7 @@ def vertex_facts(
     observer: str | None = None,
     *,
     include_internal: bool = False,
+    as_of: float | None = None,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
 
@@ -1186,10 +1203,18 @@ def vertex_facts(
     threading a user-requested ``kind`` that targets the reserved namespace
     should set this, else the ambient exclusion filters out the very kind
     being asked for.
+
+    ``as_of`` (SPEC §9.3, ontology-as-of) resolves the vertex's declaration
+    at a historical ``ts`` cutoff instead of at head — the equal-cursors
+    default is ``as_of = until_ts``, so a windowed read interprets its facts
+    under the ontology in force at the window's upper bound. ``None`` = head
+    (identical to pre-S5 behavior). Only the store-resolution and reserved-
+    namespace exclusion ride the cutoff here; the fact time window itself is
+    ``since_ts..until_ts`` as before.
     """
     from .store_reader import StoreReader
 
-    ast = load_declaration(vertex_path)
+    ast = load_declaration(vertex_path, as_of=as_of)
 
     if ast.combine is not None or ast.discover is not None:
         facts = _combined_facts(
@@ -1223,6 +1248,7 @@ def vertex_ticks(
     name: str | None = None,
     *,
     with_envelope: bool = False,
+    as_of: float | None = None,
 ) -> list:
     """Read ticks from a vertex's store within a time range.
 
@@ -1233,10 +1259,13 @@ def vertex_ticks(
     Combined/aggregation vertices return EMPTY envelopes (``chained=False``,
     blank cursor fields): attestation is a per-store property — an
     aggregate combines ticks from many stores and does not itself attest.
+
+    ``as_of`` (SPEC §9.3) resolves the declaration at a historical ``ts``
+    cutoff — equal-cursors default is ``as_of = until_ts``. ``None`` = head.
     """
     from .store_reader import StoreReader
 
-    ast = load_declaration(vertex_path)
+    ast = load_declaration(vertex_path, as_of=as_of)
 
     if ast.combine is not None or ast.discover is not None:
         ticks = _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
@@ -1431,6 +1460,7 @@ def vertex_search(
     until: float | None = None,
     limit: int = 100,
     observer: str | None = None,
+    as_of: float | None = None,
 ) -> list[dict]:
     """Search fact payloads in a vertex's store via FTS5.
 
@@ -1447,6 +1477,13 @@ def vertex_search(
         until: Only facts with ts <= until.
         limit: Maximum results (default 100).
         observer: Filter to facts from this observer.
+        as_of: SPEC §9.3 ontology-as-of ``ts`` cutoff for declaration
+            resolution — which ``search`` fields are indexed is the as-of
+            ontology's. ``None`` = head. CAVEAT (Q2): the FTS index itself is
+            built at head; ``until`` post-hoc window-filters the result set, so
+            a historical search is honest about *which facts* fall in the
+            window but the *index* it queries is the head kind set. A fully
+            rewound index is 0.7.0 work.
 
     Returns:
         Matching facts, newest first. Same shape as vertex_facts.
@@ -1457,12 +1494,13 @@ def vertex_search(
     from .compiler import collect_search_fields
     from .store_reader import StoreReader
 
-    ast = load_declaration(vertex_path)
+    ast = load_declaration(vertex_path, as_of=as_of)
 
     if ast.combine is not None or ast.discover is not None:
         return _combined_search(
             ast, vertex_path, query,
             kind=kind, since=since, until=until, limit=limit, observer=observer,
+            as_of=as_of,
         )
 
     if ast.store is None:

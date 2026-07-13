@@ -318,15 +318,12 @@ class UnsignedTickInSignedEra(Exception):
 class GenesisExists(Exception):
     """``absorb_genesis`` found a ``_decl.genesis`` row already in the store.
 
-    Genesis is identity, not fold state (SPEC §9.2): a store's lineage is
+    Genesis is identity, not fold state (SPEC §9.2): a store's OWN lineage is
     opened exactly once, so re-absorption is refused rather than last-write-
-    wins. The edit/re-absorb flow (S4) lands later.
-
-    DELIBERATELY CONSERVATIVE: the check is *any* genesis row, not
-    ``lineage == self``. Pre-S6, a merged foreign genesis is indistinguishable
-    from a self-genesis (no ``_decl.merged`` receipts yet); once merge records
-    provenance receipts, this rule is revisited to scope by self-lineage so a
-    store carrying foreign genesis rows can still open its own.
+    wins. Scoped by the ``store_meta.own_lineage`` marker — a merged foreign
+    genesis does NOT block minting our own; only an already-open own lineage
+    (marker present, or a single pre-marker genesis adopted as self) refuses.
+    Re-absorb over an open lineage is the edit ceremony (``absorb_edit``).
     """
 
 
@@ -352,12 +349,12 @@ class NoGenesis(Exception):
 
 
 class AmbiguousGenesis(Exception):
-    """``absorb_edit`` found more than one ``_decl.genesis`` row.
+    """No ``own_lineage`` marker and more than one ``_decl.genesis`` row.
 
-    Pre-S6 a store cannot tell its own genesis from a merged-foreign one (no
-    ``_decl.merged`` receipts yet), so the self-lineage id an edit must stamp
-    is indeterminate. Conservative refusal, mirroring the resolver's
-    ``AmbiguousLineage`` (SPEC §9.2 Lineage). Revisited when merge receipts land.
+    Without the store-local marker (pre-marker stores) the self-lineage id a
+    write ceremony must stamp is indeterminate among several genesis rows.
+    Conservative refusal, mirroring the resolver's ``AmbiguousLineage``
+    (SPEC §9.2 Lineage). A marked store never raises this.
     """
 
 
@@ -368,6 +365,28 @@ class UnsignableEdit(Exception):
     signing posture as genesis (an absorbed store already had a key at genesis),
     so an unsignable change refuses the WHOLE batch (rollback, no partial write)
     rather than append an unsigned declaration row.
+    """
+
+
+class StaleDeclarationHead(Exception):
+    """``absorb_edit``'s ``expected_head`` no longer matches the store.
+
+    The caller diffed the file against a declaration head that has since
+    moved (a concurrent re-absorb landed). Applying the stale diff could
+    leave the store's fold matching neither author's file, with both
+    reporting success — so the edit refuses (rollback) and the caller re-runs
+    against the current head. Compare-and-swap, not last-write-wins.
+    """
+
+
+class ReservedKindViolation(Exception):
+    """``absorb_edit`` was handed a kind outside the frozen edit vocabulary.
+
+    The edit ceremony emits only ``*-defined``/``*-retired``/``*-removed``
+    declaration events (SPEC §9.2 table). This primitive is not a general
+    ``_decl.*`` (or domain-kind) append escape: genesis has its own primitive,
+    receipts are the transport layer's (S6), and user facts go through the
+    emit path with its write-time reservation.
     """
 
 
@@ -540,10 +559,14 @@ class SqliteStore(Generic[T]):
 
         Steps, all inside the transaction:
 
-        1. Refuse (``GenesisExists``) if ANY ``_decl.genesis`` row exists. No
-           unique index — merge legitimately carries foreign genesis rows as
-           inert citizens (§9.2 Lineage); the transaction-scoped check, not a
-           schema constraint, is the correctness mechanism.
+        1. Refuse (``GenesisExists``) if the store's OWN lineage is already
+           open: the ``store_meta.own_lineage`` marker exists, or (pre-marker
+           compat) exactly one ``_decl.genesis`` row exists — that row is
+           adopted as self and the marker backfilled before refusing. Foreign
+           genesis rows (marker present, ids differ) do NOT block: merge
+           legitimately carries them as inert citizens (§9.2 Lineage), and a
+           store that received one must still be able to mint its own
+           identity. No marker + several genesis rows refuses as ambiguous.
         2. Read the era pins — chain head (latest chained tick's row hash) and
            fact cursor (newest fact by WITNESS order / rowid) — so
            "everything before me predates historization" is verifiable.
@@ -552,8 +575,11 @@ class SqliteStore(Generic[T]):
            refuse (``UnsignableGenesis``, rollback) if no signature is
            produced. The signed commitment is over the ACTUAL final payload,
            never a throwaway probe — genesis is the attestation root.
-        4. Append the ``_decl.genesis`` row and commit. Its own id IS the
-           lineage id (§9.2), returned in the receipt.
+        4. Append the ``_decl.genesis`` row, stamp ``store_meta.own_lineage``
+           with its id (the store-local identity marker — merge copies facts,
+           never meta, so identity cannot arrive from outside), and commit.
+           The genesis row's own id IS the lineage id (§9.2), returned in the
+           receipt.
 
         This is protocol surface the Go conformance oracle mirrors: the payload
         shape (``protocol``, ``documents``, ``chain_head``, ``fact_cursor``),
@@ -576,6 +602,7 @@ class SqliteStore(Generic[T]):
         self._ensure_sync()
         self._ensure_fact_signature_column()
         self._ensure_chain_columns()
+        self._ensure_meta_table()
 
         conn = self._conn
         prev_iso = conn.isolation_level
@@ -583,12 +610,11 @@ class SqliteStore(Generic[T]):
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                if conn.execute(
-                    "SELECT 1 FROM facts WHERE kind = ? LIMIT 1", (DECL_GENESIS,)
-                ).fetchone() is not None:
+                own = self._own_lineage_in_txn(conn, backfill=True)
+                if own is not None:
                     raise GenesisExists(
-                        "a _decl.genesis event already exists — the store's "
-                        "lineage is already open; re-absorb/edit is a later "
+                        "the store's own lineage is already open "
+                        f"(own_lineage {own}) — re-absorb/edit is a later "
                         "ceremony (no --force)"
                     )
 
@@ -629,6 +655,11 @@ class SqliteStore(Generic[T]):
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (lineage_id, DECL_GENESIS, ts, observer, origin, payload_text, signature),
                 )
+                conn.execute(
+                    "INSERT OR REPLACE INTO store_meta (key, value) "
+                    "VALUES ('own_lineage', ?)",
+                    (lineage_id,),
+                )
                 conn.execute("COMMIT")
             except Exception:
                 if conn.in_transaction:
@@ -654,6 +685,7 @@ class SqliteStore(Generic[T]):
         observer: str,
         origin: str = "",
         fact_signer: Callable[[str, str], str | None] | None,
+        expected_head: tuple[float, str] | None = None,
     ) -> dict[str, Any]:
         """Re-emit changed declaration subjects over an open lineage (S4).
 
@@ -669,17 +701,30 @@ class SqliteStore(Generic[T]):
         all-or-nothing (a half-applied ontology change is the §9.1 lie
         mid-flight) and the lineage id is read consistently:
 
-        1. Read the store's genesis rows. Zero → :class:`NoGenesis` (the store
-           is unabsorbed — that's the genesis path). More than one →
-           :class:`AmbiguousGenesis` (self vs merged-foreign is indeterminate
-           pre-S6). Exactly one → its id is the self-lineage id every change
-           stamps.
-        2. For each change, build the resolver's overlay/tombstone contract
+        1. Resolve the store's OWN lineage: the ``store_meta.own_lineage``
+           marker, or (pre-marker compat) a single genesis row adopted as self
+           with the marker backfilled in this transaction. None →
+           :class:`NoGenesis`; unmarked + several → :class:`AmbiguousGenesis`.
+        2. If ``expected_head`` is given, compare it against the store's
+           current declaration head — the ``(ts, id)`` of the newest
+           self-lineage ``_decl.*`` row (genesis included). A mismatch raises
+           :class:`StaleDeclarationHead` (rollback): the caller diffed against
+           a head that has since moved (concurrent re-absorb), and applying a
+           stale diff could leave the store matching neither input file.
+        3. Every row in the ceremony shares ONE effective ``ts``, stamped
+           once — the ceremony is a single ontology transition. Without this,
+           a historical ``as_of`` cursor could land *between* the rows of one
+           edit and observe a half-applied ontology (e.g. a rename showing
+           both old and new kinds) — transaction atomicity protects live
+           readers, not rewound ones.
+        4. Kinds are allowlisted to the frozen definition/tombstone vocabulary
+           (:class:`ReservedKindViolation` otherwise) — this primitive is the
+           edit ceremony's write half, not a general ``_decl.*`` append escape.
+        5. For each change, build the resolver's overlay/tombstone contract
            payload — ``{lineage, subject, payload, change}`` for a definition,
            ``{lineage, subject, change}`` for a tombstone — sign its CONTENT
            commitment under ``observer``, and refuse (:class:`UnsignableEdit`,
-           rollback) if any is unsigned.
-        3. Append every row and commit.
+           rollback) if any is unsigned. Append every row and commit.
 
         An empty ``changes`` list is a no-op (no transaction, empty receipt) —
         the idempotence guarantee: re-absorbing an unchanged file writes nothing.
@@ -688,10 +733,15 @@ class SqliteStore(Generic[T]):
         consumes (``engine.declaration``); the Go conformance oracle mirrors it.
         Returns a receipt: ``{lineage, defined, retired, observer, signed}``.
         """
-        from lang.document import DECL_GENESIS
+        from lang.document import DECL_GENESIS, DEFINED_TO_TOMBSTONE
+
+        allowed_kinds = (
+            set(DEFINED_TO_TOMBSTONE) | set(DEFINED_TO_TOMBSTONE.values())
+        )
 
         self._ensure_sync()
         self._ensure_fact_signature_column()
+        self._ensure_meta_table()
 
         if not changes:
             return {
@@ -710,29 +760,38 @@ class SqliteStore(Generic[T]):
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                genesis_rows = conn.execute(
-                    "SELECT id FROM facts WHERE kind = ? ORDER BY rowid",
-                    (DECL_GENESIS,),
-                ).fetchall()
-                if not genesis_rows:
+                lineage_id = self._own_lineage_in_txn(conn, backfill=True)
+                if lineage_id is None:
                     raise NoGenesis(
                         "no _decl.genesis event — the store's lineage is not "
                         "open; run absorb to open it (there is nothing to edit "
                         "against before genesis)"
                     )
-                if len(genesis_rows) > 1:
-                    raise AmbiguousGenesis(
-                        f"{len(genesis_rows)} _decl.genesis rows — the store's "
-                        "own lineage is indeterminate (pre-S6: self vs "
-                        "merged-foreign genesis cannot be told apart)"
-                    )
-                lineage_id = genesis_rows[0][0]
+
+                if expected_head is not None:
+                    head = self._declaration_head_in_txn(conn, lineage_id)
+                    if head != tuple(expected_head):
+                        raise StaleDeclarationHead(
+                            f"declaration head moved: expected {expected_head}, "
+                            f"store is at {head} — another edit landed since "
+                            "the diff was computed; re-run absorb against the "
+                            "current head"
+                        )
+
+                # ONE effective ts for the whole ceremony (step 3).
+                ts = datetime.now(_UTC).timestamp()
 
                 for ch in changes:
                     kind = ch.kind
                     subject = ch.subject
                     payload_doc = ch.payload
                     annotation = ch.annotation
+                    if kind not in allowed_kinds:
+                        raise ReservedKindViolation(
+                            f"absorb_edit refuses kind {kind!r} — only the "
+                            "frozen definition/tombstone vocabulary may ride "
+                            "the edit ceremony"
+                        )
                     row_payload: dict[str, Any] = {
                         "lineage": lineage_id,
                         "subject": subject,
@@ -746,7 +805,6 @@ class SqliteStore(Generic[T]):
                     else:
                         retired += 1
 
-                    ts = datetime.now(_UTC).timestamp()
                     fact_id = gen_id()
                     payload_text = json.dumps(row_payload)
                     signature = (
@@ -896,6 +954,105 @@ class SqliteStore(Generic[T]):
         """Total number of events in the store."""
         row = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()
         return row[0]
+
+    def _ensure_meta_table(self) -> None:
+        """Idempotent: create the store-local ``store_meta`` key/value table.
+
+        Holds identity that is NOT a fact — ``own_lineage`` (which
+        ``_decl.genesis`` row is *self*, SPEC §9.2). Merge copies facts and
+        ticks, never this table, so a store's identity cannot arrive from (or
+        leak to) another store. Dump/rebuild (S6) must carry it explicitly.
+        """
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        self._conn.commit()
+
+    def _own_lineage_in_txn(
+        self, conn: Any, *, backfill: bool
+    ) -> str | None:
+        """Resolve the store's own lineage id inside an open write transaction.
+
+        Marker present → its value. No marker + exactly one ``_decl.genesis``
+        row → that row is self (pre-marker compat); with ``backfill`` the
+        marker is stamped in the same transaction. No marker + several rows →
+        :class:`AmbiguousGenesis`. No marker + none → ``None`` (lineage not
+        open).
+        """
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'own_lineage'"
+        ).fetchone()
+        if row is not None:
+            return row[0]
+        from lang.document import DECL_GENESIS
+
+        genesis_rows = conn.execute(
+            "SELECT id FROM facts WHERE kind = ? ORDER BY rowid",
+            (DECL_GENESIS,),
+        ).fetchall()
+        if not genesis_rows:
+            return None
+        if len(genesis_rows) > 1:
+            raise AmbiguousGenesis(
+                f"{len(genesis_rows)} _decl.genesis rows and no own_lineage "
+                "marker — the store's own lineage is indeterminate (pre-marker "
+                "store merged with a foreign lineage?)"
+            )
+        own = genesis_rows[0][0]
+        if backfill:
+            conn.execute(
+                "INSERT OR REPLACE INTO store_meta (key, value) "
+                "VALUES ('own_lineage', ?)",
+                (own,),
+            )
+        return own
+
+    def _declaration_head_in_txn(
+        self, conn: Any, lineage_id: str
+    ) -> tuple[float, str] | None:
+        """The ``(ts, id)`` of the newest self-lineage declaration row.
+
+        Genesis included; foreign-lineage ``_decl.*`` rows excluded (their
+        payload stamps a different lineage). This is the CAS token
+        ``absorb_edit`` compares ``expected_head`` against — replay-ordered
+        ``(ts, id)``, the same axis the resolver folds on.
+        """
+        best: tuple[float, str] | None = None
+        rows = conn.execute(
+            "SELECT id, kind, ts, payload FROM facts WHERE kind GLOB '_decl.*'"
+        ).fetchall()
+        for fact_id, kind, ts, payload_text in rows:
+            if fact_id == lineage_id:
+                pass  # own genesis participates
+            else:
+                try:
+                    payload = json.loads(payload_text)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if payload.get("lineage") != lineage_id:
+                    continue
+            candidate = (ts, fact_id)
+            if best is None or candidate > best:
+                best = candidate
+        return best
+
+    def declaration_head(self) -> tuple[float, str] | None:
+        """Public read of the self-lineage declaration head (CAS token).
+
+        Captured by the CLI at diff time and passed back as ``absorb_edit``'s
+        ``expected_head`` so a concurrent re-absorb between diff and apply is
+        refused instead of silently interleaved. None when the lineage is not
+        open (or unmarked-ambiguous — the write ceremony will refuse anyway).
+        """
+        self._ensure_meta_table()
+        conn = self._conn
+        try:
+            lineage = self._own_lineage_in_txn(conn, backfill=False)
+        except AmbiguousGenesis:
+            return None
+        if lineage is None:
+            return None
+        return self._declaration_head_in_txn(conn, lineage)
 
     def _ensure_chain_columns(self) -> None:
         """Idempotent migration: add chain columns to a pre-chain ticks table.

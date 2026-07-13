@@ -120,11 +120,12 @@ class TestAbsorbEditPrimitive:
             s.absorb_edit([ch], observer="obs", fact_signer=_signer("k"))
         s.close()
 
-    def test_ambiguous_genesis_refuses(self, tmp_path):
+    def test_foreign_genesis_does_not_block_edit(self, tmp_path):
+        # A merged-foreign genesis row is inert on a marked store: the edit
+        # stamps the OWN lineage (from store_meta), not the foreign one.
         db = tmp_path / "x.db"
         s = _store(db)
-        _genesis(s, parse_vertex(BASE))
-        # A second (merged-foreign) genesis row makes self-lineage indeterminate.
+        lineage = _genesis(s, parse_vertex(BASE))  # stamps own_lineage
         s.append(
             Fact(
                 kind="_decl.genesis",
@@ -136,8 +137,99 @@ class TestAbsorbEditPrimitive:
         ch = Change(
             kind=DECL_KIND_DEFINED, subject="a", payload={"order": 0}, annotation="modified"
         )
+        receipt = s.absorb_edit([ch], observer="obs", fact_signer=_signer("k"))
+        assert receipt["lineage"] == lineage
+        s.close()
+
+    def test_ambiguous_genesis_refuses_when_unmarked(self, tmp_path):
+        # Without the marker (pre-marker store), several genesis rows make
+        # the self-lineage indeterminate — conservative refusal.
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        s.append(
+            Fact(
+                kind="_decl.genesis",
+                ts=9.0,
+                payload={"protocol": 1, "documents": []},
+                observer="foreign",
+            )
+        )
+        s._conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
+        s._conn.commit()
+        ch = Change(
+            kind=DECL_KIND_DEFINED, subject="a", payload={"order": 0}, annotation="modified"
+        )
         with pytest.raises(AmbiguousGenesis):
             s.absorb_edit([ch], observer="obs", fact_signer=_signer("k"))
+        s.close()
+
+    def test_ceremony_shares_one_effective_ts(self, tmp_path):
+        # All rows of one edit ceremony carry ONE ts, so a historical as_of
+        # cursor can never land between them and observe a half-applied
+        # ontology (e.g. a rename showing both old and new kinds).
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        changes = [
+            Change(kind=DECL_KIND_DEFINED, subject="c", payload={"order": 2}, annotation="added"),
+            Change(kind=DECL_KIND_RETIRED, subject="b", payload=None, annotation="removed"),
+        ]
+        s.absorb_edit(changes, observer="obs", fact_signer=_signer("k"))
+        s.close()
+        conn = sqlite3.connect(str(db))
+        ts_values = {
+            r[0]
+            for r in conn.execute(
+                "SELECT ts FROM facts WHERE kind IN (?, ?)",
+                (DECL_KIND_DEFINED, DECL_KIND_RETIRED),
+            )
+        }
+        conn.close()
+        assert len(ts_values) == 1
+
+    def test_stale_expected_head_refuses(self, tmp_path):
+        from engine.sqlite_store import StaleDeclarationHead
+
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        head = s.declaration_head()
+        assert head is not None
+        # A concurrent edit lands after the head was captured...
+        s.absorb_edit(
+            [Change(kind=DECL_KIND_DEFINED, subject="a", payload={"order": 0},
+                    annotation="modified")],
+            observer="obs", fact_signer=_signer("k"),
+        )
+        # ...so applying a diff computed against the old head refuses.
+        with pytest.raises(StaleDeclarationHead):
+            s.absorb_edit(
+                [Change(kind=DECL_KIND_DEFINED, subject="b", payload={"order": 1},
+                        annotation="modified")],
+                observer="obs", fact_signer=_signer("k"), expected_head=head,
+            )
+        # And the current head is accepted.
+        s.absorb_edit(
+            [Change(kind=DECL_KIND_DEFINED, subject="b", payload={"order": 1},
+                    annotation="modified")],
+            observer="obs", fact_signer=_signer("k"),
+            expected_head=s.declaration_head(),
+        )
+        s.close()
+
+    def test_non_vocabulary_kind_refuses(self, tmp_path):
+        from engine.sqlite_store import ReservedKindViolation
+
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        before = s.total
+        for bad_kind in ("_decl.genesis", "_decl.merged", "decision"):
+            ch = Change(kind=bad_kind, subject="x", payload={"order": 0}, annotation="added")
+            with pytest.raises(ReservedKindViolation):
+                s.absorb_edit([ch], observer="obs", fact_signer=_signer("k"))
+        assert s.total == before  # nothing written
         s.close()
 
     def test_unsignable_rolls_back_whole_batch(self, tmp_path):

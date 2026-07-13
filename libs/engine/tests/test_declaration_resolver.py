@@ -31,8 +31,8 @@ from lang.document import (
 )
 
 from engine.declaration import (
-    UNHISTORIZED,
     AmbiguousLineage,
+    Unhistorized,
     UnsupportedProtocol,
     load_declaration,
     resolve_declaration_documents,
@@ -310,20 +310,66 @@ class TestTombstonesAndForwardCompat:
         resolved = load_declaration(vpath)
         assert set(resolved.loops) == {"decision", "thread"}
 
-    def test_two_genesis_raises(self, tmp_path):
+    def test_foreign_genesis_is_inert_on_marked_store(self, tmp_path):
+        # A merged-in foreign genesis must NOT disturb a marked store's
+        # resolution (SPEC §9.2: foreign lineages are inert citizens) — the
+        # own_lineage marker, not row count, decides identity.
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)  # stamps store_meta.own_lineage
+        _append_decl_row(
+            store, kind=DECL_GENESIS,
+            payload={"protocol": 1, "documents": [
+                {"kind": "_decl.kind-defined", "subject": "HIJACK", "payload": {}}
+            ]},
+            ts=_genesis_ts(store) + 10, row_id="genesis-foreign",
+        )
+        resolved = load_declaration(vpath)
+        assert set(resolved.loops) == {"decision", "thread"}  # not HIJACK
+
+    def test_two_genesis_without_marker_raises(self, tmp_path):
+        # Pre-marker store (marker stripped) + several genesis rows → refuse.
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
-        # Physically inject a second genesis (a merge could carry a foreign one).
         _append_decl_row(
             store, kind=DECL_GENESIS,
             payload={"protocol": 1, "documents": []},
             ts=_genesis_ts(store) + 10, row_id="genesis2",
         )
+        conn = sqlite3.connect(str(store))
+        conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
+        conn.commit()
+        conn.close()
         with pytest.raises(AmbiguousLineage):
             resolve_declaration_documents(store)
         # And the seam surfaces it too (not swallowed into a silent fallback).
         with pytest.raises(AmbiguousLineage):
             load_declaration(vpath)
+
+    def test_marker_without_genesis_row_is_corruption(self, tmp_path):
+        from engine.declaration import DeclarationResolutionError
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        conn.execute(
+            "UPDATE store_meta SET value = 'no-such-genesis' "
+            "WHERE key = 'own_lineage'"
+        )
+        conn.commit()
+        conn.close()
+        with pytest.raises(DeclarationResolutionError):
+            resolve_declaration_documents(store)
+
+    def test_single_unmarked_genesis_is_self_compat(self, tmp_path):
+        # A store absorbed before the marker existed still resolves.
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
+        conn.commit()
+        conn.close()
+        resolved = load_declaration(vpath)
+        assert set(resolved.loops) == {"decision", "thread"}
 
     def test_protocol_too_new_raises(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -350,13 +396,18 @@ class TestTombstonesAndForwardCompat:
 
 
 class TestAsOf:
-    def test_genesis_after_cutoff_is_unhistorized(self, tmp_path):
+    def test_genesis_after_cutoff_is_unhistorized_genesis_floor(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         before = _genesis_ts(store) - 100
-        assert resolve_declaration_documents(store, as_of=before) is UNHISTORIZED
-        # The seam falls back to the file for the pre-genesis era.
-        assert load_declaration(vpath, as_of=before).strict is True
+        result = resolve_declaration_documents(store, as_of=before)
+        assert isinstance(result, Unhistorized)
+        # The seam projects the GENESIS documents (SPEC §9.2 earliest known
+        # state) — never the current file, which may have drifted since.
+        vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+        resolved = load_declaration(vpath, as_of=before)
+        assert resolved.strict is True  # genesis floor, not the mutated file
+        assert set(resolved.loops) == {"decision", "thread"}
 
     def test_no_genesis_is_none_not_unhistorized(self, tmp_path):
         # A store that never opened a lineage is None (distinct from UNHISTORIZED).

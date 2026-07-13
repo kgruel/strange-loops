@@ -21,11 +21,16 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
 - **Genesis is identity, not fold state.** A store's lineage is opened exactly
   once; the genesis event carries the whole initial document set as its
   payload. Genesis is NOT resolved by Latest — its documents are the base the
-  overlay is applied on top of. More than one ``_decl.genesis`` row is an
-  ambiguous lineage (:class:`AmbiguousLineage`) — pre-S6 a store cannot
-  distinguish its own genesis from a merged-foreign one (no ``_decl.merged``
-  receipts yet), so the conservative rule is to refuse rather than guess. This
-  is revisited when merge provenance receipts land (S6).
+  overlay is applied on top of. **Which genesis is self is recorded outside
+  the fact stream**: the ``store_meta`` table's ``own_lineage`` row, stamped
+  by ``absorb_genesis`` in the same transaction that mints the genesis. Merge
+  copies facts, never meta — so foreign genesis rows arrive as inert citizens
+  and can never hijack identity. Resolution selects the genesis row whose id
+  equals the marker; a marker whose row is missing is corruption
+  (:class:`DeclarationResolutionError`). Compat for stores absorbed before the
+  marker existed: no marker + exactly one genesis row → that row is self (the
+  next write ceremony backfills the marker); no marker + several rows →
+  :class:`AmbiguousLineage` (refuse rather than guess).
 
 - **Self-lineage scoping from day one.** Merge already carries arbitrary fact
   rows across stores today, so a foreign store's declaration events can be
@@ -108,12 +113,13 @@ class DeclarationResolutionError(Exception):
 
 
 class AmbiguousLineage(DeclarationResolutionError):
-    """More than one ``_decl.genesis`` row exists in the store.
+    """No ``own_lineage`` marker and more than one ``_decl.genesis`` row.
 
-    Pre-S6 a store cannot distinguish its own genesis from a merged-foreign one
-    (no ``_decl.merged`` provenance receipts yet), so two genesis rows make the
-    store's own lineage indeterminate. Conservative refusal, not last-write-wins
-    — genesis is identity (SPEC §9.2). Revisited when merge receipts land.
+    Without the store-local marker (stores absorbed before it existed) a store
+    cannot tell its own genesis from a merged-foreign one, so several genesis
+    rows make the store's own lineage indeterminate. Conservative refusal, not
+    last-write-wins — genesis is identity (SPEC §9.2). A marked store never
+    raises this: foreign genesis rows are simply inert.
     """
 
 
@@ -126,29 +132,44 @@ class UnsupportedProtocol(DeclarationResolutionError):
     """
 
 
-class _Unhistorized:
-    """Sentinel: at the requested ``as_of``, the store had not opened its lineage.
+class Unhistorized:
+    """At the requested ``as_of``, the store had not opened its lineage.
 
     Distinct from ``None``. ``None`` means "no genesis at all" (pre-genesis
-    store — the file is authoritative). :data:`UNHISTORIZED` means "a genesis
+    store — the file is authoritative). ``Unhistorized`` means "a genesis
     exists, but it is *later* than the ``as_of`` cutoff" — at that instant the
-    store's ontology was not yet historized. Keeping the two apart lets the
-    read path (S5) render the honest "unhistorized before genesis" state rather
-    than conflating it with a store that never opened a lineage.
+    store's ontology was not yet historized. Per SPEC §9.2 the honest answer
+    for that era is **the genesis document set as the earliest known state**
+    ("rendered honestly as legacy, never retro-claimed") — NOT the current
+    file, which may have drifted since and would retro-claim history that was
+    never recorded. The instance therefore carries ``documents`` (the genesis
+    floor) so the caller can project the earliest known ontology while
+    rendering the unhistorized distinction.
     """
 
-    _instance: _Unhistorized | None = None
+    __slots__ = ("documents",)
 
-    def __new__(cls) -> _Unhistorized:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    def __init__(self, documents: list[dict[str, Any]]) -> None:
+        self.documents = documents
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
-        return "UNHISTORIZED"
+        return f"Unhistorized({len(self.documents)} docs)"
 
 
-UNHISTORIZED = _Unhistorized()
+def _read_own_lineage(conn: sqlite3.Connection) -> str | None:
+    """Read the store-local ``own_lineage`` marker, or None if unmarked.
+
+    The marker lives in ``store_meta`` — a store-local table merge never
+    copies (merge carries facts; identity is not a fact). Stores absorbed
+    before the marker existed simply lack the table/row.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'own_lineage'"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    return row[0] if row else None
 
 
 def _open_readonly(store_path: Path) -> sqlite3.Connection | None:
@@ -170,22 +191,27 @@ def resolve_declaration_documents(
     store_path: Path,
     *,
     as_of: float | None = None,
-) -> list[dict[str, Any]] | None | _Unhistorized:
+) -> list[dict[str, Any]] | None | Unhistorized:
     """Fold the store's declaration events into a document set.
 
     Returns:
 
-    - ``None`` — the store has no ``_decl.genesis`` (pre-genesis; the file is
-      authoritative), or is not a usable SQLite store.
-    - :data:`UNHISTORIZED` — a genesis exists but is later than ``as_of`` (the
-      ontology was not yet historized at that instant).
+    - ``None`` — the store has no own ``_decl.genesis`` (pre-genesis; the file
+      is authoritative), or is not a usable SQLite store.
+    - :class:`Unhistorized` — an own genesis exists but is later than ``as_of``;
+      carries the genesis document set as the earliest known state.
     - ``list[dict]`` — the folded documents (``{"kind", "subject", "payload"}``
       each), ready for :func:`~lang.document.documents_to_vertex`.
 
     Fold (all inside the store, replay-ordered ``ORDER BY ts, id``):
 
-    1. Locate the genesis. Zero → ``None``. More than one → :class:`AmbiguousLineage`.
-    2. If ``as_of`` is set and the genesis is later → :data:`UNHISTORIZED`.
+    1. Locate the OWN genesis: the ``store_meta.own_lineage`` marker selects it
+       by id (foreign genesis rows are inert regardless of count); a marker
+       whose row is missing raises :class:`DeclarationResolutionError`.
+       Compat without a marker: zero rows → ``None``; exactly one → self;
+       more → :class:`AmbiguousLineage`.
+    2. If ``as_of`` is set and the genesis is later → :class:`Unhistorized`
+       carrying the genesis documents (the SPEC §9.2 earliest-known floor).
     3. Check ``protocol`` ≤ supported → else :class:`UnsupportedProtocol`.
     4. Seed the document dict (keyed by ``(kind, subject)``) from the genesis
        payload's ``documents``.
@@ -212,17 +238,28 @@ def resolve_declaration_documents(
 
         if not genesis_rows:
             return None
-        if len(genesis_rows) > 1:
+
+        marker = _read_own_lineage(conn)
+        if marker is not None:
+            selected = [r for r in genesis_rows if r[0] == marker]
+            if not selected:
+                raise DeclarationResolutionError(
+                    f"own_lineage marker {marker!r} in {store_path} has no "
+                    "matching _decl.genesis row — the store's identity record "
+                    "is corrupt (marker without its genesis)"
+                )
+            genesis_id, genesis_ts, genesis_payload_text = selected[0]
+        elif len(genesis_rows) == 1:
+            # Pre-marker store (absorbed before store_meta existed): the single
+            # genesis is self. The next write ceremony backfills the marker.
+            genesis_id, genesis_ts, genesis_payload_text = genesis_rows[0]
+        else:
             raise AmbiguousLineage(
-                f"{len(genesis_rows)} _decl.genesis rows in {store_path} — the "
-                "store's own lineage is indeterminate (pre-S6: self vs "
-                "merged-foreign genesis cannot be told apart)"
+                f"{len(genesis_rows)} _decl.genesis rows in {store_path} and no "
+                "own_lineage marker — the store's own lineage is indeterminate; "
+                "if this store predates the marker, re-run a write ceremony on "
+                "it before merging foreign stores"
             )
-
-        genesis_id, genesis_ts, genesis_payload_text = genesis_rows[0]
-
-        if as_of is not None and genesis_ts > as_of:
-            return UNHISTORIZED
 
         genesis_payload = json.loads(genesis_payload_text)
         protocol = genesis_payload.get("protocol", 1)
@@ -232,6 +269,9 @@ def resolve_declaration_documents(
                 f"{DECLARATION_PROTOCOL_VERSION} in {store_path} — refusing to "
                 "partially interpret a newer declaration protocol"
             )
+
+        if as_of is not None and genesis_ts > as_of:
+            return Unhistorized(list(genesis_payload.get("documents", ())))
 
         # Seed from the genesis document set, keyed by (kind, subject).
         docs: dict[tuple[str, str], dict[str, Any]] = {}
@@ -297,14 +337,14 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     - If the store exists and has opened its lineage → the store's folded
       declaration, projected back to a ``VertexFile`` with the file's locator
       re-attached.
-    - Otherwise (no store, store absent, no genesis, or ``as_of`` predates the
-      genesis) → the file AST unchanged, current pre-genesis behavior.
-
-    ``as_of`` is a timestamp cutoff hook for the read path (S5). Today an
-    ``as_of`` that predates the genesis falls back to the file: before the
-    lineage opened there is no store-form declaration, and the file is the only
-    surviving record of that era. S5 owns the read-path wiring and may render
-    the :data:`UNHISTORIZED` distinction differently.
+    - If ``as_of`` predates the genesis → the **genesis document set** projected
+      (SPEC §9.2: "an ontology-as-of read before the genesis reports
+      unhistorized, earliest known state = the genesis document"). NOT the
+      current file — the file may have drifted since absorption, and returning
+      it would retro-claim history that was never recorded.
+    - Otherwise (no store, store absent, no genesis) → the file AST unchanged,
+      pre-genesis behavior: before the lineage opened, the file is the only
+      surviving record of that era and IS authoritative.
     """
     from lang import parse_vertex_file
 
@@ -323,5 +363,8 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     docs = resolve_declaration_documents(store_path, as_of=as_of)
     if isinstance(docs, list):
         return documents_to_vertex(docs, path=vertex_path, store=store_field)
-    # None (pre-genesis / unusable store) or UNHISTORIZED → file is the record.
+    if isinstance(docs, Unhistorized):
+        # Earliest known state — the genesis floor, never the drifted file.
+        return documents_to_vertex(docs.documents, path=vertex_path, store=store_field)
+    # None (pre-genesis / unusable store) → the file is the record.
     return file_ast

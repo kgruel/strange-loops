@@ -70,7 +70,8 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
             internal_ok = known.kind is not None and is_internal_kind(known.kind)
             try:
                 fact = fetch_fact_by_id(
-                    vertex_path, known.fact_id, include_internal=internal_ok
+                    vertex_path, known.fact_id,
+                    include_internal=internal_ok, kind=known.kind,
                 )
             except ValueError as e:
                 _err(str(e))

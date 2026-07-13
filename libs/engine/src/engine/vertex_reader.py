@@ -1146,6 +1146,7 @@ def vertex_fact_by_id(
     id_prefix: str,
     *,
     include_internal: bool = False,
+    kind: str | None = None,
 ) -> dict | None:
     """Look up a single fact by ID or ID prefix from a vertex's store.
 
@@ -1168,7 +1169,9 @@ def vertex_fact_by_id(
                     result = reader.fact_by_id(
                         id_prefix, include_internal=include_internal
                     )
-                    if result is not None:
+                    if result is not None and (
+                        kind is None or result.get("kind") == kind
+                    ):
                         matches.append(result)
             except (FileNotFoundError, ValueError):
                 continue
@@ -1184,7 +1187,13 @@ def vertex_fact_by_id(
         return None
 
     with StoreReader(store_path) as reader:
-        return reader.fact_by_id(id_prefix, include_internal=include_internal)
+        found = reader.fact_by_id(id_prefix, include_internal=include_internal)
+    # An explicit --kind SCOPES the lookup, not just unlocks it: asking for
+    # --kind _decl.genesis must not return some other row that happens to
+    # match the id (branch-review #3).
+    if found is not None and kind is not None and found.get("kind") != kind:
+        return None
+    return found
 
 
 def vertex_facts(

@@ -645,3 +645,61 @@ class TestDeclarationStatus:
         # Without a cursor there is no historical claim to caveat.
         _ast, status = load_declaration_status(vpath)
         assert status == "file-pre-genesis"
+
+    def test_structural_edit_of_duplicates_never_cross_wires(self, tmp_path):
+        # Delete the FIRST of two same-command sources in the file without
+        # re-absorbing: ordinal identity is unsound for that group, so
+        # re-attachment SKIPS it (empty values, loud at runtime) rather than
+        # routing the survivor's value onto the stored first source
+        # (branch-review #2).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        two = f'''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+  source "curl -s https://x.example" {{
+    kind "pong"
+    env TOKEN="second"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+        vpath.write_text(two)
+        _absorb(vpath, store)
+        # File drops the FIRST duplicate; declaration still has both.
+        one = two.replace('''  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+'''.replace("{{", "{").replace("}}", "}"), "")
+        vpath.write_text(one)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        values = [dict(s.env).get("TOKEN", "") for s in block.sources]
+        # Both stored sources resolve EMPTY — never "second" on the first.
+        assert values == ["", ""]
+
+    def test_id_lookup_scoped_by_kind(self, tmp_path):
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        lineage = _absorb(vpath, store)
+        # Unlock alone must not return a row of a DIFFERENT kind.
+        found = vertex_fact_by_id(
+            vpath, lineage, include_internal=True, kind="_decl.kind-defined"
+        )
+        assert found is None
+        found = vertex_fact_by_id(
+            vpath, lineage, include_internal=True, kind="_decl.genesis"
+        )
+        assert found is not None

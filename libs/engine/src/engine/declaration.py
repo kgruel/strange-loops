@@ -510,16 +510,38 @@ def _reattach_ingress(resolved, file_ast):
     # values between two sources sharing a command (re-review #4: a real
     # secret cross-wire). Fallback to (command, ordinal) so a block reshuffle
     # doesn't orphan values.
+    #
+    # Ordinal identity is only sound while the file's occurrence COUNT for a
+    # (block, command) group matches the resolved declaration's. A structural
+    # edit not yet absorbed (delete/insert one of two duplicate-command
+    # sources) re-numbers the survivors and would misroute values across
+    # sources (branch-review #2) — for such diverged groups re-attachment is
+    # SKIPPED entirely: values resolve empty and fail loudly at runtime, and
+    # `absorb -n` surfaces the divergence to reconcile. Within a count-stable
+    # group, position IS the identity ("order is meaning").
     by_block: dict[tuple[int, str, int], dict[str, str]] = {}
     by_cmd: dict[tuple[str, int], dict[str, str]] = {}
     file_seen: dict[tuple[int, str], int] = {}
+    file_cmd_seen: dict[str, int] = {}
     for bi, block in enumerate(file_ast.sources_blocks):
         for src in block.sources:
             nth = file_seen.get((bi, src.command), 0)
             file_seen[(bi, src.command)] = nth + 1
+            file_cmd_seen[src.command] = file_cmd_seen.get(src.command, 0) + 1
             env_map = dict(src.env)
             by_block[(bi, src.command, nth)] = env_map
             by_cmd.setdefault((src.command, nth), env_map)
+
+    resolved_counts: dict[tuple[int, str], int] = {}
+    resolved_cmd_counts: dict[str, int] = {}
+    for bi, block in enumerate(resolved.sources_blocks):
+        for src in block.sources:
+            resolved_counts[(bi, src.command)] = (
+                resolved_counts.get((bi, src.command), 0) + 1
+            )
+            resolved_cmd_counts[src.command] = (
+                resolved_cmd_counts.get(src.command, 0) + 1
+            )
 
     from lang.ast import InlineSource, SourcesBlock
 
@@ -532,9 +554,22 @@ def _reattach_ingress(resolved, file_ast):
             nth = resolved_seen.get((bi, src.command), 0)
             resolved_seen[(bi, src.command)] = nth + 1
             if src.env and any(v == "" for _, v in src.env):
-                env_map = by_block.get(
-                    (bi, src.command, nth), by_cmd.get((src.command, nth), {})
+                block_stable = (
+                    resolved_counts.get((bi, src.command))
+                    == file_seen.get((bi, src.command))
                 )
+                cmd_stable = (
+                    resolved_cmd_counts.get(src.command)
+                    == file_cmd_seen.get(src.command)
+                )
+                if block_stable:
+                    env_map = by_block.get((bi, src.command, nth), {})
+                elif cmd_stable:
+                    env_map = by_cmd.get((src.command, nth), {})
+                else:
+                    # Occurrence count diverged (unabsorbed structural edit):
+                    # ordinal identity is unsound — skip, never cross-wire.
+                    env_map = {}
                 env = tuple(
                     (k, v or env_map.get(k, ""))
                     for k, v in src.env

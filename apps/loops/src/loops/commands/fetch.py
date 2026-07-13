@@ -505,6 +505,7 @@ def fetch_fact_by_id(
     fact_id: str,
     *,
     include_internal: bool = False,
+    kind: str | None = None,
 ) -> dict | None:
     """Fetch a single fact by ID or ID prefix.
 
@@ -513,7 +514,9 @@ def fetch_fact_by_id(
     """
     from engine import vertex_fact_by_id
 
-    return vertex_fact_by_id(vertex_path, fact_id, include_internal=include_internal)
+    return vertex_fact_by_id(
+        vertex_path, fact_id, include_internal=include_internal, kind=kind
+    )
 
 
 def fetch_ticks(

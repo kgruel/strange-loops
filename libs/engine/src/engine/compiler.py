@@ -675,7 +675,7 @@ def compile_vertex_recursive(
     from glob import glob as globfn
     from pathlib import Path
 
-    from engine.declaration import load_declaration
+    from engine.declaration import load_declaration, verify_source_pins
 
     # Initialize tracking on first call
     if _visited is None:
@@ -730,6 +730,10 @@ def compile_vertex_recursive(
     children: dict[str, CompiledVertex] = {}
     for child_path in child_paths:
         # Parse and compile child
+        # Pins guard every vertex in the composition, not just the root —
+        # a discovered child's drifted .loop is the same auto-enactment
+        # hazard (branch-review #1).
+        verify_source_pins(child_path)
         child_ast = load_declaration(child_path)
         child_compiled = compile_vertex_recursive(
             child_ast,

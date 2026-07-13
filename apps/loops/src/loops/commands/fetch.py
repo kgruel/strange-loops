@@ -418,7 +418,9 @@ def fetch_stream(
     # Fold declarations for rendering hints — resolved through the store-backed
     # seam at the ontology-as-of cursor so key_field extraction under rewind
     # uses the as-of fold keys, not head's (SPEC §9.3 equal-cursors).
-    ast = load_declaration(vertex_path, as_of=cursor)
+    from engine.declaration import load_declaration_status
+
+    ast, decl_status = load_declaration_status(vertex_path, as_of=cursor)
     fold_meta: dict[str, dict] = {}
     for k, loop_def in ast.loops.items():
         key_field = None
@@ -435,7 +437,25 @@ def fetch_stream(
     # lookup. No match → untiered "" (collect id aged out, unfolded kind).
     _tag_facts_with_tier(vertex_path, facts, fold_meta)
 
-    return {"facts": facts, "fold_meta": fold_meta, "vertex": ast.name}
+    out = {"facts": facts, "fold_meta": fold_meta, "vertex": ast.name}
+    # Honesty callout (SPEC §9.2/§9.5): a rewound read whose ontology could
+    # NOT actually resolve at the cursor must say so, not render silently.
+    if cursor is not None and decl_status != "store":
+        out["ontology_notice"] = {
+            "unhistorized": (
+                "ontology unhistorized at this anchor — rendered under the "
+                "genesis document (earliest known state)"
+            ),
+            "aggregate-head": (
+                "aggregation membership is CURRENT file state — member "
+                "history is not historized (aggregation internal tables "
+                "not yet built)"
+            ),
+            "file-pre-genesis": (
+                "no declaration lineage — ontology is the current file"
+            ),
+        }.get(decl_status, decl_status)
+    return out
 
 
 def _tag_facts_with_tier(
@@ -483,6 +503,9 @@ def _fact_matches_key(fact: dict, key_field: str | None, key: str) -> bool:
 def fetch_fact_by_id(
     vertex_path: Path,
     fact_id: str,
+    *,
+    include_internal: bool = False,
+    kind: str | None = None,
 ) -> dict | None:
     """Fetch a single fact by ID or ID prefix.
 
@@ -491,7 +514,9 @@ def fetch_fact_by_id(
     """
     from engine import vertex_fact_by_id
 
-    return vertex_fact_by_id(vertex_path, fact_id)
+    return vertex_fact_by_id(
+        vertex_path, fact_id, include_internal=include_internal, kind=kind
+    )
 
 
 def fetch_ticks(
@@ -523,7 +548,9 @@ def fetch_ticks(
 
     ticks = vertex_ticks(vertex_path, since_ts, anchor, as_of=cursor)
 
-    ast = load_declaration(vertex_path, as_of=cursor)
+    from engine.declaration import load_declaration_status
+
+    ast, decl_status = load_declaration_status(vertex_path, as_of=cursor)
     fold_meta = _get_fold_meta(vertex_path, as_of=cursor)
 
     # Tier inheritance for tick windows (decision:design/tier-one-home-
@@ -564,7 +591,22 @@ def fetch_ticks(
             "tier": _window_tier(vertex_path, tick, tmap, fold_meta) if tmap else "",
         })
 
-    return {"ticks": tick_dicts, "vertex": ast.name}
+    out = {"ticks": tick_dicts, "vertex": ast.name}
+    if cursor is not None and decl_status != "store":
+        out["ontology_notice"] = {
+            "unhistorized": (
+                "ontology unhistorized at this anchor — rendered under the "
+                "genesis document (earliest known state)"
+            ),
+            "aggregate-head": (
+                "aggregation membership is CURRENT file state — member "
+                "history is not historized"
+            ),
+            "file-pre-genesis": (
+                "no declaration lineage — ontology is the current file"
+            ),
+        }.get(decl_status, decl_status)
+    return out
 
 
 def _window_tier(
@@ -1126,9 +1168,9 @@ def fetch_horizon(
     from collections import Counter
 
     from engine import vertex_facts
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
 
-    ast = parse_vertex_file(vertex_path)
+    ast = load_declaration(vertex_path)
     now_ts = datetime.now(timezone.utc).timestamp()
 
     # Roster of armed loops: the vertex-level boundary (one row over every kind)
@@ -1776,12 +1818,12 @@ def fetch_tick_windows(
     """
     from atoms import TickWindow
     from engine import vertex_ticks
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
 
     if all_names:
         name = None  # no filter — span the full chain across every series
     elif not name:
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
         name = ast.name
 
     now = datetime.now(timezone.utc)

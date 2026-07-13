@@ -31,8 +31,8 @@ from lang.document import (
 )
 
 from engine.declaration import (
-    UNHISTORIZED,
     AmbiguousLineage,
+    Unhistorized,
     UnsupportedProtocol,
     load_declaration,
     resolve_declaration_documents,
@@ -310,20 +310,80 @@ class TestTombstonesAndForwardCompat:
         resolved = load_declaration(vpath)
         assert set(resolved.loops) == {"decision", "thread"}
 
-    def test_two_genesis_raises(self, tmp_path):
+    def test_foreign_genesis_is_inert_on_marked_store(self, tmp_path):
+        # A merged-in foreign genesis must NOT disturb a marked store's
+        # resolution (SPEC §9.2: foreign lineages are inert citizens) — the
+        # own_lineage marker, not row count, decides identity.
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)  # stamps store_meta.own_lineage
+        _append_decl_row(
+            store, kind=DECL_GENESIS,
+            payload={"protocol": 1, "documents": [
+                {"kind": "_decl.kind-defined", "subject": "HIJACK", "payload": {}}
+            ]},
+            ts=_genesis_ts(store) + 10, row_id="genesis-foreign",
+        )
+        resolved = load_declaration(vpath)
+        assert set(resolved.loops) == {"decision", "thread"}  # not HIJACK
+
+    def test_two_genesis_without_marker_raises(self, tmp_path):
+        # Pre-marker store (marker stripped) + several genesis rows → refuse.
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
-        # Physically inject a second genesis (a merge could carry a foreign one).
         _append_decl_row(
             store, kind=DECL_GENESIS,
             payload={"protocol": 1, "documents": []},
             ts=_genesis_ts(store) + 10, row_id="genesis2",
         )
+        conn = sqlite3.connect(str(store))
+        conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
+        conn.commit()
+        conn.close()
         with pytest.raises(AmbiguousLineage):
             resolve_declaration_documents(store)
         # And the seam surfaces it too (not swallowed into a silent fallback).
         with pytest.raises(AmbiguousLineage):
             load_declaration(vpath)
+
+    def test_marker_without_genesis_row_is_corruption(self, tmp_path):
+        from engine.declaration import DeclarationResolutionError
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        conn.execute(
+            "UPDATE store_meta SET value = 'no-such-genesis' "
+            "WHERE key = 'own_lineage'"
+        )
+        conn.commit()
+        conn.close()
+        with pytest.raises(DeclarationResolutionError):
+            resolve_declaration_documents(store)
+
+    def test_unmarked_genesis_refuses_until_adopted(self, tmp_path):
+        # Facts alone cannot prove which genesis is self — even a singleton.
+        # An unmarked store refuses with adopt guidance; the explicit adopt
+        # ceremony (human intent) claims identity and resolution resumes.
+        from atoms import Fact
+
+        from engine.declaration import UnadoptedLineage
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        conn.execute("DELETE FROM store_meta WHERE key = 'own_lineage'")
+        conn.commit()
+        conn.close()
+        with pytest.raises(UnadoptedLineage):
+            load_declaration(vpath)
+        s = SqliteStore(
+            path=store, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        receipt = s.adopt_lineage()
+        s.close()
+        assert receipt["genesis_count"] == 1
+        resolved = load_declaration(vpath)
+        assert set(resolved.loops) == {"decision", "thread"}
 
     def test_protocol_too_new_raises(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -350,13 +410,18 @@ class TestTombstonesAndForwardCompat:
 
 
 class TestAsOf:
-    def test_genesis_after_cutoff_is_unhistorized(self, tmp_path):
+    def test_genesis_after_cutoff_is_unhistorized_genesis_floor(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         before = _genesis_ts(store) - 100
-        assert resolve_declaration_documents(store, as_of=before) is UNHISTORIZED
-        # The seam falls back to the file for the pre-genesis era.
-        assert load_declaration(vpath, as_of=before).strict is True
+        result = resolve_declaration_documents(store, as_of=before)
+        assert isinstance(result, Unhistorized)
+        # The seam projects the GENESIS documents (SPEC §9.2 earliest known
+        # state) — never the current file, which may have drifted since.
+        vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+        resolved = load_declaration(vpath, as_of=before)
+        assert resolved.strict is True  # genesis floor, not the mutated file
+        assert set(resolved.loops) == {"decision", "thread"}
 
     def test_no_genesis_is_none_not_unhistorized(self, tmp_path):
         # A store that never opened a lineage is None (distinct from UNHISTORIZED).
@@ -385,3 +450,359 @@ class TestAsOf:
         docs2 = resolve_declaration_documents(store, as_of=gts + 200)
         decision2 = next(d for d in docs2 if d["subject"] == "decision")
         assert decision2["payload"].get("preview") == ["late"]
+
+
+# ---------------------------------------------------------------------------
+# Env ingress (SPEC §9.5 secrets-indirection)
+# ---------------------------------------------------------------------------
+
+_ENV_VERTEX_KDL = '''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="hunter2" MODE="fast"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+
+
+class TestEnvIngress:
+    """Env VALUES are ingress: never absorbed, re-attached from the file."""
+
+    def _scaffold_env(self, tmp_path):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(_ENV_VERTEX_KDL.format(store=store))
+        return vpath, store
+
+    def test_secret_never_enters_store_payloads(self, tmp_path):
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        payloads = [r[0] for r in conn.execute("SELECT payload FROM facts")]
+        conn.close()
+        assert not any("hunter2" in p for p in payloads)
+
+    def test_resolution_reattaches_values_from_file(self, tmp_path):
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        (src,) = block.sources
+        assert dict(src.env) == {"TOKEN": "hunter2", "MODE": "fast"}
+
+    def test_env_value_edit_is_live_without_ceremony(self, tmp_path):
+        # Values are ingress — like the store locator, the file's edit takes
+        # effect immediately; no declaration event required.
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        vpath.write_text(vpath.read_text().replace("hunter2", "rotated"))
+        resolved = load_declaration(vpath)
+        assert dict(resolved.sources_blocks[0].sources[0].env)["TOKEN"] == "rotated"
+
+    def test_env_key_set_is_declaration_shape(self, tmp_path):
+        # ADDING a key is a shape change: inert until absorbed (the resolved
+        # key set is store-authoritative), surfaced by the edit ceremony.
+        vpath, store = self._scaffold_env(tmp_path)
+        _absorb(vpath, store)
+        vpath.write_text(
+            vpath.read_text().replace('MODE="fast"', 'MODE="fast" EXTRA="new"')
+        )
+        resolved = load_declaration(vpath)
+        assert set(dict(resolved.sources_blocks[0].sources[0].env)) == {
+            "TOKEN", "MODE",
+        }  # EXTRA not resolved until absorb
+
+    def test_colliding_commands_do_not_cross_wire_values(self, tmp_path):
+        # Two sources sharing a command must each get their OWN env value —
+        # occurrence identity, not command identity (re-review #4).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(f'''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+  source "curl -s https://x.example" {{
+    kind "pong"
+    env TOKEN="second"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+''')
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        values = [dict(s.env)["TOKEN"] for s in block.sources]
+        assert values == ["first", "second"]
+
+
+class TestSourcePins:
+    """No-auto-enact at the execution tier: pinned sources refuse drift."""
+
+    def _scaffold_loop(self, tmp_path):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        loop = tmp_path / "feed.loop"
+        loop.write_text(
+            'kind "ping"\nobserver "t"\nsource "echo hi"\nevery "30s"\n'
+        )
+        vpath.write_text(f'''name "t"
+store "{store}"
+sources {{
+  path "./feed.loop"
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+''')
+        return vpath, store, loop
+
+    def test_pinned_source_unchanged_passes(self, tmp_path):
+        from engine.declaration import verify_source_pins
+
+        vpath, store, _loop = self._scaffold_loop(tmp_path)
+        _absorb(vpath, store)
+        verify_source_pins(vpath)  # no raise
+
+    def test_drifted_source_refuses(self, tmp_path):
+        from engine.declaration import SourceDrift, verify_source_pins
+
+        vpath, store, loop = self._scaffold_loop(tmp_path)
+        _absorb(vpath, store)
+        loop.write_text(loop.read_text().replace("echo hi", "curl evil"))
+        with pytest.raises(SourceDrift):
+            verify_source_pins(vpath)
+
+    def test_pre_genesis_is_a_noop(self, tmp_path):
+        from engine.declaration import verify_source_pins
+
+        vpath, _store, loop = self._scaffold_loop(tmp_path)  # never absorbed
+        loop.write_text("anything")
+        verify_source_pins(vpath)  # no pins, no raise
+
+
+class TestDeclarationStatus:
+    """load_declaration_status — the honesty channel for rendering surfaces."""
+
+    def test_store_status_at_head_and_asof(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        _ast, status = load_declaration_status(vpath)
+        assert status == "store"
+        _ast, status = load_declaration_status(
+            vpath, as_of=_genesis_ts(store) + 1
+        )
+        assert status == "store"
+
+    def test_unhistorized_status_before_genesis(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        ast, status = load_declaration_status(
+            vpath, as_of=_genesis_ts(store) - 100
+        )
+        assert status == "unhistorized"
+        assert set(ast.loops) == {"decision", "thread"}  # genesis floor
+
+    def test_pre_genesis_is_file_status(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath, _store = _scaffold(tmp_path)  # never absorbed
+        _ast, status = load_declaration_status(vpath)
+        assert status == "file-pre-genesis"
+
+    def test_storeless_aggregate_under_asof_is_flagged(self, tmp_path):
+        from engine.declaration import load_declaration_status
+
+        vpath = tmp_path / "agg.vertex"
+        vpath.write_text(
+            'name "agg"\ncombine {\n  vertex "/tmp/nonexistent.vertex"\n}\n'
+        )
+        _ast, status = load_declaration_status(vpath, as_of=123.0)
+        assert status == "aggregate-head"
+        # Without a cursor there is no historical claim to caveat.
+        _ast, status = load_declaration_status(vpath)
+        assert status == "file-pre-genesis"
+
+    def test_structural_edit_of_duplicates_never_cross_wires(self, tmp_path):
+        # Delete the FIRST of two same-command sources in the file without
+        # re-absorbing: ordinal identity is unsound for that group, so
+        # re-attachment SKIPS it (empty values, loud at runtime) rather than
+        # routing the survivor's value onto the stored first source
+        # (branch-review #2).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        two = f'''name "t"
+store "{store}"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+  source "curl -s https://x.example" {{
+    kind "pong"
+    env TOKEN="second"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+        vpath.write_text(two)
+        _absorb(vpath, store)
+        # File drops the FIRST duplicate; declaration still has both.
+        one = two.replace('''  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="first"
+  }}
+'''.replace("{{", "{").replace("}}", "}"), "")
+        vpath.write_text(one)
+        resolved = load_declaration(vpath)
+        (block,) = resolved.sources_blocks
+        values = [dict(s.env).get("TOKEN", "") for s in block.sources]
+        # Both stored sources resolve EMPTY — never "second" on the first.
+        assert values == ["", ""]
+
+    def test_id_lookup_scoped_by_kind(self, tmp_path):
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        lineage = _absorb(vpath, store)
+        # Unlock alone must not return a row of a DIFFERENT kind.
+        found = vertex_fact_by_id(
+            vpath, lineage, include_internal=True, kind="_decl.kind-defined"
+        )
+        assert found is None
+        found = vertex_fact_by_id(
+            vpath, lineage, include_internal=True, kind="_decl.genesis"
+        )
+        assert found is not None
+
+    def test_cross_block_move_resolves_empty_not_cross_wired(self, tmp_path):
+        # Move one of two same-command sources to a second block without
+        # re-absorbing: no (block, command) group is count-stable for the
+        # moved source, and there is NO command-level fallback — both blocks'
+        # affected sources resolve empty rather than borrowing another
+        # block's value (branch-review round 2 #1).
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        two_one_block = f'''name "t"
+store "{store}"
+sources sequential {{
+  source "echo same" {{
+    kind "ping"
+    env TOKEN="A"
+  }}
+  source "echo same" {{
+    kind "pong"
+    env TOKEN="B"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+  pong {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+        vpath.write_text(two_one_block)
+        _absorb(vpath, store)
+        split_blocks = two_one_block.replace('''  source "echo same" {
+    kind "pong"
+    env TOKEN="B"
+  }
+}
+loops''', '''}
+sources sequential {
+  source "echo same" {
+    kind "pong"
+    env TOKEN="B"
+  }
+}
+loops''')
+        vpath.write_text(split_blocks)
+        resolved = load_declaration(vpath)
+        values = [
+            dict(s.env).get("TOKEN", "")
+            for b in resolved.sources_blocks
+            for s in b.sources
+        ]
+        assert "A" in values or values == ["", ""] or values == [""] * len(values)
+        # The load-bearing assertion: pong NEVER borrows A (nor ping B).
+        (block,) = resolved.sources_blocks[:1]
+        kinds_to_token = {
+            s.kind: dict(s.env).get("TOKEN", "")
+            for b in resolved.sources_blocks
+            for s in b.sources
+        }
+        assert kinds_to_token.get("pong", "") in ("", "B")
+        assert kinds_to_token.get("ping", "") in ("", "A")
+
+    def test_id_prefix_ambiguity_scoped_by_kind(self, tmp_path):
+        # Two facts sharing an id prefix across kinds are NOT ambiguous when
+        # only one has the requested kind (branch-review round 2 #2).
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        for fid, kind in (("abc1", "decision"), ("abc2", "thread")):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, 100.0, 'kyle', '{}')",
+                (fid, kind),
+            )
+        conn.commit()
+        conn.close()
+        with pytest.raises(ValueError):
+            vertex_fact_by_id(vpath, "abc")  # genuinely ambiguous unscoped
+        found = vertex_fact_by_id(vpath, "abc", kind="decision")
+        assert found is not None and found["id"] == "abc1"
+
+    def test_combined_lookup_propagates_child_ambiguity(self, tmp_path):
+        # Within-store prefix ambiguity in an aggregation member must raise,
+        # not read as absent (branch-review round 3).
+        from engine.vertex_reader import vertex_fact_by_id
+
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        for fid in ("abc1", "abc2"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, 'decision', 100.0, 'kyle', '{}')",
+                (fid,),
+            )
+        conn.commit()
+        conn.close()
+        agg = tmp_path / "agg.vertex"
+        agg.write_text(f'name "agg"\ncombine {{\n  vertex "{vpath}"\n}}\n')
+        with pytest.raises(ValueError):
+            vertex_fact_by_id(agg, "abc", kind="decision")

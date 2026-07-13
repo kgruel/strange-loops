@@ -561,8 +561,10 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if ok else 1
 
 
-def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]:
-    """Read (has_genesis, chain_head, fact_cursor) for the era-opening pins.
+def _read_absorption_state(
+    db_path: Path,
+) -> tuple[bool, str | None, str | None, bool]:
+    """Read (has_genesis, chain_head, fact_cursor, has_marker) for absorb.
 
     SPEC §9.2 era rule: a genesis pins "everything before me predates
     historization" — a verifiable claim, not an inference from row order.
@@ -575,13 +577,18 @@ def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]
     - ``fact_cursor`` — the id of the newest fact by WITNESS order (rowid),
       matching ``append_tick``'s cursor authority — or None on empty.
 
+    ``has_marker`` — the ``store_meta.own_lineage`` identity marker exists.
+    Genesis rows WITHOUT a marker are unclaimable (pre-marker store, or a
+    merged foreign genesis) — absorb refuses with adopt guidance rather than
+    inferring identity from facts.
+
     A not-yet-materialized store (no ``.db``, or a schemaless file) returns
-    ``(False, None, None)``: genesis becomes its first fact.
+    ``(False, None, None, False)``: genesis becomes its first fact.
     """
     import sqlite3
 
     if not db_path.exists():
-        return False, None, None
+        return False, None, None, False
 
     from engine.sqlite_store import (
         _TICK_ROW_SQL,
@@ -606,7 +613,7 @@ def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]
             fact_cursor = frow[0] if frow else None
         except sqlite3.OperationalError:
             # Schemaless / non-store file — nothing absorbed, nothing to pin.
-            return False, None, None
+            return False, None, None, False
 
         chain_head: str | None = None
         try:
@@ -624,7 +631,18 @@ def _read_absorption_state(db_path: Path) -> tuple[bool, str | None, str | None]
         except sqlite3.OperationalError:
             pass
 
-        return has_genesis, chain_head, fact_cursor
+        has_marker = False
+        try:
+            has_marker = (
+                conn.execute(
+                    "SELECT 1 FROM store_meta WHERE key = 'own_lineage'"
+                ).fetchone()
+                is not None
+            )
+        except sqlite3.OperationalError:
+            pass  # pre-marker schema
+
+        return has_genesis, chain_head, fact_cursor, has_marker
     finally:
         conn.close()
 
@@ -692,10 +710,21 @@ def _run_absorb(
     # nothing to open a lineage over (build-plan aggregation wrinkle, deferred).
     db_path = resolve_store_path(target_path)
 
-    # Parse the declaration ONCE.
-    from lang import parse_vertex_file
+    # Parse the declaration ONCE — and VALIDATE it. Absorb mints immutable
+    # signed events (genesis/edit rows are never rewritten), so a declaration
+    # that ordinary validation rejects (e.g. a loop named into the _decl.*
+    # reserved namespace) must never enter the lineage (closing review #6).
+    from lang import parse_vertex_file, validate_vertex
 
     ast = parse_vertex_file(target_path)
+    try:
+        validate_vertex(ast)
+    except Exception as exc:
+        from painted import Block, Style, paint
+        paint(Block.text(
+            f"✗ {target_path.stem}: declaration invalid — {exc}", Style()
+        ), file=sys.stderr)
+        return 2
 
     # Observer resolution. Precedence: explicit ``--observer`` on the absorb
     # parser (direct/test calls) > invocation observer from the global peel >
@@ -709,7 +738,19 @@ def _run_absorb(
     # the ceremony (SPEC §9.2 / §9.5). No genesis → genesis mode (open the
     # lineage, S1). Genesis present → edit mode (S4): diff the file against the
     # fold head and re-emit ONLY the changed subjects. Same verb, two ceremonies.
-    has_genesis, _chain_head, _fact_cursor = _read_absorption_state(db_path)
+    has_genesis, _chain_head, _fact_cursor, has_marker = _read_absorption_state(db_path)
+    if has_genesis and not has_marker:
+        # Genesis rows exist but none is CLAIMED as self — a pre-marker store
+        # or a merged foreign genesis. Facts alone cannot prove which; the
+        # explicit adopt ceremony must run first (closing re-review #1).
+        from painted import Block, Style, paint
+        paint(Block.text(
+            f"✗ {target_path.stem}: genesis row(s) present but no own_lineage "
+            "marker — run `loops store adopt` to claim the store's own "
+            "lineage before editing (identity is adopted, never inferred)",
+            Style(),
+        ), file=sys.stderr)
+        return 2
     if has_genesis:
         return _absorb_edit(
             target_path, db_path, ast, observer,
@@ -774,7 +815,7 @@ def _absorb_genesis_mode(
         # Preview only — a read-only projection of what the real (atomic) path
         # would do. Inherently racy (no write lock held); the atomicity
         # guarantees belong to the real path's single transaction.
-        has_genesis, chain_head, fact_cursor = _read_absorption_state(db_path)
+        has_genesis, chain_head, fact_cursor, _has_marker = _read_absorption_state(db_path)
         if has_genesis:
             # Defensive: a concurrent absorb opened the lineage between the
             # dispatcher's mode check and here — fall back to the edit refusal.
@@ -894,6 +935,21 @@ def _absorb_edit(
     # The edited file's document set.
     new_docs = vertex_to_documents(ast)
 
+    # CAS token FIRST, then the head read: if a concurrent edit lands between
+    # the two, the token is older than the head we diffed — absorb_edit then
+    # refuses (StaleDeclarationHead) instead of interleaving, and re-running
+    # picks up the moved head. Capturing in this order fails conservative.
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    _cas_store = SqliteStore(
+        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    try:
+        expected_head = _cas_store.declaration_head()
+    finally:
+        _cas_store.close()
+
     # The fold head from the store. has_genesis was true at dispatch, so this is
     # normally a list; a resolution failure (ambiguous lineage, unsupported
     # protocol) or a non-list refuses cleanly rather than diffing against noise.
@@ -983,11 +1039,10 @@ def _absorb_edit(
 
     from loops.commands.signing import fact_signer_for
 
-    from atoms import Fact
     from engine.sqlite_store import (
         AmbiguousGenesis,
         NoGenesis,
-        SqliteStore,
+        StaleDeclarationHead,
         UnsignableEdit,
     )
 
@@ -1000,7 +1055,10 @@ def _absorb_edit(
             observer=observer,
             origin="",
             fact_signer=fact_signer_for(target_path),
+            expected_head=expected_head,
         )
+    except StaleDeclarationHead as exc:
+        return _refuse(f"{exc}")
     except UnsignableEdit:
         return _refuse(
             f"cannot absorb — no signing key for observer '{observer}'. A "
@@ -1019,6 +1077,66 @@ def _absorb_edit(
         store.close()
 
     _render_divergence(applied=True)
+    return 0
+
+
+def _run_adopt(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Explicitly claim a genesis row as the store's own lineage (SPEC §9.2).
+
+    The one legitimate path for an unmarked store (pre-marker era, or one
+    holding merged foreign genesis rows) to gain identity. Facts alone cannot
+    prove which genesis is self, so identity is ADOPTED under human intent —
+    never inferred (a singleton heuristic is the hijack vector this closes).
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="loops store adopt",
+        description="Claim a _decl.genesis row as this store's own lineage — "
+                    "stamps the store_meta.own_lineage identity marker. "
+                    "One-time ceremony for stores absorbed before the marker "
+                    "existed (or holding merged foreign genesis rows).",
+    )
+    if vertex_path is None:
+        p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
+    p.add_argument(
+        "--lineage", default=None,
+        help="Genesis id (or unique prefix) to adopt — required when several "
+             "genesis rows exist",
+    )
+    args = p.parse_args(argv)
+
+    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+    db_path = _require_materialized_store(target_path)
+
+    from atoms import Fact
+    from engine.sqlite_store import (
+        AmbiguousGenesis,
+        GenesisExists,
+        NoGenesis,
+        SqliteStore,
+    )
+    from painted import Block, Style, join_vertical, paint
+
+    store = SqliteStore(
+        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    try:
+        receipt = store.adopt_lineage(args.lineage)
+    except (GenesisExists, NoGenesis, AmbiguousGenesis) as exc:
+        paint(Block.text(f"✗ {target_path.stem}: {exc}", Style()), file=sys.stderr)
+        return 2
+    finally:
+        store.close()
+
+    from datetime import datetime, timezone
+    when = datetime.fromtimestamp(receipt["ts"], tz=timezone.utc).isoformat()
+    lines = [
+        f"✓ {target_path.stem}: lineage adopted — {receipt['lineage']}",
+        f"  genesis by {receipt['observer']} at {when}",
+        f"  ({receipt['genesis_count']} genesis row(s) present; this one is now self)",
+    ]
+    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
     return 0
 
 
@@ -1244,6 +1362,8 @@ def _run_store(
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "absorb":
         return _run_absorb(argv[1:], vertex_path=vertex_path, observer=observer)
+    if argv and argv[0] == "adopt":
+        return _run_adopt(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "ticks":
         return _run_store_ticks(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "stats":

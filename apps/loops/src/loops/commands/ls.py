@@ -234,7 +234,7 @@ def fetch_declarations(
     The returned dict exposes both ``filter`` (legacy, single) and
     ``filters``/``narrows`` (new) so lens code can transition incrementally.
     """
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
     from lang.population import (
         resolve_vertex,
     )
@@ -268,7 +268,7 @@ def fetch_declarations(
         }
 
     try:
-        vf = parse_vertex_file(vertex_path)
+        vf = load_declaration(vertex_path)
     except Exception as exc:  # noqa: BLE001
         return {
             "error": f"failed to parse {vertex_path.name}: {exc}",
@@ -382,7 +382,7 @@ def fetch_kind_stat(
     namespace level (and re-rolled by ``key_prefix`` when drilling). For a
     collect-fold (no fold key) the entries degrade to a by-observer breakdown.
     """
-    from lang import parse_vertex_file
+    from engine.declaration import load_declaration
     from lang.population import resolve_vertex
 
     from loops.commands.fetch import _get_key_field
@@ -395,7 +395,7 @@ def fetch_kind_stat(
             "vertex_name": target, "kind": kind,
         }
     try:
-        vf = parse_vertex_file(vertex_path)
+        vf = load_declaration(vertex_path)
     except Exception as exc:  # noqa: BLE001
         return {
             "error": f"failed to parse {vertex_path.name}: {exc}",

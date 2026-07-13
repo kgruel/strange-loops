@@ -1144,11 +1144,16 @@ def _dict_to_fold_item(d: dict, edge_specs: tuple[tuple[str, str], ...] = ()) ->
 def vertex_fact_by_id(
     vertex_path: Path,
     id_prefix: str,
+    *,
+    include_internal: bool = False,
+    kind: str | None = None,
 ) -> dict | None:
     """Look up a single fact by ID or ID prefix from a vertex's store.
 
     For combinatorial vertices, searches across all combined stores.
     Returns None if not found. Raises ValueError on ambiguous prefix.
+    ``include_internal`` is the explicit ``_decl.*`` defeat (SPEC §9.4) —
+    reached from the CLI via ``--kind _decl.* --id ...``.
     """
     from .store_reader import StoreReader
 
@@ -1161,11 +1166,16 @@ def vertex_fact_by_id(
         for sp in store_paths:
             try:
                 with StoreReader(sp) as reader:
-                    result = reader.fact_by_id(id_prefix)
+                    result = reader.fact_by_id(
+                        id_prefix, include_internal=include_internal, kind=kind
+                    )
                     if result is not None:
                         matches.append(result)
-            except (FileNotFoundError, ValueError):
-                continue
+            except FileNotFoundError:
+                continue  # absent member store — skip, not ambiguity
+            # A ValueError is WITHIN-STORE prefix ambiguity — propagate;
+            # swallowing it presented ambiguous data as absent
+            # (branch-review round 3).
         if not matches:
             return None
         if len(matches) > 1:
@@ -1178,7 +1188,11 @@ def vertex_fact_by_id(
         return None
 
     with StoreReader(store_path) as reader:
-        return reader.fact_by_id(id_prefix)
+        # An explicit --kind SCOPES the lookup in SQL — including prefix
+        # ambiguity resolution (branch-review round 2 #2).
+        return reader.fact_by_id(
+            id_prefix, include_internal=include_internal, kind=kind
+        )
 
 
 def vertex_facts(

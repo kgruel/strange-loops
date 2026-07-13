@@ -213,6 +213,11 @@ def load_vertex_program(
         expected tick names (sorted compiled spec keys).
     """
     ast = load_declaration(vertex_path)
+    # No-auto-enact gate: a pinned .loop/params file that drifted from its
+    # declaration must not silently change runtime behavior (SourceDrift).
+    from .declaration import verify_source_pins
+
+    verify_source_pins(vertex_path)
     if vars:
         ast = _substitute_vertex_vars(ast, vars)
     if validate_ast:

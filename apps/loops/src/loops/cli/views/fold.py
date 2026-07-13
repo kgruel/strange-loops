@@ -659,11 +659,11 @@ def _run_why(
 
 def _resolve_fold_op(vertex_path: Path, kind: str) -> Any:
     """The kind's real fold op (``spec.folds[0]``), or None when undeclared."""
+    from engine.declaration import load_declaration
     from engine.vertex_reader import _resolve_full_specs
-    from lang import parse_vertex_file
 
     try:
-        ast = parse_vertex_file(vertex_path)
+        ast = load_declaration(vertex_path)
         specs = _resolve_full_specs(ast, vertex_path)
     except Exception:
         return None

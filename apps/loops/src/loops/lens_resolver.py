@@ -244,12 +244,13 @@ def _lens_module_info(source: str, stem: str) -> tuple[str, str] | None:
     """Inspect a lens module's source. ``(name, description)`` or None.
 
     None when the source doesn't parse or exposes no resolvable entrypoint
-    (not a lens). Known boundary (review round 2 #7, accepted): AST
+    (not a lens). Known boundary (review round 2 #7 / round 3 #6): AST
     inspection cannot prove the module body IMPORTS successfully — a module
     whose body raises enumerates here but fails at resolve time. That is the
     render-free trade by design: completion projects the *declared* surface,
-    and an import-broken lens is a runtime error the user should hit (and
-    read) when they select it, not a candidate silently hidden at TAB.
+    and an import-broken lens is a runtime error the user hits — and READS —
+    when they select it (``_load_lens_module`` reports the underlying
+    exception to stderr), not a candidate silently hidden at TAB.
 
     Description is the module docstring's first line, falling back
     to the first view function's docstring; empty is fine. Pure ``ast`` — the
@@ -381,7 +382,15 @@ def _find_lens_module_path(name: str, *, vertex_dir: Path | None) -> Path | None
 
 
 def _load_lens_module(path: Path):
-    """Dynamically import a Python file. Returns the module, or None on failure."""
+    """Dynamically import a Python file. Returns the module, or None on failure.
+
+    A module-body failure is REPORTED to stderr before returning None: a lens
+    file that raises at import is a user error the user must be able to read —
+    swallowing it leaves ``--lens`` reporting a generic "not found" for a lens
+    that visibly exists (and that completion legitimately offered, since
+    enumeration projects the declared surface — Sol review review/completion-t3
+    round 3 #6).
+    """
     module_name = f"_loops_lens_{path.stem}_{id(path)}"
 
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -392,8 +401,13 @@ def _load_lens_module(path: Path):
     sys.modules[module_name] = mod
     try:
         spec.loader.exec_module(mod)
-    except Exception:
+    except Exception as e:
         del sys.modules[module_name]
+        print(
+            f"lens {path.stem!r} failed to load ({path}): "
+            f"{type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
         return None
 
     return mod

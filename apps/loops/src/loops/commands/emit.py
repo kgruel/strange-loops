@@ -112,10 +112,14 @@ def _build_receipt_lines(
     return warn_lines, primary_lines
 
 
-# --plain receipt register: set once per cmd_emit call from args.plain.
-# painted already strips ANSI on a non-TTY stderr; this honours an EXPLICIT
-# --plain on a TTY too, so the accepted flag does what it advertises
-# (Sol review review/completion-t3 round 2 #4).
+# --plain receipt register: set at every cmd_emit entry from args.plain,
+# covering all three output surfaces (receipt lines, --dry-run fact JSON,
+# --json surface receipt). painted already strips ANSI on a non-TTY stream;
+# this honours an EXPLICIT --plain on a TTY too, so the accepted flag does
+# what it advertises (Sol review review/completion-t3 rounds 2 #4, 3 #3).
+# A module global is deliberate: the CLI runs one command per process and
+# cmd_emit is not re-entered; every entry overwrites the register, so no
+# state leaks between calls even in-process (tests).
 _PLAIN_RECEIPT = False
 
 
@@ -451,7 +455,10 @@ def _emit_json_receipt(vertex_path: Path | None, kind: str) -> None:
         state = fetch_fold(vertex_path, kind=kind, observer=None)
         surface = project(state)
         text = _json.dumps(to_dict(surface), sort_keys=True, default=str)
-        paint(Block.text(text, current_palette().muted), file=sys.stdout)
+        if _PLAIN_RECEIPT:
+            print(text)
+        else:
+            paint(Block.text(text, current_palette().muted), file=sys.stdout)
     except Exception:
         return  # receipt is best-effort
 
@@ -726,12 +733,11 @@ def cmd_emit(
                 dry_run=True,
             )
             _emit_lines(warn_lines)
-        paint(
-            Block.text(
-                json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
-            ),
-            file=sys.stdout,
-        )
+        _dry_text = json.dumps(fact.to_dict(), sort_keys=True, default=str)
+        if _PLAIN_RECEIPT:
+            print(_dry_text)
+        else:
+            paint(Block.text(_dry_text, p.muted), file=sys.stdout)
         return 0
 
     # Pre-generate the fact ID so the receipt reports the same ULID the store assigns.

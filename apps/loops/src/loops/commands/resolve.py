@@ -438,6 +438,17 @@ def _completion_declaration(vertex_path: Path):
             row = conn.execute(
                 "SELECT 1 FROM facts WHERE kind = '_decl.genesis' LIMIT 1"
             ).fetchone()
+            if row is not None:
+                # Bounded-work cap: the resolver folds EVERY _decl.* row
+                # (correctness needs all of them), so its cost scales with
+                # declaration-history length. Normal stores hold a handful;
+                # a pathological one must not turn TAB into a scan (review
+                # round 3 #1). Over the cap → under-list.
+                (decl_rows,) = conn.execute(
+                    "SELECT COUNT(*) FROM facts WHERE kind GLOB '_decl.*'"
+                ).fetchone()
+                if decl_rows > 5000:
+                    return None
         finally:
             conn.close()
     except sqlite3.Error:
@@ -447,7 +458,12 @@ def _completion_declaration(vertex_path: Path):
             return _parse_vertex(vertex_path)
         from engine.declaration import load_declaration
 
-        return load_declaration(vertex_path)
+        # 0.25s busy budget + raise-on-lock: a writer grabbing the lock
+        # between probe and load must yield [] within budget, never the
+        # 5s default wait or the stale file (review round 3 #2).
+        return load_declaration(
+            vertex_path, store_timeout=0.25, on_locked="raise",
+        )
     except Exception:
         return None
 

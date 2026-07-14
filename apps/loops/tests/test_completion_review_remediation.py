@@ -389,3 +389,114 @@ class TestRound2ControlCharacters:
         assert "\x1b" not in got[0].description
 
 
+# --- Round 3 -----------------------------------------------------------------
+
+
+class TestRound3BoundedCanonicalPath:
+    def test_declaration_row_cap_underlists(self, tmp_path):
+        """R3-1: a pathological _decl.* row count under-lists instead of
+        turning TAB into a full-history fold."""
+        import sqlite3
+
+        from loops.commands.resolve import _declared_kind_names
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        conn = sqlite3.connect(str(tmp_path / "t.db"))
+        conn.executemany(
+            "INSERT INTO facts (id, kind, ts, observer, payload) "
+            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}')",
+            [(f"pad{i}",) for i in range(5001)],
+        )
+        conn.commit()
+        conn.close()
+        assert _declared_kind_names(vpath) == []
+
+    def test_lock_after_probe_underlists(self, tmp_path, monkeypatch):
+        """R3-2: a lock acquired between probe and load → [] within budget,
+        never the stale file (StoreBusy path)."""
+        from engine.declaration import StoreBusy
+
+        from loops.commands import resolve as resolve_mod
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        vpath.write_text(vpath.read_text().replace("decision", "renamed"))
+
+        def _locked_load(path, **kw):
+            raise StoreBusy("simulated post-probe lock")
+
+        import engine.declaration as decl_mod
+
+        monkeypatch.setattr(decl_mod, "load_declaration", _locked_load)
+        assert resolve_mod._declared_kind_names(vpath) == []
+
+    def test_engine_on_locked_raises_storebusy(self, tmp_path):
+        """Engine contract: on_locked='raise' surfaces lock contention as
+        StoreBusy instead of the file-fallback None."""
+        import sqlite3
+
+        import pytest as _pytest
+        from engine.declaration import StoreBusy, resolve_declaration_documents
+
+        _scaffold_and_absorb(tmp_path)
+        db = tmp_path / "t.db"
+        prep = sqlite3.connect(str(db))
+        prep.execute("PRAGMA journal_mode=DELETE")
+        prep.close()
+        holder = sqlite3.connect(str(db))
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            with _pytest.raises(StoreBusy):
+                resolve_declaration_documents(db, timeout=0.1, on_locked="raise")
+        finally:
+            holder.rollback()
+            holder.close()
+
+
+class TestRound3PlainCoversAllSurfaces:
+    def test_dry_run_plain_has_no_ansi(self, tmp_path, capsys, monkeypatch):
+        """R3-3: --plain covers the dry-run fact JSON, not just the receipt."""
+        import argparse as _argparse
+
+        import loops.commands.emit as emit_mod
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        rc = emit_mod._run_emit(
+            ["decision", "topic=t/x", "--dry-run", "--plain", "--observer", "kyle"],
+            vertex_path=vpath,
+        )
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert '"kind": "decision"' in out
+        assert "\x1b[" not in out
+        del _argparse
+
+
+class TestRound3StarImport:
+    def test_star_import_resolves_lazy_reexports(self):
+        """R3-5: __all__ makes star-import pull lazy names through __getattr__."""
+        ns: dict = {}
+        exec("from loops.main import *", ns)  # noqa: S102
+        assert "main" in ns
+        assert "LoopsError" in ns
+        assert "cmd_init" in ns
+
+
+class TestRound3LensErrorSurfaced:
+    def test_import_broken_lens_reports_cause(self, tmp_path, capsys, monkeypatch):
+        """R3-6: selecting an import-broken lens surfaces the real error."""
+        from loops.lens_resolver import resolve_lens
+
+        lens_dir = tmp_path / "lenses"
+        lens_dir.mkdir()
+        (lens_dir / "boom.py").write_text(
+            'raise RuntimeError("body exploded")\n\n'
+            "def fold_view(data, zoom, width):\n    return None\n"
+        )
+        monkeypatch.chdir(tmp_path)  # cwd tier of the resolver hierarchy
+        got = resolve_lens("boom", "fold_view")
+        err = capsys.readouterr().err
+        assert got is None
+        assert "body exploded" in err and "boom" in err
+
+

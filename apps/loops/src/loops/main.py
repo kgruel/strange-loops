@@ -79,6 +79,16 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_REEXPORTS))
 
 
+# Star-import compatibility: with a module __getattr__, ``from loops.main
+# import *`` resolves names through __all__ (each triggering __getattr__) —
+# without it, star-import silently exports only eagerly-bound globals
+# (Sol review review/completion-t3 round 3 #5).
+__all__ = sorted(
+    set(_REEXPORTS)
+    | {"main", "_VERBS", "_DEV_COMMANDS", "_SETUP_COMMANDS", "_COMMANDS", "_VERTEX_OPS"}
+)
+
+
 _VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
 _SETUP_COMMANDS = frozenset({"init", "orient", "whoami", "ls", "add", "rm", "export"})

@@ -123,11 +123,13 @@ class StoreReader:
         The completion-time sibling of :meth:`fact_key_stats`: that method
         computes an unbounded ``GROUP BY`` over the whole kind partition for a
         display lens; this one is a bounded probe for shell ``<TAB>`` — a
-        single ``LIMIT``-capped read (most-recent ``limit`` facts of ``kind``),
-        with the prefix/full-key split done in Python rather than a second SQL
-        shape. TAB must stay instant, so this trades completeness (a namespace
-        used only on older, evicted-by-the-limit facts can be missed) for a
-        fixed, small amount of I/O regardless of store size.
+        single ``LIMIT``-capped read of the ``limit`` most-recently INSERTED
+        facts of ``kind`` (rowid order, not timestamp order — after a merge
+        appends older-``ts`` foreign facts, those count as recent here; a
+        namespace live only in lower-rowid facts can be missed), with the
+        prefix/full-key split done in Python rather than a second SQL shape.
+        TAB must stay instant, so this trades completeness for a fixed, small
+        amount of I/O regardless of store size.
 
         Two modes, chosen by whether ``prefix`` already contains a ``/``:
 

@@ -112,9 +112,20 @@ def _build_receipt_lines(
     return warn_lines, primary_lines
 
 
+# --plain receipt register: set once per cmd_emit call from args.plain.
+# painted already strips ANSI on a non-TTY stderr; this honours an EXPLICIT
+# --plain on a TTY too, so the accepted flag does what it advertises
+# (Sol review review/completion-t3 round 2 #4).
+_PLAIN_RECEIPT = False
+
+
 def _emit_lines(lines: list[tuple[str, str]]) -> None:
     """Render receipt lines to stderr via painted, mapping role→palette."""
     if not lines:
+        return
+    if _PLAIN_RECEIPT:
+        for text, _role in lines:
+            print(text, file=sys.stderr)
         return
     from painted import paint, Block
     from painted.palette import current_palette
@@ -453,6 +464,8 @@ def cmd_emit(
 ) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     _ = _reporter(reporter)  # reserved for future error routing
+    global _PLAIN_RECEIPT
+    _PLAIN_RECEIPT = bool(getattr(args, "plain", False))
     from atoms import Fact
     from loops.commands.identity import resolve_observer, check_emit
     from loops.commands.resolve import (
@@ -927,15 +940,30 @@ def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.Argument
     # the add_args seam) advertises the full framework set for every command,
     # so completion offers these — the runtime parser must accept what TAB
     # offers or completion invents candidates (Sol review review/completion-t3
-    # #1). All honest no-ops here: the receipt is already plain/static text,
-    # emit runs no live surface and asks no prompts.
-    parser.add_argument("--plain", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--static", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
+    # #1). Visible in -h (SUPPRESS would re-split the -h/completion
+    # reflection the seam unified — round 2 #4). --plain is wired (ANSI-free
+    # receipt); the rest are honest no-ops: the receipt is already static
+    # text, emit runs no live surface and asks no prompts.
     parser.add_argument(
-        "-i", "--interactive", action="store_true", help=argparse.SUPPRESS,
+        "--plain", action="store_true",
+        help="Plain-text receipt, no ANSI codes",
     )
-    parser.add_argument("--no-input", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--static", action="store_true",
+        help="Accepted for interface uniformity (the receipt is already static)",
+    )
+    parser.add_argument(
+        "--live", action="store_true",
+        help="Accepted for interface uniformity (emit runs no live surface)",
+    )
+    parser.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Accepted for interface uniformity (emit has no interactive mode)",
+    )
+    parser.add_argument(
+        "--no-input", action="store_true",
+        help="Accepted for interface uniformity (emit asks no prompts)",
+    )
     parser.add_argument(
         "--declare-observer",
         action="store_true",

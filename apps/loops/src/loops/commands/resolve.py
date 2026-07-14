@@ -355,12 +355,16 @@ def _extract_kind_keys(vertex_path: Path) -> dict[str, str]:
     Skips kinds that use collect or other non-keyed folds.
     Best-effort: returns empty dict on any vertex error.
     """
-    from lang.ast import FoldBy
-
     try:
         ast = _parse_vertex(vertex_path)
     except LoopsError:
         return {}
+    return _kind_keys_from_ast(ast)
+
+
+def _kind_keys_from_ast(ast) -> dict[str, str]:
+    """kind → fold key_field for an already-resolved ``VertexFile`` AST."""
+    from lang.ast import FoldBy
 
     kind_keys: dict[str, str] = {}
     for kind_name, loop_def in ast.loops.items():
@@ -396,27 +400,72 @@ def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> set[str]
     return {edge.field for edge in getattr(loop_def, "edges", ())}
 
 
-def _declared_kind_names(vertex_path: Path) -> list[str]:
-    """Kind names from the vertex's canonical declaration, internal-excluded.
+def _completion_declaration(vertex_path: Path):
+    """The canonical declaration AST, under completion's latency contract.
 
-    Routed through ``load_declaration`` — the store-backed resolver seam —
-    not a plain file parse: post-genesis, the ``.vertex`` file is a mutable
-    cache and completion must offer what the runtime would accept, not what
-    the file happens to say (Sol review review/completion-t3 #3; same honesty
-    rule as the internal-table seam swap). Pre-genesis the seam falls back to
-    the file, so the cheap case stays cheap; the genesis probe is one bounded
-    read. No combine/discover topology chase — widening through child
-    vertices (as ``_declared_kinds`` does for *validation*) is exactly the
-    I/O TAB can't afford on every keystroke.
+    Same honesty rule as ``load_declaration`` (post-genesis, the file is a
+    mutable cache — completion must offer what the runtime accepts), but TAB
+    cannot pay the seam's default costs: sqlite's 5s busy wait, and it must
+    UNDER-LIST on a lock rather than fall back to the stale file — the seam's
+    file fallback is honest for pre-genesis stores, dishonest as an error
+    path (Sol review review/completion-t3 round 2 #2).
+
+    Shape: a 0.25s-timeout read-only genesis probe decides the era —
+
+    - store missing / no genesis row → the file AST (pre-genesis: file IS
+      the declaration);
+    - genesis present → ``load_declaration`` (store-canonical; the probe just
+      held a read connection, so the residual lock window is a race, not the
+      common case);
+    - probe locked / any error → ``None`` (caller under-lists with []).
+    """
+    import sqlite3
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except LoopsError:
+        return None  # missing/unparseable vertex — nothing to complete from
+    if store_path is None or not store_path.exists():
+        try:
+            return _parse_vertex(vertex_path)
+        except LoopsError:
+            return None
+    try:
+        conn = sqlite3.connect(
+            f"file:{store_path}?mode=ro", uri=True, timeout=0.25,
+        )
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM facts WHERE kind = '_decl.genesis' LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None  # locked / unreadable — under-list, never the stale file
+    try:
+        if row is None:
+            return _parse_vertex(vertex_path)
+        from engine.declaration import load_declaration
+
+        return load_declaration(vertex_path)
+    except Exception:
+        return None
+
+
+def _declared_kind_names(vertex_path: Path) -> list[str]:
+    """Kind names from the canonical declaration, internal-excluded.
+
+    Routed through ``_completion_declaration`` (store-canonical, bounded,
+    under-lists on lock). No combine/discover topology chase — widening
+    through child vertices (as ``_declared_kinds`` does for *validation*) is
+    exactly the I/O TAB can't afford on every keystroke.
 
     Sorted. Best-effort: ``[]`` on any failure.
     """
-    from engine.declaration import load_declaration
     from lang.document import is_internal_kind
 
-    try:
-        ast = load_declaration(vertex_path)
-    except Exception:
+    ast = _completion_declaration(vertex_path)
+    if ast is None:
         return []
     return sorted(name for name in ast.loops if not is_internal_kind(name))
 
@@ -438,7 +487,14 @@ def enumerate_key_prefixes(
     a broken/locked database.
     """
     try:
-        key_field = _extract_kind_keys(vertex_path).get(kind)
+        # Canonical declaration, not the mutable file: the fold-key FIELD is
+        # declaration state too — a file-only fold-key flip must not steer
+        # --key completion into a field the runtime fold doesn't resolve
+        # (Sol review review/completion-t3 round 2 #3).
+        ast = _completion_declaration(vertex_path)
+        if ast is None:
+            return []
+        key_field = _kind_keys_from_ast(ast).get(kind)
         if key_field is None:
             return []
         store_path = _resolve_vertex_store_path(vertex_path)

@@ -5,46 +5,80 @@ Verbs: read, emit, close, sync, cite
 Commands: test, compile, validate, store, init, ls, whoami
 
 Behaviour is owned by ``loops.cli.app``. This module re-exports all
-symbols that tests and internal callers address via ``loops.main``.
+symbols that tests and internal callers address via ``loops.main`` —
+LAZILY, via module ``__getattr__``: the eager form imported the whole
+command/view surface (and through it painted's renderer) before painted's
+``_PAINTED_COMPLETE`` completion gate could run, breaking the render-free
+TAB guarantee for the real ``python -m loops`` / console-script entry
+(Sol review review/completion-t3 round 2 #1).
 """
 from __future__ import annotations
 
 import os
 import sys
+from importlib import import_module
 
-from loops.errors import LoopsError  # noqa: F401
-from loops.commands.resolve import (  # noqa: F401 — re-export for back-compat
-    loops_home, _find_local_vertex, _warn_missing_fold_key, _extract_kind_keys,
-    _try_topology_from_store, _topology_kind_keys_and_stores, _resolve_entity_refs,
-    _resolve_writable_vertex, _resolve_vertex_store_path, _resolve_named_store,
-    _resolve_named_vertex, _resolve_combine_child, _resolve_vertex_for_dispatch,
-    _resolve_observer_flag, _apply_vertex_scope,
-    _parse_vars, _resolve_vertex_path, _vertex_name, _declared_kinds, _validate_kind_or_exit,
-)
-from loops.commands.init import (  # noqa: F401
-    _ROOT_VERTEX, _MINIMAL_INSTANCE, _extract_block_text, _extract_loops_text,
-    _find_source_vertex, _init_local_vertex, _register_with_aggregator,
-    _seed_config_facts, _scaffold_artifacts, cmd_init, _run_init,
-)
-from loops.commands.store import _run_store  # noqa: F401
-from loops.commands.population import (  # noqa: F401
-    _run_ls, _run_ls_root, _run_add, _run_rm, _run_export,
-)
-from loops.commands.devtools import _run_validate, _run_test, _run_compile  # noqa: F401
-from loops.commands.sync import (  # noqa: F401
-    _resolve_combine_vertex_paths, _execute_boundary_run, _run_sync_aggregate, _run_sync,
-)
-from loops.commands.emit import (  # noqa: F401
-    _parse_emit_parts, cmd_emit, _run_emit, _run_close, _add_produced,
-)
-from loops.commands.stream import _run_stream  # noqa: F401
-from loops.cli.views.fold import _extract_refs_depth, _looks_like_vertex_path  # noqa: F401
-from loops.commands.whoami import _run_whoami, _whoami_from_identity_store  # noqa: F401
-from loops.commands.ticks import _tick_drill_header, _run_ticks  # noqa: F401
-from loops.cli.lens import (  # noqa: F401
-    _get_vertex_lens_decl, _exit_lens_not_found, _effective_lens_name,
-    _resolve_render_fn, _resolve_lens_fetch,
-)
+# Back-compat re-export table: public-through-loops.main name → home module.
+# Resolved on first attribute access, never at import.
+_REEXPORTS: dict[str, str] = {}
+for _mod, _names in {
+    "loops.errors": ("LoopsError",),
+    "loops.commands.resolve": (
+        "loops_home", "_find_local_vertex", "_warn_missing_fold_key",
+        "_extract_kind_keys", "_try_topology_from_store",
+        "_topology_kind_keys_and_stores", "_resolve_entity_refs",
+        "_resolve_writable_vertex", "_resolve_vertex_store_path",
+        "_resolve_named_store", "_resolve_named_vertex",
+        "_resolve_combine_child", "_resolve_vertex_for_dispatch",
+        "_resolve_observer_flag", "_apply_vertex_scope", "_parse_vars",
+        "_resolve_vertex_path", "_vertex_name", "_declared_kinds",
+        "_validate_kind_or_exit",
+    ),
+    "loops.commands.init": (
+        "_ROOT_VERTEX", "_MINIMAL_INSTANCE", "_extract_block_text",
+        "_extract_loops_text", "_find_source_vertex", "_init_local_vertex",
+        "_register_with_aggregator", "_seed_config_facts",
+        "_scaffold_artifacts", "cmd_init", "_run_init",
+    ),
+    "loops.commands.store": ("_run_store",),
+    "loops.commands.population": (
+        "_run_ls", "_run_ls_root", "_run_add", "_run_rm", "_run_export",
+    ),
+    "loops.commands.devtools": ("_run_validate", "_run_test", "_run_compile"),
+    "loops.commands.sync": (
+        "_resolve_combine_vertex_paths", "_execute_boundary_run",
+        "_run_sync_aggregate", "_run_sync",
+    ),
+    "loops.commands.emit": (
+        "_parse_emit_parts", "cmd_emit", "_run_emit", "_run_close",
+        "_add_produced",
+    ),
+    "loops.commands.stream": ("_run_stream",),
+    "loops.cli.views.fold": ("_extract_refs_depth", "_looks_like_vertex_path"),
+    "loops.commands.whoami": ("_run_whoami", "_whoami_from_identity_store"),
+    "loops.commands.ticks": ("_tick_drill_header", "_run_ticks"),
+    "loops.cli.lens": (
+        "_get_vertex_lens_decl", "_exit_lens_not_found",
+        "_effective_lens_name", "_resolve_render_fn", "_resolve_lens_fetch",
+    ),
+}.items():
+    for _n in _names:
+        _REEXPORTS[_n] = _mod
+
+
+def __getattr__(name: str):
+    mod = _REEXPORTS.get(name)
+    if mod is None:
+        raise AttributeError(f"module 'loops.main' has no attribute {name!r}")
+    value = getattr(import_module(mod), name)
+    globals()[name] = value  # cache: subsequent access skips __getattr__
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_REEXPORTS))
+
+
 _VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
 _DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
 _SETUP_COMMANDS = frozenset({"init", "orient", "whoami", "ls", "add", "rm", "export"})

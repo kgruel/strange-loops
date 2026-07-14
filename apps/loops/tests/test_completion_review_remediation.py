@@ -275,3 +275,117 @@ class TestProtocolSafety:
         assert got == []
 
 
+# --- Round 2 -----------------------------------------------------------------
+
+
+class TestRound2RenderFreeRealEntry:
+    def test_importing_loops_main_does_not_import_renderer(self):
+        """R2-1: python -m loops enters via loops.main, not loops.cli.app."""
+        code = (
+            "import sys; import loops.main; "
+            "sys.exit(1 if 'painted.core.block' in sys.modules else 0)"
+        )
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True)
+        assert proc.returncode == 0, proc.stderr.decode()
+
+    def test_lazy_reexports_still_resolve(self):
+        import loops.main as m
+
+        assert callable(m._run_store)
+        assert callable(m._looks_like_vertex_path)
+
+
+class TestRound2LockedStoreHonesty:
+    def test_exclusive_lock_on_delete_journal_underlists_fast(self, tmp_path):
+        """R2-2: locked canonical store → [] quickly, NEVER the stale file."""
+        import sqlite3
+
+        from loops.commands.resolve import _declared_kind_names
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        db = tmp_path / "t.db"
+        prep = sqlite3.connect(str(db))
+        prep.execute("PRAGMA journal_mode=DELETE")
+        prep.close()
+        vpath.write_text(vpath.read_text().replace("decision", "renamed"))
+        holder = sqlite3.connect(str(db))
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            start = time.monotonic()
+            got = _declared_kind_names(vpath)
+            elapsed = time.monotonic() - start
+        finally:
+            holder.rollback()
+            holder.close()
+        assert got == []  # honest under-list — not ['renamed'] from the file
+        assert elapsed < 2.0, f"blocked {elapsed:.2f}s"
+
+
+class TestRound2KeyFieldHonesty:
+    def test_file_fold_key_flip_is_inert(self, tmp_path):
+        """R2-3: --key completes the CANONICAL fold-key field's namespaces."""
+        import json
+        import sqlite3
+
+        from loops.commands.resolve import enumerate_key_prefixes
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        db = tmp_path / "t.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, payload) "
+            "VALUES ('f1', 'decision', 1.0, 'kyle', ?)",
+            (json.dumps({"topic": "real/a", "slug": "fake/b"}),),
+        )
+        conn.commit()
+        conn.close()
+        # File-only flip of the fold key: topic → slug.
+        vpath.write_text(
+            vpath.read_text().replace('items "by" "topic"', 'items "by" "slug"')
+        )
+        assert enumerate_key_prefixes(vpath, "decision") == ["real/"]
+
+
+class TestRound2EmitFlagsVisibleAndWired:
+    def test_emit_help_shows_framework_flags(self):
+        from loops.commands.emit import _build_emit_parser
+
+        text = _build_emit_parser(prog="loops emit").format_help()
+        for flag in ("--plain", "--no-input", "--static", "--live"):
+            assert flag in text, f"{flag} hidden from emit -h"
+
+    def test_plain_receipt_has_no_ansi(self, capsys, monkeypatch):
+        import loops.commands.emit as emit_mod
+
+        monkeypatch.setattr(emit_mod, "_PLAIN_RECEIPT", True)
+        emit_mod._emit_lines([("stored: x", "muted")])
+        err = capsys.readouterr().err
+        assert "stored: x" in err and "\x1b[" not in err
+
+
+class TestRound2EqualsBearingVertexPath:
+    def test_explicit_path_with_equals_wins_over_local(self, tmp_path, monkeypatch):
+        """R2-5: ./x=y.vertex is a path, not a predicate — runtime parity."""
+        from loops.cli import completers
+
+        target_dir = tmp_path / "explicit"
+        target_dir.mkdir()
+        explicit = _scaffold_and_absorb(target_dir)
+        weird = tmp_path / "x=y.vertex"
+        weird.write_text(explicit.read_text())
+        monkeypatch.chdir(tmp_path)
+        got = completers._vertex_path_on_line(_ctx([f"./{weird.name}"]))
+        assert got is not None and got.name == "x=y.vertex"
+
+
+class TestRound2ControlCharacters:
+    def test_unit_separator_and_escape_dropped(self):
+        """R2-6: \\x1f collides with painted's file directive; \\x1b injects."""
+        got = _clean([Candidate("\x1ffiles/"), Candidate("\x1b[31mred")])
+        assert got == []
+
+    def test_escape_in_description_collapsed(self):
+        got = _clean([Candidate("ok", "a\x1b[31mb")])
+        assert "\x1b" not in got[0].description
+
+

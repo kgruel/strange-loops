@@ -243,8 +243,15 @@ def _first_line(text: str, *, limit: int = 72) -> str:
 def _lens_module_info(source: str, stem: str) -> tuple[str, str] | None:
     """Inspect a lens module's source. ``(name, description)`` or None.
 
-    None when the source doesn't parse or exposes no public ``*_view`` function
-    (not a lens). Description is the module docstring's first line, falling back
+    None when the source doesn't parse or exposes no resolvable entrypoint
+    (not a lens). Known boundary (review round 2 #7, accepted): AST
+    inspection cannot prove the module body IMPORTS successfully — a module
+    whose body raises enumerates here but fails at resolve time. That is the
+    render-free trade by design: completion projects the *declared* surface,
+    and an import-broken lens is a runtime error the user should hit (and
+    read) when they select it, not a candidate silently hidden at TAB.
+
+    Description is the module docstring's first line, falling back
     to the first view function's docstring; empty is fine. Pure ``ast`` — the
     module body never executes, so this is safe to call at TAB time.
     """

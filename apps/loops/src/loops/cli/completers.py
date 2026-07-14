@@ -26,21 +26,28 @@ from painted.cli import Candidate, CompletionContext
 def _clean(values: list[Candidate]) -> list[Candidate]:
     """Drop candidates that would corrupt the line-oriented shell protocol.
 
-    painted's zsh emitter escapes ``:`` but not newlines (Sol review
-    review/completion-t3 #8), and fold keys are arbitrary JSON strings — a
-    ``\\n``-bearing value would split into two protocol rows, the second
-    injected as a bare candidate. Values with control characters are dropped
-    (under-list, never lie); descriptions are soft — control chars collapse
-    to a space.
+    painted's zsh emitter escapes ``:`` but not control characters (Sol
+    review review/completion-t3 #8, round 2 #6), and fold keys are arbitrary
+    JSON strings — a ``\\n`` splits the line protocol, a leading ``\\x1f``
+    collides with painted's file-completion directive, and ``\\x1b`` injects
+    terminal escapes into the menu. Values with ANY control character are
+    dropped (under-list, never lie); descriptions are soft — control chars
+    collapse to a space.
     """
-    bad = ("\n", "\r", "\x00")
+
+    def _has_ctl(s: str) -> bool:
+        return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in s)
+
     cleaned: list[Candidate] = []
     for c in values:
-        if any(ch in c.value for ch in bad):
+        if _has_ctl(c.value):
             continue
         desc = c.description
-        if desc and any(ch in desc for ch in bad):
-            desc = " ".join(desc.replace("\r", "\n").split("\n"))
+        if desc and _has_ctl(desc):
+            desc = "".join(
+                " " if (ord(ch) < 0x20 or ord(ch) == 0x7F) else ch for ch in desc
+            )
+            desc = " ".join(desc.split())
             c = Candidate(c.value, desc)
         cleaned.append(c)
     return cleaned
@@ -222,7 +229,15 @@ def _vertex_path_on_line(ctx: CompletionContext):
     first = None
     for tok in tokens:
         # Skip predicates (field=value) and flags — only barewords classify.
-        if not isinstance(tok, str) or "=" in tok or tok.startswith("-"):
+        # Vertex-like paths are exempt from the predicate skip, exactly as
+        # fold's classifier exempts them (``"=" in tok and not
+        # _looks_like_vertex_path(tok)``) — ``./x=y.vertex`` is a path, not
+        # a predicate (Sol review review/completion-t3 round 2 #5).
+        if not isinstance(tok, str) or tok.startswith("-"):
+            continue
+        if "=" in tok and not (
+            tok.startswith(("/", "./", "../")) or tok.endswith(".vertex")
+        ):
             continue
         first = tok
         break

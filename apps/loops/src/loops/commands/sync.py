@@ -167,15 +167,15 @@ def _run_sync_aggregate(
             "children": children,
         }
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         from loops.lenses.sync import sync_view
-        w = ctx.width if ctx.is_tty else None
-        return sync_view(data, ctx.zoom, w)
+        from loops.lens_resolver import zoom_from_fidelity
+        return sync_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops sync",
         description=f"Sync vertex {parent_name} (aggregation)",
     )
@@ -318,16 +318,15 @@ def _run_sync(
             ],
         }
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         from loops.lenses.sync import sync_view
-
-        w = ctx.width if ctx.is_tty else None
-        return sync_view(data, ctx.zoom, w)
+        from loops.lens_resolver import zoom_from_fidelity
+        return sync_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops sync",
         description=f"Sync vertex {program.name}",
     )

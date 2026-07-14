@@ -36,12 +36,26 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from painted import Zoom
+
 if TYPE_CHECKING:
     from painted import Block
 
 
 # Type alias for lens render functions
 LensRenderFn = Callable  # (data, zoom: Zoom, width: int | None) -> Block
+
+
+def zoom_from_fidelity(fidelity) -> "Zoom":
+    """Adapt the renderer contract's open depth to a legacy lens Zoom.
+
+    The renderer boundary keeps ``Fidelity`` whole.  Built-in and third-party
+    lenses still use the pre-contract bounded ``Zoom`` vocabulary, so this is
+    the one compatibility seam that owns its required two-sided clamp.
+    """
+    if isinstance(fidelity, Zoom):
+        return fidelity
+    return Zoom(min(max(fidelity.depth, 0), 3))
 
 
 def resolve_lens(
@@ -241,7 +255,7 @@ def normalize_width(width: int | None) -> int | None:
     return width
 
 
-def call_lens(fn: LensRenderFn, data, zoom, width, **kwargs) -> "Block":
+def call_lens(fn: LensRenderFn, data, fidelity, width, **kwargs) -> "Block":
     """Call a lens render function, passing optional context kwargs if accepted.
 
     Existing lenses: fold_view(data, zoom, width) — kwargs silently dropped.
@@ -260,6 +274,7 @@ def call_lens(fn: LensRenderFn, data, zoom, width, **kwargs) -> "Block":
     import inspect
 
     params = inspect.signature(fn).parameters
+    zoom = zoom_from_fidelity(fidelity)
 
     has_var_keyword = any(
         p.kind == inspect.Parameter.VAR_KEYWORD

@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from painted import Block
+
 
 def _tick_drill_header(tick_meta: dict, width: int | None) -> "Block":
     """Compact header for tick drill-down, composed above the fold/lens
@@ -105,13 +107,11 @@ def _run_ticks(
                 from loops.commands.fetch import fetch_tick_fold
                 return fetch_tick_fold(vertex_path, tick_index, since=known.since)
 
-        def render(ctx, data):
+        def renderer(data, fidelity, width):
             nonlocal resolved_render_fn
             from painted import Block, Style, join_vertical
             from loops.cli.lens import _resolve_render_fn
             from loops.commands.resolve import _vertex_name
-
-            w = ctx.width if ctx.is_tty else None
 
             # Error case
             if data.get("_tick_error"):
@@ -128,19 +128,18 @@ def _run_ticks(
 
             from loops.lens_resolver import call_lens
             body = call_lens(
-                resolved_render_fn, fold_state, ctx.zoom, w,
+                resolved_render_fn, fold_state, fidelity, width,
                 vertex_name=_vertex_name(vertex_path),
-                piped=not ctx.is_tty,
             )
 
             # Compose tick header + fold rendering
-            header = _tick_drill_header(tick_meta, w)
+            header = _tick_drill_header(tick_meta, width)
             return join_vertical(header, body) if header else body
 
         return run_cli(
             rest,
             fetch=fetch,
-            render=render,
+            renderer=renderer,
             prog="loops ticks",
             description="Show fold state at tick boundary",
         )
@@ -153,7 +152,7 @@ def _run_ticks(
     def fetch_listing():
         return fetch_ticks(vertex_path, since=known.since, as_of=known.as_of)
 
-    def render_listing(ctx, data):
+    def renderer_listing(data, fidelity, width):
         nonlocal resolved_render_fn
         from loops.cli.lens import _resolve_render_fn
         from loops.commands.resolve import _vertex_name
@@ -161,18 +160,16 @@ def _run_ticks(
             resolved_render_fn = _resolve_render_fn(
                 known.lens, vertex_path, "ticks_view",
             )
-        w = ctx.width if ctx.is_tty else None
         from loops.lens_resolver import call_lens
         return call_lens(
-            resolved_render_fn, data, ctx.zoom, w,
+            resolved_render_fn, data, fidelity, width,
             vertex_name=_vertex_name(vertex_path),
-            piped=not ctx.is_tty,
         )
 
     return run_cli(
         rest,
         fetch=fetch_listing,
-        render=render_listing,
+        renderer=renderer_listing,
         prog="loops ticks",
         description="Show tick history",
     )

@@ -378,12 +378,11 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
 
     from loops.lens_resolver import call_lens, normalize_width
 
-    # Fidelity was already resolved upstream in the view (domain visibility,
-    # zoom, refs context). Capture it into the per-frame closure; run_cli
-    # receives only ``--live``, so its own fidelity parse is a deliberate
-    # no-op — the render contract is driven by what we captured, not by
-    # re-parsing flags painted's argparse never saw (--kind/--facts/--refs…).
-    zoom = _zoom_of(op.fidelity)
+    # The live command has already compiled its domain fidelity upstream.
+    # ``run_cli`` still compiles its own empty-argv fidelity, so retain the
+    # domain value for the semantic renderer rather than re-parsing flags it
+    # never received.
+    fidelity = op.fidelity
     extra = dict(op.render_context)
     if op.fidelity is not None:
         extra.setdefault("visible", op.fidelity.visible)
@@ -395,11 +394,11 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
         extra.setdefault("vertex_name", _vertex_name(op.vertex_path))
         extra.setdefault("vertex_path", str(op.vertex_path))
 
-    def render(ctx, data):
-        # painted's render contract: (CliContext, data) -> Block. Width is
-        # the terminal width on a TTY, None when piped (no-truncation).
-        width = normalize_width(ctx.width if ctx.is_tty else None)
-        return call_lens(lens_fn, data, zoom, width, **extra)
+    def renderer(data, runner_fidelity, width):
+        # Preserve the operation's declared fidelity when present; this live
+        # invocation has no display flags for painted itself to compile.
+        return call_lens(lens_fn, data, fidelity or runner_fidelity,
+                         normalize_width(width), **extra)
 
     def fetch():
         # run_cli requires a static fetch; the live+stream path renders
@@ -410,7 +409,7 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     return run_cli(
         ["--live"],
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         fetch_stream=op.stream_fn,
         live_delivery="surface",
         prog=f"loops {op.verb}",

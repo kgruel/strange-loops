@@ -39,12 +39,13 @@ def store_view(
     width: int | None,
     palette: LoopsPalette | None = None,
     *,
-    piped: bool = False,
+    piped: bool | None = None,
 ) -> Block:
     """Render store summary at the given fidelity level.
 
     ``piped=True`` forces width=None — the agent channel never clips.
     """
+    piped = bool(piped or (piped is None and width is None))
     p = palette or DEFAULT_PALETTE
     if piped:
         width = None  # piped register never clips (information-faithful)
@@ -312,6 +313,7 @@ def tick_chain_view(
     ``data`` shape: ``{vertex, chain_mode: bool, chain: {ticks, chained,
     signed, legacy}, since: str | None, windows: [TickWindow-as-dict, ...]}``.
     """
+    piped = bool(piped or (piped is None and width is None))
     if piped:
         width = None  # piped register never clips (information-faithful)
 
@@ -474,7 +476,7 @@ def stats_view(
     width: int | None,
     palette: LoopsPalette | None = None,
     *,
-    piped: bool = False,
+    piped: bool | None = None,
 ) -> Block:
     """Render store statistics — topline totals, and (``--by-kind``) a
     count-descending per-kind tally.
@@ -486,6 +488,7 @@ def stats_view(
 
     ``piped=True`` forces width=None — the agent channel never clips.
     """
+    piped = bool(piped or (piped is None and width is None))
     p = palette or DEFAULT_PALETTE
     if piped:
         width = None  # piped register never clips (information-faithful)
@@ -539,15 +542,15 @@ def _time_range(kinds: dict) -> str:
     latest = None
     for info in kinds.values():
         e = info.get("earliest")
-        l = info.get("latest")
+        latest_value = info.get("latest")
         if isinstance(e, datetime):
             e = ensure_utc(e)
             if earliest is None or e < earliest:
                 earliest = e
-        if isinstance(l, datetime):
-            l = ensure_utc(l)
-            if latest is None or l > latest:
-                latest = l
+        if isinstance(latest_value, datetime):
+            latest_value = ensure_utc(latest_value)
+            if latest is None or latest_value > latest:
+                latest = latest_value
 
     if earliest is None or latest is None:
         return ""

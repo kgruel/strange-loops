@@ -64,7 +64,7 @@ def _lead_kinds(v: dict[str, Any], limit: int = 3) -> str:
 
 
 def vertices_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool = False
+    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
 ) -> Block:
     """Render the stat-over-containment vertex listing.
 
@@ -79,6 +79,7 @@ def vertices_view(
     Zoom: MINIMAL = count line · SUMMARY = stat rows + preview · DETAILED =
     + per-loop detail · FULL = + store paths, combine, discover.
     """
+    piped = bool(piped or (piped is None and width is None))
     vertices = data.get("vertices", [])
     local = data.get("local_vertices", [])
     expand_config = data.get("expand_config", False)

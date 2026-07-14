@@ -89,24 +89,22 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
             as_of=known.as_of,
         )
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         nonlocal resolved_render_fn
         if resolved_render_fn is None:
             resolved_render_fn = _resolve_render_fn(
                 known.lens, vertex_path, "stream_view",
             )
-        w = ctx.width if ctx.is_tty else None
         from ..lens_resolver import call_lens
         return call_lens(
-            resolved_render_fn, data, ctx.zoom, w,
+            resolved_render_fn, data, fidelity, width,
             vertex_name=_vertex_name(vertex_path),
-            piped=not ctx.is_tty,
         )
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops stream",
         description="Show event stream",
     )

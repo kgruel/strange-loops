@@ -201,15 +201,16 @@ def _run_ls(argv: list[str]) -> int:
             target, filters=filters, narrows=narrows, extra_argv=rest,
         )
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
+        from loops.lens_resolver import zoom_from_fidelity
         return declarations_view(
-            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+            data, zoom_from_fidelity(fidelity), width
         )
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog=f"loops ls {target}",
         description="List vertex declarations",
     )
@@ -519,13 +520,14 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
     def fetch():
         return fetch_kind_stat(vertex, kind, key_prefix=known.key)
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
+        from loops.lens_resolver import zoom_from_fidelity
         return kind_stat_view(
-            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+            data, zoom_from_fidelity(fidelity), width
         )
 
     return run_cli(
-        leftover, fetch=fetch, render=render,
+        leftover, fetch=fetch, renderer=renderer,
         prog=f"loops ls {vertex} --kind {kind}",
         description=f"Stat view of kind '{kind}' in {vertex}",
     )

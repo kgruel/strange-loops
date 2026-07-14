@@ -78,15 +78,16 @@ def _run_ls_root(argv: list[str]) -> int:
         data["terse"] = terse
         return data
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
+        from loops.lens_resolver import zoom_from_fidelity
         return vertices_view(
-            data, ctx.zoom, ctx.width, piped=not getattr(ctx, "is_tty", True)
+            data, zoom_from_fidelity(fidelity), width
         )
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops ls",
         description="List vertices (stat-over-containment)",
     )

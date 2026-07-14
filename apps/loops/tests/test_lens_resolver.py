@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from painted import Fidelity, Zoom
 
 from loops.lens_resolver import (
     resolve_lens, call_lens, call_lens_fetch, normalize_width,
@@ -123,21 +124,21 @@ class TestCallLens:
         def lens_with_ctx(data, zoom, width, *, vertex_name=None):
             return f"got:{vertex_name}"
 
-        result = call_lens(lens_with_ctx, "d", "z", 80, vertex_name="project")
+        result = call_lens(lens_with_ctx, "d", Fidelity(), 80, vertex_name="project")
         assert result == "got:project"
 
     def test_drops_kwargs_when_not_accepted(self):
         def lens_without_ctx(data, zoom, width):
             return f"basic:{data}"
 
-        result = call_lens(lens_without_ctx, "d", "z", 80, vertex_name="project")
+        result = call_lens(lens_without_ctx, "d", Fidelity(), 80, vertex_name="project")
         assert result == "basic:d"
 
     def test_no_kwargs_still_works(self):
         def lens(data, zoom, width):
             return "ok"
 
-        result = call_lens(lens, "d", "z", 80)
+        result = call_lens(lens, "d", Fidelity(), 80)
         assert result == "ok"
 
     def test_body_typeerror_surfaces_single_call(self):
@@ -156,7 +157,7 @@ class TestCallLens:
             raise TypeError("body error, not a kwarg mismatch")
 
         with pytest.raises(TypeError):
-            call_lens(lens, "d", "z", 80)
+            call_lens(lens, "d", Fidelity(), 80)
         assert len(calls) == 1
 
     def test_partial_kwarg_subset_passed(self):
@@ -169,7 +170,7 @@ class TestCallLens:
             return "ok"
 
         result = call_lens(
-            lens, "d", "z", 80,
+            lens, "d", Fidelity(), 80,
             vertex_name="project", vertex_path="/x", visible=frozenset(),
         )
         assert result == "ok"
@@ -183,8 +184,14 @@ class TestCallLens:
             received.update(kwargs)
             return "ok"
 
-        call_lens(lens, "d", "z", 80, vertex_name="p", visible=frozenset(["refs"]))
+        call_lens(lens, "d", Fidelity(), 80, vertex_name="p", visible=frozenset(["refs"]))
         assert received == {"vertex_name": "p", "visible": frozenset(["refs"])}
+
+    def test_clamps_open_fidelity_depth_for_legacy_lenses(self):
+        def lens(data, zoom, width):
+            return zoom
+
+        assert call_lens(lens, "d", Fidelity(depth=99), 80) is Zoom.FULL
 
 
 class TestNormalizeWidth:

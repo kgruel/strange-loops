@@ -1243,16 +1243,15 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
             "windows": window_dicts,
         }
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         from ..lenses.store import tick_chain_view
-
-        w = ctx.width if ctx.is_tty else None
-        return tick_chain_view(data, ctx.zoom, w, piped=not ctx.is_tty)
+        from loops.lens_resolver import zoom_from_fidelity
+        return tick_chain_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         default_mode=OutputMode.STATIC,
         prog="loops store ticks",
         description=(
@@ -1322,16 +1321,15 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
             "kinds": kinds,
         }
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         from ..lenses.store import stats_view
-
-        w = ctx.width if ctx.is_tty else None
-        return stats_view(data, ctx.zoom, w, piped=not ctx.is_tty)
+        from loops.lens_resolver import zoom_from_fidelity
+        return stats_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         default_mode=OutputMode.STATIC,
         prog="loops store stats",
         description=(
@@ -1402,11 +1400,10 @@ def _run_store(
         data.setdefault("vertex", path.stem)
         return data
 
-    def render(ctx, data):
+    def renderer(data, fidelity, width):
         from ..lenses.store import store_view
-
-        w = ctx.width if ctx.is_tty else None
-        return store_view(data, ctx.zoom, w, piped=not ctx.is_tty)
+        from loops.lens_resolver import zoom_from_fidelity
+        return store_view(data, zoom_from_fidelity(fidelity), width)
 
     async def fetch_stream():
         import asyncio
@@ -1431,7 +1428,7 @@ def _run_store(
         rest,
         fetch=fetch,
         fetch_stream=fetch_stream,
-        render=render,
+        renderer=renderer,
         handlers={OutputMode.INTERACTIVE: handle_interactive},
         default_mode=OutputMode.STATIC,
         prog="loops store",

@@ -55,7 +55,7 @@ _SECTION_NAME_FIELD = {
 
 
 def declarations_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool = False
+    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
 ) -> Block:
     """Render the vertex's containment listing.
 
@@ -66,6 +66,7 @@ def declarations_view(
     text, monochrome, with no visual-only columns. Colour strips at the writer
     regardless of ``piped``; the *structural* divergence is keyed here.
     """
+    piped = bool(piped or (piped is None and width is None))
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
 
@@ -131,7 +132,7 @@ def _vertex_header(data: dict[str, Any], width: int | None) -> list[Block]:
 
 
 def _render_stat_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, piped: bool = False
+    data: dict[str, Any], zoom: Zoom, width: int | None, piped: bool | None = None
 ) -> Block:
     """Default `sl ls <vertex>` — stat header + kinds-as-entries body."""
     name = data.get("vertex_name", "?")
@@ -507,7 +508,7 @@ def _entry_table(
 
 
 def kind_stat_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool = False
+    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
 ) -> Block:
     """Render ``ls <vertex> --kind <K>`` — the kind's stat header over its
     entries one containment level down (namespaces / leaf keys / observers).
@@ -518,6 +519,7 @@ def kind_stat_view(
 
     # Piped/agent register is information-faithful — render width-free so no
     # entry row is clipped (see declarations_view).
+    piped = bool(piped or (piped is None and width is None))
     if piped:
         width = None
 

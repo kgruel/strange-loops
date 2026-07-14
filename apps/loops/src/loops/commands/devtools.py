@@ -83,14 +83,14 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
         fetch_result.append(data)
         return data
 
-    def render(ctx, data):
-        w = ctx.width if ctx.is_tty else None
-        return validate_view(data, ctx.zoom, w)
+    def renderer(data, fidelity, width):
+        from loops.lens_resolver import zoom_from_fidelity
+        return validate_view(data, zoom_from_fidelity(fidelity), width)
 
     run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops validate",
         description="Validate .loop or .vertex files",
         help_args=[HelpArg(
@@ -141,7 +141,7 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     # help short-circuits before either runs).
     if "-h" in rest or "--help" in rest:
         return run_cli(
-            rest, fetch=lambda: None, render=lambda c, d: None,
+            rest, fetch=lambda: None, renderer=lambda d, f, w: None,
             prog="loops test", help_args=_HELP_ARGS,
             description="Test a .loop file — preview facts",
         )
@@ -189,14 +189,14 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
 
             return {"results": results, "skipped": skipped}
 
-        def render(ctx, data):
-            w = ctx.width if ctx.is_tty else None
-            return test_view(data, ctx.zoom, w)
+        def renderer(data, fidelity, width):
+            from loops.lens_resolver import zoom_from_fidelity
+            return test_view(data, zoom_from_fidelity(fidelity), width)
 
         return run_cli(
             rest,
             fetch=fetch,
-            render=render,
+            renderer=renderer,
             prog="loops test",
             description="Test parse pipeline against sample input",
             help_args=_HELP_ARGS,
@@ -252,15 +252,15 @@ def _run_test(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
                 if limit and count >= limit:
                     break
 
-        def render(ctx, data):
-            w = ctx.width if ctx.is_tty else None
-            return run_facts_view(data, ctx.zoom, w)
+        def renderer(data, fidelity, width):
+            from loops.lens_resolver import zoom_from_fidelity
+            return run_facts_view(data, zoom_from_fidelity(fidelity), width)
 
         return run_cli(
             rest,
             fetch=fetch,
             fetch_stream=fetch_stream,
-            render=render,
+            renderer=renderer,
             prog="loops test",
             description=f"Run {path.name} — preview facts, no persistence",
             help_args=_HELP_ARGS,
@@ -342,14 +342,14 @@ def _run_compile(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
         else:
             raise ValueError(f"Unknown file type: {path.suffix}")
 
-    def render(ctx, data):
-        w = ctx.width if ctx.is_tty else None
-        return compile_view(data, ctx.zoom, w)
+    def renderer(data, fidelity, width):
+        from loops.lens_resolver import zoom_from_fidelity
+        return compile_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="loops compile",
         description="Show compiled structure",
         help_args=[HelpArg(

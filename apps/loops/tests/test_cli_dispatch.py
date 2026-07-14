@@ -135,7 +135,7 @@ class TestLiveBranch:
         assert captured["args"] == ["--live"]
         assert captured["kwargs"]["live_delivery"] == "surface"
         assert captured["kwargs"]["fetch_stream"] is stream_fn
-        assert callable(captured["kwargs"]["render"])
+        assert callable(captured["kwargs"]["renderer"])
         assert callable(captured["kwargs"]["fetch"])
 
 

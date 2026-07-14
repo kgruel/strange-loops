@@ -294,6 +294,26 @@ def _make_handler(view, *, peel_observer: bool):
     return handler
 
 
+def _add_args_for(name: str):
+    """The render-free arg declaration a command hangs ``-h`` and completion off.
+
+    Returned to ``AppCommand(add_args=...)``, this callback is walked by painted
+    for the intercepted ``-h`` and for shell ``<TAB>`` completion — never to run
+    the handler. It MUST stay render-free to import (it is referenced while the
+    roster is built, which happens on every invocation, completion included), so
+    each entry points at a dedicated render-free ``*_args`` module, not at a view.
+
+    Only ``read`` is wired this slice — the vertex-name / ``--kind`` / ``--key``
+    completers land as one-line additions inside ``cli/read_args.add_read_args``
+    (see that module's header for the seam), not new entries here.
+    """
+    if name == "read":
+        from .read_args import add_read_args
+
+        return add_read_args
+    return None
+
+
 def _build_commands() -> list[AppCommand]:
     """Build the unified painted ``AppCommand`` roster (verbs ∪ commands).
 
@@ -308,6 +328,7 @@ def _build_commands() -> list[AppCommand]:
                 name,
                 _DESCRIPTIONS[name],
                 _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+                add_args=_add_args_for(name),
             )
         )
     for name, view in COMMANDS.items():
@@ -318,6 +339,7 @@ def _build_commands() -> list[AppCommand]:
                 name,
                 _DESCRIPTIONS[name],
                 _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+                add_args=_add_args_for(name),
             )
         )
     return cmds

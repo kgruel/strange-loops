@@ -30,16 +30,16 @@ Lenses that don't care ignore them — call_lens handles the fallback.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import importlib.util
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from painted import Zoom
-
 if TYPE_CHECKING:
-    from painted import Block
+    from painted import Block, Zoom
 
 
 # Type alias for lens render functions
@@ -52,7 +52,14 @@ def zoom_from_fidelity(fidelity) -> "Zoom":
     The renderer boundary keeps ``Fidelity`` whole.  Built-in and third-party
     lenses still use the pre-contract bounded ``Zoom`` vocabulary, so this is
     the one compatibility seam that owns its required two-sided clamp.
+
+    ``Zoom`` is imported lazily so this module stays render-free to *import* —
+    shell completion's lens enumeration (:func:`enumerate_lenses`) rides the
+    no-renderer-on-TAB path, and a top-level ``from painted import Zoom`` would
+    drag the renderer onto it.
     """
+    from painted import Zoom
+
     if isinstance(fidelity, Zoom):
         return fidelity
     return Zoom(min(max(fidelity.depth, 0), 3))
@@ -145,24 +152,171 @@ def resolve_lens_fetch(
     return getattr(mod, "fetch", None)
 
 
-def _build_search_path(vertex_dir: Path | None) -> list[Path]:
-    """Build ordered search path for lens files."""
-    dirs: list[Path] = []
+def _labeled_search_path(vertex_dir: Path | None) -> list[tuple[str, Path]]:
+    """Ordered lens-file search path, each dir tagged with its resolver tier.
+
+    Single source of the custom-lens search order — both file resolution
+    (:func:`_build_search_path`) and completion enumeration
+    (:func:`enumerate_lenses`) read it, so they cannot drift on which
+    directories are searched or in what precedence.
+    """
+    dirs: list[tuple[str, Path]] = []
 
     # 1. Vertex-local: <vertex_dir>/lenses/
     if vertex_dir is not None:
-        dirs.append(vertex_dir / "lenses")
+        dirs.append(("vertex", vertex_dir / "lenses"))
 
     # 2. Project-local: <cwd>/lenses/
     cwd_lenses = Path.cwd() / "lenses"
-    if cwd_lenses not in dirs:
-        dirs.append(cwd_lenses)
+    if cwd_lenses not in [d for _, d in dirs]:
+        dirs.append(("cwd", cwd_lenses))
 
     # 3. User-global: ~/.config/loops/lenses/
     user_lenses = Path.home() / ".config" / "loops" / "lenses"
-    dirs.append(user_lenses)
+    dirs.append(("user", user_lenses))
 
     return dirs
+
+
+def _build_search_path(vertex_dir: Path | None) -> list[Path]:
+    """Build ordered search path for lens files."""
+    return [d for _, d in _labeled_search_path(vertex_dir)]
+
+
+# --- Lens enumeration (completion) -----------------------------------------
+#
+# Shell completion needs the *set* of resolvable lens names, where resolution
+# needs *one* name's render function. Both must agree on which directories are
+# searched, in what precedence, and what makes a file a lens — so enumeration
+# reuses ``_labeled_search_path`` (the search order) and the same view-function
+# convention resolution keys off (``_view_candidates`` looks up ``*_view``
+# functions). The difference is depth, not rules: resolution *executes* a module
+# to extract its callable; enumeration only *inspects* it (``ast``), so it never
+# runs a lens body and stays safe on the render-free TAB path.
+
+
+@dataclass(frozen=True)
+class LensInfo:
+    """One resolvable lens: its name, a one-line description, and its tier.
+
+    ``tier`` is the resolver tier the name resolves in ("vertex" / "cwd" /
+    "user" / "builtin") — carried so callers (and tests) can see precedence
+    shadowing, e.g. a vertex-local ``graph`` masking the built-in ``graph``.
+    """
+
+    name: str
+    description: str
+    tier: str
+
+
+# The built-in lens package directory (loops/lenses/), a sibling of this module.
+def _builtin_lens_dir() -> Path:
+    return Path(__file__).parent / "lenses"
+
+
+def _is_view_fn(fn_name: str) -> bool:
+    """A public lens view entrypoint — a top-level ``*_view`` (not ``_``-private).
+
+    Mirrors the convention ``_view_candidates`` resolves against (``fold_view``,
+    ``stream_view``, ``<name>_view``, ``stream_<name>_view``): every one ends in
+    ``_view``. Private helpers (``_render_stat_view``) are excluded.
+    """
+    return fn_name.endswith("_view") and not fn_name.startswith("_")
+
+
+def _first_line(text: str, *, limit: int = 72) -> str:
+    """First non-empty line of a docstring, whitespace-collapsed and truncated."""
+    for raw in text.strip().splitlines():
+        line = raw.strip()
+        if line:
+            return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+    return ""
+
+
+def _lens_module_info(source: str, stem: str) -> tuple[str, str] | None:
+    """Inspect a lens module's source. ``(name, description)`` or None.
+
+    None when the source doesn't parse or exposes no public ``*_view`` function
+    (not a lens). Description is the module docstring's first line, falling back
+    to the first view function's docstring; empty is fine. Pure ``ast`` — the
+    module body never executes, so this is safe to call at TAB time.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+
+    view_fns = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _is_view_fn(node.name)
+    ]
+    if not view_fns:
+        return None
+
+    doc = ast.get_docstring(tree) or ""
+    if not doc:
+        for fn in view_fns:
+            fn_doc = ast.get_docstring(fn)
+            if fn_doc:
+                doc = fn_doc
+                break
+
+    return stem, _first_line(doc)
+
+
+def _scan_lens_dir(directory: Path) -> list[tuple[str, str]]:
+    """Every lens module in ``directory`` as ``(name, description)``.
+
+    A missing directory yields ``[]`` (the common case for vertex/cwd/user
+    tiers). Unreadable or non-lens files are skipped — enumeration under-lists,
+    never raises. ``_``-prefixed files (``__init__``, private helpers) are
+    skipped: they aren't ``--lens`` names.
+    """
+    out: list[tuple[str, str]] = []
+    if not directory.is_dir():
+        return out
+    for path in sorted(directory.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        info = _lens_module_info(source, path.stem)
+        if info is not None:
+            out.append(info)
+    return out
+
+
+def enumerate_lenses(*, vertex_dir: Path | None = None) -> list[LensInfo]:
+    """Every resolvable lens name + one-line description, in resolver precedence.
+
+    Custom tiers first (vertex-local, cwd, user-global — the
+    ``_labeled_search_path`` order), built-ins last; the first spelling of a
+    name wins, so a custom lens shadows a built-in of the same name exactly as
+    ``resolve_lens`` would resolve it. Inspection-only (no module body runs);
+    a broken or missing tier is silently skipped. This is the enumeration side
+    of resolution — completion offers precisely the names ``--lens`` accepts.
+    """
+    seen: set[str] = set()
+    result: list[LensInfo] = []
+
+    for tier, directory in _labeled_search_path(vertex_dir):
+        for name, desc in _scan_lens_dir(directory):
+            if name in seen:
+                continue
+            seen.add(name)
+            result.append(LensInfo(name, desc, tier))
+
+    for name, desc in _scan_lens_dir(_builtin_lens_dir()):
+        if name in seen:
+            continue
+        seen.add(name)
+        result.append(LensInfo(name, desc, "builtin"))
+
+    return result
 
 
 def _view_candidates(name: str, view: str) -> tuple[str, ...]:

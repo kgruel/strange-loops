@@ -38,6 +38,7 @@ from painted.cli.types import parse_fidelity, parse_format, parse_zoom
 from ..dispatch import dispatch
 from ..invocation import Invocation
 from ..operation import Operation, SurfaceSpec
+from ..read_args import add_read_args
 
 
 # --- Helpers (absorbed from main.py) --------------------------------------
@@ -100,67 +101,20 @@ def _extract_refs_depth(rest: list[str]) -> tuple[int, list[str]]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the unified read parser.
+    """Build the unified read parser for the handler's own parse pass.
 
-    A single ``tokens`` bucket (``nargs='*'``) absorbs the vertex/entity
-    positionals AND intermixed ``field=value`` predicates;
-    ``parse_intermixed_args`` + ``_classify_tokens`` do the disambiguation
-    (the brittle ``nargs='?'``-pair shape is retired — §3.4).
+    The DOMAIN args live in ``cli/read_args.add_read_args`` — the single source
+    shared with painted's intercepted ``-h`` and shell completion (which walk
+    that declaration through ``build_parser`` without running the command). The
+    FRAMEWORK flags are added here explicitly: this handler parser bypasses
+    painted's ``build_parser`` (which would otherwise supply them via
+    ``add_cli_args``), so it owns their registration. The dests
+    (quiet/verbose/interactive/static/live/json/plain) match what painted's
+    parse_zoom / parse_mode / parse_format read via ``getattr``.
     """
     parser = argparse.ArgumentParser(prog="loops read")
-    parser.add_argument(
-        "tokens", nargs="*", default=[],
-        help="[vertex] [kind/key] [field=value ...]",
-    )
-    # Domain selectors — change WHAT is fetched (folded state vs raw facts).
-    parser.add_argument("--kind", default=None, help="Filter by fact kind")
-    parser.add_argument(
-        "--key", default=None,
-        help="Filter by fold key (prefix; comma-OR for multiple)",
-    )
-    parser.add_argument("--lens", default=None, help="Lens name for rendering")
-    parser.add_argument(
-        "--facts", action="store_true", default=False,
-        help="Show raw fact stream instead of folded state",
-    )
-    parser.add_argument(
-        "--why", action="store_true", default=False,
-        help="Per-field provenance drill for one exact kind/key address",
-    )
-    parser.add_argument(
-        "--match", "--grep", default=None, metavar="QUERY", dest="match",
-        help="Content search — FTS5 for indexed kinds, substring for the rest",
-    )
-    # Read-grammar transforms (S4) — applied over the projected Surface, so
-    # plain and --json carry the same transformed rows.
-    parser.add_argument(
-        "--full", action="store_true", default=False,
-        help="Force full-body (whole) granularity on every row",
-    )
-    parser.add_argument(
-        "--fields", default=None,
-        help="Comma-separated payload fields to project (narrow each row)",
-    )
-    parser.add_argument(
-        "--limit", type=int, default=None,
-        help="Keep the top-N rows by salience",
-    )
-    parser.add_argument(
-        "--last", type=int, default=None,
-        help="Keep the newest-N rows by timestamp",
-    )
-    parser.add_argument(
-        "--count", action="store_true", default=False,
-        help="Aggregate rows into counts (with --by, one row per group)",
-    )
-    parser.add_argument(
-        "--by", default=None,
-        help="Group --count by a row attribute / payload field",
-    )
-    # Framework survivors — registered explicitly (painted's bundled
-    # registration dissolved). The dests (quiet/verbose/interactive/static/
-    # live/json/plain) match what painted's parse_zoom / parse_mode /
-    # parse_format read via getattr.
+    add_read_args(parser)
+
     zoom = parser.add_mutually_exclusive_group()
     zoom.add_argument(
         "-q", "--quiet", action="store_true",

@@ -76,13 +76,15 @@ class TestVerbHelp:
     @pytest.mark.parametrize("verb", sorted(VERBS))
     def test_verb_help(self, capsys, verb):
         out = _help(capsys, verb, "--help")
-        # `store` and `read` render base help through painted's doc-lens shape,
-        # not argparse's raw "usage:", because their AppCommand declares an
-        # arg-source painted intercepts -h against: `store` via help_args
-        # (decision:design/devtools-help-args-idiom), `read` via add_args (the
-        # completion/-h single source in cli/read_args). The other verbs still
-        # own help through their own argparse parsers.
-        if verb in ("store", "read"):
+        # `store`, `read`, and `emit` render base help through painted's
+        # doc-lens shape, not argparse's raw "usage:", because their
+        # AppCommand declares an arg-source painted intercepts -h against:
+        # `store` via help_args (decision:design/devtools-help-args-idiom),
+        # `read`/`emit` via add_args (the completion/-h single source in
+        # cli/read_args.py / cli/emit_args.py — S4 wires emit onto the same
+        # seam). The other verbs still own help through their own argparse
+        # parsers.
+        if verb in ("store", "read", "emit"):
             assert _has_help(out), f"{verb} --help: expected help output but got: {out!r}"
         else:
             assert "usage:" in out.lower(), f"{verb} --help: expected argparse 'usage:' but got: {out!r}"

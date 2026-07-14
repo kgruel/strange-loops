@@ -127,6 +127,29 @@ def complete_key(ctx: CompletionContext) -> list[Candidate]:
         return []
 
 
+def complete_emit_tokens(ctx: CompletionContext) -> list[Candidate]:
+    """Complete emit's single ``tokens`` bucket — vertex, then kind.
+
+    Emit's grammar (``sl emit <vertex> <kind> key=value...``) collects into
+    one ``nargs='*'`` positional, so — unlike ``read``'s separate ``--kind``/
+    ``--key`` flags — there is only one action to hang a completer off. This
+    composes the two existing completers by position: an empty bucket is the
+    vertex slot (``complete_vertex``); exactly one token typed is the kind
+    slot (``complete_kind``, which resolves the vertex from that token).
+    Anything beyond that (``field=value`` payload parts) is out of scope for
+    this slice — ``[]``.
+    """
+    try:
+        tokens = ctx.args.get("tokens") or []
+    except Exception:
+        return []
+    if not tokens:
+        return complete_vertex(ctx)
+    if len(tokens) == 1:
+        return complete_kind(ctx)
+    return []
+
+
 def _vertex_path_on_line(ctx: CompletionContext):
     """Resolve the vertex already typed on the line to its ``.vertex`` path.
 

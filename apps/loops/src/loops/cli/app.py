@@ -303,14 +303,18 @@ def _add_args_for(name: str):
     roster is built, which happens on every invocation, completion included), so
     each entry points at a dedicated render-free ``*_args`` module, not at a view.
 
-    Only ``read`` is wired this slice — the vertex-name / ``--kind`` / ``--key``
-    completers land as one-line additions inside ``cli/read_args.add_read_args``
-    (see that module's header for the seam), not new entries here.
+    ``read`` and ``emit`` are wired — each points at its own dedicated
+    ``*_args`` module (``cli/read_args.py``, ``cli/emit_args.py``); new
+    completers land as one-line additions inside those, not new entries here.
     """
     if name == "read":
         from .read_args import add_read_args
 
         return add_read_args
+    if name == "emit":
+        from .emit_args import add_emit_args
+
+        return add_emit_args
     return None
 
 

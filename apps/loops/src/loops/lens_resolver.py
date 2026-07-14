@@ -214,14 +214,21 @@ def _builtin_lens_dir() -> Path:
     return Path(__file__).parent / "lenses"
 
 
-def _is_view_fn(fn_name: str) -> bool:
-    """A public lens view entrypoint — a top-level ``*_view`` (not ``_``-private).
+def _is_view_fn(fn_name: str, stem: str) -> bool:
+    """True when ``fn_name`` is an entrypoint ``resolve_lens`` can actually load.
 
-    Mirrors the convention ``_view_candidates`` resolves against (``fold_view``,
-    ``stream_view``, ``<name>_view``, ``stream_<name>_view``): every one ends in
-    ``_view``. Private helpers (``_render_stat_view``) are excluded.
+    Exactly the names ``_view_candidates`` tries for a lens named ``stem``
+    (``fold_view``, ``stream_view``, ``<stem>_view``, ``stream_<stem>_view``)
+    — not merely any public ``*_view``: a module exposing only an unrelated
+    ``phantom_view`` enumerates-but-never-resolves, making ``--lens``
+    completion invent a candidate (Sol review review/completion-t3 #5).
     """
-    return fn_name.endswith("_view") and not fn_name.startswith("_")
+    return fn_name in {
+        "fold_view",
+        "stream_view",
+        f"{stem}_view",
+        f"stream_{stem}_view",
+    }
 
 
 def _first_line(text: str, *, limit: int = 72) -> str:
@@ -250,7 +257,7 @@ def _lens_module_info(source: str, stem: str) -> tuple[str, str] | None:
         node
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and _is_view_fn(node.name)
+        and _is_view_fn(node.name, stem)
     ]
     if not view_fns:
         return None

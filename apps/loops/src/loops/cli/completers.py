@@ -23,6 +23,29 @@ from __future__ import annotations
 from painted.cli import Candidate, CompletionContext
 
 
+def _clean(values: list[Candidate]) -> list[Candidate]:
+    """Drop candidates that would corrupt the line-oriented shell protocol.
+
+    painted's zsh emitter escapes ``:`` but not newlines (Sol review
+    review/completion-t3 #8), and fold keys are arbitrary JSON strings — a
+    ``\\n``-bearing value would split into two protocol rows, the second
+    injected as a bare candidate. Values with control characters are dropped
+    (under-list, never lie); descriptions are soft — control chars collapse
+    to a space.
+    """
+    bad = ("\n", "\r", "\x00")
+    cleaned: list[Candidate] = []
+    for c in values:
+        if any(ch in c.value for ch in bad):
+            continue
+        desc = c.description
+        if desc and any(ch in desc for ch in bad):
+            desc = " ".join(desc.replace("\r", "\n").split("\n"))
+            c = Candidate(c.value, desc)
+        cleaned.append(c)
+    return cleaned
+
+
 def complete_lens(ctx: CompletionContext) -> list[Candidate]:
     """Complete ``--lens <TAB>`` with every resolvable lens + its description.
 
@@ -39,10 +62,10 @@ def complete_lens(ctx: CompletionContext) -> list[Candidate]:
         from loops.lens_resolver import enumerate_lenses
 
         vertex_dir = _vertex_dir_on_line(ctx)
-        return [
+        return _clean([
             Candidate(info.name, info.description)
             for info in enumerate_lenses(vertex_dir=vertex_dir)
-        ]
+        ])
     except Exception:
         return []
 
@@ -68,11 +91,23 @@ def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
     try:
         from loops.commands.resolve import enumerate_vertices
 
-        return [
+        return _clean([
             Candidate(info.name, info.description) for info in enumerate_vertices()
-        ]
+        ])
     except Exception:
         return []
+
+
+def complete_read_vertex(ctx: CompletionContext) -> list[Candidate]:
+    """``complete_vertex`` narrowed to names READ's classifier accepts.
+
+    Read's positional grammar treats a slash-bearing bareword as an entity
+    address, never a vertex (``fold._classify_tokens``) — so a slashed vertex
+    name (``comms/discord``), legal for emit, is *invented* if offered on the
+    read line (Sol review review/completion-t3 #4). Same enumeration, slashed
+    names filtered.
+    """
+    return [c for c in complete_vertex(ctx) if "/" not in c.value]
 
 
 def complete_kind(ctx: CompletionContext) -> list[Candidate]:
@@ -90,11 +125,16 @@ def complete_kind(ctx: CompletionContext) -> list[Candidate]:
         vertex_path = _vertex_path_on_line(ctx)
         if vertex_path is None:
             return []
-        from loops.commands.resolve import _declared_kind_names
-
-        return [Candidate(name) for name in _declared_kind_names(vertex_path)]
+        return _kind_candidates(vertex_path)
     except Exception:
         return []
+
+
+def _kind_candidates(vertex_path) -> list[Candidate]:
+    """Kind candidates for one resolved vertex path — shared read/emit core."""
+    from loops.commands.resolve import _declared_kind_names
+
+    return _clean([Candidate(name) for name in _declared_kind_names(vertex_path)])
 
 
 def complete_key(ctx: CompletionContext) -> list[Candidate]:
@@ -119,10 +159,10 @@ def complete_key(ctx: CompletionContext) -> list[Candidate]:
             return []
         from loops.commands.resolve import enumerate_key_prefixes
 
-        return [
+        return _clean([
             Candidate(key)
             for key in enumerate_key_prefixes(vertex_path, kind, ctx.prefix)
-        ]
+        ])
     except Exception:
         return []
 
@@ -146,31 +186,82 @@ def complete_emit_tokens(ctx: CompletionContext) -> list[Candidate]:
     if not tokens:
         return complete_vertex(ctx)
     if len(tokens) == 1:
-        return complete_kind(ctx)
+        # Emit's vertex slot resolves through the DISPATCH resolver (slashed
+        # names legal), not read's entity classification — mirror emit's
+        # runtime, not read's.
+        vertex_path = _dispatch_vertex_path(tokens[0])
+        if vertex_path is None:
+            return []
+        return _kind_candidates(vertex_path)
     return []
 
 
 def _vertex_path_on_line(ctx: CompletionContext):
-    """Resolve the vertex already typed on the line to its ``.vertex`` path.
+    """Resolve read's target vertex for the tokens already on the line.
 
-    Best-effort: the first positional token that resolves as a vertex wins;
-    no token, or nothing resolvable, → ``None``. Any failure → ``None``.
+    Mirrors the READ runtime's positional classification
+    (``cli/views/fold._classify_tokens`` — a parity regression test holds the
+    two together), not the dispatch resolver: a slash-bearing first bareword
+    is an *entity address* to read, never a vertex name, and the read then
+    targets the local vertex (Sol review review/completion-t3 #4). Offering
+    ``remote/vertex``'s kinds there would invent candidates the runtime
+    rejects.
+
+      first bareword is a .vertex path  → that file
+      first bareword contains "/"       → entity → the LOCAL vertex
+      first bareword is a bare name     → resolve the name
+      no bareword at all                → the LOCAL vertex (runtime fallback)
+
+    Best-effort: ``None`` on any failure.
     """
     try:
         tokens = ctx.args.get("tokens") or []
     except Exception:
         return None
 
-    from loops.commands.resolve import _resolve_vertex_for_dispatch
-
+    first = None
     for tok in tokens:
-        # Skip predicates (field=value) and flags — only barewords name a vertex.
+        # Skip predicates (field=value) and flags — only barewords classify.
         if not isinstance(tok, str) or "=" in tok or tok.startswith("-"):
             continue
-        path = _resolve_vertex_for_dispatch(tok)
-        if path is not None:
-            return path
-    return None
+        first = tok
+        break
+
+    from loops.commands.resolve import _find_local_vertex, _resolve_vertex_for_dispatch
+
+    try:
+        if first is None:
+            return _find_local_vertex()
+        # Mirror fold._looks_like_vertex_path: absolute / ./ / ../ / .vertex
+        if (
+            first.startswith(("/", "./", "../"))
+            or first.endswith(".vertex")
+        ):
+            from pathlib import Path
+
+            p = Path(first)
+            return p if p.is_file() else None
+        if "/" in first:  # entity address → runtime reads the LOCAL vertex
+            return _find_local_vertex()
+        return _resolve_vertex_for_dispatch(first)
+    except Exception:
+        return None
+
+
+def _dispatch_vertex_path(token: str):
+    """Resolve a vertex token the way EMIT's runtime does (dispatch resolver).
+
+    Emit accepts slashed vertex names (``comms/native``) — its resolution is
+    ``_resolve_vertex_for_dispatch``, not read's entity classification. Kept
+    separate from ``_vertex_path_on_line`` so each completer mirrors its own
+    runtime. ``None`` on any failure.
+    """
+    try:
+        from loops.commands.resolve import _resolve_vertex_for_dispatch
+
+        return _resolve_vertex_for_dispatch(token)
+    except Exception:
+        return None
 
 
 def _vertex_dir_on_line(ctx: CompletionContext):

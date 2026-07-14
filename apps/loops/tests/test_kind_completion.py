@@ -94,7 +94,10 @@ class TestCompleteKind:
         assert all(isinstance(c, Candidate) for c in cands)
         assert [c.value for c in cands] == ["decision"]
 
-    def test_empty_when_no_vertex_on_line(self):
+    def test_empty_when_no_vertex_and_no_local(self, tmp_path, monkeypatch):
+        # No vertex on the line -> the LOCAL vertex (runtime parity); with no
+        # local vertex either, defer with [].
+        monkeypatch.chdir(tmp_path)
         from loops.cli.completers import complete_kind
 
         assert complete_kind(_ctx()) == []

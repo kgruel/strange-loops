@@ -18,12 +18,16 @@ class StoreReader:
     the path does not exist.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, timeout: float = 5.0) -> None:
         self._path = Path(path)
         if not self._path.exists():
             raise FileNotFoundError(f"Store not found: {self._path}")
 
-        self._conn = sqlite3.connect(str(self._path))
+        # ``timeout`` is sqlite's busy wait on a locked database. The 5s
+        # default suits interactive commands; latency-critical read paths
+        # (shell completion) pass a sub-second value — waiting out an
+        # exclusive lock is worse than under-listing there.
+        self._conn = sqlite3.connect(str(self._path), timeout=timeout)
         self._conn.execute("PRAGMA query_only=ON")
 
     @property
@@ -136,10 +140,16 @@ class StoreReader:
         ``None`` bucket ``fact_key_stats`` surfaces as an orphan diagnostic)
         are silently skipped here — nothing to complete from them.
         """
+        # ORDER BY rowid, not ts: the single-column kind index is internally
+        # (kind, rowid), so this reads exactly ``limit`` index entries
+        # backwards with no temp B-tree — ``ORDER BY ts`` would scan and sort
+        # the whole kind partition before LIMIT applies (Sol review
+        # review/completion-t3 #6; a query-plan regression test holds this).
+        # Insertion order ≈ recency, which is all a completion probe needs.
         path = "$." + key_field
         rows = self._conn.execute(
             "SELECT json_extract(payload, ?) AS k FROM facts "
-            "WHERE kind = ? ORDER BY ts DESC LIMIT ?",
+            "WHERE kind = ? ORDER BY rowid DESC LIMIT ?",
             (path, kind, limit),
         ).fetchall()
         keys = [r[0] for r in rows if r[0]]

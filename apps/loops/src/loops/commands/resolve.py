@@ -397,23 +397,26 @@ def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> set[str]
 
 
 def _declared_kind_names(vertex_path: Path) -> list[str]:
-    """Kind names from a vertex's own ``loops {}`` declaration, internal-excluded.
+    """Kind names from the vertex's canonical declaration, internal-excluded.
 
-    A plain KDL parse (``_parse_vertex`` — no store open, no combine/discover
-    chase), the fast, always-instant source for ``--kind`` completion. A pure
-    ``combine``/``discover`` aggregation with no ``loops {}`` of its own yields
-    nothing here — widening through the topology (as ``_declared_kinds`` does
-    for ``--kind`` *validation*) means walking child vertices, which is exactly
-    the I/O TAB can't afford to pay on every keystroke; this stays a cheaper,
-    narrower sibling of that function on purpose.
+    Routed through ``load_declaration`` — the store-backed resolver seam —
+    not a plain file parse: post-genesis, the ``.vertex`` file is a mutable
+    cache and completion must offer what the runtime would accept, not what
+    the file happens to say (Sol review review/completion-t3 #3; same honesty
+    rule as the internal-table seam swap). Pre-genesis the seam falls back to
+    the file, so the cheap case stays cheap; the genesis probe is one bounded
+    read. No combine/discover topology chase — widening through child
+    vertices (as ``_declared_kinds`` does for *validation*) is exactly the
+    I/O TAB can't afford on every keystroke.
 
-    Sorted. Best-effort: ``[]`` on any parse failure.
+    Sorted. Best-effort: ``[]`` on any failure.
     """
+    from engine.declaration import load_declaration
     from lang.document import is_internal_kind
 
     try:
-        ast = _parse_vertex(vertex_path)
-    except LoopsError:
+        ast = load_declaration(vertex_path)
+    except Exception:
         return []
     return sorted(name for name in ast.loops if not is_internal_kind(name))
 
@@ -443,7 +446,9 @@ def enumerate_key_prefixes(
             return []
         from engine import StoreReader
 
-        with StoreReader(store_path) as reader:
+        # Sub-second busy timeout: TAB hanging out sqlite's default 5s wait
+        # on an exclusively-locked store is worse than under-listing.
+        with StoreReader(store_path, timeout=0.25) as reader:
             return reader.key_prefixes(kind, key_field, prefix=typed_prefix)
     except Exception:
         return []

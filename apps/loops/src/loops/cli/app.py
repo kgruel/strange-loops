@@ -30,8 +30,21 @@ from pathlib import Path
 from painted.cli import AppCommand, run_app
 
 from .invocation import Invocation
-from .output import default_reporter
 from .registry import COMMANDS, POPULATION_OPS, VERBS
+
+
+def default_reporter():
+    """Lazy proxy for :func:`cli.output.default_reporter`.
+
+    ``cli.output`` imports painted's rendering core at module scope; importing
+    it here eagerly would pull the renderer into the ``_PAINTED_COMPLETE``
+    TAB fast path before painted's completion gate runs (Sol review
+    review/completion-t3 #2). Deferred to first call — every call site below
+    runs strictly after the gate.
+    """
+    from .output import default_reporter as _real
+
+    return _real()
 
 
 # Verbs that use ``--observer`` as a section-selector flag rather than an

@@ -31,7 +31,12 @@ import argparse
 
 from painted.cli import complete_via
 
-from .completers import complete_key, complete_kind, complete_lens, complete_vertex
+from .completers import (
+    complete_key,
+    complete_kind,
+    complete_lens,
+    complete_read_vertex,
+)
 
 
 def add_read_args(parser: argparse.ArgumentParser) -> None:
@@ -62,7 +67,7 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
             "tokens", nargs="*", default=[],
             help="[vertex] [kind/key] [field=value ...]",
         ),
-        complete_vertex,
+        complete_read_vertex,
     )
     # Domain selectors — change WHAT is fetched (folded state vs raw facts).
     # --kind carries a domain completer: the kinds the vertex on the line

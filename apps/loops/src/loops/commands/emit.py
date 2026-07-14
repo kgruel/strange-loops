@@ -923,6 +923,19 @@ def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.Argument
         action="store_true",
         help="After storing, print the post-emit fold as a structured Surface dict.",
     )
+    # Framework-flag acceptance: painted's reflected parser (build_parser via
+    # the add_args seam) advertises the full framework set for every command,
+    # so completion offers these — the runtime parser must accept what TAB
+    # offers or completion invents candidates (Sol review review/completion-t3
+    # #1). All honest no-ops here: the receipt is already plain/static text,
+    # emit runs no live surface and asks no prompts.
+    parser.add_argument("--plain", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--static", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "-i", "--interactive", action="store_true", help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--no-input", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--declare-observer",
         action="store_true",

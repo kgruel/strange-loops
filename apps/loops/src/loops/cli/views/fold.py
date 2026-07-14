@@ -145,6 +145,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--plain", action="store_true",
         help="Plain text, no ANSI codes",
     )
+    # painted's reflected parser advertises --no-input for every command, so
+    # completion offers it; the runtime must accept it (Sol review
+    # review/completion-t3 #1). Honest no-op: read asks no prompts.
+    parser.add_argument("--no-input", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 

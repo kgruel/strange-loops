@@ -372,16 +372,17 @@ class TestKeyPrefixes:
             assert reader.key_prefixes("nonexistent", "topic") == []
 
     def test_limit_bounds_the_underlying_scan(self, tmp_db: Path):
-        # 500 facts across 3 namespaces — a limit of 10 (newest-first, by ts)
-        # only samples the tail, so at most the namespaces present in that
-        # tail can surface. Proves the probe is bounded, not a full scan.
+        # 500 facts — a limit of 10 (newest-first by ROWID: insertion order,
+        # served backwards by the kind index with no sort — Sol review
+        # review/completion-t3 #6) samples only the insertion tail, so only
+        # namespaces in that tail surface. Proves the probe is bounded.
         conn = sqlite3.connect(str(tmp_db))
         rows = [
-            (f"k{i}", "decision", float(i), "kyle", f'{{"topic": "only-late/{i}"}}')
-            for i in range(490, 500)
-        ] + [
             (f"k{i}", "decision", float(i), "kyle", f'{{"topic": "early/{i}"}}')
             for i in range(0, 490)
+        ] + [
+            (f"k{i}", "decision", float(i), "kyle", f'{{"topic": "only-late/{i}"}}')
+            for i in range(490, 500)
         ]
         conn.executemany(
             "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",

@@ -123,6 +123,25 @@ def _build_receipt_lines(
 _PLAIN_RECEIPT = False
 
 
+def _say(text: str, role: str = "error", *, out: bool = False) -> None:
+    """One human diagnostic line, honoring the --plain register.
+
+    Every cmd_emit error/diagnostic path routes here so the ``--plain``
+    contract ("no ANSI codes") holds on FAILURE paths too, not just the
+    receipt (Sol review review/completion-t3 round 4 #2).
+    """
+    stream = sys.stdout if out else sys.stderr
+    if _PLAIN_RECEIPT:
+        print(text, file=stream)
+        return
+    from painted import paint, Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+    style = {"error": p.error, "muted": p.muted}.get(role, p.muted)
+    paint(Block.text(text, style), file=stream)
+
+
 def _emit_lines(lines: list[tuple[str, str]]) -> None:
     """Render receipt lines to stderr via painted, mapping role→palette."""
     if not lines:
@@ -498,13 +517,9 @@ def cmd_emit(
     # "the following arguments are required: kind") instead of previewing a
     # kind:null fact (false success) or crashing inside program.receive.
     if kind is None:
-        paint(
-            Block.text(
-                "Error: emit requires a kind "
-                "(e.g. `loops emit <vertex> decision topic=…`)",
-                p.error,
-            ),
-            file=sys.stderr,
+        _say(
+            "Error: emit requires a kind "
+            "(e.g. `loops emit <vertex> decision topic=…`)"
         )
         return 2
 
@@ -516,14 +531,10 @@ def cmd_emit(
     from lang.document import is_internal_kind
 
     if is_internal_kind(kind):
-        paint(
-            Block.text(
-                f"Error: kind '{kind}' is in the reserved declaration "
-                f"namespace ('_decl.*') — declarations are recorded via "
-                f"`sl store absorb`, not emitted",
-                p.error,
-            ),
-            file=sys.stderr,
+        _say(
+            f"Error: kind '{kind}' is in the reserved declaration "
+            f"namespace ('_decl.*') — declarations are recorded via "
+            f"`sl store absorb`, not emitted"
         )
         return 2
 
@@ -556,7 +567,7 @@ def cmd_emit(
                 else:
                     # Unresolvable explicit vertex — error. (A kind or message word
                     # never arrives here as args.vertex: classification is upstream.)
-                    paint(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
+                    _say(f"Error: {candidate} not found")
                     return 1
 
         if vertex_ref is None:
@@ -565,12 +576,7 @@ def cmd_emit(
             if local is not None:
                 vertex_path = local.resolve()
             else:
-                paint(
-                    Block.text(
-                        "No vertex found. Run 'loops init' first.", p.error
-                    ),
-                    file=sys.stderr,
-                )
+                _say("No vertex found. Run 'loops init' first.")
                 return 1
 
     # Apply --stdin / --file flags (inject expanded payload values into parts).
@@ -582,7 +588,7 @@ def cmd_emit(
             list(getattr(args, "file", None) or []),
         )
     except LoopsError as e:
-        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        _say(f"Error: {e}")
         return 1
 
     emit_warnings: list[str] = []
@@ -615,11 +621,11 @@ def cmd_emit(
     if vertex_path is not None:
         obs_check = check_emit(vertex_path, observer, kind)
         if obs_check.status == "forbidden":
-            paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+            _say(f"Error: {obs_check.message}")
             return 1
         if obs_check.status == "undeclared":
             if strict_mode:
-                paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+                _say(f"Error: {obs_check.message}")
                 # The declaration hint is most useful exactly here — print it
                 # before refusing so the actor can fix the strict rejection.
                 if declare_observer:
@@ -638,10 +644,7 @@ def cmd_emit(
         writable_path = _resolve_writable_vertex(vertex_path)
         if writable_path is None:
             if not args.dry_run:
-                paint(
-                    Block.text("Error: vertex has no store configured", p.error),
-                    file=sys.stderr,
-                )
+                _say("Error: vertex has no store configured")
                 return 1
             store_path = None
         else:
@@ -651,7 +654,7 @@ def cmd_emit(
             store_path = _resolve_vertex_store_path(writable_path)
     except LoopsError as e:
         if not args.dry_run:
-            paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+            _say(f"Error: {e}")
             return 1
         store_path = None
 
@@ -778,12 +781,9 @@ def cmd_emit(
                 # STDERR: this is a receipt diagnostic. On stdout it would
                 # prepend a non-JSON line to the --json Surface dict and corrupt
                 # the machine-readable contract.
-                paint(
-                    Block.text(
-                        f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
-                        p.muted,
-                    ),
-                    file=sys.stderr,
+                _say(
+                    f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
+                    "muted",
                 )
 
             # Emit receipt: WARN lines (kind/fold-key/refs degradation) plus
@@ -846,14 +846,13 @@ def cmd_emit(
         # Lazy import keeps engine off the CLI-startup import path.
         from engine.sqlite_store import UnsignedTickInSignedEra
         if isinstance(e, UnsignedTickInSignedEra):
-            paint(Block.text(
+            _say(
                 f"seal refused: {e}\n"
                 "  the window's facts are stored; run again once the signing "
-                "key is available to close the accumulated window.",
-                p.error,
-            ), file=sys.stderr)
+                "key is available to close the accumulated window."
+            )
             return 1
-        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        _say(f"Error: {e}")
         return 1
 
 

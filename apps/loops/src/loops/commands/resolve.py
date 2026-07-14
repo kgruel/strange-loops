@@ -443,11 +443,15 @@ def _completion_declaration(vertex_path: Path):
                 # (correctness needs all of them), so its cost scales with
                 # declaration-history length. Normal stores hold a handful;
                 # a pathological one must not turn TAB into a scan (review
-                # round 3 #1). Over the cap → under-list.
-                (decl_rows,) = conn.execute(
-                    "SELECT COUNT(*) FROM facts WHERE kind GLOB '_decl.*'"
+                # round 3 #1). Existence-at-offset, not COUNT(*): the count
+                # itself visits every index entry, so the guard would be as
+                # unbounded as the work it guards (round 4 #1) — this visits
+                # at most cap+1 entries.
+                over_cap = conn.execute(
+                    "SELECT 1 FROM facts WHERE kind GLOB '_decl.*' "
+                    "LIMIT 1 OFFSET 5000"
                 ).fetchone()
-                if decl_rows > 5000:
+                if over_cap is not None:
                     return None
         finally:
             conn.close()

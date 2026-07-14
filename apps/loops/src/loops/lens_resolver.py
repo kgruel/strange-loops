@@ -95,10 +95,17 @@ def resolve_lens(
     path = _find_lens_module_path(name, vertex_dir=vertex_dir)
     if path is not None:
         mod = _load_lens_module(path)
-        if mod is not None:
-            fn = _extract_view(mod, candidates)
-            if fn is not None:
-                return fn
+        if mod is None:
+            # The user's custom file exists but failed to IMPORT: falling
+            # back to a same-named built-in would silently run a different
+            # lens than the one selected (review round 4 #4). The load
+            # failure was reported to stderr; refuse here.
+            return None
+        fn = _extract_view(mod, candidates)
+        if fn is not None:
+            return fn
+        # Loaded fine but exposes no matching view: historical shadowing
+        # behavior — fall through to the built-in.
 
     # Fall back to built-in lenses in this package
     return _load_builtin(name, candidates)
@@ -403,14 +410,23 @@ def _load_lens_module(path: Path):
         spec.loader.exec_module(mod)
     except Exception as e:
         del sys.modules[module_name]
-        print(
-            f"lens {path.stem!r} failed to load ({path}): "
-            f"{type(e).__name__}: {e}",
-            file=sys.stderr,
-        )
+        # Once per path per process: resolve_lens runs for both the fetch
+        # and the view of one command — the same broken file must not
+        # report twice (review round 4 #4).
+        if path not in _reported_broken:
+            _reported_broken.add(path)
+            print(
+                f"lens {path.stem!r} failed to load ({path}): "
+                f"{type(e).__name__}: {e}",
+                file=sys.stderr,
+            )
         return None
 
     return mod
+
+
+# Broken lens files already reported to stderr this process (dedupe).
+_reported_broken: set[Path] = set()
 
 
 def _load_builtin(name: str, candidates: tuple[str, ...]) -> LensRenderFn | None:

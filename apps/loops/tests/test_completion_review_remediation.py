@@ -482,6 +482,82 @@ class TestRound3StarImport:
         assert "cmd_init" in ns
 
 
+# --- Round 4 -----------------------------------------------------------------
+
+
+class TestRound4BoundedGuard:
+    def test_cap_check_is_itself_bounded(self, tmp_path):
+        """R4-1: the guard visits at most cap+1 index entries — with 50k
+        _decl rows the whole under-list decision stays instant."""
+        import sqlite3
+
+        from loops.commands.resolve import _declared_kind_names
+
+        vpath = _scaffold_and_absorb(tmp_path)
+        conn = sqlite3.connect(str(tmp_path / "t.db"))
+        conn.executemany(
+            "INSERT INTO facts (id, kind, ts, observer, payload) "
+            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}')",
+            [(f"pad{i}",) for i in range(50_000)],
+        )
+        conn.commit()
+        conn.close()
+        start = time.monotonic()
+        got = _declared_kind_names(vpath)
+        elapsed = time.monotonic() - start
+        assert got == []
+        assert elapsed < 0.5, f"guard scanned the partition: {elapsed:.2f}s"
+
+
+class TestRound4PlainErrorPaths:
+    def test_missing_kind_error_avoids_renderer_under_plain(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """R4-2: --plain failure paths never call painted at all."""
+        import painted
+
+        import loops.commands.emit as emit_mod
+
+        def _boom(*a, **kw):
+            raise AssertionError("paint() called on a --plain path")
+
+        monkeypatch.setattr(painted, "paint", _boom)
+        vpath = _scaffold_and_absorb(tmp_path)
+        rc = emit_mod._run_emit(["--plain"], vertex_path=vpath)
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert "emit requires a kind" in err
+        assert "\x1b[" not in err
+
+
+class TestRound4BrokenLensNoFallback:
+    def _write_broken(self, tmp_path):
+        lens_dir = tmp_path / "lenses"
+        lens_dir.mkdir(exist_ok=True)
+        (lens_dir / "graph.py").write_text('raise RuntimeError("broken custom graph")\n')
+
+    def test_broken_custom_lens_does_not_run_builtin(self, tmp_path, monkeypatch):
+        """R4-4a: a load-failed custom lens must not silently become the
+        same-named built-in."""
+        from loops.lens_resolver import resolve_lens
+
+        self._write_broken(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        assert resolve_lens("graph", "fold_view") is None
+
+    def test_broken_lens_reported_once_per_process(self, tmp_path, monkeypatch, capsys):
+        """R4-4b: fetch + view resolution of one command report the failure once."""
+        import loops.lens_resolver as lr
+
+        self._write_broken(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(lr, "_reported_broken", set())
+        lr.resolve_lens("graph", "fold_view")
+        lr.resolve_lens("graph", "stream_view")
+        err = capsys.readouterr().err
+        assert err.count("broken custom graph") == 1
+
+
 class TestRound3LensErrorSurfaced:
     def test_import_broken_lens_reports_cause(self, tmp_path, capsys, monkeypatch):
         """R3-6: selecting an import-broken lens surfaces the real error."""

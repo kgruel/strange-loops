@@ -47,6 +47,34 @@ def complete_lens(ctx: CompletionContext) -> list[Candidate]:
         return []
 
 
+def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
+    """Complete the leading vertex positional with every resolvable name.
+
+    Scoped to the FIRST token only: once a bareword already occupies the
+    vertex slot (``ctx.args["tokens"]`` non-empty — the positional's
+    already-parsed prefix), this is completing a later slot (kind/key,
+    ``field=value``) that this slice doesn't offer candidates for, so it
+    defers by returning ``[]`` rather than guessing.
+
+    Enumeration is a filesystem walk plus a per-candidate KDL parse (no store
+    open), so this stays on the render-free TAB path. Any failure -> ``[]``.
+    """
+    try:
+        tokens = ctx.args.get("tokens") or []
+    except Exception:
+        return []
+    if tokens:
+        return []
+    try:
+        from loops.commands.resolve import enumerate_vertices
+
+        return [
+            Candidate(info.name, info.description) for info in enumerate_vertices()
+        ]
+    except Exception:
+        return []
+
+
 def _vertex_dir_on_line(ctx: CompletionContext):
     """Resolve the vertex already typed on the line to its directory, or None.
 

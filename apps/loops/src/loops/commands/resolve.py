@@ -84,6 +84,95 @@ def _find_local_vertex() -> Path | None:
     return matches[0] if matches else None
 
 
+@dataclass(frozen=True)
+class VertexInfo:
+    """One enumerable vertex candidate — name, description, resolution tier."""
+    name: str
+    description: str
+    tier: str  # "local" | "config"
+
+
+def _describe_vertex(path: Path) -> str:
+    """"instance" / "aggregation", from a lightweight parse. "" on failure.
+
+    Cheap by construction: parses the vertex file's KDL text (no store open,
+    no fold) — the same parse ``_find_local_vertex``'s callers already pay
+    for elsewhere. Never raises; a broken or unreadable vertex degrades to an
+    undescribed candidate rather than dropping it from enumeration.
+    """
+    try:
+        ast = _parse_vertex(path)
+    except LoopsError:
+        return ""
+    return "aggregation" if (ast.combine is not None or ast.discover is not None) else "instance"
+
+
+def _local_vertex_candidates() -> list[Path]:
+    """Every named ``.vertex`` file the local tier would resolve — not just
+    the first (``_find_local_vertex`` picks one; this enumerates all)."""
+    paths: list[Path] = []
+    loops_dir = Path.cwd() / ".loops"
+    if loops_dir.is_dir():
+        paths.extend(sorted(loops_dir.glob("*.vertex")))
+    paths.extend(sorted(Path.cwd().glob("*.vertex")))
+    return paths
+
+
+def _config_vertex_candidates(home: Path) -> list[tuple[str, Path]]:
+    """Every ``LOOPS_HOME`` vertex file, with its dotted/slashed name.
+
+    Mirrors ``lang.population.resolve_vertex``'s convention (``home / name /
+    f"{name}.vertex"``) without forking it: a file counts as a named vertex
+    when its stem matches its own parent directory's name — the same
+    relationship that convention builds by construction. Slashed names
+    (``dev/check``) fall out for free: the name is the parent directory's
+    path relative to ``home``. The un-named root ``home/.vertex`` has no
+    directory-name match (its parent is ``home`` itself), so it never
+    surfaces here — there is no name to type for it.
+    """
+    if not home.is_dir():
+        return []
+    results: list[tuple[str, Path]] = []
+    for vertex_file in sorted(home.rglob("*.vertex")):
+        if vertex_file.stem != vertex_file.parent.name:
+            continue
+        name = vertex_file.parent.relative_to(home).as_posix()
+        results.append((name, vertex_file))
+    return results
+
+
+def enumerate_vertices() -> list[VertexInfo]:
+    """Every vertex name ``resolve_vertex``/``_resolve_vertex_for_dispatch``
+    would accept from cwd, with a cheap description, in resolution order.
+
+    Local tier first (``.loops/*.vertex``, then bare ``cwd/*.vertex`` —
+    ``_local_vertex_candidates``' order), config tier
+    (``LOOPS_HOME/**/<name>.vertex``) after; the first spelling of a name
+    wins, mirroring ``_resolve_vertex_for_dispatch``'s local-shadows-config
+    precedence. Stat-free beyond the enumeration walk itself — no store is
+    opened. Any per-candidate failure degrades that candidate's description
+    to ``""``, never drops enumeration entirely.
+    """
+    seen: set[str] = set()
+    result: list[VertexInfo] = []
+
+    for path in _local_vertex_candidates():
+        if path.stem in ("", ".vertex"):
+            continue  # unnamed root vertex — nothing to type
+        if path.stem in seen:
+            continue
+        seen.add(path.stem)
+        result.append(VertexInfo(path.stem, _describe_vertex(path), "local"))
+
+    for name, path in _config_vertex_candidates(loops_home()):
+        if name in seen:
+            continue
+        seen.add(name)
+        result.append(VertexInfo(name, _describe_vertex(path), "config"))
+
+    return result
+
+
 # --- Internal helpers ---
 
 

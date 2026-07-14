@@ -31,7 +31,7 @@ import argparse
 
 from painted.cli import complete_via
 
-from .completers import complete_lens
+from .completers import complete_lens, complete_vertex
 
 
 def add_read_args(parser: argparse.ArgumentParser) -> None:
@@ -53,9 +53,16 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
     action) — never acts on the args, so it is safe to introspect for ``-h``
     and completion without running the command.
     """
-    parser.add_argument(
-        "tokens", nargs="*", default=[],
-        help="[vertex] [kind/key] [field=value ...]",
+    # ``tokens`` carries a domain completer too: the leading slot is the
+    # vertex name (every candidate ``resolve_vertex``/dispatch would accept);
+    # once that slot is filled, ``complete_vertex`` defers with ``[]`` — later
+    # slots (kind/key, ``field=value``) aren't this slice's scope.
+    complete_via(
+        parser.add_argument(
+            "tokens", nargs="*", default=[],
+            help="[vertex] [kind/key] [field=value ...]",
+        ),
+        complete_vertex,
     )
     # Domain selectors — change WHAT is fetched (folded state vs raw facts).
     parser.add_argument("--kind", default=None, help="Filter by fact kind")

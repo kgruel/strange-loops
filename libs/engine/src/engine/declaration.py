@@ -178,16 +178,29 @@ def _read_own_lineage(conn: sqlite3.Connection) -> str | None:
     return row[0] if row else None
 
 
-def _open_readonly(store_path: Path) -> sqlite3.Connection | None:
+class StoreBusy(DeclarationResolutionError):
+    """The store is lock-contended within the caller's timeout budget.
+
+    Raised only under ``on_locked="raise"`` — latency-bounded callers (shell
+    completion) that must distinguish "locked, under-list" from "pre-genesis,
+    the file is authoritative". The default path keeps the historical
+    swallow-to-file-fallback behavior for interactive commands.
+    """
+
+
+def _open_readonly(
+    store_path: Path, *, timeout: float = 5.0
+) -> sqlite3.Connection | None:
     """Open ``store_path`` read-only, or None if it is not a usable store.
 
     Read-only (URI ``mode=ro``) so declaration resolution never mutates a
     store and is safe alongside a concurrent writer (WAL). A path that is not a
     valid SQLite database (empty file, non-db bytes) yields None — the caller
-    falls back to the file, never crashes.
+    falls back to the file, never crashes. ``timeout`` is sqlite's busy wait;
+    latency-bounded callers pass a sub-second value.
     """
     try:
-        conn = sqlite3.connect(f"file:{store_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{store_path}?mode=ro", uri=True, timeout=timeout)
     except sqlite3.Error:
         return None
     return conn
@@ -197,6 +210,8 @@ def resolve_declaration_documents(
     store_path: Path,
     *,
     as_of: float | None = None,
+    timeout: float = 5.0,
+    on_locked: str = "swallow",
 ) -> list[dict[str, Any]] | None | Unhistorized:
     """Fold the store's declaration events into a document set.
 
@@ -229,7 +244,7 @@ def resolve_declaration_documents(
     6. Return the surviving documents in insertion order (definition order,
        modulo later replacements keeping position).
     """
-    conn = _open_readonly(store_path)
+    conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
         return None
     try:
@@ -238,8 +253,14 @@ def resolve_declaration_documents(
                 "SELECT id, ts, payload FROM facts WHERE kind = ? ORDER BY ts, id",
                 (DECL_GENESIS,),
             ).fetchall()
-        except sqlite3.Error:
-            # No facts table / unreadable schema — not a usable store.
+        except sqlite3.Error as e:
+            # Lock contention is DISTINGUISHABLE state for latency-bounded
+            # callers: swallowing it here would flow to the file fallback —
+            # a stale-file lie when a genesis exists (completion review
+            # round 3 #2). Everything else (no facts table, unreadable
+            # schema) means "not a usable store" as before.
+            if on_locked == "raise" and "locked" in str(e).lower():
+                raise StoreBusy(f"{store_path} is lock-contended: {e}") from e
             return None
 
         if not genesis_rows:
@@ -342,7 +363,11 @@ DECLARATION_STATUSES = ("store", "file-pre-genesis", "unhistorized", "aggregate-
 
 
 def load_declaration_status(
-    vertex_path: Path, *, as_of: float | None = None
+    vertex_path: Path,
+    *,
+    as_of: float | None = None,
+    store_timeout: float = 5.0,
+    on_locked: str = "swallow",
 ) -> tuple[Any, str]:
     """:func:`load_declaration` plus the provenance of what was resolved.
 
@@ -367,7 +392,9 @@ def load_declaration_status(
     if not store_path.exists():
         return file_ast, "file-pre-genesis"
 
-    docs = resolve_declaration_documents(store_path, as_of=as_of)
+    docs = resolve_declaration_documents(
+        store_path, as_of=as_of, timeout=store_timeout, on_locked=on_locked,
+    )
     if isinstance(docs, list):
         resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
         return _reattach_ingress(resolved, file_ast), "store"
@@ -379,7 +406,13 @@ def load_declaration_status(
     return file_ast, "file-pre-genesis"
 
 
-def load_declaration(vertex_path: Path, *, as_of: float | None = None):
+def load_declaration(
+    vertex_path: Path,
+    *,
+    as_of: float | None = None,
+    store_timeout: float = 5.0,
+    on_locked: str = "swallow",
+):
     """Resolve a vertex's declaration — THE seam (SPEC §9.5).
 
     This is the single function every declaration-consulting site routes
@@ -407,7 +440,9 @@ def load_declaration(vertex_path: Path, *, as_of: float | None = None):
     :func:`load_declaration_status` instead — this bare seam returns the same
     AST but erases the provenance.
     """
-    ast, _status = load_declaration_status(vertex_path, as_of=as_of)
+    ast, _status = load_declaration_status(
+        vertex_path, as_of=as_of, store_timeout=store_timeout, on_locked=on_locked,
+    )
     return ast
 
 

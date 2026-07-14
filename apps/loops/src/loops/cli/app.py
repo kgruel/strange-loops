@@ -30,8 +30,21 @@ from pathlib import Path
 from painted.cli import AppCommand, run_app
 
 from .invocation import Invocation
-from .output import default_reporter
 from .registry import COMMANDS, POPULATION_OPS, VERBS
+
+
+def default_reporter():
+    """Lazy proxy for :func:`cli.output.default_reporter`.
+
+    ``cli.output`` imports painted's rendering core at module scope; importing
+    it here eagerly would pull the renderer into the ``_PAINTED_COMPLETE``
+    TAB fast path before painted's completion gate runs (Sol review
+    review/completion-t3 #2). Deferred to first call — every call site below
+    runs strictly after the gate.
+    """
+    from .output import default_reporter as _real
+
+    return _real()
 
 
 # Verbs that use ``--observer`` as a section-selector flag rather than an
@@ -294,6 +307,30 @@ def _make_handler(view, *, peel_observer: bool):
     return handler
 
 
+def _add_args_for(name: str):
+    """The render-free arg declaration a command hangs ``-h`` and completion off.
+
+    Returned to ``AppCommand(add_args=...)``, this callback is walked by painted
+    for the intercepted ``-h`` and for shell ``<TAB>`` completion — never to run
+    the handler. It MUST stay render-free to import (it is referenced while the
+    roster is built, which happens on every invocation, completion included), so
+    each entry points at a dedicated render-free ``*_args`` module, not at a view.
+
+    ``read`` and ``emit`` are wired — each points at its own dedicated
+    ``*_args`` module (``cli/read_args.py``, ``cli/emit_args.py``); new
+    completers land as one-line additions inside those, not new entries here.
+    """
+    if name == "read":
+        from .read_args import add_read_args
+
+        return add_read_args
+    if name == "emit":
+        from .emit_args import add_emit_args
+
+        return add_emit_args
+    return None
+
+
 def _build_commands() -> list[AppCommand]:
     """Build the unified painted ``AppCommand`` roster (verbs ∪ commands).
 
@@ -308,6 +345,7 @@ def _build_commands() -> list[AppCommand]:
                 name,
                 _DESCRIPTIONS[name],
                 _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+                add_args=_add_args_for(name),
             )
         )
     for name, view in COMMANDS.items():
@@ -318,6 +356,7 @@ def _build_commands() -> list[AppCommand]:
                 name,
                 _DESCRIPTIONS[name],
                 _make_handler(view, peel_observer=name in _PEEL_OBSERVER),
+                add_args=_add_args_for(name),
             )
         )
     return cmds

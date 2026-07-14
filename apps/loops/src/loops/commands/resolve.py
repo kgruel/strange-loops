@@ -84,6 +84,95 @@ def _find_local_vertex() -> Path | None:
     return matches[0] if matches else None
 
 
+@dataclass(frozen=True)
+class VertexInfo:
+    """One enumerable vertex candidate — name, description, resolution tier."""
+    name: str
+    description: str
+    tier: str  # "local" | "config"
+
+
+def _describe_vertex(path: Path) -> str:
+    """"instance" / "aggregation", from a lightweight parse. "" on failure.
+
+    Cheap by construction: parses the vertex file's KDL text (no store open,
+    no fold) — the same parse ``_find_local_vertex``'s callers already pay
+    for elsewhere. Never raises; a broken or unreadable vertex degrades to an
+    undescribed candidate rather than dropping it from enumeration.
+    """
+    try:
+        ast = _parse_vertex(path)
+    except LoopsError:
+        return ""
+    return "aggregation" if (ast.combine is not None or ast.discover is not None) else "instance"
+
+
+def _local_vertex_candidates() -> list[Path]:
+    """Every named ``.vertex`` file the local tier would resolve — not just
+    the first (``_find_local_vertex`` picks one; this enumerates all)."""
+    paths: list[Path] = []
+    loops_dir = Path.cwd() / ".loops"
+    if loops_dir.is_dir():
+        paths.extend(sorted(loops_dir.glob("*.vertex")))
+    paths.extend(sorted(Path.cwd().glob("*.vertex")))
+    return paths
+
+
+def _config_vertex_candidates(home: Path) -> list[tuple[str, Path]]:
+    """Every ``LOOPS_HOME`` vertex file, with its dotted/slashed name.
+
+    Mirrors ``lang.population.resolve_vertex``'s convention (``home / name /
+    f"{name}.vertex"``) without forking it: a file counts as a named vertex
+    when its stem matches its own parent directory's name — the same
+    relationship that convention builds by construction. Slashed names
+    (``dev/check``) fall out for free: the name is the parent directory's
+    path relative to ``home``. The un-named root ``home/.vertex`` has no
+    directory-name match (its parent is ``home`` itself), so it never
+    surfaces here — there is no name to type for it.
+    """
+    if not home.is_dir():
+        return []
+    results: list[tuple[str, Path]] = []
+    for vertex_file in sorted(home.rglob("*.vertex")):
+        if vertex_file.stem != vertex_file.parent.name:
+            continue
+        name = vertex_file.parent.relative_to(home).as_posix()
+        results.append((name, vertex_file))
+    return results
+
+
+def enumerate_vertices() -> list[VertexInfo]:
+    """Every vertex name ``resolve_vertex``/``_resolve_vertex_for_dispatch``
+    would accept from cwd, with a cheap description, in resolution order.
+
+    Local tier first (``.loops/*.vertex``, then bare ``cwd/*.vertex`` —
+    ``_local_vertex_candidates``' order), config tier
+    (``LOOPS_HOME/**/<name>.vertex``) after; the first spelling of a name
+    wins, mirroring ``_resolve_vertex_for_dispatch``'s local-shadows-config
+    precedence. Stat-free beyond the enumeration walk itself — no store is
+    opened. Any per-candidate failure degrades that candidate's description
+    to ``""``, never drops enumeration entirely.
+    """
+    seen: set[str] = set()
+    result: list[VertexInfo] = []
+
+    for path in _local_vertex_candidates():
+        if path.stem in ("", ".vertex"):
+            continue  # unnamed root vertex — nothing to type
+        if path.stem in seen:
+            continue
+        seen.add(path.stem)
+        result.append(VertexInfo(path.stem, _describe_vertex(path), "local"))
+
+    for name, path in _config_vertex_candidates(loops_home()):
+        if name in seen:
+            continue
+        seen.add(name)
+        result.append(VertexInfo(name, _describe_vertex(path), "config"))
+
+    return result
+
+
 # --- Internal helpers ---
 
 
@@ -266,12 +355,16 @@ def _extract_kind_keys(vertex_path: Path) -> dict[str, str]:
     Skips kinds that use collect or other non-keyed folds.
     Best-effort: returns empty dict on any vertex error.
     """
-    from lang.ast import FoldBy
-
     try:
         ast = _parse_vertex(vertex_path)
     except LoopsError:
         return {}
+    return _kind_keys_from_ast(ast)
+
+
+def _kind_keys_from_ast(ast) -> dict[str, str]:
+    """kind → fold key_field for an already-resolved ``VertexFile`` AST."""
+    from lang.ast import FoldBy
 
     kind_keys: dict[str, str] = {}
     for kind_name, loop_def in ast.loops.items():
@@ -305,6 +398,136 @@ def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> set[str]
     if loop_def is None:
         return set()
     return {edge.field for edge in getattr(loop_def, "edges", ())}
+
+
+def _completion_declaration(vertex_path: Path):
+    """The canonical declaration AST, under completion's latency contract.
+
+    Same honesty rule as ``load_declaration`` (post-genesis, the file is a
+    mutable cache — completion must offer what the runtime accepts), but TAB
+    cannot pay the seam's default costs: sqlite's 5s busy wait, and it must
+    UNDER-LIST on a lock rather than fall back to the stale file — the seam's
+    file fallback is honest for pre-genesis stores, dishonest as an error
+    path (Sol review review/completion-t3 round 2 #2).
+
+    Shape: a 0.25s-timeout read-only genesis probe decides the era —
+
+    - store missing / no genesis row → the file AST (pre-genesis: file IS
+      the declaration);
+    - genesis present → ``load_declaration`` (store-canonical; the probe just
+      held a read connection, so the residual lock window is a race, not the
+      common case);
+    - probe locked / any error → ``None`` (caller under-lists with []).
+    """
+    import sqlite3
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except LoopsError:
+        return None  # missing/unparseable vertex — nothing to complete from
+    if store_path is None or not store_path.exists():
+        try:
+            return _parse_vertex(vertex_path)
+        except LoopsError:
+            return None
+    try:
+        conn = sqlite3.connect(
+            f"file:{store_path}?mode=ro", uri=True, timeout=0.25,
+        )
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM facts WHERE kind = '_decl.genesis' LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                # Bounded-work cap: the resolver folds EVERY _decl.* row
+                # (correctness needs all of them), so its cost scales with
+                # declaration-history length. Normal stores hold a handful;
+                # a pathological one must not turn TAB into a scan (review
+                # round 3 #1). Existence-at-offset, not COUNT(*): the count
+                # itself visits every index entry, so the guard would be as
+                # unbounded as the work it guards (round 4 #1) — this visits
+                # at most cap+1 entries.
+                over_cap = conn.execute(
+                    "SELECT 1 FROM facts WHERE kind GLOB '_decl.*' "
+                    "LIMIT 1 OFFSET 5000"
+                ).fetchone()
+                if over_cap is not None:
+                    return None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None  # locked / unreadable — under-list, never the stale file
+    try:
+        if row is None:
+            return _parse_vertex(vertex_path)
+        from engine.declaration import load_declaration
+
+        # 0.25s busy budget + raise-on-lock: a writer grabbing the lock
+        # between probe and load must yield [] within budget, never the
+        # 5s default wait or the stale file (review round 3 #2).
+        return load_declaration(
+            vertex_path, store_timeout=0.25, on_locked="raise",
+        )
+    except Exception:
+        return None
+
+
+def _declared_kind_names(vertex_path: Path) -> list[str]:
+    """Kind names from the canonical declaration, internal-excluded.
+
+    Routed through ``_completion_declaration`` (store-canonical, bounded,
+    under-lists on lock). No combine/discover topology chase — widening
+    through child vertices (as ``_declared_kinds`` does for *validation*) is
+    exactly the I/O TAB can't afford on every keystroke.
+
+    Sorted. Best-effort: ``[]`` on any failure.
+    """
+    from lang.document import is_internal_kind
+
+    ast = _completion_declaration(vertex_path)
+    if ast is None:
+        return []
+    return sorted(name for name in ast.loops if not is_internal_kind(name))
+
+
+def enumerate_key_prefixes(
+    vertex_path: Path, kind: str, typed_prefix: str = "",
+) -> list[str]:
+    """Namespace prefixes (or scoped full keys) for ``--key`` completion.
+
+    Unlike ``_declared_kind_names``, this DOES need the store open — namespace
+    prefixes live in fact key *values*, not the declaration — so it resolves
+    the kind's fold-key field (``_extract_kind_keys``), the vertex's store
+    path, and probes it read-only through ``StoreReader.key_prefixes`` (a
+    single ``LIMIT``-bounded query; see that method for the completeness
+    trade-off). ``kind`` without a declared fold-key field (collect-style
+    kinds have no key to prefix) yields ``[]``, same as any resolution miss.
+
+    Best-effort: ``[]`` on any failure — no vertex, no store, no fold key,
+    a broken/locked database.
+    """
+    try:
+        # Canonical declaration, not the mutable file: the fold-key FIELD is
+        # declaration state too — a file-only fold-key flip must not steer
+        # --key completion into a field the runtime fold doesn't resolve
+        # (Sol review review/completion-t3 round 2 #3).
+        ast = _completion_declaration(vertex_path)
+        if ast is None:
+            return []
+        key_field = _kind_keys_from_ast(ast).get(kind)
+        if key_field is None:
+            return []
+        store_path = _resolve_vertex_store_path(vertex_path)
+        if store_path is None:
+            return []
+        from engine import StoreReader
+
+        # Sub-second busy timeout: TAB hanging out sqlite's default 5s wait
+        # on an exclusively-locked store is worse than under-listing.
+        with StoreReader(store_path, timeout=0.25) as reader:
+            return reader.key_prefixes(kind, key_field, prefix=typed_prefix)
+    except Exception:
+        return []
 
 
 # --- Topology ---

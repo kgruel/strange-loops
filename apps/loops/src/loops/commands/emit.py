@@ -112,9 +112,43 @@ def _build_receipt_lines(
     return warn_lines, primary_lines
 
 
+# --plain receipt register: set at every cmd_emit entry from args.plain,
+# covering all three output surfaces (receipt lines, --dry-run fact JSON,
+# --json surface receipt). painted already strips ANSI on a non-TTY stream;
+# this honours an EXPLICIT --plain on a TTY too, so the accepted flag does
+# what it advertises (Sol review review/completion-t3 rounds 2 #4, 3 #3).
+# A module global is deliberate: the CLI runs one command per process and
+# cmd_emit is not re-entered; every entry overwrites the register, so no
+# state leaks between calls even in-process (tests).
+_PLAIN_RECEIPT = False
+
+
+def _say(text: str, role: str = "error", *, out: bool = False) -> None:
+    """One human diagnostic line, honoring the --plain register.
+
+    Every cmd_emit error/diagnostic path routes here so the ``--plain``
+    contract ("no ANSI codes") holds on FAILURE paths too, not just the
+    receipt (Sol review review/completion-t3 round 4 #2).
+    """
+    stream = sys.stdout if out else sys.stderr
+    if _PLAIN_RECEIPT:
+        print(text, file=stream)
+        return
+    from painted import paint, Block
+    from painted.palette import current_palette
+
+    p = current_palette()
+    style = {"error": p.error, "muted": p.muted}.get(role, p.muted)
+    paint(Block.text(text, style), file=stream)
+
+
 def _emit_lines(lines: list[tuple[str, str]]) -> None:
     """Render receipt lines to stderr via painted, mapping role→palette."""
     if not lines:
+        return
+    if _PLAIN_RECEIPT:
+        for text, _role in lines:
+            print(text, file=sys.stderr)
         return
     from painted import paint, Block
     from painted.palette import current_palette
@@ -398,20 +432,26 @@ def _print_observer_declaration(
     entry. Goes to STDERR so machine-readable stdout (fact / Surface JSON) stays
     clean.
     """
+    decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
+    lines = [
+        f"declare: add to {vertex_path} —",
+        "observers {",
+        f"  {decl_name} {{ }}",
+        "}",
+    ]
+    if _PLAIN_RECEIPT:
+        # --plain contract holds on the declaration hint too (review round 5 #1).
+        for line in lines:
+            print(line, file=sys.stderr)
+        return
     from painted import paint, Block, join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
-    decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
     # join_vertical, NOT a raw "\n" in Block.text — painted 0.4.0 flattens an
     # embedded newline to a space (friction:block-text-multiline-passthrough-broke-on-040).
     paint(
-        join_vertical(
-            Block.text(f"declare: add to {vertex_path} —", p.muted),
-            Block.text("observers {", p.muted),
-            Block.text(f"  {decl_name} {{ }}", p.muted),
-            Block.text("}", p.muted),
-        ),
+        join_vertical(*[Block.text(line, p.muted) for line in lines]),
         file=sys.stderr,
     )
 
@@ -440,7 +480,10 @@ def _emit_json_receipt(vertex_path: Path | None, kind: str) -> None:
         state = fetch_fold(vertex_path, kind=kind, observer=None)
         surface = project(state)
         text = _json.dumps(to_dict(surface), sort_keys=True, default=str)
-        paint(Block.text(text, current_palette().muted), file=sys.stdout)
+        if _PLAIN_RECEIPT:
+            print(text)
+        else:
+            paint(Block.text(text, current_palette().muted), file=sys.stdout)
     except Exception:
         return  # receipt is best-effort
 
@@ -453,6 +496,8 @@ def cmd_emit(
 ) -> int:
     """Inject a fact directly into a vertex store (or print in --dry-run)."""
     _ = _reporter(reporter)  # reserved for future error routing
+    global _PLAIN_RECEIPT
+    _PLAIN_RECEIPT = bool(getattr(args, "plain", False))
     from atoms import Fact
     from loops.commands.identity import resolve_observer, check_emit
     from loops.commands.resolve import (
@@ -478,13 +523,9 @@ def cmd_emit(
     # "the following arguments are required: kind") instead of previewing a
     # kind:null fact (false success) or crashing inside program.receive.
     if kind is None:
-        paint(
-            Block.text(
-                "Error: emit requires a kind "
-                "(e.g. `loops emit <vertex> decision topic=…`)",
-                p.error,
-            ),
-            file=sys.stderr,
+        _say(
+            "Error: emit requires a kind "
+            "(e.g. `loops emit <vertex> decision topic=…`)"
         )
         return 2
 
@@ -496,14 +537,10 @@ def cmd_emit(
     from lang.document import is_internal_kind
 
     if is_internal_kind(kind):
-        paint(
-            Block.text(
-                f"Error: kind '{kind}' is in the reserved declaration "
-                f"namespace ('_decl.*') — declarations are recorded via "
-                f"`sl store absorb`, not emitted",
-                p.error,
-            ),
-            file=sys.stderr,
+        _say(
+            f"Error: kind '{kind}' is in the reserved declaration "
+            f"namespace ('_decl.*') — declarations are recorded via "
+            f"`sl store absorb`, not emitted"
         )
         return 2
 
@@ -536,7 +573,7 @@ def cmd_emit(
                 else:
                     # Unresolvable explicit vertex — error. (A kind or message word
                     # never arrives here as args.vertex: classification is upstream.)
-                    paint(Block.text(f"Error: {candidate} not found", p.error), file=sys.stderr)
+                    _say(f"Error: {candidate} not found")
                     return 1
 
         if vertex_ref is None:
@@ -545,12 +582,7 @@ def cmd_emit(
             if local is not None:
                 vertex_path = local.resolve()
             else:
-                paint(
-                    Block.text(
-                        "No vertex found. Run 'loops init' first.", p.error
-                    ),
-                    file=sys.stderr,
-                )
+                _say("No vertex found. Run 'loops init' first.")
                 return 1
 
     # Apply --stdin / --file flags (inject expanded payload values into parts).
@@ -562,7 +594,7 @@ def cmd_emit(
             list(getattr(args, "file", None) or []),
         )
     except LoopsError as e:
-        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        _say(f"Error: {e}")
         return 1
 
     emit_warnings: list[str] = []
@@ -595,11 +627,11 @@ def cmd_emit(
     if vertex_path is not None:
         obs_check = check_emit(vertex_path, observer, kind)
         if obs_check.status == "forbidden":
-            paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+            _say(f"Error: {obs_check.message}")
             return 1
         if obs_check.status == "undeclared":
             if strict_mode:
-                paint(Block.text(f"Error: {obs_check.message}", p.error), file=sys.stderr)
+                _say(f"Error: {obs_check.message}")
                 # The declaration hint is most useful exactly here — print it
                 # before refusing so the actor can fix the strict rejection.
                 if declare_observer:
@@ -618,10 +650,7 @@ def cmd_emit(
         writable_path = _resolve_writable_vertex(vertex_path)
         if writable_path is None:
             if not args.dry_run:
-                paint(
-                    Block.text("Error: vertex has no store configured", p.error),
-                    file=sys.stderr,
-                )
+                _say("Error: vertex has no store configured")
                 return 1
             store_path = None
         else:
@@ -631,7 +660,7 @@ def cmd_emit(
             store_path = _resolve_vertex_store_path(writable_path)
     except LoopsError as e:
         if not args.dry_run:
-            paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+            _say(f"Error: {e}")
             return 1
         store_path = None
 
@@ -713,12 +742,11 @@ def cmd_emit(
                 dry_run=True,
             )
             _emit_lines(warn_lines)
-        paint(
-            Block.text(
-                json.dumps(fact.to_dict(), sort_keys=True, default=str), p.muted
-            ),
-            file=sys.stdout,
-        )
+        _dry_text = json.dumps(fact.to_dict(), sort_keys=True, default=str)
+        if _PLAIN_RECEIPT:
+            print(_dry_text)
+        else:
+            paint(Block.text(_dry_text, p.muted), file=sys.stdout)
         return 0
 
     # Pre-generate the fact ID so the receipt reports the same ULID the store assigns.
@@ -759,12 +787,9 @@ def cmd_emit(
                 # STDERR: this is a receipt diagnostic. On stdout it would
                 # prepend a non-JSON line to the --json Surface dict and corrupt
                 # the machine-readable contract.
-                paint(
-                    Block.text(
-                        f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
-                        p.muted,
-                    ),
-                    file=sys.stderr,
+                _say(
+                    f"tick: {tick.name} ({len(tick.payload)} fields) · {mark}",
+                    "muted",
                 )
 
             # Emit receipt: WARN lines (kind/fold-key/refs degradation) plus
@@ -827,14 +852,13 @@ def cmd_emit(
         # Lazy import keeps engine off the CLI-startup import path.
         from engine.sqlite_store import UnsignedTickInSignedEra
         if isinstance(e, UnsignedTickInSignedEra):
-            paint(Block.text(
+            _say(
                 f"seal refused: {e}\n"
                 "  the window's facts are stored; run again once the signing "
-                "key is available to close the accumulated window.",
-                p.error,
-            ), file=sys.stderr)
+                "key is available to close the accumulated window."
+            )
             return 1
-        paint(Block.text(f"Error: {e}", p.error), file=sys.stderr)
+        _say(f"Error: {e}")
         return 1
 
 
@@ -922,6 +946,34 @@ def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.Argument
         "--json",
         action="store_true",
         help="After storing, print the post-emit fold as a structured Surface dict.",
+    )
+    # Framework-flag acceptance: painted's reflected parser (build_parser via
+    # the add_args seam) advertises the full framework set for every command,
+    # so completion offers these — the runtime parser must accept what TAB
+    # offers or completion invents candidates (Sol review review/completion-t3
+    # #1). Visible in -h (SUPPRESS would re-split the -h/completion
+    # reflection the seam unified — round 2 #4). --plain is wired (ANSI-free
+    # receipt); the rest are honest no-ops: the receipt is already static
+    # text, emit runs no live surface and asks no prompts.
+    parser.add_argument(
+        "--plain", action="store_true",
+        help="Plain-text receipt, no ANSI codes",
+    )
+    parser.add_argument(
+        "--static", action="store_true",
+        help="Accepted for interface uniformity (the receipt is already static)",
+    )
+    parser.add_argument(
+        "--live", action="store_true",
+        help="Accepted for interface uniformity (emit runs no live surface)",
+    )
+    parser.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Accepted for interface uniformity (emit has no interactive mode)",
+    )
+    parser.add_argument(
+        "--no-input", action="store_true",
+        help="Accepted for interface uniformity (emit asks no prompts)",
     )
     parser.add_argument(
         "--declare-observer",

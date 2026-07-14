@@ -111,6 +111,46 @@ class StoreReader:
             for r in rows
         }
 
+    def key_prefixes(
+        self, kind: str, key_field: str, *, prefix: str = "", limit: int = 200,
+    ) -> list[str]:
+        """Namespace prefixes (or scoped full keys) for one kind's fold-key field.
+
+        The completion-time sibling of :meth:`fact_key_stats`: that method
+        computes an unbounded ``GROUP BY`` over the whole kind partition for a
+        display lens; this one is a bounded probe for shell ``<TAB>`` — a
+        single ``LIMIT``-capped read (most-recent ``limit`` facts of ``kind``),
+        with the prefix/full-key split done in Python rather than a second SQL
+        shape. TAB must stay instant, so this trades completeness (a namespace
+        used only on older, evicted-by-the-limit facts can be missed) for a
+        fixed, small amount of I/O regardless of store size.
+
+        Two modes, chosen by whether ``prefix`` already contains a ``/``:
+
+        - no slash yet — the namespace-prefix drill: distinct first path
+          segments (``practice/``, ``design/``...) among the sampled keys.
+        - slash present — the scoped drill: full fold-key values starting
+          with ``prefix`` (``practice/`` -> ``practice/review-altitude``...).
+
+        Sorted for a stable TAB order. Keys missing the fold-key field (the
+        ``None`` bucket ``fact_key_stats`` surfaces as an orphan diagnostic)
+        are silently skipped here — nothing to complete from them.
+        """
+        path = "$." + key_field
+        rows = self._conn.execute(
+            "SELECT json_extract(payload, ?) AS k FROM facts "
+            "WHERE kind = ? ORDER BY ts DESC LIMIT ?",
+            (path, kind, limit),
+        ).fetchall()
+        keys = [r[0] for r in rows if r[0]]
+        if "/" in prefix:
+            return sorted({k for k in keys if k.startswith(prefix)})
+        namespaces: set[str] = set()
+        for k in keys:
+            if "/" in k:
+                namespaces.add(k.split("/", 1)[0] + "/")
+        return sorted(namespaces)
+
     def fact_observer_stats(self, kind: str) -> dict:
         """Per-observer fact counts and freshness within one kind, count-desc.
 

@@ -342,6 +342,59 @@ class TestFactKeyStats:
         assert counts == sorted(counts, reverse=True)
 
 
+class TestKeyPrefixes:
+    """``key_prefixes`` — the bounded probe behind ``--key`` completion."""
+
+    def test_namespace_prefixes_when_no_slash_typed(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            prefixes = reader.key_prefixes("decision", "topic")
+        assert prefixes == ["arch/", "design/"]
+
+    def test_full_keys_when_prefix_already_has_slash(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            keys = reader.key_prefixes("decision", "topic", prefix="design/")
+        assert keys == ["design/a", "design/b"]
+
+    def test_scoped_prefix_excludes_other_namespaces(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            keys = reader.key_prefixes("decision", "topic", prefix="arch/")
+        assert keys == ["arch/x"]
+
+    def test_orphan_facts_missing_key_field_skipped(self, keyed_db: Path):
+        # d5 has no "topic" at all — must not surface as a bare "" or None entry.
+        with StoreReader(keyed_db) as reader:
+            prefixes = reader.key_prefixes("decision", "topic")
+        assert "" not in prefixes
+        assert None not in prefixes
+
+    def test_unknown_kind_yields_empty(self, keyed_db: Path):
+        with StoreReader(keyed_db) as reader:
+            assert reader.key_prefixes("nonexistent", "topic") == []
+
+    def test_limit_bounds_the_underlying_scan(self, tmp_db: Path):
+        # 500 facts across 3 namespaces — a limit of 10 (newest-first, by ts)
+        # only samples the tail, so at most the namespaces present in that
+        # tail can surface. Proves the probe is bounded, not a full scan.
+        conn = sqlite3.connect(str(tmp_db))
+        rows = [
+            (f"k{i}", "decision", float(i), "kyle", f'{{"topic": "only-late/{i}"}}')
+            for i in range(490, 500)
+        ] + [
+            (f"k{i}", "decision", float(i), "kyle", f'{{"topic": "early/{i}"}}')
+            for i in range(0, 490)
+        ]
+        conn.executemany(
+            "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+
+        with StoreReader(tmp_db) as reader:
+            prefixes = reader.key_prefixes("decision", "topic", limit=10)
+        assert prefixes == ["only-late/"]
+
+
 class TestFactObserverStats:
     def test_groups_by_observer(self, keyed_db: Path):
         with StoreReader(keyed_db) as reader:

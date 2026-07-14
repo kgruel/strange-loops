@@ -31,7 +31,7 @@ import argparse
 
 from painted.cli import complete_via
 
-from .completers import complete_lens, complete_vertex
+from .completers import complete_key, complete_kind, complete_lens, complete_vertex
 
 
 def add_read_args(parser: argparse.ArgumentParser) -> None:
@@ -65,10 +65,21 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         complete_vertex,
     )
     # Domain selectors — change WHAT is fetched (folded state vs raw facts).
-    parser.add_argument("--kind", default=None, help="Filter by fact kind")
-    parser.add_argument(
-        "--key", default=None,
-        help="Filter by fold key (prefix; comma-OR for multiple)",
+    # --kind carries a domain completer: the kinds the vertex on the line
+    # declares (declaration parse only — no store open, stays instant).
+    complete_via(
+        parser.add_argument("--kind", default=None, help="Filter by fact kind"),
+        complete_kind,
+    )
+    # --key carries a domain completer: namespace prefixes for the (vertex,
+    # --kind) already on the line — this one DOES open the store, since
+    # prefixes live in fact key values, not the declaration.
+    complete_via(
+        parser.add_argument(
+            "--key", default=None,
+            help="Filter by fold key (prefix; comma-OR for multiple)",
+        ),
+        complete_key,
     )
     # --lens carries a domain completer: every resolvable lens (built-in +
     # custom, scoped to the vertex on the line) as a described row.

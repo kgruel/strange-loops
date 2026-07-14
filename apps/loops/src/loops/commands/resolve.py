@@ -396,6 +396,59 @@ def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> set[str]
     return {edge.field for edge in getattr(loop_def, "edges", ())}
 
 
+def _declared_kind_names(vertex_path: Path) -> list[str]:
+    """Kind names from a vertex's own ``loops {}`` declaration, internal-excluded.
+
+    A plain KDL parse (``_parse_vertex`` — no store open, no combine/discover
+    chase), the fast, always-instant source for ``--kind`` completion. A pure
+    ``combine``/``discover`` aggregation with no ``loops {}`` of its own yields
+    nothing here — widening through the topology (as ``_declared_kinds`` does
+    for ``--kind`` *validation*) means walking child vertices, which is exactly
+    the I/O TAB can't afford to pay on every keystroke; this stays a cheaper,
+    narrower sibling of that function on purpose.
+
+    Sorted. Best-effort: ``[]`` on any parse failure.
+    """
+    from lang.document import is_internal_kind
+
+    try:
+        ast = _parse_vertex(vertex_path)
+    except LoopsError:
+        return []
+    return sorted(name for name in ast.loops if not is_internal_kind(name))
+
+
+def enumerate_key_prefixes(
+    vertex_path: Path, kind: str, typed_prefix: str = "",
+) -> list[str]:
+    """Namespace prefixes (or scoped full keys) for ``--key`` completion.
+
+    Unlike ``_declared_kind_names``, this DOES need the store open — namespace
+    prefixes live in fact key *values*, not the declaration — so it resolves
+    the kind's fold-key field (``_extract_kind_keys``), the vertex's store
+    path, and probes it read-only through ``StoreReader.key_prefixes`` (a
+    single ``LIMIT``-bounded query; see that method for the completeness
+    trade-off). ``kind`` without a declared fold-key field (collect-style
+    kinds have no key to prefix) yields ``[]``, same as any resolution miss.
+
+    Best-effort: ``[]`` on any failure — no vertex, no store, no fold key,
+    a broken/locked database.
+    """
+    try:
+        key_field = _extract_kind_keys(vertex_path).get(kind)
+        if key_field is None:
+            return []
+        store_path = _resolve_vertex_store_path(vertex_path)
+        if store_path is None:
+            return []
+        from engine import StoreReader
+
+        with StoreReader(store_path) as reader:
+            return reader.key_prefixes(kind, key_field, prefix=typed_prefix)
+    except Exception:
+        return []
+
+
 # --- Topology ---
 
 

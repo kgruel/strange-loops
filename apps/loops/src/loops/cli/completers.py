@@ -75,13 +75,63 @@ def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
         return []
 
 
-def _vertex_dir_on_line(ctx: CompletionContext):
-    """Resolve the vertex already typed on the line to its directory, or None.
+def complete_kind(ctx: CompletionContext) -> list[Candidate]:
+    """Complete ``--kind <TAB>`` with the kinds declared by the vertex on the line.
 
-    Scopes vertex-local candidates to the vertex being read. Best-effort: the
-    first positional token that resolves as a vertex wins; no token, or nothing
-    resolvable, → None (which still lists cwd / user / built-in lenses). Any
-    failure → None.
+    Resolves the vertex bareword the same way ``complete_vertex``/
+    ``_vertex_path_on_line`` do; no vertex on the line (or resolution
+    failure) → ``[]`` rather than guessing.
+
+    Enumeration is a plain KDL parse of the ``.vertex`` (``_declared_kind_names``
+    — no store open), so this stays on the render-free, instant TAB path. Any
+    failure → ``[]``.
+    """
+    try:
+        vertex_path = _vertex_path_on_line(ctx)
+        if vertex_path is None:
+            return []
+        from loops.commands.resolve import _declared_kind_names
+
+        return [Candidate(name) for name in _declared_kind_names(vertex_path)]
+    except Exception:
+        return []
+
+
+def complete_key(ctx: CompletionContext) -> list[Candidate]:
+    """Complete ``--key <TAB>`` with namespace prefixes for the (vertex, kind)
+    already on the line.
+
+    Requires both a resolvable vertex and a ``--kind`` value already typed —
+    a fold key's namespace is scoped per kind, so without ``--kind`` there is
+    no single key space to prefix-complete, and this defers with ``[]``.
+
+    Unlike ``complete_vertex``/``complete_kind``, this DOES open the store:
+    namespace prefixes live in fact key values, not the declaration
+    (``enumerate_key_prefixes`` — a single ``LIMIT``-bounded probe). Any
+    failure (no vertex, no store, broken database) → ``[]``.
+    """
+    try:
+        vertex_path = _vertex_path_on_line(ctx)
+        if vertex_path is None:
+            return []
+        kind = ctx.args.get("kind")
+        if not kind:
+            return []
+        from loops.commands.resolve import enumerate_key_prefixes
+
+        return [
+            Candidate(key)
+            for key in enumerate_key_prefixes(vertex_path, kind, ctx.prefix)
+        ]
+    except Exception:
+        return []
+
+
+def _vertex_path_on_line(ctx: CompletionContext):
+    """Resolve the vertex already typed on the line to its ``.vertex`` path.
+
+    Best-effort: the first positional token that resolves as a vertex wins;
+    no token, or nothing resolvable, → ``None``. Any failure → ``None``.
     """
     try:
         tokens = ctx.args.get("tokens") or []
@@ -96,5 +146,16 @@ def _vertex_dir_on_line(ctx: CompletionContext):
             continue
         path = _resolve_vertex_for_dispatch(tok)
         if path is not None:
-            return path.parent
+            return path
     return None
+
+
+def _vertex_dir_on_line(ctx: CompletionContext):
+    """Resolve the vertex already typed on the line to its directory, or None.
+
+    Scopes vertex-local candidates to the vertex being read (``complete_lens``).
+    Thin wrapper over ``_vertex_path_on_line`` — same best-effort/None-on-miss
+    contract, one level up (directory, not file).
+    """
+    path = _vertex_path_on_line(ctx)
+    return path.parent if path is not None else None

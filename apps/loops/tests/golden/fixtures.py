@@ -249,16 +249,6 @@ SAMPLE_TEST = {
     "skipped": 1,
 }
 
-# ── ls (population) ────────────────────────────────────────────────────────
-SAMPLE_LS = {
-    "header": ["kind", "feed_url"],
-    "rows": [
-        {"kind": "disk", "feed_url": "file:///var/log/disk.csv"},
-        {"kind": "memory", "feed_url": "file:///var/log/mem.csv"},
-        {"kind": "network", "feed_url": "https://monitor.local/net"},
-    ],
-}
-
 # ── run facts ───────────────────────────────────────────────────────────────
 SAMPLE_FACTS = [
     {

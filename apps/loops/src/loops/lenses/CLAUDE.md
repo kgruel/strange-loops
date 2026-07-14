@@ -84,7 +84,7 @@ CLI: `--lens <name>` overrides all tiers. Vertex `lens {}` declaration overrides
 - `prompt` — system prompt rendering (structured schema, domain-aware kind filtering)
 
 **CLI command lenses** (wired to specific display commands):
-- `compile`, `run`, `store`, `test`, `validate`, `vertices`, `pop`
+- `compile`, `run`, `store`, `test`, `validate`, `vertices`
 
 **Utilities** (imported by other lenses):
 - `_grammar` — the shared static-grammar vocabulary: ONE time vocabulary

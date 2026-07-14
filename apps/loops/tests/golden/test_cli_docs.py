@@ -13,10 +13,9 @@ from painted import Zoom
 
 from loops.lenses.validate import validate_view
 from loops.lenses.test import test_view as _test_view
-from loops.lenses.run import run_facts_view, run_ticks_view
+from loops.lenses.run import _run_ticks_view, run_facts_view
 from loops.lenses.compile import compile_view
 from loops.lenses.store import store_view
-from loops.lenses.pop import pop_view
 from loops.lenses.fold import fold_view
 from loops.lenses.stream import stream_view
 
@@ -28,7 +27,6 @@ from .fixtures import (
     SAMPLE_COMPILE_VERTEX,
     SAMPLE_VALIDATE,
     SAMPLE_TEST,
-    SAMPLE_LS,
     SAMPLE_FACTS,
     SAMPLE_TICKS,
 )
@@ -96,14 +94,9 @@ def _render_all() -> list[tuple[str, str, str]]:
         block_to_text(run_facts_view(SAMPLE_FACTS, ZOOM, WIDTH)),
     ))
     entries.append((
-        "ls",
-        "List population entries.",
-        block_to_text(pop_view(SAMPLE_LS, ZOOM, WIDTH)),
-    ))
-    entries.append((
         "run (ticks)",
         "Run a .vertex file — one-shot sync.",
-        block_to_text(run_ticks_view(SAMPLE_TICKS, ZOOM, WIDTH)),
+        block_to_text(_run_ticks_view(SAMPLE_TICKS, ZOOM, WIDTH)),
     ))
 
     _COMMANDS.extend(entries)

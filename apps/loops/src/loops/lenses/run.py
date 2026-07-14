@@ -65,7 +65,7 @@ def run_facts_view(data: list[dict], zoom: Zoom, width: int | None) -> Block:
     return join_vertical(*rows)
 
 
-def run_ticks_view(data: list[dict], zoom: Zoom, width: int | None) -> Block:
+def _run_ticks_view(data: list[dict], zoom: Zoom, width: int | None) -> Block:
     """Render a list of ticks at the given zoom level.
 
     Each item: {name, ts, payload, origin}

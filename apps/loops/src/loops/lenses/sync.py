@@ -5,7 +5,7 @@ import time
 
 from painted import Block, Style, Zoom, join_vertical
 
-from .run import run_ticks_view
+from .run import _run_ticks_view
 
 
 def _format_ago(epoch_ts: float) -> str:
@@ -132,7 +132,7 @@ def sync_view(data: dict, zoom: Zoom, width: int | None) -> Block:
     # Tick rendering for SUMMARY and above
     if ticks:
         rows.append(Block.text("", Style(), width=width))
-        rows.append(run_ticks_view(ticks, zoom, width))
+        rows.append(_run_ticks_view(ticks, zoom, width))
     elif ran:
         rows.append(Block.text("", Style(), width=width))
         rows.append(Block.text("No ticks fired.", dim, width=width))

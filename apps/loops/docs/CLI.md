@@ -132,17 +132,6 @@ Run a .loop file — preview facts, no persistence.
 --- 2 facts ---
 ```
 
-## `ls`
-
-List population entries.
-
-```
-kind     feed_url
-disk     file:///var/log/disk.csv
-memory   file:///var/log/mem.csv
-network  https://monitor.local/net
-```
-
 ## `run (ticks)`
 
 Run a .vertex file — one-shot sync.

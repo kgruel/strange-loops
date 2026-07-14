@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from painted import Zoom
 
-from loops.lenses.run import _format_ts, run_facts_view, run_ticks_view
+from loops.lenses.run import _format_ts, _run_ticks_view, run_facts_view
 
 from .helpers import block_text as _text
 
@@ -34,19 +34,19 @@ def test_facts_footer():
     assert "1 facts" in _text(run_facts_view([{"kind": "x", "payload": {}}], Zoom.MINIMAL, 80))
 
 def test_ticks_empty():
-    assert "No ticks" in _text(run_ticks_view([], Zoom.SUMMARY, 80))
+    assert "No ticks" in _text(_run_ticks_view([], Zoom.SUMMARY, 80))
 
 def test_ticks_minimal():
-    assert "s" in _text(run_ticks_view([{"name": "s", "payload": {}, "ts": 1e9}], Zoom.MINIMAL, 80))
+    assert "s" in _text(_run_ticks_view([{"name": "s", "payload": {}, "ts": 1e9}], Zoom.MINIMAL, 80))
 
 def test_ticks_summary():
-    assert "1 keys" in _text(run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9}], Zoom.SUMMARY, 80))
+    assert "1 keys" in _text(_run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9}], Zoom.SUMMARY, 80))
 
 def test_ticks_detailed():
-    assert "n:" in _text(run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9}], Zoom.DETAILED, 80))
+    assert "n:" in _text(_run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9}], Zoom.DETAILED, 80))
 
 def test_ticks_full():
-    t = _text(run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9, "origin": "proj"}], Zoom.FULL, 80))
+    t = _text(_run_ticks_view([{"name": "s", "payload": {"n": 1}, "ts": 1e9, "origin": "proj"}], Zoom.FULL, 80))
     assert "origin=proj" in t
 
 def test_format_ts_float():

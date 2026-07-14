@@ -1,4 +1,0 @@
-kind     feed_url
-disk     file:///var/log/disk.csv
-memory   file:///var/log/mem.csv
-network  https://monitor.local/net

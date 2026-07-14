@@ -146,10 +146,15 @@ def resolve_lens_fetch(
     path = _find_lens_module_path(name, vertex_dir=vertex_dir)
     if path is not None:
         mod = _load_lens_module(path)
-        if mod is not None:
-            fn = getattr(mod, "fetch", None)
-            if fn is not None:
-                return fn
+        if mod is None:
+            # Same no-fallback rule as resolve_lens (review rounds 4 #4,
+            # 5 #2): a custom file that failed to IMPORT must not silently
+            # become the same-named built-in's fetch.
+            return None
+        fn = getattr(mod, "fetch", None)
+        if fn is not None:
+            return fn
+        # Loaded, no fetch attribute: historical shadowing fallback.
 
     # Built-in fallback
     try:

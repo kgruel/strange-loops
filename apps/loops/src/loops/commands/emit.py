@@ -432,20 +432,26 @@ def _print_observer_declaration(
     entry. Goes to STDERR so machine-readable stdout (fact / Surface JSON) stays
     clean.
     """
+    decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
+    lines = [
+        f"declare: add to {vertex_path} —",
+        "observers {",
+        f"  {decl_name} {{ }}",
+        "}",
+    ]
+    if _PLAIN_RECEIPT:
+        # --plain contract holds on the declaration hint too (review round 5 #1).
+        for line in lines:
+            print(line, file=sys.stderr)
+        return
     from painted import paint, Block, join_vertical
     from painted.palette import current_palette
 
     p = current_palette()
-    decl_name = observer.split("/")[-1]  # bare agent name (strip namespace)
     # join_vertical, NOT a raw "\n" in Block.text — painted 0.4.0 flattens an
     # embedded newline to a space (friction:block-text-multiline-passthrough-broke-on-040).
     paint(
-        join_vertical(
-            Block.text(f"declare: add to {vertex_path} —", p.muted),
-            Block.text("observers {", p.muted),
-            Block.text(f"  {decl_name} {{ }}", p.muted),
-            Block.text("}", p.muted),
-        ),
+        join_vertical(*[Block.text(line, p.muted) for line in lines]),
         file=sys.stderr,
     )
 

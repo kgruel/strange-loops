@@ -558,6 +558,48 @@ class TestRound4BrokenLensNoFallback:
         assert err.count("broken custom graph") == 1
 
 
+# --- Round 5 -----------------------------------------------------------------
+
+
+class TestRound5PlainDeclareObserver:
+    def test_declare_observer_hint_avoids_renderer_under_plain(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """R5-1: the observers{} declaration hint honors --plain too."""
+        import painted
+
+        import loops.commands.emit as emit_mod
+
+        def _boom(*a, **kw):
+            raise AssertionError("paint() called on a --plain path")
+
+        monkeypatch.setattr(painted, "paint", _boom)
+        vpath = _scaffold_and_absorb(tmp_path)
+        rc = emit_mod._run_emit(
+            [
+                "decision", "topic=t/x", "--dry-run", "--plain",
+                "--declare-observer", "--observer", "bob",
+            ],
+            vertex_path=vpath,
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "observers {" in captured.err
+        assert "\x1b[" not in captured.err and "\x1b[" not in captured.out
+
+
+class TestRound5FetchNoFallback:
+    def test_broken_custom_lens_refuses_fetch_fallback(self, tmp_path, monkeypatch):
+        """R5-2: resolve_lens_fetch applies the same no-fallback rule."""
+        from loops.lens_resolver import resolve_lens_fetch
+
+        lens_dir = tmp_path / "lenses"
+        lens_dir.mkdir()
+        (lens_dir / "graph.py").write_text('raise RuntimeError("boom")\n')
+        monkeypatch.chdir(tmp_path)
+        assert resolve_lens_fetch("graph", vertex_dir=tmp_path) is None
+
+
 class TestRound3LensErrorSurfaced:
     def test_import_broken_lens_reports_cause(self, tmp_path, capsys, monkeypatch):
         """R3-6: selecting an import-broken lens surfaces the real error."""

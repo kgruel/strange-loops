@@ -161,6 +161,7 @@ review speed — never the reverse.
 | Bump prior that informed this turn (no new claim) | `cite` | (refs only) |
 | Implementation strategy | `plan` | `name=` |
 | Design deliberation that revises in place (options weighed, position evolves across sessions) | `design` | `topic=` + `status=` |
+| Arc-level process synthesis after a body of work closes | `retrospective` | `name=` (arc handle) |
 
 Forgetting the fold key (`name=` on a decision, `topic=` on a thread) silently
 orphans the fact. Check this table before emit.
@@ -219,6 +220,7 @@ attribution — they answer different questions.
 | Design settles or dies | re-emit `status=ratified`/`rejected`/`parked` |
 | A design replaces an earlier one | re-emit the OLD `topic=` with `status=superseded superseded_by=design:topic/new-slug` |
 | Discovery worth noting, no prescription | `observation` |
+| An arc closes and its process lessons are worth keeping | `retrospective` with `name=` — synthesis in the message, findings as ref='d observations; store-native, not a dev-doc |
 | Tooling/process pain identified | `friction` with `status=open` |
 
 **Don't defer to session-end.** Emit in-moment. Cost of forgetting > cost of

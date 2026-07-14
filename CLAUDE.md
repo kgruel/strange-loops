@@ -99,7 +99,7 @@ sl read meta --facts --kind decision --since 7d # recent cross-cutting decisions
 
 **Project store** (`.loops/project.vertex`): architecture, API design, lib boundaries.
 
-**Meta store** (`~/Code/meta-discussion/meta.vertex`, external repo, read via the config-level `meta` aggregation): cross-cutting patterns that apply to any project.
+**Meta store** (`~/Code/meta-discussion/meta.vertex`, external repo, read via the config-level `meta` aggregation): historical cross-cutting notes. **Deprecated as an emit destination** (decision:practice/meta-store-role-dissolved, 2026-07-13): process/practice lessons emit in the project where they're born, under `practice/`/`workflow/` prefixes — cross-cutting is a read-path property (aggregation over stores), not an authoring destination. Meta's original intent — a separate workspace recursing over all stores mining for patterns, storing separately — is deferred until multi-project store usage matures.
 
 ### Principles
 
@@ -144,7 +144,8 @@ review speed — never the reverse.
 | Use | Vertex |
 |-----|--------|
 | This repo's architecture, API, design | `project` |
-| Cross-cutting patterns, ways of working | `meta` |
+| Ways of working, process/practice lessons born in this repo's work | `project` (under `practice/`/`workflow/` prefixes) |
+| Cross-cutting reads across projects | the config-level aggregation (read path, not an emit target) |
 | Self-knowledge, identity, peer relationships | `identity` |
 | Scoped experimental inquiry | `experiments/<name>` |
 

@@ -442,7 +442,14 @@ def main(argv: list[str] | None = None) -> int:
     # Tiers 1+2 and top-level help → painted run_app.
     if not argv or argv[0] in ("-h", "--help") or argv[0] in known:
         return run_app(
-            argv, commands, prog="loops", description=_APP_DESCRIPTION
+            argv,
+            commands,
+            prog="loops",
+            # Alias entry points from [project.scripts] — the completion glue
+            # registers all of them (multi-name #compdef), so `sl <TAB>` gets
+            # the same completion as `loops <TAB>`.
+            aliases=("sl",),
+            description=_APP_DESCRIPTION,
         )
 
     # Tier 3: vertex shorthand — ``loops <vertex> [op] …``. painted has no

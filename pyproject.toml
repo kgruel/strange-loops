@@ -27,7 +27,6 @@ dependencies = [
 ]
 
 [project.scripts]
-sloop = "loops.main:main"
 sl = "loops.main:main"
 loops = "loops.main:main"
 

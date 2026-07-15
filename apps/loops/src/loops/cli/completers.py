@@ -77,24 +77,12 @@ def complete_lens(ctx: CompletionContext) -> list[Candidate]:
         return []
 
 
-def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
-    """Complete the leading vertex positional with every resolvable name.
-
-    Scoped to the FIRST token only: once a bareword already occupies the
-    vertex slot (``ctx.args["tokens"]`` non-empty — the positional's
-    already-parsed prefix), this is completing a later slot (kind/key,
-    ``field=value``) that this slice doesn't offer candidates for, so it
-    defers by returning ``[]`` rather than guessing.
+def _vertex_candidates() -> list[Candidate]:
+    """Every resolvable vertex name, described — the shared enumeration core.
 
     Enumeration is a filesystem walk plus a per-candidate KDL parse (no store
     open), so this stays on the render-free TAB path. Any failure -> ``[]``.
     """
-    try:
-        tokens = ctx.args.get("tokens") or []
-    except Exception:
-        return []
-    if tokens:
-        return []
     try:
         from loops.commands.resolve import enumerate_vertices
 
@@ -103,6 +91,41 @@ def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
         ])
     except Exception:
         return []
+
+
+def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
+    """Complete the leading vertex positional with every resolvable name.
+
+    Scoped to the FIRST token only: once a bareword already occupies the
+    vertex slot (``ctx.args["tokens"]`` non-empty — the positional's
+    already-parsed prefix), this is completing a later slot (kind/key,
+    ``field=value``) that this slice doesn't offer candidates for, so it
+    defers by returning ``[]`` rather than guessing.
+    """
+    try:
+        tokens = ctx.args.get("tokens") or []
+    except Exception:
+        return []
+    if tokens:
+        return []
+    return _vertex_candidates()
+
+
+def complete_ls_vertex(ctx: CompletionContext) -> list[Candidate]:
+    """``complete_vertex`` for ``ls``'s single ``vertex`` positional.
+
+    ``ls`` declares one true positional (``nargs='?'``), not a ``tokens``
+    bucket, so the already-filled check reads ``ctx.args["vertex"]``
+    directly rather than a list. Once a vertex is on the line this defers
+    with ``[]`` — same reasoning as ``complete_vertex``.
+    """
+    try:
+        vertex = ctx.args.get("vertex")
+    except Exception:
+        return []
+    if vertex:
+        return []
+    return _vertex_candidates()
 
 
 def complete_read_vertex(ctx: CompletionContext) -> list[Candidate]:
@@ -170,6 +193,47 @@ def complete_key(ctx: CompletionContext) -> list[Candidate]:
             Candidate(key)
             for key in enumerate_key_prefixes(vertex_path, kind, ctx.prefix)
         ])
+    except Exception:
+        return []
+
+
+def _ls_vertex_path_on_line(ctx: CompletionContext):
+    """Resolve ``ls``'s target vertex the way ``fetch_declarations`` does.
+
+    ``ls <vertex>/<qualifier>`` splits at the first ``/`` (template-row
+    qualifier, unrelated to kinds) unless the target looks like a path — the
+    same split ``commands/ls.py:fetch_declarations`` performs. This is NOT
+    read's entity-address classifier (``_vertex_path_on_line`` in this
+    module): ls accepts slashed vertex references outright, it doesn't
+    reinterpret them as an entity address into the local vertex. Best-effort:
+    ``None`` on any failure.
+    """
+    try:
+        target = ctx.args.get("vertex")
+    except Exception:
+        return None
+    if not target:
+        return None
+    if "/" in target and not target.startswith(("./", "/")):
+        vertex_ref = target.split("/", 1)[0]
+    else:
+        vertex_ref = target
+    return _dispatch_vertex_path(vertex_ref)
+
+
+def complete_ls_kind(ctx: CompletionContext) -> list[Candidate]:
+    """Complete ``ls <vertex> --kind <TAB>`` with the vertex's declared kinds.
+
+    Reuses the same declared-kind enumeration ``complete_kind`` (read/emit)
+    does — ``_kind_candidates`` — scoped through ls's own target resolution
+    (``_ls_vertex_path_on_line``) rather than read's, since the two verbs
+    disagree on what a slashed bareword means. Any failure -> ``[]``.
+    """
+    try:
+        vertex_path = _ls_vertex_path_on_line(ctx)
+        if vertex_path is None:
+            return []
+        return _kind_candidates(vertex_path)
     except Exception:
         return []
 

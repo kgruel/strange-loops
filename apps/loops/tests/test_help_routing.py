@@ -79,11 +79,11 @@ class TestVerbHelp:
         # `store`, `read`, and `emit` render base help through painted's
         # doc-lens shape, not argparse's raw "usage:", because their
         # AppCommand declares an arg-source painted intercepts -h against:
-        # `store` via help_args (decision:design/devtools-help-args-idiom),
-        # `read`/`emit` via add_args (the completion/-h single source in
-        # cli/read_args.py / cli/emit_args.py — S4 wires emit onto the same
-        # seam). The other verbs still own help through their own argparse
-        # parsers.
+        # add_args, the completion/-h single source in cli/read_args.py /
+        # cli/emit_args.py / cli/store_args.py (store's own help_args-based
+        # -h, decision:design/devtools-help-args-idiom, is superseded now
+        # that add_args exists — the intercept fires first). The other
+        # verbs still own help through their own argparse parsers.
         if verb in ("store", "read", "emit"):
             assert _has_help(out), f"{verb} --help: expected help output but got: {out!r}"
         else:

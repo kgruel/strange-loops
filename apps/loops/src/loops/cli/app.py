@@ -316,10 +316,10 @@ def _add_args_for(name: str):
     roster is built, which happens on every invocation, completion included), so
     each entry points at a dedicated render-free ``*_args`` module, not at a view.
 
-    ``read``, ``emit``, ``store``, and ``ls`` are wired — each points at its
-    own dedicated ``*_args`` module (``cli/read_args.py``, ``cli/emit_args.py``,
-    ``cli/store_args.py``, ``cli/ls_args.py``); new completers land as
-    one-line additions inside those, not new entries here.
+    ``read``, ``emit``, ``cite``, ``seal``, ``close``, ``sync``, ``store``,
+    and ``ls`` are wired — each points at its own dedicated ``cli/<name>_args.py``
+    module; new completers land as one-line additions inside those, not new
+    entries here.
     """
     if name == "read":
         from .read_args import add_read_args
@@ -329,6 +329,22 @@ def _add_args_for(name: str):
         from .emit_args import add_emit_args
 
         return add_emit_args
+    if name == "cite":
+        from .cite_args import add_cite_args
+
+        return add_cite_args
+    if name == "seal":
+        from .seal_args import add_seal_args
+
+        return add_seal_args
+    if name == "close":
+        from .close_args import add_close_args
+
+        return add_close_args
+    if name == "sync":
+        from .sync_args import add_sync_args
+
+        return add_sync_args
     if name == "store":
         from .store_args import add_store_args
 

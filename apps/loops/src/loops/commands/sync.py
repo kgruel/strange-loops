@@ -202,23 +202,19 @@ def _run_sync(
 
     rep = _reporter(reporter)
 
+    from loops.cli.sync_args import add_sync_args
+
     # Intercept --help before vertex resolution (pre-parser uses parse_known_args
     # so argparse would not catch --help itself).
     if "-h" in argv or "--help" in argv:
         import sys as _sys
         _help = argparse.ArgumentParser(prog="loops sync")
-        if vertex_path is None:
-            _help.add_argument("vertex", nargs="?", help="Vertex name or path")
-        _help.add_argument("--force", "-f", action="store_true", help="Run all sources unconditionally")
-        _help.add_argument("--var", action="append", metavar="KEY=VALUE", help="Variable override")
+        add_sync_args(_help, include_vertex=vertex_path is None)
         _help.print_help(_sys.stdout)
         return 0
 
     pre = argparse.ArgumentParser(add_help=False)
-    if vertex_path is None:
-        pre.add_argument("vertex", nargs="?", default=None)
-    pre.add_argument("--force", "-f", action="store_true", default=False)
-    pre.add_argument("--var", action="append", default=[])
+    add_sync_args(pre, include_vertex=vertex_path is None)
     known, rest = pre.parse_known_args(argv)
 
     # Resolve vertex path — accepts name or file path

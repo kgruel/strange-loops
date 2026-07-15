@@ -76,18 +76,14 @@ class TestVerbHelp:
     @pytest.mark.parametrize("verb", sorted(VERBS))
     def test_verb_help(self, capsys, verb):
         out = _help(capsys, verb, "--help")
-        # `store`, `read`, and `emit` render base help through painted's
-        # doc-lens shape, not argparse's raw "usage:", because their
-        # AppCommand declares an arg-source painted intercepts -h against:
-        # add_args, the completion/-h single source in cli/read_args.py /
-        # cli/emit_args.py / cli/store_args.py (store's own help_args-based
-        # -h, decision:design/devtools-help-args-idiom, is superseded now
-        # that add_args exists — the intercept fires first). The other
-        # verbs still own help through their own argparse parsers.
-        if verb in ("store", "read", "emit"):
-            assert _has_help(out), f"{verb} --help: expected help output but got: {out!r}"
-        else:
-            assert "usage:" in out.lower(), f"{verb} --help: expected argparse 'usage:' but got: {out!r}"
+        # Every verb now renders base help through painted's doc-lens shape,
+        # not argparse's raw "usage:": each AppCommand declares add_args (the
+        # completion/-h single source in cli/<verb>_args.py) that painted
+        # intercepts -h against. store's older help_args-based -h
+        # (decision:design/devtools-help-args-idiom) is superseded — the
+        # add_args intercept fires first. No verb owns help through its own
+        # argparse parser anymore.
+        assert _has_help(out), f"{verb} --help: expected help output but got: {out!r}"
 
     def test_read_flag_descriptions(self, capsys):
         out = _help(capsys, "read", "--help")

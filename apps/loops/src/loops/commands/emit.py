@@ -1030,6 +1030,7 @@ def _run_close(
     from engine import vertex_facts, vertex_fold
     from painted import paint, Block, Style
     from painted.palette import current_palette
+    from loops.cli.close_args import add_close_args
     from loops.commands.identity import resolve_local_vertex, resolve_observer, validate_emit
     from loops.commands.resolve import _resolve_vertex_for_dispatch, _resolve_writable_vertex
 
@@ -1037,12 +1038,7 @@ def _run_close(
     p = current_palette()
 
     parser = argparse.ArgumentParser(prog="loops close")
-    if vertex_path is None:
-        parser.add_argument("vertex", nargs="?", default=None)
-    parser.add_argument("kind", help="Fact kind to close (e.g. thread, task)")
-    parser.add_argument("name", help="Name/key of the item to close")
-    parser.add_argument("message", nargs="?", default=None, help="Resolution summary")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would happen")
+    add_close_args(parser, include_vertex=vertex_path is None)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:

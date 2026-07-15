@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 
+from ..cite_args import add_cite_args
 from ..invocation import Invocation
 from . import emit as emit_view
 
@@ -28,22 +29,7 @@ from . import emit as emit_view
 def run(argv: list[str], ctx: Invocation) -> int:
     """Parse cite-shape args, translate to emit-shape, delegate."""
     parser = argparse.ArgumentParser(prog="loops cite")
-    parser.add_argument(
-        "refs", nargs="+",
-        help="kind/key refs or bare ULIDs — the attention targets",
-    )
-    parser.add_argument(
-        "--context", default=None,
-        help="Optional thread or task name to tag the citation",
-    )
-    parser.add_argument(
-        "-m", "--message", default=None,
-        help="Optional in-the-moment context for the citation",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print the fact JSON without storing",
-    )
+    add_cite_args(parser)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:

@@ -30,6 +30,7 @@ import argparse
 from pathlib import Path
 
 from ..invocation import Invocation
+from ..seal_args import add_seal_args
 from . import emit as emit_view
 
 
@@ -77,25 +78,11 @@ def _store_in_signed_era(vertex_path: Path) -> bool:
 def run(argv: list[str], ctx: Invocation) -> int:
     """Parse seal-shape args, pre-check sealability, delegate to emit."""
     parser = argparse.ArgumentParser(prog="loops seal")
-    if ctx.vertex_path is None:
-        parser.add_argument(
-            "vertex",
-            nargs="?",
-            default=None,
-            help="Vertex name or .vertex path (auto-resolves local vertex)",
-        )
-    parser.add_argument(
-        "-m", "--message", default=None,
-        help="Why this boundary is being drawn — sealed inside its own window",
-    )
-    parser.add_argument(
-        "--observer", default=None,
-        help="Observer string (defaults to .vertex declaration / $LOOPS_OBSERVER)",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print the seal fact JSON without storing",
-    )
+    add_seal_args(parser, include_vertex=ctx.vertex_path is None)
+    # -q/--quiet is domain-specific here (suppress the receipt line) and
+    # collides with painted's framework zoom -q, so add_seal_args omits it
+    # for the completion/-h walk — this bare parser has no framework block,
+    # so it's safe to add directly (see cli/seal_args.py's docstring).
     parser.add_argument(
         "-q", "--quiet", action="store_true",
         help="Suppress the 'stored:' receipt (tick line still prints)",

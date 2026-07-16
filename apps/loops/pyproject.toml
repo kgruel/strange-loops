@@ -3,7 +3,7 @@ name = "loops"
 version = "0.1.0"
 description = "CLI for .loop and .vertex files"
 requires-python = ">=3.11"
-dependencies = ["lang", "atoms", "engine", "painted"]
+dependencies = ["lang", "atoms", "engine", "custody", "sign", "store", "painted"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "pytest-cov>=6.0"]
@@ -12,6 +12,9 @@ dev = ["pytest>=8.0", "pytest-cov>=6.0"]
 lang = { workspace = true }
 atoms = { workspace = true }
 engine = { workspace = true }
+custody = { workspace = true }
+sign = { workspace = true }
+store = { workspace = true }
 
 [project.scripts]
 loops = "loops.main:main"

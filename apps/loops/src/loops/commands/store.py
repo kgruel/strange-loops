@@ -228,7 +228,7 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
     # verifies the chain but cannot check signatures.
-    from loops.commands.signing import fact_verifier_for, tick_verifier_for
+    from custody import fact_verifier_for, tick_verifier_for
 
     verifier, declared_keys = tick_verifier_for(target_path)
     fact_verifier, _fact_keys = fact_verifier_for(target_path)
@@ -423,7 +423,7 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # Signing/verification compose from the SOURCE vertex's custody — the
     # reborn store is the same lineage's next incarnation (injection, not
     # import; raw .db source → unsigned genesis, honest pre-signature era).
-    from loops.commands.signing import tick_signer_for, tick_verifier_for
+    from custody import tick_signer_for, tick_verifier_for
 
     signer = tick_signer_for(src_target)
     verifier, _keys = tick_verifier_for(src_target)
@@ -518,7 +518,7 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     if not db_path.exists():
         raise FileNotFoundError(f"{db_path} does not exist")
 
-    from loops.commands.signing import (
+    from custody import (
         fact_signer_for, fact_verifier_for, tick_signer_for, tick_verifier_for,
     )
 
@@ -778,7 +778,7 @@ def _absorb_genesis_mode(
     golden-locked, so the rendering is preserved verbatim.
     """
     from lang.document import DECLARATION_PROTOCOL_VERSION, genesis_payload
-    from loops.commands.signing import fact_signer_for
+    from custody import fact_signer_for
 
     documents = genesis_payload(ast)["documents"]
     doc_count = len(documents)
@@ -1037,7 +1037,7 @@ def _absorb_edit(
             "signing first (loops add <vertex> observer --keygen)."
         )
 
-    from loops.commands.signing import fact_signer_for
+    from custody import fact_signer_for
 
     from engine.sqlite_store import (
         AmbiguousGenesis,

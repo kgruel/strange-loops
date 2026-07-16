@@ -49,7 +49,7 @@ def _make_signed_vertex(tmp_path: Path) -> Path:
 
 class TestTickSignerComposition:
     def test_no_keys_means_no_signer(self, tmp_path):
-        from loops.commands.signing import tick_signer_for
+        from custody import tick_signer_for
         vpath = _make_vertex(tmp_path)
         assert tick_signer_for(vpath) is None
 
@@ -145,14 +145,14 @@ class TestVerifyComposition:
 
 class TestRegistryReads:
     def test_declared_observer_keys(self, tmp_path):
-        from loops.commands.signing import declared_observer_keys
+        from custody import declared_observer_keys
         vpath = _make_signed_vertex(tmp_path)
         keys = declared_observer_keys(vpath)
         assert list(keys) == ["x"]
         assert len(keys["x"]) == 44
 
     def test_no_observers_block_is_empty_registry(self, tmp_path):
-        from loops.commands.signing import declared_observer_keys
+        from custody import declared_observer_keys
         vpath = _make_vertex(tmp_path)
         assert declared_observer_keys(vpath) == {}
 
@@ -175,7 +175,7 @@ class TestAddObserverKey:
         silently unsigned until someone separately ran --keygen for the stem.
         """
         from loops.commands.add import _add_observer
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
         from loops.commands.store import _run_verify
 
         vpath = _make_vertex(tmp_path)   # hand-written vertex, NO keys yet
@@ -209,7 +209,7 @@ class TestAddObserverKey:
         """The self-observer --keygen path already mints+registers the flat key;
         the self-observer bootstrap must not fire a second, colliding splice."""
         from loops.commands.add import _add_observer
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
 
         vpath = _make_vertex(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -230,7 +230,7 @@ class TestAddObserverKey:
         fixes it.
         """
         from loops.commands.add import _add_observer
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
         from loops.commands.store import _run_verify
 
         vpath = _make_vertex(tmp_path)
@@ -267,7 +267,7 @@ class TestAddObserverKey:
         unchanged.
         """
         from loops.commands.add import _add_observer
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
 
         vpath = _make_vertex(tmp_path)
         # Pre-declare a bare observer so the requested add collides (bare names
@@ -293,7 +293,7 @@ class TestAddObserverKey:
         """
         from lang import parse_vertex
         from loops.commands.add import ensure_self_observer_signing
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
 
         base = (
             'name "proj"\nstore "./x.db"\n'
@@ -348,7 +348,7 @@ class TestInitBootstrap:
         gitignore = (workdir / ".loops" / ".gitignore").read_text()
         assert "keys/" in gitignore.split()
 
-        from loops.commands.signing import declared_observer_keys, tick_signer_for
+        from custody import declared_observer_keys, tick_signer_for
         keys = declared_observer_keys(vpath)
         assert keys["proj"] == (key_dir / "ed25519.pub").read_text().strip()
         assert tick_signer_for(vpath) is not None
@@ -365,7 +365,7 @@ class TestInitBootstrap:
         vpath = _init_local_vertex("proj")  # re-run on existing .loops
 
         assert (workdir / ".loops" / "keys" / "ed25519.pub").read_text() == pub_before
-        from loops.commands.signing import declared_observer_keys
+        from custody import declared_observer_keys
         assert list(declared_observer_keys(vpath)) == ["proj"]
         # gitignore not duplicated
         lines = (workdir / ".loops" / ".gitignore").read_text().split()

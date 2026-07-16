@@ -8,7 +8,7 @@ commitment always yields the same signature, so re-signing never produces
 spurious diffs and signature equality is meaningful.
 
 Domain separation is mandatory: every signature binds a caller-supplied domain
-prefix (e.g. ``loops-tick-v1``) so a signature minted for one surface can
+prefix (e.g. ``myapp-tick-v1``) so a signature minted for one surface can
 never be replayed as a commitment on another. The prefix constant belongs to
 the COMPOSING layer (apps/loops), not here — this library stays loops-agnostic.
 

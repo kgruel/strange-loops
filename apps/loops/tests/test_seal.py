@@ -172,7 +172,7 @@ class TestSealEraGuard:
         ).fetchone() == (1, 1)
 
     def test_keyed_seal_signs_and_discloses(self, loops_env, capsys):
-        from loops.commands.signing import ensure_signing_key
+        from custody import ensure_signing_key
 
         vpath = _write_vertex(loops_env)
         ensure_signing_key(vpath)
@@ -188,7 +188,7 @@ class TestSealEraGuard:
     def test_signed_era_keyless_seal_refuses(self, loops_env, capsys):
         import shutil
 
-        from loops.commands.signing import ensure_signing_key, keys_dir_for
+        from custody import ensure_signing_key, keys_dir_for
 
         vpath = _write_vertex(loops_env)
         ensure_signing_key(vpath)
@@ -217,7 +217,7 @@ class TestSealEraGuard:
         # a store-level invariant cannot be enforced at the verb alone.
         import shutil
 
-        from loops.commands.signing import ensure_signing_key, keys_dir_for
+        from custody import ensure_signing_key, keys_dir_for
 
         vpath = _write_vertex(loops_env)
         ensure_signing_key(vpath)
@@ -238,7 +238,7 @@ class TestSealEraGuard:
         # when the key is gone in the signed era.
         import shutil
 
-        from loops.commands.signing import ensure_signing_key, keys_dir_for
+        from custody import ensure_signing_key, keys_dir_for
 
         vpath = _write_vertex(loops_env)
         ensure_signing_key(vpath)

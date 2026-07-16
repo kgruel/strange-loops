@@ -170,7 +170,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # SessionEnd hook, which seals through here; promoting the guard into the
     # engine mint to cover emit-triggered boundaries is thread:
     # seal-era-boundary-guard.)
-    from loops.commands.signing import tick_signer_for
+    from custody import tick_signer_for
 
     if (
         not args.dry_run

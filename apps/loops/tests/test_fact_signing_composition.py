@@ -54,12 +54,12 @@ def _fact_sigs(tmp_path: Path) -> list[tuple[str, str | None]]:
 
 class TestFactSignerResolution:
     def test_no_keys_dir_means_no_signer(self, tmp_path):
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         assert fact_signer_for(vpath) is None
 
     def test_flat_key_serves_self_observer_only(self, tmp_path):
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         ed25519.load_or_generate(tmp_path / "keys")  # flat delta-2 layout
         signer = fact_signer_for(vpath)
@@ -68,7 +68,7 @@ class TestFactSignerResolution:
         assert signer("someone-else", "digest") is None
 
     def test_per_observer_dir_serves_that_observer(self, tmp_path):
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         ed25519.load_or_generate(tmp_path / "keys" / "kyle")
         signer = fact_signer_for(vpath)
@@ -77,7 +77,7 @@ class TestFactSignerResolution:
         assert signer("x", "digest") is None  # no flat key, self unkeyed
 
     def test_slashed_observer_names_nest(self, tmp_path):
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         ed25519.load_or_generate(tmp_path / "keys" / "kyle" / "loops-claude")
         signer = fact_signer_for(vpath)
@@ -88,7 +88,7 @@ class TestFactSignerResolution:
         """The path-join footgun: keys_root/'' collapses to the flat layout
         — an anonymous writer must not receive the vertex key's authorship
         claim (observation implementation/empty-observer-path-join-footgun)."""
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         ed25519.load_or_generate(tmp_path / "keys")
         signer = fact_signer_for(vpath)
@@ -97,7 +97,7 @@ class TestFactSignerResolution:
         assert signer("../x", "digest") is None
 
     def test_deterministic_signature(self, tmp_path):
-        from loops.commands.signing import fact_signer_for
+        from custody import fact_signer_for
         vpath = _make_vertex(tmp_path)
         ed25519.load_or_generate(tmp_path / "keys" / "kyle")
         signer = fact_signer_for(vpath)
@@ -188,14 +188,14 @@ class TestEmitSignsFactsEndToEnd:
 
 class TestKeygenPerObserver:
     def test_ensure_signing_key_observer_layout(self, tmp_path):
-        from loops.commands.signing import ensure_signing_key
+        from custody import ensure_signing_key
         vpath = _make_vertex(tmp_path)
         kp = ensure_signing_key(vpath, observer="kyle")
         assert (tmp_path / "keys" / "kyle" / "ed25519.key").exists()
         assert len(kp.public_b64) == 44
 
     def test_self_observer_keeps_flat_layout(self, tmp_path):
-        from loops.commands.signing import ensure_signing_key
+        from custody import ensure_signing_key
         vpath = _make_vertex(tmp_path)
         ensure_signing_key(vpath, observer="x")  # vertex stem
         assert (tmp_path / "keys" / "ed25519.key").exists()
@@ -206,7 +206,7 @@ class TestKeygenPerObserver:
         node names — bare they fail the parse-gate AFTER keygen minted the
         key, stranding an unregistered (unverifiable) signer."""
         from loops.commands.add import _add_observer
-        from loops.commands.signing import declared_observer_keys
+        from custody import declared_observer_keys
         vpath = _make_vertex(tmp_path)
         rc = _add_observer(str(vpath), ["kyle/loops-claude", "--keygen"])
         assert rc == 0

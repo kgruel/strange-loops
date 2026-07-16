@@ -216,7 +216,7 @@ def _add_observer(target: str, argv: list[str]) -> int:
 
     keys_note = ""
     if args.keygen:
-        from loops.commands.signing import (
+        from custody import (
             ensure_signing_key,
             keys_dir_for,
             observer_keys_dir_for,
@@ -327,7 +327,7 @@ def ensure_self_observer_signing(vertex_path: Path) -> bool:
     Shared entry point: ``loops init`` (whole-store bootstrap) and
     ``loops add <v> observer <name> --keygen`` both ride it.
     """
-    from loops.commands.signing import declared_observer_keys, ensure_signing_key
+    from custody import declared_observer_keys, ensure_signing_key
 
     stem = vertex_path.stem
     keypair = ensure_signing_key(vertex_path)  # flat (self-observer) layout

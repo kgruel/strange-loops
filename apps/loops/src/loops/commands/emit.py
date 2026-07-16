@@ -759,7 +759,7 @@ def cmd_emit(
         # Inject the run-clause dispatcher so program.receive/sync fire
         # boundary run clauses automatically when ticks have .run set.
         store_path.parent.mkdir(parents=True, exist_ok=True)
-        from loops.commands.signing import fact_signer_for, tick_signer_for
+        from custody import fact_signer_for, tick_signer_for
         from loops.commands.sync import _execute_boundary_run
         # Capture the tick signer so the boundary receipt can disclose the
         # signing outcome: a minted tick is signed iff a key was available
@@ -1203,7 +1203,7 @@ def _run_close(
         return 1
 
     from engine import load_vertex_program
-    from loops.commands.signing import fact_signer_for, tick_signer_for
+    from custody import fact_signer_for, tick_signer_for
     from loops.commands.sync import _execute_boundary_run
 
     vp = _resolve_writable_vertex(vertex_path)

@@ -28,6 +28,7 @@ workspace-runner form, which masked staleness of the installed `sl`.
 ```
 libs/
   atoms/            Fact, Spec, Source, Parse, Fold — the three shapes and ingress
+  custody/          Signing composition — domain constants, key layout, signer/verifier builders
   engine/           Vertex, Loop, Store, Peer, Grant — the pattern and persistence
   lang/             KDL loader + validator for .loop/.vertex files
   sign/             JWKS + signature primitives for federated attestation
@@ -284,7 +285,11 @@ edge-declaration candidates. See decision:architecture/typed-edges-overlay-defau
 ## Conventions
 
 - Immutable by default — frozen dataclasses, pure functions
-- `engine` depends on `atoms` (TYPE_CHECKING only). No other cross-lib imports.
+- Cross-lib imports follow the DAG in `tests/test_architecture.py`
+  (`_LIB_ALLOWED_RUNTIME`) — engine→{lang,atoms}, store→{engine},
+  custody→{sign,engine}; everything else is forbidden. The signing domain
+  constants (`loops-tick-v1`/`loops-fact-v1`) are string-pinned to
+  `libs/custody` — import them, never re-hardcode.
 - Each lib/app has: CLAUDE.md, pyproject.toml, src/, tests/
 - `./dev check` must pass before commit
 

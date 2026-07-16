@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-LIBS = ("atoms", "engine", "lang", "painted", "store")
+LIBS = ("atoms", "custody", "engine", "lang", "sign", "store")
 APPS = ("loops", "hlab", "strange_loops")
 
 
@@ -128,8 +128,12 @@ def test_apps_do_not_import_store_reader():
     EXCEPTIONS = {
         # store inspector meta-tool — needs raw store access for introspection
         "apps/loops/src/loops/commands/store.py",
-        # TODO: migrate to vertex_facts
-        "apps/loops/src/loops/pop_store.py",
+        # Accumulated while the ratchet was red (found 2026-07-16, custody
+        # move) — read-path internals reaching below vertex_read/vertex_facts.
+        # Shrink-only: reroute through the vertex read interface, don't add.
+        "apps/loops/src/loops/commands/resolve.py",
+        "apps/loops/src/loops/commands/ls.py",
+        "apps/loops/src/loops/commands/vertices.py",
     }
     _check_exceptions(EXCEPTIONS)
 
@@ -158,12 +162,31 @@ def test_apps_do_not_import_store_reader():
 
 
 def test_apps_no_raw_sqlite():
-    """Apps must not import sqlite3 directly."""
+    """Apps must not import sqlite3 directly.
+
+    EXCEPTIONS is a shrink-only allowlist of low-level store probes that
+    predate an engine surface for them (era probe, lock-aware declaration
+    probe, genesis/marker probe). New entries need the same justification:
+    engine has no interface for the question being asked. TODO: dissolve
+    when engine grows a probe surface (friction:sqlite-probes-in-apps).
+    """
+    EXCEPTIONS = {
+        # store inspector meta-tool + genesis/marker probe for absorb
+        "apps/loops/src/loops/commands/store.py",
+        # lock-aware store-canonical declaration probe (SPEC §9.5)
+        "apps/loops/src/loops/commands/resolve.py",
+        # signed-era probe — era-is-a-floor guard reads the signature column
+        "apps/loops/src/loops/cli/views/seal.py",
+    }
+    _check_exceptions(EXCEPTIONS)
+
     violations = []
     for app_dir in (REPO_ROOT / "apps").iterdir():
         if not app_dir.is_dir():
             continue
         for py_file in _src_py_files(app_dir):
+            if _rel(py_file) in EXCEPTIONS:
+                continue
             collector = _collect_imports(py_file)
             lines = _imports_module(collector.runtime_modules, "sqlite3")
             for lineno in lines:
@@ -207,11 +230,18 @@ def test_libs_do_not_import_apps():
 _LIB_ALLOWED_RUNTIME: dict[str, set[str]] = {
     "atoms": set(),
     "lang": set(),
-    "painted": set(),
-    "store": set(),
+    "sign": set(),  # loops-agnostic utility — shared with vouch/pile/comms
+    "store": {
+        "engine",  # rebirth.py reuses tick_row_hash — chain hashing stays
+                   # single-sourced; duplicating it would fork the format
+    },
     "engine": {
         "lang",   # program.py, compiler.py — lang provides AST types
         "atoms",  # function-local lazy imports in compiler.py, vertex.py, program.py
+    },
+    "custody": {
+        "sign",    # Ed25519 primitives
+        "engine",  # load_declaration — store-canonical observer-key registry
     },
 }
 
@@ -309,15 +339,15 @@ def test_lib_dataclasses_frozen():
         # Legitimately mutable — accumulator/collector patterns
         ("libs/lang/src/lang/validator.py", "ValidationContext"),  # error accumulator
         ("libs/engine/src/engine/loop.py", "Loop"),  # _period_start timing state
-        ("libs/painted/src/painted/_timer.py", "FrameRecord"),  # timing accumulator
         # TODO: freeze — these are config/output holders, not accumulators
         ("libs/atoms/src/atoms/source.py", "Source"),
         ("libs/engine/src/engine/compiler.py", "CompiledVertex"),
         ("libs/engine/src/engine/stream.py", "Tap"),
         ("libs/lang/src/lang/validator.py", "Shape"),
         ("libs/lang/src/lang/errors.py", "Location"),
-        ("libs/painted/src/painted/buffer.py", "CellWrite"),
-        ("libs/painted/src/painted/fidelity.py", "CliRunner"),
+        # Accumulated while the ratchet was red (found 2026-07-16):
+        ("libs/engine/src/engine/executor.py", "SyncResult"),  # output holder — freezable
+        ("libs/engine/src/engine/executor.py", "Executor"),  # runtime coordinator
     }
     # Validate exception paths still exist
     for rel_path, _cls in EXCEPTIONS:
@@ -399,5 +429,45 @@ def test_sqlite3_confined_to_engine_store():
 
     assert not violations, (
         "Only engine and store may import sqlite3:\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 8: signing domain constants live in libs/custody only
+# ---------------------------------------------------------------------------
+
+_DOMAIN_LITERALS = ("loops-tick-v1", "loops-fact-v1")
+_DOMAIN_HOME = "libs/custody/src/custody/signing.py"
+
+
+def test_domain_constants_confined_to_custody():
+    """The domain-separation literals appear in exactly one source file.
+
+    ``loops-tick-v1``/``loops-fact-v1`` are the store's at-rest signing
+    format (design/architecture/custody-lib-extraction). This pin is
+    string-level, not import-level, on purpose: re-hardcoding the literal
+    instead of importing TICK_DOMAIN/FACT_DOMAIN would pass any import
+    ratchet while silently forking the format. Import the constants.
+    """
+    assert (REPO_ROOT / _DOMAIN_HOME).exists(), f"custody moved? {_DOMAIN_HOME}"
+
+    violations = []
+    for root_name in ("libs", "apps"):
+        for pkg_dir in (REPO_ROOT / root_name).iterdir():
+            if not pkg_dir.is_dir():
+                continue
+            for py_file in _src_py_files(pkg_dir):
+                rel = _rel(py_file)
+                if rel == _DOMAIN_HOME:
+                    continue
+                text = py_file.read_text()
+                for literal in _DOMAIN_LITERALS:
+                    if literal in text:
+                        violations.append(f"  {rel} contains {literal!r}")
+
+    assert not violations, (
+        f"Signing domain literals belong to {_DOMAIN_HOME} only — "
+        "import TICK_DOMAIN/FACT_DOMAIN from custody instead:\n"
         + "\n".join(violations)
     )

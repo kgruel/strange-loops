@@ -10,7 +10,7 @@ import pytest
 from sign import ed25519
 
 DIGEST = hashlib.sha256(b"tick row canonical bytes").hexdigest().encode()
-DOMAIN = "loops-tick-v1"
+DOMAIN = "test-domain-a"
 
 
 def test_generates_when_dir_empty(tmp_path: Path) -> None:
@@ -73,7 +73,7 @@ def test_tampered_digest_fails(tmp_path: Path) -> None:
 def test_wrong_domain_fails(tmp_path: Path) -> None:
     kp = ed25519.load_or_generate(tmp_path)
     sig = ed25519.sign(kp, DIGEST, domain=DOMAIN)
-    assert ed25519.verify(kp.public, sig, DIGEST, domain="loops-fact-v1") is False
+    assert ed25519.verify(kp.public, sig, DIGEST, domain="test-domain-b") is False
 
 
 def test_wrong_key_fails(tmp_path: Path) -> None:

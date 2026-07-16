@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Dev harness for the monorepo root — repo-level invariants.
+#
+# `./dev check` runs the tests that belong to no single package: the
+# architecture ratchet (tests/test_architecture.py — lib DAG, import
+# boundaries, domain-constant pin, frozen-dataclass convention). These
+# were previously run only by hand, and 4 of 7 rules silently went red
+# (found 2026-07-16, custody extraction). A ratchet nothing runs is
+# review vigilance wearing a test's costume — this script is the fix.
+#
+# Per-package tests keep their documented invocations:
+#   uv run --package <name> pytest libs/<name>/tests
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+case "${1:-}" in
+    check)
+        exec uv run pytest tests/ -q
+        ;;
+    *)
+        echo "Usage: ./dev check    # repo-level invariants (architecture ratchet)"
+        exit "$([ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && echo 0 || echo 1)"
+        ;;
+esac

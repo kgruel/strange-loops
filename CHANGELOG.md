@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.8.0 — unreleased
+
+The **temporal-cursor wave** (`feat/temporal-cursor`, SPEC §9.3 session 1):
+a read-path cursor over witness order, plus the explicit event-time
+projection and a structural diff built on top of both.
+
+### Added
+- **engine: `WitnessPosition` — the read-path temporal cursor.** A cursor
+  denotes the inclusive witness PREFIX a store had received at a position
+  (`rowid <= resolved`), never a `ts` cutoff — a backdated/merged arrival
+  lands at a *later* witness position even though it sorts earlier under
+  `(ts, id)` replay, so an earlier position never gets silently rewritten.
+  `resolve_witness_position` resolves `head` / a full fact id / the empty
+  sentinel by primary-key lookup only (ids are never ordered or parsed);
+  `seq:N` / `tick:ID` / wall-clock address forms resolve at the CLI layer
+  (`resolve_seq`/`resolve_tick_cursor`/`resolve_tick_floor`) down to a fact
+  id or rowid the engine seam takes directly.
+- **engine: `vertex_fold(at=)` — fold-state-as-of.** Full reconstruction at
+  a witness position: the prefix is selected, ontology resolves from the
+  SAME prefix (equal cursors), facts replay in `(ts, id)` order. Returns a
+  `WitnessFold` envelope (fold + position + mode + honesty status) so the
+  answering mode is a machine-readable field, not only rendered prose.
+  `vertex_fold(as_of=)` is the sibling event-time projection (`ts <= T`,
+  mutually exclusive with `at=`) — allowed on aggregates (current
+  membership, each member's facts cut by the same cutoff), where `at=` is
+  refused (witness order is per-store, no shared order across members).
+- **engine: durable lineage-qualified handles.** An adopted store's
+  position serializes to a portable `fact:<lineage>/<id>` handle that
+  re-resolves safely against any store sharing that lineage (re-resolving
+  the id in the TARGET store's own append order, never reusing a source
+  rowid). An unadopted store's position has no durable handle — durable
+  serialization is refused rather than inventing a surrogate id.
+- **`sl read VERTEX --at <address>`** — the witness-cursor read. Address
+  grammar: `head`, `fact:ID` (exact or an unambiguous prefix, plus the
+  durable `fact:<lineage>/<id>` form), `seq:N` (receipt ordinal), `tick:ID`,
+  or an ISO date/datetime (snaps to the last sealed tick at-or-before the
+  mark — never a silent ts-approximation; no usable tick refuses, naming
+  `--as-of`). A position landing inside an atomic declaration-edit ceremony
+  refuses for exact forms (`fact:`/`seq:`) and snaps to just before the
+  ceremony for floor-derived forms (`tick:`/wall-clock). Refused outright
+  on aggregate (combine/discover) vertices, with teaching tailored to the
+  address form.
+- **`sl read VERTEX --as-of <ts>`** — the explicit event-time projection on
+  the fold route (duration/epoch/ISO grammar, same as the shipped
+  `--facts --as-of`), mutually exclusive with `--at`.
+- **`sl read VERTEX --diff A..B`** (or `--at A --diff B`) — two independent
+  full reconstructions plus a key-level structural diff per kind section
+  (added/removed/changed; a keyless collect-fold degrades honestly to a
+  before/after count). Reports interval honesty info a payload diff alone
+  cannot see: late (backdated) arrivals between the two positions, and
+  whether the declaration itself changed in the interval.
+- **Honesty disclosure (mode-line + JSON `cursor` field).** Every `--at`/
+  `--as-of` answer — and each `--diff` endpoint — carries its resolved mode,
+  status (the honesty-ladder: `store`/`file-pre-genesis`/`unhistorized`/
+  `aggregate-head`), position (fact id, seq, tick anchor), and
+  portable/unadopted state, in BOTH the rendered text (a prepended mode
+  line, injected even for a render-only custom lens whose own signature
+  doesn't declare it) and the structured `--json` payload.
+
+### Changed
+- The 0.7.0 fold-route refusal for `--as-of`/`--since`/`--id` now teaches
+  `--at`/`--as-of` as the two supported cursor flags; `--since`/`--id`
+  still have no fold-route meaning and stay refused.
+
 ## 0.7.0 — 2026-07-16
 
 Three waves since 0.6.0: store-backed declarations (SPEC §9,

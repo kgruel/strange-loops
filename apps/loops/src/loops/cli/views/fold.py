@@ -573,11 +573,18 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # fold path entirely (own fetch, own lens, own --json shape). Cursor
     # addressing on --why is out of scope tonight — refuse rather than
     # silently drop the flag (the same honesty stance as the router refusal).
+    # --diff is a SEPARATE temporal operation (two reconstructions), not a
+    # cursor address, but the same silent-discard hazard applies: --why
+    # returns before the --diff branch ever runs, so `--why --diff A..B`
+    # used to answer the head provenance query while --diff vanished with
+    # no error (capstone M4).
     if args.why:
-        if args.at or args.as_of:
+        if args.at or args.as_of or args.diff:
+            flag = "--diff" if args.diff else ("--at" if args.at else "--as-of")
             ctx.reporter.err(
-                "read --why: --at/--as-of are not supported together with "
-                "--why yet — the provenance drill always reads at head."
+                f"read --why: {flag} is not supported together with --why "
+                "yet — the provenance drill always reads at head (historical "
+                "why is future work)."
             )
             return 2
         return _run_why(
@@ -683,6 +690,22 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # say so rather than silently swallowing the request.
     elif args.live and not ctx.isatty:
         ctx.reporter.err("live mode needs a TTY; rendering static instead")
+
+    # Interactive dispatch (autoresearch TUI) is head-only in 0.8.0: the
+    # cursor was already resolved above into at_position/as_of_ts/cursor_meta,
+    # but dispatch's INTERACTIVE branch calls op.interactive_handler() directly
+    # and never touches op.fn/fetch_data at all — the resolved position would
+    # be silently discarded and the TUI would read live/head data while the
+    # user believed they'd addressed a historical one (capstone M5). Refuse
+    # rather than let the Operation carry a cursor no code path applies.
+    if mode == "interactive" and (at_position is not None or as_of_ts is not None):
+        flag = "--at" if at_position is not None else "--as-of"
+        ctx.reporter.err(
+            f"read -i: {flag} is not supported together with -i yet — "
+            "interactive mode (autoresearch) is head-only in 0.8.0. Drop "
+            f"{flag}, or drop -i for a static witnessed/event-time read."
+        )
+        return 2
 
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None
@@ -1006,12 +1029,30 @@ def _run_diff(
     state2 = fetch_fold(vertex_path, kind=kind, key=key, observer=obs, at=pos2)
     rows = _compute_diff(_diff_snapshot(state1), _diff_snapshot(state2))
 
+    # Interval honesty (M8/A13): a structural diff can look "clean" while
+    # something still happened between the two positions — a late (backdated)
+    # arrival, or a declaration change — that a payload-level diff would never
+    # surface. Both endpoints already resolved against the SAME store (a
+    # precondition diff_interval_report also documents), so this is best-effort
+    # supplementary info: a failure here must not sink the diff itself.
+    interval: dict | None = None
+    try:
+        from engine import diff_interval_report
+        from loops.commands.resolve import _resolve_vertex_store_path
+
+        store_path = _resolve_vertex_store_path(vertex_path)
+        if store_path is not None:
+            interval = diff_interval_report(store_path, pos1, pos2)
+    except Exception:
+        interval = None
+
     if parse_format(args) is Format.JSON:
         import json as _json
 
         ctx.reporter.msg(_json.dumps({
             "mode": "diff", "from": meta1, "to": meta2,
             "sections": [_diff_row_to_json(r) for r in rows],
+            "interval": interval,
         }))
         return 0
 
@@ -1020,7 +1061,9 @@ def _run_diff(
     from loops.lenses.fold import diff_view
 
     width = shutil.get_terminal_size().columns if ctx.isatty else None
-    block = diff_view(meta1, meta2, rows, width, piped=not ctx.isatty)
+    block = diff_view(
+        meta1, meta2, rows, width, piped=not ctx.isatty, interval=interval,
+    )
     ctx.reporter.print_block(block)
     return 0
 

@@ -329,7 +329,7 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     if gate:
         render_data = _project_surface(op, data)
 
-    from loops.lens_resolver import call_lens
+    from loops.lens_resolver import accepts_kwarg, call_lens
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
     # existing lenses accept. visible/chars/lines flow as kwargs; the lens
@@ -368,6 +368,24 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     if not isinstance(block, Block):
         # Lens may return None when there's nothing to render.
         return 0
+    # Render-only mode-line fallback (0.8.0 capstone M6): the fetch-side
+    # cursor check upstream (cli.views.fold._lens_fetch_accepts_cursor)
+    # already guarantees the DATA is correctly selected for an active
+    # --at/--as-of read; this is a SEPARATE concern — whether the resolved
+    # render lens's own signature accepts the `cursor` kwarg at all.
+    # call_lens's dispatch silently drops kwargs a lens doesn't declare, so a
+    # render-only custom lens (correct fetch, plain `fold_view(data, zoom,
+    # width)` signature) would answer with the right data but no witness/
+    # as_of label in TEXT — while JSON (merged unconditionally above) still
+    # carries it. Inject the label here, outside the lens body, rather than
+    # refusing: the answer is honest, only the disclosure was about to be
+    # lost.
+    if cursor_meta is not None and not accepts_kwarg(lens_fn, "cursor"):
+        from painted import join_vertical
+
+        from loops.lenses.fold import cursor_mode_line
+
+        block = join_vertical(cursor_mode_line(cursor_meta, width), block)
     reporter.print_block(block)
     return 0
 

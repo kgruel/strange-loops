@@ -461,6 +461,75 @@ def durable_handle(pos: WitnessPosition) -> str | None:
     return f"fact:{pos.lineage}/{pos.fact_id}"
 
 
+def diff_interval_report(
+    store_path: Path,
+    pos1: WitnessPosition,
+    pos2: WitnessPosition,
+    *,
+    timeout: float = 5.0,
+) -> dict:
+    """Interval honesty info between two witness positions (0.8.0 ``--diff``, M8/A13).
+
+    A bare structural (kind, key) diff between two fold reconstructions can
+    look "clean" (no changed keys) while something still happened in the
+    receipt stream between the two positions — this reports the two things
+    a payload-level diff cannot see:
+
+    - ``late_arrivals``: facts received in the interval between the two
+      positions whose ``ts`` is EARLIER than the newest ts already visible
+      at the earlier position — an arrival that inserts itself BEFORE facts
+      the earlier position already replayed in ``(ts, id)`` order (the same
+      phenomenon ``_n`` in ``_diff_snapshot`` surfaces at the per-key level,
+      reported here store-wide). Each entry is ``{"id", "kind", "ts"}``,
+      newest-received first. ``_decl.*`` rows are excluded (domain facts
+      only — a declaration change is reported separately below).
+    - ``declaration_changed``: True when any ``_decl.*`` row falls in the
+      interval — the ontology itself may have moved between the two
+      positions (a rekey, a new kind, ...), independent of whether any
+      domain payload changed.
+
+    Symmetric by rowid (``lo``/``hi`` = ``min``/``max(pos1.rowid,
+    pos2.rowid)``): ``--diff B..A`` (the later position named first) reports
+    identically to ``--diff A..B``. Both positions MUST be resolved against
+    the SAME store — the caller (``cli.views.fold._run_diff``) already
+    requires this, since both diff endpoints resolve against one vertex.
+    """
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        raise WitnessResolutionError(
+            f"{store_path} is not a usable store — cannot compute a diff "
+            "interval report against it"
+        )
+    try:
+        lo, hi = sorted((pos1.rowid, pos2.rowid))
+        if lo == hi:
+            return {"late_arrivals": [], "declaration_changed": False}
+        newest_row = conn.execute(
+            "SELECT MAX(ts) FROM facts WHERE rowid <= ? AND kind NOT GLOB '_decl.*'",
+            (lo,),
+        ).fetchone()
+        newest_ts_at_lo = newest_row[0] if newest_row else None
+        late_arrivals: list[dict] = []
+        if newest_ts_at_lo is not None:
+            rows = conn.execute(
+                "SELECT id, kind, ts FROM facts WHERE rowid > ? AND rowid <= ? "
+                "AND kind NOT GLOB '_decl.*' AND ts < ? ORDER BY rowid DESC",
+                (lo, hi, newest_ts_at_lo),
+            ).fetchall()
+            late_arrivals = [{"id": r[0], "kind": r[1], "ts": r[2]} for r in rows]
+        decl_row = conn.execute(
+            "SELECT 1 FROM facts WHERE rowid > ? AND rowid <= ? "
+            "AND kind GLOB '_decl.*' LIMIT 1",
+            (lo, hi),
+        ).fetchone()
+        return {
+            "late_arrivals": late_arrivals,
+            "declaration_changed": decl_row is not None,
+        }
+    finally:
+        conn.close()
+
+
 def expand_fact_prefix(store_path: Path, prefix: str, *, timeout: float = 5.0) -> str:
     """Resolve a (possibly partial) ``fact:`` id to its full canonical id.
 

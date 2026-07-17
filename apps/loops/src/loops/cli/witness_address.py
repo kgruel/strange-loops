@@ -225,9 +225,15 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
         if not raw:
             raise AddressError("`--at tick:` needs a tick id (e.g. `--at tick:01J...`)")
         fid, name, ts = resolve_tick_cursor(store_path, raw)
+        # Floor boundary mode (M3): a tick/wall-clock snap lands where the
+        # SEALED tick left off, not on a user-named exact row — the ratified
+        # contract snaps these floor forms before a ceremony's first row
+        # rather than refusing (fact:/seq: keep the "refuse" default; they
+        # name an exact row, so landing mid-ceremony IS a user error).
         return resolve_witness_position(
             store_path, fid,
             anchor=TickAnchor(name=name, ts=ts, fact_cursor=fid),
+            group_boundary="floor",
         )
 
     # wall-clock — ISO date-or-datetime, snap to the tick floor (A5).
@@ -236,4 +242,5 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
     return resolve_witness_position(
         store_path, fid,
         anchor=TickAnchor(name=name, ts=ts, fact_cursor=fid),
+        group_boundary="floor",
     )

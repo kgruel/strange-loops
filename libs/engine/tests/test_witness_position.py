@@ -27,6 +27,7 @@ from lang.document import (
     vertex_to_documents,
 )
 
+from engine import vertex_fold
 from engine.declaration import (
     Unhistorized,
     load_declaration,
@@ -38,9 +39,11 @@ from engine.witness import (
     GENESIS_SENTINEL,
     MidReceiptGroupPosition,
     UnknownWitnessHandle,
+    WitnessLineageMismatch,
     WitnessPosition,
     receipt_group_span,
     resolve_witness_position,
+    verify_position_for_store,
 )
 
 _VERTEX_KDL = '''name "t"
@@ -310,7 +313,7 @@ class TestReceiptGroupGuard:
         _vpath, store, rows = self._ceremony_store(tmp_path)
         rogue = WitnessPosition(
             fact_id="rogue", rowid=rows[0], seq=rows[0],
-            lineage=None, unadopted=True, anchor=None,
+            lineage=None, unadopted=True, anchor=None, store=str(store),
         )
         with pytest.raises(MidReceiptGroupPosition):
             resolve_declaration_documents(store, at=rogue)
@@ -350,7 +353,7 @@ class TestEqualCursorsOntology:
         # rekey lives at rowid 2, outside the genesis prefix.
         at_genesis = WitnessPosition(
             fact_id="g", rowid=1, seq=1, lineage=lineage,
-            unadopted=False, anchor=None,
+            unadopted=False, anchor=None, store=str(store),
         )
         at_rekey = resolve_witness_position(store, rekey_id)  # rowid 2
 
@@ -409,3 +412,142 @@ def test_as_of_and_at_are_mutually_exclusive(tmp_path):
     pos = resolve_witness_position(store, GENESIS_SENTINEL)
     with pytest.raises(ValueError):
         resolve_declaration_documents(store, as_of=100.0, at=pos)
+
+
+def test_load_declaration_status_mutual_exclusion_on_early_return(tmp_path):
+    # Review finding 4: the exclusivity check must fire even on the
+    # file-pre-genesis early-return path (which never reaches the resolver).
+    vpath = tmp_path / "t.vertex"
+    store = tmp_path / "t.db"
+    vpath.write_text(_VERTEX_KDL.format(store=store))
+    _fresh_store(store)  # pre-genesis → load_declaration_status early-returns
+    pos = resolve_witness_position(store, GENESIS_SENTINEL)
+    with pytest.raises(ValueError):
+        load_declaration_status(vpath, as_of=100.0, at=pos)
+
+
+# ---------------------------------------------------------------------------
+# Lineage-qualified handles (A10) — review finding 1
+# ---------------------------------------------------------------------------
+
+
+class TestLineageQualification:
+    def test_position_records_its_source_store(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        pos = resolve_witness_position(store, "head")
+        assert pos.store == str(store.resolve())
+
+    def test_verify_accepts_same_store(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        pos = resolve_witness_position(store, "head")
+        verify_position_for_store(pos, store)  # no raise
+
+    def test_unadopted_position_refused_on_a_different_store(self, tmp_path):
+        # An unadopted (pre-genesis) handle is session-local to its own store —
+        # its rowid means nothing elsewhere (N1). vertex_fold(at=) must refuse.
+        va = tmp_path / "a.vertex"
+        sa = tmp_path / "a.db"
+        va.write_text(_VERTEX_KDL.format(store=sa))
+        _fresh_store(sa)
+        _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, "head")
+
+        vb = tmp_path / "b.vertex"
+        sb = tmp_path / "b.db"
+        vb.write_text(_VERTEX_KDL.format(store=sb))
+        _fresh_store(sb)
+        _append(sb, "decision", 100, topic="b")
+
+        with pytest.raises(WitnessLineageMismatch):
+            vertex_fold(vb, at=pos_a)
+
+    def test_adopted_position_refused_on_a_different_lineage(self, tmp_path):
+        # Two adopted stores with DIFFERENT lineages: A's handle is rejected on B.
+        va = tmp_path / "a.vertex"
+        sa = tmp_path / "a.db"
+        va.write_text(_VERTEX_KDL.format(store=sa))
+        _absorb(va, sa)
+        _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, "head")
+        assert pos_a.lineage is not None  # adopted
+
+        vb = tmp_path / "b.vertex"
+        sb = tmp_path / "b.db"
+        vb.write_text(_VERTEX_KDL.format(store=sb))
+        _absorb(vb, sb)  # a DIFFERENT genesis → different lineage
+        _append(sb, "decision", 100, topic="b")
+
+        with pytest.raises(WitnessLineageMismatch):
+            vertex_fold(vb, at=pos_a)
+
+    def test_vertex_facts_also_verifies(self, tmp_path):
+        from engine import vertex_facts
+
+        va = tmp_path / "a.vertex"
+        sa = tmp_path / "a.db"
+        va.write_text(_VERTEX_KDL.format(store=sa))
+        _fresh_store(sa)
+        _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, "head")
+
+        vb = tmp_path / "b.vertex"
+        sb = tmp_path / "b.db"
+        vb.write_text(_VERTEX_KDL.format(store=sb))
+        _fresh_store(sb)
+        _append(sb, "decision", 100, topic="b")
+
+        with pytest.raises(WitnessLineageMismatch):
+            vertex_facts(vb, 0.0, 1e12, at=pos_a)
+
+
+# ---------------------------------------------------------------------------
+# Guard is unconditional — pre-genesis / imported ceremonies (review finding 2)
+# ---------------------------------------------------------------------------
+
+
+class TestPreGenesisGuard:
+    def _foreign_group(self, store: Path) -> list[int]:
+        """Insert a 2-row foreign ceremony (shared ts+lineage, contiguous) with
+        NO own genesis — the imported-history case. Returns the two rowids."""
+        _append(store, DECL_KIND_DEFINED, 500.0,
+                lineage="foreign", subject="a", payload={"folds": [], "order": 0})
+        _append(store, DECL_KIND_DEFINED, 500.0,
+                lineage="foreign", subject="b", payload={"folds": [], "order": 1})
+        conn = sqlite3.connect(str(store))
+        rows = [r[0] for r in conn.execute(
+            "SELECT rowid FROM facts WHERE kind = ? ORDER BY rowid",
+            (DECL_KIND_DEFINED,)).fetchall()]
+        conn.close()
+        return rows
+
+    def test_mid_group_refused_without_own_genesis(self, tmp_path):
+        # The store has _decl ceremony rows but NO own _decl.genesis. Previously
+        # resolve_declaration_documents returned None before reaching the guard;
+        # now the guard runs unconditionally, so a mid-group position is refused.
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        rows = self._foreign_group(store)
+        assert rows[1] == rows[0] + 1  # contiguous
+        rogue = WitnessPosition(
+            fact_id="rogue", rowid=rows[0], seq=rows[0], lineage=None,
+            unadopted=True, anchor=None, store=str(store),
+        )
+        with pytest.raises(MidReceiptGroupPosition):
+            resolve_declaration_documents(store, at=rogue)
+
+    def test_complete_group_position_still_returns_pre_genesis(self, tmp_path):
+        # Precision check: a position AT the ceremony's last row is complete, so
+        # the guard does NOT fire — and with no own genesis the resolver returns
+        # None (pre-genesis) as before.
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        rows = self._foreign_group(store)
+        ok = WitnessPosition(
+            fact_id="ok", rowid=rows[1], seq=rows[1], lineage=None,
+            unadopted=True, anchor=None, store=str(store),
+        )
+        assert resolve_declaration_documents(store, at=ok) is None

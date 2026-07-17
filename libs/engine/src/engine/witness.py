@@ -103,6 +103,19 @@ class WitnessAggregateUnsupported(WitnessResolutionError):
     """
 
 
+class WitnessLineageMismatch(WitnessResolutionError):
+    """A witness position is applied to a store it was not resolved against (A10).
+
+    A position's ``rowid`` indexes ONE store's append order; applying it to a
+    different store selects an unrelated prefix. A read is accepted only when the
+    target store IS the store the position was resolved against (same resolved
+    path — always valid, unadopted handles included, N1) or when the position is
+    lineage-qualified and the target store shares that lineage (the portable
+    lineage-handle contract). Anything else is refused — silence here is the
+    "same handle silently means a different prefix" hazard A10 exists to close.
+    """
+
+
 class SeqOutOfRange(WitnessResolutionError):
     """A ``seq:N`` address names a receipt ordinal outside ``[1, total rows]``.
 
@@ -171,6 +184,12 @@ class WitnessPosition:
     unadopted: bool
     #: The last sealed tick at-or-before this position, or ``None`` (A12).
     anchor: TickAnchor | None
+    #: The resolved (canonical, absolute) path of the store this position was
+    #: resolved against. A position's rowid is meaningful ONLY in this store;
+    #: :func:`verify_position_for_store` uses it to refuse cross-store misuse
+    #: (A10) — especially for unadopted handles, which have no lineage to
+    #: qualify them with.
+    store: str
 
 
 def _lineage_of(payload_text: str) -> str | None:
@@ -230,6 +249,11 @@ def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
     window hash uses) and takes the highest cursor-rowid within the prefix. Pre-
     chain schemas (no ``fact_cursor`` column) and pre-chain rows (empty cursor)
     contribute nothing — honestly no anchor.
+
+    Tie-break: when several ticks seal the SAME ``fact_cursor`` (a re-fired
+    boundary), the LAST-appended tick wins (``t.rowid DESC``) — the "last tick"
+    the docstring promises, resolved deterministically rather than by whichever
+    row the engine happened to return.
     """
     tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
     if "fact_cursor" not in tick_cols:
@@ -238,7 +262,7 @@ def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
         "SELECT t.name, t.ts, t.fact_cursor FROM ticks t "
         "JOIN facts f ON f.id = t.fact_cursor "
         "WHERE t.fact_cursor IS NOT NULL AND t.fact_cursor <> '' "
-        "AND f.rowid <= ? ORDER BY f.rowid DESC LIMIT 1",
+        "AND f.rowid <= ? ORDER BY f.rowid DESC, t.rowid DESC LIMIT 1",
         (rowid,),
     ).fetchone()
     if row is None:
@@ -295,9 +319,53 @@ def resolve_witness_position(
             lineage=marker,
             unadopted=marker is None,
             anchor=anchor,
+            store=str(Path(store_path).resolve()),
         )
     finally:
         conn.close()
+
+
+def verify_position_for_store(
+    at: WitnessPosition, store_path: Path, *, timeout: float = 5.0
+) -> None:
+    """Refuse a witness position resolved against a DIFFERENT store (A10).
+
+    A witness position's ``rowid`` is an index into ONE store's append order;
+    applying it to another store silently selects an unrelated prefix. Accept
+    only when:
+
+    - the target store IS the store the position was resolved against (same
+      resolved path) — always valid, unadopted handles included (N1); or
+    - the position is lineage-qualified (adopted) AND the target store shares
+      that lineage — the portable-handle contract.
+
+    Any other case raises :class:`WitnessLineageMismatch` with teaching. Called
+    at the engine ``at=`` read seams (``vertex_fold`` / ``vertex_facts``) before
+    the rowid is ever applied, so no read layer trusts a foreign position.
+    """
+    target = str(Path(store_path).resolve())
+    if at.store == target:
+        return
+    if at.lineage is None:
+        raise WitnessLineageMismatch(
+            f"witness position (fact {at.fact_id!r}) was resolved against "
+            f"{at.store} but is being applied to {target} — an UNADOPTED handle "
+            "is session-local to its own store (N1); its rowid means nothing "
+            "here. Resolve the position against this store, or adopt the store "
+            "to mint a portable lineage-qualified handle."
+        )
+    conn = _open_readonly(store_path, timeout=timeout)
+    target_lineage = _read_own_lineage(conn) if conn is not None else None
+    if conn is not None:
+        conn.close()
+    if target_lineage != at.lineage:
+        raise WitnessLineageMismatch(
+            f"witness position (lineage {at.lineage}) was resolved against "
+            f"{at.store} and does not match this store's lineage "
+            f"({target_lineage}) at {target} — a lineage-qualified handle "
+            "resolves only against its own lineage (A10). Address the correct "
+            "store, or re-resolve the position here."
+        )
 
 
 def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str, int]:

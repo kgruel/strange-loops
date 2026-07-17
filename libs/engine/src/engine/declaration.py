@@ -292,6 +292,25 @@ def resolve_declaration_documents(
                 raise StoreBusy(f"{store_path} is lock-contended: {e}") from e
             return None
 
+        # Receipt-group guard (A2) — UNCONDITIONAL, before EVERY honesty-ladder
+        # early return below. Foreign/imported `_decl` rows can form a ceremony
+        # even with no own genesis (merge carries arbitrary rows across stores),
+        # and a pre-genesis position also short-circuits before the fold — so a
+        # mid-group position must be refused here regardless of genesis/lineage
+        # state, never only on the folded path. (`resolve_witness_position` also
+        # guards the address→position step; this is the defense for a hand-built
+        # position handed straight to the engine seam — review finding 2.)
+        if at is not None:
+            from engine.witness import MidReceiptGroupPosition, receipt_group_span
+
+            span = receipt_group_span(conn, at.rowid)
+            if span is not None:
+                raise MidReceiptGroupPosition(
+                    f"witness position rowid {at.rowid} lands inside the atomic "
+                    f"receipt group at rowids {span[0]}..{span[1]} — refusing to "
+                    "resolve a partial declaration ceremony"
+                )
+
         if not genesis_rows:
             return None
 
@@ -338,20 +357,8 @@ def resolve_declaration_documents(
             # marked unhistorized upstream.
             return Unhistorized(list(genesis_payload.get("documents", ())))
 
-        # Receipt-group guard (A2) at the ONTOLOGY seam: a position strictly
-        # inside an atomic edit ceremony would fold a half-applied ontology.
-        # Enforced here (not only in the CLI address resolver) so a hand-built
-        # position handed straight to the engine cannot bypass it.
-        if at is not None:
-            from engine.witness import MidReceiptGroupPosition, receipt_group_span
-
-            span = receipt_group_span(conn, at.rowid)
-            if span is not None:
-                raise MidReceiptGroupPosition(
-                    f"witness position rowid {at.rowid} lands inside the atomic "
-                    f"receipt group at rowids {span[0]}..{span[1]} — refusing to "
-                    "resolve a partial declaration ceremony"
-                )
+        # (The receipt-group guard ran unconditionally above, before this
+        # honesty-ladder — review finding 2.)
 
         # Seed from the genesis document set, keyed by (kind, subject).
         docs: dict[tuple[str, str], dict[str, Any]] = {}
@@ -440,6 +447,17 @@ def load_declaration_status(
     silently retro-claiming.
     """
     from lang import parse_vertex_file
+
+    # Enforce A8 exclusivity HERE, not only in resolve_declaration_documents:
+    # the early-return paths below (storeless aggregate, missing store,
+    # file-pre-genesis) never reach the resolver, so without this check a caller
+    # passing both selectors would be silently tolerated on those paths
+    # (review finding 4).
+    if as_of is not None and at is not None:
+        raise ValueError(
+            "load_declaration_status: as_of and at are mutually exclusive (A8) "
+            "— a read is either event-time-projected or witness-cursor'd"
+        )
 
     historical = as_of is not None or at is not None
     file_ast = parse_vertex_file(vertex_path)

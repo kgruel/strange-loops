@@ -506,6 +506,28 @@ def _combined_facts(
         conn.close()
 
 
+def _member_labels(paths: list[Path]) -> dict[Path, str]:
+    """Collision-free ``member`` labels for aggregate stores (review finding 3).
+
+    The stem is the friendly default, but ``a/events.db`` and ``b/events.db``
+    both stem to ``events`` — indistinguishable, so a consumer could resolve a
+    tick's ``fact_cursor`` against the WRONG member store. Colliding stems are
+    qualified with their parent directory name; if that still collides (same
+    leaf dir under different roots), the whole set falls back to full resolved
+    paths. Non-colliding stems stay short.
+    """
+    from collections import Counter
+
+    stem_counts = Counter(p.stem for p in paths)
+    labels: dict[Path, str] = {
+        p: (p.stem if stem_counts[p.stem] == 1 else f"{p.parent.name}/{p.stem}")
+        for p in paths
+    }
+    if len(set(labels.values())) < len(set(paths)):
+        labels = {p: str(p.resolve()) for p in paths}
+    return labels
+
+
 def _combined_ticks(
     ast: Any,
     vertex_path: Path,
@@ -518,8 +540,9 @@ def _combined_ticks(
     """Ticks across multiple stores (combinatorial vertex_ticks).
 
     With ``with_envelope=True`` this pass-through carries each member's REAL
-    attestation envelope (N4), tagged with ``member`` (the source store stem) —
-    not the blank ``chained=False`` placeholder the aggregate returned before.
+    attestation envelope (N4), tagged with ``member`` (a collision-free label
+    for the source store — :func:`_member_labels`) — not the blank
+    ``chained=False`` placeholder the aggregate returned before.
     A tick's ``fact_cursor`` is a witness handle into ITS OWN member store (A1:
     no shared witness order across the aggregate), so the envelope is resolved
     against that member's own connection and the ``member`` tag tells a consumer
@@ -535,6 +558,7 @@ def _combined_ticks(
     if with_envelope:
         from .store_reader import StoreReader
 
+        labels = _member_labels(store_paths)
         pairs: list[tuple[Tick, dict]] = []
         for path in store_paths:
             try:
@@ -545,7 +569,7 @@ def _combined_ticks(
             except FileNotFoundError:
                 continue  # absent member store — skip, not a failure
             for tick, env in member_pairs:
-                env["member"] = path.stem
+                env["member"] = labels[path]
                 pairs.append((tick, env))
         pairs.sort(key=lambda pair: pair[0].ts)
         return pairs
@@ -1056,6 +1080,15 @@ def vertex_fold(
         if not store_path.is_absolute():
             store_path = (vertex_path.parent / store_path).resolve()
 
+        # A10: a witness position's rowid indexes THIS store's append order only.
+        # Verify it was resolved against this store (or shares its lineage)
+        # BEFORE applying at.rowid, so a position from another store can never
+        # silently select an unrelated prefix here (review finding 1).
+        if at is not None:
+            from .witness import verify_position_for_store
+
+            verify_position_for_store(at, store_path)
+
         if not store_path.exists():
             raw = {k: spec.initial_state() for k, spec in full_specs.items()}
         else:
@@ -1364,6 +1397,13 @@ def vertex_facts(
         store_path = ast.store
         if not store_path.is_absolute():
             store_path = (vertex_path.parent / store_path).resolve()
+
+        # A10: refuse a position from a different store before applying its
+        # rowid here (review finding 1) — same guard as vertex_fold.
+        if at is not None:
+            from .witness import verify_position_for_store
+
+            verify_position_for_store(at, store_path)
 
         if not store_path.exists():
             facts = []

@@ -39,10 +39,16 @@ passes; do not announce until the PyPI install smokes.
 ```bash
 uv sync
 uv run --package loops pytest apps/loops/tests -q
-for lib in atoms engine lang sign store; do
-  uv run --package $lib pytest libs/$lib/tests -q
+for lib in $(ls libs); do
+  uv run --package "$lib" pytest "libs/$lib/tests" -q
 done
 ```
+
+The loop iterates `libs/` rather than naming packages — a hardcoded list
+goes stale the release after a new lib lands (the 0.7.0 cut had to notice
+`custody` was missing from this list and run it on initiative). Every
+`libs/<name>` directory is a workspace package whose name matches its
+directory.
 
 Goldens ride in the suite. If the painted pin moved this wave, this run IS
 the bump gate — it must run against the exact wheel the pin resolves

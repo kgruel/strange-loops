@@ -264,9 +264,14 @@ def _diff_interval_block(interval: dict | None, width: int | None) -> Block | No
     """Interval honesty lines (late arrivals + declaration change, M8/A13).
 
     ``interval`` is ``engine.diff_interval_report``'s output (or ``None`` —
-    aggregate/error paths that never computed one). Returns ``None`` when
-    there is nothing to disclose (no late arrivals, no declaration change)
-    — a clean interval says nothing rather than an empty reassurance line.
+    aggregate/error paths that never computed one), plus the ``baseline``
+    key the CLI stamps on: which endpoint label ('from'/'to') is the
+    rowid-earlier baseline the late arrivals were computed against. The
+    engine report is symmetric by rowid, so on a reversed ``--diff B..A``
+    the baseline is 'to' — naming 'from' unconditionally would make a false
+    temporal attribution. Returns ``None`` when there is nothing to disclose
+    (no late arrivals, no declaration change) — a clean interval says
+    nothing rather than an empty reassurance line.
     """
     if not interval:
         return None
@@ -277,9 +282,11 @@ def _diff_interval_block(interval: dict | None, width: int | None) -> Block | No
 
     rows: list[Block] = []
     if late:
+        baseline = interval.get("baseline", "from")
         rows.append(Block.text(
             f"⚠ {len(late)} late arrival(s) in the interval — received here "
-            "with an earlier ts than the 'from' position had already seen:",
+            f"with an earlier ts than the '{baseline}' position had already "
+            "seen:",
             Style(dim=True), width=width,
         ))
         for entry in late:

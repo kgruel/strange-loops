@@ -289,6 +289,48 @@ class TestM8DiffIntervalHonesty:
         text = block_to_text(r.blocks[0])
         assert "late arrival" in text
 
+    def test_forward_diff_attributes_baseline_to_from(self, capstone_vertex):
+        # Forward `--diff A..B`: 'from' is the rowid-earlier endpoint — the
+        # baseline the late arrival is measured against — and is named as such.
+        vpath, store = capstone_vertex
+        _append(store, "decision", 100, topic="a")
+        _append(store, "decision", 50, topic="b")  # backdated arrival
+
+        rc, r = _run(vpath, ["--diff", "seq:1..seq:2"])
+        assert rc == 0
+        text = block_to_text(r.blocks[0])
+        assert "'from' position had already" in text
+
+        r2 = BufferReporter()
+        rc2 = read_view.run(
+            [str(vpath), "--diff", "seq:1..seq:2", "--json"], ctx(r2),
+        )
+        assert rc2 == 0
+        assert json.loads(r2.out_lines[0])["interval"]["baseline"] == "from"
+
+    def test_reversed_diff_attributes_baseline_to_to(self, capstone_vertex):
+        # Codex re-verify MAJOR: the engine report is symmetric by rowid, so
+        # on `--diff B..A` (later endpoint named first) the baseline the late
+        # arrivals were computed against is the 'to' endpoint. Hardcoding
+        # 'from' made a false temporal claim — 'from' here ALREADY contains
+        # the late fact.
+        vpath, store = capstone_vertex
+        _append(store, "decision", 100, topic="a")
+        _append(store, "decision", 50, topic="b")  # backdated arrival
+
+        rc, r = _run(vpath, ["--diff", "seq:2..seq:1"])
+        assert rc == 0
+        text = block_to_text(r.blocks[0])
+        assert "'to' position had already" in text
+        assert "'from' position had already" not in text
+
+        r2 = BufferReporter()
+        rc2 = read_view.run(
+            [str(vpath), "--diff", "seq:2..seq:1", "--json"], ctx(r2),
+        )
+        assert rc2 == 0
+        assert json.loads(r2.out_lines[0])["interval"]["baseline"] == "to"
+
     def test_no_late_arrival_no_interval_line(self, capstone_vertex):
         vpath, store = capstone_vertex
         _append(store, "decision", 100, topic="a")

@@ -41,6 +41,7 @@ from engine.witness import (
     UnknownWitnessHandle,
     WitnessLineageMismatch,
     WitnessPosition,
+    durable_handle,
     receipt_group_span,
     resolve_witness_position,
     verify_position_for_store,
@@ -313,7 +314,7 @@ class TestReceiptGroupGuard:
         _vpath, store, rows = self._ceremony_store(tmp_path)
         rogue = WitnessPosition(
             fact_id="rogue", rowid=rows[0], seq=rows[0],
-            lineage=None, unadopted=True, anchor=None, store=str(store),
+            lineage=None, unadopted=True, anchor=None, store=str(store.resolve()),
         )
         with pytest.raises(MidReceiptGroupPosition):
             resolve_declaration_documents(store, at=rogue)
@@ -353,7 +354,7 @@ class TestEqualCursorsOntology:
         # rekey lives at rowid 2, outside the genesis prefix.
         at_genesis = WitnessPosition(
             fact_id="g", rowid=1, seq=1, lineage=lineage,
-            unadopted=False, anchor=None, store=str(store),
+            unadopted=False, anchor=None, store=str(store.resolve()),
         )
         at_rekey = resolve_witness_position(store, rekey_id)  # rowid 2
 
@@ -534,7 +535,7 @@ class TestPreGenesisGuard:
         assert rows[1] == rows[0] + 1  # contiguous
         rogue = WitnessPosition(
             fact_id="rogue", rowid=rows[0], seq=rows[0], lineage=None,
-            unadopted=True, anchor=None, store=str(store),
+            unadopted=True, anchor=None, store=str(store.resolve()),
         )
         with pytest.raises(MidReceiptGroupPosition):
             resolve_declaration_documents(store, at=rogue)
@@ -548,6 +549,151 @@ class TestPreGenesisGuard:
         rows = self._foreign_group(store)
         ok = WitnessPosition(
             fact_id="ok", rowid=rows[1], seq=rows[1], lineage=None,
-            unadopted=True, anchor=None, store=str(store),
+            unadopted=True, anchor=None, store=str(store.resolve()),
         )
         assert resolve_declaration_documents(store, at=ok) is None
+
+
+# ---------------------------------------------------------------------------
+# Durable-handle serialization (A10, capstone B1a)
+# ---------------------------------------------------------------------------
+
+
+class TestDurableHandle:
+    def test_adopted_yields_lineage_qualified_handle(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        lineage = _absorb(vpath, store)
+        f1 = _append(store, "decision", 100, topic="a")
+        pos = resolve_witness_position(store, f1)
+        assert durable_handle(pos) == f"fact:{lineage}/{f1}"
+
+    def test_unadopted_refuses_durable_serialization(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        pos = resolve_witness_position(store, "head")
+        assert durable_handle(pos) is None  # session-local, not portable (N1)
+
+    def test_genesis_sentinel_has_no_durable_handle(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _absorb(vpath, store)
+        pos = resolve_witness_position(store, GENESIS_SENTINEL)
+        assert durable_handle(pos) is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-store re-resolution (A10, capstone B1c) — never reuse the source rowid
+# ---------------------------------------------------------------------------
+
+
+def _mirror_lineage(src: Path, dst: Path, lineage: str) -> None:
+    """Simulate a within-lineage merge: copy src's genesis row into dst and
+    stamp dst's own_lineage to the SAME lineage."""
+    sconn = sqlite3.connect(str(src))
+    grow = sconn.execute(
+        "SELECT id, kind, ts, observer, origin, payload, signature "
+        "FROM facts WHERE id = ?",
+        (lineage,),
+    ).fetchone()
+    sconn.close()
+    dconn = sqlite3.connect(str(dst))
+    dconn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        grow,
+    )
+    dconn.execute(
+        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+    )
+    dconn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('own_lineage', ?)",
+        (lineage,),
+    )
+    dconn.commit()
+    dconn.close()
+
+
+class TestCrossStoreReResolution:
+    def test_same_lineage_reresolves_to_target_rowid(self, tmp_path):
+        # The capstone B1c hole: a fact copied by merge into a sibling store sits
+        # at a DIFFERENT append position there. A handle minted in store A must
+        # re-resolve fact_id in store B (target rowid), never reuse A's rowid.
+        va = tmp_path / "a.vertex"
+        sa = tmp_path / "a.db"
+        va.write_text(_VERTEX_KDL.format(store=sa))
+        lineage = _absorb(va, sa)  # genesis rowid 1 in A
+        f1 = _append(sa, "decision", 100, topic="a")  # rowid 2 in A
+        pos_a = resolve_witness_position(sa, f1)
+        assert pos_a.rowid == 2 and pos_a.lineage == lineage and not pos_a.unadopted
+
+        sb = tmp_path / "b.db"
+        _fresh_store(sb)
+        _mirror_lineage(sa, sb, lineage)  # genesis rowid 1 in B, same lineage
+        _append(sb, "decision", 50, topic="filler")  # rowid 2 in B
+        _append(sb, "decision", 100, topic="a", fid=f1)  # SAME id, rowid 3 in B
+
+        applied = verify_position_for_store(pos_a, sb)
+        assert applied.rowid == 3  # the TARGET rowid, not the source rowid 2
+        assert applied.store == str(sb.resolve())
+        assert applied.fact_id == f1 and applied.lineage == lineage
+
+    def test_same_lineage_handle_absent_in_target_refuses(self, tmp_path):
+        # A lineage-qualified handle whose fact was NOT merged into the target
+        # doesn't resolve there — honest UnknownWitnessHandle, not a wrong rowid.
+        va = tmp_path / "a.vertex"
+        sa = tmp_path / "a.db"
+        va.write_text(_VERTEX_KDL.format(store=sa))
+        lineage = _absorb(va, sa)
+        f1 = _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, f1)
+
+        sb = tmp_path / "b.db"
+        _fresh_store(sb)
+        _mirror_lineage(sa, sb, lineage)  # same lineage, but f1 NOT copied
+        with pytest.raises(UnknownWitnessHandle):
+            verify_position_for_store(pos_a, sb)
+
+
+# ---------------------------------------------------------------------------
+# Ontology seam verifies the position too (capstone M2)
+# ---------------------------------------------------------------------------
+
+
+def test_ontology_seam_verifies_foreign_position(tmp_path):
+    # resolve_declaration_documents(at=) is a public selector that applies
+    # at.rowid — it must refuse a position from another (unadopted) store, not
+    # only vertex_fold/vertex_facts (M2).
+    a = tmp_path / "a.db"
+    _fresh_store(a)
+    _append(a, "decision", 100, topic="a")
+    pos_a = resolve_witness_position(a, "head")  # unadopted, store == a
+
+    b = tmp_path / "b.db"
+    _fresh_store(b)
+    _append(b, "decision", 100, topic="b")
+    with pytest.raises(WitnessLineageMismatch):
+        resolve_declaration_documents(b, at=pos_a)
+
+
+# ---------------------------------------------------------------------------
+# group_boundary snap vs refuse (capstone M3)
+# ---------------------------------------------------------------------------
+
+
+class TestGroupBoundarySnap:
+    def _ceremony(self, tmp_path):
+        return TestReceiptGroupGuard()._ceremony_store(tmp_path)
+
+    def test_refuse_is_default_floor_snaps_before_first_row(self, tmp_path):
+        _vpath, store, rows = self._ceremony(tmp_path)
+        conn = sqlite3.connect(str(store))
+        first_id = conn.execute(
+            "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+        ).fetchone()[0]
+        conn.close()
+        # Exact form (default refuse) — a mid-group position errors.
+        with pytest.raises(MidReceiptGroupPosition):
+            resolve_witness_position(store, first_id)
+        # Floor form — snaps to the position JUST BEFORE the ceremony's first row.
+        snapped = resolve_witness_position(store, first_id, group_boundary="floor")
+        assert snapped.rowid == rows[0] - 1

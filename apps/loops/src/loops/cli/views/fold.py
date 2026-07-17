@@ -320,9 +320,15 @@ def _resolve_cursor(
         except Exception as exc:  # engine WitnessResolutionError family
             raise CursorAddressError(str(exc)) from exc
 
-        from engine import load_declaration_status
+        from engine import durable_handle, load_declaration_status
 
         _ast, status = load_declaration_status(vertex_path, at=position)
+        # A10 durable-handle contract (B1a): only an adopted store yields a
+        # PORTABLE handle (fact:<lineage>/<id>); an unadopted position is
+        # session-local, so no reusable handle is advertised — `durable_handle`
+        # is None and consumers render the id as non-portable, never as a bare
+        # `fact:ID` that would silently resolve in another store.
+        handle = durable_handle(position)
         meta = {
             "mode": "witness",
             "address": at_address,
@@ -331,6 +337,8 @@ def _resolve_cursor(
             "seq": position.seq,
             "unadopted": position.unadopted,
             "lineage": position.lineage,
+            "durable_handle": handle,
+            "portable": handle is not None,
             "anchor": _anchor_dict(position),
         }
         return position, None, meta

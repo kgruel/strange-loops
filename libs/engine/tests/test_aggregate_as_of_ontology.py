@@ -134,3 +134,35 @@ def test_member_fold_op_is_the_cutoff_era_op(tmp_path):
         s for s in vertex_fold(agg).sections if s.kind == "decision"
     )
     assert head_section.key_field == "name"
+
+
+def test_aggregate_with_own_store_still_reports_aggregate_head(tmp_path):
+    # Capstone M7: a combine/discover vertex that ALSO carries a self-knowledge
+    # store must NOT lose the A9 aggregate-head derogation on a historical read —
+    # its membership/existence set is still current. Before the fix it resolved
+    # the own store's declaration and reported "store", hiding the derogation.
+    from engine import load_declaration_status
+
+    members = tmp_path / "members"
+    members.mkdir()
+    m_store = members / "m.db"
+    m_vertex = members / "m.vertex"
+    m_vertex.write_text(_MEMBER_KDL.format(store=m_store))
+    _absorb(m_vertex, m_store)
+
+    agg_store = tmp_path / "agg.db"
+    agg = tmp_path / "agg.vertex"
+    agg.write_text(
+        f'name "agg"\nstore "{agg_store}"\ndiscover "members/*.vertex"\n'
+        'loops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        'observers {\n  kyle { key "AAAA" }\n}\n'
+    )
+    _absorb(agg, agg_store)  # the aggregate's OWN store is adopted (would be "store")
+    gts = _genesis_ts(agg_store)
+
+    # Historical read → aggregate-head (membership current, derogation disclosed).
+    _ast, status = load_declaration_status(agg, as_of=gts + 1000)
+    assert status == "aggregate-head"
+    # Head read is genuinely current — no derogation label needed there.
+    _ast2, head_status = load_declaration_status(agg)
+    assert head_status == "store"

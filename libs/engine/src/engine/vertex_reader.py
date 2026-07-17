@@ -1094,13 +1094,14 @@ def vertex_fold(
             store_path = (vertex_path.parent / store_path).resolve()
 
         # A10: a witness position's rowid indexes THIS store's append order only.
-        # Verify it was resolved against this store (or shares its lineage)
-        # BEFORE applying at.rowid, so a position from another store can never
-        # silently select an unrelated prefix here (review finding 1).
+        # verify_position_for_store returns the position to APPLY — unchanged for
+        # the same store, or RE-RESOLVED (target rowid) for a same-lineage sibling
+        # store; it refuses an unadopted/foreign handle. Never trust the source
+        # rowid across stores (findings 1 + capstone B1c).
         if at is not None:
             from .witness import verify_position_for_store
 
-            verify_position_for_store(at, store_path)
+            at = verify_position_for_store(at, store_path)
 
         if not store_path.exists():
             raw = {k: spec.initial_state() for k, spec in full_specs.items()}
@@ -1411,12 +1412,13 @@ def vertex_facts(
         if not store_path.is_absolute():
             store_path = (vertex_path.parent / store_path).resolve()
 
-        # A10: refuse a position from a different store before applying its
-        # rowid here (review finding 1) — same guard as vertex_fold.
+        # A10: return the position to apply (re-resolved for a same-lineage
+        # sibling store, refused if foreign) — same guard as vertex_fold
+        # (findings 1 + capstone B1c).
         if at is not None:
             from .witness import verify_position_for_store
 
-            verify_position_for_store(at, store_path)
+            at = verify_position_for_store(at, store_path)
 
         if not store_path.exists():
             facts = []

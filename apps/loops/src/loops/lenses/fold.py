@@ -191,9 +191,16 @@ def _cursor_mode_line(cursor: dict, width: int | None) -> Block:
 
     if cursor.get("mode") == "witness":
         fact_id = cursor.get("fact_id") or "(genesis)"
-        bits = [f"witness cursor: fact {fact_id} (seq {cursor.get('seq')})"]
+        handle = cursor.get("durable_handle")
+        if handle:
+            # Adopted store — advertise the PORTABLE lineage-qualified handle.
+            bits = [f"witness cursor: {handle} (seq {cursor.get('seq')})"]
+        else:
+            # Unadopted (or genesis) — show the id but NOT as a reusable
+            # `fact:ID`; the position is session-local, not portable (A10/B1a).
+            bits = [f"witness cursor: fact {fact_id} (seq {cursor.get('seq')})"]
         if cursor.get("unadopted"):
-            bits.append("unadopted store")
+            bits.append("unadopted store — position not portable")
         anchor = cursor.get("anchor")
         if anchor:
             bits.append(

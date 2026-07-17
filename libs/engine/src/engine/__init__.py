@@ -103,7 +103,7 @@ __all__ = [
     "resolve_tick_cursor",
     "resolve_tick_floor",
     "expand_fact_prefix",
-    "receipt_group_span",
+    "durable_handle",
     "verify_position_for_store",
     "WitnessResolutionError",
     "UnknownWitnessHandle",
@@ -205,7 +205,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "resolve_tick_cursor": ("engine.witness", "resolve_tick_cursor"),
     "resolve_tick_floor": ("engine.witness", "resolve_tick_floor"),
     "expand_fact_prefix": ("engine.witness", "expand_fact_prefix"),
-    "receipt_group_span": ("engine.witness", "receipt_group_span"),
+    "durable_handle": ("engine.witness", "durable_handle"),
     "verify_position_for_store": (
         "engine.witness",
         "verify_position_for_store",

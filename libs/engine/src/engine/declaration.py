@@ -56,9 +56,16 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   ontology** — the edit wins its own instant, regardless of physical append
   order. The tie-break is purely ``ts``-based (not witness/rowid order), so it is
   reproducible across runs and across a ``rebuild(dump(S))`` that reassigns
-  rowids. Witness-order ("as of" the fact cursor) is the finer axis SPEC §9.4
-  grounds fact-residence on; it is deferred (Q1) until a fact-cursor read surface
-  exists — until then ``ts`` with this inclusive tie-break is the single axis.
+  rowids. This governs the ``as_of`` **event-time** axis only.
+
+- **Witness-order selection (``at=``) is implemented (0.8.0).** The finer axis
+  SPEC §9.4 grounds fact-residence on is now live: pass a
+  :class:`~engine.witness.WitnessPosition` as ``at=`` (mutually exclusive with
+  ``as_of``) and the cutoff is the receipt prefix ``rowid <= at.rowid`` rather
+  than ``ts <= as_of``. Selection is by witness order; the ``(ts, id)`` replay
+  order and this tie-break are unchanged within the selected prefix. The
+  position is A10-verified against this store before its rowid is applied
+  (:func:`~engine.witness.verify_position_for_store`).
 
 The overlay-row *payload shape* this reader consumes —
 ``{"lineage": <genesis id>, "subject": <str>, "payload": <document payload>}``
@@ -272,6 +279,15 @@ def resolve_declaration_documents(
             "(A8) — a read is either event-time-projected or witness-cursor'd, "
             "never both"
         )
+    if at is not None:
+        # A10 lineage guard at THIS public selector too (capstone M2): this API
+        # is exported and applies at.rowid directly, so a position from another
+        # store must be refused / re-resolved here, not only in vertex_fold.
+        # Same-store returns the position unchanged (no DB hit); a same-lineage
+        # sibling re-resolves to the target rowid; foreign/unadopted refuses.
+        from engine.witness import verify_position_for_store
+
+        at = verify_position_for_store(at, store_path, timeout=timeout)
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
         return None
@@ -461,32 +477,42 @@ def load_declaration_status(
 
     historical = as_of is not None or at is not None
     file_ast = parse_vertex_file(vertex_path)
+    is_aggregate = file_ast.combine is not None or file_ast.discover is not None
+
+    def _finish(ast: Any, status: str) -> tuple[Any, str]:
+        # A9 named derogation (capstone M7): a combine/discover vertex's
+        # membership/existence set is ALWAYS current — aggregation internal
+        # tables are not built yet (SPEC §9.5) — so a historical read over an
+        # aggregate is disclosed as ``aggregate-head`` even when the vertex ALSO
+        # carries a self-knowledge store (whose ontology may resolve at the
+        # cutoff). Without this override, a combine-with-store reported ``store``
+        # and the membership derogation was silently lost.
+        if historical and is_aggregate:
+            return ast, "aggregate-head"
+        return ast, status
+
     store_field = file_ast.store
     if store_field is None:
-        if historical and (
-            file_ast.combine is not None or file_ast.discover is not None
-        ):
-            return file_ast, "aggregate-head"
-        return file_ast, "file-pre-genesis"
+        return _finish(file_ast, "file-pre-genesis")
 
     store_path = store_field
     if not store_path.is_absolute():
         store_path = (vertex_path.parent / store_path).resolve()
     if not store_path.exists():
-        return file_ast, "file-pre-genesis"
+        return _finish(file_ast, "file-pre-genesis")
 
     docs = resolve_declaration_documents(
         store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
     )
     if isinstance(docs, list):
         resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
-        return _reattach_ingress(resolved, file_ast), "store"
+        return _finish(_reattach_ingress(resolved, file_ast), "store")
     if isinstance(docs, Unhistorized):
         resolved = documents_to_vertex(
             docs.documents, path=vertex_path, store=store_field
         )
-        return _reattach_ingress(resolved, file_ast), "unhistorized"
-    return file_ast, "file-pre-genesis"
+        return _finish(_reattach_ingress(resolved, file_ast), "unhistorized")
+    return _finish(file_ast, "file-pre-genesis")
 
 
 def load_declaration(

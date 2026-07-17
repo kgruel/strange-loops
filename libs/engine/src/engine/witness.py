@@ -85,10 +85,12 @@ class MidReceiptGroupPosition(WitnessResolutionError):
     """A cursor lands strictly inside an atomic receipt group (A2).
 
     An absorb-edit ceremony's ``_decl.*`` rows are all-or-nothing: a prefix that
-    includes some but not all of them would resolve a half-applied ontology. The
-    engine refuses rather than silently snap — the CLI address resolver is what
-    snaps floor-forms out of a group; a ``fact:ID`` naming a mid-group row is an
-    error with teaching.
+    includes some but not all of them would resolve a half-applied ontology.
+    Raised only for the **refuse** boundary mode (exact ``fact:``/``seq:``
+    forms) — naming a mid-ceremony row is an error with teaching. Floor-derived
+    forms (``tick:``/wall-clock) pass ``group_boundary="floor"`` to
+    :func:`resolve_witness_position`, which SNAPS to the position just before
+    the ceremony's first row instead of raising.
     """
 
 
@@ -276,6 +278,7 @@ def resolve_witness_position(
     *,
     timeout: float = 5.0,
     anchor: TickAnchor | None = None,
+    group_boundary: str = "refuse",
 ) -> WitnessPosition:
     """Resolve a witness address to a :class:`WitnessPosition` against one store.
 
@@ -302,6 +305,14 @@ def resolve_witness_position(
     re-derivation would name that later tick instead of the floor tick actually
     selected. When ``None`` (head/seq/fact forms), the anchor is derived as the
     last sealed tick at-or-before the position.
+
+    ``group_boundary`` governs a position that lands inside an atomic receipt
+    group (A2). ``"refuse"`` (default, for exact forms — ``fact:``/``seq:``)
+    raises :class:`MidReceiptGroupPosition`. ``"floor"`` (for floor-derived
+    forms — ``tick:``/wall-clock, chosen by the CLI resolver per address form)
+    **snaps** to the position just before the ceremony's first row — the last
+    complete ontology state — rather than refusing (M3). ``head`` never lands
+    mid-group (a completed ceremony committed atomically).
     """
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
@@ -313,14 +324,21 @@ def resolve_witness_position(
         fact_id, rowid = _resolve_address_rowid(conn, address)
         span = receipt_group_span(conn, rowid)
         if span is not None:
-            raise MidReceiptGroupPosition(
-                f"witness position {address!r} (rowid {rowid}) lands inside the "
-                f"atomic receipt group at rowids {span[0]}..{span[1]} — a "
-                "declaration edit ceremony is all-or-nothing. Address the "
-                f"position at-or-after rowid {span[1]} (the ceremony's last "
-                "row) to include the whole edit, or before its first row to "
-                "exclude it."
-            )
+            if group_boundary == "floor":
+                # Snap OUT of the ceremony to the position just before its first
+                # row — the last complete state (M3). Floor forms land on solid
+                # ground rather than refusing.
+                rowid = span[0] - 1
+                fact_id = _id_at_rowid(conn, rowid)
+            else:  # "refuse" — an exact fact:/seq: form never silently snaps.
+                raise MidReceiptGroupPosition(
+                    f"witness position {address!r} (rowid {rowid}) lands inside "
+                    f"the atomic receipt group at rowids {span[0]}..{span[1]} — "
+                    "a declaration edit ceremony is all-or-nothing. Address the "
+                    f"position at-or-after rowid {span[1]} (the ceremony's last "
+                    "row) to include the whole edit, or before its first row to "
+                    "exclude it."
+                )
         marker = _read_own_lineage(conn)
         seq = conn.execute(
             "SELECT COUNT(*) FROM facts WHERE rowid <= ?", (rowid,)
@@ -341,25 +359,31 @@ def resolve_witness_position(
 
 def verify_position_for_store(
     at: WitnessPosition, store_path: Path, *, timeout: float = 5.0
-) -> None:
-    """Refuse a witness position resolved against a DIFFERENT store (A10).
+) -> WitnessPosition:
+    """Return the position to APPLY against ``store_path``, or refuse (A10).
 
     A witness position's ``rowid`` is an index into ONE store's append order;
-    applying it to another store silently selects an unrelated prefix. Accept
-    only when:
+    applying it to another store silently selects an unrelated prefix. Cases:
 
     - the target store IS the store the position was resolved against (same
-      resolved path) — always valid, unadopted handles included (N1); or
+      resolved path) — returns ``at`` unchanged (its rowid is valid, unadopted
+      handles included, N1);
     - the position is lineage-qualified (adopted) AND the target store shares
-      that lineage — the portable-handle contract.
+      that lineage — **re-resolves** ``at.fact_id`` in the target store and
+      returns the target-store position. The source rowid is NEVER reused: append
+      order is per-store, so a merge that copied the fact reorders it (B1c). A
+      fact id absent from the target raises :class:`UnknownWitnessHandle`;
+      - an unadopted position (no lineage) on a different store, or a lineage
+      mismatch, raises :class:`WitnessLineageMismatch` with teaching.
 
-    Any other case raises :class:`WitnessLineageMismatch` with teaching. Called
-    at the engine ``at=`` read seams (``vertex_fold`` / ``vertex_facts``) before
-    the rowid is ever applied, so no read layer trusts a foreign position.
+    Called at every engine ``at=`` selector (``vertex_fold`` / ``vertex_facts`` /
+    ``resolve_declaration_documents``) before the rowid is applied, so no read
+    layer trusts a foreign position — the guard that the in-memory check alone
+    could not give once a handle is serialized and re-used across stores.
     """
     target = str(Path(store_path).resolve())
     if at.store == target:
-        return
+        return at
     if at.lineage is None:
         raise WitnessLineageMismatch(
             f"witness position (fact {at.fact_id!r}) was resolved against "
@@ -380,6 +404,10 @@ def verify_position_for_store(
             "resolves only against its own lineage (A10). Address the correct "
             "store, or re-resolve the position here."
         )
+    # Same lineage, DIFFERENT store: re-resolve the fact id in the target store
+    # so the applied rowid is the TARGET's append position (B1c) — never the
+    # source's. The empty/genesis sentinel maps to the target's empty prefix.
+    return resolve_witness_position(store_path, at.fact_id, timeout=timeout)
 
 
 def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str, int]:
@@ -403,6 +431,34 @@ def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str,
             "resolves by exact id (ids are opaque; never parsed or ordered)"
         )
     return address, row[0]
+
+
+def _id_at_rowid(conn: sqlite3.Connection, rowid: int) -> str:
+    """The fact id at ``rowid``, or the empty sentinel for rowid <= 0."""
+    if rowid <= 0:
+        return GENESIS_SENTINEL
+    row = conn.execute("SELECT id FROM facts WHERE rowid = ?", (rowid,)).fetchone()
+    return row[0] if row else GENESIS_SENTINEL
+
+
+def durable_handle(pos: WitnessPosition) -> str | None:
+    """The PORTABLE address form for a position, or ``None`` if not serializable.
+
+    A10-narrowed durable-handle contract (final-contracts Session 1):
+
+    - **Adopted** store → ``fact:<lineage>/<id>`` — the lineage-qualified handle.
+      Re-resolving it elsewhere verifies the lineage and re-resolves the id in
+      the target store (never reuses a rowid), so the same handle can never
+      silently mean a different prefix across stores.
+    - **Unadopted** store (no lineage), or the empty/genesis sentinel → ``None``:
+      **durable serialization is REFUSED** (N1). The position is session-local;
+      no surrogate id is invented. A caller rendering cursor metadata MUST NOT
+      present a bare ``fact:<id>`` as a reusable handle here — it is not portable
+      (the id resolves in ANY store that merged the fact, to a different prefix).
+    """
+    if pos.unadopted or pos.lineage is None or not pos.fact_id:
+        return None
+    return f"fact:{pos.lineage}/{pos.fact_id}"
 
 
 def expand_fact_prefix(store_path: Path, prefix: str, *, timeout: float = 5.0) -> str:

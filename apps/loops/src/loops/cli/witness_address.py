@@ -179,7 +179,34 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
         return resolve_witness_position(store_path, "head")
 
     if form == "fact":
-        fid = _expand_fact_prefix(store_path, address[len("fact:"):])
+        raw = address[len("fact:"):]
+        if "/" in raw:
+            # Durable, lineage-qualified handle `fact:<lineage>/<id>` (A10, B1).
+            # The lineage guards cross-store reuse: resolve the id in THIS store
+            # and refuse unless this store's own lineage matches — so the same
+            # advertised handle can never silently mean a different prefix after
+            # a merge copies the fact into another lineage.
+            lineage_q, _, id_part = raw.partition("/")
+            if not lineage_q or not id_part:
+                raise AddressError(
+                    "`--at fact:<lineage>/<id>` needs both a lineage and an id"
+                )
+            fid = _expand_fact_prefix(store_path, id_part)
+            pos = resolve_witness_position(store_path, fid)
+            if pos.unadopted:
+                raise AddressError(
+                    f"`--at fact:{lineage_q}/…` is a lineage-qualified handle but "
+                    "this store is unadopted (no lineage) — the handle cannot "
+                    "belong here. Adopt the store, or address it in-session."
+                )
+            if pos.lineage != lineage_q:
+                raise AddressError(
+                    f"`--at fact:{lineage_q}/…` does not match this store's "
+                    f"lineage ({pos.lineage}) — a durable handle resolves only "
+                    "against its own lineage (A10)."
+                )
+            return pos
+        fid = _expand_fact_prefix(store_path, raw)
         return resolve_witness_position(store_path, fid)
 
     if form == "seq":

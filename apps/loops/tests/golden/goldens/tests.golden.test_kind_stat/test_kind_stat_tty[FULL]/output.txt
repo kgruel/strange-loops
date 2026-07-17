@@ -1,0 +1,12 @@
+╭─ decision · by:topic ───────────────────────╮
+│ 42 facts · 42.0% of project                 │
+│ 3 keys · span Jan 10–Jan 15 · updated Jan 15│
+╰─────────────────────────────────────────────╯
+
+   ENTRY          COUNT  SHARE          UPDATED
+───────────────────────────────────────────────
+◆  design/sqlite     20  ███████ 47.6%   Jan 15
+│  design/kdl        15  █████░░ 35.7%   Jan 14
+   design/misc        7  ██░░░░░ 16.7%   Jan 13
+
+  read project --kind decision for content

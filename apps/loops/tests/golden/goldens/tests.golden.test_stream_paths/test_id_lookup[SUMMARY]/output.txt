@@ -1,0 +1,8 @@
+2025-01-15:
+  2025-01-15T10:00:00Z [decision] design/sqlite: chose sqlite
+  topic: design/sqlite
+  message: chose sqlite
+  rationale: atomic writes and query support
+    id: 01IDLOOKUPAAAAAAAAAAAAAAAA
+    observer: kaygee
+    origin: cli

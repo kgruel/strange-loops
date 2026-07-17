@@ -14,3 +14,11 @@ from .helpers import block_to_text
 def test_log_demo(golden, zoom):
     block = stream_view(SAMPLE_STREAM, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
+
+
+@pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
+def test_log_demo_piped(golden, zoom):
+    """The piped/agent register (width=None, piped=True) — S0 gap: the base
+    goldens above only ever exercised the TTY register."""
+    block = stream_view(SAMPLE_STREAM, zoom, width=None, piped=True)
+    golden.assert_match(block_to_text(block), "output")

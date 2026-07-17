@@ -1,0 +1,14 @@
+Tick #0 of 5 — session end
+  window: 2025-01-15T09:00:00+00:00 → 2025-01-15T10:00:00+00:00
+  2 facts
+
+2025-01-15:
+  2025-01-15T10:00:00Z [decision] design/sqlite: chose sqlite
+  topic: design/sqlite
+  message: chose sqlite
+    id: 01TICKDRILLAAAAAAAAAAAAAA
+    observer: kaygee
+  2025-01-15T09:30:00Z [task] implement-fold
+  name: implement-fold
+  status: done
+    observer: kaygee

@@ -1,0 +1,5 @@
+2025-01-15:
+high      10:32 [decision] design/sqlite-persistence: Chose SQLite over flat files
+
+2025-01-14:
+untiered  09:05 [task] implement-fold

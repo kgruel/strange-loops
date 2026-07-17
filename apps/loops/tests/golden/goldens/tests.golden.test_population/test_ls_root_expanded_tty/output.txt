@@ -1,0 +1,17 @@
+local — cwd, verbs resolve these first
+    project   128 facts   3 kinds  Jan 15  ⊃ decision · thread · task
+      ⊳ shadows ~/.config/loops/project/project.vertex
+      ⊙ own store
+      decision  80
+      thread    30
+      task      18
+config — ~/.config/loops
+    project    12 facts   1 kinds  Jan 14  ⊃ note
+      ⊙ own store
+      note      12
+    meta      combines 2                —
+      ⊙ combine of project, identity
+    identity   40 facts   2 kinds  Jan 15  ⊃ trait · peer
+      ⊙ own store + combine of external
+      trait     25
+      peer      15

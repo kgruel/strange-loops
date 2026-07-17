@@ -1,0 +1,5 @@
+decision (42) under design/
+  42.0% of project · 3 keys · span Jan 10–Jan 15 · updated Jan 15
+  high   design/sqlite      20   47.6%  Jan 15
+  mid    design/kdl         15   35.7%  Jan 14
+         design/misc         7   16.7%  Jan 13

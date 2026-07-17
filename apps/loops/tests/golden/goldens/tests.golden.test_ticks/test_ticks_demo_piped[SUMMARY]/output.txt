@@ -1,0 +1,10 @@
+2025-01-15:
+high      10:32 #0 session end (1h32m)
+
+2025-01-14:
+untiered  18:00 #1 demo (6h)
+
+2025-01-13:
+untiered  08:00 #2 demo
+
+Drill down: loops read <vertex> --ticks <#>

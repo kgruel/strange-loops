@@ -487,6 +487,275 @@ SAMPLE_FOLD_FACTS = FoldState(
     },
 )
 
+# ── stream: tiered rows (rail glyph vs tier word) ────────────────────────────
+# One high-tier fact, one untiered — locks the rail-gutter glyph (TTY) and the
+# tier WORD (piped ledger) that test_parity_stream_ticks.py only content-checks
+# (register parity), not byte-locks. Distinct from SAMPLE_STREAM (no tiers).
+SAMPLE_STREAM_TIERED = {
+    "vertex": "demo",
+    "facts": [
+        {
+            "kind": "decision", "ts": "2025-01-15T10:32:00+00:00",
+            "observer": "kyle", "id": "01JQ8FAAAAAAAAAAAAAAAAAAAA",
+            "payload": {"topic": "design/sqlite-persistence",
+                        "message": "Chose SQLite over flat files"},
+            "tier": "high",
+        },
+        {
+            "kind": "task", "ts": "2025-01-14T09:05:00+00:00",
+            "observer": "loops-claude", "id": "01JQ8FBBBBBBBBBBBBBBBBBBBB",
+            "payload": {"name": "implement-fold", "status": "in-progress"},
+        },
+    ],
+    "fold_meta": {
+        "decision": {"key_field": "topic"},
+        "task": {"key_field": "name"},
+    },
+}
+
+# ── stream: tick drill-down (single tick, _tick metadata) ────────────────────
+# stream_view's ``tick_meta is not None`` branch — header rows via
+# tick_drill_rows + facts, no vertex card (card path is skipped whenever a
+# tick drill is active). Unreachable from any live CLI wiring today
+# (fetch_tick_facts has no caller — S7 relocated ticks under `store ticks`,
+# which drills through fold_view instead) but the branch is still live code
+# the render_row consolidation will touch, so it gets a golden regardless.
+SAMPLE_STREAM_TICK_DRILL = {
+    "vertex": "demo",
+    "facts": [
+        {"kind": "decision", "ts": "2025-01-15T10:00:00+00:00",
+         "payload": {"topic": "design/sqlite", "message": "chose sqlite"},
+         "observer": "kaygee", "id": "01TICKDRILLAAAAAAAAAAAAAA"},
+        {"kind": "task", "ts": "2025-01-15T09:30:00+00:00",
+         "payload": {"name": "implement-fold", "status": "done"},
+         "observer": "kaygee"},
+    ],
+    "fold_meta": {
+        "decision": {"key_field": "topic"},
+        "task": {"key_field": "name"},
+    },
+    "_tick": {
+        "index": 0, "total": 5,
+        "boundary": {"name": "session", "status": "end"},
+        "since": "2025-01-15T09:00:00+00:00", "ts": "2025-01-15T10:00:00+00:00",
+        "envelope": None,
+    },
+}
+
+# ── stream: tick RANGE drill-down (0:3 form, range_end + range_boundaries) ───
+SAMPLE_STREAM_TICK_RANGE = {
+    "vertex": "demo",
+    "facts": [
+        {"kind": "decision", "ts": "2025-01-15T10:00:00+00:00",
+         "payload": {"topic": "design/sqlite", "message": "chose sqlite"},
+         "observer": "kaygee"},
+    ],
+    "fold_meta": {"decision": {"key_field": "topic"}},
+    "_tick": {
+        "index": 0, "total": 5, "range_end": 3,
+        "boundary": {}, "since": None, "ts": None,
+        "range_boundaries": [
+            {"name": "session", "status": "end"},
+            {"name": "manual", "status": ""},
+        ],
+        "envelope": None,
+    },
+}
+
+# ── stream: tick error (out-of-range drill) ──────────────────────────────────
+SAMPLE_STREAM_TICK_ERROR = {
+    "vertex": "demo",
+    "facts": [],
+    "fold_meta": {},
+    "_tick_error": "Tick index 9 out of range (have 5 ticks)",
+}
+
+# ── stream: single-fact id lookup (--id mode) ────────────────────────────────
+# is_id_lookup forces FULL-equivalent graft (id/observer/origin) at every zoom.
+SAMPLE_STREAM_ID_LOOKUP = {
+    "vertex": "demo",
+    "_id_lookup": True,
+    "facts": [
+        {"kind": "decision", "ts": "2025-01-15T10:00:00+00:00",
+         "payload": {"topic": "design/sqlite", "message": "chose sqlite",
+                     "rationale": "atomic writes and query support"},
+         "observer": "kaygee", "id": "01IDLOOKUPAAAAAAAAAAAAAAAA",
+         "origin": "cli"},
+    ],
+    "fold_meta": {"decision": {"key_field": "topic"}},
+}
+
+# ── stream: ontology honesty callout (SPEC §9.2/§9.5) ────────────────────────
+SAMPLE_STREAM_ONTOLOGY_NOTICE = {
+    "vertex": "demo",
+    "ontology_notice": "no declaration lineage — ontology is the current file",
+    "facts": [
+        {"kind": "decision", "ts": "2025-01-09T10:00:00+00:00",
+         "payload": {"topic": "design/x", "message": "y"}, "observer": "kaygee"},
+    ],
+    "fold_meta": {"decision": {"key_field": "topic"}},
+}
+
+# ── ticks: listing (store ticks), real ticks_view contract ──────────────────
+# {"ticks": [...], "vertex": str} — distinct from SAMPLE_TICKS above (which is
+# the flat run-ticks list shape consumed by _run_ticks_view, a different lens).
+SAMPLE_TICKS_LISTING = {
+    "vertex": "demo",
+    "ticks": [
+        {
+            "name": "demo", "ts": "2025-01-15T10:32:00+00:00",
+            "since": "2025-01-15T09:00:00+00:00", "origin": "session",
+            "boundary": {"name": "session", "status": "end"},
+            "kind_counts": {"decision": 3, "task": 2}, "tier": "high",
+        },
+        {
+            "name": "demo", "ts": "2025-01-14T18:00:00+00:00",
+            "since": "2025-01-14T12:00:00+00:00", "origin": "manual",
+            "boundary": {}, "kind_counts": {"decision": 1},
+        },
+        {
+            # No since → no duration; no boundary/name fallback in the body.
+            "name": "demo", "ts": "2025-01-13T08:00:00+00:00",
+            "since": None, "origin": "manual",
+            "boundary": {}, "kind_counts": {},
+        },
+    ],
+}
+
+SAMPLE_TICKS_ONTOLOGY_NOTICE = {
+    "vertex": "demo",
+    "ontology_notice": "no declaration lineage — ontology is the current file",
+    "ticks": [
+        {
+            "name": "demo", "ts": "2025-01-15T10:32:00+00:00",
+            "since": "2025-01-15T09:00:00+00:00", "origin": "session",
+            "boundary": {"name": "session", "status": "end"},
+            "kind_counts": {"decision": 3},
+        },
+    ],
+}
+
+# ── sync: instance vertex (ran/skipped/errors/ticks) ─────────────────────────
+# _format_ago (loops.lenses.sync) reads time.time() directly with NO calendar
+# cutover (unlike _grammar.recency) — tests MUST freeze loops.lenses.sync.time
+# .time, unlike every other fixture in this module (old timestamps alone don't
+# make this one deterministic).
+SAMPLE_SYNC_INSTANCE = {
+    "ran": ["disk", "memory"],
+    "skipped": [
+        {"kind": "network", "last_run_ts": REF_TS - 300, "cadence_interval": 3600},
+        {"kind": "temp"},  # no timestamps — bare-kind fallback
+    ],
+    "fact_counts": {"disk": 3, "memory": 2},
+    "errors": [
+        {"kind": "battery", "observer": "system-monitor",
+         "payload": {"error": "sensor unavailable"}},
+    ],
+    "ticks": [
+        {"name": "disk", "ts": REF_TS, "payload": {"fs": "/dev/sda1"},
+         "origin": "disk.loop"},
+    ],
+}
+
+# ── sync: aggregation vertex (children breakdown) ────────────────────────────
+SAMPLE_SYNC_AGGREGATION = {
+    "ran": [], "skipped": [], "fact_counts": {}, "errors": [], "ticks": [],
+    "children": [
+        {
+            "name": "project", "ran": ["decision"], "fact_counts": {"decision": 4},
+            "skipped": [
+                {"kind": "thread", "last_run_ts": REF_TS - 600, "cadence_interval": 1800},
+            ],
+        },
+        {
+            "name": "meta", "ran": [], "fact_counts": {},
+            "skipped": [{"kind": "note"}],
+        },
+    ],
+}
+
+# ── sync: nothing configured ──────────────────────────────────────────────────
+SAMPLE_SYNC_EMPTY = {
+    "ran": [], "skipped": [], "fact_counts": {}, "errors": [], "ticks": [],
+}
+
+# ── ls / kind_stat: `ls <vertex> --kind <kind>` descent view ─────────────────
+# Matches fetch_kind_stat's real contract (commands/ls.py): epoch-float
+# earliest/latest/entry.latest, tiered entries. Deterministic without a clock
+# patch — REF_TS is well past recency()'s 30-day calendar cutover.
+SAMPLE_KIND_STAT = {
+    "vertex_name": "project", "kind": "decision", "fold_op": "by:topic",
+    "count": 42, "vertex_total": 100, "share": 42.0,
+    "earliest": REF_TS - 5 * 86400, "latest": REF_TS,
+    "distinct_keys": 3,
+    "entries": [
+        {"key": "design/sqlite", "count": 20, "latest": REF_TS,
+         "leaf": True, "tier": "high"},
+        {"key": "design/kdl", "count": 15, "latest": REF_TS - 86400,
+         "leaf": True, "tier": "mid"},
+        {"key": "design/misc", "count": 7, "latest": REF_TS - 2 * 86400,
+         "leaf": True, "tier": ""},
+    ],
+}
+
+# ── ls / kind_stat: --key prefix drill (one level deeper) ────────────────────
+SAMPLE_KIND_STAT_DRILLED = {
+    **SAMPLE_KIND_STAT,
+    "key_prefix": "design/",
+    "distinct_keys": 3,
+}
+
+# ── ls root (population): multi-vertex, local+config layering, shadow ───────
+# Matches _run_ls_root's real fetch contract (commands/population.py + the
+# per-vertex shape built by commands/vertices._extract_vertex_info /
+# _enrich_with_stats): local layer (cwd, always stat'd) shadowing a config
+# vertex of the same name, plus an aggregation and a hybrid vertex in config.
+SAMPLE_LS_ROOT = {
+    "local_vertices": [
+        {
+            "name": "project", "kind": "instance", "facts": 128,
+            "kind_count": 3,
+            "kind_stats": [
+                {"kind": "decision", "count": 80},
+                {"kind": "thread", "count": 30},
+                {"kind": "task", "count": 18},
+            ],
+            "mtime": REF_TS,
+            "loops": [],
+            "shadows": True,
+            "shadows_path": "/Users/kaygee/.config/loops/project/project.vertex",
+        },
+    ],
+    "vertices": [
+        {
+            "name": "project", "kind": "instance", "facts": 12,
+            "kind_count": 1,
+            "kind_stats": [{"kind": "note", "count": 12}],
+            "mtime": REF_TS - 86400,
+            "loops": [{"name": "note.loop", "folds": ["by:topic"]}],
+        },
+        {
+            "name": "meta", "kind": "aggregation", "facts": None,
+            "kind_count": 0, "kind_stats": [],
+            "mtime": None, "loops": [], "combine": ["project", "identity"],
+        },
+        {
+            "name": "identity", "kind": "hybrid", "facts": 40,
+            "kind_count": 2,
+            "kind_stats": [
+                {"kind": "trait", "count": 25}, {"kind": "peer", "count": 15},
+            ],
+            "mtime": REF_TS - 3600,
+            "loops": [{"name": "trait.loop", "folds": ["collect"]}],
+            "combine": ["external"],
+            "store": "identity.db", "discover": "./loops/",
+        },
+    ],
+    "cwd": "/Users/kaygee/Code/loops",
+    "expand_config": False,
+    "terse": False,
+}
+
 # ── fold: unfolded-kinds coverage signal ─────────────────────────────────────
 # A vertex with one declared kind plus undeclared kinds present in the store —
 # exercises the MINIMAL loose-render and the "Unfolded:" footer.

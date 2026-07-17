@@ -1,0 +1,4 @@
+project: 4 facts (decision)
+  ⏭ thread: fresh (last run 15m ago, cadence 30m)
+  ⏭ note
+No sources configured.

@@ -1,0 +1,7 @@
+local — cwd, verbs resolve these first
+  project  instance  128 facts  3 kinds  updated Jan 15  ⊃ decision · thread · task
+      ⊳ shadows ~/.config/loops/project/project.vertex
+      decision  80
+      thread    30
+      task      18
+config — ~/.config/loops · 3 vertices  sl ls --all

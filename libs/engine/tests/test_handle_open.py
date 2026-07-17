@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 from atoms import Fact
 from atoms.fold_state import FoldState
+from lang import parse_vertex_file
+from lang.document import DECL_KIND_DEFINED, genesis_payload
 
 from engine import vertex_fold
 from engine.handle import (
@@ -282,6 +284,113 @@ class TestInvalidation:
             _ = h.snapshot
         with pytest.raises(HandleClosed):
             h.refresh()
+
+
+class TestSemanticEpoch:
+    """A batch that carries a _decl fold-key change AND an affected domain row:
+    the domain row must fold under the NEW ontology, not the pre-batch one."""
+
+    def _adopt(self, tmp_path):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(_VERTEX_KDL.format(store=store))
+        import hashlib
+
+        ast = parse_vertex_file(vpath)
+        docs = genesis_payload(ast)["documents"]
+        s = SqliteStore(
+            path=store, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        signer = lambda o, d: hashlib.sha256(f"{o}:{d}".encode()).hexdigest()  # noqa: E731
+        lineage = s.absorb_genesis(docs, observer="kyle", fact_signer=signer)["lineage"]
+        s.close()
+        conn = sqlite3.connect(str(store))
+        gts = conn.execute(
+            "SELECT MIN(ts) FROM facts WHERE kind GLOB '_decl.*'"
+        ).fetchone()[0]
+        conn.close()
+        return vpath, store, lineage, gts
+
+    def test_decl_rekey_plus_domain_row_folds_under_new_key(self, tmp_path):
+        vpath, store, lineage, gts = self._adopt(tmp_path)
+        with open_vertex(vpath) as h:
+            # baseline ontology: decision folds by "topic"
+            assert _sections(h.snapshot.fold)["decision"].key_field == "topic"
+
+            # ONE burst: a _decl edit moving decision's key topic→name, then a
+            # domain decision fact under that new ontology.
+            conn = sqlite3.connect(str(store))
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                ("rekey", DECL_KIND_DEFINED, gts + 100, "kyle", "", json.dumps({
+                    "lineage": lineage, "subject": "decision",
+                    "payload": {"order": 0, "search": ["message"], "folds": [
+                        {"target": "items", "op": {"op": "by", "key_field": "name"}}]},
+                })),
+            )
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (gen_id(), "decision", gts + 200, "kyle", "", json.dumps(
+                    {"topic": "OLDKEY", "name": "NEWKEY", "message": "m"})),
+            )
+            conn.commit()
+            conn.close()
+
+            batch = h.refresh()
+            assert batch is not None
+            assert batch.ontology_changed is True
+            assert any(r.control for r in batch.receipts)  # the _decl receipt
+            sec = _sections(h.snapshot.fold)["decision"]
+            # folded under the NEW ontology: key is "name", not "topic"
+            assert sec.key_field == "name"
+            assert any(i.payload.get("name") == "NEWKEY" for i in sec.items)
+
+
+class TestSnapshotImmutability:
+    """The published snapshot is shared across readers; a reader must not be able
+    to mutate it through FoldState's otherwise-mutable nested dicts/lists."""
+
+    def test_nested_payload_and_scalars_are_read_only(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _append(store, "decision", 100, topic="a", message="alpha",
+                meta={"nested": "v"}, tags=["x", "y"])
+        with open_vertex(vpath) as h:
+            item = _sections(h.snapshot.fold)["decision"].items[0]
+            # top-level payload dict is read-only
+            with pytest.raises(TypeError):
+                item.payload["topic"] = "mutated"
+            # nested dict is read-only (deep freeze)
+            with pytest.raises(TypeError):
+                item.payload["meta"]["nested"] = "mutated"
+            # nested list became a tuple — no in-place mutation
+            assert isinstance(item.payload["tags"], tuple)
+            with pytest.raises(AttributeError):
+                item.payload["tags"].append("z")
+            # the handle's canonical copy is unchanged after the attempts
+            again = _sections(h.snapshot.fold)["decision"].items[0]
+            assert again.payload["topic"] == "a"
+            assert again.payload["meta"]["nested"] == "v"
+
+    def test_scalars_mapping_is_read_only(self, tmp_path):
+        # A section with a scalar fold target — its scalars dict must be frozen.
+        vpath = tmp_path / "s.vertex"
+        store = tmp_path / "s.db"
+        vpath.write_text(
+            f'name "s"\nstore "{store}"\n'
+            'loops {\n  event { fold { acc "sum" "v" } }\n}\n'
+            'observers { kyle { key "AAAA" } }\n'
+        )
+        SqliteStore(
+            path=store, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        ).close()
+        _append(store, "event", 100, v=3)
+        with open_vertex(vpath) as h:
+            sec = _sections(h.snapshot.fold)["event"]
+            if sec.scalars:  # sum target present
+                with pytest.raises(TypeError):
+                    sec.scalars["sum"] = 999
 
 
 class TestExports:

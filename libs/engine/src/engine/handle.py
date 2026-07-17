@@ -54,8 +54,9 @@ import sqlite3
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
 from engine.declaration import _read_own_lineage
@@ -63,7 +64,7 @@ from engine.witness import GENESIS_SENTINEL, WitnessPosition
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from atoms import Fact
-    from atoms.fold_state import FoldItem, FoldState
+    from atoms.fold_state import FoldItem, FoldSection, FoldState
 
     from engine.peer import Grant
     from engine.vertex import Receipt
@@ -435,6 +436,17 @@ class StoreProbe:
             (through,),
         ).fetchone()[0]
 
+    def fact_exists(self, fact_id: str, conn: sqlite3.Connection | None = None) -> bool:
+        """Whether a fact with EXACTLY this id is committed.
+
+        Attribution by identity — used by ``receive()`` to decide whether *our*
+        write landed after the live path raised. Position (rowid advance) cannot
+        tell our commit from a racing external one; a primary-key hit can."""
+        c = conn or self._live()
+        return c.execute(
+            "SELECT 1 FROM facts WHERE id = ? LIMIT 1", (fact_id,)
+        ).fetchone() is not None
+
     def identity(self) -> StoreIdentity:
         """File ``(device, inode)`` + own lineage — the store-replacement guard.
 
@@ -594,6 +606,56 @@ class ReceiveResult:
     change: ChangeBatch | None
 
 
+def _deep_freeze(obj):
+    """Recursively make a JSON-shaped value read-only: ``dict`` →
+    ``MappingProxyType``, ``list``/``tuple`` → ``tuple``, scalars unchanged.
+
+    A mutation attempt on any frozen level raises ``TypeError`` — the immutability
+    the frozen :class:`VertexSnapshot` promises but that ``FoldItem.payload`` /
+    ``FoldSection.scalars`` (plain dicts from ``json.loads``) would otherwise
+    leak to readers of the shared published snapshot.
+    """
+    if isinstance(obj, dict):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in obj.items()})
+    if isinstance(obj, (list, tuple)):
+        return tuple(_deep_freeze(v) for v in obj)
+    return obj
+
+
+def _freeze_item(item: FoldItem) -> FoldItem:
+    return replace(item, payload=_deep_freeze(item.payload))
+
+
+def _freeze_section(section: FoldSection) -> FoldSection:
+    return replace(
+        section,
+        items=tuple(_freeze_item(i) for i in section.items),
+        sections=tuple(_freeze_section(s) for s in section.sections),
+        scalars=_deep_freeze(section.scalars),
+    )
+
+
+def _freeze_fold(fold: FoldState) -> FoldState:
+    """Deep-freeze a reconstructed :class:`~atoms.fold_state.FoldState` at the
+    handle's snapshot boundary so a reader cannot mutate the shared published
+    copy through its still-mutable nested dicts (payload / scalars / unfolded).
+
+    Rebuilds items/sections/state with read-only mappings — engine-side only, so
+    ``vertex_fold``'s other (one-shot CLI) callers are untouched. Content
+    equality with an unfrozen fold is preserved (``MappingProxyType`` and
+    ``dict`` compare equal), so cold-read equality assertions still hold.
+    """
+    from atoms.fold_state import FoldState
+
+    return FoldState(
+        sections=tuple(_freeze_section(s) for s in fold.sections),
+        vertex=fold.vertex,
+        unfolded=_deep_freeze(fold.unfolded),
+        source_facts=_deep_freeze(fold.source_facts),
+        walked=fold.walked,
+    )
+
+
 def _fold_sections(fold: FoldState) -> dict:
     return {s.kind: s for s in fold.sections}
 
@@ -720,6 +782,10 @@ class VertexHandle:
         self._iterating = False
         # S3 lazily-built writer
         self._writer = None
+        # Test seam (default off): fires inside _refresh_locked right after the
+        # head+rows are captured, to deterministically inject a commit into the
+        # capture→publish window for the tail-loss regression test.
+        self._on_refresh_capture: Callable[[], None] | None = None
 
     # -- construction -------------------------------------------------------
 
@@ -853,9 +919,9 @@ class VertexHandle:
         if position is None or self._store_path is None:
             fold = vertex_fold(self._vertex_path)
             _ast, status = load_declaration_status(self._vertex_path)
-            return fold, status
+            return _freeze_fold(fold), status
         wf = vertex_fold(self._vertex_path, at=position)
-        return wf.fold, wf.status
+        return _freeze_fold(wf.fold), wf.status
 
     def _build_tick_query(self, ticks: list[StoredTick]) -> dict[str, StoredTick]:
         """name → latest tick (by append/rowid order) over the scanned ticks."""
@@ -864,14 +930,33 @@ class VertexHandle:
             out[t.name] = t  # ticks arrive rowid-ordered → last wins = latest
         return out
 
-    def _publish(self, snapshot: VertexSnapshot, *, fact_cursor: int, tick_cursor: int) -> None:
-        """Atomic swap of the published snapshot + cursors (all-or-nothing)."""
-        self._snapshot = snapshot
-        self._last_good = snapshot
+    def _publish(
+        self,
+        snapshot: VertexSnapshot,
+        *,
+        fact_cursor: int,
+        tick_cursor: int,
+        tick_query: dict[str, StoredTick] | None = None,
+    ) -> None:
+        """Publish ALL public state under the lock in one ordering — snapshot LAST.
+
+        Cursors, generation, the tick-query reference, and state are set BEFORE
+        ``_snapshot`` is assigned, so a reader that observes the new snapshot
+        never sees an older cursor / tick-query / generation (no torn read across
+        generations). The tick query is swapped by WHOLE reference (built off to
+        the side by the caller), never mutated in place, so an unlocked reader
+        sees the old or new complete map, never a half-update. Called under the
+        handle lock by every refresh/receive path; ``_bootstrap`` (open, single-
+        threaded) is the only unlocked caller.
+        """
         self._fact_cursor = fact_cursor
         self._tick_cursor = tick_cursor
         self._generation = snapshot.generation
+        if tick_query is not None:
+            self._tick_query = tick_query
         self._state = _OPEN
+        self._last_good = snapshot
+        self._snapshot = snapshot  # published LAST — the visible commit point
 
     def _ensure_usable(self) -> None:
         if self._state == _CLOSED:
@@ -903,19 +988,26 @@ class VertexHandle:
 
     @property
     def generation(self) -> int:
-        return self._generation
+        # Read from the atomically-published snapshot so it can never be seen
+        # ahead of the snapshot it labels (publish sets _generation before
+        # _snapshot; reading the snapshot's own field avoids that skew window).
+        snap = self._snapshot
+        return snap.generation if snap is not None else self._generation
 
     @property
     def tick_query(self) -> Mapping[str, StoredTick]:
         """Task→latest-tick map hydrated at open (one blessed epoch scan) and
         kept current by refresh. Serves ``ticked``'s reconcile, which needs
         name→latest-close over all history without re-scanning ticks from epoch
-        zero every cycle."""
-        return dict(self._tick_query)
+        zero every cycle. Read under the lock — the underlying map is swapped by
+        whole reference at publish, so this returns a consistent generation."""
+        with self._lock:
+            return dict(self._tick_query)
 
     def latest_tick(self, name: str) -> StoredTick | None:
         """The most recent tick for ``name`` from the hydrated tick query."""
-        return self._tick_query.get(name)
+        with self._lock:
+            return self._tick_query.get(name)
 
     # -- refresh ------------------------------------------------------------
 
@@ -982,6 +1074,13 @@ class VertexHandle:
         except sqlite3.OperationalError as exc:
             raise StoreBusy(f"store busy during refresh: {exc}") from exc
 
+        # Test seam: inject a commit into the capture→publish window. A write that
+        # lands here has a rowid ABOVE the captured head, so it is (correctly) NOT
+        # in this batch; the change iterator must re-detect and deliver it next
+        # loop rather than lose it (the tail-loss regression).
+        if self._on_refresh_capture is not None:
+            self._on_refresh_capture()
+
         new_file_stamp = self._compute_file_stamp()
         file_changed = new_file_stamp != self._file_stamp
         has_new_facts = bool(new_facts)
@@ -1008,15 +1107,17 @@ class VertexHandle:
     ) -> ChangeBatch:
         before = self._snapshot.position
         tick_events = self._tick_events(new_ticks)
-        for t in new_ticks:
-            self._tick_query[t.name] = t
+        new_tick_query = self._extended_tick_query(new_ticks)
         snap = VertexSnapshot(
             position=before, fold=self._snapshot.fold,
             generation=self._generation + 1,
             ontology_epoch=self._snapshot.ontology_epoch, tick_seq=thead.rowid,
             visible_domain_count=vdc, status=self._snapshot.status,
         )
-        self._publish(snap, fact_cursor=self._fact_cursor, tick_cursor=thead.rowid)
+        self._publish(
+            snap, fact_cursor=self._fact_cursor, tick_cursor=thead.rowid,
+            tick_query=new_tick_query,
+        )
         return ChangeBatch(
             before=before, after=before, receipt_ranges=(),
             receipts=(), ticks=tick_events, rows=(),
@@ -1049,8 +1150,7 @@ class VertexHandle:
         rows = _diff_folds(before_fold, fold)
         receipts = self._receipt_events(new_facts)
         tick_events = self._tick_events(new_ticks)
-        for t in new_ticks:
-            self._tick_query[t.name] = t
+        new_tick_query = self._extended_tick_query(new_ticks)
         receipt_ranges: tuple[tuple[str, int, int], ...] = ()
         if receipts:
             receipt_ranges = ((self._member_id(), receipts[0].seq, receipts[-1].seq),)
@@ -1061,7 +1161,10 @@ class VertexHandle:
             visible_domain_count=vdc, status=status,
         )
         self._file_stamp = new_file_stamp
-        self._publish(snap, fact_cursor=fhead.rowid, tick_cursor=thead.rowid)
+        self._publish(
+            snap, fact_cursor=fhead.rowid, tick_cursor=thead.rowid,
+            tick_query=new_tick_query,
+        )
         return ChangeBatch(
             before=before_pos, after=position, receipt_ranges=receipt_ranges,
             receipts=receipts, ticks=tick_events, rows=rows,
@@ -1138,6 +1241,15 @@ class VertexHandle:
                       ts=t.ts, payload=t.payload)
             for t in ticks
         )
+
+    def _extended_tick_query(self, new_ticks: list[StoredTick]) -> dict[str, StoredTick]:
+        """A NEW tick-query map (copy + folded new ticks) — never an in-place
+        mutation of the published one, so ``_publish`` can swap it by reference
+        without a reader observing a half-update."""
+        updated = dict(self._tick_query)
+        for t in new_ticks:
+            updated[t.name] = t  # rowid-ordered → last wins = latest
+        return updated
 
     # -- write-through (S3) -------------------------------------------------
 
@@ -1228,35 +1340,52 @@ class VertexHandle:
             #    boundary decision serializable — that is the deferred CAS).
             self._refresh_locked(force=False)
 
-            # 2. Operation-fresh signers on the held writer.
+            # 2. Operation-fresh signers on the held writer (which creates the
+            #    store on first write — open a probe now if it did).
             writer = self._ensure_writer()
             creds = self._credentials.for_write(self._vertex_path)
             self._apply_credentials(creds)
+            if (self._probe is None and self._store_path is not None
+                    and self._store_path.exists()):
+                self._probe = StoreProbe(self._store_path)
+                self._identity = self._probe.identity()
 
-            # 3. Capture the pre-write head to discriminate a committed fact from
-            #    a rejected one if the compound live op raises.
-            pre = self._probe.fact_head() if self._probe is not None else FactHead(0, "", 0)
+            # 3. Preselect the fact id so attribution is by IDENTITY, not inferred
+            #    from a rowid advance — under concurrent writers a rowid bump can
+            #    be a racing external commit, not ours (HIGH). We confirm this
+            #    exact id landed.
+            from engine.sqlite_store import gen_id
 
-            # 4. The live receive path — exactly once.
+            write_id = id_override if id_override is not None else gen_id()
+
+            # 4. The live receive path — exactly once, under our preselected id.
             try:
-                receipt = writer.receive(fact, grant, id_override=id_override)
+                receipt = writer.receive(fact, grant, id_override=write_id)
             except Exception as exc:
-                post = self._probe.fact_head() if self._probe is not None else pre
-                if post.rowid > pre.rowid:
-                    # Fact committed; a later step (boundary/tick persistence)
-                    # failed. Catch state up and name the committed fact.
+                # Did OUR exact id land? A primary-key hit distinguishes our
+                # committed fact from a racing external one.
+                if self._probe is not None and self._probe.fact_exists(write_id):
                     change = None
                     with suppress(Exception):  # pragma: no cover - defensive
                         change = self._refresh_locked(force=False)
-                    raise ReceiveCommittedError(post.fact_id, change, exc) from exc
+                    raise ReceiveCommittedError(write_id, change, exc) from exc
                 raise
 
             if not receipt.stored:
                 # Gate rejection — nothing written, no batch.
                 return ReceiveResult(receipt=receipt, change=None)
 
-            # 5. Canonicalize STATE: reconstruct at the new head, publish.
-            change = self._refresh_locked(force=False)
+            # 5. The fact is COMMITTED. From here, EVERY failure must surface as
+            #    ReceiveCommittedError carrying the committed id — a post-write
+            #    reconstruction that raised HandleInvalidated/StoreBusy would let
+            #    the caller retry and duplicate the fact (CRITICAL). Canonicalize
+            #    STATE by reconstructing at the new head, inside the guard.
+            try:
+                change = self._refresh_locked(force=False)
+            except Exception as exc:
+                raise ReceiveCommittedError(
+                    receipt.fact_id or write_id, None, exc
+                ) from exc
             return ReceiveResult(receipt=receipt, change=change)
 
     # -- change iteration (S2) ---------------------------------------------
@@ -1331,14 +1460,17 @@ class VertexHandle:
         """
         import time
 
-        if self._iterating:
-            raise HandleError(
-                f"handle for {self._vertex_path} already has an active change "
-                "iterator — one iterator per handle; use independent handles"
-            )
-        if self._state == _CLOSED:
-            raise HandleClosed(f"handle for {self._vertex_path} is closed")
-        self._iterating = True
+        # Test-and-set the single-iterator flag atomically under the lock so two
+        # threads racing changes() cannot both proceed (exactly one raises).
+        with self._lock:
+            if self._iterating:
+                raise HandleError(
+                    f"handle for {self._vertex_path} already has an active change "
+                    "iterator — one iterator per handle; use independent handles"
+                )
+            if self._state == _CLOSED:
+                raise HandleClosed(f"handle for {self._vertex_path} is closed")
+            self._iterating = True
         try:
             # Initial catch-up: deliver anything committed between the handle's
             # cursor (open / last refresh) and store head before following. The
@@ -1367,21 +1499,25 @@ class VertexHandle:
                     return
                 if cur != last:
                     # Coalesce: wait for quiet (reset on each new commit), cap
-                    # total wait at max_latency from first detection.
+                    # total wait at max_latency from first detection. Each sleep
+                    # is bounded by the remaining quiet/latency budget so a
+                    # deadline is not overshot by up to one poll_interval.
                     first = time.monotonic()
                     last_change = first
                     seen = cur
                     while True:
-                        time.sleep(poll_interval)
+                        now = time.monotonic()
+                        if now - last_change >= coalesce or now - first >= max_latency:
+                            break
+                        wait = min(poll_interval, coalesce - (now - last_change),
+                                   max_latency - (now - first))
+                        time.sleep(max(0.0, wait))
                         probe = self._safe_token()
                         if probe is _CLOSED:
                             return
-                        now = time.monotonic()
                         if probe != seen:
                             seen = probe
-                            last_change = now
-                        if now - last_change >= coalesce or now - first >= max_latency:
-                            break
+                            last_change = time.monotonic()
                     # Token before refresh (see the initial-catch-up note): a
                     # write racing the refresh must re-trip next loop, not be
                     # swallowed into `last`.
@@ -1396,15 +1532,21 @@ class VertexHandle:
                     if batch is not None:
                         yield batch
                 else:
-                    if (idle_timeout is not None
-                            and time.monotonic() - idle_start >= idle_timeout):
-                        idle_start = time.monotonic()
-                        if self._state == _OPEN:
-                            yield self._idle_batch()
-                    else:
+                    if idle_timeout is None:
                         time.sleep(poll_interval)
+                    else:
+                        # Bound the sleep by the remaining idle budget so the
+                        # deadline wake is not overshot by up to one interval.
+                        remaining = idle_timeout - (time.monotonic() - idle_start)
+                        if remaining <= 0:
+                            idle_start = time.monotonic()
+                            if self._state == _OPEN:
+                                yield self._idle_batch()
+                        else:
+                            time.sleep(min(poll_interval, remaining))
         finally:
-            self._iterating = False
+            with self._lock:
+                self._iterating = False
 
     async def changes_async(
         self,
@@ -1422,14 +1564,17 @@ class VertexHandle:
         import asyncio
         import time
 
-        if self._iterating:
-            raise HandleError(
-                f"handle for {self._vertex_path} already has an active change "
-                "iterator — one iterator per handle; use independent handles"
-            )
-        if self._state == _CLOSED:
-            raise HandleClosed(f"handle for {self._vertex_path} is closed")
-        self._iterating = True
+        # Test-and-set the single-iterator flag atomically under the lock so two
+        # threads racing changes() cannot both proceed (exactly one raises).
+        with self._lock:
+            if self._iterating:
+                raise HandleError(
+                    f"handle for {self._vertex_path} already has an active change "
+                    "iterator — one iterator per handle; use independent handles"
+                )
+            if self._state == _CLOSED:
+                raise HandleClosed(f"handle for {self._vertex_path} is closed")
+            self._iterating = True
         try:
             # Capture the change token BEFORE the refresh reads the store: a
             # write that lands between the refresh's head-read and the token
@@ -1457,16 +1602,18 @@ class VertexHandle:
                     last_change = first
                     seen = cur
                     while True:
-                        await asyncio.sleep(poll_interval)
+                        now = time.monotonic()
+                        if now - last_change >= coalesce or now - first >= max_latency:
+                            break
+                        wait = min(poll_interval, coalesce - (now - last_change),
+                                   max_latency - (now - first))
+                        await asyncio.sleep(max(0.0, wait))
                         probe = self._safe_token()
                         if probe is _CLOSED:
                             return
-                        now = time.monotonic()
                         if probe != seen:
                             seen = probe
-                            last_change = now
-                        if now - last_change >= coalesce or now - first >= max_latency:
-                            break
+                            last_change = time.monotonic()
                     # Token before refresh (see the initial-catch-up note): a
                     # write racing the refresh must re-trip next loop, not be
                     # swallowed into `last`.
@@ -1481,15 +1628,19 @@ class VertexHandle:
                     if batch is not None:
                         yield batch
                 else:
-                    if (idle_timeout is not None
-                            and time.monotonic() - idle_start >= idle_timeout):
-                        idle_start = time.monotonic()
-                        if self._state == _OPEN:
-                            yield self._idle_batch()
-                    else:
+                    if idle_timeout is None:
                         await asyncio.sleep(poll_interval)
+                    else:
+                        remaining = idle_timeout - (time.monotonic() - idle_start)
+                        if remaining <= 0:
+                            idle_start = time.monotonic()
+                            if self._state == _OPEN:
+                                yield self._idle_batch()
+                        else:
+                            await asyncio.sleep(min(poll_interval, remaining))
         finally:
-            self._iterating = False
+            with self._lock:
+                self._iterating = False
 
     def _safe_token(self):
         """Poll the change token, mapping a closed probe to the ``_CLOSED``

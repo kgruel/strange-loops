@@ -241,3 +241,51 @@ class TestCommittedFactError:
         conn.close()
         assert n == 1
         h.close()
+
+    def test_post_write_reconstruction_failure_is_committed_error(self, tmp_path, monkeypatch):
+        """CRITICAL: the mandatory post-write reconstruction sits INSIDE the
+        committed-fact guard — a reconstruction failure after a successful commit
+        must raise ReceiveCommittedError, never HandleInvalidated/StoreBusy (which
+        would make the caller retry and duplicate the fact)."""
+        vpath, store = _scaffold(tmp_path)
+        creds = _Creds()
+        h = open_vertex(vpath, credentials=creds)
+
+        import engine.handle as hm
+
+        def boom(self, position):  # fails only the post-write refresh (pre-write
+            raise RuntimeError("post-write reconstruction failure")  # is a no-op)
+
+        monkeypatch.setattr(hm.VertexHandle, "_reconstruct", boom)
+        with pytest.raises(ReceiveCommittedError) as ei:
+            h.receive(Fact.of("decision", "kyle", topic="a"))
+        assert ei.value.fact_id is not None
+        # committed exactly once — not retried
+        conn = sqlite3.connect(str(store))
+        (n,) = conn.execute("SELECT COUNT(*) FROM facts WHERE kind='decision'").fetchone()
+        conn.close()
+        assert n == 1
+        h.close()
+
+    def test_committed_error_names_our_id_under_racing_external(self, tmp_path, monkeypatch):
+        """HIGH: attribution is by IDENTITY (our preselected id), not inferred
+        from a rowid advance. An external commit landing at a HIGHER rowid after
+        ours must not be mis-named as the committed fact."""
+        vpath, store = _scaffold(tmp_path, kdl=_BOUNDARY_KDL)
+        creds = _Creds()
+        h = open_vertex(vpath, credentials=creds)
+
+        import engine.sqlite_store as ss
+
+        def boom_after_external(self, tick, *, enforce_floor=True):
+            # our fact already committed; a racing external commit lands at a
+            # higher rowid (would become head), THEN the tick step fails.
+            _append(store, "event.close", 999, topic="external")
+            raise RuntimeError("tick failure after an external race")
+
+        monkeypatch.setattr(ss.SqliteStore, "append_tick", boom_after_external)
+        with pytest.raises(ReceiveCommittedError) as ei:
+            h.receive(Fact.of("event.close", "kyle", v=1), id_override="OURID")
+        # names OUR id, not the external fact now at head
+        assert ei.value.fact_id == "OURID"
+        h.close()

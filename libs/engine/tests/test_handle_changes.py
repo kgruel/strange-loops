@@ -307,3 +307,103 @@ class TestAsync:
 
         b = asyncio.run(drive())
         assert b.idle_wake is True
+
+
+# ---------------------------------------------------------------------------
+# Iterator single-flag race (MEDIUM #5)
+# ---------------------------------------------------------------------------
+
+
+class TestIteratorRace:
+    def test_two_threads_racing_changes_exactly_one_wins(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _append(store, "decision", 100, topic="a")
+        with open_vertex(vpath) as h:
+            results: list = []
+            barrier = threading.Barrier(2)
+
+            def run():
+                barrier.wait()  # start both threads together
+                try:
+                    gen = h.changes(**_FAST, idle_timeout=0.1)
+                    next(gen)  # forces the generator's test-and-set to run
+                    results.append("ok")
+                    gen.close()
+                except HandleError:
+                    results.append("refused")
+
+            threads = [threading.Thread(target=run, daemon=True) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(5.0)
+            # exactly one acquired the single iterator; the other was refused
+            assert sorted(results) == ["ok", "refused"]
+
+
+# ---------------------------------------------------------------------------
+# Tail-loss regression (LOW #7) — a commit injected into the capture→publish
+# window must be delivered next loop, never swallowed into the watermark.
+# ---------------------------------------------------------------------------
+
+
+class TestTailLoss:
+    def test_commit_injected_during_refresh_is_not_lost_sync(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        with open_vertex(vpath) as h:
+            injected = {"id": None, "fired": False}
+
+            def inject():
+                if not injected["fired"]:
+                    injected["fired"] = True
+                    injected["id"] = _append(store, "decision", 200, topic="injected")
+
+            h._on_refresh_capture = inject
+            first_id = _append(store, "decision", 100, topic="first")
+            seen: list[str] = []
+            done = threading.Event()
+
+            def consume():
+                try:
+                    for b in h.changes(**_FAST):
+                        seen.extend(r.fact_id for r in b.receipts)
+                        if injected["id"] and injected["id"] in seen:
+                            break
+                finally:
+                    done.set()
+
+            t = threading.Thread(target=consume, daemon=True)
+            t.start()
+            done.wait(5.0)
+            assert first_id in seen
+            # the commit that landed AFTER head-capture, DURING refresh, is
+            # delivered on the next loop — not lost to the watermark.
+            assert injected["id"] in seen
+
+    def test_commit_injected_during_refresh_is_not_lost_async(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+
+        async def drive():
+            with open_vertex(vpath) as h:
+                injected = {"id": None, "fired": False}
+
+                def inject():
+                    if not injected["fired"]:
+                        injected["fired"] = True
+                        injected["id"] = _append(store, "decision", 200, topic="inj")
+
+                h._on_refresh_capture = inject
+                first_id = _append(store, "decision", 100, topic="first")
+                seen: list[str] = []
+
+                async def pump():
+                    async for b in h.changes_async(**_FAST):
+                        seen.extend(r.fact_id for r in b.receipts)
+                        if injected["id"] and injected["id"] in seen:
+                            return
+                await asyncio.wait_for(pump(), timeout=5.0)
+                return first_id, injected["id"], seen
+
+        first_id, inj_id, seen = asyncio.run(drive())
+        assert first_id in seen
+        assert inj_id in seen

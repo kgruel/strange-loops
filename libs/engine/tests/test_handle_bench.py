@@ -9,11 +9,13 @@ not for S0-S3 at realistic sizes.
 
 Measured on this checkout (reference only, not asserted tightly):
   open (10k cold reconstruct):            ~39 ms
-  refresh-after-one-append (full, 10k):   p50 ~22 ms  p95 ~24 ms
-  no-change refresh:                      ~0.26 ms
-  data_version probe:                     ~1.2 us
+  refresh-after-one-append (full, 10k):   p95 ~24 ms  (real p95 over 30 samples)
+  no-change refresh:                      ~0.26 ms  (mean over 50)
+  data_version probe:                     ~1.2 us   (mean over 500)
 
-Assertions carry a wide margin so the gate is proven without CI flakiness.
+Assertions carry a wide margin so the gate is proven without CI flakiness. The
+refresh gate takes a genuine p95 over 30 samples (not a 1-of-8 near-max dressed
+up as a percentile); the probe/no-change gates are honestly labelled as means.
 Scratch stores in tmp_path only.
 """
 
@@ -74,19 +76,20 @@ def _append_one(store: Path, i: int) -> None:
 
 def test_refresh_after_one_append_under_gate_at_10k(tmp_path):
     vpath, store = _build_10k(tmp_path)
+    _SAMPLES = 30  # enough for an honest p95 (index 28 of 30, not a 1-of-8 max)
     with open_vertex(vpath) as h:
         assert h.snapshot.visible_domain_count == _N
         times = []
-        for i in range(8):
+        for i in range(_SAMPLES):
             _append_one(store, i)
             t0 = time.perf_counter()
             batch = h.refresh()
             times.append((time.perf_counter() - t0) * 1000.0)
             assert batch is not None and batch.replay_mode == "full"
         times.sort()
-        p95 = times[int(len(times) * 0.95) - 1]
+        p95 = times[int(len(times) * 0.95)]  # real p95 over 30 samples
         # Full-reconstruction path (no checkpoint rung 4) at 10k is ~24ms p95;
-        # a 10x margin proves the 250ms ordinary-refresh gate holds here.
+        # a wide margin proves the 250ms ordinary-refresh gate holds here.
         assert p95 < 250.0, f"refresh p95={p95:.1f}ms exceeded the 250ms gate"
 
 

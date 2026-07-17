@@ -18,10 +18,13 @@ import sqlite3
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .declaration import load_declaration
+from .declaration import load_declaration, load_declaration_status
 from .observer import observer_matches
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .witness import WitnessPosition
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1207,7 @@ def vertex_facts(
     *,
     include_internal: bool = False,
     as_of: float | None = None,
+    at: WitnessPosition | None = None,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
 
@@ -1218,19 +1222,39 @@ def vertex_facts(
     should set this, else the ambient exclusion filters out the very kind
     being asked for.
 
-    ``as_of`` (SPEC §9.3, ontology-as-of) resolves the vertex's declaration
-    at a historical ``ts`` cutoff instead of at head — the equal-cursors
-    default is ``as_of = until_ts``, so a windowed read interprets its facts
-    under the ontology in force at the window's upper bound. ``None`` = head
-    (identical to pre-S5 behavior). Only the store-resolution and reserved-
-    namespace exclusion ride the cutoff here; the fact time window itself is
-    ``since_ts..until_ts`` as before.
+    Two mutually-exclusive historical selectors (A8):
+
+    - ``as_of`` (SPEC §9.3, ontology-as-of) resolves the declaration at a
+      historical ``ts`` cutoff — equal-cursors default ``as_of = until_ts``.
+      Only store-resolution and the reserved-namespace exclusion ride it; the
+      fact window stays ``since_ts..until_ts``.
+    - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0 cursor) caps the
+      result to the witness prefix ``rowid <= at.rowid`` AND resolves ontology
+      from that prefix — the facts the store had *received* at the position,
+      inside the time window. Per-store only: refused on aggregates
+      (:class:`~engine.witness.WitnessAggregateUnsupported`) — witness order is
+      per-member (A1/A9).
+
+    ``None`` for both = head (identical to pre-S5 behavior).
     """
     from .store_reader import StoreReader
 
-    ast = load_declaration(vertex_path, as_of=as_of)
+    if as_of is not None and at is not None:
+        raise ValueError(
+            "vertex_facts: as_of and at are mutually exclusive (A8)"
+        )
+
+    ast = load_declaration(vertex_path, as_of=as_of, at=at)
 
     if ast.combine is not None or ast.discover is not None:
+        if at is not None:
+            from .witness import WitnessAggregateUnsupported
+
+            raise WitnessAggregateUnsupported(
+                "vertex_facts: a witness position is per-store and cannot select "
+                "over a combine/discover aggregate — address a member store, or "
+                "use as_of for a uniform event-time projection"
+            )
         facts = _combined_facts(
             ast, vertex_path, since_ts, until_ts, kind,
             include_internal=include_internal,
@@ -1247,7 +1271,9 @@ def vertex_facts(
         else:
             with StoreReader(store_path) as reader:
                 facts = reader.facts_between(
-                    since_ts, until_ts, kind=kind, include_internal=include_internal
+                    since_ts, until_ts, kind=kind,
+                    include_internal=include_internal,
+                    at_rowid=at.rowid if at is not None else None,
                 )
 
     if observer:

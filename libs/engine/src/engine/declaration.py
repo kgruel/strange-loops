@@ -72,7 +72,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lang.document import (
     DECL_GENESIS,
@@ -83,6 +83,9 @@ from lang.document import (
     documents_to_vertex,
     is_internal_kind,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from engine.witness import WitnessPosition
 
 # ---------------------------------------------------------------------------
 # Tombstone vocabulary: which "*-defined" subject a "*-retired/-removed" row
@@ -210,17 +213,34 @@ def resolve_declaration_documents(
     store_path: Path,
     *,
     as_of: float | None = None,
+    at: WitnessPosition | None = None,
     timeout: float = 5.0,
     on_locked: str = "swallow",
 ) -> list[dict[str, Any]] | None | Unhistorized:
     """Fold the store's declaration events into a document set.
 
+    Two mutually-exclusive selectors (A8):
+
+    - ``as_of`` — the shipped **event-time projection** (``ts <= as_of``): an
+      explicitly-requested analytical mode. Its same-``ts`` inclusive tie-break
+      is unchanged (module docstring).
+    - ``at`` — a **witness prefix** (:class:`~engine.witness.WitnessPosition`):
+      the ``_decl`` rows this store had *received* at that position
+      (``rowid <= at.rowid``), replayed in ``(ts, id)`` order. Late arrivals do
+      not rewrite an earlier position; this is the §9.3 cursor default. A
+      position strictly inside an atomic receipt group is refused
+      (:class:`~engine.witness.MidReceiptGroupPosition`) — the guard runs at this
+      engine selector, not only in CLI address parsing.
+
+    Passing both raises ``ValueError``; passing neither is a head read.
+
     Returns:
 
     - ``None`` — the store has no own ``_decl.genesis`` (pre-genesis; the file
       is authoritative), or is not a usable SQLite store.
-    - :class:`Unhistorized` — an own genesis exists but is later than ``as_of``;
-      carries the genesis document set as the earliest known state.
+    - :class:`Unhistorized` — an own genesis exists but is later than the cutoff
+      (``as_of``-earlier, or ``at`` before the genesis *rowid*); carries the
+      genesis document set as the earliest known state.
     - ``list[dict]`` — the folded documents (``{"kind", "subject", "payload"}``
       each), ready for :func:`~lang.document.documents_to_vertex`.
 
@@ -231,26 +251,35 @@ def resolve_declaration_documents(
        whose row is missing raises :class:`DeclarationResolutionError`.
        Compat without a marker: zero rows → ``None``; exactly one → self;
        more → :class:`AmbiguousLineage`.
-    2. If ``as_of`` is set and the genesis is later → :class:`Unhistorized`
-       carrying the genesis documents (the SPEC §9.2 earliest-known floor).
+    2. If the genesis is later than the cutoff → :class:`Unhistorized` carrying
+       the genesis documents (the SPEC §9.2 earliest-known floor). For ``at`` the
+       comparison is by genesis *rowid* (witness order), not ``ts`` (A13).
     3. Check ``protocol`` ≤ supported → else :class:`UnsupportedProtocol`.
     4. Seed the document dict (keyed by ``(kind, subject)``) from the genesis
        payload's ``documents``.
     5. Overlay every LATER ``_decl.*`` row that is self-lineage-scoped
-       (``payload["lineage"] == genesis id``) and within ``as_of``:
-       ``*-defined`` replaces its ``(kind, subject)`` document (Latest wins by
-       replay order); a tombstone removes the paired ``*-defined`` subject;
-       ``_decl.genesis`` and unknown ``_decl.*`` kinds are skipped.
+       (``payload["lineage"] == genesis id``) and within the cutoff
+       (``ts <= as_of`` or ``rowid <= at.rowid``): ``*-defined`` replaces its
+       ``(kind, subject)`` document (Latest wins by replay order); a tombstone
+       removes the paired ``*-defined`` subject; ``_decl.genesis`` and unknown
+       ``_decl.*`` kinds are skipped.
     6. Return the surviving documents in insertion order (definition order,
        modulo later replacements keeping position).
     """
+    if as_of is not None and at is not None:
+        raise ValueError(
+            "resolve_declaration_documents: as_of and at are mutually exclusive "
+            "(A8) — a read is either event-time-projected or witness-cursor'd, "
+            "never both"
+        )
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
         return None
     try:
         try:
             genesis_rows = conn.execute(
-                "SELECT id, ts, payload FROM facts WHERE kind = ? ORDER BY ts, id",
+                "SELECT id, rowid, ts, payload FROM facts WHERE kind = ? "
+                "ORDER BY ts, id",
                 (DECL_GENESIS,),
             ).fetchall()
         except sqlite3.Error as e:
@@ -275,7 +304,9 @@ def resolve_declaration_documents(
                     "matching _decl.genesis row — the store's identity record "
                     "is corrupt (marker without its genesis)"
                 )
-            genesis_id, genesis_ts, genesis_payload_text = selected[0]
+            genesis_id, genesis_rowid, genesis_ts, genesis_payload_text = (
+                selected[0]
+            )
         else:
             # No marker + genesis rows present. Facts alone CANNOT distinguish
             # a pre-marker own genesis from a merged-foreign one — a singleton
@@ -301,6 +332,26 @@ def resolve_declaration_documents(
 
         if as_of is not None and genesis_ts > as_of:
             return Unhistorized(list(genesis_payload.get("documents", ())))
+        if at is not None and genesis_rowid > at.rowid:
+            # Witness-mode pre-genesis: the position predates the genesis ROW
+            # (A13 — compared by rowid, not ts). Same genesis floor, honestly
+            # marked unhistorized upstream.
+            return Unhistorized(list(genesis_payload.get("documents", ())))
+
+        # Receipt-group guard (A2) at the ONTOLOGY seam: a position strictly
+        # inside an atomic edit ceremony would fold a half-applied ontology.
+        # Enforced here (not only in the CLI address resolver) so a hand-built
+        # position handed straight to the engine cannot bypass it.
+        if at is not None:
+            from engine.witness import MidReceiptGroupPosition, receipt_group_span
+
+            span = receipt_group_span(conn, at.rowid)
+            if span is not None:
+                raise MidReceiptGroupPosition(
+                    f"witness position rowid {at.rowid} lands inside the atomic "
+                    f"receipt group at rowids {span[0]}..{span[1]} — refusing to "
+                    "resolve a partial declaration ceremony"
+                )
 
         # Seed from the genesis document set, keyed by (kind, subject).
         docs: dict[tuple[str, str], dict[str, Any]] = {}
@@ -311,12 +362,12 @@ def resolve_declaration_documents(
         # genesis is confirmed — never on a pre-genesis store (the hot path),
         # where step 1 already returned None.
         overlay_rows = conn.execute(
-            "SELECT id, kind, ts, payload FROM facts "
+            "SELECT id, rowid, kind, ts, payload FROM facts "
             "WHERE kind GLOB '_decl.*' AND kind <> ? ORDER BY ts, id",
             (DECL_GENESIS,),
         ).fetchall()
 
-        for _row_id, kind, _ts, payload_text in overlay_rows:
+        for _row_id, _rowid, kind, _ts, payload_text in overlay_rows:
             if not is_internal_kind(kind):  # defensive; GLOB already scopes
                 continue
             # Inclusive cutoff (`> as_of`, not `>= as_of`): an edit AT `as_of`
@@ -324,6 +375,12 @@ def resolve_declaration_documents(
             # edit sharing an exact `ts` fold the fact under the NEW ontology —
             # the deterministic ts-axis tie-break (module docstring).
             if as_of is not None and _ts > as_of:
+                continue
+            # Witness cutoff: the row must be WITHIN the received prefix
+            # (rowid <= position). Selection is by witness order; replay order
+            # stays (ts, id) — the SELECT above. A backdated edit that arrived
+            # after the position sorts early here but is excluded by its rowid.
+            if at is not None and _rowid > at.rowid:
                 continue
             try:
                 payload = json.loads(payload_text)
@@ -366,6 +423,7 @@ def load_declaration_status(
     vertex_path: Path,
     *,
     as_of: float | None = None,
+    at: WitnessPosition | None = None,
     store_timeout: float = 5.0,
     on_locked: str = "swallow",
 ) -> tuple[Any, str]:
@@ -374,13 +432,20 @@ def load_declaration_status(
     The bare seam erases the ``Unhistorized`` distinction (every caller gets
     an AST); surfaces that RENDER a historical read need to say honestly which
     era the ontology came from — this is that channel (closing re-review #2).
+
+    ``at`` (a witness position) is the mutually-exclusive sibling of ``as_of``
+    (A8). On a store that never opened a lineage — the dominant live case — a
+    witness read still reports ``"file-pre-genesis"`` (N3): the ontology came
+    from the CURRENT file, not from history, and the status says so rather than
+    silently retro-claiming.
     """
     from lang import parse_vertex_file
 
+    historical = as_of is not None or at is not None
     file_ast = parse_vertex_file(vertex_path)
     store_field = file_ast.store
     if store_field is None:
-        if as_of is not None and (
+        if historical and (
             file_ast.combine is not None or file_ast.discover is not None
         ):
             return file_ast, "aggregate-head"
@@ -393,7 +458,7 @@ def load_declaration_status(
         return file_ast, "file-pre-genesis"
 
     docs = resolve_declaration_documents(
-        store_path, as_of=as_of, timeout=store_timeout, on_locked=on_locked,
+        store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
     )
     if isinstance(docs, list):
         resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
@@ -410,6 +475,7 @@ def load_declaration(
     vertex_path: Path,
     *,
     as_of: float | None = None,
+    at: WitnessPosition | None = None,
     store_timeout: float = 5.0,
     on_locked: str = "swallow",
 ):
@@ -441,7 +507,8 @@ def load_declaration(
     AST but erases the provenance.
     """
     ast, _status = load_declaration_status(
-        vertex_path, as_of=as_of, store_timeout=store_timeout, on_locked=on_locked,
+        vertex_path, as_of=as_of, at=at,
+        store_timeout=store_timeout, on_locked=on_locked,
     )
     return ast
 

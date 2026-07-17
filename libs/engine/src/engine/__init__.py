@@ -92,7 +92,18 @@ __all__ = [
     "vertex_summary",
     # Declaration resolver (store-backed declaration seam)
     "load_declaration",
+    "load_declaration_status",
     "resolve_declaration_documents",
+    # Witness positions (read-path temporal cursor)
+    "WitnessPosition",
+    "WitnessFold",
+    "TickAnchor",
+    "resolve_witness_position",
+    "receipt_group_span",
+    "WitnessResolutionError",
+    "UnknownWitnessHandle",
+    "MidReceiptGroupPosition",
+    "WitnessAggregateUnsupported",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -171,9 +182,23 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "vertex_ticks": ("engine.vertex_reader", "vertex_ticks"),
     # Declaration resolver
     "load_declaration": ("engine.declaration", "load_declaration"),
+    "load_declaration_status": ("engine.declaration", "load_declaration_status"),
     "resolve_declaration_documents": (
         "engine.declaration",
         "resolve_declaration_documents",
+    ),
+    # Witness positions (read-path temporal cursor)
+    "WitnessPosition": ("engine.witness", "WitnessPosition"),
+    "WitnessFold": ("engine.witness", "WitnessFold"),
+    "TickAnchor": ("engine.witness", "TickAnchor"),
+    "resolve_witness_position": ("engine.witness", "resolve_witness_position"),
+    "receipt_group_span": ("engine.witness", "receipt_group_span"),
+    "WitnessResolutionError": ("engine.witness", "WitnessResolutionError"),
+    "UnknownWitnessHandle": ("engine.witness", "UnknownWitnessHandle"),
+    "MidReceiptGroupPosition": ("engine.witness", "MidReceiptGroupPosition"),
+    "WitnessAggregateUnsupported": (
+        "engine.witness",
+        "WitnessAggregateUnsupported",
     ),
 }
 

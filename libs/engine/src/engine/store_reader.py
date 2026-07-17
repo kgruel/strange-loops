@@ -430,6 +430,7 @@ class StoreReader:
         kind: str | None = None,
         *,
         include_internal: bool = False,
+        at_rowid: int | None = None,
     ) -> list[dict]:
         """Facts within a time range, optionally filtered by kind.
 
@@ -439,32 +440,48 @@ class StoreReader:
         that resolve an explicit user-requested internal ``kind`` should set
         this, since the ambient exclusion would otherwise filter out the very
         kind being asked for.
+
+        ``at_rowid`` caps the result to the witness prefix ``rowid <= at_rowid``
+        (0.8.0 temporal cursor, A1 facts-only) — rows the store had *received*
+        at that position. It composes with the time window: a witnessed read of
+        a range returns the facts in ``[since, until]`` that were present at the
+        cursor. Resolve a :class:`~engine.witness.WitnessPosition` for the rowid;
+        never hand a raw id here (ids are never ordered — A3).
         """
         internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
+        rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
+        rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
         if kind is not None:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
                 "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?)"
-                f"{internal_clause} ORDER BY ts",
-                (since_ts, until_ts, kind, kind + ".%"),
+                f"{internal_clause}{rowid_clause} ORDER BY ts",
+                (since_ts, until_ts, kind, kind + ".%", *rowid_param),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                f"WHERE ts >= ? AND ts <= ?{internal_clause} ORDER BY ts",
-                (since_ts, until_ts),
+                f"WHERE ts >= ? AND ts <= ?{internal_clause}{rowid_clause} "
+                "ORDER BY ts",
+                (since_ts, until_ts, *rowid_param),
             ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
 
-    def facts_by_kind(self, kind: str) -> list[dict]:
+    def facts_by_kind(self, kind: str, *, at_rowid: int | None = None) -> list[dict]:
         """All facts for a kind, ordered by insertion (rowid ASC).
 
         Used for fold replay — facts must be in causal order.
+
+        ``at_rowid`` caps to the witness prefix (``rowid <= at_rowid``): the fold
+        reconstructs from the rows the store had received at that position, still
+        replayed in ``(ts, id)`` order (0.8.0 fold-at). ``None`` is a head read.
         """
+        rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
+        rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            "WHERE kind = ? ORDER BY ts, id",
-            (kind,),
+            f"WHERE kind = ?{rowid_clause} ORDER BY ts, id",
+            (kind, *rowid_param),
         ).fetchall()
         return [
             {

@@ -27,7 +27,7 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
     # --as-of (SPEC §9.3): rewind read to a historical anchor — facts up to it,
     # AND the ontology (fold keys/kinds) resolved at the SAME anchor
     # (equal-cursors default). Accepts a duration ("ago") or absolute epoch/ISO.
-    # --ontology-as-of is RESERVED for the future unequal-cursors escape (0.7.0)
+    # --ontology-as-of is RESERVED for the future unequal-cursors escape (0.8.0)
     # and deliberately NOT wired here — passing it errors as unknown.
     pre.add_argument("--as-of", default=None, dest="as_of")
     pre.add_argument("--lens", default=None)

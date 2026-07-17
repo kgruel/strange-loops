@@ -1497,7 +1497,7 @@ def vertex_search(
             built at head; ``until`` post-hoc window-filters the result set, so
             a historical search is honest about *which facts* fall in the
             window but the *index* it queries is the head kind set. A fully
-            rewound index is 0.7.0 work.
+            rewound index is 0.8.0 work.
 
     Returns:
         Matching facts, newest first. Same shape as vertex_facts.

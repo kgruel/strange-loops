@@ -70,7 +70,7 @@ Absent, the anchor is *now* and the ontology is head (current behavior, exactly)
   rewind (§9.3 permits non-critical state to follow the reading session). FTS
   content search (`--match`) is a head-built index; a historical result set is
   window-filtered but queries the head kind set. `--ontology-as-of` (unequal
-  cursors — deliberate reinterpretation) is reserved for 0.7.0, not yet wired.
+  cursors — deliberate reinterpretation) is reserved for 0.8.0, not yet wired.
 
 ### Query & transform grammar
 

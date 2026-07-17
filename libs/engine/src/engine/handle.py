@@ -56,13 +56,16 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Mapping
+from typing import TYPE_CHECKING, Callable, Iterator, Mapping, Protocol
 
 from engine.declaration import _read_own_lineage
 from engine.witness import GENESIS_SENTINEL, WitnessPosition
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from atoms import Fact
     from atoms.fold_state import FoldItem, FoldState
+    from engine.peer import Grant
+    from engine.vertex import Receipt
 
 # ---------------------------------------------------------------------------
 # Error hierarchy — typed failures, never a bare Exception the caller can't
@@ -141,6 +144,40 @@ class ReceiveCommittedError(HandleError):
             f"fact {fact_id!r} committed but the boundary/tick step failed: "
             f"{cause!r} — the fact landed; do not retry as uncommitted"
         )
+
+
+# ---------------------------------------------------------------------------
+# S3 write credentials — operation-fresh signers, never frozen at handle build.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WriteCredentials:
+    """The signers for one write, fetched fresh at the moment of the write.
+
+    ``tick_signer`` (commitment digest -> signature) and ``fact_signer``
+    (observer, content digest -> signature | None) are the same opaque callables
+    the store constructor takes — but supplied per-operation rather than cached
+    for the handle's lifetime. ``None`` on either = unsigned for that axis
+    (honest NULL, a pre-signature or per-observer era).
+    """
+
+    tick_signer: Callable[[str], str] | None = None
+    fact_signer: Callable[[str, str], str | None] | None = None
+
+
+class CredentialProvider(Protocol):
+    """Supplies :class:`WriteCredentials` fresh for each write.
+
+    Operation-fresh lookup is mandatory: caching signer callables for the handle
+    lifetime wedges a process after key creation or rotation (tasked's
+    ``substrate.py`` lesson — a handle-lifetime cache froze key material at
+    startup; a key minted/rotated after start left ``tick_signer`` ``None`` →
+    ``UnsignedTickInSignedEra`` on every boundary until restart). The handle
+    calls ``for_write`` at the moment of each write, never at open.
+    """
+
+    def for_write(self, vertex: Path) -> WriteCredentials: ...
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +577,22 @@ class ChangeBatch:
     oversized_group: bool
     generation: int
     idle_wake: bool = False  # S2: a deadline/idle wake with no store change
+
+
+@dataclass(frozen=True)
+class ReceiveResult:
+    """The result of a write through the handle (S3).
+
+    ``receipt`` is the existing write :class:`~engine.vertex.Receipt` (fact_id /
+    tick / stored) — unchanged. ``change`` is the post-write
+    :class:`ChangeBatch` canonicalizing the new state (the local write plus any
+    external write that raced in during catch-up), or ``None`` when ingress was
+    rejected/not stored. Post-write reconstruction canonicalizes STATE, not
+    ADMISSION — see :meth:`VertexHandle.receive`.
+    """
+
+    receipt: "Receipt"
+    change: ChangeBatch | None
 
 
 def _fold_sections(fold: "FoldState") -> dict:
@@ -1057,6 +1110,14 @@ class VertexHandle:
         self._ast = ast
         self._specs = compile_vertex(ast)
         self._file_stamp = new_file_stamp
+        # The held writer's compiled runtime is stale under a new ontology —
+        # discard it so the next receive() rebuilds against the current epoch.
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+            self._writer = None
 
     def _member_id(self) -> str:
         """The store's stable member id for receipt ranges (single-store: its
@@ -1080,6 +1141,128 @@ class VertexHandle:
                       ts=t.ts, payload=t.payload)
             for t in ticks
         )
+
+    # -- write-through (S3) -------------------------------------------------
+
+    def _ensure_writer(self):
+        """Build (once) and hold the writer program for this handle's store.
+
+        The writer is the single held runtime that fires and persists
+        boundaries; ``receive`` refreshes its signers per write. It is discarded
+        and rebuilt on an ontology change (see ``_recompile``)."""
+        if self._writer is not None:
+            return self._writer
+        from engine.program import load_vertex_program
+
+        self._writer = load_vertex_program(self._vertex_path)
+        return self._writer
+
+    def _apply_credentials(self, creds: WriteCredentials) -> None:
+        """Install operation-fresh signers on the held writer store, per write.
+
+        Setting the store's signer fields per operation (rather than caching
+        them at construction) is the "operation-fresh provider" the contract
+        requires — it directly answers the handle-lifetime signer wedge."""
+        store = getattr(self._writer.vertex, "_store", None)
+        if store is not None:
+            store._tick_signer = creds.tick_signer
+            store._fact_signer = creds.fact_signer
+
+    def receive(
+        self,
+        fact: "Fact",
+        grant: "Grant | None" = None,
+        *,
+        expect: object | None = None,
+        id_override: str | None = None,
+    ) -> ReceiveResult:
+        """Write a fact through the held handle, without a full reload (S3).
+
+        Sequence: catch the handle up (so the write sees external commits),
+        fetch operation-fresh signers from the :class:`CredentialProvider` at the
+        moment of the write, call the live receive path **exactly once** (the
+        writer is the only party that fires and persists a boundary), then
+        reconstruct the canonical ``(ts, id)`` snapshot at the new head and
+        return a :class:`ReceiveResult`. A locally backdated fact therefore
+        cannot leave the published state in live-tail order — it folds at its
+        ``(ts, id)`` position on reconstruction.
+
+        **Post-write reconstruction canonicalizes STATE, not ADMISSION.** A
+        pre-refresh does not make the boundary/admission decision serializable:
+        another writer can commit between catch-up and this append, and this
+        handle's grant/observer/reserved-namespace/route/boundary gating was
+        evaluated against the pre-write compile. The post-write rebuild repairs
+        the published *state* but does not and cannot re-adjudicate the
+        *admission* of the already-committed fact. Closing that window is the
+        sibling conditional-emit/CAS + fact-plus-tick transaction; this handle
+        must not claim to have done so (ticked's close lock remains until then).
+
+        ``expect`` is the named CAS seam — it is REFUSED
+        (:class:`ConditionalEmitUnsupported`) rather than faked, because
+        implementing refresh→compare→append would not be CAS and is forbidden.
+
+        Gate rejection returns the existing ``Receipt(stored=False)`` and
+        ``change=None``. If the fact commits but boundary/tick persistence then
+        raises, the handle catches up and raises
+        :class:`ReceiveCommittedError` — the caller MUST know the fact landed;
+        retrying as uncommitted would duplicate data.
+        """
+        with self._lock:
+            self._ensure_usable()
+            if expect is not None:
+                raise ConditionalEmitUnsupported(
+                    "receive(expect=...) is the conditional-emit/CAS seam — "
+                    "refused rather than faked. Post-write reconstruction "
+                    "canonicalizes STATE, not ADMISSION; a serializable "
+                    "expectation is the sibling CAS design, not this handle."
+                )
+            if self._store_path is None:
+                raise ReadOnlyAggregate(
+                    "receive() on a storeless handle — write-target resolution "
+                    "is an app/Digest concern, not the handle's"
+                )
+            if self._credentials is None:
+                raise HandleError(
+                    f"handle for {self._vertex_path} is read-only — open with "
+                    "credentials= to write through it"
+                )
+
+            # 1. Catch up so the write sees external commits (does not make the
+            #    boundary decision serializable — that is the deferred CAS).
+            self._refresh_locked(force=False)
+
+            # 2. Operation-fresh signers on the held writer.
+            writer = self._ensure_writer()
+            creds = self._credentials.for_write(self._vertex_path)
+            self._apply_credentials(creds)
+
+            # 3. Capture the pre-write head to discriminate a committed fact from
+            #    a rejected one if the compound live op raises.
+            pre = self._probe.fact_head() if self._probe is not None else FactHead(0, "", 0)
+
+            # 4. The live receive path — exactly once.
+            try:
+                receipt = writer.receive(fact, grant, id_override=id_override)
+            except Exception as exc:
+                post = self._probe.fact_head() if self._probe is not None else pre
+                if post.rowid > pre.rowid:
+                    # Fact committed; a later step (boundary/tick persistence)
+                    # failed. Catch state up and name the committed fact.
+                    change = None
+                    try:
+                        change = self._refresh_locked(force=False)
+                    except Exception:  # pragma: no cover - defensive
+                        pass
+                    raise ReceiveCommittedError(post.fact_id, change, exc) from exc
+                raise
+
+            if not receipt.stored:
+                # Gate rejection — nothing written, no batch.
+                return ReceiveResult(receipt=receipt, change=None)
+
+            # 5. Canonicalize STATE: reconstruct at the new head, publish.
+            change = self._refresh_locked(force=False)
+            return ReceiveResult(receipt=receipt, change=change)
 
     # -- change iteration (S2) ---------------------------------------------
 

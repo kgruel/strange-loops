@@ -1,0 +1,18 @@
+## THREAD (1)
+KEY                          TIER   N  IN  DATE        MESSAGE
+loops-go-conformance-oracle  mid    8   0  2026-07-13  open · S5 cursor-axis check needed against the Go vector set: S5 ratified ts (epoch-seconds fold axis) as the ontology as_of cursor with equal-cursors default; witness-order (fact-id/rowid) deferred until a fact-cursor read surface exists. SPEC §9.4 grounds residence on witness order and calls ts-based as-of 'undefined within windows' — verify the §9.3/§10 Go vectors don't assume a witness cursor, or mark the ts choice as incumbent-provisional in the vectors.
+  observer: kyle/loops-claude
+  id:01KXCXEP
+  feature: internal-table
+  ▸ Jul 13 open
+  ▸ Jul 2 open
+  ▸ Jun 12 open
+  ▸ Jun 12 open
+  ▸ Jun 12 open
+  ▸ Jun 12 open
+  ▸ Jun 3 open
+  ▸ Jun 3 open
+  _id: 01KXCXEPES6ZEKYZKJK237AHQ8
+  _ts: 2026-07-13T04:58:33+00:00
+  _observer: kyle/loops-claude
+  _n: 8

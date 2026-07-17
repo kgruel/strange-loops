@@ -1,0 +1,27 @@
+You are the independent design advisor on a gating architecture decision for the strange-loops project (a fact-store system with fold-replay semantics, hash-chained tick attestation, and store merge/interchange). Repo: /Users/kaygee/Code/loops (Python incumbent). Protocol spec: /Users/kaygee/Code/loops-go/SPEC.md (Go conformance implementation in the same repo).
+
+THE QUESTION — the temporal cursor axis for 0.8.0:
+The wave builds: fold-state-as-of (reconstruct fold state at a past position), read --diff (state delta between two positions), a TUI Rewind scrubber, and a Watch live-tail. All share ONE cursor concept. What does a cursor position resolve to? Three authorities are in apparent conflict:
+
+1. ts (event-time): the shipped S5 ontology-as-of resolver uses a float ts cutoff (_ts <= as_of), deliberately rowid-independent. Read libs/engine/src/engine/declaration.py lines 30-70 and its module docstring, and libs/engine/tests/test_ontology_as_of.py.
+2. Witness order (store receipt order, SQLite rowid): SPEC.md sections 8.4 (two ordering authorities, normative), 9.3 (two time axes, equal-cursors default: 'an honest snapshot of what a reader at T would have seen'), 9.4 (fact-residence grounding). Also section 6.2: fold replay is (ts,id) order, normative, merge-stable.
+3. Tick anchor: the TUI Rewind mock renders 'tick cursor at T 01JQ4C... seq 116 - Jan 10 16:58 (last tick before the mark)' — chain-verified positions. Ticks pin witness cursors (window_start/fact_cursor) per SPEC 8.4.
+
+WHAT YOUR ANSWER MUST DETERMINE:
+a) fold-as-of fact SELECTION: given cursor T, which facts replay? ts-cutoff (all facts with ts<=T including late arrivals received after T) vs witness-cutoff (facts the store had received by T)? These diverge exactly on late arrivals (merge, import, backdated facts). What does each mean for honesty per SPEC 9.3?
+b) The cursor's user-facing ADDRESS form: wall-clock timestamp, tick id, sequence number, fact id? And what internal position it resolves to.
+c) --diff semantics between two cursors.
+d) Scrubber semantics (Rewind) and Watch's seq-N tail — same axis?
+e) Merge behavior: witness order is per-store (merge(A,B) != merge(B,A) receipt order) while (ts,id) is merge-stable. Which reads SHOULD be merge-stable and which are legitimately per-store?
+f) Rebuild stability: rebuild(dump(S)) reassigns rowids. SPEC section 10 round-trip bar. Does a witness cursor survive dump/rebuild? (Check SPEC 10.2-10.4: does the dump preserve witness order as line order?)
+g) Equal-cursors coherence: S5's ontology-as-of is ts-based. If facts-as-of used a different axis, what does 'equal cursors' even mean? Must they share an axis?
+h) Conformance: /Users/kaygee/Code/loops-go testdata vectors and store/ reader — do the existing Go vectors assume any particular cursor axis? Would a ts-based fold-as-of break any vector?
+
+Also consider: the store records witness ORDER (rowid) but not witness TIME per fact — only ticks carry sealed timestamps. So a wall-clock address on the witness axis is only resolvable through tick anchors (or approximated by ts). Weigh that.
+
+DELIVER:
+1. Your recommended design (be specific: axis, address forms, resolution rules, selection semantics for fold-as-of and --diff, scrubber and watch semantics).
+2. The strongest failure mode of each pure position (pure-ts, pure-witness, pure-tick-anchor).
+3. Your answer to the late-arrival question with a concrete scenario.
+4. Anything the question itself gets wrong (framing errors, false conflicts).
+Be direct and specific; cite file:line for claims about the code and spec sections for claims about the protocol.

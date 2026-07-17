@@ -898,6 +898,7 @@ def vertex_fold(
     observer: str | None = None,
     kind: str | None = None,
     retain_facts: bool = False,
+    at: WitnessPosition | None = None,
 ) -> Any:
     """Read fold state as a typed ``FoldState``.
 
@@ -910,10 +911,30 @@ def vertex_fold(
 
     When *observer* is provided, only that observer's facts are folded.
     When *kind* is provided, only that kind is included.
+
+    ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0 fold-state-as-of)
+    reconstructs the fold at a witness position: the prefix ``rowid <= at.rowid``
+    is selected, ontology is resolved **from the same prefix** (equal cursors ⇒
+    one position for selection and ontology), and facts are replayed in
+    ``(ts, id)`` order — a full reconstruction, never incremental application of
+    an interval (a backdated arrival inserts early in replay). It returns a
+    :class:`~engine.witness.WitnessFold` envelope (fold + resolved position +
+    ``mode='witness'`` + honesty status) instead of a bare ``FoldState``, so the
+    answering mode is machine-readable (A11). Per-store only: refused on
+    aggregates (witness order is per-member, A1/A9). ``None`` = head, returning a
+    bare ``FoldState`` exactly as before.
     """
     from .compiler import compile_vertex
 
-    ast = load_declaration(vertex_path)
+    ast = load_declaration(vertex_path, at=at)
+    if at is not None and (ast.combine is not None or ast.discover is not None):
+        from .witness import WitnessAggregateUnsupported
+
+        raise WitnessAggregateUnsupported(
+            "vertex_fold: a witness position is per-store and cannot reconstruct "
+            "a combine/discover aggregate fold — witness order is per-member "
+            "(A1/A9). Fold a member store at its own position instead."
+        )
     specs = compile_vertex(ast)
 
     # Resolve full specs (merge source specs for combine/discover).
@@ -982,10 +1003,11 @@ def vertex_fold(
             from .store_reader import StoreReader  # deferred: not needed for combine-only
             from atoms.fold import Upsert
 
+            at_rowid = at.rowid if at is not None else None
             with StoreReader(store_path) as reader:
                 raw = {}
                 for k, spec in full_specs.items():
-                    facts = reader.facts_by_kind(k)
+                    facts = reader.facts_by_kind(k, at_rowid=at_rowid)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1011,12 +1033,19 @@ def vertex_fold(
                 # the reserved `_decl.*` namespace by default (SPEC §9.4 —
                 # every read surface excludes it ambiently); an explicit
                 # `--kind` request below is the escape hatch, not this footer.
-                store_kinds = reader.fact_kind_stats()
-                unfolded = {
-                    k: v["count"]
-                    for k, v in store_kinds.items()
-                    if k not in full_specs
-                }
+                # Suppressed under a witness cursor: the store-kind stats are
+                # head-scoped (no rowid cap on GROUP BY), so showing them at a
+                # historical position would leak head counts the prefix never
+                # saw. The folded sections themselves ARE prefix-correct.
+                if at is not None:
+                    unfolded = {}
+                else:
+                    store_kinds = reader.fact_kind_stats()
+                    unfolded = {
+                        k: v["count"]
+                        for k, v in store_kinds.items()
+                        if k not in full_specs
+                    }
 
                 # Explicit --kind for a kind no vertex declares a loop for:
                 # fetch its raw facts directly rather than silently rendering
@@ -1027,7 +1056,7 @@ def vertex_fold(
                 # reserved-namespace kind on demand: an explicit ask overrides
                 # the ambient default everywhere else in this module too.
                 if kind is not None and kind not in full_specs:
-                    facts = reader.facts_by_kind(kind)
+                    facts = reader.facts_by_kind(kind, at_rowid=at_rowid)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1040,10 +1069,20 @@ def vertex_fold(
                         payloads.append(p)
                     raw[kind] = payloads
 
-    return _raw_to_fold_state(
+    fold_state = _raw_to_fold_state(
         raw, ast, full_specs, kind=kind, unfolded=unfolded,
         source_facts=source_facts if retain_facts else None,
     )
+    if at is None:
+        return fold_state
+    # Witness-mode read: wrap the fold in the machine-readable envelope so the
+    # answering mode/status is a field, not only rendered text (A11). Status
+    # comes from the ontology seam (file-pre-genesis on the dominant live
+    # corpus — N3 — never a silent retro-claim).
+    from .witness import WitnessFold
+
+    _ast, status = load_declaration_status(vertex_path, at=at)
+    return WitnessFold(fold=fold_state, position=at, mode="witness", status=status)
 
 
 def vertex_tick_fold(

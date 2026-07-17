@@ -5,10 +5,12 @@ with kind, ts, observer as real columns (SQL-queryable) and payload as
 JSON text (queryable via json_extract()).
 
 Uses WAL mode for concurrent reads during folds. IDs are ULIDs generated
-Python-side via python-ulid (26-char Crockford base32, time-sortable,
-within-ms monotonic). Time-sortability is load-bearing for cross-store
-fact interleaving (ORDER BY id ≈ chronological) and for merge dedup
-on slice→merge round-trips via INSERT OR IGNORE on the id PK.
+Python-side via python-ulid (26-char Crockford base32, time-sortable to the
+millisecond — but NOT within-ms monotonic; see ``gen_id``). Ms-granular
+time-sortability is load-bearing for cross-store fact interleaving (ORDER BY
+id ≈ chronological) and for merge dedup on slice→merge round-trips via INSERT
+OR IGNORE on the id PK. Receipt order is always rowid (append order), never
+id order.
 
 History: 2026-03-15 to 2026-05-16 a perf-driven change swapped to
 uuid.uuid4() to avoid loading the sqlite-ulid C extension per connection
@@ -37,10 +39,21 @@ _raw_decode = json.JSONDecoder().raw_decode
 def gen_id() -> str:
     """Generate a unique ID for store records.
 
-    Uses python-ulid: 26-char Crockford base32 ULID, time-sortable
-    (lexicographic order matches generation time), within-ms monotonic
-    (sequential calls within the same millisecond have incrementing
-    suffixes). Pure Python — no C extension, no dlopen cost.
+    Uses python-ulid: 26-char Crockford base32 ULID. Guaranteed:
+
+    - **Unique** — 48-bit millisecond timestamp + 80 bits of randomness.
+    - **Time-sortable to the millisecond** — lexicographic order matches
+      generation time across *different* milliseconds (the timestamp prefix
+      dominates). Load-bearing for cross-store interleaving (``ORDER BY id`` ≈
+      chronological at ms granularity) and merge dedup on the id PK.
+
+    NOT guaranteed: **within-millisecond ordering**. python-ulid draws a fresh
+    random 80-bit component per id (it is not a monotonic factory), so two ids
+    minted in the same millisecond have NO order relation — adjacent calls can
+    invert (empirically ~1/5000 in a tight loop). Any code that needs receipt
+    order MUST use rowid (append order), never id order — see the ORDERING
+    AUTHORITY note on ``append_tick`` and the WitnessPosition A3 rule. Pure
+    Python — no C extension, no dlopen cost.
     """
     return str(ULID())
 

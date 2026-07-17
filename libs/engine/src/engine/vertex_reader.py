@@ -503,11 +503,43 @@ def _combined_ticks(
     since_ts: float,
     until_ts: float,
     name: str | None = None,
-) -> list[Tick]:
-    """Ticks across multiple stores (combinatorial vertex_ticks)."""
+    *,
+    with_envelope: bool = False,
+) -> "list[Tick] | list[tuple[Tick, dict]]":
+    """Ticks across multiple stores (combinatorial vertex_ticks).
+
+    With ``with_envelope=True`` this pass-through carries each member's REAL
+    attestation envelope (N4), tagged with ``member`` (the source store stem) —
+    not the blank ``chained=False`` placeholder the aggregate returned before.
+    A tick's ``fact_cursor`` is a witness handle into ITS OWN member store (A1:
+    no shared witness order across the aggregate), so the envelope is resolved
+    against that member's own connection and the ``member`` tag tells a consumer
+    which store to anchor the cursor against (A9's per-member vector). This path
+    opens one :class:`StoreReader` per member (N cold-starts) rather than the
+    single ATTACH the fast fold path uses — correctness of per-member cursor
+    resolution is worth the ~10ms, and only a ``--ticks`` drill pays it.
+    """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
         return []
+
+    if with_envelope:
+        from .store_reader import StoreReader
+
+        pairs: list[tuple[Tick, dict]] = []
+        for path in store_paths:
+            try:
+                with StoreReader(path) as reader:
+                    member_pairs = reader.ticks_between(
+                        since_ts, until_ts, name=name, with_envelope=True
+                    )
+            except FileNotFoundError:
+                continue  # absent member store — skip, not a failure
+            for tick, env in member_pairs:
+                env["member"] = path.stem
+                pairs.append((tick, env))
+        pairs.sort(key=lambda pair: pair[0].ts)
+        return pairs
 
     conn, aliases = _open_combined(store_paths)
     try:
@@ -1335,9 +1367,13 @@ def vertex_ticks(
     Returns Tick objects (from StoreReader.ticks_between), or
     ``(Tick, envelope)`` pairs when ``with_envelope=True``.
 
-    Combined/aggregation vertices return EMPTY envelopes (``chained=False``,
-    blank cursor fields): attestation is a per-store property — an
-    aggregate combines ticks from many stores and does not itself attest.
+    Combined/aggregation vertices carry each member's REAL envelope tagged with
+    its source ``member`` (0.8.0, N4): the aggregate does not itself attest, but
+    a member tick's chain/signature/cursor are per-store facts and are passed
+    through honestly rather than blanked. The ``fact_cursor`` is a witness handle
+    into that ``member`` store only — no shared aggregate witness order exists
+    (A1) — so a consumer resolves it against the named member (A9's per-member
+    vector).
 
     ``as_of`` (SPEC §9.3) resolves the declaration at a historical ``ts``
     cutoff — equal-cursors default is ``as_of = until_ts``. ``None`` = head.
@@ -1347,12 +1383,11 @@ def vertex_ticks(
     ast = load_declaration(vertex_path, as_of=as_of)
 
     if ast.combine is not None or ast.discover is not None:
-        ticks = _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
         if not with_envelope:
-            return ticks
-        empty = {"chained": False, "signed": False, "fact_cursor": "",
-                 "cursor_kind": "", "cursor_preview": ""}
-        return [(t, dict(empty)) for t in ticks]
+            return _combined_ticks(ast, vertex_path, since_ts, until_ts, name)
+        return _combined_ticks(
+            ast, vertex_path, since_ts, until_ts, name, with_envelope=True
+        )
 
     if ast.store is None:
         return []

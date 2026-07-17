@@ -67,14 +67,29 @@ def test_tick_error(golden):
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_id_lookup(golden, zoom):
-    """--id mode: id/observer/origin graft at EVERY zoom, not just FULL."""
+    """--id mode: id/observer/origin graft at every zoom that renders facts
+    (SUMMARY/DETAILED/FULL — is_id_lookup forces rec_zoom=FULL for the record
+    itself, which is why those three golden files come out byte-identical).
+    MINIMAL has its own early-return (a plain count line) before the
+    id-lookup branch is ever consulted, so it carries no graft."""
     block = stream_view(SAMPLE_STREAM_ID_LOOKUP, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
-def test_ontology_notice(golden):
-    """SPEC §9.2/§9.5 honesty callout — rendered above the rows on every
-    register (checked here on the TTY register; stream_view recurses through
-    the same code path regardless of ``piped``)."""
-    block = stream_view(SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80)
+def test_ontology_notice_tty(golden):
+    """SPEC §9.2/§9.5 honesty callout — rendered above the rows, TTY
+    register."""
+    block = stream_view(
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80, piped=False,
+    )
+    golden.assert_match(block_to_text(block), "output")
+
+
+def test_ontology_notice_piped(golden):
+    """Same callout on the piped register — stream_view recurses through the
+    same code path regardless of ``piped``, but this exercises it rather
+    than asserting it by comment."""
+    block = stream_view(
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=None, piped=True,
+    )
     golden.assert_match(block_to_text(block), "output")

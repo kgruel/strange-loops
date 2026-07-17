@@ -640,13 +640,24 @@ SAMPLE_TICKS_ONTOLOGY_NOTICE = {
 # cutover (unlike _grammar.recency) — tests MUST freeze loops.lenses.sync.time
 # .time, unlike every other fixture in this module (old timestamps alone don't
 # make this one deterministic).
+#
+# One `ran` kind is deliberately long enough that the rendered "Ran: ..." line
+# exceeds 80 columns: sync_view's rows use Block.text(..., width=width) with
+# the default Wrap.NONE (single-line hard truncate, no ellipsis), so a TTY
+# read (width=80) silently drops the tail while a piped read (width=None)
+# carries the line whole — the tty/piped goldens must actually diverge to be
+# worth having both (S0 codex review finding: the original fixture's longest
+# line was ~50 cols, so both registers rendered byte-identical).
 SAMPLE_SYNC_INSTANCE = {
-    "ran": ["disk", "memory"],
+    "ran": ["disk", "memory", "network-interface-diagnostics-and-telemetry-extended"],
     "skipped": [
         {"kind": "network", "last_run_ts": REF_TS - 300, "cadence_interval": 3600},
         {"kind": "temp"},  # no timestamps — bare-kind fallback
     ],
-    "fact_counts": {"disk": 3, "memory": 2},
+    "fact_counts": {
+        "disk": 3, "memory": 2,
+        "network-interface-diagnostics-and-telemetry-extended": 7,
+    },
     "errors": [
         {"kind": "battery", "observer": "system-monitor",
          "payload": {"error": "sensor unavailable"}},
@@ -658,11 +669,18 @@ SAMPLE_SYNC_INSTANCE = {
 }
 
 # ── sync: aggregation vertex (children breakdown) ────────────────────────────
+# Same over-80-column device as SAMPLE_SYNC_INSTANCE above, applied to the
+# child breakdown line ("<name>: N facts (kinds...)").
 SAMPLE_SYNC_AGGREGATION = {
     "ran": [], "skipped": [], "fact_counts": {}, "errors": [], "ticks": [],
     "children": [
         {
-            "name": "project", "ran": ["decision"], "fact_counts": {"decision": 4},
+            "name": "project",
+            "ran": ["decision", "network-interface-diagnostics-and-telemetry-extended"],
+            "fact_counts": {
+                "decision": 4,
+                "network-interface-diagnostics-and-telemetry-extended": 9,
+            },
             "skipped": [
                 {"kind": "thread", "last_run_ts": REF_TS - 600, "cadence_interval": 1800},
             ],

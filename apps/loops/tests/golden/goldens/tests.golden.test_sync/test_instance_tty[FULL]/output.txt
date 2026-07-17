@@ -1,4 +1,4 @@
-Ran: disk (3), memory (2)
+Ran: disk (3), memory (2), network-interface-diagnostics-and-telemetry-extended
   ⏭ network: fresh (last run 10m ago, cadence 1h)
   ⏭ temp
 Errors: 1

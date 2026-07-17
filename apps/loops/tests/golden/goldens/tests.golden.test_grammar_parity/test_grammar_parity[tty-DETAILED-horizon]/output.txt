@@ -1,5 +1,4 @@
 ╭─ grammar · horizon ──────────────────────────────────────────────────────────╮
-│ 1 armed · 0 unsealed                                                         │
-│ last sealed 3d                                                               │
+│ 1 armed loop · 0 facts since last seal (3d)                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-    grammar  waiting on session · 0 facts in window · last sealed 3d   [status=c
+    grammar  seals on next session · 0 facts since last seal (3d)   [status=clos

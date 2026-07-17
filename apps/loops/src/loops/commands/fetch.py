@@ -1157,6 +1157,11 @@ def fetch_horizon(
     loop has no tick series, so its window is all history scoped to its own
     kind (honest — nothing has ever sealed it).
 
+    ``total_unsealed`` is the DISTINCT-fact union across all armed windows —
+    per-row ``window_facts`` may overlap (vertex-level boundaries share one
+    window; a vertex-scope window contains every kind-scoped one), so it is
+    NOT the sum of the rows.
+
     Returns a JSON-clean dict (``last_sealed`` is a float epoch or None)::
 
         {"vertex", "now", "armed": int, "total_unsealed": int,
@@ -1188,7 +1193,7 @@ def fetch_horizon(
             armed.append((kname, "loop", loop_def.boundary, kname))
 
     loops: list[dict] = []
-    total_unsealed = 0
+    union_ids: set[str] = set()
     seals: list[float] = []
     for name, scope, boundary, window_kind in armed:
         last_sealed = _newest_tick_ts(vertex_path, name, now_ts)
@@ -1198,13 +1203,18 @@ def fetch_horizon(
         # facts_between is inclusive on the lower bound, so the fact that
         # triggered the last seal (ts == tick.ts) would re-appear — drop
         # anything at or before the seal to keep the window strictly open.
-        window = Counter(
-            f["kind"]
-            for f in facts
+        kept = [
+            f for f in facts
             if never or _fact_epoch(f.get("ts")) > since
-        )
-        window_facts = sum(window.values())
-        total_unsealed += window_facts
+        ]
+        window = Counter(f["kind"] for f in kept)
+        window_facts = len(kept)
+        # total_unsealed is the DISTINCT-fact union across windows, not the
+        # sum of per-row window_facts: two vertex-level boundaries share one
+        # window (the same facts), and a vertex-scope window contains every
+        # kind-scoped one — summing double-counted the header (session read
+        # 32 when 16 facts existed, caught live 2026-07-15).
+        union_ids.update(f["id"] for f in kept)
         if last_sealed is not None:
             seals.append(last_sealed)
 
@@ -1272,7 +1282,7 @@ def fetch_horizon(
         "vertex": ast.name,
         "now": now_ts,
         "armed": len(loops),
-        "total_unsealed": total_unsealed,
+        "total_unsealed": len(union_ids),
         "last_sealed": max(seals) if seals else None,
         "unarmed_facts": unarmed_facts,
         "loops": loops,

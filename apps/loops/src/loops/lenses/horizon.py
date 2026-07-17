@@ -18,9 +18,15 @@ Two boundary shapes render two honestly-different rows:
 
 * **count-based** (``after``/``every``) — numeric proximity ``n/N`` with a
   TTY-only meter (``n`` unsealed facts against the declared ``count``).
-* **kind-based** (``when``) — ``waiting on <kind> · N facts in window · last
-  sealed <recency>``. NO fake progress meter: a kind boundary has no numerator
-  (hlab is 100% kind-based), so inventing a bar would smuggle a signal.
+* **kind-based** (``when``) — ``seals on next <kind> · N facts since last
+  seal (<recency>)``. NO fake progress meter: a kind boundary has no numerator
+  (hlab is 100% kind-based), so inventing a bar would smuggle a signal. The
+  wording is consequence-side (thread:horizon-legibility-gap): the trigger is
+  named as what CLOSES the window — for operator-emitted kinds (``seal``)
+  that's the reader — and the count states its relation to the seal instead
+  of juxtaposing two bare numbers. Vertex-scope rows carry their kind mix at
+  default zoom (top-3 ``+N``); kind-scoped rows don't (their mix is trivially
+  their own kind).
 
 The rows carry NO rail tier glyph: a loop is a declaration, not a folded
 entity, so it has no salience tier — the gutter stays blank rather than fake
@@ -110,16 +116,15 @@ def _meter(n: int, total: int, width: int = 8) -> str:
     return _BAR_FULL * filled + _BAR_EMPTY * (width - filled)
 
 
-def _seal_phrase(row: dict) -> str:
-    """``last sealed 2h`` / ``never sealed`` — the honest recency of the seal."""
-    if row["never_sealed"]:
-        return "never sealed"
-    return f"last sealed {recency(row['last_sealed'])}"
+def _since_phrase(ts: float) -> str:
+    """``since last seal (2w)`` — the window stated as a RELATION.
 
-
-def _shape_word(row: dict) -> str:
-    """The boundary shape as a bare word — ``when`` / ``after`` / ``every``."""
-    return row["mode"]
+    The old wording juxtaposed two numbers (``7 facts in window · last
+    sealed 2w``) and left their relationship as an exercise for the reader;
+    this states it: the window IS everything after that seal
+    (thread:horizon-legibility-gap, Kyle 2026-07-15).
+    """
+    return f"since last seal ({recency(ts)})"
 
 
 def _conditions_text(row: dict) -> str:
@@ -133,9 +138,27 @@ def _conditions_text(row: dict) -> str:
     return " · ".join(parts)
 
 
-def _mix_text(row: dict, *, joiner: str = " · ", sep: str = " ") -> str:
-    """Window kind mix — ``decision 2 · thread 1`` — or ``''`` when empty."""
-    return joiner.join(f"{k}{sep}{n}" for k, n in row.get("window_kinds", {}).items())
+def _plural(n: int, noun: str) -> str:
+    """``1 fact`` / ``2 facts`` — one pluralization idiom for the module."""
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
+def _mix_text(
+    row: dict, *, joiner: str = " · ", sep: str = " ", limit: int | None = None
+) -> str:
+    """Window kind mix — ``decision 2 · thread 1`` — or ``''`` when empty.
+
+    ``limit`` truncates to the top-``limit`` kinds with a ``+N`` remainder
+    tail (the default-zoom form: a bare fact count answers "how many" but
+    not "of what", thread:horizon-legibility-gap); ``None`` is the full
+    census (DETAILED). ``window_kinds`` is already count-desc from the
+    fetch's ``most_common()``.
+    """
+    items = list(row.get("window_kinds", {}).items())
+    parts = [f"{k}{sep}{n}" for k, n in items[:limit]]
+    if limit is not None and len(items) > limit:
+        parts.append(f"+{len(items) - limit}")
+    return joiner.join(parts)
 
 
 def _unarmed_segment(unarmed: list[dict], unarmed_facts: int, *, piped: bool) -> str:
@@ -146,10 +169,9 @@ def _unarmed_segment(unarmed: list[dict], unarmed_facts: int, *, piped: bool) ->
     entirely, no ``◦ 0 unarmed`` noise, decision:design/horizon-unarmed-rollup).
     """
     glyph = "" if piped else f"{_UNARMED} "
-    facts_word = "fact" if unarmed_facts == 1 else "facts"
     return (
         f"{glyph}{len(unarmed)} unarmed · "
-        f"{unarmed_facts} {facts_word} accumulating"
+        f"{_plural(unarmed_facts, 'fact')} accumulating"
     )
 
 
@@ -175,14 +197,33 @@ def _unarmed_row_text(row: dict, name_w: int, *, piped: bool) -> str:
 
 
 def _descriptor(row: dict, zoom: Zoom) -> str:
-    """The TTY row body after the name column (meter appended separately)."""
+    """The TTY row body after the name column (meter appended separately).
+
+    Wording is consequence-side, not mechanism-side: ``seals on next seal``
+    names what closes the window (for operator-emitted kinds like ``seal``
+    that's the reader), and the fact count states its RELATION to the seal
+    (``since last seal (2w)``) instead of juxtaposing two bare numbers
+    (thread:horizon-legibility-gap).
+    """
     if row["mode"] == "when":
-        wf = row["window_facts"]
-        out = f"waiting on {row['trigger_kind']}"
-        out += f" · {wf} fact{'s' if wf != 1 else ''} in window · {_seal_phrase(row)}"
+        facts_word = _plural(row["window_facts"], "fact")
+        out = f"seals on next {row['trigger_kind']}"
+        if row["never_sealed"]:
+            out += f" · never sealed · {facts_word} in window"
+        else:
+            out += f" · {facts_word} {_since_phrase(row['last_sealed'])}"
     else:
         out = f"{row['mode']} {row['count']} · {row['window_facts']}/{row['count']}"
-        out += f" · {_seal_phrase(row)}"
+        if row["never_sealed"]:
+            out += " · never sealed"
+        else:
+            out += f" {_since_phrase(row['last_sealed'])}"
+    if zoom < Zoom.DETAILED and row["scope"] == "vertex" and row["window_facts"]:
+        # Default-zoom kind mix — vertex-scope windows span kinds, so the
+        # referents matter; a kind-scoped row's mix is trivially its own kind
+        # (pure redundancy, honest absence). DETAILED carries the full census
+        # below instead.
+        out += f" · {_mix_text(row, limit=3)}"
     if zoom >= Zoom.DETAILED:
         cond = _conditions_text(row)
         if cond:
@@ -193,6 +234,41 @@ def _descriptor(row: dict, zoom: Zoom) -> str:
     if zoom >= Zoom.FULL and not row["never_sealed"]:
         out += f"   sealed {stamp(row['last_sealed'])}"
     return out
+
+
+def _summary_parts(data: dict) -> list[str]:
+    """Header/rollup segments shared by -q, the piped header, and the card.
+
+    When every armed row hangs off ONE seal instant (the overwhelmingly
+    common single-boundary case — and multi-boundary vertices sharing a tick
+    series), the total is stated as a relation: ``7 facts since last seal
+    (2w)``. With MIXED seal times that phrase would lie (the union spans
+    windows with different starts), so the split form stays — honest wording
+    per case, never a false merge (thread:horizon-legibility-gap).
+
+    Shape contract: ``parts[0]`` is the armed count, ``parts[1]`` the fact
+    total, ``parts[2:]`` an optional seal trailer — the card letterhead
+    slices on these positions.
+    """
+    loops = data.get("loops", [])
+    total_unsealed = data.get("total_unsealed", 0)
+    parts = [_plural(data.get("armed", 0), "armed loop")]
+    seal_set = {r["last_sealed"] for r in loops}
+    if len(seal_set) == 1:
+        only = next(iter(seal_set))
+        if only is None:
+            parts.append(f"{_plural(total_unsealed, 'fact')} in window")
+            parts.append("never sealed")
+        else:
+            parts.append(f"{_plural(total_unsealed, 'fact')} {_since_phrase(only)}")
+    else:
+        last_sealed = data.get("last_sealed")
+        parts.append(_plural(total_unsealed, "unsealed fact"))
+        parts.append(
+            f"last sealed {recency(last_sealed)}"
+            if last_sealed is not None else "never sealed"
+        )
+    return parts
 
 
 def horizon_view(
@@ -215,9 +291,6 @@ def horizon_view(
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")
     loops = data.get("loops", [])
-    armed = data.get("armed", 0)
-    total_unsealed = data.get("total_unsealed", 0)
-    last_sealed = data.get("last_sealed")
     unarmed = data.get("unarmed", [])
     unarmed_facts = data.get("unarmed_facts", 0)
 
@@ -226,18 +299,13 @@ def horizon_view(
         # true line, never an empty fake table.
         return _line("No armed loops — nothing seals.", p.metadata, width)
 
-    seal_tag = recency(last_sealed) if last_sealed is not None else "never"
-
     # -q: the shared rollup, plus the unarmed segment appended as a trailing,
     # non-sheddable part. Its counts have no degraded form on the line, so —
     # like graph's hub segment — the whole line WRAPS rather than sheds
     # (decision:design/rollup-shed-only-what-degrades). ◦ is TTY-only; the pipe
     # carries the bare words.
-    rollup_parts = [
-        f"{armed} armed loop{'s' if armed != 1 else ''}",
-        f"{total_unsealed} unsealed fact{'s' if total_unsealed != 1 else ''}",
-        f"last sealed {seal_tag}",
-    ]
+    summary = _summary_parts(data)
+    rollup_parts = list(summary)
     if unarmed:
         rollup_parts.append(_unarmed_segment(unarmed, unarmed_facts, piped=piped))
     rollup = rollup_line(vertex, rollup_parts)
@@ -289,17 +357,9 @@ def horizon_view(
                     _line(_unarmed_row_text(r, unarmed_name_w, piped=True),
                           Style(), None)
                 )
-        header_parts = [
-            f"{armed} armed",
-            f"{total_unsealed} unsealed",
-            f"last sealed {seal_tag}",
-        ]
-        if unarmed:
-            header_parts.append(
-                _unarmed_segment(unarmed, unarmed_facts, piped=True)
-            )
-        header = rollup_line(vertex, header_parts)
-        return join_vertical(_line(header, p.header, None), *rows)
+        # The piped header IS the -q rollup: this branch has piped=True, so
+        # the rollup above was already built with the piped unarmed segment.
+        return join_vertical(_line(rollup, p.header, None), *rows)
 
     # --- TTY register ------------------------------------------------------
     for r in loops:
@@ -352,13 +412,10 @@ def horizon_view(
     blocks: list[Block] = []
     if loops:
         body = join_vertical(*rows)
-        sublines = [
-            f"{armed} armed · {total_unsealed} unsealed",
-        ]
-        if last_sealed is not None:
-            sublines.append(f"last sealed {recency(last_sealed)}")
-        else:
-            sublines.append("never sealed")
+        # Card letterhead: armed count + fact total merge onto the first
+        # subline; any remaining segment (mixed-window seal recency) keeps
+        # its own line (positions per _summary_parts' shape contract).
+        sublines = [" · ".join(summary[:2])] + summary[2:]
         title = f"{vertex} · horizon"
         card_w = card_width(body, title, sublines, width)
         blocks.append(card(title, sublines, card_w, p=p))

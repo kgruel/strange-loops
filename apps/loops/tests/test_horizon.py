@@ -168,7 +168,7 @@ class TestRegisters:
         data = fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5))
         text = _render(data, zoom=Zoom.MINIMAL).rstrip("\n")
         assert "\n" not in text
-        assert "1 armed loop" in text and "2 unsealed" in text
+        assert "1 armed loop" in text and "2 facts since last seal" in text
 
     def test_count_row_shows_proximity_and_meter(self, tmp_path):
         data = fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5))
@@ -178,7 +178,7 @@ class TestRegisters:
 
     def test_kind_row_has_no_fake_meter(self, tmp_path):
         text = _render(fetch_horizon(_vertex_boundary(tmp_path)))
-        assert "waiting on session" in text
+        assert "seals on next session" in text
         assert "▓" not in text  # kind-based boundary NEVER invents a bar
 
     def test_never_sealed_wording(self, tmp_path):
@@ -471,12 +471,59 @@ class TestParity:
         data = fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5))
         assert_register_parity(
             horizon_view, data,
-            load_bearing=["decision", "2/3", "1 armed", "2 unsealed"],
+            load_bearing=["decision", "2/3", "1 armed", "2 facts since last seal"],
         )
 
     def test_register_parity_kind(self, tmp_path):
         data = fetch_horizon(_vertex_boundary(tmp_path))
         assert_register_parity(
             horizon_view, data,
-            load_bearing=["session", "1 armed", "1 unsealed"],
+            load_bearing=["session", "1 armed", "1 fact since last seal"],
         )
+
+
+class TestUnionTotal:
+    def test_two_vertex_boundaries_share_one_window(self, tmp_path):
+        # Two vertex-level boundaries hang off the SAME tick series and the
+        # same window — the header total is the distinct-fact union, never the
+        # sum of the rows (session read 32 when 16 facts existed, live
+        # 2026-07-15, thread:horizon-legibility-gap).
+        data = fetch_horizon(_two_vertex_boundaries(tmp_path))
+        assert data["armed"] == 2
+        assert all(r["window_facts"] == 1 for r in data["loops"])
+        assert data["total_unsealed"] == 1  # same fact, counted once
+
+
+class TestLegibleWording:
+    def test_kind_row_states_the_relation(self, tmp_path):
+        # "1 fact since last seal (<recency>)" — one relational statement,
+        # not two juxtaposed numbers.
+        text = _render(fetch_horizon(_vertex_boundary(tmp_path)))
+        assert "1 fact since last seal (" in text
+        assert "in window" not in text  # sealed rows drop the old phrasing
+
+    def test_count_row_states_the_relation(self, tmp_path):
+        text = _render(fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5)))
+        assert "2/3 since last seal (" in text
+
+    def test_default_zoom_mix_on_vertex_row(self, tmp_path):
+        # A vertex-scope window spans kinds — the referents ride at default
+        # zoom (top-3 +N), answering "of what" next to "how many".
+        text = _render(fetch_horizon(_vertex_boundary(tmp_path)))
+        assert "decision 1" in text
+
+    def test_default_zoom_mix_absent_on_kind_row(self, tmp_path):
+        # A kind-scoped row's mix is trivially its own kind — redundant, so
+        # honest absence at default zoom.
+        text = _render(fetch_horizon(_count_vertex(tmp_path, count=3, n_facts=5)))
+        assert "decision 2" not in text
+
+    def test_mixed_seal_times_keep_split_header(self, tmp_path):
+        # With differing last-seal instants the union spans windows with
+        # different starts — "N facts since last seal" would lie, so the
+        # split form stays.
+        data = fetch_horizon(_multi_strata(tmp_path))
+        assert len({r["last_sealed"] for r in data["loops"]}) > 1
+        text = _render(data, zoom=Zoom.MINIMAL)
+        assert "unsealed facts" in text
+        assert "last sealed" in text

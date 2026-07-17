@@ -1344,12 +1344,17 @@ class VertexHandle:
             # cursor (open / last refresh) and store head before following. The
             # iterator baseline is the CURSOR, not the store head — a change that
             # landed between open and changes() is delivered, never dropped.
+            # Capture the change token BEFORE the refresh reads the store: a
+            # write that lands between the refresh's head-read and the token
+            # read must NOT be absorbed into `last` (that would lose it until the
+            # next unrelated commit — silent tail loss). Token-before-refresh
+            # means any such write re-trips `cur != last` next loop.
+            last = self._safe_token()
+            if last is _CLOSED:
+                return
             try:
                 first_batch = self.refresh()
             except HandleClosed:
-                return
-            last = self._safe_token()
-            if last is _CLOSED:
                 return
             idle_start = time.monotonic()
             if first_batch is not None:
@@ -1377,12 +1382,15 @@ class VertexHandle:
                             last_change = now
                         if now - last_change >= coalesce or now - first >= max_latency:
                             break
+                    # Token before refresh (see the initial-catch-up note): a
+                    # write racing the refresh must re-trip next loop, not be
+                    # swallowed into `last`.
+                    last = self._safe_token()
+                    if last is _CLOSED:
+                        return
                     try:
                         batch = self.refresh()
                     except HandleClosed:
-                        return
-                    last = self._safe_token()
-                    if last is _CLOSED:
                         return
                     idle_start = time.monotonic()
                     if batch is not None:
@@ -1423,12 +1431,17 @@ class VertexHandle:
             raise HandleClosed(f"handle for {self._vertex_path} is closed")
         self._iterating = True
         try:
+            # Capture the change token BEFORE the refresh reads the store: a
+            # write that lands between the refresh's head-read and the token
+            # read must NOT be absorbed into `last` (that would lose it until the
+            # next unrelated commit — silent tail loss). Token-before-refresh
+            # means any such write re-trips `cur != last` next loop.
+            last = self._safe_token()
+            if last is _CLOSED:
+                return
             try:
                 first_batch = self.refresh()
             except HandleClosed:
-                return
-            last = self._safe_token()
-            if last is _CLOSED:
                 return
             idle_start = time.monotonic()
             if first_batch is not None:
@@ -1454,12 +1467,15 @@ class VertexHandle:
                             last_change = now
                         if now - last_change >= coalesce or now - first >= max_latency:
                             break
+                    # Token before refresh (see the initial-catch-up note): a
+                    # write racing the refresh must re-trip next loop, not be
+                    # swallowed into `last`.
+                    last = self._safe_token()
+                    if last is _CLOSED:
+                        return
                     try:
                         batch = self.refresh()
                     except HandleClosed:
-                        return
-                    last = self._safe_token()
-                    if last is _CLOSED:
                         return
                     idle_start = time.monotonic()
                     if batch is not None:

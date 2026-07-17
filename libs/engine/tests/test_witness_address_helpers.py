@@ -27,6 +27,8 @@ from engine.witness import (
     SeqOutOfRange,
     TickAnchor,
     UnknownTickHandle,
+    UnknownWitnessHandle,
+    expand_fact_prefix,
     resolve_seq,
     resolve_tick_cursor,
     resolve_tick_floor,
@@ -193,6 +195,39 @@ class TestResolveTickFloor:
         _append_tick(store, "bad", 150.0, fact_cursor="01DANGLINGCURSOR0000000000")
         cursor, name, ts = resolve_tick_floor(store, 200.0)
         assert cursor == f1 and name == "good" and ts == 120.0
+
+
+class TestExpandFactPrefix:
+    # The engine-owned fact:prefix resolver — the app must not touch StoreReader
+    # (architecture ratchet); this is where the store access lives now.
+    def test_exact_and_prefix(self, tmp_path):
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        full = _append(store, "decision", 100, fid="01KABCDEF00000000000000001", topic="a")
+        assert expand_fact_prefix(store, full) == full
+        assert expand_fact_prefix(store, "01KABCDEF") == full
+
+    def test_resolves_internal_decl_rows_too(self, tmp_path):
+        # Witness identity is over ALL rows — a _decl.* id is addressable.
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        did = _append(store, "_decl.genesis", 50, fid="01KDECL0000000000000000001")
+        assert expand_fact_prefix(store, "01KDECL") == did
+
+    def test_no_match_raises_unknown_handle(self, tmp_path):
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        with pytest.raises(UnknownWitnessHandle):
+            expand_fact_prefix(store, "ZZZNONEXISTENT")
+
+    def test_ambiguous_prefix_raises_value_error(self, tmp_path):
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        _append(store, "decision", 100, fid="01KSHARED0000000000000000A1", topic="a")
+        _append(store, "decision", 101, fid="01KSHARED0000000000000000B2", topic="b")
+        with pytest.raises(ValueError):
+            expand_fact_prefix(store, "01KSHARED")
 
 
 class TestAnchorPreservation:

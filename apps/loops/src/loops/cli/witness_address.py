@@ -106,28 +106,26 @@ def refuse_aggregate_at(address: str) -> AddressError:
 def _expand_fact_prefix(store_path: Path, prefix: str) -> str:
     """Resolve a (possibly partial) fact id to its full canonical id.
 
-    Exact match first, then unambiguous prefix — mirrors
-    ``StoreReader.fact_by_id``'s exact-then-prefix resolution.
-    ``include_internal=True``: witness identity is over ALL rows regardless
-    of kind (a ``_decl.*`` row is still a valid, addressable position — the
-    receipt-group guard, not kind, is what may refuse it).
+    Store access belongs to the engine — the resolution is
+    ``engine.expand_fact_prefix`` (exact-then-prefix over all rows); this thin
+    wrapper only handles the CLI-grammar concerns: the empty ``fact:`` form and
+    turning the engine's no-match / ambiguous-prefix errors into an
+    :class:`AddressError`.
     """
-    from engine.store_reader import StoreReader
+    from engine.witness import UnknownWitnessHandle, expand_fact_prefix
 
     if not prefix:
         raise AddressError(
             "`--at fact:` needs an id (e.g. `--at fact:01J...`)"
         )
-    with StoreReader(store_path) as reader:
-        try:
-            found = reader.fact_by_id(prefix, include_internal=True)
-        except ValueError as exc:
-            raise AddressError(str(exc)) from exc
-    if found is None:
+    try:
+        return expand_fact_prefix(store_path, prefix)
+    except ValueError as exc:  # ambiguous prefix (two facts share it)
+        raise AddressError(str(exc)) from exc
+    except UnknownWitnessHandle as exc:
         raise AddressError(
             f"no fact matches `fact:{prefix}` in this store"
-        )
-    return found["id"]
+        ) from exc
 
 
 def _parse_wallclock(address: str) -> float:

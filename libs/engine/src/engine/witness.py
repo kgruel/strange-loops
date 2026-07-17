@@ -405,6 +405,33 @@ def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str,
     return address, row[0]
 
 
+def expand_fact_prefix(store_path: Path, prefix: str, *, timeout: float = 5.0) -> str:
+    """Resolve a (possibly partial) ``fact:`` id to its full canonical id.
+
+    Exact-then-prefix resolution over ALL rows (``include_internal`` — witness
+    identity is over every row regardless of kind: a ``_decl.*`` row is still a
+    valid, addressable position, and the receipt-group guard, not kind, is what
+    may refuse it). The engine owns store access, so this lives here rather than
+    in the CLI (the app must not touch :class:`StoreReader` directly).
+
+    Raises :class:`UnknownWitnessHandle` when nothing matches, and propagates
+    ``StoreReader.fact_by_id``'s ``ValueError`` for an ambiguous prefix (two
+    facts share it) — the CLI grammar layer turns both into its own address
+    error. The resolved id still flows through :func:`resolve_witness_position`
+    for the actual position (guard, lineage, anchor).
+    """
+    from .store_reader import StoreReader
+
+    with StoreReader(store_path, timeout=timeout) as reader:
+        found = reader.fact_by_id(prefix, include_internal=True)
+    if found is None:
+        raise UnknownWitnessHandle(
+            f"no fact matches {prefix!r} in this store — a witness handle "
+            "resolves by exact id or an unambiguous prefix"
+        )
+    return found["id"]
+
+
 def resolve_seq(store_path: Path, n: int, *, timeout: float = 5.0) -> str:
     """Resolve a ``seq:N`` receipt ordinal to its fact id.
 

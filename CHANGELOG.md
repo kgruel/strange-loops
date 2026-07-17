@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.7.0 — 2026-07-16
+
+Three waves since 0.6.0: store-backed declarations (SPEC §9,
+`feat/internal-table` + hardening), shell completion T3, and the custody
+extraction that made the signing format a lib below every writer.
+
+### Added
+- **Declaration documents & absorb ceremony (SPEC §9)** — declaration
+  document form in lang (AST ↔ per-subject JSON), `store absorb` as the
+  atomic genesis primitive (era opening, `_decl` reservation), store-backed
+  declaration resolver in engine (the vertex file dissolves to locator +
+  ingress), edit ceremony re-absorbing diffs at subject granularity,
+  ontology-as-of resolution, `_decl.*` excluded from read surfaces, and the
+  closing-review hardening wave (identity adoption, rewind honesty, pin
+  enforcement, ingress safety).
+- **Shell completion T3** — the completer seam (`complete_via`),
+  vertex-name/`--lens`/`--kind`/`--key` completers, the emit and store
+  walks, cite/seal/close/sync in the walk; `sl` registered in the
+  completion glue (aliases through `run_app`).
+- **`libs/custody`** — signing composition promoted out of the CLI app:
+  the `loops-tick-v1`/`loops-fact-v1` domain constants, `keys/` custody
+  layout, signer/verifier builders, `ensure_signing_key`. Consumer-forced
+  extraction (tasked is the second writer); the architecture ratchet pins
+  the domain constants to the lib.
+- **engine: Receipt write path** — the write path returns a `Receipt` and
+  owns store lifecycle.
+- **Template-param secrets policy** — `$VAR` env indirection resolved at
+  compile time (engine, lang).
+- **`./dev check`** — root gate for the architecture ratchet (it was
+  running on nobody).
+
+### Changed
+- **painted 0.10.0 → 0.12.1** — migrated all 19 `run_cli` sites off the
+  deprecated `render=` param onto the `renderer=(data, fidelity, width)`
+  contract (`fidelity_from_args` shadow deleted with its residue, piped
+  width now flows from painted's native non-TTY `width=None` offer), then
+  rode the 0.11 → 0.12 render= deprecation gate and 0.12.1's completion
+  glue alias registration.
+- Dropped the `sloop` entry point — unused alias; `sl` and `loops` remain.
+
+### Fixed
+- **Temporal flags no longer silently drop on folded reads** — `sl read
+  <vertex> --as-of/--since/--id` without `--facts`/`--ticks` used to render
+  head state with exit 0 (the router pre-parser consumed the cursor and the
+  fold route never saw it). The router now refuses with the supported
+  spellings; fold-state-as-of is 0.8.0 temporal-cursor work.
+- **Horizon `total_unsealed` no longer double-counts overlapping windows**
+  — the header total is now a distinct-fact union, not a sum of per-row
+  window counts (a vertex-scope window contains every kind-scoped one; a
+  session read 32 when 16 facts existed). Plus consequence-side wording on
+  boundary rows ("seals on next `<kind>`", "N facts since last seal") and
+  a top-3 kind mix on vertex-scope rows at default zoom.
+
 ## 0.6.0 — 2026-07-11
 
 The **static-honest wave** (`feat/static-honest-spine`): a unified TTY/piped

@@ -64,6 +64,12 @@ class TestFoldRouteRefusesTemporalFlags:
         assert rc == 2
         assert "fold route only" in "\n".join(reporter.err_lines)
 
+    def test_ticks_with_diff_refused(self):
+        reporter = BufferReporter()
+        rc = read_view.run(["project", "--ticks", "--diff", "head..head"], ctx(reporter))
+        assert rc == 2
+        assert "fold route only" in "\n".join(reporter.err_lines)
+
 
 class TestTemporalRoutesStillCarryTheCursor:
     def test_facts_since_routes_to_stream_with_flag(self):
@@ -122,3 +128,20 @@ class TestTemporalRoutesStillCarryTheCursor:
         assert rc == 0
         argv = m.call_args[0][0]
         assert "--at" in argv and "head" in argv
+
+    def test_diff_routes_to_fold_with_flag(self):
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--diff", "head..head"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--diff" in argv and "head..head" in argv
+
+    def test_at_diff_alt_syntax_routes_to_fold_with_both_flags(self):
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--at", "head", "--diff", "seq:1"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--at" in argv and "head" in argv
+        assert "--diff" in argv and "seq:1" in argv

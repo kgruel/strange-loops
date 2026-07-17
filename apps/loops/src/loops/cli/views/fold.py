@@ -557,6 +557,12 @@ def run(argv: list[str], ctx: Invocation) -> int:
             zoom=parse_zoom(args),
         )
 
+    # --diff: two full reconstructions + a structural diff. Wholly different
+    # render shape from a single fold, so it short-circuits here too (own
+    # fetch pair, own render, own --json shape) — mirrors --why.
+    if args.diff:
+        return _run_diff(ctx, vertex_path, args, kind=kind, key=fetch_key)
+
     # Temporal cursor (0.8.0, A8/A11): --at (witness) / --as-of (event-time)
     # are mutually exclusive (enforced by the read router before this view
     # ever runs) and resolve to a position/ts + machine-readable metadata.
@@ -797,6 +803,174 @@ def _collect_section_facts(state: Any, kind: str) -> list[dict]:
     return facts
 
 
+
+
+# --- Structural diff (0.8.0, C2) -------------------------------------------
+
+
+def _split_diff_addresses(
+    at_value: str | None, diff_value: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Split ``--diff``'s value (+ optional ``--at``) into two addresses.
+
+    Two accepted forms: ``--diff A..B`` (split on the first ``..`` — ISO
+    fractional seconds use a single dot, never a double, so this is
+    unambiguous) or ``--at A --diff B`` (the trivial alt syntax). Returns
+    ``(addr1, addr2, error)`` — exactly one of the pair is ``None`` on error.
+    """
+    if ".." in diff_value:
+        if at_value:
+            return None, None, (
+                "give either `--diff A..B` or `--at A --diff B`, not both"
+            )
+        a, b = diff_value.split("..", 1)
+        a, b = a.strip(), b.strip()
+        if not a or not b:
+            return None, None, (
+                f"`--diff {diff_value!r}` needs two addresses on either "
+                "side of '..'"
+            )
+        return a, b, None
+    if not at_value:
+        return None, None, (
+            "--diff needs two addresses: `--diff A..B`, or `--at A --diff B`"
+        )
+    return at_value, diff_value, None
+
+
+def _diff_snapshot(state: Any) -> dict[str, dict[str, dict]]:
+    """A ``FoldState`` reduced to ``{kind: {key: payload}}`` for diffing.
+
+    Keyed (``by``-fold) sections diff at the key level. Each key's payload
+    carries a synthetic ``_n`` (revision count) alongside the visible
+    fields — a backdated arrival that loses the ``(ts, id)`` replay to an
+    earlier-received-but-later-ts fact leaves the VISIBLE payload unchanged
+    (the winner didn't change) while still advancing the receipt count; `_n`
+    is what makes that witnessed event honestly visible in the diff instead
+    of two positions that "look" identical.
+
+    Keyless (``collect``) sections have no stable per-item identity to diff
+    against, so they reduce to a single synthetic ``"_count"`` entry — an
+    honest degradation (item-level collect diffing is out of scope, not
+    silently faked).
+    """
+    out: dict[str, dict[str, dict]] = {}
+    for section in state.sections:
+        if section.key_field:
+            snap: dict[str, dict] = {}
+            for item in section.items:
+                key = str(item.payload.get(section.key_field, ""))
+                payload = dict(item.payload)
+                payload["_n"] = item.n
+                snap[key] = payload
+            out[section.kind] = snap
+        else:
+            out[section.kind] = {"_count": {"n": len(section.items)}}
+    return out
+
+
+def _compute_diff(before: dict, after: dict) -> list[dict]:
+    """Structural (kind, key) diff between two ``_diff_snapshot`` maps.
+
+    One row per kind that differs: keyed kinds carry added/removed/changed
+    keys (changed = same key, different payload); collect kinds carry a
+    before/after item count. Kinds identical across both sides are omitted.
+    """
+    rows: list[dict] = []
+    for kind in sorted(set(before) | set(after)):
+        b, a = before.get(kind, {}), after.get(kind, {})
+        if "_count" in b or "_count" in a:
+            bn, an = b.get("_count", {}).get("n", 0), a.get("_count", {}).get("n", 0)
+            if bn != an:
+                rows.append({"kind": kind, "collect_count": (bn, an)})
+            continue
+        added = sorted(set(a) - set(b))
+        removed = sorted(set(b) - set(a))
+        changed = sorted(k for k in (set(a) & set(b)) if a[k] != b[k])
+        if added or removed or changed:
+            rows.append({
+                "kind": kind, "added": added, "removed": removed,
+                "changed": [(k, b[k], a[k]) for k in changed],
+            })
+    return rows
+
+
+def _diff_row_to_json(row: dict) -> dict:
+    if "collect_count" in row:
+        before, after = row["collect_count"]
+        return {"kind": row["kind"], "collect_count": {"before": before, "after": after}}
+    return {
+        "kind": row["kind"],
+        "added": row["added"],
+        "removed": row["removed"],
+        "changed": [
+            {"key": k, "before": b, "after": a} for k, b, a in row["changed"]
+        ],
+    }
+
+
+def _run_diff(
+    ctx: Invocation, vertex_path: Path, args: argparse.Namespace,
+    *, kind: str | None, key: str | None,
+) -> int:
+    """``--diff A..B``: two full reconstructions + a structural fold diff.
+
+    Never incremental — a backdated arrival inserts early in ``(ts, id)``
+    replay and can change order-sensitive state, so each endpoint is folded
+    independently from scratch (the same discipline ``--at`` uses). Each
+    endpoint resolves through the same address grammar and aggregate
+    refusal as a bare ``--at`` (``_resolve_cursor``). Mixed axis (one
+    endpoint witness, one event-time) is refused — same-axis endpoints only
+    tonight (C2); since this implementation's two addresses are always
+    witness-grammar, the only reachable "mixed" request is `--as-of`
+    combined with `--diff`, refused explicitly below.
+    """
+    if args.as_of:
+        ctx.reporter.err(
+            "read --diff: mixed modes are refused — one endpoint would be "
+            "event-time (--as-of), the other a witness address (--diff's "
+            "grammar). Give two witness addresses instead: `--diff A..B` "
+            "(or `--at A --diff B`)."
+        )
+        return 2
+
+    addr1, addr2, err = _split_diff_addresses(args.at, args.diff)
+    if err is not None:
+        ctx.reporter.err(f"read --diff: {err}")
+        return 2
+
+    try:
+        pos1, _, meta1 = _resolve_cursor(vertex_path, addr1, None)
+        pos2, _, meta2 = _resolve_cursor(vertex_path, addr2, None)
+    except CursorAddressError as exc:
+        ctx.reporter.err(f"read --diff: {exc}")
+        return 2
+
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import _apply_vertex_scope
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    state1 = fetch_fold(vertex_path, kind=kind, key=key, observer=obs, at=pos1)
+    state2 = fetch_fold(vertex_path, kind=kind, key=key, observer=obs, at=pos2)
+    rows = _compute_diff(_diff_snapshot(state1), _diff_snapshot(state2))
+
+    if parse_format(args) is Format.JSON:
+        import json as _json
+
+        ctx.reporter.msg(_json.dumps({
+            "mode": "diff", "from": meta1, "to": meta2,
+            "sections": [_diff_row_to_json(r) for r in rows],
+        }))
+        return 0
+
+    import shutil
+
+    from loops.lenses.fold import diff_view
+
+    width = shutil.get_terminal_size().columns if ctx.isatty else None
+    block = diff_view(meta1, meta2, rows, width, piped=not ctx.isatty)
+    ctx.reporter.print_block(block)
+    return 0
 
 
 # --- Interactive handler (autoresearch TUI) -------------------------------

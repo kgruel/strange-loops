@@ -12,11 +12,12 @@ specialised display verbs:
 ontology to a historical anchor; combined with ``--facts`` it routes to
 stream exactly as ``--since`` does (unchanged, shipped behavior).
 
-On the FOLD route (no ``--facts``/``--ticks``), two temporal flags are
-honored directly by the fold view (0.8.0 temporal-cursor, A11): ``--at``
-(a witness-cursor address — head/fact:/seq:/tick:/ISO) and ``--as-of`` (the
-explicit event-time projection). They are mutually exclusive. ``--since``
-and ``--id`` have no fold-route meaning and stay refused, teaching both
+On the FOLD route (no ``--facts``/``--ticks``), temporal flags are honored
+directly by the fold view (0.8.0 temporal-cursor, A11): ``--at`` (a
+witness-cursor address — head/fact:/seq:/tick:/ISO), ``--as-of`` (the
+explicit event-time projection, mutually exclusive with ``--at``), and
+``--diff`` (a structural fold diff between two addresses, C2). ``--since``
+and ``--id`` have no fold-route meaning and stay refused, teaching the
 cursor flags plus the existing --facts/--ticks routes.
 
 This router does the minimum disambiguation — pre-parses the routing
@@ -40,6 +41,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--as-of", default=None, dest="as_of")
     pre.add_argument("--id", default=None, dest="fact_id")
     pre.add_argument("--at", default=None)
+    pre.add_argument("--diff", default=None)
     known, rest = pre.parse_known_args(argv)
 
     # Temporal facts query → stream (re-injects --since / --as-of / --id).
@@ -58,13 +60,13 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # --ticks → ticks (dedicated drill-down + lens). Re-inject the temporal
     # flags the pre-parser consumed — the ticks command owns --since/--as-of
     # semantics (window bound + ontology cursor); dropping them here silently
-    # ignored the user's cursor (closing review #7). --at addresses the fold
-    # route only — per-member cursor vectors on ticks are out of scope
-    # tonight (A9), so refuse rather than let it fall through unrecognized.
+    # ignored the user's cursor (closing review #7). --at/--diff address the
+    # fold route only — per-member cursor vectors on ticks are out of scope
+    # tonight (A9), so refuse rather than let them fall through unrecognized.
     if known.ticks:
-        if known.at:
+        if known.at or known.diff:
             ctx.reporter.err(
-                "read: --at addresses the fold route only — "
+                "read: --at/--diff address the fold route only — "
                 "`--ticks` does not support cursor addressing yet."
             )
             return 2
@@ -111,8 +113,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         )
         return 2
 
-    # Default → fold. Re-inject --facts/--at/--as-of so fold's own parser
-    # sees them (routing flags here, domain flags there).
+    # Default → fold. Re-inject --facts/--at/--as-of/--diff so fold's own
+    # parser sees them (routing flags here, domain flags there).
     fold_rest = list(rest)
     if known.facts:
         fold_rest.append("--facts")
@@ -120,6 +122,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fold_rest += ["--at", known.at]
     if known.as_of:
         fold_rest += ["--as-of", known.as_of]
+    if known.diff:
+        fold_rest += ["--diff", known.diff]
     from . import fold as fold_view
 
     return fold_view.run(fold_rest, ctx)

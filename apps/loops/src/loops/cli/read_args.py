@@ -121,6 +121,13 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--diff", default=None, metavar="A..B",
+        help=(
+            "Structural fold diff between two positions (same grammar as "
+            "--at); or pair with --at A --diff B"
+        ),
+    )
+    parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",
     )

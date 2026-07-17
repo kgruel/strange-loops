@@ -212,6 +212,74 @@ def _cursor_mode_line(cursor: dict, width: int | None) -> Block:
     return join_vertical(*rows)
 
 
+def _diff_endpoint_label(meta: dict) -> str:
+    """One-line label for a diff endpoint's resolved position."""
+    if meta.get("mode") == "witness":
+        return f"fact:{meta.get('fact_id') or '(genesis)'} (seq {meta.get('seq')})"
+    return f"as-of {_format_ts_full(meta.get('as_of'))}"
+
+
+def diff_view(
+    meta1: dict, meta2: dict, rows: list[dict], width: int | None,
+    *, piped: bool = False,
+) -> Block:
+    """Structural fold diff between two resolved positions (0.8.0, C2).
+
+    Two independent full reconstructions (never incremental — a backdated
+    arrival can reorder ``(ts, id)`` replay, so an interval-application diff
+    would be dishonest); this renders their KEY-LEVEL difference per kind
+    section. Plain and textual — no colors beyond the fold lens's existing
+    dim/bold conventions, on either register.
+
+    ``rows`` is ``_compute_diff``'s output: each entry either
+    ``{"kind", "collect_count": (before, after)}`` (a keyless collect fold —
+    count-only, item-level diffing needs stable identity collect folds
+    don't have) or ``{"kind", "added", "removed", "changed"}`` (a keyed
+    ``by``-fold — ``changed`` is ``[(key, before_payload, after_payload)]``).
+    """
+    header = Block.text(
+        f"diff: {_diff_endpoint_label(meta1)} → {_diff_endpoint_label(meta2)}",
+        Style(bold=True), width=width,
+    )
+    if not rows:
+        return join_vertical(
+            header, Block.text("(no differences)", Style(dim=True), width=width),
+        )
+
+    blocks: list[Block] = [header]
+    for row in rows:
+        blocks.append(Block.text("", Style(), width=width))
+        if "collect_count" in row:
+            before, after = row["collect_count"]
+            blocks.append(Block.text(
+                f"{row['kind']}: {before} → {after} items "
+                "(collect fold — count only)",
+                Style(bold=True), width=width,
+            ))
+            continue
+
+        added, removed, changed = row["added"], row["removed"], row["changed"]
+        blocks.append(Block.text(
+            f"{row['kind']}: +{len(added)} added, -{len(removed)} removed, "
+            f"~{len(changed)} changed",
+            Style(bold=True), width=width,
+        ))
+        for k in added:
+            blocks.append(Block.text(f"  + {k}", Style(fg="green"), width=width))
+        for k in removed:
+            blocks.append(Block.text(f"  - {k}", Style(fg="red"), width=width))
+        for k, before, after in changed:
+            blocks.append(Block.text(f"  ~ {k}", Style(), width=width))
+            for field in sorted(set(before) | set(after)):
+                bv, av = before.get(field), after.get(field)
+                if bv != av:
+                    blocks.append(Block.text(
+                        f"      {field}: {bv!r} → {av!r}",
+                        Style(dim=True), width=width,
+                    ))
+    return join_vertical(*blocks)
+
+
 def fold_view(
     data: "Surface | FoldState", zoom: Zoom, width: int | None,
     *, vertex_name: str | None = None, vertex_path: str | None = None,

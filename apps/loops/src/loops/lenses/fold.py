@@ -170,12 +170,55 @@ def _fold_card(
 # ---------------------------------------------------------------------------
 
 
+def _cursor_mode_line(cursor: dict, width: int | None) -> Block:
+    """The ``--at``/``--as-of`` mode-line disclosure (0.8.0, A11).
+
+    Rendered-text sibling of the machine-readable ``cursor`` field dispatch
+    merges into JSON output — every register gets the same honesty-ladder
+    treatment ``stream_view`` already gives ``ontology_notice``. Prepended
+    above the fold body, at every zoom level (never gated to SUMMARY+): a
+    rewound read must say so as prominently as an unrewound one hides it.
+    """
+    notice = {
+        "unhistorized": (
+            "unhistorized at this position — genesis floor (earliest known state)"
+        ),
+        "aggregate-head": (
+            "aggregation membership is CURRENT file state — not historized"
+        ),
+        "file-pre-genesis": "no declaration lineage — ontology is the current file",
+    }.get(cursor.get("status", ""))
+
+    if cursor.get("mode") == "witness":
+        fact_id = cursor.get("fact_id") or "(genesis)"
+        bits = [f"witness cursor: fact {fact_id} (seq {cursor.get('seq')})"]
+        if cursor.get("unadopted"):
+            bits.append("unadopted store")
+        anchor = cursor.get("anchor")
+        if anchor:
+            bits.append(
+                f"anchored at tick '{anchor['name']}' sealed "
+                f"{_format_ts_full(anchor['ts'])}"
+            )
+        else:
+            bits.append("unsealed tail — no prior tick anchor")
+        head = "⏱ " + " — ".join(bits)
+    else:
+        head = f"⏱ event-time projection: as of {_format_ts_full(cursor.get('as_of'))}"
+
+    rows = [Block.text(head, Style(dim=True), width=width)]
+    if notice:
+        rows.append(Block.text(f"  ⚠ ontology: {notice}", Style(dim=True), width=width))
+    return join_vertical(*rows)
+
+
 def fold_view(
     data: "Surface | FoldState", zoom: Zoom, width: int | None,
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
     piped: bool | None = None,
+    cursor: dict | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -198,7 +241,21 @@ def fold_view(
       chars: max display width for body text. Caps the body budget that
              width-based truncation already enforces — useful for context-
              window economics where total tokens matter more than terminal fit.
+
+    ``cursor`` (0.8.0 temporal cursor, optional — ``None`` for every existing
+    caller, so default renders are byte-identical) carries the resolved
+    --at/--as-of mode/status/position; when present it prepends the mode-line
+    disclosure above the fold body, in every register.
     """
+    if cursor is not None:
+        body = fold_view(
+            data, zoom, width,
+            vertex_name=vertex_name, vertex_path=vertex_path,
+            visible=visible, lines=lines, chars=chars, piped=piped,
+        )
+        line_width = None if (piped or (piped is None and width is None)) else width
+        return join_vertical(_cursor_mode_line(cursor, line_width), body)
+
     if isinstance(data, FoldState):
         data = project(data)
 

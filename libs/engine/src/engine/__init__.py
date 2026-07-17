@@ -99,11 +99,17 @@ __all__ = [
     "WitnessFold",
     "TickAnchor",
     "resolve_witness_position",
+    "resolve_seq",
+    "resolve_tick_cursor",
+    "resolve_tick_floor",
     "receipt_group_span",
     "WitnessResolutionError",
     "UnknownWitnessHandle",
     "MidReceiptGroupPosition",
     "WitnessAggregateUnsupported",
+    "SeqOutOfRange",
+    "UnknownTickHandle",
+    "NoWitnessAnchor",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -192,6 +198,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "WitnessFold": ("engine.witness", "WitnessFold"),
     "TickAnchor": ("engine.witness", "TickAnchor"),
     "resolve_witness_position": ("engine.witness", "resolve_witness_position"),
+    "resolve_seq": ("engine.witness", "resolve_seq"),
+    "resolve_tick_cursor": ("engine.witness", "resolve_tick_cursor"),
+    "resolve_tick_floor": ("engine.witness", "resolve_tick_floor"),
     "receipt_group_span": ("engine.witness", "receipt_group_span"),
     "WitnessResolutionError": ("engine.witness", "WitnessResolutionError"),
     "UnknownWitnessHandle": ("engine.witness", "UnknownWitnessHandle"),
@@ -200,6 +209,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "engine.witness",
         "WitnessAggregateUnsupported",
     ),
+    "SeqOutOfRange": ("engine.witness", "SeqOutOfRange"),
+    "UnknownTickHandle": ("engine.witness", "UnknownTickHandle"),
+    "NoWitnessAnchor": ("engine.witness", "NoWitnessAnchor"),
 }
 
 

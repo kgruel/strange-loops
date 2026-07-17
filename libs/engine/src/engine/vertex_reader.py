@@ -333,6 +333,7 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
 def _combined_read(
     ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None,
     return_payloads: bool = False,
+    until_ts: float | None = None,
 ) -> "dict[str, dict[str, Any]] | tuple[dict[str, dict[str, Any]], dict[str, list[dict]]]":
     """Fold state across multiple stores (combinatorial vertex_read).
 
@@ -344,6 +345,12 @@ def _combined_read(
     When ``return_payloads=True``, returns ``(raw_state, kind_payloads)``
     so callers can use the per-kind payload lists for retain_facts /
     source_facts population without re-querying the stores.
+
+    ``until_ts`` (0.8.0 fold-state-``as_of``, A9) caps every member's facts
+    to ``ts <= until_ts`` — the event-time projection over an aggregate.
+    Membership itself stays CURRENT file state regardless (aggregation
+    internal tables are not yet built, the shipped "aggregate-head" honesty
+    marker) — only the facts axis is cut by the cursor.
     """
     store_paths = _resolve_stores(ast, vertex_path)
     if not store_paths:
@@ -359,14 +366,16 @@ def _combined_read(
         # total order the engine replay paths use. Store- and merge-order
         # independent, so combined reads re-fold identically regardless of
         # which store a fact lives in.
+        ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
         selects = [
             f"SELECT id, kind, ts, observer, origin, payload "
-            f"FROM {'[' + a + '].' if a != 'main' else ''}facts"
+            f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
             for a in aliases
         ]
         sql = " UNION ALL ".join(selects)
+        params = (until_ts,) * len(aliases) if until_ts is not None else ()
 
-        rows = conn.execute(sql).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         # Sort in Python — avoids SQLite index scan for ORDER BY ts
         # which causes random I/O (~14ms vs ~1ms for unsorted read).
         rows.sort(key=lambda r: (r[2], r[0]))
@@ -931,6 +940,7 @@ def vertex_fold(
     kind: str | None = None,
     retain_facts: bool = False,
     at: WitnessPosition | None = None,
+    as_of: float | None = None,
 ) -> Any:
     """Read fold state as a typed ``FoldState``.
 
@@ -944,21 +954,38 @@ def vertex_fold(
     When *observer* is provided, only that observer's facts are folded.
     When *kind* is provided, only that kind is included.
 
-    ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0 fold-state-as-of)
-    reconstructs the fold at a witness position: the prefix ``rowid <= at.rowid``
-    is selected, ontology is resolved **from the same prefix** (equal cursors ⇒
-    one position for selection and ontology), and facts are replayed in
-    ``(ts, id)`` order — a full reconstruction, never incremental application of
-    an interval (a backdated arrival inserts early in replay). It returns a
-    :class:`~engine.witness.WitnessFold` envelope (fold + resolved position +
-    ``mode='witness'`` + honesty status) instead of a bare ``FoldState``, so the
-    answering mode is machine-readable (A11). Per-store only: refused on
-    aggregates (witness order is per-member, A1/A9). ``None`` = head, returning a
-    bare ``FoldState`` exactly as before.
+    Two mutually-exclusive historical selectors (A8) — passing both raises
+    ``ValueError``:
+
+    - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0
+      fold-state-as-of) reconstructs the fold at a witness position: the
+      prefix ``rowid <= at.rowid`` is selected, ontology is resolved **from
+      the same prefix** (equal cursors ⇒ one position for selection and
+      ontology), and facts are replayed in ``(ts, id)`` order — a full
+      reconstruction, never incremental application of an interval (a
+      backdated arrival inserts early in replay). Returns a
+      :class:`~engine.witness.WitnessFold` envelope (fold + resolved position
+      + ``mode='witness'`` + honesty status) instead of a bare ``FoldState``,
+      so the answering mode is machine-readable (A11). Per-store only:
+      refused on aggregates (witness order is per-member, A1/A9).
+    - ``as_of`` (event-time ``ts <= as_of`` projection, the explicit
+      analytical mode — never the cursor default) selects facts by timestamp
+      cutoff and resolves ontology via the existing ``load_declaration``
+      ``as_of`` seam (equal ts cursors both axes). Allowed on aggregates
+      (uniform event-time is well-posed — current membership, each member's
+      facts cut by the same cutoff, matching the shipped facts-route
+      behavior). Returns a bare ``FoldState`` — the caller pairs it with
+      ``load_declaration_status(as_of=...)`` for the honesty status, as the
+      existing stream/ticks fetches already do.
+
+    ``None`` for both = head, returning a bare ``FoldState`` exactly as before.
     """
     from .compiler import compile_vertex
 
-    ast = load_declaration(vertex_path, at=at)
+    if as_of is not None and at is not None:
+        raise ValueError("vertex_fold: as_of and at are mutually exclusive (A8)")
+
+    ast = load_declaration(vertex_path, as_of=as_of, at=at)
     if at is not None and (ast.combine is not None or ast.discover is not None):
         from .witness import WitnessAggregateUnsupported
 
@@ -988,12 +1015,12 @@ def vertex_fold(
         if retain_facts:
             raw, child_payloads = _combined_read(
                 ast, vertex_path, full_specs,
-                observer=observer, return_payloads=True,
+                observer=observer, return_payloads=True, until_ts=as_of,
             )
             _populate_source_facts(full_specs, child_payloads, source_facts)
         else:
             raw = _combined_read(
-                ast, vertex_path, full_specs, observer=observer,
+                ast, vertex_path, full_specs, observer=observer, until_ts=as_of,
             )
 
         # Aggregation with own store: overlay self-knowledge
@@ -1007,7 +1034,7 @@ def vertex_fold(
                 with StoreReader(own_store) as reader:
                     own_payloads_by_kind: dict[str, list[dict]] = {}
                     for k, spec in specs.items():
-                        facts = reader.facts_by_kind(k)
+                        facts = reader.facts_by_kind(k, until_ts=as_of)
                         if observer:
                             facts = [f for f in facts if observer_matches(f["observer"], observer)]
                         payloads = []
@@ -1039,7 +1066,7 @@ def vertex_fold(
             with StoreReader(store_path) as reader:
                 raw = {}
                 for k, spec in full_specs.items():
-                    facts = reader.facts_by_kind(k, at_rowid=at_rowid)
+                    facts = reader.facts_by_kind(k, at_rowid=at_rowid, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1065,11 +1092,12 @@ def vertex_fold(
                 # the reserved `_decl.*` namespace by default (SPEC §9.4 —
                 # every read surface excludes it ambiently); an explicit
                 # `--kind` request below is the escape hatch, not this footer.
-                # Suppressed under a witness cursor: the store-kind stats are
-                # head-scoped (no rowid cap on GROUP BY), so showing them at a
-                # historical position would leak head counts the prefix never
-                # saw. The folded sections themselves ARE prefix-correct.
-                if at is not None:
+                # Suppressed under a witness cursor OR an as_of projection: the
+                # store-kind stats are head-scoped (no rowid/ts cutoff on the
+                # GROUP BY), so showing them at a historical position would
+                # leak head counts the prefix/cutoff never saw. The folded
+                # sections themselves ARE prefix/cutoff-correct.
+                if at is not None or as_of is not None:
                     unfolded = {}
                 else:
                     store_kinds = reader.fact_kind_stats()
@@ -1088,7 +1116,7 @@ def vertex_fold(
                 # reserved-namespace kind on demand: an explicit ask overrides
                 # the ambient default everywhere else in this module too.
                 if kind is not None and kind not in full_specs:
-                    facts = reader.facts_by_kind(kind, at_rowid=at_rowid)
+                    facts = reader.facts_by_kind(kind, at_rowid=at_rowid, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []

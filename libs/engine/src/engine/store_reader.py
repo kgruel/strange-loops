@@ -467,7 +467,13 @@ class StoreReader:
             ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
 
-    def facts_by_kind(self, kind: str, *, at_rowid: int | None = None) -> list[dict]:
+    def facts_by_kind(
+        self,
+        kind: str,
+        *,
+        at_rowid: int | None = None,
+        until_ts: float | None = None,
+    ) -> list[dict]:
         """All facts for a kind, ordered by insertion (rowid ASC).
 
         Used for fold replay — facts must be in causal order.
@@ -475,13 +481,21 @@ class StoreReader:
         ``at_rowid`` caps to the witness prefix (``rowid <= at_rowid``): the fold
         reconstructs from the rows the store had received at that position, still
         replayed in ``(ts, id)`` order (0.8.0 fold-at). ``None`` is a head read.
+
+        ``until_ts`` caps to ``ts <= until_ts`` — the event-time projection
+        sibling (0.8.0 fold-state-``as_of``, A8): facts are selected by
+        timestamp cutoff rather than receipt prefix. Mutually exclusive with
+        ``at_rowid`` in practice (the caller picks one selector); both compose
+        as independent WHERE clauses if ever passed together.
         """
         rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
         rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
+        ts_clause = " AND ts <= ?" if until_ts is not None else ""
+        ts_param: tuple = (until_ts,) if until_ts is not None else ()
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE kind = ?{rowid_clause} ORDER BY ts, id",
-            (kind, *rowid_param),
+            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY ts, id",
+            (kind, *rowid_param, *ts_param),
         ).fetchall()
         return [
             {

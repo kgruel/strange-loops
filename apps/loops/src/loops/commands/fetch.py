@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from atoms import FoldItem, FoldState, TickWindow
+    from engine.witness import WitnessPosition
 
 
 def _parse_duration(s: str) -> float:
@@ -104,6 +105,9 @@ def fetch_fold(
     observer: str | None = None,
     retain_facts: bool = False,
     refs_depth: int = 0,
+    *,
+    at: "WitnessPosition | None" = None,
+    as_of: float | None = None,
 ) -> "FoldState":
     """Fetch fold state, with optional key prefix drill-down.
 
@@ -128,9 +132,20 @@ def fetch_fold(
     state's ``walked`` field. Primary sections are unaffected. See
     decision/atoms/walked-items-as-foldstate-extension for the shape.
     A2 of the trace-dissolution arc — walk is outbound only.
+
+    ``at``/``as_of`` (0.8.0 temporal cursor, mutually exclusive — A8) thread
+    straight to ``engine.vertex_fold``. ``at`` reconstructs the fold returns
+    a ``WitnessFold`` envelope from the engine; this function unwraps
+    ``.fold`` so callers keep receiving a bare ``FoldState`` exactly as
+    before — callers that need the envelope's position/status/mode read it
+    via ``engine.load_declaration_status`` or resolve the position
+    themselves beforehand (see ``cli.views.fold``, which builds the
+    render-context cursor metadata up front rather than threading a tuple
+    return through here).
     """
     from atoms import FoldSection, FoldState
     from engine import vertex_fold
+    from engine.witness import WitnessFold
 
     # Back-compat: split embedded kind/key syntax when no explicit key given.
     if kind and key is None and "/" in kind:
@@ -138,8 +153,10 @@ def fetch_fold(
 
     state = vertex_fold(
         vertex_path, observer=observer, kind=kind,
-        retain_facts=retain_facts,
+        retain_facts=retain_facts, at=at, as_of=as_of,
     )
+    if isinstance(state, WitnessFold):
+        state = state.fold
 
     if key is not None:
         # Filter each section's items by the section's own key_field (prefix match).

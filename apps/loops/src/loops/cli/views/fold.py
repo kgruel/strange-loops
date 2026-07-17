@@ -263,6 +263,96 @@ def _resolve_mode(
     return "static"
 
 
+# --- Temporal cursor (0.8.0) — --at / --as-of resolution -------------------
+
+
+class CursorAddressError(Exception):
+    """Wraps any --at/--as-of resolution failure with a ``read --at/--as-of:
+    `` prefix — the single catch site in ``run()`` reports it and exits 2."""
+
+
+def _anchor_dict(position: Any) -> dict | None:
+    """JSON-clean projection of a ``WitnessPosition.anchor`` (TickAnchor)."""
+    anchor = position.anchor
+    if anchor is None:
+        return None
+    return {"name": anchor.name, "ts": anchor.ts, "fact_cursor": anchor.fact_cursor}
+
+
+def _resolve_cursor(
+    vertex_path: Path, at_address: str | None, as_of_raw: str | None,
+) -> tuple[Any, float | None, dict]:
+    """Resolve ``--at``/``--as-of`` (mutually exclusive, enforced upstream by
+    the read router) into ``(witness_position_or_None, as_of_ts_or_None,
+    cursor_meta)``.
+
+    ``cursor_meta`` is the machine-readable mode/status/position disclosure
+    (A11) — carried in ``render_context`` for text rendering and merged into
+    the JSON payload by ``dispatch``. Raises :class:`CursorAddressError` for
+    every failure mode (aggregate refusal, unresolvable address, mid-ceremony
+    position, out-of-range seq, unanchored wall-clock/tick) with the
+    underlying teaching message intact.
+    """
+    from loops.cli.witness_address import (
+        AddressError,
+        is_aggregate_vertex,
+        refuse_aggregate_at,
+        resolve_at_address,
+    )
+    from loops.commands.resolve import _resolve_vertex_store_path
+
+    if at_address is not None:
+        if is_aggregate_vertex(vertex_path):
+            raise CursorAddressError(str(refuse_aggregate_at(at_address)))
+        try:
+            store_path = _resolve_vertex_store_path(vertex_path)
+        except Exception as exc:  # VertexNotFound/VertexParseError etc.
+            raise CursorAddressError(str(exc)) from exc
+        if store_path is None:
+            raise CursorAddressError(
+                "this vertex has no store — there is nothing to address a "
+                "witness position against."
+            )
+        try:
+            position = resolve_at_address(store_path, at_address)
+        except AddressError as exc:
+            raise CursorAddressError(str(exc)) from exc
+        except Exception as exc:  # engine WitnessResolutionError family
+            raise CursorAddressError(str(exc)) from exc
+
+        from engine import load_declaration_status
+
+        _ast, status = load_declaration_status(vertex_path, at=position)
+        meta = {
+            "mode": "witness",
+            "address": at_address,
+            "status": status,
+            "fact_id": position.fact_id,
+            "seq": position.seq,
+            "unadopted": position.unadopted,
+            "lineage": position.lineage,
+            "anchor": _anchor_dict(position),
+        }
+        return position, None, meta
+
+    # --as-of: the explicit event-time projection. Same duration/epoch/ISO
+    # grammar the shipped stream/ticks --as-of already accepts.
+    from datetime import datetime, timezone
+
+    from loops.commands.fetch import _parse_as_of
+
+    try:
+        as_of_ts = _parse_as_of(as_of_raw, datetime.now(timezone.utc))
+    except ValueError as exc:
+        raise CursorAddressError(str(exc)) from exc
+
+    from engine import load_declaration_status
+
+    _ast, status = load_declaration_status(vertex_path, as_of=as_of_ts)
+    meta = {"mode": "as_of", "address": as_of_raw, "status": status, "as_of": as_of_ts}
+    return None, as_of_ts, meta
+
+
 # --- Fetch closures --------------------------------------------------------
 
 
@@ -274,12 +364,18 @@ def _build_fold_fetch(
     refs_depth: int,
     want_facts: bool,
     lens: str | None,
+    *,
+    at: Any = None,
+    as_of: float | None = None,
 ) -> Any:
     """Return a zero-arg callable that produces the fold data.
 
     Honours lens-declared fetch (composition lenses) when present;
     otherwise calls ``commands.fetch.fetch_fold`` with the full kwarg
-    surface.
+    surface. ``at``/``as_of`` (0.8.0 temporal cursor) pass straight through
+    to ``fetch_fold`` on the direct path; a lens-declared fetch that doesn't
+    name them simply doesn't receive them (``call_lens_fetch``'s existing
+    signature-based dispatch).
     """
     from loops.commands.resolve import _apply_vertex_scope
 
@@ -299,6 +395,7 @@ def _build_fold_fetch(
                 kind=kind, key=key, observer=obs,
                 retain_facts=want_facts,
                 refs_depth=refs_depth,
+                at=at, as_of=as_of,
             )
         from loops.commands.fetch import fetch_fold
 
@@ -306,6 +403,7 @@ def _build_fold_fetch(
             vertex_path, kind=kind, key=key, observer=obs,
             retain_facts=want_facts,
             refs_depth=refs_depth,
+            at=at, as_of=as_of,
         )
 
     return fetch_data
@@ -443,13 +541,36 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
-    # fold path entirely (own fetch, own lens, own --json shape).
+    # fold path entirely (own fetch, own lens, own --json shape). Cursor
+    # addressing on --why is out of scope tonight — refuse rather than
+    # silently drop the flag (the same honesty stance as the router refusal).
     if args.why:
+        if args.at or args.as_of:
+            ctx.reporter.err(
+                "read --why: --at/--as-of are not supported together with "
+                "--why yet — the provenance drill always reads at head."
+            )
+            return 2
         return _run_why(
             ctx, vertex_path, kind, queried_key, key_or,
             json=(parse_format(args) is Format.JSON),
             zoom=parse_zoom(args),
         )
+
+    # Temporal cursor (0.8.0, A8/A11): --at (witness) / --as-of (event-time)
+    # are mutually exclusive (enforced by the read router before this view
+    # ever runs) and resolve to a position/ts + machine-readable metadata.
+    at_position: Any = None
+    as_of_ts: float | None = None
+    cursor_meta: dict | None = None
+    if args.at or args.as_of:
+        try:
+            at_position, as_of_ts, cursor_meta = _resolve_cursor(
+                vertex_path, args.at, args.as_of,
+            )
+        except CursorAddressError as exc:
+            ctx.reporter.err(f"read: {exc}")
+            return 2
 
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
@@ -457,6 +578,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         refs_depth=refs_depth,
         want_facts=args.facts,
         lens=args.lens,
+        at=at_position,
+        as_of=as_of_ts,
     )
 
     # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on
@@ -523,7 +646,13 @@ def run(argv: list[str], ctx: Invocation) -> int:
         surface_spec=surface_spec,
         # Presentation register keys on the channel (TTY = human "Threads (N):"
         # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
-        render_context={"piped": not ctx.isatty},
+        # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
+        # disclosure — read by the fold lens (mode-line) and by dispatch's
+        # JSON branch (merged into the structured payload).
+        render_context={
+            "piped": not ctx.isatty,
+            **({"cursor": cursor_meta} if cursor_meta is not None else {}),
+        },
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]
@@ -666,6 +795,8 @@ def _collect_section_facts(state: Any, kind: str) -> list[dict]:
             facts.append(pd)
     facts.sort(key=lambda f: f.get("_ts") or 0)
     return facts
+
+
 
 
 # --- Interactive handler (autoresearch TUI) -------------------------------

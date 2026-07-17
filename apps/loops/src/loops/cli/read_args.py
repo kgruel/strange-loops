@@ -102,6 +102,24 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         "--why", action="store_true", default=False,
         help="Per-field provenance drill for one exact kind/key address",
     )
+    # Temporal cursor (0.8.0) — two mutually-exclusive selectors on the fold
+    # route (A8/A11): --at is the witness-prefix cursor, --as-of is the
+    # explicit event-time projection. See cli.witness_address for the --at
+    # grammar (head / fact:ID / seq:N / tick:ID / ISO date-or-datetime).
+    parser.add_argument(
+        "--at", default=None, metavar="ADDRESS",
+        help=(
+            "Witness-cursor address: head / fact:ID / seq:N / tick:ID / "
+            "ISO date-or-datetime (snaps to the tick floor)"
+        ),
+    )
+    parser.add_argument(
+        "--as-of", default=None, dest="as_of", metavar="TS",
+        help=(
+            "Event-time projection — rewinds facts + ontology to this ts "
+            "(duration e.g. '7d', epoch seconds, or ISO-8601)"
+        ),
+    )
     parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",

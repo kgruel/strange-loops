@@ -103,6 +103,31 @@ class WitnessAggregateUnsupported(WitnessResolutionError):
     """
 
 
+class SeqOutOfRange(WitnessResolutionError):
+    """A ``seq:N`` address names a receipt ordinal outside ``[1, total rows]``.
+
+    ``seq`` is a 1-based receipt ordinal over ALL rows in rowid (append)
+    order, ``_decl.*`` included — the inverse of :attr:`WitnessPosition.seq`.
+    """
+
+
+class UnknownTickHandle(WitnessResolutionError):
+    """A ``tick:ID`` address names a tick id no row in the store carries."""
+
+
+class NoWitnessAnchor(WitnessResolutionError):
+    """A wall-clock or tick address has no usable witness-time anchor.
+
+    Facts carry no receipt timestamp (module docstring) — only a sealed,
+    chained tick's ``fact_cursor`` binds wall-clock to a witness position.
+    Raised when the named tick predates the chain era (no ``fact_cursor``
+    column, or an empty cursor on a pre-chain row), or when no chained tick
+    exists at-or-before a wall-clock mark. Per A5, this is never silently
+    approximated with a ts-cutoff — the caller routes to the explicit
+    ``--as-of`` event-time projection instead.
+    """
+
+
 @dataclass(frozen=True)
 class TickAnchor:
     """The last sealed tick at-or-before a witness position, if any.
@@ -296,6 +321,143 @@ def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str,
             "resolves by exact id (ids are opaque; never parsed or ordered)"
         )
     return address, row[0]
+
+
+def resolve_seq(store_path: Path, n: int, *, timeout: float = 5.0) -> str:
+    """Resolve a ``seq:N`` receipt ordinal to its fact id.
+
+    The inverse of :attr:`WitnessPosition.seq`: ``seq`` is a 1-based ordinal
+    over ALL rows in rowid (append) order, ``_decl.*`` included. This is a
+    rowid→id lookup (``ORDER BY rowid`` + offset), never an ordering of ids
+    (A3) — the resolved id still flows through
+    :func:`resolve_witness_position` for the actual position (receipt-group
+    guard, lineage, anchor).
+
+    Raises :class:`SeqOutOfRange` for ``n < 1`` or ``n`` beyond the store's
+    total receipt count.
+    """
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        raise WitnessResolutionError(
+            f"{store_path} is not a usable store — cannot resolve seq:{n} "
+            "against it"
+        )
+    try:
+        row = (
+            conn.execute(
+                "SELECT id FROM facts ORDER BY rowid LIMIT 1 OFFSET ?",
+                (n - 1,),
+            ).fetchone()
+            if n >= 1
+            else None
+        )
+        if row is None:
+            total = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+            raise SeqOutOfRange(
+                f"seq:{n} is out of range — this store has {total} receipt(s) "
+                f"(valid range: seq:1..seq:{total})"
+            )
+        return row[0]
+    finally:
+        conn.close()
+
+
+def resolve_tick_cursor(
+    store_path: Path, tick_id: str, *, timeout: float = 5.0
+) -> tuple[str, str, float]:
+    """Resolve a ``tick:ID`` address to its ``(fact_cursor, name, ts)``.
+
+    A tick's own id is a primary-key lookup into the ``ticks`` table (never
+    ordered or parsed, A3's sibling rule); its ``fact_cursor`` is already a
+    fact id and is handed to :func:`resolve_witness_position` unchanged.
+
+    Raises :class:`UnknownTickHandle` when no tick carries that id, and
+    :class:`NoWitnessAnchor` when the named tick predates the witness-chain
+    era (no usable ``fact_cursor`` — A5's honest refusal, never a silent
+    ts-approximation).
+    """
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        raise WitnessResolutionError(
+            f"{store_path} is not a usable store — cannot resolve tick:"
+            f"{tick_id} against it"
+        )
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        if "fact_cursor" not in cols:
+            row = conn.execute(
+                "SELECT name, ts FROM ticks WHERE id = ?", (tick_id,)
+            ).fetchone()
+            if row is None:
+                raise UnknownTickHandle(
+                    f"no tick with id {tick_id!r} in this store"
+                )
+            raise NoWitnessAnchor(
+                f"tick:{tick_id} ({row[0]} @ {row[1]}) predates the "
+                "witness-chain era (no fact_cursor column) — no witness "
+                "anchor for this era. Use --as-of for the explicit "
+                "event-time projection instead."
+            )
+        row = conn.execute(
+            "SELECT name, ts, fact_cursor FROM ticks WHERE id = ?", (tick_id,)
+        ).fetchone()
+        if row is None:
+            raise UnknownTickHandle(f"no tick with id {tick_id!r} in this store")
+        name, ts, cursor = row
+        if not cursor:
+            raise NoWitnessAnchor(
+                f"tick:{tick_id} ({name} @ {ts}) has no witness anchor — a "
+                "pre-chain tick was never bound to a fact_cursor. Use "
+                "--as-of for the explicit event-time projection instead."
+            )
+        return cursor, name, ts
+    finally:
+        conn.close()
+
+
+def resolve_tick_floor(
+    store_path: Path, mark_ts: float, *, timeout: float = 5.0
+) -> tuple[str, str, float]:
+    """The last sealed, chained tick at-or-before ``mark_ts`` — the wall-clock floor.
+
+    Wall-clock addressing snaps to the newest tick whose window closed
+    at-or-before the mark (A5): facts carry no receipt timestamp, so a tick's
+    ``fact_cursor`` is the only anchor binding wall-clock to a witness
+    position. Returns ``(fact_cursor, name, ts)`` of that tick.
+
+    Raises :class:`NoWitnessAnchor` when no chained tick precedes the mark
+    (sparse-tick eras, pre-chain ticks, or a pre-chain schema) — never a
+    silent ts-approximation. The caller routes to the explicit ``--as-of``
+    event-time projection instead.
+    """
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        raise WitnessResolutionError(
+            f"{store_path} is not a usable store — cannot resolve a "
+            "wall-clock address against it"
+        )
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        row = (
+            conn.execute(
+                "SELECT name, ts, fact_cursor FROM ticks "
+                "WHERE ts <= ? AND fact_cursor IS NOT NULL AND fact_cursor <> '' "
+                "ORDER BY ts DESC LIMIT 1",
+                (mark_ts,),
+            ).fetchone()
+            if "fact_cursor" in cols
+            else None
+        )
+        if row is None:
+            raise NoWitnessAnchor(
+                "no witness-time anchor — no sealed tick at or before this "
+                "mark carries a usable cursor. Use --as-of for the explicit "
+                "event-time projection instead."
+            )
+        name, ts, cursor = row
+        return cursor, name, ts
+    finally:
+        conn.close()
 
 
 @dataclass(frozen=True)

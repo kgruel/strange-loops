@@ -2755,10 +2755,12 @@ class TestEmitExceptionAndResolveEdges:
         monkeypatch.setenv("LOOPS_HOME", str(tmp_path))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
 
-        def bad_receive(self, fact):
+        def bad_receive(self, fact, *a, **kw):
             raise RuntimeError("inject error for L346-348")
 
-        with patch.object(Vertex, "receive", bad_receive):
+        # cmd_emit routes through receive_receipt (receive is its tick
+        # projection) — patch the implementation, not the view.
+        with patch.object(Vertex, "receive_receipt", bad_receive):
             ns = argparse.Namespace(
                 vertex=None, kind="ping", parts=["n=1"], observer="", dry_run=False
             )

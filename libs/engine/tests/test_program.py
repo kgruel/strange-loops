@@ -116,9 +116,10 @@ def test_load_vertex_program_expected_ticks_and_default_override(tmp_path: Path)
     assert program.expected_ticks == ["foo"]
 
     # Ensure override is actually applied by folding and firing the boundary.
-    tick = program.receive(Fact.of("foo", "test", v=2))
-    assert tick is None
-    tick = program.receive(Fact.of("foo.complete", "test"))
+    receipt = program.receive(Fact.of("foo", "test", v=2))
+    assert receipt.tick is None
+    receipt = program.receive(Fact.of("foo.complete", "test"))
+    tick = receipt.tick
     assert tick is not None
     assert tick.name == "foo"
     assert tick.payload["acc"] == 2
@@ -158,7 +159,7 @@ def test_load_vertex_program_per_kind_overrides(tmp_path: Path) -> None:
     assert program.expected_ticks == ["a", "b"]
 
     program.receive(Fact.of("a", "test"))
-    tick_a = program.receive(Fact.of("a.complete", "test"))
+    tick_a = program.receive(Fact.of("a.complete", "test")).tick
     assert tick_a is not None
     assert tick_a.name == "a"
     assert tick_a.payload["seen"] == 10
@@ -351,7 +352,7 @@ def test_program_receive_dispatches_run_clause(tmp_path: Path) -> None:
         path=fake_path, run_dispatcher=dispatcher,
     )
 
-    tick = program.receive(Fact.of("task", "kyle", name="job1"))
+    tick = program.receive(Fact.of("task", "kyle", name="job1")).tick
     assert tick is not None
     assert tick.run == "scripts/dispatch.sh"
     assert calls == [("scripts/dispatch.sh", "task", fake_path)]
@@ -382,7 +383,7 @@ def test_program_receive_no_dispatcher_is_noop(tmp_path: Path) -> None:
 
     program = VertexProgram(vertex=v, sources=[], expected_ticks=["task"])  # no dispatcher
 
-    tick = program.receive(Fact.of("task", "kyle", name="job1"))
+    tick = program.receive(Fact.of("task", "kyle", name="job1")).tick
     assert tick is not None
     assert tick.run == "scripts/dispatch.sh"  # tick still carries it
     store.close()

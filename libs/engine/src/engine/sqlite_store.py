@@ -493,6 +493,10 @@ class SqliteStore(Generic[T]):
         another observer's fact under a local key would be forgery; the
         override bypasses the signer entirely).
         """
+        if self._conn is None:
+            # close() is part of the public lifecycle now — use-after-close
+            # gets a named error, not AttributeError on a None connection.
+            raise RuntimeError(f"store closed: {self._path}")
         self._ensure_sync()
         self._ensure_fact_signature_column()
         d = self._serialize(event)

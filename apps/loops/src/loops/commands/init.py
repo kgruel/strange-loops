@@ -285,24 +285,21 @@ def _seed_config_facts(
     rep = _reporter(reporter)
     key_aliases = {"metric": "primary_metric"}
 
-    program = load_vertex_program(vertex_path, validate_ast=False, skip_sources=True)
-    v = program.vertex
-    ts = datetime.now(timezone.utc).timestamp()
+    with load_vertex_program(vertex_path, validate_ast=False, skip_sources=True) as program:
+        v = program.vertex
+        ts = datetime.now(timezone.utc).timestamp()
 
-    for key, value in config.items():
-        key = key_aliases.get(key, key)
-        fact = Fact(
-            kind="config",
-            ts=ts,
-            payload={"key": key, "value": value},
-            observer="init",
-            origin="",
-        )
-        v.receive(fact)
-        ts += 0.001
-
-    if hasattr(v, '_store') and v._store is not None:
-        v._store.close()
+        for key, value in config.items():
+            key = key_aliases.get(key, key)
+            fact = Fact(
+                kind="config",
+                ts=ts,
+                payload={"key": key, "value": value},
+                observer="init",
+                origin="",
+            )
+            v.receive(fact)
+            ts += 0.001
 
     rep.msg(f"Seeded {len(config)} config facts")
 

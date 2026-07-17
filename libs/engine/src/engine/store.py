@@ -25,12 +25,15 @@ class Store(Protocol[T_contra]):
     Optional: between() for time-range queries (fidelity traversal).
     """
 
-    def append(self, event: T_contra, *, id_override: str | None = None) -> Any:
-        """Append one event to the log.
+    def append(self, event: T_contra, *, id_override: str | None = None) -> str | None:
+        """Append one event to the log. Returns the ID stored under, or
+        None for implementations that don't track per-event IDs.
 
         ``id_override`` is honored by stores that track explicit IDs
         (SqliteStore); other implementations may ignore it. When provided,
-        the returned ID (if any) equals ``id_override``.
+        the returned ID (if any) equals ``id_override``. The returned id
+        rides out on the write Receipt (Vertex.receive_receipt) — callers
+        never need to pre-mint.
         """
         ...
 

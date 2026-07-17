@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .cadence import Cadence
     from .executor import SyncResult
     from .tick import Tick
-    from .vertex import Vertex
+    from .vertex import Receipt, Vertex
 
 
 # Dispatcher contract: (command, tick_name, vertex_path) -> None.
@@ -84,24 +84,50 @@ class VertexProgram:
         grant: Any = None,
         *,
         id_override: str | None = None,
-    ) -> Tick | None:
+    ) -> Receipt:
         """Route a fact through the vertex; dispatch run-clause if the resulting tick has one.
 
         Single-fact entry that consolidates ``vertex.receive(fact)`` with
         run-clause dispatch. Use this in place of ``program.vertex.receive(fact)``
         from CLI/app code so any registered dispatcher fires automatically.
 
-        ``id_override`` (optional) is threaded through to the underlying store
-        so callers can pre-generate the fact ID for receipt printing. Only
-        honored by stores that track IDs (SqliteStore).
+        Returns the write :class:`~engine.vertex.Receipt` — ``fact_id``
+        is the id the store assigned (no pre-minting needed), ``tick``
+        the boundary Tick if one fired, ``stored`` whether the fact was
+        appended to THIS vertex's store: False on gate rejection AND on
+        storeless vertices (which may still have folded the fact); writes
+        forwarded to stored children are not reflected. Callers that only
+        care whether a boundary fired read ``receipt.tick``.
+
+        ``id_override`` (rare) forces a specific fact id — replay/transport-
+        shaped callers; ordinary writers read the minted id off the Receipt.
+        Only honored by stores that track IDs (SqliteStore).
         """
-        if grant is not None:
-            tick = self.vertex.receive(fact, grant, id_override=id_override)
-        else:
-            tick = self.vertex.receive(fact, id_override=id_override)
-        if tick is not None:
-            self._dispatch_tick(tick)
-        return tick
+        receipt = self.vertex.receive_receipt(fact, grant, id_override=id_override)
+        if receipt.tick is not None:
+            self._dispatch_tick(receipt.tick)
+        return receipt
+
+    def close(self) -> None:
+        """Release the program's store resources (idempotent).
+
+        The lifecycle verb for the load → receive/sync → close arc.
+        Embedded clients (daemons, tests, second apps) MUST close —
+        a loaded program holds an open store handle (sqlite connection
+        or file). One-shot CLI processes get away without it via process
+        exit; long-lived processes leak handles per load without it.
+        Prefer the context-manager form::
+
+            with load_vertex_program(path) as program:
+                receipt = program.receive(fact)
+        """
+        self.vertex.close()
+
+    def __enter__(self) -> VertexProgram:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     async def sync_async(
         self,
@@ -248,8 +274,15 @@ def load_vertex_program(
     )
 
     # Replay stored facts to rebuild fold state — makes one-shot CLI
-    # invocations indistinguishable from a persistent runtime
-    vertex.replay()
+    # invocations indistinguishable from a persistent runtime. A raising
+    # replay (corrupt row, raising fold) must not leak the store handle
+    # materialize_vertex just opened — no vertex reference escapes this
+    # function on raise, so close here.
+    try:
+        vertex.replay()
+    except BaseException:
+        vertex.close()
+        raise
 
     # Only specs with boundaries produce ticks (boundary-less = memory pattern)
     expected_ticks = sorted(

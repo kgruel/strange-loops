@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
@@ -46,6 +48,38 @@ if TYPE_CHECKING:
 
 # Observer-state kind pattern: kind.{observer_name}
 _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
+
+
+@dataclass(frozen=True)
+class Receipt:
+    """The write receipt — identity of your write, not current state.
+
+    Returned by ``Vertex.receive_receipt`` / ``VertexProgram.receive``:
+
+    - ``fact_id`` — the id the store assigned to this write (equal to
+      ``id_override`` when one was passed). ``None`` when the attached
+      store doesn't track ids (EventStore/FileStore) or nothing was
+      stored.
+    - ``tick`` — the Tick if this fact fired a boundary, else None.
+    - ``stored`` — whether the fact was appended to an attached store.
+      ``False`` on gate rejection (grant potential, observer-state
+      ownership) and on storeless vertices (which may still have folded
+      the fact). Distinguishes "stored, no boundary fired" from
+      "rejected, nothing written" — both were an ambiguous ``None``
+      under the tick-only return.
+
+    ``fact_id``/``stored`` describe THIS vertex's store only — a fact
+    forwarded to a nested child with its own store is appended there
+    under the child's own bookkeeping, not reflected here.
+
+    Deliberately carries no fold state: a write returns a stable handle
+    to itself; "current state" is a separate racy read
+    (write-receipt-vs-temporal-query).
+    """
+
+    fact_id: str | None
+    tick: Tick | None
+    stored: bool
 
 
 class ReservedKindError(Exception):
@@ -410,6 +444,28 @@ class Vertex:
         _from_child: str | None = None,
         id_override: str | None = None,
     ) -> Tick | None:
+        """Tick projection of :meth:`receive_receipt`.
+
+        The routing view: returns the Tick if this fact fired a boundary,
+        else None. Engine-internal callers (child forwarding, executor,
+        replay) consume this. Client code that needs write identity —
+        the stored fact id, or stored-vs-rejected — goes through
+        ``receive_receipt`` (or ``VertexProgram.receive``, which returns
+        the full Receipt). One implementation, two views: this delegates,
+        so the projections cannot drift.
+        """
+        return self.receive_receipt(
+            fact, grant, _from_child=_from_child, id_override=id_override
+        ).tick
+
+    def receive_receipt(
+        self,
+        fact: Fact,
+        grant: Grant | None = None,
+        *,
+        _from_child: str | None = None,
+        id_override: str | None = None,
+    ) -> Receipt:
         """Route a fact to the appropriate fold engine, gated by optional grant.
 
         Gating rules:
@@ -427,14 +483,21 @@ class Vertex:
 
         After folding, checks if the incoming kind triggers a boundary.
         If so, snapshots the triggered engine's state into a Tick and
-        optionally resets the engine. Returns the Tick, or None.
+        carries it on the Receipt.
 
-        Returns None on rejection (fact not permitted by grant).
+        Returns a :class:`Receipt` — ``stored=False, fact_id=None,
+        tick=None`` on gate rejection; otherwise ``fact_id`` is the id
+        the attached store assigned (None for stores that don't track
+        ids, and for storeless vertices) and ``tick`` is the boundary
+        Tick or None.
 
         Args:
             fact: The Fact to receive
             grant: Optional Grant for potential gating
             _from_child: Internal - name of child that produced this fact (prevents loopback)
+            id_override: Pre-generated fact id to store under (rare —
+                replay/transport-shaped callers; ordinary writers let the
+                store mint and read the id off the Receipt)
         """
         kind = fact.kind
         payload = fact.payload
@@ -442,13 +505,13 @@ class Vertex:
 
         # Gate 1: potential check (only if grant provided)
         if grant is not None and grant.potential is not None and kind not in grant.potential:
-            return None
+            return Receipt(fact_id=None, tick=None, stored=False)
 
         # Gate 2: observer-state ownership
         if kind[:6] in {"focus.", "scroll"} or kind.startswith("selection."):
             _, _, owner_name = kind.partition(".")
             if owner_name and owner_name != observer:
-                return None
+                return Receipt(fact_id=None, tick=None, stored=False)
 
         # Reserved-namespace ingest guard (SPEC §9.2 write-time reservation).
         # A ``_decl.*`` kind is the declaration protocol's own vocabulary,
@@ -463,12 +526,17 @@ class Vertex:
                 f"('_decl.*') — recorded via the absorb ceremony, not ingest"
             )
 
-        # Store the full fact (not just kind/payload) for replay.
-        # id_override (when provided by callers like cmd_emit) lets the
-        # caller pre-generate the fact ID so the same ID can be reported
-        # in the emit receipt — only honored by stores that track IDs.
+        # Store the full fact (not just kind/payload) for replay. The
+        # store's append returns the id it stored under (None for stores
+        # that don't track ids) — that id IS the write's identity and
+        # rides out on the Receipt. id_override forces a specific id
+        # (replay/transport-shaped callers); ordinary writers read the
+        # minted id off the Receipt instead of pre-generating.
+        fact_id: str | None = None
+        stored = False
         if self._store is not None:
-            self._store.append(fact, id_override=id_override)
+            fact_id = self._store.append(fact, id_override=id_override)
+            stored = True
 
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
@@ -490,8 +558,9 @@ class Vertex:
             if payload is None:
                 # Parse rejected this fact — skip fold and routing,
                 # consistent with source-level parse where None means
-                # "drop the record." Fact is already stored for audit.
-                return None
+                # "drop the record." Fact is already stored for audit —
+                # the receipt says so honestly (stored, no tick).
+                return Receipt(fact_id=fact_id, tick=None, stored=stored)
 
         # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire
@@ -520,11 +589,12 @@ class Vertex:
 
         # Phase: boundary (live only — replay bypasses receive entirely)
         if self._replaying:
-            return None
+            return Receipt(fact_id=fact_id, tick=None, stored=stored)
 
-        return self._fire_live_boundaries(
+        tick = self._fire_live_boundaries(
             kind, routed_kind, payload, loop, count_boundary_fire, fact_ts,
         )
+        return Receipt(fact_id=fact_id, tick=tick, stored=stored)
 
     def _fire_live_boundaries(
         self,
@@ -650,6 +720,51 @@ class Vertex:
         """
         return self._loops[kind].version
 
+    def close(self) -> None:
+        """Release store resources for this vertex AND every descendant.
+
+        Idempotent (store closes are None-guarded) and a no-op for
+        storeless vertices. Recursive on purpose: nested children may
+        declare their own stores, and a root-only close would leak
+        exactly the handle class this verb exists to release. The
+        lifecycle verb consumers previously reached
+        ``vertex._store.close()`` for — embedded clients close through
+        this (or ``VertexProgram.close()`` one level up), never through
+        the private attribute.
+        """
+        for child in self._children:
+            child.close()
+        if self._store is not None:
+            self._store.close()
+
+    @contextmanager
+    def _replay_guard(self):
+        """Per-TREE replay discipline: detach every descendant's store and
+        mark the whole tree replaying; restore both in ``finally``.
+
+        Per-vertex swapping was a double-append bug: parent replay
+        forwards historical facts to children (fallback path), and a
+        child whose store was still attached re-persisted the parent's
+        entire history on every load. The ``finally`` also fixes the
+        leak/wedge where a raising fold mid-replay left ``_store=None``
+        permanently — making ``close()`` a silent no-op and the vertex
+        unusable.
+        """
+        saved: list[tuple[Vertex, Any, bool]] = []
+        stack: list[Vertex] = [self]
+        while stack:
+            v = stack.pop()
+            saved.append((v, v._store, v._replaying))
+            v._store = None
+            v._replaying = True
+            stack.extend(v._children)
+        try:
+            yield
+        finally:
+            for v, s, r in saved:
+                v._store = s
+                v._replaying = r
+
     def replay(self) -> int:
         """Replay stored facts to rebuild fold state.
 
@@ -691,65 +806,58 @@ class Vertex:
 
             # Stream path: store provides data, vertex dispatches to projections
             if mut_dispatch and hasattr(store, 'replay_cursor'):
-                self._store = None
-                self._replaying = True
                 get = mut_dispatch.get
                 count = 0
-                for kind, payload in store.replay_cursor(0):
-                    entry = get(kind)
-                    if entry is not None:
-                        fns, proj = entry
-                        proj.fold_one_mut(payload, fns)
-                    count += 1
+                with self._replay_guard():
+                    for kind, payload in store.replay_cursor(0):
+                        entry = get(kind)
+                        if entry is not None:
+                            fns, proj = entry
+                            proj.fold_one_mut(payload, fns)
+                        count += 1
                 if count == 0:
-                    self._replaying = False
-                    self._store = store
                     return 0
             else:
                 raw_facts = store.since_raw(0)
                 if not raw_facts:
                     return 0
                 count = len(raw_facts)
-                self._store = None
-                self._replaying = True
-                if mut_dispatch:
-                    for kind, payload in raw_facts:
-                        entry = mut_dispatch.get(kind)
-                        if entry is not None:
-                            fns, proj = entry
-                            proj.fold_one_mut(payload, fns)
-                else:
-                    for kind, payload in raw_facts:
-                        loop = loops.get(kind)
-                        if loop is not None:
-                            loop._projection.fold_one(payload)
+                with self._replay_guard():
+                    if mut_dispatch:
+                        for kind, payload in raw_facts:
+                            entry = mut_dispatch.get(kind)
+                            if entry is not None:
+                                fns, proj = entry
+                                proj.fold_one_mut(payload, fns)
+                    else:
+                        for kind, payload in raw_facts:
+                            loop = loops.get(kind)
+                            if loop is not None:
+                                loop._projection.fold_one(payload)
         else:
             # Fallback: full Fact objects needed for routes/parse/children
             facts = store.since(0)
             if not facts:
                 return 0
             count = len(facts)
-            self._store = None
-            self._replaying = True
-            for fact in facts:
-                routed_kind = self._routed_kind(fact.kind) if self._has_routes else fact.kind
-                payload = fact.payload
-                if has_parse_pipelines:
-                    payload = self._apply_parse_pipeline(routed_kind, payload)
-                    if payload is None:
-                        continue
-                loop = self._loops.get(routed_kind)
-                if loop is not None:
-                    loop.receive(
-                        {**payload, "_ts": fact.ts},
-                        ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc),
-                    )
-                if self._has_children:
-                    for child in self._children:
-                        if child.accepts(fact.kind):
-                            child.receive(fact)
-        self._replaying = False
-        self._store = store  # restore
+            with self._replay_guard():
+                for fact in facts:
+                    routed_kind = self._routed_kind(fact.kind) if self._has_routes else fact.kind
+                    payload = fact.payload
+                    if has_parse_pipelines:
+                        payload = self._apply_parse_pipeline(routed_kind, payload)
+                        if payload is None:
+                            continue
+                    loop = self._loops.get(routed_kind)
+                    if loop is not None:
+                        loop.receive(
+                            {**payload, "_ts": fact.ts},
+                            ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc),
+                        )
+                    if self._has_children:
+                        for child in self._children:
+                            if child.accepts(fact.kind):
+                                child.receive(fact)
 
         # Reconcile count-based boundary state after replay.
         # During replay, loop.receive() may or may not have been called

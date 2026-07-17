@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from engine import gen_id
 from loops.errors import LoopsError
 
 if TYPE_CHECKING:
@@ -25,7 +24,7 @@ def _reporter(reporter: "Reporter | None") -> "Reporter":
 
 def _build_receipt_lines(
     kind: str,
-    fact_id: str,
+    fact_id: str | None,
     status: "object",  # EmitStatus, kept loose to avoid circular import
     unresolved: list,
     refs_resolved_count: int,
@@ -104,8 +103,12 @@ def _build_receipt_lines(
     suffix = ""
     if refs_resolved_count > 0:
         suffix = f"  (refs: {refs_resolved_count} resolved)"
+    # fact_id is None when the store tracks no per-fact ids (EventStore/
+    # FileStore-backed vertices) — the '@ <id>' grammar is reserved for
+    # real ids; never render 'stored: ... @ None'.
+    at_id = f" @ {fact_id}" if fact_id is not None else ""
     primary_lines.append((
-        f"stored: {kind}/{key_display} @ {fact_id}{suffix}",
+        f"stored: {kind}/{key_display}{at_id}{suffix}",
         "muted",
     ))
 
@@ -749,9 +752,6 @@ def cmd_emit(
             paint(Block.text(_dry_text, p.muted), file=sys.stdout)
         return 0
 
-    # Pre-generate the fact ID so the receipt reports the same ULID the store assigns.
-    fact_id = gen_id()
-
     try:
         from engine import load_vertex_program
 
@@ -775,10 +775,25 @@ def cmd_emit(
 
         try:
             # Route fact through the vertex runtime — fold, boundary check, store.
-            # program.receive dispatches the run clause if the resulting tick has one.
-            # id_override threads the pre-generated fact_id so the receipt
-            # reports the same ULID the store assigns.
-            tick = program.receive(fact, id_override=fact_id)
+            # program.receive dispatches the run clause if the resulting tick has
+            # one, and returns the write Receipt — the store-assigned fact id
+            # rides out on it (no pre-minting; the receipt reports the exact
+            # ULID the store assigned, because the store said so).
+            receipt = program.receive(fact)
+            if not receipt.stored:
+                # The engine's gate refused the write and nothing landed —
+                # never print a 'stored:' receipt for it. cmd_emit passes no
+                # grant, so the only reachable gate is observer-state
+                # ownership (focus./scroll./selection. kinds owned by
+                # another observer). rc=2 matches the strict-refuse exit.
+                _say(
+                    f"refused: '{kind}' not stored — observer-state kind "
+                    f"owned by another observer (emitted as '{fact.observer}')",
+                    "error",
+                )
+                return 2
+            fact_id = receipt.fact_id
+            tick = receipt.tick
             if tick is not None:
                 # Boundary fired — a tick was produced. Disclose its signing
                 # outcome (signed iff a key was wired, matching the engine's
@@ -836,8 +851,7 @@ def cmd_emit(
                         _emit_lines([_delta_line(r) for r in resolved_refs])
         finally:
             # Clean up the store connection
-            if program.has_store:
-                program.vertex._store.close()
+            program.close()
 
         # Structured receipt (--json): the post-emit fold as a Surface dict on
         # stdout. Runs AFTER the store connection closes so the read re-opens
@@ -1207,11 +1221,11 @@ def _run_close(
     from loops.commands.sync import _execute_boundary_run
 
     vp = _resolve_writable_vertex(vertex_path)
-    program = load_vertex_program(
+    with load_vertex_program(
         vp, run_dispatcher=_execute_boundary_run, tick_signer=tick_signer_for(vp),
         fact_signer=fact_signer_for(vp),
-    )
-    program.receive(fact)
+    ) as program:
+        program.receive(fact)
 
     paint(Block.text(f"  ✓ {args.kind} '{args.name}' resolved", p.success))
     return 0

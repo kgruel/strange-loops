@@ -113,15 +113,18 @@ def _run_sync_aggregate(
 
         for child_path in child_paths:
             from custody import fact_signer_for, tick_signer_for
-            child_program = load_vertex_program(
+            # Context-managed per child: without the close, one aggregate
+            # sync leaked one open store handle PER CHILD in this process
+            # (friction:engine-write-path-no-receipt-no-close).
+            with load_vertex_program(
                 child_path, vars=vars, run_dispatcher=_execute_boundary_run,
                 tick_signer=tick_signer_for(child_path),
                 fact_signer=fact_signer_for(child_path),
-            )
-            if not child_program.sources:
-                continue
-            # Boundary run clauses dispatched inside program.sync().
-            result = child_program.sync(on_error=log_error, force=force)
+            ) as child_program:
+                if not child_program.sources:
+                    continue
+                # Boundary run clauses dispatched inside program.sync().
+                result = child_program.sync(on_error=log_error, force=force)
 
             all_ran.extend(result.ran)
             all_skipped.extend(
@@ -319,10 +322,14 @@ def _run_sync(
         from loops.lens_resolver import zoom_from_fidelity
         return sync_view(data, zoom_from_fidelity(fidelity), width)
 
-    return run_cli(
-        rest,
-        fetch=fetch,
-        renderer=renderer,
-        prog="loops sync",
-        description=f"Sync vertex {program.name}",
-    )
+    try:
+        return run_cli(
+            rest,
+            fetch=fetch,
+            renderer=renderer,
+            prog="loops sync",
+            description=f"Sync vertex {program.name}",
+        )
+    finally:
+        # fetch() runs inside run_cli — close only after render completes.
+        program.close()

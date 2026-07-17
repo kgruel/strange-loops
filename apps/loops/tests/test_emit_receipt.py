@@ -723,3 +723,36 @@ class TestIdOverride:
                 "SELECT id FROM facts WHERE id = ?", (custom_id,)
             ).fetchone()
             assert row is not None
+
+
+class TestRefusedWrite:
+    """Gate-rejected writes must never print a success receipt
+    (adversarial-review finding: 'stored: ... @ None', rc=0, zero facts)."""
+
+    def test_observer_state_rejection_refuses_loudly(self, basic_vertex, capsys):
+        rc, _ = _emit(basic_vertex, "focus.bob", target="x")
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert "refused" in err
+        assert "stored:" not in err
+
+
+class TestIdlessStoreReceipt:
+    """EventStore/FileStore-backed vertices get an honest receipt —
+    the '@ <id>' grammar is reserved for stores that track ids."""
+
+    def test_jsonl_store_receipt_has_no_at_none(self, tmp_path, capsys):
+        vpath = tmp_path / "jl.vertex"
+        vpath.write_text(
+            'name "jl"\n'
+            'store "./jl.jsonl"\n'
+            '\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '}\n'
+        )
+        rc, _ = _emit(vpath, "decision", topic="x", message="hi")
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "stored: decision/x" in err
+        assert "@ None" not in err

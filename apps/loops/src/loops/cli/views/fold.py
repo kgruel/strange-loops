@@ -356,6 +356,30 @@ def _resolve_cursor(
 # --- Fetch closures --------------------------------------------------------
 
 
+def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
+    """True when a lens-declared fetch can honor the active cursor selector.
+
+    Mirrors ``call_lens_fetch``'s own signature-based dispatch (``**kwargs``
+    opts into everything; otherwise only named params are passed) so this
+    check and the actual call always agree on what "accepts" means. Called
+    by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
+    active selector would silently answer at head while the render context
+    still carries witness/as_of metadata (review finding 2: a head answer
+    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
+    selector active", not the resolved values.
+    """
+    import inspect
+
+    params = inspect.signature(fetch_fn).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    if at and "at" not in params:
+        return False
+    if as_of and "as_of" not in params:
+        return False
+    return True
+
+
 def _build_fold_fetch(
     vertex_path: Path,
     observer: str | None,
@@ -363,28 +387,25 @@ def _build_fold_fetch(
     key: str | None,
     refs_depth: int,
     want_facts: bool,
-    lens: str | None,
+    lens_fetch: Any,
     *,
     at: Any = None,
     as_of: float | None = None,
 ) -> Any:
     """Return a zero-arg callable that produces the fold data.
 
-    Honours lens-declared fetch (composition lenses) when present;
-    otherwise calls ``commands.fetch.fetch_fold`` with the full kwarg
-    surface. ``at``/``as_of`` (0.8.0 temporal cursor) pass straight through
-    to ``fetch_fold`` on the direct path; a lens-declared fetch that doesn't
-    name them simply doesn't receive them (``call_lens_fetch``'s existing
-    signature-based dispatch).
+    Takes an already-resolved lens-declared fetch (composition lenses) —
+    resolved once by the caller (``run``), which also checks it can honor
+    an active cursor selector (``_lens_fetch_accepts_cursor``) before ever
+    reaching here, so this closure never needs a fallback "did it actually
+    apply the cursor" check of its own. ``None`` falls through to
+    ``commands.fetch.fetch_fold``. ``at``/``as_of`` (0.8.0 temporal cursor)
+    pass straight through either path.
     """
     from loops.commands.resolve import _apply_vertex_scope
 
     obs = _apply_vertex_scope(observer, vertex_path) or None
     _validate_kind_or_exit(kind, vertex_path)
-
-    from loops.cli.lens import _resolve_lens_fetch
-
-    lens_fetch = _resolve_lens_fetch(lens, vertex_path, "fold_view")
 
     def fetch_data():
         if lens_fetch is not None:
@@ -578,12 +599,35 @@ def run(argv: list[str], ctx: Invocation) -> int:
             ctx.reporter.err(f"read: {exc}")
             return 2
 
+    # Resolve the lens fetch ONCE here (rather than inside _build_fold_fetch)
+    # so a cursor selector can be checked against it before anything runs:
+    # a lens-declared fetch that doesn't accept at=/as_of= would otherwise
+    # silently answer at head while cursor_meta still claims a witness/as_of
+    # position — a head answer mislabeled as historical (review finding 2).
+    # Refuse rather than degrade; the built-in fold fetch (lens_fetch is
+    # None) always supports both, so this never fires on the default path.
+    from loops.cli.lens import _resolve_lens_fetch
+
+    lens_fetch = _resolve_lens_fetch(args.lens, vertex_path, "fold_view")
+    if cursor_meta is not None and lens_fetch is not None:
+        if not _lens_fetch_accepts_cursor(
+            lens_fetch, at=at_position is not None, as_of=as_of_ts is not None,
+        ):
+            flag = "--at" if at_position is not None else "--as-of"
+            ctx.reporter.err(
+                f"read: this vertex's lens fetch doesn't accept {flag} — "
+                "it would answer at head while the response still claimed "
+                "a historical position. Drop --at/--as-of, or use a lens "
+                "whose fetch declares at=/as_of= (or **kwargs)."
+            )
+            return 2
+
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
         kind=kind, key=fetch_key,
         refs_depth=refs_depth,
         want_facts=args.facts,
-        lens=args.lens,
+        lens_fetch=lens_fetch,
         at=at_position,
         as_of=as_of_ts,
     )

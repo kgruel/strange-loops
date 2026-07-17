@@ -200,7 +200,7 @@ def fetch_fold(
         )
 
     if refs_depth > 0:
-        state = _walk_refs(state, vertex_path, observer, refs_depth)
+        state = _walk_refs(state, vertex_path, observer, refs_depth, at=at, as_of=as_of)
 
     return state
 
@@ -210,6 +210,9 @@ def _walk_refs(
     vertex_path: Path,
     observer: str | None,
     refs_depth: int,
+    *,
+    at: "WitnessPosition | None" = None,
+    as_of: float | None = None,
 ) -> "FoldState":
     """Outbound ref-graph walk from primary items, up to ``refs_depth`` hops.
 
@@ -224,6 +227,16 @@ def _walk_refs(
     walked) — once visited, an address is never re-added, preventing both
     cycles and re-rendering an entity twice. The address is the
     ``section_kind/key`` form.
+
+    ``at``/``as_of`` (0.8.0 temporal cursor) are threaded through every walk
+    hop UNCHANGED — the walk never leaves ``vertex_path``'s own store (refs
+    address ``kind:key`` within one vertex; there is no cross-vertex ref
+    form here), so the primary fold's position applies identically to every
+    referenced entity. Without this, a historical primary would pull its
+    refs at HEAD — a witnessed answer whose graph neighborhood silently lied
+    about being witnessed too (review finding 3). A future ref form that DID
+    cross stores would need to refuse that hop rather than reuse a foreign
+    position; this walk has no such hop to guard yet.
 
     Implementation note: each walk-hop calls ``fetch_fold`` recursively with
     ``refs_depth=0`` (default), so the inner call doesn't loop. The recursive
@@ -263,10 +276,11 @@ def _walk_refs(
             if target_addr in visited:
                 continue
             visited.add(target_addr)
-            # Fetch this entity (refs_depth=0 so inner call doesn't walk)
+            # Fetch this entity (refs_depth=0 so inner call doesn't walk),
+            # at the SAME position as the primary fold (see docstring).
             target_state = fetch_fold(
                 vertex_path, kind=target_kind, key=target_key,
-                observer=observer,
+                observer=observer, at=at, as_of=as_of,
             )
             for tsection in target_state.sections:
                 tkf = tsection.key_field

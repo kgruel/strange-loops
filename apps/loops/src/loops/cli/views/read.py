@@ -44,6 +44,29 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--diff", default=None)
     known, rest = pre.parse_known_args(argv)
 
+    # --at/--diff are fold-route-only concerns (A9/A11). Resolve their
+    # incompatibility with every route that would otherwise consume argv
+    # BEFORE any route is selected — the stream branch immediately below
+    # used to run first and silently swallow --at/--diff whenever --facts
+    # combined with --since/--as-of/--id (or --ticks) triggered it, so
+    # e.g. `--facts --at head --as-of 30d` ran the event-time stream query
+    # with --at discarded, never refused (review finding 1). A bare
+    # `--facts --at ADDRESS` (no since/as-of/id) is unaffected — that
+    # legitimately falls through to the fold route below, unchanged.
+    routes_away_from_fold = (
+        known.facts and (known.since or known.as_of or known.fact_id)
+    ) or known.ticks
+    if routes_away_from_fold and (known.at or known.diff):
+        if known.ticks:
+            reason = "`--ticks` does not support cursor addressing yet"
+        else:
+            reason = (
+                "`--facts` with a temporal window/anchor routes to the "
+                "event-history view, not the fold read"
+            )
+        ctx.reporter.err(f"read: --at/--diff address the fold route only — {reason}.")
+        return 2
+
     # Temporal facts query → stream (re-injects --since / --as-of / --id).
     if known.facts and (known.since or known.as_of or known.fact_id):
         stream_rest = list(rest)
@@ -60,16 +83,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # --ticks → ticks (dedicated drill-down + lens). Re-inject the temporal
     # flags the pre-parser consumed — the ticks command owns --since/--as-of
     # semantics (window bound + ontology cursor); dropping them here silently
-    # ignored the user's cursor (closing review #7). --at/--diff address the
-    # fold route only — per-member cursor vectors on ticks are out of scope
-    # tonight (A9), so refuse rather than let them fall through unrecognized.
+    # ignored the user's cursor (closing review #7). --at/--diff incompatibility
+    # with --ticks is already refused above.
     if known.ticks:
-        if known.at or known.diff:
-            ctx.reporter.err(
-                "read: --at/--diff address the fold route only — "
-                "`--ticks` does not support cursor addressing yet."
-            )
-            return 2
         ticks_rest = list(rest)
         if known.since:
             ticks_rest += ["--since", known.since]

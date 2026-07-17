@@ -255,7 +255,7 @@ the question, not the one that's habitual.
 | What's the lifecycle of this prediction/thread? | event history | `sl read project --kind <K> --facts` |
 | What's the friction backlog? | friction scan | `sl read project --kind friction --plain` |
 | What needs attention? | staleness review | `sl read project --lens reconcile` |
-| What changed recently? | window slice | `sl read project --since 7d` |
+| What changed recently? | window slice | `sl read project --facts --since 7d` |
 
 `--key` is the workhorse — the newest read-path primitive (0.3.1). Default
 scoping move when entering a domain.

@@ -61,6 +61,31 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
         return ticks_view.run(ticks_rest, ctx)
 
+    # Temporal flags without a temporal route: the folded read cannot
+    # honor them yet, and silently dropping a cursor renders head state
+    # as if it were T — a silent anachronism (SPEC §9.3's honesty
+    # posture: rewound reads must never silently lie). Refuse until
+    # fold-state-as-of ships (0.8.0 temporal-cursor work).
+    dropped = [
+        flag
+        for flag, value in (
+            ("--since", known.since),
+            ("--as-of", known.as_of),
+            ("--id", known.fact_id),
+        )
+        if value
+    ]
+    if dropped:
+        flags = ", ".join(dropped)
+        ctx.reporter.err(
+            f"read: {flags} needs a temporal view — the folded read"
+            " cannot honor it yet (fold-state-as-of is 0.8.0"
+            " temporal-cursor work).\n"
+            "  event history:  read <vertex> --facts --since/--as-of/--id …\n"
+            "  tick windows:   read <vertex> --ticks --since/--as-of …"
+        )
+        return 2
+
     # Default → fold. Re-inject --facts so fold's parser sees it
     # (it's a visibility layer, not a routing flag).
     fold_rest = [*rest, "--facts"] if known.facts else rest

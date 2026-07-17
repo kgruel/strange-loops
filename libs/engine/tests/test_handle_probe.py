@@ -205,8 +205,10 @@ class TestProbeTransactionInvariant:
             writer = (
                 "import sqlite3, sys, json;"
                 "c=sqlite3.connect(sys.argv[1]);"
-                "c.execute(\"INSERT INTO facts (id,kind,ts,observer,origin,payload,signature)"
-                " VALUES ('EXTID','decision',102,'kyle','',?,NULL)\", (json.dumps({'topic':'z'}),));"
+                "c.execute(\"INSERT INTO facts"
+                " (id,kind,ts,observer,origin,payload,signature)"
+                " VALUES ('EXTID','decision',102,'kyle','',?,NULL)\","
+                " (json.dumps({'topic':'z'}),));"
                 "c.commit(); c.close()"
             )
             result = subprocess.run(

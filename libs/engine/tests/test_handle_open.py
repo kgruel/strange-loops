@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 from atoms import Fact
 from atoms.fold_state import FoldState
-from lang import parse_vertex_file
-from lang.document import genesis_payload
 
 from engine import vertex_fold
 from engine.handle import (
@@ -119,7 +118,7 @@ class TestOpen:
         _append(store, "decision", 100, topic="a", message="alpha")
         with open_vertex(vpath) as h:
             snap = h.snapshot
-            with pytest.raises(Exception):
+            with pytest.raises(FrozenInstanceError):
                 snap.generation = 5  # frozen dataclass
 
     def test_aggregate_refused(self, tmp_path):

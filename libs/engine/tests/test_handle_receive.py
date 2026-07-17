@@ -150,9 +150,8 @@ class TestWriteThrough:
 
     def test_read_only_handle_refuses_write(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
-        with open_vertex(vpath) as h:  # no credentials
-            with pytest.raises(HandleError):
-                h.receive(Fact.of("decision", "kyle", topic="a"))
+        with open_vertex(vpath) as h, pytest.raises(HandleError):  # no credentials
+            h.receive(Fact.of("decision", "kyle", topic="a"))
 
 
 # ---------------------------------------------------------------------------
@@ -167,12 +166,12 @@ class TestCredentials:
         vpath, store = _scaffold(tmp_path)
         creds = _Creds(WriteCredentials())  # no fact_signer initially
         with open_vertex(vpath, credentials=creds) as h:
-            r1 = h.receive(Fact.of("decision", "kyle", topic="a"))
+            h.receive(Fact.of("decision", "kyle", topic="a"))  # unsigned (no key)
             # "mint a key" mid-lifetime
             def signer(observer: str, digest: str) -> str:
                 return hashlib.sha256(f"{observer}:{digest}".encode()).hexdigest()
             creds.current = WriteCredentials(fact_signer=signer)
-            r2 = h.receive(Fact.of("decision", "kyle", topic="b"))
+            h.receive(Fact.of("decision", "kyle", topic="b"))  # signed
             assert creds.calls == 2  # one lookup per write
         # the second fact is signed, the first is not
         conn = sqlite3.connect(str(store))
@@ -206,9 +205,9 @@ class TestGatingAndSeam:
     def test_expect_seam_refused_not_faked(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
         creds = _Creds()
-        with open_vertex(vpath, credentials=creds) as h:
-            with pytest.raises(ConditionalEmitUnsupported):
-                h.receive(Fact.of("decision", "kyle", topic="a"), expect=object())
+        with open_vertex(vpath, credentials=creds) as h, \
+                pytest.raises(ConditionalEmitUnsupported):
+            h.receive(Fact.of("decision", "kyle", topic="a"), expect=object())
 
 
 # ---------------------------------------------------------------------------

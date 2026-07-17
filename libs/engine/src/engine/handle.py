@@ -50,13 +50,13 @@ ladder, not this slice.
 from __future__ import annotations
 
 import hashlib
-import os
 import sqlite3
 import threading
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator, Mapping, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from engine.declaration import _read_own_lineage
 from engine.witness import GENESIS_SENTINEL, WitnessPosition
@@ -64,6 +64,7 @@ from engine.witness import GENESIS_SENTINEL, WitnessPosition
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from atoms import Fact
     from atoms.fold_state import FoldItem, FoldState
+
     from engine.peer import Grant
     from engine.vertex import Receipt
 
@@ -136,7 +137,7 @@ class ReceiveCommittedError(HandleError):
     committed ``fact_id``, the caught-up ``change`` (if any), and the
     originating ``cause``."""
 
-    def __init__(self, fact_id: str, change: "ChangeBatch | None", cause: BaseException):
+    def __init__(self, fact_id: str, change: ChangeBatch | None, cause: BaseException):
         self.fact_id = fact_id
         self.change = change
         self.cause = cause
@@ -344,10 +345,8 @@ class StoreProbe:
             yield conn
             conn.execute("COMMIT")
         except BaseException:
-            try:
+            with suppress(sqlite3.Error):  # pragma: no cover - defensive
                 conn.execute("ROLLBACK")
-            except sqlite3.Error:  # pragma: no cover - defensive
-                pass
             raise
         assert not conn.in_transaction, (
             "probe left a transaction open after reading() — invariant violated"
@@ -445,7 +444,7 @@ class StoreProbe:
         silently reinterpreting the old cursor against new bytes.
         """
         conn = self._live()
-        st = os.stat(self._path)
+        st = self._path.stat()
         marker = _read_own_lineage(conn)
         return StoreIdentity(device=st.st_dev, inode=st.st_ino, lineage=marker)
 
@@ -455,7 +454,7 @@ class StoreProbe:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "StoreProbe":
+    def __enter__(self) -> StoreProbe:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -487,8 +486,8 @@ class RowChange:
     """
 
     address: FoldAddress
-    before: "FoldItem | None"
-    after: "FoldItem | None"
+    before: FoldItem | None
+    after: FoldItem | None
 
 
 @dataclass(frozen=True)
@@ -543,7 +542,7 @@ class VertexSnapshot:
     """
 
     position: WitnessPosition
-    fold: "FoldState"
+    fold: FoldState
     generation: int
     ontology_epoch: str
     tick_seq: int
@@ -591,11 +590,11 @@ class ReceiveResult:
     ADMISSION — see :meth:`VertexHandle.receive`.
     """
 
-    receipt: "Receipt"
+    receipt: Receipt
     change: ChangeBatch | None
 
 
-def _fold_sections(fold: "FoldState") -> dict:
+def _fold_sections(fold: FoldState) -> dict:
     return {s.kind: s for s in fold.sections}
 
 
@@ -618,7 +617,7 @@ def _section_index(section) -> dict:
     return out
 
 
-def _diff_folds(before: "FoldState", after: "FoldState") -> tuple[RowChange, ...]:
+def _diff_folds(before: FoldState, after: FoldState) -> tuple[RowChange, ...]:
     """Structural diff of two fold reconstructions → typed :class:`RowChange`s.
 
     A best-effort highlight aid (the snapshot fold stays canonical). Compares
@@ -665,8 +664,8 @@ def open_vertex(
     vertex_path: Path,
     *,
     validate_ast: bool = True,
-    credentials: "CredentialProvider | None" = None,
-) -> "VertexHandle":
+    credentials: CredentialProvider | None = None,
+) -> VertexHandle:
     """Open a held, closeable vertex session over ``vertex_path`` (S1).
 
     Parses, verifies pins, compiles the ontology plan once, opens the store's
@@ -700,7 +699,7 @@ class VertexHandle:
         probe: StoreProbe | None,
         ast,
         specs: dict,
-        credentials: "CredentialProvider | None",
+        credentials: CredentialProvider | None,
     ) -> None:
         self._vertex_path = Path(vertex_path)
         self._store_path = store_path
@@ -727,9 +726,9 @@ class VertexHandle:
     @classmethod
     def _open(
         cls, vertex_path: Path, *, validate_ast: bool, credentials
-    ) -> "VertexHandle":
-        from engine.declaration import load_declaration, verify_source_pins
+    ) -> VertexHandle:
         from engine.compiler import compile_vertex
+        from engine.declaration import load_declaration, verify_source_pins
 
         vertex_path = Path(vertex_path)
         ast = load_declaration(vertex_path)
@@ -849,7 +848,7 @@ class VertexHandle:
         ``(ts, id)`` order, ontology resolved from the same prefix). ``None`` /
         storeless → a bare head read.
         """
-        from engine.vertex_reader import vertex_fold, load_declaration_status
+        from engine.vertex_reader import load_declaration_status, vertex_fold
 
         if position is None or self._store_path is None:
             fold = vertex_fold(self._vertex_path)
@@ -1102,8 +1101,8 @@ class VertexHandle:
 
     def _recompile(self, new_file_stamp: str) -> None:
         """Re-resolve + re-verify pins + recompile the cached plan (epoch turn)."""
-        from engine.declaration import load_declaration, verify_source_pins
         from engine.compiler import compile_vertex
+        from engine.declaration import load_declaration, verify_source_pins
 
         ast = load_declaration(self._vertex_path)
         verify_source_pins(self._vertex_path)
@@ -1113,10 +1112,8 @@ class VertexHandle:
         # The held writer's compiled runtime is stale under a new ontology —
         # discard it so the next receive() rebuilds against the current epoch.
         if self._writer is not None:
-            try:
+            with suppress(Exception):  # pragma: no cover - defensive
                 self._writer.close()
-            except Exception:  # pragma: no cover - defensive
-                pass
             self._writer = None
 
     def _member_id(self) -> str:
@@ -1170,8 +1167,8 @@ class VertexHandle:
 
     def receive(
         self,
-        fact: "Fact",
-        grant: "Grant | None" = None,
+        fact: Fact,
+        grant: Grant | None = None,
         *,
         expect: object | None = None,
         id_override: str | None = None,
@@ -1249,10 +1246,8 @@ class VertexHandle:
                     # Fact committed; a later step (boundary/tick persistence)
                     # failed. Catch state up and name the committed fact.
                     change = None
-                    try:
+                    with suppress(Exception):  # pragma: no cover - defensive
                         change = self._refresh_locked(force=False)
-                    except Exception:  # pragma: no cover - defensive
-                        pass
                     raise ReceiveCommittedError(post.fact_id, change, exc) from exc
                 raise
 
@@ -1501,13 +1496,11 @@ class VertexHandle:
                 self._probe.close()
                 self._probe = None
             if self._writer is not None:
-                try:
+                with suppress(Exception):  # pragma: no cover - defensive
                     self._writer.close()
-                except Exception:  # pragma: no cover - defensive
-                    pass
                 self._writer = None
 
-    def __enter__(self) -> "VertexHandle":
+    def __enter__(self) -> VertexHandle:
         return self
 
     def __exit__(self, *exc: object) -> None:

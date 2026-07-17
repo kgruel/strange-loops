@@ -240,11 +240,15 @@ class StoreProbe:
         # Read-only URI + autocommit. mode=ro reads a WAL database (verified
         # cross-process). isolation_level=None means sqlite3 never implicitly
         # opens a transaction: the probe-transaction invariant is structural,
-        # not a discipline the caller has to remember.
+        # not a discipline the caller has to remember. check_same_thread=False
+        # lets a consumer drive the change iterator from a thread other than the
+        # one that opened the handle (e.g. a TUI paint loop); the VertexHandle
+        # serializes ALL probe access under its lock, so cross-thread use is
+        # safe despite the relaxed guard.
         try:
             self._conn: sqlite3.Connection | None = sqlite3.connect(
                 f"file:{self._path}?mode=ro", uri=True, isolation_level=None,
-                timeout=timeout,
+                timeout=timeout, check_same_thread=False,
             )
         except sqlite3.Error as exc:  # pragma: no cover - defensive
             raise StoreBusy(f"cannot open probe on {self._path}: {exc}") from exc
@@ -1076,6 +1080,232 @@ class VertexHandle:
                       ts=t.ts, payload=t.payload)
             for t in ticks
         )
+
+    # -- change iteration (S2) ---------------------------------------------
+
+    def _change_token(self):
+        """The cheap poll token: (data_version, declaration-file stamp).
+
+        ``data_version`` catches committed SQLite change; the file stamp catches
+        a vertex-file/pinned-source edit that never touches SQLite (which
+        ``data_version`` cannot see). A difference in EITHER wakes a refresh.
+
+        Probe access is under the handle lock so a consumer may poll from a
+        thread other than the opener's (the probe connection is
+        ``check_same_thread=False``; the lock is what makes that safe).
+        """
+        fs = self._compute_file_stamp()
+        if self._probe is None:
+            return (None, fs)
+        with self._lock:
+            if self._probe is None or self._state == _CLOSED:
+                raise HandleClosed(f"handle for {self._vertex_path} is closed")
+            dv = self._probe.data_version()
+        return (dv, fs)
+
+    def _idle_batch(self) -> ChangeBatch:
+        pos = self._snapshot.position
+        return ChangeBatch(
+            before=pos, after=pos, receipt_ranges=(), receipts=(), ticks=(),
+            rows=(), ontology_changed=False, tick_arrived=False,
+            visible_domain_count=self._snapshot.visible_domain_count,
+            replay_mode="idle", catching_up=False, oversized_group=False,
+            generation=self._generation, idle_wake=True,
+        )
+
+    def changes(
+        self,
+        *,
+        poll_interval: float = 0.050,
+        coalesce: float = 0.200,
+        max_latency: float = 0.500,
+        idle_timeout: float | None = None,
+    ) -> Iterator[ChangeBatch]:
+        """Yield a :class:`ChangeBatch` for each committed change (S2).
+
+        The eventful contract above the polling transport. Detection is a cheap
+        ``data_version`` (+ file-stamp) poll on the held probe; on a detected
+        commit the coalescer waits ``coalesce`` seconds of quiet — capped at
+        ``max_latency`` so a continuous writer cannot starve delivery — then
+        refreshes ONCE, so a burst collapses into one full-reconstruction batch
+        (WAL-as-queue: the durable cursor is the backlog; the adapter keeps only
+        a head watermark). No receipt is dropped.
+
+        ``idle_timeout`` (panel amendment F2): when no change arrives within it,
+        yield an ``idle_wake`` batch so a consumer can wake at a wall-clock
+        deadline with **zero store traffic** — ``ticked``'s reaper is the one
+        consumer that must fire on a derived deadline even when a dead worker
+        emits nothing. ``None`` never idle-wakes.
+
+        Head-start-only: the iterator follows HEAD from the handle's current
+        cursor. Resume-from-position is scoped OUT of 0.8.0 (no ``since=``): no
+        consumer needs backlog resume — ticked's state is the fold, a fresh
+        Watch starts at now, the TUI re-renders from head.
+
+        One active iterator per handle. ``close()`` (or ``^C``/``break``)
+        terminates it cleanly with no store mutation.
+
+        Deviation: backlog sub-splitting at receipt-group boundaries
+        (``max_receipts``/``max_bytes``, ``catching_up``/``oversized_group``) is
+        the next-session backpressure slice; S2 delivers one coalesced batch per
+        refresh. The diagnostic flags are present on :class:`ChangeBatch` and
+        stay ``False`` until that slice sets them.
+        """
+        import time
+
+        if self._iterating:
+            raise HandleError(
+                f"handle for {self._vertex_path} already has an active change "
+                "iterator — one iterator per handle; use independent handles"
+            )
+        if self._state == _CLOSED:
+            raise HandleClosed(f"handle for {self._vertex_path} is closed")
+        self._iterating = True
+        try:
+            # Initial catch-up: deliver anything committed between the handle's
+            # cursor (open / last refresh) and store head before following. The
+            # iterator baseline is the CURSOR, not the store head — a change that
+            # landed between open and changes() is delivered, never dropped.
+            try:
+                first_batch = self.refresh()
+            except HandleClosed:
+                return
+            last = self._safe_token()
+            if last is _CLOSED:
+                return
+            idle_start = time.monotonic()
+            if first_batch is not None:
+                yield first_batch
+            while True:
+                if self._state == _CLOSED:
+                    return
+                cur = self._safe_token()
+                if cur is _CLOSED:
+                    return
+                if cur != last:
+                    # Coalesce: wait for quiet (reset on each new commit), cap
+                    # total wait at max_latency from first detection.
+                    first = time.monotonic()
+                    last_change = first
+                    seen = cur
+                    while True:
+                        time.sleep(poll_interval)
+                        probe = self._safe_token()
+                        if probe is _CLOSED:
+                            return
+                        now = time.monotonic()
+                        if probe != seen:
+                            seen = probe
+                            last_change = now
+                        if now - last_change >= coalesce or now - first >= max_latency:
+                            break
+                    try:
+                        batch = self.refresh()
+                    except HandleClosed:
+                        return
+                    last = self._safe_token()
+                    if last is _CLOSED:
+                        return
+                    idle_start = time.monotonic()
+                    if batch is not None:
+                        yield batch
+                else:
+                    if (idle_timeout is not None
+                            and time.monotonic() - idle_start >= idle_timeout):
+                        idle_start = time.monotonic()
+                        if self._state == _OPEN:
+                            yield self._idle_batch()
+                    else:
+                        time.sleep(poll_interval)
+        finally:
+            self._iterating = False
+
+    async def changes_async(
+        self,
+        *,
+        poll_interval: float = 0.050,
+        coalesce: float = 0.200,
+        max_latency: float = 0.500,
+        idle_timeout: float | None = None,
+    ):
+        """Async mirror of :meth:`changes` — the seam the TUI paint loop consumes.
+
+        Same detection/coalescing/idle-wake semantics; ``asyncio.sleep`` yields
+        the event loop between polls so a foreground painter stays responsive.
+        """
+        import asyncio
+        import time
+
+        if self._iterating:
+            raise HandleError(
+                f"handle for {self._vertex_path} already has an active change "
+                "iterator — one iterator per handle; use independent handles"
+            )
+        if self._state == _CLOSED:
+            raise HandleClosed(f"handle for {self._vertex_path} is closed")
+        self._iterating = True
+        try:
+            try:
+                first_batch = self.refresh()
+            except HandleClosed:
+                return
+            last = self._safe_token()
+            if last is _CLOSED:
+                return
+            idle_start = time.monotonic()
+            if first_batch is not None:
+                yield first_batch
+            while True:
+                if self._state == _CLOSED:
+                    return
+                cur = self._safe_token()
+                if cur is _CLOSED:
+                    return
+                if cur != last:
+                    first = time.monotonic()
+                    last_change = first
+                    seen = cur
+                    while True:
+                        await asyncio.sleep(poll_interval)
+                        probe = self._safe_token()
+                        if probe is _CLOSED:
+                            return
+                        now = time.monotonic()
+                        if probe != seen:
+                            seen = probe
+                            last_change = now
+                        if now - last_change >= coalesce or now - first >= max_latency:
+                            break
+                    try:
+                        batch = self.refresh()
+                    except HandleClosed:
+                        return
+                    last = self._safe_token()
+                    if last is _CLOSED:
+                        return
+                    idle_start = time.monotonic()
+                    if batch is not None:
+                        yield batch
+                else:
+                    if (idle_timeout is not None
+                            and time.monotonic() - idle_start >= idle_timeout):
+                        idle_start = time.monotonic()
+                        if self._state == _OPEN:
+                            yield self._idle_batch()
+                    else:
+                        await asyncio.sleep(poll_interval)
+        finally:
+            self._iterating = False
+
+    def _safe_token(self):
+        """Poll the change token, mapping a closed probe to the ``_CLOSED``
+        sentinel so an iterator terminates cleanly instead of raising."""
+        if self._state == _CLOSED:
+            return _CLOSED
+        try:
+            return self._change_token()
+        except HandleClosed:
+            return _CLOSED
 
     # -- lifecycle ----------------------------------------------------------
 

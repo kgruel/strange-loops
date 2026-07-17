@@ -251,7 +251,11 @@ def _specs_match(a: Any, b: Any) -> bool:
 
 
 def _collect_source_specs(
-    ast: Any, vertex_path: Path, *, override_kinds: frozenset[str] = frozenset()
+    ast: Any,
+    vertex_path: Path,
+    *,
+    override_kinds: frozenset[str] = frozenset(),
+    as_of: float | None = None,
 ) -> dict:
     """Collect fold specs from all source vertices, erroring on conflicts.
 
@@ -263,6 +267,13 @@ def _collect_source_specs(
 
     Kinds in *override_kinds* are skipped during conflict detection —
     the aggregation vertex's own declaration will take precedence.
+
+    ``as_of`` resolves each MEMBER declaration at the same event-time cutoff
+    (equal-cursor semantics, review finding 6): an aggregate without its own
+    loops replays ``ts<=T`` member facts, and those must fold under the member
+    ontology in force AT T — not head, which could carry a fold-key rename
+    introduced after T. (Membership itself stays current — the disclosed
+    aggregate-head derogation; only the ontology rides the cutoff.)
     """
     from lang import resolve_vertex
 
@@ -296,7 +307,7 @@ def _collect_source_specs(
             if not vpath.exists():
                 continue
             try:
-                ref_ast = load_declaration(vpath)
+                ref_ast = load_declaration(vpath, as_of=as_of)
             except Exception:
                 continue
             _merge_from(ref_ast, entry.name)
@@ -307,7 +318,7 @@ def _collect_source_specs(
             if match.suffix != ".vertex" or match.resolve() == vertex_path.resolve():
                 continue
             try:
-                ref_ast = load_declaration(match)
+                ref_ast = load_declaration(match, as_of=as_of)
             except Exception:
                 continue
             _merge_from(ref_ast, match.stem)
@@ -1027,8 +1038,10 @@ def vertex_fold(
     # meaning it relies entirely on child specs (union semantics).
     full_specs = dict(specs)
     if (ast.combine is not None or ast.discover is not None) and not specs:
+        # as_of resolves member ontology at the cutoff (finding 6); at= is
+        # already refused on aggregates above, so only as_of can reach here.
         source_specs = _collect_source_specs(
-            ast, vertex_path, override_kinds=frozenset(specs)
+            ast, vertex_path, override_kinds=frozenset(specs), as_of=as_of
         )
         full_specs = {**source_specs, **specs}
 

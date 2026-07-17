@@ -25,6 +25,7 @@ from engine.sqlite_store import SqliteStore, gen_id
 from engine.witness import (
     NoWitnessAnchor,
     SeqOutOfRange,
+    TickAnchor,
     UnknownTickHandle,
     resolve_seq,
     resolve_tick_cursor,
@@ -168,3 +169,56 @@ class TestResolveTickFloor:
         _append_tick(store, "project", 150.0, fact_cursor=None)
         with pytest.raises(NoWitnessAnchor):
             resolve_tick_floor(store, 200.0)
+
+    def test_dangling_cursor_refuses_with_as_of_teaching(self, tmp_path):
+        # Review finding 7b: the only pre-mark tick carries a fact_cursor that
+        # resolves to NO fact (a merged/dangling cursor). It must NOT be treated
+        # as usable — the JOIN skips it, so the floor scan finds nothing and
+        # raises the honest NoWitnessAnchor refusal (not a downstream
+        # unknown-fact error).
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        _append_tick(store, "project", 150.0, fact_cursor="01DANGLINGCURSORNOFACT00000")
+        with pytest.raises(NoWitnessAnchor):
+            resolve_tick_floor(store, 200.0)
+
+    def test_dangling_cursor_scan_continues_to_a_resolvable_tick(self, tmp_path):
+        # A dangling-cursor tick is skipped, but an EARLIER tick with a
+        # resolvable cursor is a valid floor — the scan continues past the hole.
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "good", 120.0, fact_cursor=f1)  # resolvable
+        _append_tick(store, "bad", 150.0, fact_cursor="01DANGLINGCURSOR0000000000")
+        cursor, name, ts = resolve_tick_floor(store, 200.0)
+        assert cursor == f1 and name == "good" and ts == 120.0
+
+
+class TestAnchorPreservation:
+    def test_floor_tick_preserved_not_re_derived(self, tmp_path):
+        # Review finding 7a: two ticks seal the SAME fact_cursor — an earlier one
+        # (the wall-clock floor) and a later one PAST the mark. resolve_tick_floor
+        # picks the floor; passing it as anchor= to resolve_witness_position
+        # preserves it. Re-deriving from the cursor would instead name the later
+        # tick (the finding-5 tie-break picks the last-appended sealing tick).
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "floor", 150.0, fact_cursor=f1)
+        _append_tick(store, "later", 250.0, fact_cursor=f1)  # after the mark
+
+        cursor, name, ts = resolve_tick_floor(store, 175.0)  # mark between ticks
+        assert name == "floor" and ts == 150.0
+
+        # WITHOUT preservation, the anchor is re-derived and names the LATER tick
+        # (last-appended sealing the same cursor) — the bug.
+        re_derived = resolve_witness_position(store, cursor)
+        assert re_derived.anchor is not None and re_derived.anchor.name == "later"
+
+        # WITH preservation (the fix), the position reports the floor tick.
+        preserved = resolve_witness_position(
+            store, cursor, anchor=TickAnchor(name=name, ts=ts, fact_cursor=cursor)
+        )
+        assert preserved.anchor is not None
+        assert preserved.anchor.name == "floor" and preserved.anchor.ts == 150.0

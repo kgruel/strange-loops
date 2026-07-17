@@ -271,7 +271,11 @@ def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
 
 
 def resolve_witness_position(
-    store_path: Path, address: str, *, timeout: float = 5.0
+    store_path: Path,
+    address: str,
+    *,
+    timeout: float = 5.0,
+    anchor: TickAnchor | None = None,
 ) -> WitnessPosition:
     """Resolve a witness address to a :class:`WitnessPosition` against one store.
 
@@ -287,7 +291,17 @@ def resolve_witness_position(
 
     Runs the receipt-group guard (A2) — a mid-ceremony position raises
     :class:`MidReceiptGroupPosition`. Reads the ``own_lineage`` marker to set
-    :attr:`WitnessPosition.unadopted` (N1) and resolves the sealing tick anchor.
+    :attr:`WitnessPosition.unadopted` (N1).
+
+    ``anchor``: for a ``tick:``/wall-clock address, the CALLER already knows the
+    exact tick it snapped to (from :func:`resolve_tick_cursor` /
+    :func:`resolve_tick_floor`) and passes it here so it is PRESERVED as the
+    position's :attr:`~WitnessPosition.anchor` (review finding 7a). Re-deriving
+    it from the cursor would be wrong when several ticks seal the same
+    ``fact_cursor`` — one of them possibly *after* the requested mark — and the
+    re-derivation would name that later tick instead of the floor tick actually
+    selected. When ``None`` (head/seq/fact forms), the anchor is derived as the
+    last sealed tick at-or-before the position.
     """
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
@@ -311,14 +325,14 @@ def resolve_witness_position(
         seq = conn.execute(
             "SELECT COUNT(*) FROM facts WHERE rowid <= ?", (rowid,)
         ).fetchone()[0]
-        anchor = _resolve_anchor(conn, rowid)
+        resolved_anchor = anchor if anchor is not None else _resolve_anchor(conn, rowid)
         return WitnessPosition(
             fact_id=fact_id,
             rowid=rowid,
             seq=seq,
             lineage=marker,
             unadopted=marker is None,
-            anchor=anchor,
+            anchor=resolved_anchor,
             store=str(Path(store_path).resolve()),
         )
     finally:
@@ -497,6 +511,12 @@ def resolve_tick_floor(
     (sparse-tick eras, pre-chain ticks, or a pre-chain schema) — never a
     silent ts-approximation. The caller routes to the explicit ``--as-of``
     event-time projection instead.
+
+    A tick whose ``fact_cursor`` does NOT resolve to a fact (a dangling cursor —
+    e.g. a merged tick referencing a fact this store never received) is NOT a
+    usable anchor: the JOIN skips it and the floor scan continues to the next
+    resolvable tick, so a dangling cursor yields the honest "no anchor →
+    --as-of" refusal, not a downstream unknown-fact error (review finding 7b).
     """
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
@@ -508,9 +528,10 @@ def resolve_tick_floor(
         cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
         row = (
             conn.execute(
-                "SELECT name, ts, fact_cursor FROM ticks "
-                "WHERE ts <= ? AND fact_cursor IS NOT NULL AND fact_cursor <> '' "
-                "ORDER BY ts DESC LIMIT 1",
+                "SELECT t.name, t.ts, t.fact_cursor FROM ticks t "
+                "JOIN facts f ON f.id = t.fact_cursor "
+                "WHERE t.ts <= ? AND t.fact_cursor IS NOT NULL "
+                "AND t.fact_cursor <> '' ORDER BY t.ts DESC LIMIT 1",
                 (mark_ts,),
             ).fetchone()
             if "fact_cursor" in cols
@@ -519,8 +540,8 @@ def resolve_tick_floor(
         if row is None:
             raise NoWitnessAnchor(
                 "no witness-time anchor — no sealed tick at or before this "
-                "mark carries a usable cursor. Use --as-of for the explicit "
-                "event-time projection instead."
+                "mark carries a cursor that resolves in this store. Use "
+                "--as-of for the explicit event-time projection instead."
             )
         name, ts, cursor = row
         return cursor, name, ts

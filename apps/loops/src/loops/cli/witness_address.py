@@ -155,11 +155,12 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
 
     Maps each grammar form onto a fact id and calls
     ``resolve_witness_position`` for the actual position — the receipt-group
-    guard, adoption marker, and tick anchor all come from that single engine
-    seam regardless of which form produced the id. For a wall-clock/``tick:``
-    snap, the resulting position's ``.anchor`` IS the tick that was resolved
-    (the anchor recomputation lands on the exact same tick), so the snap is
-    reported for free by rendering ``.anchor`` — no separate bookkeeping.
+    guard and adoption marker come from that single engine seam regardless of
+    which form produced the id. For a wall-clock/``tick:`` snap the tick we
+    resolved IS the anchor to report, so it is passed through as ``anchor=`` and
+    PRESERVED on the position — re-deriving it from the cursor could name a
+    different tick when several ticks seal the same ``fact_cursor``, one of them
+    possibly after the requested mark (review finding 7a).
 
     Propagates engine errors unchanged (``UnknownWitnessHandle``,
     ``MidReceiptGroupPosition``, ``SeqOutOfRange``, ``UnknownTickHandle``,
@@ -167,6 +168,7 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
     problems (empty/malformed forms, ambiguous fact prefix).
     """
     from engine.witness import (
+        TickAnchor,
         resolve_seq,
         resolve_tick_cursor,
         resolve_tick_floor,
@@ -197,10 +199,16 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
         raw = address[len("tick:"):]
         if not raw:
             raise AddressError("`--at tick:` needs a tick id (e.g. `--at tick:01J...`)")
-        fid, _name, _ts = resolve_tick_cursor(store_path, raw)
-        return resolve_witness_position(store_path, fid)
+        fid, name, ts = resolve_tick_cursor(store_path, raw)
+        return resolve_witness_position(
+            store_path, fid,
+            anchor=TickAnchor(name=name, ts=ts, fact_cursor=fid),
+        )
 
     # wall-clock — ISO date-or-datetime, snap to the tick floor (A5).
     mark_ts = _parse_wallclock(address)
-    fid, _name, _ts = resolve_tick_floor(store_path, mark_ts)
-    return resolve_witness_position(store_path, fid)
+    fid, name, ts = resolve_tick_floor(store_path, mark_ts)
+    return resolve_witness_position(
+        store_path, fid,
+        anchor=TickAnchor(name=name, ts=ts, fact_cursor=fid),
+    )

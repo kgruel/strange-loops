@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **deps: widen the painted cap to `<0.14`.** 0.8.0 was cut with
+  `painted>=0.12.1,<0.13`, same-day as painted 0.13.0 — the sibling
+  releases were mutually exclusive, so no released strange-loops could
+  coexist with painted 0.13 and downstream floor bumps (tasked's
+  080-adoption T1) could not lock. Loops itself uses no 0.13-only
+  surface yet; the floor stays `>=0.12.1`. Full gate verified against
+  painted 0.13.0 resolved from PyPI.
+
 ## 0.8.0 — 2026-07-18
 
 Two arcs from the overnight design wave: the **temporal cursor**
